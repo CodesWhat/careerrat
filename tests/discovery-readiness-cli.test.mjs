@@ -179,6 +179,42 @@ test("searches --list calls out configured searches that have never run", () => 
   }
 });
 
+test("a saved login-backed source stays actionable without a setup or permission gate", () => {
+  const home = tempHome();
+  try {
+    seedCandidateFiles(home);
+    mkdirSync(join(home, "config"), { recursive: true });
+    writeFileSync(
+      join(home, "config", "search-sources.yml"),
+      `searches:
+  - provider: LinkedIn
+    platform: linkedin
+    source_type: browser
+    auth: true
+    label: LinkedIn operations
+    url: https://www.linkedin.com/jobs/search/?keywords=operations
+    enabled: false
+`,
+      "utf8"
+    );
+
+    const list = runCli("src/cli/searches.mjs", ["--list"], home);
+    assert.equal(list.status, 0, list.stderr || list.stdout);
+    assert.match(list.stdout, /Ask your agent to run search-jobs/i);
+    assert.match(list.stdout, /ask whether you want to log in/i);
+    assert.doesNotMatch(list.stdout, /run setup-searches or enable sources/i);
+
+    const doctor = runCli("src/cli/doctor.mjs", ["--json"], home);
+    assert.equal(doctor.status, 0, doctor.stderr || doctor.stdout);
+    const data = JSON.parse(doctor.stdout);
+    assert.equal(data.discovery.broadSources.pendingLogin, 1);
+    assert.equal(data.agentGuidance.nextSkill, "search-jobs");
+    assert.doesNotMatch(data.agentGuidance.reason, /nothing useful to sweep/i);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("doctor --json exposes the next agent skill after onboarding search setup", () => {
   const home = tempHome();
   try {

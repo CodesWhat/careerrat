@@ -102,6 +102,35 @@ function baseProps(overrides = {}) {
 }
 
 describe("WorkspaceBrowser", () => {
+  it("renders a complete roving workspace tab pattern", async () => {
+    const { WorkspaceBrowser } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <WorkspaceBrowser {...baseProps({ activeTab: "pipeline" })} />
+    );
+
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('aria-orientation="horizontal"');
+    expect(html).toMatch(
+      /id="workspace-tab-pipeline"[^>]*role="tab"[^>]*aria-selected="true"[^>]*aria-controls="workspace-panel-pipeline"[^>]*tabindex="0"/
+    );
+    expect(html).toMatch(
+      /id="workspace-tab-search"[^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-controls="workspace-panel-search"[^>]*tabindex="-1"/
+    );
+    expect(html).toMatch(
+      /id="workspace-panel-pipeline"[^>]*role="tabpanel"[^>]*aria-labelledby="workspace-tab-pipeline"/
+    );
+  });
+
+  it("moves workspace tabs with arrows, Home, and End", async () => {
+    const { nextBrowserTab } = await loadBrowser();
+
+    expect(nextBrowserTab("search", "ArrowLeft")).toBe("schedule");
+    expect(nextBrowserTab("pipeline", "ArrowRight")).toBe("files");
+    expect(nextBrowserTab("people", "Home")).toBe("search");
+    expect(nextBrowserTab("people", "End")).toBe("schedule");
+    expect(nextBrowserTab("people", "Enter")).toBeNull();
+  });
+
   it("keeps missing-source recovery inside the new Settings source surface", async () => {
     const { SearchToolbar } = await loadBrowser();
     const onOpenSourceHealth = vi.fn();
@@ -273,6 +302,112 @@ describe("WorkspaceBrowser", () => {
     expect(complete).not.toContain("Partial description");
   });
 
+  it("shows the actionable details for a local AI posting with listed compensation", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchJobRow
+        job={{
+          id: "nyc-ai",
+          company: "NYC AI Co",
+          role: "AI Engineer",
+          modeLabel: "Hybrid",
+          location: "New York, NY",
+          fit: 82,
+          link: "https://jobs.example.test/nyc-ai-engineer",
+          base: "$85,000 - $100,000",
+          aiDiscovered: true,
+          descriptionPartial: true,
+        }}
+        selected={false}
+      />
+    );
+
+    expect.soft(html).toContain('href="https://jobs.example.test/nyc-ai-engineer"');
+    expect.soft(html).toContain('target="_blank"');
+    expect.soft(html).toContain('rel="noopener noreferrer"');
+    expect.soft(html).toContain("$85k–$100k");
+    expect.soft(html).toContain("AI · unverified");
+    expect.soft(html).toContain("Found by AI on the open web. Evaluate it to verify the posting");
+    expect.soft(html).toContain("Fit 82");
+    expect.soft(html).toContain("New York, NY");
+    expect.soft(html).toContain("Hybrid");
+    expect.soft(html).not.toContain("Partial description");
+  });
+
+  it("labels a tipped role by its annual cash value instead of its hourly base", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchJobRow
+        job={{
+          id: "tipped-role",
+          company: "Tips Co",
+          role: "Bartender",
+          modeLabel: "On-site",
+          location: "New York, NY",
+          fit: 88,
+          comp: "$11.35 per hour",
+          tc: "$85,000 - $110,000",
+          compBasis: "annual-earnings",
+          compCompact: "$98K",
+        }}
+        selected={false}
+      />
+    );
+
+    expect(html).toContain("$98k annual cash");
+    expect(html).not.toContain("$11.35");
+  });
+
+  it("does not relabel an hourly base as annual cash when the annual band is missing", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchJobRow
+        job={{
+          id: "tipped-role-missing-cash",
+          company: "Tips Co",
+          role: "Bartender",
+          modeLabel: "On-site",
+          location: "New York, NY",
+          fit: 88,
+          comp: "$11.35 per hour",
+          compBasis: "annual-earnings",
+          compCompact: "TBD",
+        }}
+        selected={false}
+      />
+    );
+
+    expect(html).toContain("Comp not listed");
+    expect(html).not.toContain("$11.35");
+  });
+
+  it("shows the actionable details for a US-remote posting without listed compensation", async () => {
+    const { SearchJobRow } = await loadBrowser();
+    const html = renderToStaticMarkup(
+      <SearchJobRow
+        job={{
+          id: "us-remote",
+          company: "Remote Co",
+          role: "Platform Engineer",
+          modeLabel: "Remote",
+          location: "United States (Remote)",
+          fit: 76,
+          link: "https://jobs.example.test/us-remote-platform-engineer",
+          base: null,
+        }}
+        selected={false}
+      />
+    );
+
+    expect.soft(html).toContain('href="https://jobs.example.test/us-remote-platform-engineer"');
+    expect.soft(html).toContain('target="_blank"');
+    expect.soft(html).toContain('rel="noopener noreferrer"');
+    expect.soft(html).toContain("Comp not listed");
+    expect.soft(html).toContain("Fit 76");
+    expect.soft(html).toContain("United States (Remote)");
+    expect.soft(html).toContain("Remote");
+  });
+
   it("renders coordinated lane progress from typed state and never invents a timer", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(
@@ -292,7 +427,6 @@ describe("WorkspaceBrowser", () => {
                 label: "AI web search",
                 configured: true,
                 executable: true,
-                consented: true,
                 status: "running",
               },
             },
@@ -422,7 +556,7 @@ describe("WorkspaceBrowser", () => {
             aiWeb: {
               label: "AI web search",
               status: "skipped",
-              reason: "not-consented",
+              reason: "unavailable",
             },
             backup: {
               label: "Backup search",
@@ -445,13 +579,13 @@ describe("WorkspaceBrowser", () => {
     );
 
     expect(html).toContain("Saved job sites: not set up");
-    expect(html).toContain("AI search: permission needed");
+    expect(html).toContain("AI search: not available");
+    expect(html).not.toContain("AI search: permission needed");
     expect(html).toContain("Backup search: not available");
     expect(html).toContain("Paused search: stopped");
     expect(html).not.toContain("Internal lane");
     expect(html).not.toContain("skipped");
     expect(html).not.toContain("not-configured");
-    expect(html).not.toContain("not-consented");
     expect(html).not.toContain("provider_route_disabled");
   });
 
@@ -758,7 +892,7 @@ describe("WorkspaceBrowser", () => {
       jobs: [],
       filterJobs: JOBS,
       query: "no matching company",
-      filters: { fit80: true, stage: "staff", source: "lever" },
+      filters: { fit80: true, fitFloor: 65, stage: "staff", source: "lever" },
       sourceSweep: { status: "complete", summary: "0 new · 8 scanned" },
       onClearFilters,
     });
@@ -779,7 +913,7 @@ describe("WorkspaceBrowser", () => {
     const tree = SearchPanel({
       jobs: [],
       filterJobs: JOBS,
-      filters: { fit80: true },
+      filters: { fit80: true, fitFloor: 65 },
       sourceSweep: {
         status: "complete",
         summary: "2 search lanes finished · 1 lane needs retry",
@@ -979,6 +1113,7 @@ describe("WorkspaceBrowser", () => {
           ],
           filters: {
             fit80: false,
+            fitFloor: 65,
             comp: true,
             remote: false,
             stage: "staff",
@@ -991,7 +1126,7 @@ describe("WorkspaceBrowser", () => {
       />
     );
 
-    expect(html).toContain('aria-pressed="false">Fit 80+');
+    expect(html).toContain('aria-pressed="false">Fit 65+');
     expect(html).toContain('aria-pressed="true">Comp ✓');
     expect(html).toContain('aria-label="Filter by stage"');
     expect(html).toContain('aria-label="Filter by source"');

@@ -33,7 +33,9 @@ The thread rail keeps each workflow recoverable:
 
 - The main thread holds briefs, questions, and active missions.
 - Job conversations keep the posting, evaluation, artifacts, recruiter history,
-  and interview work together.
+  interview work, and application-answer review together. When a packet needs a
+  candidate answer, choose **Answer** in the right panel and respond through the
+  normal composer; the saved question disappears after CareerRat rebuilds the packet.
 - Research skills open visible threads that can be left and resumed later.
 - Deep ingest has its own thread for turning past work into grounded evidence,
   stories, role signals, and honesty boundaries.
@@ -50,7 +52,12 @@ continue without creating a long stack of separate approval cards.
 The left rail opens focused views without replacing the conversation:
 
 - **Search** shows sourced roles, fit, location, compensation, and the next gated
-  action.
+  action. Built-in public job-board sources and broad AI open-web discovery
+  follow your saved roles, while CareerRat discovers additional specialist
+  boards and employer pages for the search. When AI finds a credible role but cannot
+  read the full description, the row is labeled **AI · unverified**. **Evaluate**
+  owns liveness, full-description capture, and the final check against location,
+  office-day, compensation, seniority, eligibility, and fit-band rules.
 - **Pipeline** groups active applications by stage and opens the owning job
   conversation.
 - **Files** holds résumés, job descriptions, tailored packets, interview dossiers,
@@ -59,8 +66,17 @@ The left rail opens focused views without replacing the conversation:
 - **Schedule** shows interviews, assessments, follow-ups, and deadlines.
 
 Settings holds the selected AI runtime, browser automation readiness, source
-configuration, and candidate preferences. The packaged app uses a fixed desktop
-window and supports normal native full screen.
+configuration, and candidate preferences. **Automatic** quality lets CareerRat
+choose by task; **Faster**, **Balanced**, and **Best** are provider-neutral
+quality choices, while **Thinking depth** offers Automatic, Low, Medium, or High.
+The labels mean the same thing with Claude Code or OpenAI Codex. Changes apply to
+new work; an operation already running keeps the plan it started with. The
+packaged app uses a fixed desktop window and supports normal native full screen.
+
+Searches and intake keep running in the background when you navigate to another
+view. Returning or reloading restores the durable status. If the app stops
+mid-run, the next launch shows a retry instead of marking interrupted work as
+complete.
 
 ## What happens when you act
 
@@ -73,6 +89,8 @@ finishes. The assistant only speaks to ask a question or hand you a result.
 
 ![A search step in Ask with its spinner still running next to the "Searching the web" label](./chat-activity-pending.png)
 
-Application preparation can inspect and fill supported forms, but the final
-Submit action always stays with you. External-account changes remain
+Application preparation can inspect and fill supported forms. Once the answer
+review is clear, the job panel checks its opt-in permission, offers **Allow form
+preparation** when needed, and resumes the exact paused application mission. The
+final Submit action always stays with you. External-account changes remain
 confirmation-gated.

@@ -15,7 +15,7 @@
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -191,6 +191,76 @@ function startMockUpstream() {
       resolve({ server, requests, url: `http://127.0.0.1:${port}`, close: () => server.close() });
     });
   });
+}
+
+function startControlledUpstream() {
+  const requests = [];
+  const pending = [];
+  let released = false;
+  function respond(res, body) {
+    if (res.destroyed) return;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ...NON_STREAM_BODY, model: body.model }));
+  }
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      requests.push({ req, res, body: parsed });
+      if (released) respond(res, parsed);
+      else pending.push({ req, res, body: parsed });
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      resolve({
+        server,
+        requests,
+        pending,
+        url: `http://127.0.0.1:${port}`,
+        respondAll() {
+          released = true;
+          while (pending.length) {
+            const { res, body } = pending.shift();
+            respond(res, body);
+          }
+        },
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+function sendRawRequest(url, { headers, chunks, end = true }) {
+  const target = new URL(url);
+  let req;
+  const response = new Promise((resolve, reject) => {
+    req = httpRequest(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname,
+        method: "POST",
+        headers,
+      },
+      (res) => {
+        const responseChunks = [];
+        res.on("data", (chunk) => responseChunks.push(chunk));
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode,
+            body: Buffer.concat(responseChunks).toString("utf8"),
+          })
+        );
+      }
+    );
+    req.on("error", reject);
+    for (const chunk of chunks) req.write(chunk);
+    if (end) req.end();
+  });
+  return { req, response };
 }
 
 async function startProxy(opts) {
@@ -556,6 +626,235 @@ test("proxy: forwards while under cap, then 402s the next request without upstre
     assert.equal(upstream.requests[0].headers["x-careerrat-skill"], undefined);
     assert.equal(upstream.requests[0].headers["ai-reporting-user"], undefined);
     assert.equal(upstream.requests[0].headers["ai-reporting-tags"], undefined);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: serializes capped requests per user so concurrent calls cannot all spend the same balance", async () => {
+  const upstream = await startControlledUpstream();
+  const root = tempRoot();
+  const perRequestCost = computeCost("claude-sonnet-5", {
+    tokens_in: 1000,
+    tokens_out: 500,
+    cache_read_tokens: 100,
+    cache_creation_tokens: 200,
+  }).cost_usd;
+  const proxy = await startProxy({
+    proxyTokens: { cappedTester: "fake-concurrent-token" },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: perRequestCost,
+  });
+  const send = () =>
+    fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer fake-concurrent-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+  try {
+    const responses = [send(), send()];
+    await waitFor(
+      () => upstream.requests.length >= 1,
+      "first capped request did not reach upstream"
+    );
+    upstream.respondAll();
+    const settled = await Promise.all(responses);
+    assert.deepEqual(settled.map((response) => response.status).sort(), [200, 402]);
+    await Promise.all(settled.map((response) => response.text()));
+    assert.equal(upstream.requests.length, 1);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: capped admission remains concurrent across different users", async () => {
+  const upstream = await startControlledUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyTokens: { alpha: "fake-alpha-concurrent", beta: "fake-beta-concurrent" },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: 1,
+  });
+  const send = (token) =>
+    fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+  try {
+    const responses = [send("fake-alpha-concurrent"), send("fake-beta-concurrent")];
+    await waitFor(
+      () => upstream.requests.length === 2,
+      "different capped users were serialized behind one another"
+    );
+    upstream.respondAll();
+    const settled = await Promise.all(responses);
+    assert.deepEqual(
+      settled.map((response) => response.status),
+      [200, 200]
+    );
+    await Promise.all(settled.map((response) => response.text()));
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: aborting a capped request releases that user's admission slot", async () => {
+  const upstream = await startControlledUpstream();
+  const root = tempRoot();
+  const token = "fake-abort-token";
+  const proxy = await startProxy({
+    proxyTokens: { abortTester: token },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: 1,
+  });
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const body = JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] });
+  try {
+    const first = sendRawRequest(`${proxy.url}/v1/messages`, { headers, chunks: [body] });
+    first.response.catch(() => {});
+    await waitFor(() => upstream.requests.length === 1, "aborted request did not reach upstream");
+    first.req.destroy();
+
+    const second = fetch(`${proxy.url}/v1/messages`, { method: "POST", headers, body });
+    await waitFor(
+      () => upstream.requests.length === 2,
+      "aborted request kept the user's admission slot"
+    );
+    upstream.respondAll();
+    const response = await second;
+    assert.equal(response.status, 200);
+    await response.text();
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: aborting while a capped body is still arriving releases admission", async () => {
+  const upstream = await startControlledUpstream();
+  const root = tempRoot();
+  const token = "fake-partial-abort-token";
+  const proxy = await startProxy({
+    proxyTokens: { partialAbortTester: token },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: 1,
+  });
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  try {
+    const first = sendRawRequest(`${proxy.url}/v1/messages`, {
+      headers,
+      chunks: ['{"model":"claude-sonnet-5",'],
+      end: false,
+    });
+    first.response.catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    first.req.destroy();
+
+    const second = fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    await waitFor(
+      () => upstream.requests.length === 1,
+      "partial-body abort kept the user's admission slot"
+    );
+    upstream.respondAll();
+    const response = await second;
+    assert.equal(response.status, 200);
+    await response.text();
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: a documented gateway model is priced and advances a capped user's spend", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const model = "anthropic/claude-sonnet-4.6";
+  const perRequestCost = computeCost("claude-sonnet-4-6", {
+    tokens_in: 1000,
+    tokens_out: 500,
+    cache_read_tokens: 100,
+    cache_creation_tokens: 200,
+  }).cost_usd;
+  const proxy = await startProxy({
+    proxyToken: "fake-gateway-token",
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: perRequestCost,
+  });
+  const send = () =>
+    fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: "Bearer fake-gateway-token", "content-type": "application/json" },
+      body: JSON.stringify({ model, max_tokens: 16, messages: [] }),
+    });
+  try {
+    const first = await send();
+    assert.equal(first.status, 200);
+    await first.text();
+    const second = await send();
+    assert.equal(second.status, 402);
+    await second.text();
+    const [event] = readUsageEvents({ root });
+    assert.equal(event.model, model);
+    assert.equal(event.priced, true);
+    assert.equal(event.cost_usd, perRequestCost);
+    assert.equal(upstream.requests.length, 1);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: capped users cannot dispatch a model with unknown pricing", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "fake-unpriced-capped-token",
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: 1,
+  });
+  try {
+    const response = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer fake-unpriced-capped-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ model: "unknown-priced-model", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(response.status, 402);
+    const body = await response.json();
+    assert.equal(body.error.type, "cap_exceeded");
+    assert.match(body.error.message, /model is unavailable/i);
+    assert.equal(upstream.requests.length, 0);
   } finally {
     proxy.close();
     upstream.close();
@@ -1139,10 +1438,10 @@ test("proxy: unknown model is metered as unpriced with cost_usd:null", async () 
 });
 
 // ---------------------------------------------------------------------------
-// Generic /v1/* passthrough (no metering outside /v1/messages)
+// Exact managed-proxy surface
 // ---------------------------------------------------------------------------
 
-test("proxy: generic passthrough for other /v1/* paths, no usage_event written", async () => {
+test("proxy: rejects every authenticated method/path except POST /v1/messages", async () => {
   const upstream = await startMockUpstream();
   const root = tempRoot();
   const proxy = await startProxy({
@@ -1152,13 +1451,80 @@ test("proxy: generic passthrough for other /v1/* paths, no usage_event written",
     meterRoot: root,
   });
   try {
-    const res = await fetch(`${proxy.url}/v1/models`, {
-      headers: { authorization: "Bearer devtok" },
-    });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.deepEqual(body, { data: [] });
+    const attempts = [
+      fetch(`${proxy.url}/v1/messages/batches`, {
+        method: "POST",
+        headers: { authorization: "Bearer devtok", "content-type": "application/json" },
+        body: "{}",
+      }),
+      fetch(`${proxy.url}/v1/messages`, { headers: { authorization: "Bearer devtok" } }),
+      fetch(`${proxy.url}/v1/models`, { headers: { authorization: "Bearer devtok" } }),
+    ];
+    const responses = await Promise.all(attempts);
+    assert.deepEqual(
+      responses.map((response) => response.status),
+      [404, 404, 404]
+    );
+    await Promise.all(responses.map((response) => response.json()));
+    assert.equal(upstream.requests.length, 0);
     assert.equal(readUsageEvents({ root }).length, 0);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: rejects a declared oversized body with 413 before upstream", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "devtok",
+    upstreamKey: "sk-real",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    maxRequestBytes: 32,
+  });
+  const body = JSON.stringify({ model: "claude-sonnet-5", messages: [] });
+  try {
+    const response = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer devtok",
+        "content-type": "application/json",
+        "content-length": String(Buffer.byteLength(body)),
+      },
+      body,
+    });
+    assert.equal(response.status, 413);
+    assert.equal((await response.json()).error.type, "request_too_large");
+    assert.equal(upstream.requests.length, 0);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: bounds chunked bodies and returns 413 without an upstream request", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "devtok",
+    upstreamKey: "sk-real",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    maxRequestBytes: 32,
+  });
+  try {
+    const { response } = sendRawRequest(`${proxy.url}/v1/messages`, {
+      headers: { authorization: "Bearer devtok", "content-type": "application/json" },
+      chunks: ['{"model":"claude-', 'sonnet-5","messages":[]}'],
+    });
+    const result = await response;
+    assert.equal(result.status, 413);
+    assert.equal(JSON.parse(result.body).error.type, "request_too_large");
+    assert.equal(upstream.requests.length, 0);
   } finally {
     proxy.close();
     upstream.close();

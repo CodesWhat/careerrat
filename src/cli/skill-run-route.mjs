@@ -206,13 +206,11 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
       // deliberately excludes search-jobs (see skill-runtime.mjs's own
       // comment), so gating this flag on `skills.includes("search-jobs")`
       // would misreport the lane unavailable on every normal install.
-      // Available whenever an AI route is configured AND the operator
-      // hasn't explicitly locked the embedded runtime down
-      // (CAREERRAT_RUNTIME_SKILLS === "" — resolveSkillAllowlist's own "empty
-      // means nothing is allowed" contract, which ai-web-search.mjs's own
-      // scoped override respects too rather than punching through it).
+      // Available whenever an AI route is configured. The generic
+      // CAREERRAT_RUNTIME_SKILLS allowlist governs POST /api/skill/run only;
+      // this app-owned route grants search-jobs for its one scoped call.
       aiWebSearch: {
-        available: route.type !== "none" && env.CAREERRAT_RUNTIME_SKILLS !== "",
+        available: route.type !== "none",
       },
     });
   });

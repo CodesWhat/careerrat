@@ -24,6 +24,7 @@ import {
   NATIVE_UPDATE_ACCEPTANCE_ARG,
 } from "../native-update-acceptance.mjs";
 import { selectMacUpdateZip, verifyMacUpdateFeed } from "../release-verification.mjs";
+import { ALL_MIGRATIONS } from "../../../src/core/db/migrations.mjs";
 
 const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = join(desktopRoot, "..", "..");
@@ -81,13 +82,12 @@ export function choosePriorAcceptanceKind({
   acceptanceHookPresent,
 } = {}) {
   if (publishedFeedAvailable && acceptanceHookPresent) return "published";
+  if (publishedFeedAvailable) return "bootstrap";
   if (priorVersion === bootstrapPriorVersion) return "bootstrap";
   if (!publishedFeedAvailable) {
     throw new Error(`Prior published updater feed is missing for ${priorVersion}.`);
   }
-  throw new Error(
-    `Prior published app ${priorVersion} does not contain the native update acceptance hook.`
-  );
+  throw new Error(`Prior published updater feed is missing for ${priorVersion}.`);
 }
 
 export function signAcceptanceRequest({ requestBytes, privateKey }) {
@@ -136,9 +136,13 @@ export function selectPriorFeedAssets(release, version) {
 }
 
 export function hasNativeAcceptanceHook(asarEntries) {
-  return String(asarEntries || "")
+  const entries = String(asarEntries || "")
     .split(/\r?\n/)
-    .some((entry) => /(?:^|[\\/])native-update-acceptance\.mjs$/.test(entry.trim()));
+    .map((entry) => entry.trim());
+  return (
+    entries.some((entry) => /(?:^|[\\/])native-update-acceptance\.mjs$/.test(entry)) &&
+    entries.some((entry) => /(?:^|[\\/])native-update-data-contract-v2\.json$/.test(entry))
+  );
 }
 
 export function previousDesktopVersion(version) {
@@ -154,7 +158,12 @@ export function previousDesktopVersion(version) {
   throw new Error("Desktop version 0.0.0 has no valid lower acceptance version.");
 }
 
-export function verifyNativeUpdateResult({ result, fromVersion, expectedVersion }) {
+export function verifyNativeUpdateResult({
+  result,
+  fromVersion,
+  expectedVersion,
+  expectedMigrationCeiling,
+}) {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     throw new Error("Native update acceptance did not write a result object.");
   }
@@ -175,6 +184,18 @@ export function verifyNativeUpdateResult({ result, fromVersion, expectedVersion 
   }
   if (result.sentinelPreserved !== true) {
     throw new Error("Native update acceptance did not preserve the CAREERRAT_HOME sentinel.");
+  }
+  if (result.durableRowPreserved !== true) {
+    throw new Error("Native update acceptance did not preserve the canonical candidate row.");
+  }
+  if (
+    result.expectedMigrationCeiling !== expectedMigrationCeiling ||
+    result.observedMigrationVersion !== expectedMigrationCeiling ||
+    result.migrationCeilingRespected !== true
+  ) {
+    throw new Error(
+      `Native update acceptance did not stop at migration ceiling ${expectedMigrationCeiling}.`
+    );
   }
   if (result.ok !== true) {
     throw new Error("Native update acceptance reported failure.");
@@ -482,6 +503,7 @@ async function main() {
 
   const pkg = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8"));
   const expectedVersion = pkg.version;
+  const expectedMigrationCeiling = ALL_MIGRATIONS.at(-1)?.id || 0;
   const acceptancePrivateKey = process.env[acceptancePrivateKeyName];
   if (!acceptancePrivateKey?.trim()) {
     throw new Error(`${acceptancePrivateKeyName} is required for native update acceptance.`);
@@ -542,6 +564,7 @@ async function main() {
     const homeDir = join(scratch, "careerrat-home");
     mkdirSync(homeDir, { recursive: true });
     const sentinel = randomUUID();
+    const durableCandidateName = `CareerRat update acceptance ${randomUUID()}`;
     writeFileSync(join(homeDir, "acceptance-sentinel.txt"), sentinel);
     const requestPath = join(scratch, "request.json");
     const resultPath = join(scratch, "result.json");
@@ -551,6 +574,8 @@ async function main() {
         fromVersion,
         expectedVersion,
         sentinel,
+        durableCandidateName,
+        expectedMigrationCeiling,
       })}\n`
     );
     writeSignedAcceptanceRequest({
@@ -571,7 +596,12 @@ async function main() {
       }
     );
     const result = await waitForResult({ resultPath, logPath, child });
-    verifyNativeUpdateResult({ result, fromVersion, expectedVersion });
+    verifyNativeUpdateResult({
+      result,
+      fromVersion,
+      expectedVersion,
+      expectedMigrationCeiling,
+    });
     if (readFileSync(join(homeDir, "acceptance-sentinel.txt"), "utf8") !== sentinel) {
       throw new Error("CAREERRAT_HOME sentinel changed during the native update.");
     }

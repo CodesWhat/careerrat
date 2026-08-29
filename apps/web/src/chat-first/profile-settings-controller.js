@@ -2,6 +2,63 @@ import { UserFacingError } from "../lib/errorCopy.js";
 import { runtimePresentation } from "./first-run-controller.js";
 import { buildLocationPolicy } from "./location-policy.js";
 
+const SETTINGS_PANELS = new Set(["engine", "source", "technical"]);
+const PROFILE_PANEL = "editor";
+export const PROFILE_SETTINGS_EDITOR_SECTIONS = Object.freeze([
+  "targets",
+  "compensation",
+  "dealbreakers",
+  "location-policy",
+  "writing-style",
+  "search-rules",
+  "application-defaults",
+]);
+const PROFILE_SECTIONS = new Set(PROFILE_SETTINGS_EDITOR_SECTIONS);
+
+export function profileSettingsRoute({ tab = "profile", panel = null, section = null } = {}) {
+  const cleanSection = String(section || "").trim();
+  const cleanPanel =
+    cleanSection === "sources"
+      ? "source"
+      : SETTINGS_PANELS.has(panel)
+        ? panel
+        : panel === PROFILE_PANEL && PROFILE_SECTIONS.has(cleanSection)
+          ? PROFILE_PANEL
+          : null;
+  const owningTab = SETTINGS_PANELS.has(cleanPanel)
+    ? "settings"
+    : cleanPanel === PROFILE_PANEL
+      ? "profile"
+      : tab === "settings"
+        ? "settings"
+        : "profile";
+  const params = new URLSearchParams();
+  if (owningTab === "settings") params.set("tab", "settings");
+  if (cleanPanel) params.set("panel", cleanPanel);
+  if (cleanPanel === PROFILE_PANEL) {
+    params.set("section", cleanSection);
+  }
+  const search = params.toString();
+  return `/settings${search ? `?${search}` : ""}`;
+}
+
+export function profileSettingsLocation(search = "") {
+  const params = new URLSearchParams(search);
+  const route = profileSettingsRoute({
+    tab: params.get("tab"),
+    panel: params.get("panel"),
+    section: params.get("section"),
+  });
+  const canonical = new URL(route, "http://careerrat.local");
+  const canonicalParams = canonical.searchParams;
+  return {
+    route,
+    activeTab: canonicalParams.get("tab") === "settings" ? "settings" : "profile",
+    panel: canonicalParams.get("panel"),
+    section: canonicalParams.get("panel") === PROFILE_PANEL ? canonicalParams.get("section") : null,
+  };
+}
+
 function list(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -68,7 +125,6 @@ const VOLUNTARY_FORM_POLICY_OPTIONS = [
 ];
 
 const PERMISSION_PLATFORMS = Object.freeze({
-  authenticated_search: ["linkedin", "indeed", "wellfound", "glassdoor"],
   authenticated_apply_preparation: [
     "greenhouse",
     "lever",
@@ -82,8 +138,6 @@ const PERMISSION_PLATFORMS = Object.freeze({
 });
 
 const PERMISSION_PROVIDER_SCOPES = Object.freeze({
-  authenticated_search:
-    "Turning this on records consent for LinkedIn, Indeed, Wellfound, and Glassdoor.",
   authenticated_apply_preparation:
     "Turning this on records consent for Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and external ATS sites.",
   mail_access: "Turning this on records consent for Gmail, Outlook, and webmail.",
@@ -239,6 +293,7 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
       targets,
       compensation: {
         floor: money(compensation.minimum_base ?? compensation.oe_min_base),
+        annualEarningsFloor: money(compensation.minimum_annual_earnings),
         target: money(compensation.target_base ?? compensation.expected_base),
       },
       locationPolicy: locationPolicyForProfile(location, onboard),
@@ -293,10 +348,25 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
           fields: [
             field(
               "minimumBase",
-              "Minimum base salary",
+              "Guaranteed base floor",
               "number",
               numberValue(compensation.minimum_base ?? compensation.oe_min_base),
-              { min: "0", step: "1000" }
+              {
+                min: "0",
+                step: "1000",
+                help: "Use this when guaranteed wages or salary must clear a minimum.",
+              }
+            ),
+            field(
+              "minimumAnnualEarnings",
+              "Minimum annual cash earnings",
+              "number",
+              numberValue(compensation.minimum_annual_earnings),
+              {
+                min: "0",
+                step: "1000",
+                help: "Includes wages, tips, commission, and cash bonuses. Excludes equity and benefits.",
+              }
             ),
             field(
               "targetBase",
@@ -433,6 +503,10 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
       source: publicSyncPreference.source || "default",
       updatedAt: publicSyncPreference.updatedAt || null,
     },
+    permissionState: ["authenticated_apply_preparation", "mail_access"].map((id) => ({
+      id,
+      enabled: capabilityEnabled(automation, id),
+    })),
     permissions: [
       {
         id: "draft_documents",
@@ -441,14 +515,6 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         enabled: true,
         mutable: false,
         statusLabel: "Always on",
-      },
-      {
-        id: "authenticated_search",
-        name: "Browse job portals",
-        description: "use connected browser sessions when needed",
-        providerScope: PERMISSION_PROVIDER_SCOPES.authenticated_search,
-        enabled: capabilityEnabled(automation, "authenticated_search"),
-        mutable: true,
       },
       {
         id: "authenticated_apply_preparation",
@@ -512,6 +578,10 @@ export function profileSectionSavePlan(
   }
   if (section === "compensation") {
     const minimumBase = amountOrNull(values.minimumBase, "Minimum base");
+    const minimumAnnualEarnings = amountOrNull(
+      values.minimumAnnualEarnings,
+      "Minimum annual cash earnings"
+    );
     const targetBase = amountOrNull(values.targetBase, "Target base");
     if (minimumBase !== null && targetBase !== null && targetBase < minimumBase) {
       throw new UserFacingError("Target base must be at least the floor.");
@@ -521,7 +591,11 @@ export function profileSectionSavePlan(
         kind: "candidate",
         name: "profile",
         patch: {
-          compensation: { minimum_base: minimumBase, target_base: targetBase },
+          compensation: {
+            minimum_base: minimumBase,
+            minimum_annual_earnings: minimumAnnualEarnings,
+            target_base: targetBase,
+          },
         },
       },
     ];
@@ -621,7 +695,7 @@ export function profileSectionSavePlan(
 }
 
 export function permissionPatch(id, enabled, currentPermissions = []) {
-  if (id === "draft_documents") return null;
+  if (!Object.hasOwn(PERMISSION_PLATFORMS, id)) return null;
   const value = Boolean(enabled);
   const platforms = PERMISSION_PLATFORMS[id] || [];
   const providerState = Object.fromEntries(platforms.map((platform) => [platform, value]));

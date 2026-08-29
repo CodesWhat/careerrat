@@ -62,6 +62,13 @@ function statusForMessageError(err) {
       return 404;
     case "SESSION_CLOSED":
       return 410;
+    case "STALE_CHOICE_PROMPT":
+    case "CHOICE_ALREADY_RESOLVED":
+      return 409;
+    case "BAD_CHOICE_OPTION":
+    case "BAD_CHOICE_PROMPT":
+    case "BAD_REQUEST_ID":
+      return 400;
     default:
       return 500;
   }
@@ -138,7 +145,12 @@ export function mountChatRoute({ addRoute, repoRoot, chatRuntime, env = process.
     }
 
     try {
-      const result = chatRuntime.postMessage(body?.chatId, body?.text);
+      const result = chatRuntime.postMessage(
+        body?.chatId,
+        body?.text,
+        body?.choice,
+        body?.requestId
+      );
       sendJson(res, 202, result);
     } catch (err) {
       sendJson(res, statusForMessageError(err), { error: err.message });

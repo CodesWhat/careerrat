@@ -57,6 +57,18 @@
             "context": "dependency-review"
           },
           {
+            "context": "web-build"
+          },
+          {
+            "context": "website-build"
+          },
+          {
+            "context": "windows-package-smoke"
+          },
+          {
+            "context": "browser-application-prep"
+          },
+          {
             "context": "qlty"
           },
           {

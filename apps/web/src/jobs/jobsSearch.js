@@ -1,12 +1,12 @@
-import {
-  generateSearchPrompts,
-  getSearchPrompts,
-  getSourcingRun,
-  runAiWebSearchStream,
-  saveSearchPrompts,
-  startSearchRun,
-} from "../lib/api.js";
+import { getSearchExecution, startSearchRun } from "../lib/api.js";
 import { errorState } from "../lib/errorCopy.js";
+
+const SEARCH_LANES = Object.freeze({
+  deterministic: { label: "Configured sources" },
+  aiWeb: { label: "AI web search" },
+});
+
+const TERMINAL_EXECUTION_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 function unwrapRun(value) {
   if (!value || typeof value !== "object") return null;
@@ -16,128 +16,35 @@ function unwrapRun(value) {
   return value;
 }
 
-const SEARCH_LANES = Object.freeze({
-  deterministic: { label: "Configured sources" },
-  aiWeb: { label: "AI web search" },
-});
-
-export function jobSearchCapabilities({ sourceStatus, ai } = {}) {
-  const enabledSearches = Number(sourceStatus?.searches?.enabled || 0);
-  const enabledCompanies = Number(sourceStatus?.enabledTrackedCompanies || 0);
-  const deterministicAttempts = Number(sourceStatus?.deterministicSources?.attempted || 0);
-  return {
-    deterministic: {
-      configured: enabledSearches > 0 || enabledCompanies > 0,
-      executable: deterministicAttempts > 0,
-      consented: true,
-    },
-    aiWeb: {
-      configured: ai?.configured === true,
-      executable: ai?.executable === true,
-      consented: ai?.consented === true,
-    },
-  };
+function unwrapExecution(value) {
+  if (!value || typeof value !== "object") return null;
+  const execution = Object.hasOwn(value, "execution") ? value.execution : value;
+  return execution && typeof execution === "object" ? execution : null;
 }
 
-function skippedReason(capability) {
-  if (!capability.configured) return "not-configured";
-  if (!capability.consented) return "not-consented";
-  return "unavailable";
-}
-
-function initialLaneState(id, capability = {}) {
-  const configured = capability.configured === true;
-  const executable = capability.executable === true;
-  const consented = capability.consented !== false;
-  const runnable = configured && executable && consented;
-  return {
-    label: SEARCH_LANES[id].label,
-    configured,
-    executable,
-    consented,
-    status: runnable ? "running" : "skipped",
-    ...(!runnable ? { reason: skippedReason({ configured, executable, consented }) } : {}),
-  };
-}
-
-function laneError(result, fallback) {
-  if (typeof result?.error === "string" && result.error) return result.error;
-  if (result?.error?.message) return result.error.message;
+function laneError(value, fallback) {
+  if (typeof value?.error === "string" && value.error.trim()) return value.error.trim();
+  if (typeof value?.error?.message === "string" && value.error.message.trim()) {
+    return value.error.message.trim();
+  }
   return fallback;
-}
-
-function resultNewCount(result) {
-  const value = result?.data?.new ?? result?.run?.summary?.new ?? result?.summary?.new;
-  const count = Number(value);
-  return Number.isFinite(count) ? count : 0;
-}
-
-function resultCount(result, key) {
-  const value = result?.data?.[key] ?? result?.run?.summary?.[key] ?? result?.summary?.[key];
-  const count = Number(value);
-  return Number.isFinite(count) && count > 0 ? count : 0;
-}
-
-function deterministicErrorCount(value) {
-  const summary = value?.run?.summary || value?.summary || value;
-  const errors = Array.isArray(summary?.errors) ? summary.errors : [];
-  const declared = Number(summary?.errorCount || 0);
-  return Math.max(errors.length, Number.isFinite(declared) ? declared : 0);
-}
-
-function configuredSourceFailureCopy(count) {
-  return count === 1
-    ? "1 configured source couldn't be searched."
-    : `${count} configured sources couldn't be searched.`;
-}
-
-function completedDeterministicResult(result, run) {
-  const classified = classifyDurableSearchRun("deterministic", { run });
-  if (!classified.partial) return result;
-  return {
-    ...(result && typeof result === "object" ? result : {}),
-    ok: true,
-    partial: true,
-    error: classified.error,
-    run,
-  };
 }
 
 function failedPromptIds(result) {
   const ids = [
     result?.failedPromptIds,
-    result?.data?.failedPromptIds,
     result?.summary?.failedPromptIds,
     result?.error?.failedPromptIds,
-    result?.run?.summary?.failedPromptIds,
-    result?.run?.error?.failedPromptIds,
   ].find((candidate) => Array.isArray(candidate) && candidate.length > 0);
   return Array.isArray(ids)
     ? [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))]
     : [];
 }
 
-function inferredPartialLane(id, result) {
-  if (result?.partial === true) {
-    return {
-      error: laneError(result, `${SEARCH_LANES[id].label} partly failed.`),
-      failedPromptIds: failedPromptIds(result),
-    };
-  }
-  if (id === "deterministic") {
-    const count = deterministicErrorCount(result);
-    if (count > 0) {
-      return { error: configuredSourceFailureCopy(count), failedPromptIds: [] };
-    }
-  }
-  const promptIds = id === "aiWeb" ? failedPromptIds(result) : [];
-  if (promptIds.length > 0) {
-    return {
-      error: laneError(result, `${promptIds.length} AI search prompt failed.`),
-      failedPromptIds: promptIds,
-    };
-  }
-  return null;
+function deterministicErrorCount(value) {
+  const errors = Array.isArray(value?.summary?.errors) ? value.summary.errors : [];
+  const declared = Number(value?.summary?.errorCount || 0);
+  return Math.max(errors.length, Number.isFinite(declared) ? declared : 0);
 }
 
 export function classifyDurableSearchRun(id, value) {
@@ -167,666 +74,276 @@ export function classifyDurableSearchRun(id, value) {
       run,
     };
   }
-  const partial = inferredPartialLane(id, { run });
-  if (partial) {
+  const errorCount = id === "deterministic" ? deterministicErrorCount(run) : 0;
+  const promptIds = id === "aiWeb" ? failedPromptIds(run) : [];
+  if (errorCount > 0 || promptIds.length > 0) {
+    const fallback =
+      id === "deterministic"
+        ? `${errorCount} configured source${errorCount === 1 ? "" : "s"} couldn't be searched.`
+        : `${promptIds.length} AI search prompt${promptIds.length === 1 ? "" : "s"} failed.`;
     return {
       status: "failed",
       partial: true,
-      error: partial.error,
-      failedPromptIds: partial.failedPromptIds,
+      error: laneError(run, fallback),
+      failedPromptIds: promptIds,
       run,
     };
   }
   return { status: "succeeded", partial: false, error: null, failedPromptIds: [], run };
 }
 
-function retryRequest(value) {
-  const aiPromptIds = Array.isArray(value?.aiPromptIds)
-    ? [...new Set(value.aiPromptIds.map((id) => String(id || "").trim()).filter(Boolean))]
-    : [];
-  const deterministic = value?.deterministic === true;
-  const aiWeb = value?.aiWeb === true || aiPromptIds.length > 0;
+function executionLaneError(id, lane) {
+  return laneError(lane, `${SEARCH_LANES[id].label} failed.`);
+}
+
+function executionLaneState(id, lane = {}) {
+  const status = String(lane.status || "queued");
+  const base = {
+    label: SEARCH_LANES[id].label,
+    ...(lane.runId ? { runId: lane.runId } : {}),
+    ...(lane.summary ? { summary: lane.summary } : {}),
+  };
+  if (status === "completed") return { ...base, status: "succeeded" };
+  if (status === "failed") {
+    return { ...base, status: "failed", error: executionLaneError(id, lane) };
+  }
+  if (status === "cancelled") return { ...base, status: "skipped", reason: "cancelled" };
+  if (status === "skipped") {
+    return { ...base, status: "skipped", reason: lane.reason || "unavailable" };
+  }
+  return { ...base, status: status === "running" ? "running" : "queued" };
+}
+
+function aggregateExecutionMetrics(execution) {
+  const deterministic = execution?.lanes?.deterministic?.summary || {};
+  const aiWeb = execution?.lanes?.aiWeb?.summary || {};
+  const numeric = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
   return {
-    active: deterministic || aiWeb,
-    deterministic,
-    aiWeb,
-    aiPromptIds,
+    new: numeric(deterministic.new) + numeric(aiWeb.new),
+    qualified: numeric(deterministic.qualified) + numeric(aiWeb.qualified),
+    scanned: numeric(deterministic.scanned) + numeric(aiWeb.scanned),
+    sources: numeric(
+      deterministic.attemptedSources || deterministic?.deterministicSources?.attempted
+    ),
   };
 }
 
-function retryDescriptor(outcomes) {
-  const retry = {};
-  const deterministic = outcomes.find(
-    (outcome) => outcome.id === "deterministic" && outcome.error && !outcome.aborted
-  );
-  if (deterministic) retry.deterministic = true;
-
-  const aiWeb = outcomes.find(
-    (outcome) => outcome.id === "aiWeb" && outcome.error && !outcome.aborted
-  );
-  if (aiWeb) {
-    const promptIds = failedPromptIds(aiWeb);
-    if (promptIds.length) retry.aiPromptIds = promptIds;
-    else retry.aiWeb = true;
+function completedExecutionSummary(lanes, metrics) {
+  const succeeded = Object.entries(lanes)
+    .filter(([, lane]) => lane.status === "succeeded")
+    .map(([id]) => id);
+  const failed = Object.entries(lanes)
+    .filter(([, lane]) => lane.status === "failed")
+    .map(([id]) => id);
+  if (succeeded.includes("deterministic") && failed.includes("aiWeb")) {
+    return "Your saved job sites finished. The AI search needs another try.";
   }
-  return Object.keys(retry).length ? retry : null;
-}
-
-function normalizedIdentityPart(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-function normalizedOfferUrl(value) {
-  try {
-    const url = new URL(value);
-    url.hash = "";
-    url.hostname = url.hostname.toLowerCase();
-    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
-    return url.href;
-  } catch {
-    return String(value || "")
-      .trim()
-      .toLowerCase();
+  if (succeeded.includes("aiWeb") && failed.includes("deterministic")) {
+    return "The AI search finished. Your saved job sites need another try.";
   }
-}
-
-function offerIdentityKeys(offer) {
-  const url = String(offer?.url || offer?.link || "").trim();
-  const reqId = String(offer?.reqId || offer?.scanner?.reqId || "")
-    .trim()
-    .toLowerCase();
-  const keys = [];
-  if (url) keys.push(`url:${normalizedOfferUrl(url)}`);
-  if (reqId) keys.push(`req:${reqId}`);
-  if (keys.length) return keys;
-
-  const company = normalizedIdentityPart(offer?.company);
-  const role = normalizedIdentityPart(offer?.role || offer?.title);
-  const location = normalizedIdentityPart(offer?.location || offer?.loc);
-  return company && role && location
-    ? [`company-role-location:${company}::${role}::${location}`]
-    : [];
-}
-
-function resultNewOffers(result) {
-  const value = result?.data?.offers ?? result?.run?.summary?.offers ?? result?.summary?.offers;
-  return Array.isArray(value) ? value : null;
-}
-
-function reconciledNewCount(outcomes) {
-  const seenIdentities = new Set();
-  let identified = 0;
-  let withoutIdentity = 0;
-  for (const outcome of outcomes) {
-    const count = resultNewCount(outcome.result);
-    const offers = resultNewOffers(outcome.result);
-    if (!offers) {
-      withoutIdentity += count;
-      continue;
-    }
-    const countedOffers = offers.slice(0, count);
-    withoutIdentity += Math.max(0, count - countedOffers.length);
-    for (const offer of countedOffers) {
-      const identities = offerIdentityKeys(offer);
-      if (!identities.length) {
-        withoutIdentity += 1;
-        continue;
-      }
-      if (identities.some((identity) => seenIdentities.has(identity))) continue;
-      for (const identity of identities) seenIdentities.add(identity);
-      identified += 1;
-    }
+  if (failed.length && succeeded.length) {
+    return "Part of the search finished. The rest needs another try.";
   }
-  return identified + withoutIdentity;
+  if (failed.length) return "The search needs another try.";
+  return [
+    `${metrics.new} new`,
+    `${metrics.qualified} qualified`,
+    `${metrics.scanned} scanned`,
+    `${metrics.sources} ${metrics.sources === 1 ? "source" : "sources"}`,
+  ].join(" · ");
 }
 
-export async function runCoordinatedJobSearch({
-  capabilities = {},
-  retry,
-  runDeterministic,
-  runAiWeb,
-  refetch,
-  setSearchState,
-  signal,
-} = {}) {
-  let lanes = {
-    deterministic: initialLaneState("deterministic", capabilities.deterministic),
-    aiWeb: initialLaneState("aiWeb", capabilities.aiWeb),
+export function searchExecutionPresentation(value) {
+  const execution = unwrapExecution(value);
+  if (!execution) return { status: "hydrating", detail: "Loading your saved search" };
+  const lanes = {
+    deterministic: executionLaneState("deterministic", execution?.lanes?.deterministic),
+    aiWeb: executionLaneState("aiWeb", execution?.lanes?.aiWeb),
   };
-  const runners = { deterministic: runDeterministic, aiWeb: runAiWeb };
-  const requestedRetry = retryRequest(retry);
-  if (requestedRetry.active) {
-    for (const id of Object.keys(lanes)) {
-      const requested =
-        id === "deterministic" ? requestedRetry.deterministic : requestedRetry.aiWeb;
-      if (lanes[id].status === "running" && !requested) {
-        lanes = {
-          ...lanes,
-          [id]: { ...lanes[id], status: "succeeded", reason: "already-succeeded" },
-        };
-      }
-    }
-  }
-  const runnable = Object.keys(lanes).filter(
-    (id) => lanes[id].status === "running" && typeof runners[id] === "function"
-  );
-
-  function publish(state) {
-    setSearchState?.({ ...state, lanes: { ...lanes } });
-  }
-
-  function updateLane(id, patch = {}) {
-    lanes = { ...lanes, [id]: { ...lanes[id], ...patch } };
-    publish({
+  const running = Object.entries(lanes)
+    .filter(([, lane]) => lane.status === "running")
+    .map(([id]) => id);
+  const searchExecutionId = String(execution.id || "").trim();
+  if (!TERMINAL_EXECUTION_STATUSES.has(execution.status)) {
+    const detail =
+      running.includes("deterministic") && running.includes("aiWeb")
+        ? "Searching your saved job sites and the web"
+        : running.includes("deterministic")
+          ? "Searching your saved job sites"
+          : running.includes("aiWeb")
+            ? "Searching the web"
+            : "Preparing your job search";
+    return {
       status: "running",
-      detail: `${runnable.map((laneId) => SEARCH_LANES[laneId].label).join(" and ")} running`,
-    });
-  }
-
-  if (!runnable.length) {
-    const state = {
-      status: "error",
-      reason: "no-configured-lane",
-      summary: "CareerRat needs at least one job site or a connected AI before it can search.",
-    };
-    publish(state);
-    return { ok: false, skipped: true, lanes };
-  }
-
-  publish({
-    status: "running",
-    detail: `${runnable.map((id) => SEARCH_LANES[id].label).join(" and ")} running`,
-  });
-
-  const outcomes = await Promise.all(
-    runnable.map(async (id) => {
-      try {
-        const result = await runners[id]({
-          signal,
-          onLaneState: (patch) => updateLane(id, patch),
-          ...(id === "aiWeb" && requestedRetry.aiPromptIds.length
-            ? { retryPromptIds: requestedRetry.aiPromptIds }
-            : {}),
-        });
-        if (signal?.aborted || result?.aborted) return { id, result, aborted: true };
-        if (result?.ok === false) {
-          return {
-            id,
-            result,
-            error: laneError(result, `${SEARCH_LANES[id].label} failed.`),
-            failedPromptIds: failedPromptIds(result),
-          };
-        }
-        const partial = inferredPartialLane(id, result);
-        return partial
-          ? { id, result, ok: true, partial: true, ...partial }
-          : { id, result, ok: true };
-      } catch (error) {
-        if (signal?.aborted || error?.name === "AbortError") return { id, aborted: true };
-        return { id, error: error?.message || `${SEARCH_LANES[id].label} failed.` };
-      }
-    })
-  );
-
-  if (signal?.aborted || outcomes.every((outcome) => outcome.aborted)) {
-    for (const id of runnable) {
-      lanes = {
-        ...lanes,
-        [id]: { ...lanes[id], status: "skipped", reason: "cancelled" },
-      };
-    }
-    publish({ status: "idle", reason: "cancelled", summary: "Search cancelled." });
-    return { ok: false, aborted: true };
-  }
-
-  for (const outcome of outcomes) {
-    lanes = {
-      ...lanes,
-      [outcome.id]:
-        outcome.ok && !outcome.partial
-          ? { ...lanes[outcome.id], status: "succeeded", result: outcome.result }
-          : outcome.ok
-            ? {
-                ...lanes[outcome.id],
-                status: "failed",
-                partial: true,
-                error: outcome.error,
-                ...(outcome.failedPromptIds?.length
-                  ? { failedPromptIds: outcome.failedPromptIds }
-                  : {}),
-                result: outcome.result,
-              }
-            : {
-                ...lanes[outcome.id],
-                status: outcome.aborted ? "skipped" : "failed",
-                ...(outcome.aborted
-                  ? { reason: "cancelled" }
-                  : { error: outcome.error || `${SEARCH_LANES[outcome.id].label} failed.` }),
-                ...(outcome.failedPromptIds?.length
-                  ? { failedPromptIds: outcome.failedPromptIds }
-                  : {}),
-              },
+      detail,
+      ...(searchExecutionId ? { searchExecutionId } : {}),
+      lanes,
     };
   }
-
-  await refetch?.();
-  const succeeded = outcomes.filter((outcome) => outcome.ok);
-  const failed = outcomes.filter((outcome) => outcome.error);
-  const newCount = reconciledNewCount(succeeded);
-  const unreadableCount = succeeded.reduce(
-    (sum, outcome) => sum + resultCount(outcome.result, "unreadable"),
-    0
-  );
-  const partialDescriptionCount = succeeded.reduce(
-    (sum, outcome) => sum + resultCount(outcome.result, "partial"),
-    0
-  );
-  const finishedCopy = `${succeeded.length} search lane${succeeded.length === 1 ? "" : "s"} finished`;
-  const newCopy = newCount ? ` · ${newCount} new` : "";
-  const unreadableCopy = unreadableCount ? ` · ${unreadableCount} couldn't be added` : "";
-  const partialDescriptionCopy = partialDescriptionCount
-    ? ` · ${partialDescriptionCount} ${partialDescriptionCount === 1 ? "has" : "have"} a partial description`
-    : "";
-  const ok = succeeded.length > 0;
-  const nextRetry = retryDescriptor(outcomes);
-  const retryPromptIds = nextRetry?.aiPromptIds || [];
-  const failedCopy = failed.length
-    ? ` · ${failed.length} lane${failed.length === 1 ? "" : "s"} ${failed.length === 1 ? "needs" : "need"} retry`
-    : "";
-  const state = {
-    status: ok ? "complete" : "error",
-    summary: `${finishedCopy}${failedCopy}${newCopy}${unreadableCopy}${partialDescriptionCopy}`,
-  };
-  publish(state);
+  if (execution.status === "cancelled") {
+    return {
+      status: "idle",
+      reason: "cancelled",
+      summary: "Search cancelled.",
+      ...(searchExecutionId ? { searchExecutionId } : {}),
+      lanes,
+    };
+  }
+  const metrics = aggregateExecutionMetrics(execution);
+  const anySucceeded = Object.values(lanes).some((lane) => lane.status === "succeeded");
   return {
-    ok,
-    partial: ok && failed.length > 0,
-    ...(retryPromptIds.length ? { failedPromptIds: retryPromptIds } : {}),
-    ...(nextRetry ? { retry: nextRetry } : {}),
+    status:
+      execution.status === "completed" || (execution.partial === true && anySucceeded)
+        ? "complete"
+        : "error",
+    partial: execution.partial === true,
+    metrics,
+    summary: completedExecutionSummary(lanes, metrics),
+    ...(searchExecutionId ? { searchExecutionId } : {}),
+    ...(execution.completedAt ? { completedAt: execution.completedAt } : {}),
     lanes,
-    results: Object.fromEntries(outcomes.map((outcome) => [outcome.id, outcome.result])),
   };
 }
 
-// The chat-first sweep status accepts one user-facing string, so errors stay
-// message-only after translation through resolveErrorCopy().
-function describeJobsPageSearchError(error) {
-  return errorState(error, "Search could not start. Review Search setup, then try again.").message;
-}
-
-// Resolves after `ms`, or immediately if `signal` aborts first — the poll
-// loop's sleep step, kept local rather than pulled in as a dependency.
-function sleep(ms, signal) {
+function waitForPoll(ms, signal) {
   return new Promise((resolve) => {
     if (signal?.aborted) {
       resolve();
       return;
     }
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener?.(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true }
-    );
+    let settled = false;
+    let timer;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.("abort", finish);
+      resolve();
+    };
+    timer = setTimeout(finish, ms);
+    signal?.addEventListener?.("abort", finish, { once: true });
   });
 }
 
-// The start request (POST /api/sourcing/search/start) returns immediately
-// with a point-in-time "running" run row while the scan itself runs detached
-// server-side (src/cli/sourcing-route.mjs -> runFirstSearchInBackground).
-// Without this loop the caller stores that "running" snapshot forever and
-// the button spins indefinitely even after the run completes. Polls
-// GET /api/sourcing/runs/latest (via getSourcingRunFn) until the run reaches
-// a terminal status, times out, or the caller aborts.
-async function pollManualSearchRun({
-  getSourcingRunFn,
-  runId,
-  refetch,
-  setSearchError,
-  setSearchRun,
-  signal,
-  pollIntervalMs,
-  pollTimeoutMs,
-}) {
-  const deadline = Date.now() + pollTimeoutMs;
-  let misses = 0;
-
-  for (;;) {
-    await sleep(pollIntervalMs, signal);
-    if (signal?.aborted) return { ok: false, aborted: true };
-
-    if (Date.now() >= deadline) {
-      setSearchRun?.(null);
-      setSearchError?.(
-        "Search is still running in the background. Reload the page later to see results."
-      );
-      return { ok: false, timedOut: true };
-    }
-
-    let polledRun = null;
-    let pollError = null;
-    try {
-      polledRun = unwrapRun(
-        await getSourcingRunFn({
-          purpose: "manual-search",
-          ...(runId ? { id: runId } : {}),
-          ...(signal ? { signal } : {}),
-        })
-      );
-    } catch (error) {
-      pollError = error;
-    }
-
-    if (!polledRun) {
-      misses += 1;
-      if (misses < 3) continue;
-      if (signal?.aborted) return { ok: false, aborted: true };
-      setSearchRun?.(null);
-      setSearchError?.("Couldn't read search status. Reload the page to see results.");
-      return { ok: false, error: pollError || new Error("No sourcing run returned") };
-    }
-    misses = 0;
-
-    if (polledRun.status === "running") continue;
-
-    if (signal?.aborted) return { ok: false, aborted: true };
-    setSearchRun?.(polledRun);
-    if (polledRun.status === "failed") {
-      const message =
-        polledRun.error?.message ||
-        "Search failed. Add an RSS source or supported public ATS company, then retry.";
-      setSearchError?.(message);
-      return { ok: false, error: message, run: polledRun };
-    }
-    const result = completedDeterministicResult({ ok: true, run: polledRun }, polledRun);
-    if (result.partial) setSearchError?.(result.error);
-    await refetch?.();
-    return result;
+function executionResult(execution) {
+  if (execution?.status === "cancelled") {
+    return { ok: false, aborted: true, searchExecutionId: execution.id, execution };
   }
+  const ok = execution?.status === "completed";
+  return {
+    ok,
+    partial: execution?.partial === true,
+    searchExecutionId: execution?.id,
+    execution,
+    ...(!ok ? { error: "Search couldn't finish. Try again." } : {}),
+  };
 }
 
-export async function runJobsPageSearch({
-  startSearchRun: startSearchRunFn = startSearchRun,
-  getSourcingRun: getSourcingRunFn = getSourcingRun,
-  refetch,
-  setSearchError,
-  setSearchRun,
+export async function followSearchExecution({
+  getSearchExecution: getSearchExecutionFn = getSearchExecution,
   searchExecutionId,
+  initialExecution,
+  refetch,
+  setSearchState,
   signal,
   pollIntervalMs = 2500,
   pollTimeoutMs = 10 * 60 * 1000,
 } = {}) {
+  const id = String(searchExecutionId || initialExecution?.id || "").trim();
+  if (!id) return { ok: false, error: "Search status is missing its execution id." };
+  let execution = unwrapExecution(initialExecution);
+  if (execution?.id !== id) execution = null;
+  let deterministicStatus = execution?.lanes?.deterministic?.status || null;
+  if (execution) setSearchState?.(searchExecutionPresentation(execution));
+  if (execution && TERMINAL_EXECUTION_STATUSES.has(execution.status)) {
+    await refetch?.();
+    return executionResult(execution);
+  }
+
+  const deadline = Date.now() + pollTimeoutMs;
+  let misses = 0;
+  for (;;) {
+    await waitForPoll(pollIntervalMs, signal);
+    if (signal?.aborted) return { ok: false, aborted: true, searchExecutionId: id };
+    if (Date.now() >= deadline) {
+      return { ok: true, running: true, timedOut: true, searchExecutionId: id, execution };
+    }
+    let next = null;
+    try {
+      next = unwrapExecution(
+        await getSearchExecutionFn({
+          searchExecutionId: id,
+          ...(signal ? { signal } : {}),
+        })
+      );
+    } catch (error) {
+      misses += 1;
+      if (misses < 3) continue;
+      const message = errorState(
+        error,
+        "Couldn't read this search's status. Reload to see its latest results."
+      ).message;
+      return { ok: false, error: message, searchExecutionId: id };
+    }
+    if (!next || next.id !== id) {
+      misses += 1;
+      if (misses < 3) continue;
+      return { ok: false, error: "Couldn't read this search's status.", searchExecutionId: id };
+    }
+    misses = 0;
+    const nextDeterministicStatus = next?.lanes?.deterministic?.status || null;
+    const deterministicJustCompleted =
+      deterministicStatus !== "completed" && nextDeterministicStatus === "completed";
+    if (deterministicJustCompleted) {
+      await refetch?.();
+    }
+    deterministicStatus = nextDeterministicStatus;
+    execution = next;
+    setSearchState?.(searchExecutionPresentation(execution));
+    if (!TERMINAL_EXECUTION_STATUSES.has(execution.status)) continue;
+    if (!deterministicJustCompleted) await refetch?.();
+    return executionResult(execution);
+  }
+}
+
+export async function runUnifiedJobSearch({
+  startSearchRun: startSearchRunFn = startSearchRun,
+  getSearchExecution: getSearchExecutionFn = getSearchExecution,
+  searchExecutionId,
+  refetch,
+  setSearchState,
+  signal,
+  pollIntervalMs,
+  pollTimeoutMs,
+} = {}) {
   try {
-    setSearchError?.(null);
-    const result = await startSearchRunFn({
+    const started = await startSearchRunFn({
       purpose: "manual-search",
       ...(searchExecutionId ? { searchExecutionId } : {}),
     });
-    const run = unwrapRun(result);
-    setSearchRun?.(run);
-    if (run?.status === "failed") {
-      const message =
-        run.error?.message ||
-        "Search failed. Add an RSS source or supported public ATS company, then retry.";
-      setSearchError?.(message);
-      return { ok: false, error: message, run };
-    }
-    if (run?.status === "running") {
-      return await pollManualSearchRun({
-        getSourcingRunFn,
-        runId: run.id,
-        refetch,
-        setSearchError,
-        setSearchRun,
-        signal,
-        pollIntervalMs,
-        pollTimeoutMs,
-      });
-    }
-    const completed = completedDeterministicResult(result, run);
-    if (completed?.partial) setSearchError?.(completed.error);
-    await refetch?.();
-    return completed;
-  } catch (error) {
-    const message = describeJobsPageSearchError(error);
-    setSearchError?.(message);
-    return { ok: false, error: message };
-  }
-}
-
-// Keep AI sweep failures in the same message-only shape.
-function describeAiWebSearchError(error) {
-  return errorState(error, "AI web search could not start. Review saved prompts, then try again.")
-    .message;
-}
-
-// Non-technical, single honest message for every way the invisible prep step
-// below can fail (no targeting context to generate from, a model/provider
-// error, or no AI route configured at all) — a non-technical job seeker has
-// no use for "SEARCH_PROMPTS_NO_TARGETING" or a provider status code, only
-// somewhere to go fix it.
-const AI_SEARCH_PREP_ERROR =
-  "Couldn't figure out what to search for. Finish your job preferences in Settings.";
-
-// There is no per-prompt/Regenerate UI anymore (Scott, 2026-07-20: the old
-// "AI prompts (N)" button + modal meant nothing to a non-technical job
-// seeker), so nothing ever tells this lane "the prompts are stale". The
-// server fingerprints only the candidate inputs that prompt generation reads
-// and stores that fingerprint with the generated set. This avoids timestamp
-// races because the prompts themselves live inside targeting.
-function promptsAreStale(prompts, inputFingerprint, savedInputFingerprint) {
-  const list = Array.isArray(prompts) ? prompts : [];
-  if (!list.length) return true;
-  if (!inputFingerprint || !savedInputFingerprint) return true;
-  return inputFingerprint !== savedInputFingerprint;
-}
-
-// Invisible AI-search prep: makes sure there ARE saved search prompts, and
-// that they still reflect the candidate's current targeting, before the AI
-// web-search run itself starts. Generation is a FULL replace, never a
-// partial-preserve merge — there's no UI left to reconcile a partial edit
-// against, so the freshly generated set simply becomes the stored set.
-async function ensureFreshSearchPrompts({
-  getSearchPrompts: getSearchPromptsFn,
-  generateSearchPrompts: generateSearchPromptsFn,
-  saveSearchPrompts: saveSearchPromptsFn,
-  setActivity,
-}) {
-  let stored;
-  try {
-    stored = await getSearchPromptsFn();
-  } catch (_error) {
-    return { ok: false, error: AI_SEARCH_PREP_ERROR };
-  }
-
-  const prompts = stored?.data?.prompts;
-
-  if (
-    !promptsAreStale(prompts, stored?.data?.inputFingerprint, stored?.data?.savedInputFingerprint)
-  ) {
-    return { ok: true, prompts };
-  }
-
-  setActivity?.("Preparing your search…");
-
-  let generated;
-  try {
-    generated = await generateSearchPromptsFn();
-  } catch (_error) {
-    return { ok: false, error: AI_SEARCH_PREP_ERROR };
-  }
-  if (!generated?.data?.prompts?.length) {
-    return { ok: false, error: AI_SEARCH_PREP_ERROR };
-  }
-
-  try {
-    const saved = await saveSearchPromptsFn(
-      generated.data.prompts.map((prompt) => ({ text: prompt.text }))
-    );
-    return {
-      ok: true,
-      prompts: saved?.data?.prompts || generated.data.prompts,
-      regenerated: true,
-    };
-  } catch (_error) {
-    return { ok: false, error: AI_SEARCH_PREP_ERROR };
-  }
-}
-
-// Runs the AI web-search lane (POST /api/search/ai-web-search/run's SSE
-// stream) — same status/error-describing shape as runJobsPageSearch above,
-// but stateful across the run's lifetime instead of a single request/
-// response: `status` moves idle -> running -> results | error, `setActivity`
-// gets the latest {type:"activity"} message as it streams, and `setCounts`
-// gets the {type:"done"} payload's {searched, found, new, duplicates,
-// errors} once the run finishes. Aborting via `signal` (see AbortController)
-// is treated as a user cancel, not a failure — status returns to "idle"
-// rather than "error". Same refetch handoff on completion as the free-board
-// lane: the dashboard/results view re-reads the latest DB state rather than
-// this function trying to merge the run's counts into it locally.
-//
-// Before any of that, ensureFreshSearchPrompts() (above) runs invisibly —
-// there's no more user-facing "AI prompts"/Regenerate control, so this lane
-// has to keep its own prompts current. A brief "Preparing your search…"
-// activity message covers that step through the same SearchStatusStrip the
-// rest of this lane's activity text renders through; a prep failure (no
-// targeting context, a model error, or no AI route) reports AI_SEARCH_PREP_ERROR
-// and returns without ever starting the stream.
-export async function runAiWebSearchLane({
-  runAiWebSearchStream: runFn = runAiWebSearchStream,
-  getSearchPrompts: getSearchPromptsFn = getSearchPrompts,
-  generateSearchPrompts: generateSearchPromptsFn = generateSearchPrompts,
-  saveSearchPrompts: saveSearchPromptsFn = saveSearchPrompts,
-  promptIds,
-  searchExecutionId,
-  refetch,
-  signal,
-  setStatus,
-  setActivity,
-  setCounts,
-  setError,
-  // Optional — reports the stream's wall-clock duration once a run finishes,
-  // for the sweep-line engine receipt (design handoff 3b: "AI · ENGINE ·
-  // 41S"). Measured client-side since neither the runtime-config route nor
-  // the "done" SSE frame carries a server-side duration.
-  setElapsedMs,
-} = {}) {
-  setError?.(null);
-  setCounts?.(null);
-  setActivity?.(null);
-  setStatus?.("running");
-
-  const prep = await ensureFreshSearchPrompts({
-    getSearchPrompts: getSearchPromptsFn,
-    generateSearchPrompts: generateSearchPromptsFn,
-    saveSearchPrompts: saveSearchPromptsFn,
-    setActivity,
-  });
-
-  if (!prep.ok) {
-    setStatus?.("error");
-    setError?.(prep.error);
-    return { ok: false, error: prep.error };
-  }
-
-  setActivity?.(null);
-
-  const startedAt = Date.now();
-  let doneData = null;
-  let sawDone = false;
-  let streamErrorMessage = null;
-
-  try {
-    await runFn({
-      ...(!prep.regenerated && Array.isArray(promptIds) && promptIds.length ? { promptIds } : {}),
-      ...(searchExecutionId ? { searchExecutionId } : {}),
+    const initialExecution = unwrapExecution(started);
+    const adoptedId = String(
+      started?.searchExecutionId || initialExecution?.id || searchExecutionId || ""
+    ).trim();
+    return followSearchExecution({
+      getSearchExecution: getSearchExecutionFn,
+      searchExecutionId: adoptedId,
+      initialExecution,
+      refetch,
+      setSearchState,
       signal,
-      onEvent: (payload) => {
-        if (!payload || typeof payload !== "object") return;
-        switch (payload.type) {
-          case "activity":
-            if (payload.message) setActivity?.(payload.message);
-            break;
-          case "done":
-            sawDone = true;
-            doneData = payload.data || null;
-            break;
-          case "error":
-            streamErrorMessage = payload.message || "AI web search failed.";
-            break;
-          default:
-            break;
-        }
-      },
+      ...(pollIntervalMs == null ? {} : { pollIntervalMs }),
+      ...(pollTimeoutMs == null ? {} : { pollTimeoutMs }),
     });
   } catch (error) {
-    if (error?.name === "AbortError") {
-      setStatus?.("idle");
-      return { ok: false, aborted: true };
-    }
-    const message = describeAiWebSearchError(error);
-    setStatus?.("error");
-    setError?.(message);
+    const message = errorState(
+      error,
+      "Search could not start. Review Search setup, then try again."
+    ).message;
+    setSearchState?.({ status: "error", summary: message });
     return { ok: false, error: message };
   }
-
-  if (streamErrorMessage) {
-    setStatus?.("error");
-    setError?.(streamErrorMessage);
-    return { ok: false, error: streamErrorMessage };
-  }
-
-  // The stream closed without ever emitting a "done" or "error" frame — a
-  // dropped connection or a server-side bug, not a legitimate zero-result
-  // run. Report it as a failure and skip refetch rather than quietly
-  // clearing results/counts as if the search actually completed.
-  if (!sawDone) {
-    const message = "Search ended unexpectedly. Try again.";
-    setStatus?.("error");
-    setError?.(message);
-    return { ok: false, error: message };
-  }
-
-  const failedPromptIds = Array.isArray(doneData?.failedPromptIds) ? doneData.failedPromptIds : [];
-  const allQueriesFailed =
-    Number(doneData?.searched || 0) > 0 &&
-    failedPromptIds.length >= Number(doneData.searched) &&
-    Number(doneData?.new || 0) === 0;
-
-  if (allQueriesFailed) {
-    const message =
-      doneData?.errors?.[0] ||
-      doneData?.queryResults?.find((item) => item?.error)?.error ||
-      "Every selected AI web-search query failed.";
-    setCounts?.(doneData);
-    setStatus?.("error");
-    setError?.(message);
-    return { ok: false, error: message, failedPromptIds, data: doneData };
-  }
-
-  const someQueriesFailed = failedPromptIds.length > 0;
-  const partialError = someQueriesFailed
-    ? doneData?.errors?.[0] ||
-      doneData?.queryResults?.find((item) => item?.status === "failed" && item?.error)?.error ||
-      `${failedPromptIds.length} AI search prompt failed.`
-    : null;
-
-  setCounts?.(doneData);
-  setElapsedMs?.(Date.now() - startedAt);
-  setStatus?.("results");
-  if (partialError) setError?.(partialError);
-  await refetch?.();
-  return {
-    ok: true,
-    ...(partialError ? { partial: true, error: partialError, failedPromptIds } : {}),
-    data: doneData,
-  };
 }

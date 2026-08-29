@@ -119,6 +119,11 @@ test("product apps and archived prototypes are consolidated out of the repositor
     execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).trim().split("\n")
   );
   assert.equal(
+    [...trackedPaths].some((path) => path.startsWith(".planning/")),
+    false,
+    ".planning/ is local-only and must not be tracked"
+  );
+  assert.equal(
     trackedPaths.has("apps/docs/next-env.d.ts"),
     false,
     "Next may generate app-local type wiring, but Git should not track it"
@@ -153,10 +158,9 @@ test("product apps and archived prototypes are consolidated out of the repositor
 test("onboarding does not ask candidates to choose implementation modes", async () => {
   const router = await readText("AGENTS.md");
   const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
-  const roadmap = await readText("docs/ROADMAP.md");
   const setup = await readText("docs/SETUP.md");
   const installGuide = await readText("apps/docs/content/docs/getting-started/install.mdx");
-  for (const text of [router, skill, roadmap, setup, installGuide]) {
+  for (const text of [router, skill, setup, installGuide]) {
     assert.doesNotMatch(text, /Basic vs Advanced/i);
     assert.doesNotMatch(text, /\b(?:Basic|Advanced) mode\b/i);
     assert.doesNotMatch(text, /Do you want \*\*(?:Basic|Deep|Simple)/i);
@@ -398,6 +402,19 @@ test("web discovery emits one structured board review that the app can validate 
   assert.match(companies, /careerrat:discovery/);
   assert.match(companies, /"kind":"company_proposal"/);
   assert.match(companies, /"kind":"discovery_complete","step":"discover-companies"/);
+});
+
+test("explicit discovery requests do not require repeated approval for validated public sources", async () => {
+  const boards = await readText(".agents/skills/research-boards/SKILL.md");
+  const companies = await readText(".agents/skills/discover-companies/SKILL.md");
+
+  for (const skill of [boards, companies]) {
+    assert.match(skill, /the explicit discovery request is the authorization/i);
+    assert.match(skill, /high-confidence.*add.*without per-item confirmation/is);
+    assert.match(skill, /borderline.*review/i);
+  }
+  assert.doesNotMatch(boards, /confirm-first is the default/i);
+  assert.doesNotMatch(companies, /confirm-first is the default/i);
 });
 
 test("the app ships one fixed light visual mode", async () => {

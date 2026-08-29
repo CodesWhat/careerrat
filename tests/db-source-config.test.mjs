@@ -8,7 +8,9 @@ import {
   candidateSetupInitialize,
   companyAtsRemove,
   companyAtsUpsert,
+  publicSearchSourceUpsert,
   sourceConfigGet,
+  sourceConfigPut,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
@@ -85,4 +87,58 @@ test("VER-04 company ATS source-config owner does not write generated tracker ex
   assert.equal(existsSync(trackerPath), false);
   assert.equal(existsSync(trackerHtmlPath), false);
   assert.equal(existsSync(activityPath), false);
+});
+
+test("search source config normalizes legacy manual-auth rows and persists generic public sources", () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "indeed.com",
+          source_type: "manual-auth",
+          label: "Indeed saved search",
+          url: "https://www.indeed.com/jobs?q=operations",
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  const normalized = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0];
+  assert.equal(normalized.source_type, "browser");
+  assert.equal(normalized.auth, true);
+
+  const added = publicSearchSourceUpsert({
+    repoRoot,
+    entry: {
+      name: "Plain Co careers",
+      url: "https://plain.example/careers",
+    },
+  });
+  assert.equal(added.status, "added");
+  assert.deepEqual(added.entry, {
+    provider: "plain.example",
+    source_type: "browser",
+    platform: "plain.example",
+    label: "Plain Co careers",
+    url: "https://plain.example/careers",
+    enabled: true,
+    recency: { mode: "since-last-run", safetyMinutes: 30 },
+  });
+  assert.equal(
+    publicSearchSourceUpsert({ repoRoot, entry: added.entry }).status,
+    "already-tracked"
+  );
+  assert.throws(
+    () =>
+      publicSearchSourceUpsert({
+        repoRoot,
+        entry: { name: "Local", url: "http://127.0.0.1/jobs" },
+      }),
+    /private|local/i
+  );
 });

@@ -38,6 +38,8 @@ export function createPlaywrightApplyExecutor({
   // back to the default root when given null.
   const profileDir = profilePath(PROFILE_PLATFORM, {
     profileRoot: data?.session?.profile_root || null,
+    repoRoot,
+    env,
   });
 
   const ops = createPlaywrightOps({ launchImpl, profileDir, headless });

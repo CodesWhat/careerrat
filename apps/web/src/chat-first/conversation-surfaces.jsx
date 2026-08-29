@@ -1,4 +1,3 @@
-import { isPlainYesNoQuestion } from "../../../../src/core/ai/chat-answer-mode.mjs";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
 import { cleanAgentCopy } from "./agent-copy.js";
@@ -32,6 +31,91 @@ function AgentBubble({ agentName = "Paul", children }) {
 
 function UserBubble({ children }) {
   return <div className="chat-first-bubble chat-first-bubble--user">{children}</div>;
+}
+
+function choiceReply(prompt, optionIds) {
+  const selected = optionIds
+    .map((id) => prompt.options.find((option) => option.id === id))
+    .filter(Boolean);
+  return {
+    text: selected.map((option) => option.actionRef?.input?.text || option.label).join(" and "),
+    reference: { promptId: prompt.id, version: prompt.version, optionIds },
+  };
+}
+
+function ChoicePromptActions({ prompt, onAnswer, busy = false }) {
+  const options = Array.isArray(prompt?.options) ? prompt.options : EMPTY_LIST;
+  if (!prompt?.id || prompt.state !== "pending" || !options.length) return null;
+  const status = (
+    <span className="chat-first-choice-actions__status" role="status" aria-live="polite">
+      {busy ? "Saving answer…" : ""}
+    </span>
+  );
+  if (prompt.mode === "multi") {
+    function submit(event) {
+      event.preventDefault();
+      const selected = [...new FormData(event.currentTarget).getAll("choice-option")];
+      if (selected.length < prompt.minSelections || selected.length > prompt.maxSelections) {
+        const first = event.currentTarget.querySelector('input[name="choice-option"]');
+        first?.setCustomValidity(
+          `Choose ${prompt.minSelections === prompt.maxSelections ? prompt.minSelections : `${prompt.minSelections} to ${prompt.maxSelections}`} options.`
+        );
+        first?.reportValidity();
+        first?.setCustomValidity("");
+        return;
+      }
+      const reply = choiceReply(prompt, selected);
+      onAnswer(reply.text, reply.reference);
+    }
+    return (
+      <form className="chat-first-choice-actions" onSubmit={submit}>
+        <fieldset disabled={busy}>
+          <legend className="sr-only">{prompt.question}</legend>
+          <div className="chat-first-choice-actions__options">
+            {options.map((option) => (
+              <label className="chat-first-choice-option" key={option.id}>
+                <input type="checkbox" name="choice-option" value={option.id} />
+                <span>
+                  <strong>{option.label}</strong>
+                  {option.description ? <small>{option.description}</small> : null}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="chat-first-choice-actions__footer">
+            <button className="chat-first-pill chat-first-pill--outline" type="submit">
+              {prompt.submitLabel || "Use Selected Options"}
+            </button>
+            {prompt.allowText ? <span>or just type it</span> : null}
+          </div>
+        </fieldset>
+        {status}
+      </form>
+    );
+  }
+  return (
+    <fieldset
+      className={`chat-first-inline-actions chat-first-choice-actions${prompt.mode === "binary" ? " chat-first-binary-actions" : ""}`}
+    >
+      <legend className="sr-only">{prompt.question}</legend>
+      {options.map((option) => (
+        <button
+          className="chat-first-pill chat-first-pill--outline"
+          type="button"
+          key={option.id}
+          disabled={busy}
+          onClick={() => {
+            const reply = choiceReply(prompt, [option.id]);
+            onAnswer(reply.text, reply.reference);
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+      {prompt.allowText ? <span>or just type it</span> : null}
+      {status}
+    </fieldset>
+  );
 }
 
 function RunReceipt({ receipt }) {
@@ -80,7 +164,8 @@ function browserWorkflowBlockerCode(artifact) {
 function browserWorkflowRecovery(artifact) {
   const blockerCode = browserWorkflowBlockerCode(artifact);
   if (blockerCode === "CONSENT_REQUIRED") {
-    return "CareerRat needs your permission for this browser task. Open Settings, turn it on, then retry.";
+    const task = browserWorkflowTitle(artifact);
+    return `CareerRat needs permission to ${task === "LinkedIn profile review" ? "review your LinkedIn profile" : `run ${task.toLowerCase()}`}. Ask Paul to run this task again and the permission control will appear here.`;
   }
   if (blockerCode === "STATUS_URL_REQUIRED") {
     return "CareerRat needs the signed-in application dashboard link. Open the job, save that link, then retry.";
@@ -201,6 +286,11 @@ function AttachedArtifacts({ message, onArtifactAction }) {
     return (
       <div className="chat-first-indented-card" key={key}>
         <ArtifactCard artifact={artifactView(artifact, message, onArtifactAction)} />
+        {artifact?.kind === "company_proposals" ? (
+          <small>
+            or type the company names you want to track; the others in this batch will be skipped
+          </small>
+        ) : null}
       </div>
     );
   });
@@ -381,16 +471,11 @@ export function MessageTranscript({
     (action) => action?.intent?.type && action?.intent?.entity
   );
   const latestActionableIndex = latestActions.length ? latestActionStateIndex : -1;
-  const latestDialogueIndex = displayMessages.reduce((latestIndex, message, index) => {
-    return message?.role === "user" || message?.role === "assistant" ? index : latestIndex;
+  const latestChoiceIndex = displayMessages.reduce((latestIndex, message, index) => {
+    return message?.role === "assistant" && message?.metadata?.choicePrompt?.state === "pending"
+      ? index
+      : latestIndex;
   }, -1);
-  const latestDialogue = displayMessages[latestDialogueIndex];
-  const binaryQuestionIndex =
-    latestDialogue?.role === "assistant" &&
-    latestDialogue?.kind === "text" &&
-    isPlainYesNoQuestion(latestDialogue?.text)
-      ? latestDialogueIndex
-      : -1;
 
   return (
     <div className="chat-first-conversation-flow">
@@ -481,28 +566,18 @@ export function MessageTranscript({
           <div className="chat-first-transcript-entry" key={key}>
             {content}
             <AttachedArtifacts message={message} onArtifactAction={onArtifactAction} />
-            {index === binaryQuestionIndex && typeof onAnswer === "function" ? (
-              <fieldset className="chat-first-inline-actions chat-first-binary-actions">
-                <legend className="sr-only">Suggested answers</legend>
-                {["Yes", "No"].map((answer) => (
-                  <button
-                    className="chat-first-pill chat-first-pill--outline"
-                    type="button"
-                    key={answer}
-                    disabled={answerBusy}
-                    onClick={() => onAnswer(answer)}
-                  >
-                    {answer}
-                  </button>
-                ))}
-                <span>or just type it</span>
-              </fieldset>
+            {index === latestChoiceIndex && typeof onAnswer === "function" ? (
+              <ChoicePromptActions
+                prompt={message.metadata.choicePrompt}
+                onAnswer={onAnswer}
+                busy={answerBusy}
+              />
             ) : null}
             {index === latestActionableIndex && typeof onIntentAction === "function" ? (
               <div className="chat-first-inline-actions">
                 {latestActions.map((action, actionIndex) => (
                   <button
-                    className={`chat-first-pill chat-first-pill--${actionIndex === 0 ? "lime" : "outline"}`}
+                    className={`chat-first-pill chat-first-pill--${action.primary === false || actionIndex > 0 ? "outline" : "lime"}`}
                     type="button"
                     key={
                       action.id ||
@@ -673,15 +748,12 @@ export function TodayConversation({
             <div className="chat-first-mission__header">
               <span className="chat-first-eyebrow">MISSION</span>
               <strong>{mission.title}</strong>
-              {mission.onPause ? (
-                <button type="button" onClick={mission.onPause}>
-                  pause
-                </button>
-              ) : null}
-              {mission.onResume ? (
-                <button type="button" onClick={mission.onResume}>
-                  resume
-                </button>
+              {mission.choicePrompt && typeof onAnswer === "function" ? (
+                <ChoicePromptActions
+                  prompt={mission.choicePrompt}
+                  onAnswer={onAnswer}
+                  busy={answerBusy}
+                />
               ) : null}
             </div>
             <div className="chat-first-mission__steps">
@@ -704,6 +776,7 @@ export function TodayConversation({
 
 export function JobConversation({
   eyebrow,
+  notice,
   inbound,
   agentName = "Paul",
   agentReply,
@@ -723,6 +796,7 @@ export function JobConversation({
   return (
     <div className="chat-first-conversation-flow">
       <div className="chat-first-conversation-eyebrow">{eyebrow}</div>
+      {notice ? <AgentBubble agentName={agentName}>{notice}</AgentBubble> : null}
       {inbound ? (
         <blockquote className="chat-first-inbound">
           <strong>✉ {inbound.sender}</strong>
@@ -799,6 +873,7 @@ export function CanonicalJobConversation({
   intentBusy = false,
   onAnswer,
   answerBusy = false,
+  packetReview = null,
 }) {
   const draft = communication?.draft;
   const actions = draft
@@ -816,6 +891,13 @@ export function CanonicalJobConversation({
   return (
     <JobConversation
       eyebrow={eyebrow}
+      notice={
+        packetReview?.questionCaptureRequired
+          ? "CareerRat needs to open the application form to discover its questions. Use Prepare form on the right."
+          : packetReview?.gaps?.length
+            ? `I need ${packetReview.gaps.length} application answer${packetReview.gaps.length === 1 ? "" : "s"} before I can continue. Use the application review on the right, then resume preparation.`
+            : null
+      }
       inbound={canonicalInbound(communication)}
       agentName={agentName}
       agentReply={draft?.body || null}
@@ -831,8 +913,22 @@ export function CanonicalJobConversation({
   );
 }
 
-export function JobContextPanel({ job, summary, files = EMPTY_LIST, note, action }) {
+export function JobContextPanel({
+  job,
+  summary,
+  files = EMPTY_LIST,
+  note,
+  action,
+  packetReview = null,
+  activePacketGapId = null,
+  packetBusy = false,
+  onAnswerGap,
+  onResumePacket,
+  applicationPreparation = null,
+  onEnableApplicationPreparation,
+}) {
   const location = jobLocationCopy(job);
+  const preparationReady = applicationPreparation == null || applicationPreparation.ready === true;
 
   return (
     <aside className="chat-first-context-stack" aria-label="This job">
@@ -898,6 +994,92 @@ export function JobContextPanel({ job, summary, files = EMPTY_LIST, note, action
                 ))}
               </ul>
             </div>
+          ) : null}
+        </section>
+      ) : null}
+      {packetReview ? (
+        <section className="chat-first-packet-review" aria-label="Application answers">
+          <div className="chat-first-eyebrow">
+            {packetReview.questionCaptureRequired
+              ? "APPLICATION ANSWERS · FORM NEEDED"
+              : packetReview.gaps?.length
+                ? `APPLICATION ANSWERS · ${packetReview.gaps.length} NEEDED`
+                : "APPLICATION ANSWERS · READY"}
+          </div>
+          {packetReview.questionCaptureRequired ? (
+            <div className="chat-first-packet-review__gap">
+              <div>
+                <strong>No form questions captured yet</strong>
+                <small>
+                  {packetReview.questionCaptureMessage ||
+                    "Open and prepare the application form so CareerRat can discover its questions."}
+                </small>
+              </div>
+            </div>
+          ) : null}
+          {(packetReview.gaps || EMPTY_LIST).map((gap) => (
+            <div className="chat-first-packet-review__gap" key={gap.id}>
+              <div>
+                <strong>{gap.label}</strong>
+                {!gap.answerable && gap.message ? <small>{gap.message}</small> : null}
+              </div>
+              {gap.answerable ? (
+                Array.isArray(gap.options) && gap.options.length > 1 ? (
+                  <fieldset className="chat-first-packet-review__choices">
+                    <legend className="sr-only">{gap.label}</legend>
+                    {gap.options.map((option) => (
+                      <button
+                        type="button"
+                        key={option}
+                        disabled={packetBusy || activePacketGapId === gap.id}
+                        onClick={() => onAnswerGap?.(gap, option)}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </fieldset>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={packetBusy || activePacketGapId === gap.id}
+                    onClick={() => onAnswerGap?.(gap)}
+                  >
+                    {activePacketGapId === gap.id ? "Answer below" : "Answer"}
+                  </button>
+                )
+              ) : null}
+            </div>
+          ))}
+          {applicationPreparation?.status === "checking" ? (
+            <small>Checking form permission…</small>
+          ) : null}
+          {applicationPreparation?.ready === false &&
+          applicationPreparation?.status !== "checking" ? (
+            <div className="chat-first-packet-review__permission">
+              <strong>Allow CareerRat to prepare the form</strong>
+              <small>
+                CareerRat needs permission to open and fill application forms. You still press
+                Submit. Choose the button, or type “Allow form preparation”.
+              </small>
+              <button
+                className="chat-first-context-action"
+                type="button"
+                disabled={packetBusy}
+                onClick={onEnableApplicationPreparation}
+              >
+                Allow form preparation
+              </button>
+            </div>
+          ) : null}
+          {(packetReview.canResume || packetReview.canPrepare) && preparationReady ? (
+            <button
+              className="chat-first-context-action"
+              type="button"
+              disabled={packetBusy}
+              onClick={onResumePacket}
+            >
+              {packetReview.canPrepare ? "Prepare form" : "Resume preparation"}
+            </button>
           ) : null}
         </section>
       ) : null}
@@ -1030,7 +1212,16 @@ export function MockInterviewConversation({
   );
 }
 
-export function MockInterviewContext({ title, detail, loadedContext, status = "active", onEnd }) {
+export function MockInterviewContext({
+  title,
+  detail,
+  loadedContext,
+  status = "active",
+  choicePrompt,
+  onAnswer,
+  answerBusy = false,
+  onEnd,
+}) {
   const ended = status === "ended";
   return (
     <aside
@@ -1049,13 +1240,17 @@ export function MockInterviewContext({ title, detail, loadedContext, status = "a
         <strong>Context loaded</strong>
         <span>{loadedContext}</span>
       </section>
-      <button
-        className="chat-first-context-action chat-first-context-action--outline"
-        type="button"
-        onClick={onEnd}
-      >
-        {ended ? "Back to thread" : "End session → back to thread"}
-      </button>
+      {!ended && choicePrompt && typeof onAnswer === "function" ? (
+        <ChoicePromptActions prompt={choicePrompt} onAnswer={onAnswer} busy={answerBusy} />
+      ) : ended ? (
+        <button
+          className="chat-first-context-action chat-first-context-action--outline"
+          type="button"
+          onClick={onEnd}
+        >
+          Back to thread
+        </button>
+      ) : null}
     </aside>
   );
 }

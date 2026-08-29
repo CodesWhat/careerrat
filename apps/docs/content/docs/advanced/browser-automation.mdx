@@ -45,17 +45,25 @@ claiming it ran.
 Automatic is the default. Settings shows the effective browser and allows an explicit
 override without requiring the candidate to understand their CLI setup during onboarding.
 
-## Opt-in authenticated capabilities
+## Job-site login
 
-Reading public posting bodies requires no permission. Logged-in Layer-3 uses are
-opt-in and default OFF. With no `candidate/automation.yml`, none of them run.
+Saved job-site searches use one point-of-use choice, not the automation
+capability matrix. When a source is added or first used and login is needed,
+CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that
+exact saved search in the visible session browser. No skips it and keeps
+searching the other sources.
+
+## Opt-in private-account capabilities
+
+Reading public posting bodies requires no permission. The private-account uses
+below are opt-in and default OFF. With no `candidate/automation.yml`, none of
+them run.
 
 | Capability | Skill | What it does |
 |------------|-------|-------------|
 | `status_polling` | `sync-status` | Read application status from ATS dashboards |
-| `authenticated_search` | `search-jobs` / `setup-searches` | Authenticated board search results |
 | `messaging` | `ingest-messages` | Read LinkedIn / Wellfound DMs |
-| `authenticated_apply_preparation` | `apply-job` | Prepare LinkedIn Easy Apply and stop before final submit |
+| `authenticated_apply_preparation` | `apply-job` | Prepare supported ATS forms, including LinkedIn Easy Apply, and stop before final submit |
 | `profile_optimize` | `optimize-linkedin` | Read LinkedIn profile for analysis |
 | `profile_apply` | `optimize-linkedin` | Write approved edits back to the profile |
 | `mail_access` | `ingest-mail`, `apply-job` | Webmail verification codes + Gmail/Outlook ingest |
@@ -64,6 +72,10 @@ opt-in and default OFF. With no `candidate/automation.yml`, none of them run.
 | `calendar_sync` | `calendar-sync` | Write events to a calendar provider |
 
 ## Enabling a capability
+
+The desktop job review offers **Allow form preparation** when an otherwise-ready
+application needs this permission. Terminal users can manage the same underlying
+capability matrix with the commands below.
 
 All three conditions must be true for a capability to run on a platform:
 

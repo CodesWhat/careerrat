@@ -22,6 +22,7 @@ const EXPLICIT_ACTION_LABELS = {
 const RUNTIME_PRESENTATION_LABELS = {
   ready: "Ready",
   auth_required: "Auth required",
+  check_failed: "Needs a retry",
   unavailable: "Unavailable",
 };
 
@@ -46,6 +47,12 @@ export function runtimePresentation(runtime = {}) {
     return {
       state: "auth_required",
       label: RUNTIME_PRESENTATION_LABELS.auth_required,
+    };
+  }
+  if (status === "completion_probe_failed") {
+    return {
+      state: "check_failed",
+      label: RUNTIME_PRESENTATION_LABELS.check_failed,
     };
   }
 
@@ -106,6 +113,8 @@ export function firstRunRuntimeChoices(state) {
         selected: runtime.id === state?.selectedId,
         status: runtime.status,
         action: runtime.action,
+        actionLabel: runtime.actionLabel || null,
+        probeMessage: runtime.probeMessage || null,
         installUrl: runtime.installUrl || null,
         capabilityReason: runtime.capabilityReason || null,
       };
@@ -247,19 +256,77 @@ function buildKnowledgeEditor(key, state) {
   if (key === "quickFacts") {
     const location = profile.location || {};
     const minimumBase = Number(profile.compensation?.minimum_base);
+    const minimumAnnualEarnings = Number(profile.compensation?.minimum_annual_earnings);
+    const hasMinimumBase = Number.isFinite(minimumBase) && minimumBase > 0;
+    const hasMinimumAnnualEarnings =
+      Number.isFinite(minimumAnnualEarnings) && minimumAnnualEarnings > 0;
+    const useAnnualCash = hasMinimumAnnualEarnings && !hasMinimumBase;
+    const compensationFloor = useAnnualCash ? minimumAnnualEarnings : minimumBase;
+    const compensationFields =
+      hasMinimumBase && hasMinimumAnnualEarnings
+        ? [
+            editorField(
+              "compensationFloorType",
+              "How should CareerRat screen pay?",
+              "select",
+              "both",
+              {
+                options: [
+                  { value: "both", label: "Keep both floors" },
+                  { value: "guaranteed-base", label: "Guaranteed base pay only" },
+                  { value: "annual-cash", label: "Annual cash earnings only" },
+                ],
+              }
+            ),
+            editorField(
+              "minimumBase",
+              "Minimum guaranteed base pay",
+              "number",
+              String(minimumBase),
+              { min: "0", step: "1000" }
+            ),
+            editorField(
+              "minimumAnnualEarnings",
+              "Minimum annual cash earnings",
+              "number",
+              String(minimumAnnualEarnings),
+              { min: "0", step: "1000" }
+            ),
+          ]
+        : [
+            editorField(
+              "compensationFloorType",
+              "How should CareerRat screen pay?",
+              "select",
+              useAnnualCash ? "annual-cash" : "guaranteed-base",
+              {
+                options: [
+                  { value: "guaranteed-base", label: "Guaranteed base pay" },
+                  {
+                    value: "annual-cash",
+                    label:
+                      "Total yearly cash earnings (tips, commission, or cash bonuses included)",
+                  },
+                ],
+              }
+            ),
+            editorField(
+              "compensationFloor",
+              "Minimum yearly amount",
+              "number",
+              Number.isFinite(compensationFloor) && compensationFloor > 0
+                ? String(compensationFloor)
+                : "",
+              { min: "0", step: "1000" }
+            ),
+          ];
     return {
       fields: [
         editorField("name", "Name", "text", candidate.full_name || ""),
         editorField("email", "Email", "email", candidate.email || ""),
         editorField("phone", "Phone", "text", candidate.phone || ""),
         editorField("home", "Home market", "text", location.home || candidate.location || ""),
-        editorField(
-          "minimumBase",
-          "Minimum base salary",
-          "number",
-          Number.isFinite(minimumBase) && minimumBase > 0 ? String(minimumBase) : "",
-          { min: "0", step: "1000" }
-        ),
+        ...compensationFields,
         editorField(
           "remoteScope",
           "Remote job eligibility",
@@ -330,27 +397,32 @@ export function buildFirstRunKnowledge(state, runtime) {
 
 export function firstRunAssistantMessage(raw, id) {
   const parsedAnswer = parseChatAnswerMode(raw);
-  const { text, blocks } = parseConfirmBlocks(parsedAnswer.text);
+  const parsed = parseConfirmBlocks(parsedAnswer.text);
+  const text = parsed.text;
+  const blocks = parsed.blocks;
   const suggested =
     blocks.length === 0 && /what kind of role are you actually after/i.test(text)
       ? [FIRST_ROLE_SUGGESTION]
       : [];
+  const options = blocks.length
+    ? blocks.flatMap((block, index) =>
+        isFirstRunExtractedFact(block)
+          ? []
+          : (EXPLICIT_ACTION_LABELS[block.kind] || []).map((label, actionIndex) => ({
+              id: `${actionIndex === 0 ? "confirm" : "decline"}:${index}`,
+              label,
+            }))
+      )
+    : suggested;
   return {
     id,
     role: "assistant",
     text,
     blocks,
-    ...(parsedAnswer.answerMode ? { answerMode: parsedAnswer.answerMode } : {}),
-    options: blocks.length
-      ? blocks.flatMap((block, index) =>
-          isFirstRunExtractedFact(block)
-            ? []
-            : (EXPLICIT_ACTION_LABELS[block.kind] || []).map((label, actionIndex) => ({
-                id: `${actionIndex === 0 ? "confirm" : "decline"}:${index}`,
-                label,
-              }))
-        )
-      : suggested,
+    ...(options.length === 0 && parsedAnswer.answerMode
+      ? { answerMode: parsedAnswer.answerMode }
+      : {}),
+    options,
     allowTypedAnswer: true,
   };
 }
@@ -359,7 +431,7 @@ function companyExamples(state) {
   return list(state?.data?.targeting?.company_preferences?.examples);
 }
 
-export async function applyFirstRunConfirmation(block, { api, state } = {}) {
+export async function applyFirstRunConfirmation(block, { api, state, onCompanyOperation } = {}) {
   if (block?.kind === "authorization") {
     await api.saveCandidateFile("profile", { authorization: block.patch });
     await api.saveCandidateFile("form-defaults", {
@@ -383,8 +455,11 @@ export async function applyFirstRunConfirmation(block, { api, state } = {}) {
     return "Evidence saved";
   }
   if (block?.kind === "companies_suggest") {
-    await api.createCompanyProposals({});
-    return "Company suggestions ready";
+    const started = await api.createCompanyProposals({});
+    if (started?.operation) onCompanyOperation?.(started.operation);
+    return ["queued", "running"].includes(started?.operation?.status)
+      ? "Finding company suggestions in the background"
+      : "Company suggestions ready";
   }
   if (block?.kind === "company_add") {
     const preferences = state?.data?.targeting?.company_preferences || {};

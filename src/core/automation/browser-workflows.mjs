@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 
 import { runBoundedAI } from "../ai/bounded-ai.mjs";
 import { callAI } from "../ai/call-ai.mjs";
+import { assertAIExecutionPlanForOperation } from "../ai/operation-policy.mjs";
 import { hostnameToPortal } from "../apply/form-fill.mjs";
 import { appApplySyncedStatus } from "../db/verbs/app.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
@@ -436,7 +437,13 @@ export async function sourceRelationshipsInApp({
   });
 }
 
-async function defaultLinkedinProposals({ repoRoot, env, surfaces }) {
+async function defaultLinkedinProposals({
+  repoRoot,
+  env,
+  surfaces,
+  executionPlan,
+  callAIImpl = callAI,
+}) {
   const context = {};
   for (const name of ["profile", "targeting", "evidence"]) {
     try {
@@ -457,7 +464,9 @@ async function defaultLinkedinProposals({ repoRoot, env, surfaces }) {
     maxTokens: 4_000,
     root: repoRoot,
     env,
-    call: callAI,
+    call: callAIImpl,
+    aiOperation: executionPlan ? undefined : "research.web",
+    executionPlan,
     system:
       "Draft honest LinkedIn profile improvements. Use only supplied candidate evidence. Return JSON matching the schema. Never invent experience or compensation.",
     messages: [
@@ -482,10 +491,12 @@ export async function optimizeLinkedinInApp({
   repoRoot,
   env = process.env,
   profileUrl,
+  executionPlan,
   now = () => new Date(),
   createSessionImpl = createConfiguredBrowserSession,
   readProfileImpl = readLinkedinProfile,
   proposeImpl = defaultLinkedinProposals,
+  callAIImpl = callAI,
   saveBatch = linkedinProposalBatchPut,
 } = {}) {
   const at = now().toISOString();
@@ -496,7 +507,8 @@ export async function optimizeLinkedinInApp({
       blockers: [
         {
           code: "CONSENT_REQUIRED",
-          message: "Turn on LinkedIn profile review in Settings.",
+          message:
+            "Return to CareerRat and run LinkedIn profile review again. The permission control will appear there.",
         },
       ],
       at,
@@ -518,7 +530,16 @@ export async function optimizeLinkedinInApp({
   }
   let proposals;
   try {
-    proposals = await proposeImpl({ repoRoot, env, surfaces: read.records });
+    const frozenExecutionPlan = executionPlan
+      ? assertAIExecutionPlanForOperation(executionPlan, "research.web")
+      : null;
+    proposals = await proposeImpl({
+      repoRoot,
+      env,
+      surfaces: read.records,
+      executionPlan: frozenExecutionPlan,
+      callAIImpl,
+    });
   } catch (error) {
     return workflowResult("optimize-linkedin", "needs-user", {
       title: "LinkedIn profile review",

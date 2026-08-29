@@ -724,10 +724,21 @@ describe("skill chat model", () => {
     expect(skillChatSubmitBlocked(null)).toBe(false);
   });
 
-  it("hydrates durable state at terminal stream boundaries", () => {
+  it("hydrates durable state at terminal and typed-answer stream boundaries", () => {
     expect(skillChatEventNeedsHydration("result")).toBe(true);
     expect(skillChatEventNeedsHydration("error")).toBe(true);
-    expect(skillChatEventNeedsHydration("assistant")).toBe(false);
+    expect(
+      skillChatEventNeedsHydration(
+        "assistant",
+        JSON.stringify({ answerMode: "yes-no", message: { content: [] } })
+      )
+    ).toBe(true);
+    expect(
+      skillChatEventNeedsHydration(
+        "assistant",
+        JSON.stringify({ answerMode: null, message: { content: [] } })
+      )
+    ).toBe(false);
   });
 
   it("makes board completion reachable only after every source proposal has a decision", () => {

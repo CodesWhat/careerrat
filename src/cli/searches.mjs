@@ -26,7 +26,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mayRun } from "../core/automation/consent.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
@@ -256,30 +255,7 @@ function runToggle(selector, enabled) {
     console.error(err.message);
     return 1;
   }
-  if (enabled) warnIfAuthGateClosed(config, next);
   return writeConfig(next, { mode: enabled ? "enable" : "disable", selector });
-}
-
-// Enabling an authenticated (logged-in) browser source is allowed, but the source
-// won't actually run at scan time unless the automation consent gate is open for
-// its platform (mayRun's three-part AND: capability · platform · ToS consent). Per
-// the Browser Automation Contract, surface exactly which switch is still off rather
-// than silently enabling a source that can't run.
-function warnIfAuthGateClosed(before, after) {
-  const prev = before.searches ?? [];
-  const now = after.searches ?? [];
-  const flipped = now.find((s, i) => s.enabled === true && prev[i]?.enabled !== true);
-  if (flipped?.auth !== true || !flipped.platform) return;
-  const { allowed, reasons } = mayRun({
-    capability: "authenticated_search",
-    platform: flipped.platform,
-    root,
-  });
-  if (allowed) return;
-  console.error(
-    `Note: "${flipped.label || flipped.platform}" is an authenticated source, enabled, but it will NOT run until authenticated_search is allowed for "${flipped.platform}":`
-  );
-  for (const reason of reasons || []) console.error(`  - ${reason}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +323,13 @@ function runReadiness(rows) {
   return {
     total: rows.length,
     enabled: enabled.length,
+    pendingLogin: rows.filter(
+      (row) =>
+        row.enabled === false &&
+        row.source_type === "browser" &&
+        row.auth === true &&
+        row.login_skipped !== true
+    ).length,
     withLastRun: enabled.filter((row) => row.lastRunAt).length,
   };
 }
@@ -357,11 +340,15 @@ function printRunReadiness(rows) {
   console.log(
     `\n${readiness.enabled} enabled ${searchWord} configured; ${readiness.withLastRun}/${readiness.enabled} have run watermarks.`
   );
-  if (readiness.enabled === 0) {
+  if (readiness.pendingLogin > 0) {
+    console.log(
+      "Next: Ask your agent to run search-jobs. CareerRat will ask whether you want to log in, then continue with the other sources."
+    );
+  } else if (readiness.enabled === 0) {
     console.log("Next: ask your agent to run setup-searches or enable sources before search-jobs.");
   } else if (readiness.withLastRun === 0) {
     console.log(
-      "Next: Ask your agent to run search-jobs to scan these sources. `modes allows search:sweep:broad` reports permission, not run history."
+      "Next: Ask your agent to run search-jobs to scan these sources. `modes allows search:sweep:broad` reports the background-mode setting, not run history."
     );
   } else if (readiness.withLastRun < readiness.enabled) {
     const missing = readiness.enabled - readiness.withLastRun;

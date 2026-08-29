@@ -41,7 +41,7 @@ const PROFILE = {
     summary: "NYC local + worldwide remote",
     boundary: "On-site limited to NYC",
   },
-  compensation: { floor: "$210k", target: "$230k+" },
+  compensation: { floor: "$210k", annualEarningsFloor: "$225k", target: "$230k+" },
   dealbreakers: ["Fully onsite", "Crypto / web3", "Less than 4 weeks PTO"],
   evidence: { roles: 6, promotions: 3, stories: 14 },
   writingStyle: { sampleCount: 2, description: "plain, direct, no buzzwords" },
@@ -91,6 +91,8 @@ describe("ProfileSettings", () => {
     expect(html).toContain("On-site · NYC only");
     expect(html).toContain("Confirmed search boundary");
     expect(html).toContain("$210k");
+    expect(html).toContain("$225k");
+    expect(html).toContain("yearly cash earnings");
     expect(html).toContain("14 stories captured");
     expect(html).toContain("plain, direct, no buzzwords");
     expect(html).toContain("APPLICATION DEFAULTS");
@@ -98,6 +100,115 @@ describe("ProfileSettings", () => {
     expect(html).toContain("Leave these blank (default)");
     expect(html).toContain("Local only on this computer. This setting never goes through Paul.");
     expect(html).toContain("edit anything here");
+  });
+
+  it("uses a keyboard-safe tab pattern for profile and app settings", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onTabChange = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Paul",
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      onTabChange,
+    });
+    const html = renderToStaticMarkup(tree);
+    const appSettings = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "App settings"
+    );
+
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('id="profile-settings-tab-settings"');
+    expect(appSettings.props).toMatchObject({
+      role: "tab",
+      "aria-selected": true,
+      "aria-controls": "profile-settings-panel-settings",
+      tabIndex: 0,
+    });
+
+    const preventDefault = vi.fn();
+    appSettings.props.onKeyDown({ key: "ArrowLeft", preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onTabChange).toHaveBeenCalledWith("profile");
+  });
+
+  it("wraps arrow-key selection across both settings tabs", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onTabChange = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      onTabChange,
+    });
+    const appSettings = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "App settings"
+    );
+
+    appSettings.props.onKeyDown({ key: "ArrowRight", preventDefault: vi.fn() });
+
+    expect(onTabChange).toHaveBeenCalledWith("profile");
+  });
+
+  it("renders keyboard-operable provider-neutral quality and thinking choices", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onAiPreferenceChange = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Paul",
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      aiPreferences: {
+        quality: "balanced",
+        reasoning: "high",
+        source: "saved",
+        updatedAt: "2026-08-27T16:00:00.000Z",
+      },
+      aiPreferencesStatus: "Saved on this computer",
+      onAiPreferenceChange,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain("HOW PAUL THINKS");
+    expect(html).toContain("Paul quality");
+    expect(html).toContain("Thinking depth");
+    expect(html).toContain("Automatic (recommended)");
+    expect(html).toContain("Paul stays strong; searches and small helpers stay efficient.");
+    expect(html).toContain("CareerRat chooses by task.");
+    expect(html).toContain("Saved on this computer");
+    expect(html.match(/<fieldset class="cf-settings__ai-group"/g)).toHaveLength(2);
+    expect(html).not.toMatch(/opus|sonnet|haiku|gpt-5\.6|luna|terra|sol/i);
+
+    const best = findElement(
+      tree,
+      (node) =>
+        node.type === "input" && node.props.name === "paul-quality" && node.props.value === "best"
+    );
+    const high = findElement(
+      tree,
+      (node) =>
+        node.type === "input" && node.props.name === "thinking-depth" && node.props.value === "high"
+    );
+    expect(best.props.checked).toBe(false);
+    expect(high.props.checked).toBe(true);
+    best.props.onChange({ target: { value: "best" } });
+    expect(onAiPreferenceChange).toHaveBeenCalledWith("quality", "best");
+  });
+
+  it("disables every AI preference radio while a save is in flight", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const html = renderToStaticMarkup(
+      <ProfileSettings
+        activeTab="settings"
+        permissions={PERMISSIONS}
+        aiPreferences={{ quality: "automatic", reasoning: "automatic" }}
+        aiPreferencesBusy
+        aiPreferencesStatus="Saving…"
+      />
+    );
+
+    expect(html).toContain("Saving…");
+    expect(html.match(/type="radio"/g)).toHaveLength(8);
+    expect(html.match(/disabled=""/g).length).toBeGreaterThanOrEqual(8);
   });
 
   it("keeps the application-defaults editor local and never shows saved sensitive answers", async () => {
@@ -234,6 +345,112 @@ describe("ProfileSettings", () => {
     expect(onSaveEditor).toHaveBeenCalledOnce();
   });
 
+  it("renders a clear unsaved-change choice with keep and discard actions", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onKeepEditing = vi.fn();
+    const onDiscardEditor = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Paul",
+      activeTab: "profile",
+      profile: PROFILE,
+      profileEditor: {
+        id: "targets",
+        title: "Edit targets",
+        fields: [{ id: "titles", label: "Target roles", type: "textarea" }],
+      },
+      editorValues: { titles: "Principal Engineer" },
+      discardEditorOpen: true,
+      onKeepEditing,
+      onDiscardEditor,
+    });
+    const html = renderToStaticMarkup(tree);
+    const keep = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Keep editing"
+    );
+    const discard = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Discard changes"
+    );
+
+    expect(html).toContain("Discard unsaved changes?");
+    expect(html).toContain("Your edits haven&#x27;t been saved yet.");
+    keep.props.onClick();
+    discard.props.onClick();
+    expect(onKeepEditing).toHaveBeenCalledOnce();
+    expect(onDiscardEditor).toHaveBeenCalledOnce();
+  });
+
+  it("gives every Settings dialog Escape, contained focus, and focus restoration", async () => {
+    const { ProfileSettings, handleSettingsDialogKeyDown, restoreSettingsDialogFocus } =
+      await loadProfile();
+    expect.soft(handleSettingsDialogKeyDown).toBeTypeOf("function");
+    expect.soft(restoreSettingsDialogFocus).toBeTypeOf("function");
+    if (
+      typeof handleSettingsDialogKeyDown !== "function" ||
+      typeof restoreSettingsDialogFocus !== "function"
+    ) {
+      return;
+    }
+
+    const onClose = vi.fn();
+    const escapeEvent = {
+      key: "Escape",
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    };
+    handleSettingsDialogKeyDown({ event: escapeEvent, onClose });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(escapeEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(escapeEvent.stopImmediatePropagation).toHaveBeenCalledOnce();
+
+    const first = { focus: vi.fn() };
+    const last = { focus: vi.fn() };
+    const dialog = {
+      querySelectorAll: () => [first, last],
+      contains: (element) => element === first || element === last,
+    };
+    const forward = { key: "Tab", shiftKey: false, preventDefault: vi.fn() };
+    handleSettingsDialogKeyDown({ event: forward, dialog, activeElement: last });
+    expect(forward.preventDefault).toHaveBeenCalledOnce();
+    expect(first.focus).toHaveBeenCalledOnce();
+
+    const backward = { key: "Tab", shiftKey: true, preventDefault: vi.fn() };
+    handleSettingsDialogKeyDown({ event: backward, dialog, activeElement: first });
+    expect(backward.preventDefault).toHaveBeenCalledOnce();
+    expect(last.focus).toHaveBeenCalledOnce();
+
+    const trigger = { isConnected: true, focus: vi.fn() };
+    const replacementEditorField = { isConnected: true, focus: vi.fn() };
+    const openDialog = { contains: (element) => element === replacementEditorField };
+    vi.stubGlobal("document", {
+      getElementById: (id) => (id === "editor-field" ? replacementEditorField : null),
+      querySelector: () => openDialog,
+    });
+    restoreSettingsDialogFocus(trigger);
+    restoreSettingsDialogFocus({ isConnected: false }, "editor-field");
+    expect(trigger.focus).not.toHaveBeenCalled();
+    expect(replacementEditorField.focus).toHaveBeenCalledOnce();
+
+    globalThis.document.querySelector = () => null;
+    restoreSettingsDialogFocus(trigger);
+    expect(trigger.focus).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+
+    const html = renderToStaticMarkup(
+      <ProfileSettings
+        activeTab="settings"
+        permissions={PERMISSIONS}
+        sourceDialogOpen
+        sourceDraft="https://jobs.example.test/search"
+        onCloseSourceDialog={() => undefined}
+      />
+    );
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('tabindex="-1"');
+  });
+
   it("renders settings in plain language and keeps every submit gated", async () => {
     const { ProfileSettings } = await loadProfile();
     const html = renderToStaticMarkup(
@@ -261,7 +478,9 @@ describe("ProfileSettings", () => {
     expect(html).toContain("Connected");
     expect(html).toContain("WHAT PAUL MAY DO ON HIS OWN");
     expect(html).toContain("Submitting an application always gates back to you");
-    expect(html).toContain("1 board blocked by a bot wall");
+    expect(html).toContain("Saved sources run when you search");
+    expect(html).not.toContain("blocked by a bot wall");
+    expect(html).not.toContain("permission to use LinkedIn");
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="false"');
     expect(html).toContain("Always on");
@@ -467,7 +686,11 @@ describe("ProfileSettings", () => {
     expect(html).toContain(">Sign in</button>");
     expect(html).not.toMatch(/open terminal/i);
     expect(html).toContain("Retry detection");
-    expect(html).toContain("Add a niche board");
+    expect(html).toContain("Add a job source");
+    expect(html).toContain("Board or saved-search URL");
+    expect(html).toContain("Add source");
+    expect(html).not.toContain("Permission to use LinkedIn");
+    expect(html).not.toContain("Set up LinkedIn");
     expect(html).toContain('value="https://jobs.example.com"');
     expect(html).toContain("Technical details");
     expect(html).toContain("Browser connection");
@@ -700,6 +923,45 @@ describe("ProfileSettings", () => {
     expect(onRetryEngine).toHaveBeenCalledWith("claude");
   });
 
+  it("shows the completion probe failure and its retry action in engine settings", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onRetryEngine = vi.fn();
+    const tree = ProfileSettings({
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      engine: {
+        name: "Codex",
+        connected: false,
+        choices: [
+          {
+            id: "codex",
+            name: "Codex",
+            supported: true,
+            available: true,
+            ready: false,
+            selectable: false,
+            status: "completion_probe_failed",
+            action: "retry",
+            actionLabel: "Try again",
+            probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+          },
+        ],
+      },
+      enginePickerOpen: true,
+      onRetryEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+    const retry = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Try again"
+    );
+
+    expect(html).toContain("didn&#x27;t return a usable test reply");
+    expect(html).toContain("Needs a retry");
+    retry.props.onClick();
+    expect(onRetryEngine).toHaveBeenCalledWith("codex");
+  });
+
   it("presents supported engines with one Ready contract in settings", async () => {
     const { ProfileSettings } = await loadProfile();
     const html = renderToStaticMarkup(
@@ -799,10 +1061,11 @@ describe("ProfileSettings", () => {
     expect(actions.onBack).toHaveBeenCalledOnce();
     expect(actions.onTabChange).toHaveBeenCalledWith("profile");
 
-    const settings = tree.props.children[1];
-    const permissionCard = settings.props.children[1];
-    const mutablePermission = permissionCard.props.children[1][1];
-    mutablePermission.props.children[1].props.onClick();
+    const mutablePermission = findElement(
+      tree,
+      (node) => node.type === "button" && node.props["aria-label"] === "Read job-search email: off"
+    );
+    mutablePermission.props.onClick();
     expect(actions.onPermissionChange).toHaveBeenCalledWith("email", true);
   });
 

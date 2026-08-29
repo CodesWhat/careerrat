@@ -17,6 +17,9 @@
 // Orca-shaped and out of scope here, so this module produces text it already
 // understands instead of leaving upload targets undetectable under this provider.
 
+import { createPublicBrowserProxy } from "../net/public-browser-proxy.mjs";
+import { resolvePublicHttpTarget } from "../net/public-http-fetch.mjs";
+import { abortableDelay, runAbortable, throwIfAborted } from "./cancellation.mjs";
 import { uniqueVoluntaryDeclineOption } from "./form-fill.mjs";
 
 const CONTROL_SELECTOR = "input, textarea, select, button, [role='button']";
@@ -57,14 +60,48 @@ const TYPEAHEAD_SETTLE_DELAY_MS = 700;
 // least-recently-used tab is closed to free real browser resources.
 const MAX_OPEN_PAGES = 8;
 
-async function defaultLaunch({ profileDir, headless, channel }) {
-  const { chromium } = await import("playwright");
-  return chromium.launchPersistentContext(profileDir, {
-    headless,
-    ...(channel ? { channel } : {}),
-    viewport: { width: 1440, height: 1100 },
-  });
+export async function launchPublicPlaywrightContext({
+  profileDir,
+  headless,
+  channel,
+  createProxyImpl = createPublicBrowserProxy,
+  loadPlaywrightImpl = () => import("playwright"),
+  resolvePublicTargetImpl = resolvePublicHttpTarget,
+} = {}) {
+  const proxy = await createProxyImpl({ resolvePublicTargetImpl });
+  try {
+    const { chromium } = await loadPlaywrightImpl();
+    const context = await chromium.launchPersistentContext(profileDir, {
+      headless,
+      ...(channel ? { channel } : {}),
+      viewport: { width: 1440, height: 1100 },
+      proxy: { server: proxy.url },
+      serviceWorkers: "block",
+      args: [
+        "--proxy-bypass-list=<-loopback>",
+        "--disable-quic",
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+      ],
+    });
+    const closeContext = context.close.bind(context);
+    let closed = false;
+    context.close = async (...args) => {
+      if (closed) return;
+      closed = true;
+      try {
+        await closeContext(...args);
+      } finally {
+        await proxy.close();
+      }
+    };
+    return context;
+  } catch (error) {
+    await proxy.close();
+    throw error;
+  }
 }
+
+const defaultLaunch = launchPublicPlaywrightContext;
 
 // Runs against the live matched elements (already in DOM/selector order, same
 // order `container.nth(index)` addresses). Self-contained — every helper is
@@ -521,9 +558,11 @@ function escapeRegExp(value) {
 // because both satisfy a substring filter; `.first()` tolerates a genuine
 // duplicate label (two options rendering the identical text) by clicking
 // whichever occurrence currently exists.
-async function clickOptionByExactText(optionsLocator, optionText, timeoutMs) {
+async function clickOptionByExactText(optionsLocator, optionText, timeoutMs, signal) {
   const exact = new RegExp(`^\\s*${escapeRegExp(String(optionText).trim())}\\s*$`);
-  await optionsLocator.filter({ hasText: exact }).first().click({ timeout: timeoutMs });
+  await runAbortable(signal, () =>
+    optionsLocator.filter({ hasText: exact }).first().click({ timeout: timeoutMs })
+  );
 }
 
 // Reads back whatever a combobox-shaped control currently displays as its
@@ -532,10 +571,17 @@ async function clickOptionByExactText(optionsLocator, optionText, timeoutMs) {
 // decide a combobox selection actually took: the P0 this guards against was
 // a real Ashby control where a click resolved with no error and left the
 // field's own value genuinely blank.
-async function readComboboxDisplayValue(locator) {
-  return locator
-    .evaluate((el) => ("value" in el ? String(el.value ?? "") : String(el.textContent ?? "")))
-    .catch(() => "");
+async function readComboboxDisplayValue(locator, signal) {
+  try {
+    return await runAbortable(signal, () =>
+      locator.evaluate((el) =>
+        "value" in el ? String(el.value ?? "") : String(el.textContent ?? "")
+      )
+    );
+  } catch {
+    throwIfAborted(signal);
+    return "";
+  }
 }
 
 function comboboxSelectionConfirmed(displayValue, expectedText) {
@@ -576,26 +622,29 @@ async function matchClickAndConfirm({
   attempts,
   settleDelayMs,
   requireDisplayChange = false,
+  signal,
 }) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    throwIfAborted(signal);
     if (settleDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, settleDelayMs));
+      await abortableDelay(settleDelayMs, signal);
     }
-    const optionTexts = await optionsLocator.allTextContents();
+    const optionTexts = await runAbortable(signal, () => optionsLocator.allTextContents());
     const matchIndex = findOptionMatch(optionTexts, stringValue);
     if (matchIndex === -1) continue;
     const matchedText = optionTexts[matchIndex];
     const displayValueBeforeClick = requireDisplayChange
-      ? await readComboboxDisplayValue(locator)
+      ? await readComboboxDisplayValue(locator, signal)
       : null;
     try {
-      await clickOptionByExactText(optionsLocator, matchedText, SELECT_OPTION_TIMEOUT_MS);
+      await clickOptionByExactText(optionsLocator, matchedText, SELECT_OPTION_TIMEOUT_MS, signal);
     } catch {
+      throwIfAborted(signal);
       continue;
     }
-    const displayValue = await readComboboxDisplayValue(locator);
+    const displayValue = await readComboboxDisplayValue(locator, signal);
     if (requireDisplayChange) {
-      const optionListClosed = (await optionsLocator.count()) === 0;
+      const optionListClosed = (await runAbortable(signal, () => optionsLocator.count())) === 0;
       if (displayValue !== displayValueBeforeClick || optionListClosed) return true;
       continue;
     }
@@ -628,31 +677,98 @@ export function createPlaywrightOps({
   profileDir,
   headless = false,
   channel,
+  resolvePublicTargetImpl = resolvePublicHttpTarget,
 } = {}) {
   let contextPromise = null;
   const pages = new Map(); // pageId -> Page, Map iteration order = LRU order (oldest first)
   const latestRefs = new Map(); // pageId -> Map(ref -> {locator, fileInput}), replaced on every snapshot()
   const evictedPageIds = new Set();
+  const blockedNavigationByFrame = new WeakMap();
   let pageCounter = 0;
 
-  async function getContext() {
+  function blockedNavigationError(target, originalError) {
+    const frame = target?.mainFrame?.();
+    const blocked = frame && blockedNavigationByFrame.get(frame);
+    if (!blocked) return originalError;
+    blockedNavigationByFrame.delete(frame);
+    const error = new Error(
+      `Navigation blocked by CareerRat's public-network boundary: ${blocked.reason}`,
+      { cause: originalError }
+    );
+    error.code = "UNSAFE_BROWSER_NAVIGATION";
+    error.url = blocked.url;
+    return error;
+  }
+
+  async function navigatePage(target, action, signal) {
+    try {
+      const result = await runAbortable(signal, action);
+      const frame = target?.mainFrame?.();
+      if (frame) blockedNavigationByFrame.delete(frame);
+      return result;
+    } catch (error) {
+      const navigationError = blockedNavigationError(target, error);
+      throwIfAborted(signal);
+      throw navigationError;
+    }
+  }
+
+  async function getContext(signal) {
+    throwIfAborted(signal);
     if (!contextPromise) {
       // On rejection, clear the cached promise before rethrowing so the NEXT
       // openTab retries the launch instead of replaying a stale failure (a
       // transient profile lock or crash would otherwise permanently disable
       // this provider until process restart).
-      contextPromise = launchImpl({ profileDir, headless, ...(channel ? { channel } : {}) }).catch(
-        (error) => {
+      contextPromise = launchImpl({
+        profileDir,
+        headless,
+        ...(channel ? { channel } : {}),
+        resolvePublicTargetImpl,
+      })
+        .then(async (context) => {
+          if (typeof context?.route === "function") {
+            await context.route("**/*", async (route) => {
+              const request = route.request();
+              let protocol = "";
+              try {
+                protocol = new URL(request.url()).protocol;
+              } catch {
+                await route.abort("blockedbyclient");
+                return;
+              }
+              if (protocol !== "http:" && protocol !== "https:") {
+                await route.continue();
+                return;
+              }
+              const target = await resolvePublicTargetImpl(request.url());
+              if (!target?.ok) {
+                const frame = request?.isNavigationRequest?.() === true && request?.frame?.();
+                if (frame && typeof frame === "object") {
+                  blockedNavigationByFrame.set(frame, {
+                    url: request.url(),
+                    reason: target?.reason || "unsafe navigation target",
+                  });
+                }
+                await route.abort("blockedbyclient");
+                return;
+              }
+              await route.continue();
+            });
+          }
+          return context;
+        })
+        .catch((error) => {
           contextPromise = null;
           throw error;
-        }
-      );
+        });
     }
-    return contextPromise;
+    return runAbortable(signal, () => contextPromise);
   }
 
-  async function evictLeastRecentlyUsed() {
+  async function evictLeastRecentlyUsed(signal) {
     while (pages.size > MAX_OPEN_PAGES) {
+      throwIfAborted(signal);
       const oldestPageId = pages.keys().next().value;
       const oldestPage = pages.get(oldestPageId);
       pages.delete(oldestPageId);
@@ -700,39 +816,56 @@ export function createPlaywrightOps({
   }
 
   return {
-    async openTab({ url }) {
-      const context = await getContext();
-      const target = await context.newPage();
+    networkBoundary: "pinned-public-http",
+    async openTab({ url, signal }) {
+      const context = await getContext(signal);
+      let target = null;
       try {
-        await target.goto(url, { waitUntil: "domcontentloaded" });
+        throwIfAborted(signal);
+        target = await context.newPage();
+        throwIfAborted(signal);
+        await navigatePage(
+          target,
+          () => target.goto(url, { waitUntil: "domcontentloaded" }),
+          signal
+        );
       } catch (error) {
         // A failed goto must not leak the new page. It was never added to
         // `pages`, so evictLeastRecentlyUsed can never find it to close it,
         // and repeated navigation failures would grow real browser tabs
         // without bound.
-        await target.close().catch(() => {});
+        await target?.close().catch(() => {});
+        throwIfAborted(signal);
         throw error;
       }
       pageCounter += 1;
       const pageId = `page-${pageCounter}`;
       pages.set(pageId, target);
-      await evictLeastRecentlyUsed();
+      try {
+        await runAbortable(signal, () => evictLeastRecentlyUsed(signal));
+      } catch (error) {
+        pages.delete(pageId);
+        latestRefs.delete(pageId);
+        await target.close().catch(() => {});
+        throwIfAborted(signal);
+        throw error;
+      }
       return { pageId };
     },
 
-    async focusTab({ pageId }) {
-      await page(pageId).bringToFront();
+    async focusTab({ pageId, signal }) {
+      await runAbortable(signal, () => page(pageId).bringToFront());
     },
 
-    async navigate({ pageId, url }) {
+    async navigate({ pageId, url, signal }) {
       const target = page(pageId);
-      await target.goto(url, { waitUntil: "domcontentloaded" });
+      await navigatePage(target, () => target.goto(url, { waitUntil: "domcontentloaded" }), signal);
       return { pageId, url: target.url() };
     },
 
-    async back({ pageId }) {
+    async back({ pageId, signal }) {
       const target = page(pageId);
-      await target.goBack({ waitUntil: "domcontentloaded" });
+      await navigatePage(target, () => target.goBack({ waitUntil: "domcontentloaded" }), signal);
       return { pageId, url: target.url() };
     },
 
@@ -843,10 +976,11 @@ export function createPlaywrightOps({
       return { pageId, url: target.url() };
     },
 
-    async snapshot({ pageId }) {
+    async snapshot({ pageId, signal }) {
+      throwIfAborted(signal);
       const target = page(pageId);
       const container = target.locator(CONTROL_SELECTOR);
-      const rawControls = await container.evaluateAll(collectControls);
+      const rawControls = await runAbortable(signal, () => container.evaluateAll(collectControls));
       // Normalize here, at the collection choke point. collectControls itself
       // runs inside the browser via evaluateAll, so it can't share this helper.
       // Normalizing before refs/tree lines are built means the driver-side
@@ -883,8 +1017,11 @@ export function createPlaywrightOps({
 
       let bodyText = "";
       try {
-        bodyText = String((await target.locator("body").innerText()) || "").slice(0, MAX_PAGE_TEXT);
+        bodyText = String(
+          (await runAbortable(signal, () => target.locator("body").innerText())) || ""
+        ).slice(0, MAX_PAGE_TEXT);
       } catch {
+        throwIfAborted(signal);
         bodyText = "";
       }
 
@@ -894,8 +1031,8 @@ export function createPlaywrightOps({
       return { origin: target.url(), pageText, refs };
     },
 
-    async fillField({ pageId, ref, value }) {
-      await resolveRef(pageId, ref).locator.fill(String(value));
+    async fillField({ pageId, ref, value, signal }) {
+      await runAbortable(signal, () => resolveRef(pageId, ref).locator.fill(String(value)));
     },
 
     // Three shapes of dropdown, tried in order. None of them is trusted on
@@ -935,7 +1072,8 @@ export function createPlaywrightOps({
     // additive, but comfortably under the product's 15s ceiling (measured
     // worst case under 10s against a live Chromium fixture, see
     // tests/playwright-live-dropdowns.test.mjs).
-    async selectOption({ pageId, ref, value, optionAliases = [] }) {
+    async selectOption({ pageId, ref, value, optionAliases = [], signal }) {
+      throwIfAborted(signal);
       const target = page(pageId);
       const { locator, name } = resolveRef(pageId, ref);
       const stringValue = String(value);
@@ -952,11 +1090,14 @@ export function createPlaywrightOps({
       for (const candidateValue of candidateValues) {
         for (const arg of [{ label: candidateValue }, candidateValue]) {
           try {
-            const selected = await locator.selectOption(arg, {
-              timeout: SELECT_OPTION_TIMEOUT_MS,
-            });
+            const selected = await runAbortable(signal, () =>
+              locator.selectOption(arg, {
+                timeout: SELECT_OPTION_TIMEOUT_MS,
+              })
+            );
             if (selected.length > 0) return;
           } catch {
+            throwIfAborted(signal);
             // Not a native <select> (or this particular match form didn't
             // hit) — try the next form, then fall through to the combobox
             // path below.
@@ -967,17 +1108,20 @@ export function createPlaywrightOps({
       const optionsLocator = target.locator("[role='option']:visible");
 
       try {
-        await locator.click({ timeout: SELECT_OPTION_TIMEOUT_MS });
+        await runAbortable(signal, () => locator.click({ timeout: SELECT_OPTION_TIMEOUT_MS }));
         // react-select shape: the option list renders right away off the
         // click above. A type-to-populate shape (Ashby) times out here
         // instead — caught rather than left to abort the whole strategy, so
         // control falls through to the typing attempt below instead of
         // giving up on a list that was never going to open from a click
         // alone.
-        await optionsLocator
-          .first()
-          .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
-          .catch(() => {});
+        try {
+          await runAbortable(signal, () =>
+            optionsLocator.first().waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
+          );
+        } catch {
+          throwIfAborted(signal);
+        }
 
         for (const candidateValue of candidateValues) {
           const confirmed = await matchClickAndConfirm({
@@ -986,19 +1130,26 @@ export function createPlaywrightOps({
             stringValue: candidateValue,
             attempts: 1,
             settleDelayMs: 0,
+            signal,
           });
           if (confirmed) return;
         }
       } catch {
+        throwIfAborted(signal);
         // fall through to the typing strategy below
       }
 
       try {
-        const isTypeable = await locator
-          .evaluate(
-            (el) => el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable
-          )
-          .catch(() => false);
+        let isTypeable = false;
+        try {
+          isTypeable = await runAbortable(signal, () =>
+            locator.evaluate(
+              (el) => el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable
+            )
+          );
+        } catch {
+          throwIfAborted(signal);
+        }
         if (isTypeable) {
           // Real keystrokes, paced, not fill() — a type-to-populate
           // combobox (Ashby-shaped) listens for input/keydown as the user
@@ -1008,18 +1159,28 @@ export function createPlaywrightOps({
           // live-search either. TYPEAHEAD_KEY_DELAY_MS mirrors the paced
           // sequence measured to actually work against a live Ashby form.
           for (let index = 0; index < candidateValues.length; index += 1) {
+            throwIfAborted(signal);
             const candidateValue = candidateValues[index];
             if (index > 0) {
-              await locator.fill("", { timeout: SELECT_OPTION_TIMEOUT_MS });
+              await runAbortable(signal, () =>
+                locator.fill("", { timeout: SELECT_OPTION_TIMEOUT_MS })
+              );
             }
-            await locator.pressSequentially(candidateValue, {
-              timeout: SELECT_OPTION_TIMEOUT_MS,
-              delay: TYPEAHEAD_KEY_DELAY_MS,
-            });
-            await optionsLocator
-              .first()
-              .waitFor({ state: "visible", timeout: TYPEAHEAD_OPTIONS_TIMEOUT_MS })
-              .catch(() => {});
+            await runAbortable(signal, () =>
+              locator.pressSequentially(candidateValue, {
+                timeout: SELECT_OPTION_TIMEOUT_MS,
+                delay: TYPEAHEAD_KEY_DELAY_MS,
+              })
+            );
+            try {
+              await runAbortable(signal, () =>
+                optionsLocator
+                  .first()
+                  .waitFor({ state: "visible", timeout: TYPEAHEAD_OPTIONS_TIMEOUT_MS })
+              );
+            } catch {
+              throwIfAborted(signal);
+            }
 
             const confirmed = await matchClickAndConfirm({
               locator,
@@ -1034,27 +1195,37 @@ export function createPlaywrightOps({
               // anything. Require real evidence instead: the display value
               // changing, or the option list closing.
               requireDisplayChange: true,
+              signal,
             });
             if (confirmed) return;
           }
         }
       } catch {
+        throwIfAborted(signal);
         // fall through to the handoff error below
       }
 
       throw comboboxHandoffError(name);
     },
 
-    async selectDeclineOption({ pageId, ref, label }) {
+    async selectDeclineOption({ pageId, ref, label, signal }) {
+      throwIfAborted(signal);
       const target = page(pageId);
       const { locator, name } = resolveRef(pageId, ref);
-      const nativeOptions = await locator
-        .evaluate((element) =>
-          element.tagName === "SELECT"
-            ? Array.from(element.options).map((option) => option.textContent || option.label || "")
-            : null
-        )
-        .catch(() => null);
+      let nativeOptions = null;
+      try {
+        nativeOptions = await runAbortable(signal, () =>
+          locator.evaluate((element) =>
+            element.tagName === "SELECT"
+              ? Array.from(element.options).map(
+                  (option) => option.textContent || option.label || ""
+                )
+              : null
+          )
+        );
+      } catch {
+        throwIfAborted(signal);
+      }
       if (Array.isArray(nativeOptions)) {
         const option = uniqueVoluntaryDeclineOption(nativeOptions);
         if (!option) {
@@ -1062,9 +1233,8 @@ export function createPlaywrightOps({
             `The "${label || name}" dropdown did not offer one unambiguous decline option.`
           );
         }
-        const selected = await locator.selectOption(
-          { label: option },
-          { timeout: SELECT_OPTION_TIMEOUT_MS }
+        const selected = await runAbortable(signal, () =>
+          locator.selectOption({ label: option }, { timeout: SELECT_OPTION_TIMEOUT_MS })
         );
         if (!selected.length) {
           throw new Error(`The "${label || name}" dropdown did not keep its decline option.`);
@@ -1073,31 +1243,38 @@ export function createPlaywrightOps({
       }
 
       const optionsLocator = target.locator("[role='option']:visible");
-      await locator.click({ timeout: SELECT_OPTION_TIMEOUT_MS });
-      await optionsLocator
-        .first()
-        .waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
-        .catch(() => {});
-      const option = uniqueVoluntaryDeclineOption(await optionsLocator.allTextContents());
+      await runAbortable(signal, () => locator.click({ timeout: SELECT_OPTION_TIMEOUT_MS }));
+      try {
+        await runAbortable(signal, () =>
+          optionsLocator.first().waitFor({ state: "visible", timeout: SELECT_OPTION_TIMEOUT_MS })
+        );
+      } catch {
+        throwIfAborted(signal);
+      }
+      const option = uniqueVoluntaryDeclineOption(
+        await runAbortable(signal, () => optionsLocator.allTextContents())
+      );
       if (!option) {
         throw new Error(
           `The "${label || name}" dropdown did not offer one unambiguous decline option.`
         );
       }
-      await clickOptionByExactText(optionsLocator, option, SELECT_OPTION_TIMEOUT_MS);
-      const displayValue = await readComboboxDisplayValue(locator);
+      await clickOptionByExactText(optionsLocator, option, SELECT_OPTION_TIMEOUT_MS, signal);
+      const displayValue = await readComboboxDisplayValue(locator, signal);
       if (!comboboxSelectionConfirmed(displayValue, option)) {
         throw new Error(`The "${label || name}" dropdown did not keep its decline option.`);
       }
       return { selectedValue: option };
     },
 
-    async toggleField({ pageId, ref, checked }) {
-      await resolveRef(pageId, ref).locator.setChecked(Boolean(checked));
+    async toggleField({ pageId, ref, checked, signal }) {
+      await runAbortable(signal, () =>
+        resolveRef(pageId, ref).locator.setChecked(Boolean(checked))
+      );
     },
 
-    async clickButton({ pageId, ref }) {
-      await resolveRef(pageId, ref).locator.click();
+    async clickButton({ pageId, ref, signal }) {
+      await runAbortable(signal, () => resolveRef(pageId, ref).locator.click());
     },
 
     // Two shapes of upload target: a real (often visually hidden) <input
@@ -1106,22 +1283,22 @@ export function createPlaywrightOps({
     // be awaited and fed instead. The wait is bounded — if no chooser opens,
     // this rejects and the driver's own catch already turns that into an
     // unresolved field instead of hanging on the implicit 30s default.
-    async upload({ pageId, ref, files }) {
+    async upload({ pageId, ref, files, signal }) {
+      throwIfAborted(signal);
       const target = page(pageId);
       const { locator, fileInput } = resolveRef(pageId, ref);
       if (fileInput) {
-        await locator.setInputFiles(files);
+        await runAbortable(signal, () => locator.setInputFiles(files));
         return;
       }
-      const [chooser] = await Promise.all([
-        target.waitForEvent("filechooser", { timeout: 10_000 }),
-        locator.click(),
-      ]);
-      await chooser.setFiles(files);
+      const [chooser] = await runAbortable(signal, () =>
+        Promise.all([target.waitForEvent("filechooser", { timeout: 10_000 }), locator.click()])
+      );
+      await runAbortable(signal, () => chooser.setFiles(files));
     },
 
-    async screenshot({ pageId }) {
-      const buffer = await page(pageId).screenshot({ type: "png" });
+    async screenshot({ pageId, signal }) {
+      const buffer = await runAbortable(signal, () => page(pageId).screenshot({ type: "png" }));
       return { data: Buffer.from(buffer).toString("base64"), format: "png" };
     },
 

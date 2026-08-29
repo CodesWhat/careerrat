@@ -3,7 +3,9 @@
 // existing dashboard render (`careerrat tracker`) keeps reading tracker.json
 // unchanged; this is the db's half of that contract. Every write verb calls
 // this once, OUTSIDE its own transaction, right after that transaction
-// commits (see verbs/shared.mjs's runVerb()).
+// commits (see verbs/shared.mjs's runVerb()). That shared path writes only the
+// surface whose canonical DB state changed. Explicit recovery exports keep the
+// default below and regenerate both files.
 //
 // Must round-trip: import → export → deep-equal (modulo key order) with the
 // original tracker.json. Key ORDER on write mirrors the legacy shape (meta,
@@ -94,31 +96,39 @@ export function assembleActivityEvents(db) {
   return rowsAsObjects(db, "activity_events");
 }
 
-export function exportToTracker({ repoRoot, env } = {}) {
+export function exportToTracker({ repoRoot, env } = {}, { tracker = true, activity = true } = {}) {
   const pathCtx = { repoRoot, env };
   const db = requireDb({ repoRoot, env });
 
-  const output = assembleTrackerObject(db);
+  const output = tracker ? assembleTrackerObject(db) : null;
   const kvCount = db.prepare("SELECT COUNT(*) AS n FROM kv").get().n;
 
   const trackerPath = userPath(pathCtx, "workspace/tracker.json");
-  mkdirSync(dirname(trackerPath), { recursive: true });
-  atomicWriteFile(trackerPath, `${JSON.stringify(output, null, 2)}\n`);
+  if (tracker) {
+    mkdirSync(dirname(trackerPath), { recursive: true });
+    atomicWriteFile(trackerPath, `${JSON.stringify(output, null, 2)}\n`);
+  }
 
-  const activityLines = buildActivityLines(db);
   const activityPath = userPath(pathCtx, "workspace/activity.jsonl");
-  atomicWriteFile(activityPath, activityLines.length ? `${activityLines.join("\n")}\n` : "");
+  const activityLines = activity ? buildActivityLines(db) : null;
+  if (activity) {
+    mkdirSync(dirname(activityPath), { recursive: true });
+    atomicWriteFile(activityPath, activityLines.length ? `${activityLines.join("\n")}\n` : "");
+  }
+
+  const tableCount = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
 
   return {
     ok: true,
     trackerPath,
     activityPath,
+    wrote: { tracker, activity },
     counts: {
-      applications: output.applications.length,
-      sourced: output.sourced.length,
-      sources: output.sources.length,
-      communications: output.communications.length,
-      activity: activityLines.length,
+      applications: output?.applications.length ?? tableCount("applications"),
+      sourced: output?.sourced.length ?? tableCount("sourced"),
+      sources: output?.sources.length ?? tableCount("sources"),
+      communications: output?.communications.length ?? tableCount("communications"),
+      activity: activityLines?.length ?? tableCount("activity_events"),
       kv: kvCount,
     },
   };

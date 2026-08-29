@@ -1212,6 +1212,23 @@ test("previewWorkspaceIntent: a comp-floor phrasing classifies as a settings.app
   });
 });
 
+test("previewWorkspaceIntent: annual cash earnings has its own settings gate", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "set my minimum annual earnings to $90k",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Set minimum annual cash earnings to $90,000",
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "gate", type: "comp-annual-floor", value: 90000 } },
+    },
+  });
+});
+
 test("previewWorkspaceIntent: Profile phrasings become confirm-first canonical setting changes", () => {
   const repoRoot = tempRepo();
   const cases = [

@@ -22,12 +22,14 @@ publish:
 files:
   - main.mjs
   - atomic-write.mjs
+  - desktop-lifecycle.mjs
   - desktop-identity.mjs
   - menu-template.mjs
   - desktop-runtime.mjs
   - desktop-routing.mjs
   - desktop-smoke.mjs
   - native-update-acceptance.mjs
+  - native-update-data-contract-v2.json
   - update-check.mjs
   - window-options.mjs
   - preload/update-check-preload.cjs

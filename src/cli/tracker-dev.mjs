@@ -36,7 +36,11 @@ import { stopInstalledRuntimeSignIns } from "../core/ai/installed-runtimes.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { createConfiguredApplyExecutor } from "../core/apply/apply-executor-factory.mjs";
 import { ingestAppleMail } from "../core/automation/apple-mail-ingest.mjs";
-import { createBrowserSessionManager } from "../core/automation/browser-session.mjs";
+import {
+  classifyBrowserAuthState,
+  createBrowserSessionManager,
+  unsafePublicBrowserReason,
+} from "../core/automation/browser-session.mjs";
 import {
   ingestPlatformMessagesInApp,
   ingestWebmailInApp,
@@ -44,7 +48,16 @@ import {
   sourceRelationshipsInApp,
   syncStatusesInApp,
 } from "../core/automation/browser-workflows.mjs";
+import { createDeepIngestAppOperationKinds } from "../core/deep-ingest/app-operations.mjs";
+import {
+  COMPANY_DISCOVERY_OPERATION_KIND,
+  createCompanyDiscoveryOperationKind,
+  startCompanyDiscoveryOperation,
+} from "../core/discovery/company-operation.mjs";
+import { resolvePublicHttpTarget, validatePublicHttpUrl } from "../core/net/public-http-fetch.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
+import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
+import { captureBrowserSearchSource } from "../core/search/browser-source-capture.mjs";
 import { securityHeaders } from "../core/security/browser-policy.mjs";
 import { mimeFor, resolvePort, safeAssetPath } from "../core/tracker/dev-server.mjs";
 import {
@@ -54,6 +67,7 @@ import {
 } from "../core/tracker/request-security.mjs";
 import { dispatchHttpRoute } from "../core/tracker/route-dispatch.mjs";
 import { readVersion } from "../core/version.mjs";
+import { mountAppOperationRoutes } from "./app-operation-route.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountAutomationRoutes } from "./automation-route.mjs";
 import {
@@ -62,7 +76,7 @@ import {
   mountBoardsRoutes,
   setSearchSourceEnabled,
 } from "./boards-route.mjs";
-import { mountChatFirstRoutes } from "./chat-first-route.mjs";
+import { createChatFirstOperationKinds, mountChatFirstRoutes } from "./chat-first-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
@@ -74,13 +88,21 @@ import { captureIntakeText, mountIntakeRoutes } from "./intake-route.mjs";
 import { mountInterviewPrepRoutes } from "./interview-prep-route.mjs";
 import { mountJobArtifactRoutes } from "./job-artifact-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
-import { mountOnboardRoutes } from "./onboard-route.mjs";
+import {
+  createOnboardingSearchPromptOperationKind,
+  mountOnboardRoutes,
+  ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND,
+  recoverOnboardingSearchPromptOperations,
+} from "./onboard-route.mjs";
 import { mountPacketRoutes } from "./packet-route.mjs";
 import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 import { mountSourcingRoutes } from "./sourcing-route.mjs";
 import { mountTrackOutcomeRoutes } from "./track-outcome-route.mjs";
-import { mountWorkspaceAgentRoutes } from "./workspace-agent-route.mjs";
+import {
+  createWorkspaceOperationKinds,
+  mountWorkspaceAgentRoutes,
+} from "./workspace-agent-route.mjs";
 import { mountWorkspaceExportRoutes } from "./workspace-export-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
@@ -109,6 +131,74 @@ function log(msg) {
   process.stdout.write(`[tracker:dev] ${msg}\n`);
 }
 
+function authenticatedSourceSite(platform) {
+  return (
+    {
+      linkedin: "LinkedIn",
+      indeed: "Indeed",
+      wellfound: "Wellfound",
+      glassdoor: "Glassdoor",
+    }[String(platform || "").toLowerCase()] || "The job site"
+  );
+}
+
+export async function openAuthenticatedSource(
+  browserSessionManager,
+  { platform, url } = {},
+  { resolvePublicTargetImpl = resolvePublicHttpTarget } = {}
+) {
+  const site = authenticatedSourceSite(platform);
+  const checked = validatePublicHttpUrl(url);
+  if (!checked.ok) {
+    return {
+      state: "needs-user",
+      summary: `CareerRat couldn't open that ${site} link. Add a public job-site URL and try again.`,
+    };
+  }
+  const initialTarget = await resolvePublicTargetImpl(checked.url);
+  if (!initialTarget?.ok) {
+    return {
+      state: "needs-user",
+      summary: `CareerRat couldn't open that ${site} link. Add a public job-site URL and try again.`,
+    };
+  }
+  const session = browserSessionManager.get({ platform, provider: "playwright" });
+  if (!session?.available) {
+    return {
+      state: "needs-user",
+      summary: `${site} couldn't open in CareerRat. Close and reopen CareerRat, then try again.`,
+    };
+  }
+  const unsafeBrowser = unsafePublicBrowserReason(session);
+  if (unsafeBrowser) {
+    return { state: "needs-user", summary: unsafeBrowser };
+  }
+  try {
+    const page = await session.open(initialTarget.url);
+    const finalTarget = await resolvePublicTargetImpl(page?.url || initialTarget.url);
+    if (!finalTarget?.ok) {
+      return {
+        state: "needs-user",
+        summary: `CareerRat couldn't open that ${site} link. Add a public job-site URL and try again.`,
+      };
+    }
+    const auth = classifyBrowserAuthState(page);
+    if (auth) {
+      return {
+        state: "needs-user",
+        summary: `${site} is open. Finish the visible sign-in or verification step there, then come back here.`,
+        blocker: auth,
+      };
+    }
+    return { state: "ready", summary: `${site} is open and ready.` };
+  } catch {
+    return {
+      state: "needs-user",
+      summary: `${site} couldn't open in CareerRat. Close and reopen CareerRat, then try again.`,
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Server creation
 
@@ -116,6 +206,7 @@ export function createDevServer({
   repoRoot = DEFAULT_ROOT,
   env = process.env,
   runSkillStream = defaultRunSkillStream,
+  appOperationKinds = {},
   // M2 — the conversational chat runtime (see src/core/ai/chat-runtime.mjs).
   // Dependency-injected the same way `runSkillStream` is above, so tests can
   // hand in a runtime built against a fake `loadSdk` without touching the
@@ -126,6 +217,7 @@ export function createDevServer({
   chatRuntime = createChatRuntime({ repoRoot, env }),
   applyJobImpl = createConfiguredApplyExecutor({ repoRoot, env }),
   browserSessionManager = createBrowserSessionManager({ defaults: { repoRoot, env } }),
+  optimizeLinkedinInAppImpl = optimizeLinkedinInApp,
   workspaceAgentRuntime = createWorkspaceAgentRuntime({
     repoRoot,
     env,
@@ -133,6 +225,7 @@ export function createDevServer({
     addBoardSourceImpl: addBoardSource,
     addSearchSourceQueryImpl: addSearchSourceQuery,
     setSearchSourceEnabledImpl: setSearchSourceEnabled,
+    openAuthenticatedSourceImpl: (input) => openAuthenticatedSource(browserSessionManager, input),
     applyJobImpl,
     startBoardDiscoveryImpl: ({ request }) =>
       startExplicitDiscoveryChat({
@@ -193,11 +286,12 @@ export function createDevServer({
         role,
         createSessionImpl: (options) => browserSessionManager.get(options),
       }),
-    runLinkedinOptimizeImpl: ({ profileUrl }) =>
-      optimizeLinkedinInApp({
+    runLinkedinOptimizeImpl: ({ profileUrl, executionPlan }) =>
+      optimizeLinkedinInAppImpl({
         repoRoot,
         env,
         profileUrl,
+        executionPlan,
         createSessionImpl: (options) => browserSessionManager.get(options),
       }),
     runStatusSyncImpl: ({ applications }) =>
@@ -206,6 +300,14 @@ export function createDevServer({
         env,
         applications,
         createSessionImpl: (options) => browserSessionManager.get(options),
+      }),
+    captureBrowserSourceImpl: (source) =>
+      captureBrowserSearchSource({
+        source,
+        session: browserSessionManager.get({
+          platform: source?.platform || source?.provider || "search",
+          provider: "playwright",
+        }),
       }),
   }),
 } = {}) {
@@ -262,6 +364,31 @@ export function createDevServer({
     });
   });
 
+  let appOperations;
+  appOperations = mountAppOperationRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    kinds: {
+      ...createWorkspaceOperationKinds({
+        repoRoot,
+        env,
+        runTurnImpl: workspaceAgentRuntime.runTurn,
+        executeIntentImpl: workspaceAgentRuntime.executeIntent,
+        startCompanyDiscoveryOperationImpl: (input) =>
+          startCompanyDiscoveryOperation({ appOperations, input }),
+      }),
+      ...createChatFirstOperationKinds({ repoRoot, env }),
+      [COMPANY_DISCOVERY_OPERATION_KIND]: createCompanyDiscoveryOperationKind({ repoRoot, env }),
+      [ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND]: createOnboardingSearchPromptOperationKind({
+        repoRoot,
+        env,
+      }),
+      ...createDeepIngestAppOperationKinds({ repoRoot, env }),
+      ...appOperationKinds,
+    },
+  });
+
   // P0-4 — the embedded AI skill runtime. See src/cli/skill-run-route.mjs for
   // the SSE/abort/status-code mechanics and src/core/ai/skill-runtime.mjs for
   // the Agent SDK driver itself. `runSkillStream` is dependency-injected above
@@ -277,7 +404,13 @@ export function createDevServer({
   // (candidate file seeding, resume parsing, BYOK key storage) —
   // src/cli/onboard-route.mjs. No page mounted here — apps/web's SPA
   // onboarding wizard is the only client.
-  mountOnboardRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  const onboardRoutes = mountOnboardRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    workspaceAgentRuntime,
+    appOperations,
+  });
 
   // M8 — the /app/onboarding SPA wizard's AI-assist surface: server-side
   // prompt templates for the Targeting step's "Roland-suggest" chips
@@ -302,20 +435,41 @@ export function createDevServer({
     runTurnImpl: workspaceAgentRuntime.runTurn,
     executeIntentImpl: workspaceAgentRuntime.executeIntent,
     captureIntakeImpl: workspaceAgentRuntime.captureIntake,
+    appOperations,
   });
-  mountChatFirstRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  mountChatFirstRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime, appOperations });
   mountWorkspaceExportRoutes({ addRoute, repoRoot, env });
   // App-facing supervised discovery pipeline. Shares the same chatRuntime as
   // /api/chat/* so Quick Start / Continue Discovery can start or reconnect to
   // exactly one visible research-boards session. Company discovery stays on
   // the reviewed app-owned proposal path; search-jobs uses its dedicated route.
-  mountDiscoveryRoutes({ addRoute, repoRoot, env, chatRuntime, workspaceAgentRuntime });
+  mountDiscoveryRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    chatRuntime,
+    workspaceAgentRuntime,
+    appOperations,
+  });
 
   // M3 of the paid-POC journey — the /search surface over the existing
   // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the
   // sweep) is src/cli/search-route.mjs. No page mounted here — apps/web's SPA
   // Jobs surface is the only client.
-  mountSearchRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  const searchRoutes = mountSearchRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    workspaceAgentRuntime,
+    captureBrowserSourceImpl: (source) =>
+      captureBrowserSearchSource({
+        source,
+        session: browserSessionManager.get({
+          platform: source?.platform || source?.provider || "search",
+          provider: "playwright",
+        }),
+      }),
+  });
   mountSourcingRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
 
   // M4 of the paid-POC journey — the /packet view: review a gated
@@ -323,7 +477,7 @@ export function createDevServer({
   // via tailor-application. Its HTTP surface (list + single-packet resolution,
   // path-safety-checked artifact reads) is src/cli/packet-route.mjs. No page
   // mounted here — apps/web's SPA is the only client.
-  mountPacketRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  mountPacketRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime, appOperations });
   mountInterviewPrepRoutes({ addRoute, repoRoot, env });
   mountJobArtifactRoutes({ addRoute, repoRoot, env });
 
@@ -332,7 +486,7 @@ export function createDevServer({
   // yet" error until `careerrat data init`/`import` creates one; there is no
   // page mounted here (no /data view), just the API surface CLI verbs mirror.
   mountDataRoutes({ addRoute, repoRoot, env });
-  mountDeepIngestRoutes({ addRoute, repoRoot, env });
+  mountDeepIngestRoutes({ addRoute, repoRoot, env, appOperations });
 
   // Productization — the first "app calls AI -> structured result -> typed DB
   // write" pipeline for application state (src/cli/track-outcome-route.mjs):
@@ -353,11 +507,12 @@ export function createDevServer({
   // (POST /api/intake/confirm), and the read/dismiss/re-classify routes
   // alongside it. Interactive dispatches go through workspaceAgentRuntime so
   // buttons preserve workspace-main context.
-  mountIntakeRoutes({
+  const intakeRoutes = mountIntakeRoutes({
     addRoute,
     repoRoot,
     env,
     workspaceAgentRuntime,
+    appOperations,
     captureTextImpl: async ({ text, inputKind, requestedAction }) => {
       const result = await workspaceAgentRuntime.captureIntake({
         text,
@@ -593,8 +748,48 @@ export function createDevServer({
     clients.clear();
   }
 
+  let runtimeOwnership = null;
+  server.on("close", () => {
+    runtimeOwnership?.release();
+    runtimeOwnership = null;
+  });
+
+  async function listen({ port, host = "127.0.0.1" } = {}) {
+    const boundPort = await new Promise((resolve, reject) => {
+      function onError(error) {
+        server.removeListener("listening", onListening);
+        reject(error);
+      }
+      function onListening() {
+        server.removeListener("error", onError);
+        resolve(server.address().port);
+      }
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, host);
+    });
+
+    try {
+      runtimeOwnership = acquireWorkspaceRuntimeOwnership({ repoRoot, env });
+      const recoveredAppOperations = appOperations.recoverOrphans();
+      await recoverOnboardingSearchPromptOperations({
+        appOperations,
+        recovered: recoveredAppOperations,
+      });
+      workspaceAgentRuntime.recoverOrphanedSourcingRuns();
+      await workspaceAgentRuntime.recoverAdjacentRoleCoaching?.();
+      intakeRoutes.recoverOrphans();
+      onboardRoutes.recoverResumeExtractions();
+      return boundPort;
+    } catch (error) {
+      await new Promise((resolve) => server.close(resolve));
+      throw error;
+    }
+  }
+
   return {
     server,
+    listen,
     pathCtx,
     addRoute,
     startWatching,
@@ -604,6 +799,12 @@ export function createDevServer({
     chatRuntime,
     browserSessionManager,
     stopRuntimeSignIns: stopInstalledRuntimeSignIns,
+    shutdownAiWebSearch: searchRoutes.shutdownAiWebSearch,
+    shutdownSourcingWorkers: workspaceAgentRuntime.shutdownSourcingWorkers,
+    shutdownIntake: intakeRoutes.shutdownLaneB,
+    shutdownResumeExtractions: onboardRoutes.shutdownResumeExtractions,
+    appOperations,
+    shutdownAppOperations: appOperations.shutdown,
   };
 }
 
@@ -627,21 +828,21 @@ async function main() {
   // runtimes. Keep its native-client trust assumption confined to loopback;
   // public previews are built as inert static bundles by build-demo.mjs.
   const host = resolveTrackerBindHost(process.env);
-  dev.server.listen(port, host, () => {
-    const url = `http://localhost:${port}`;
+  try {
+    const boundPort = await dev.listen({ port, host });
+    const url = `http://localhost:${boundPort}`;
     log(`serving ${url}`);
     log("watching workspace/tracker.json and workspace/activity.jsonl for app data updates.");
     log("Ctrl-C to stop.");
     if (wantOpen) openBrowser(url);
-  });
-  dev.server.on("error", (err) => {
+  } catch (err) {
     if (err.code === "EADDRINUSE") {
       log(`port ${port} is in use. Pick another: careerrat tracker-dev --port ${port + 1}`);
     } else {
       log(`server error: ${err.message}`);
     }
     process.exit(1);
-  });
+  }
 
   async function shutdown() {
     dev.closeClients();
@@ -651,6 +852,11 @@ async function main() {
     // child process running.
     dev.chatRuntime.shutdown();
     dev.stopRuntimeSignIns();
+    await dev.shutdownSourcingWorkers();
+    await dev.shutdownAiWebSearch();
+    await dev.shutdownIntake();
+    await dev.shutdownResumeExtractions();
+    await dev.shutdownAppOperations();
     await dev.browserSessionManager.shutdown();
     dev.server.close(() => process.exit(0));
     // Don't hang on a lingering socket.
@@ -690,7 +896,7 @@ Routes:
 
 Local app APIs:
   GET  /api/health                      { ok, version }
-  GET  /api/runtime/config              { skills: [...] }: the embedded runtime's allowlist
+  GET  /api/runtime/config              generic runtime and app-owned AI capability status
   POST /api/skill/run                   Run a SKILL.md via the embedded Agent SDK runtime (SSE)
   GET  /api/onboard/state               Candidate-file + key + search-config status
   POST /api/onboard/init                Seed candidate/ from templates (never overwrites)

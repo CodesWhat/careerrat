@@ -16,6 +16,7 @@ import {
   DEEP_INGEST_REQUIRED_LANES,
   deepIngestLaneSetState,
 } from "../src/core/db/verbs.mjs";
+import { verifiedRuntimeEvidence } from "./helpers/installed-runtime-fixture.mjs";
 
 const cleanupRoots = [];
 
@@ -75,6 +76,166 @@ function seedApplication(repoRoot, row) {
   });
 }
 
+function insertChatFirstReadModel(db, index, { messageCount = 1 } = {}) {
+  const suffix = String(index).padStart(3, "0");
+  const applicationId = `app-read-${suffix}`;
+  const threadId = `job:${applicationId}`;
+  const missionId = `mission-read-${suffix}`;
+  const mockId = `mock-read-${suffix}`;
+  const skill = `read-skill-${suffix}`;
+  const skillThreadId = `skill:${skill}`;
+  const at = `2026-08-27T12:${String(index % 60).padStart(2, "0")}:00.000Z`;
+  const application = {
+    id: applicationId,
+    company: `Read Model ${suffix}`,
+    role: "Platform Engineer",
+    status: "applied",
+    createdAt: at,
+    updatedAt: at,
+  };
+  const thread = {
+    id: threadId,
+    applicationId,
+    status: "active",
+    pinned: false,
+    earnedBy: ["human-entered"],
+    createdAt: at,
+    updatedAt: at,
+  };
+  const mission = {
+    id: missionId,
+    title: `Mission ${suffix}`,
+    status: "completed",
+    createdAt: at,
+    updatedAt: at,
+  };
+  const mock = {
+    id: mockId,
+    applicationId,
+    title: `Mock ${suffix}`,
+    status: "ended",
+    questionTotal: 1,
+    currentQuestion: 1,
+    startedAt: at,
+    endedAt: at,
+    updatedAt: at,
+  };
+  const skillThread = {
+    id: skillThreadId,
+    skill,
+    status: "active",
+    messageCount,
+    createdAt: at,
+    updatedAt: at,
+  };
+
+  db.prepare("INSERT INTO applications (id, data) VALUES (?, ?)").run(
+    applicationId,
+    JSON.stringify(application)
+  );
+  db.prepare("INSERT INTO job_threads (id, application_id, data) VALUES (?, ?, ?)").run(
+    threadId,
+    applicationId,
+    JSON.stringify(thread)
+  );
+  db.prepare("INSERT INTO missions (id, data) VALUES (?, ?)").run(
+    missionId,
+    JSON.stringify(mission)
+  );
+  db.prepare("INSERT INTO mission_steps (id, mission_id, sequence, data) VALUES (?, ?, ?, ?)").run(
+    `step-${suffix}`,
+    missionId,
+    1,
+    JSON.stringify({
+      id: `step-${suffix}`,
+      missionId,
+      sequence: 1,
+      label: "Finished",
+      status: "completed",
+      createdAt: at,
+      updatedAt: at,
+    })
+  );
+  db.prepare("INSERT INTO mock_interview_sessions (id, application_id, data) VALUES (?, ?, ?)").run(
+    mockId,
+    applicationId,
+    JSON.stringify(mock)
+  );
+  db.prepare("INSERT INTO skill_chat_threads (id, data) VALUES (?, ?)").run(
+    skillThreadId,
+    JSON.stringify(skillThread)
+  );
+
+  const insertJobMessage = db.prepare(
+    "INSERT INTO job_thread_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
+  );
+  const insertMockMessage = db.prepare(
+    "INSERT INTO mock_interview_messages (id, session_id, sequence, data) VALUES (?, ?, ?, ?)"
+  );
+  const insertMockFeedback = db.prepare(
+    "INSERT INTO mock_interview_feedback (id, session_id, message_id, data) VALUES (?, ?, ?, ?)"
+  );
+  const insertSkillMessage = db.prepare(
+    "INSERT INTO skill_chat_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
+  );
+  for (let sequence = 1; sequence <= messageCount; sequence += 1) {
+    const jobMessage = {
+      id: `job-message-${suffix}-${sequence}`,
+      threadId,
+      sequence,
+      role: sequence % 2 ? "user" : "assistant",
+      kind: "text",
+      text: `Job message ${sequence}`,
+      createdAt: at,
+    };
+    insertJobMessage.run(jobMessage.id, threadId, sequence, JSON.stringify(jobMessage));
+    const mockMessage = {
+      id: `mock-message-${suffix}-${sequence}`,
+      sessionId: mockId,
+      sequence,
+      role: sequence % 2 ? "assistant" : "user",
+      kind: sequence % 2 ? "question" : "answer",
+      questionNumber: Math.ceil(sequence / 2),
+      text: `Mock message ${sequence}`,
+      createdAt: at,
+    };
+    insertMockMessage.run(mockMessage.id, mockId, sequence, JSON.stringify(mockMessage));
+    const feedback = {
+      id: `mock-feedback-${suffix}-${sequence}`,
+      sessionId: mockId,
+      messageId: mockMessage.id,
+      questionNumber: sequence,
+      worked: `Worked ${sequence}`,
+      tighten: `Tighten ${sequence}`,
+      createdAt: at,
+    };
+    insertMockFeedback.run(feedback.id, mockId, mockMessage.id, JSON.stringify(feedback));
+    const skillMessage = {
+      id: `skill-message-${suffix}-${sequence}`,
+      threadId: skillThreadId,
+      sequence,
+      role: sequence % 2 ? "assistant" : "user",
+      text: `Skill message ${sequence}`,
+      createdAt: at,
+    };
+    insertSkillMessage.run(skillMessage.id, skillThreadId, sequence, JSON.stringify(skillMessage));
+  }
+}
+
+function preparedStatementsDuring(db, read) {
+  const originalPrepare = db.prepare;
+  const statements = [];
+  db.prepare = function measuredPrepare(sql, ...args) {
+    statements.push(sql);
+    return originalPrepare.call(this, sql, ...args);
+  };
+  try {
+    return { value: read(), statements };
+  } finally {
+    db.prepare = originalPrepare;
+  }
+}
+
 test("migration 012 creates durable chat-first thread, mission, and mock interview tables", () => {
   assert.equal(
     ALL_MIGRATIONS.find((migration) => migration.id === 12)?.name,
@@ -99,6 +260,87 @@ test("migration 012 creates durable chat-first thread, mission, and mock intervi
     "mock_interview_feedback",
   ]) {
     assert.equal(tables.has(table), true, `${table} should exist`);
+  }
+});
+
+test("chat-first dashboard state uses a constant number of database statements as thread counts grow", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  insertChatFirstReadModel(db, 1);
+
+  const small = preparedStatementsDuring(db, () => api.chatFirstStateFromDb(db));
+  for (let index = 2; index <= 24; index += 1) insertChatFirstReadModel(db, index);
+  const large = preparedStatementsDuring(db, () => api.chatFirstStateFromDb(db));
+
+  assert.equal(small.value.jobThreads.length, 1);
+  assert.equal(large.value.jobThreads.length, 24);
+  assert.equal(large.value.missions.length, 24);
+  assert.equal(large.value.mockSessions.length, 24);
+  assert.equal(large.value.skillChats.length, 24);
+  assert.equal(
+    large.statements.length,
+    small.statements.length,
+    `chat-first state grew from ${small.statements.length} to ${large.statements.length} statements`
+  );
+});
+
+test("chat-first dashboard state returns only the newest bounded message history without deleting durable rows", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  insertChatFirstReadModel(db, 1, { messageCount: 225 });
+  const workspaceThread = {
+    id: "workspace-main",
+    title: "Career workspace",
+    status: "active",
+    createdAt: "2026-08-27T12:00:00.000Z",
+    updatedAt: "2026-08-27T12:00:00.000Z",
+  };
+  db.prepare("INSERT INTO workspace_threads (id, data) VALUES (?, ?)").run(
+    workspaceThread.id,
+    JSON.stringify(workspaceThread)
+  );
+  const insertWorkspaceMessage = db.prepare(
+    "INSERT INTO workspace_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
+  );
+  for (let sequence = 1; sequence <= 225; sequence += 1) {
+    const message = {
+      id: `workspace-message-${sequence}`,
+      threadId: workspaceThread.id,
+      sequence,
+      role: sequence % 2 ? "user" : "assistant",
+      kind: "text",
+      text: `Workspace message ${sequence}`,
+      createdAt: "2026-08-27T12:00:00.000Z",
+    };
+    insertWorkspaceMessage.run(message.id, workspaceThread.id, sequence, JSON.stringify(message));
+  }
+
+  const state = api.chatFirstStateFromDb(db);
+  const assertBounded = (rows, label) => {
+    assert.equal(rows.length, 200, `${label} should be bounded`);
+    assert.equal(rows[0].sequence ?? rows[0].questionNumber, 26);
+    assert.equal(rows.at(-1).sequence ?? rows.at(-1).questionNumber, 225);
+  };
+  assertBounded(state.jobThreads[0].messages, "job messages");
+  assertBounded(state.mainThread.messages, "workspace messages");
+  assertBounded(state.skillChats[0].messages, "skill messages");
+  assertBounded(state.mockSessions[0].messages, "mock messages");
+  assertBounded(state.mockSessions[0].feedback, "mock feedback");
+
+  for (const table of [
+    "job_thread_messages",
+    "workspace_messages",
+    "skill_chat_messages",
+    "mock_interview_messages",
+    "mock_interview_feedback",
+  ]) {
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count,
+      225,
+      `${table} must remain durable`
+    );
   }
 });
 
@@ -149,6 +391,36 @@ test("chat-first state hydrates durable research threads and their saved or disc
     message: "Benchmark ready for review.",
     decisionAction: "discard",
   });
+});
+
+test("skill chat persists a binary prompt and resolves typed text once", async () => {
+  const api = await import("../src/core/db/verbs.mjs");
+  const repoRoot = tempRepo();
+  const assistant = api.skillChatMessageAppend({
+    repoRoot,
+    skill: "ingest-profile",
+    role: "assistant",
+    text: "Should I keep this role direction?",
+    metadata: { answerMode: "yes-no" },
+    now: new Date("2026-08-27T16:00:00.000Z"),
+  }).message;
+
+  assert.equal(assistant.metadata.answerMode, undefined);
+  assert.equal(assistant.metadata.choicePrompt.threadId, "skill:ingest-profile");
+  assert.equal(assistant.metadata.choicePrompt.messageId, assistant.id);
+  const user = api.skillChatMessageAppend({
+    repoRoot,
+    skill: "ingest-profile",
+    role: "user",
+    text: "Nope",
+    now: new Date("2026-08-27T16:01:00.000Z"),
+  }).message;
+
+  closeAll();
+  const reloaded = api.skillChatThreadRead({ repoRoot, skill: "ingest-profile" });
+  assert.equal(reloaded.messages[0].metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(reloaded.messages[0].metadata.choicePrompt.selectedOptionIds, ["no"]);
+  assert.deepEqual(user.metadata.choiceResolution.optionIds, ["no"]);
 });
 
 function expectSkillChat(threads, skill, { message, decisionAction }) {
@@ -354,6 +626,199 @@ test("pinning, messaging, and manual archive state survive restart without copyi
   assert.equal(stored.touchDue, undefined);
 });
 
+test("jobThreadMessageAppend reuses an identical durable message id without a second write", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-packet-answer",
+    company: "Hightouch",
+    status: "reviewed-hold",
+  });
+  const input = {
+    repoRoot,
+    applicationId: "app-packet-answer",
+    id: "packet-answer-user:workspace-repeat",
+    role: "user",
+    kind: "text",
+    text: "When can you start?: Two weeks after accepting an offer",
+    now: new Date("2026-08-27T14:00:00.000Z"),
+  };
+
+  const first = api.jobThreadMessageAppend(input);
+  const db = openDb({ repoRoot });
+  const versionAfterFirst = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const activityAfterFirst = db
+    .prepare("SELECT count(*) AS count FROM activity_events")
+    .get().count;
+  const second = api.jobThreadMessageAppend(input);
+
+  assert.equal(first.reused, false);
+  assert.equal(second.reused, true);
+  assert.equal(second.message.id, input.id);
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM job_thread_messages WHERE id = ?").get(input.id)
+      .count,
+    1
+  );
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    versionAfterFirst
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    activityAfterFirst
+  );
+});
+
+test("jobThreadMessageAppend refuses to reuse one message id for different transcript text", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-packet-answer-conflict",
+    company: "Hightouch",
+    status: "reviewed-hold",
+  });
+  const input = {
+    repoRoot,
+    applicationId: "app-packet-answer-conflict",
+    id: "packet-answer-user:workspace-conflict",
+    role: "user",
+    kind: "text",
+    text: "When can you start?: Two weeks",
+  };
+  api.jobThreadMessageAppend(input);
+
+  assert.throws(
+    () => api.jobThreadMessageAppend({ ...input, text: "When can you start?: Immediately" }),
+    (error) => error.code === "CONFLICT"
+  );
+  const db = openDb({ repoRoot });
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM job_thread_messages WHERE id = ?").get(input.id)
+      .count,
+    1
+  );
+});
+
+test("job threads expose live packet gaps without leaking the packet manifest", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-packet-review",
+    company: "Hightouch",
+    status: "reviewed-hold",
+    packetManifest: {
+      applicationId: "app-packet-review",
+      status: "reviewable",
+      uploadReady: false,
+      gapCount: 2,
+      questions: {
+        answerable: [
+          {
+            id: "north-america",
+            label: "Are you currently located in North America?",
+            type: "select",
+            required: true,
+            options: ["Yes", "No"],
+          },
+        ],
+      },
+      artifacts: { answersSource: "workspace/private-answer-path.md" },
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "linkedin-profile",
+          message: "Answer “LinkedIn Profile”.",
+        },
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "north-america",
+          message: "Answer “Are you currently located in North America?”.",
+        },
+      ],
+    },
+  });
+  api.jobThreadSetPinned({ repoRoot, applicationId: "app-packet-review" });
+
+  const thread = api
+    .chatFirstStateGet({ repoRoot })
+    .jobThreads.find((row) => row.applicationId === "app-packet-review");
+
+  assert.deepEqual(thread.packetReview, {
+    status: "reviewable",
+    uploadReady: false,
+    gapCount: 2,
+    canResume: false,
+    gaps: [
+      {
+        id: "linkedin-profile",
+        questionId: "linkedin-profile",
+        kind: "answers",
+        code: "ANSWER_CONFIRMATION_REQUIRED",
+        label: "LinkedIn Profile",
+        message: "Answer “LinkedIn Profile”.",
+        answerable: true,
+      },
+      {
+        id: "north-america",
+        questionId: "north-america",
+        kind: "answers",
+        code: "ANSWER_CONFIRMATION_REQUIRED",
+        label: "Are you currently located in North America?",
+        message: "Answer “Are you currently located in North America?”.",
+        answerable: true,
+        options: ["Yes", "No"],
+      },
+    ],
+  });
+  assert.equal(JSON.stringify(thread.packetReview).includes("private-answer-path"), false);
+});
+
+test("job threads expose deferred question capture as form preparation, not a candidate question", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-question-capture",
+    company: "Hightouch",
+    status: "reviewed-hold",
+    packetManifest: {
+      applicationId: "app-question-capture",
+      status: "upload-ready",
+      uploadReady: true,
+      gapCount: 1,
+      gaps: [
+        {
+          kind: "answers",
+          code: "QUESTION_CAPTURE_DEFERRED",
+          message:
+            "answers artifact skipped: no application questions captured yet; capture the form questions (packet questions step), then regenerate, to produce answers",
+        },
+      ],
+    },
+  });
+  api.jobThreadSetPinned({ repoRoot, applicationId: "app-question-capture" });
+
+  const thread = api
+    .chatFirstStateGet({ repoRoot })
+    .jobThreads.find((row) => row.applicationId === "app-question-capture");
+
+  assert.deepEqual(thread.packetReview, {
+    status: "upload-ready",
+    uploadReady: true,
+    gapCount: 0,
+    canResume: false,
+    canPrepare: true,
+    questionCaptureRequired: true,
+    questionCaptureMessage:
+      "Open and prepare the application form so CareerRat can discover its questions.",
+    gaps: [],
+  });
+  assert.equal(JSON.stringify(thread.packetReview).includes("answers artifact skipped"), false);
+  assert.equal(JSON.stringify(thread.packetReview).includes("packet questions step"), false);
+});
+
 test("scanner rows preserve whether the saved job description is partial", async () => {
   const { sourcedRowsFromScanOffers } = await import("../src/core/scoring/sourced-persistence.mjs");
   const rows = sourcedRowsFromScanOffers([
@@ -389,7 +854,7 @@ test("promoted scanner facts reach job threads and their AI context", async () =
         title: "Staff JavaScript Engineer",
         url: "https://jobs.example.test/scanner-facts",
         location: "Remote - United States",
-        comp: "$185,000 - $215,000",
+        baseComp: "$185,000 - $215,000",
         fit: "high",
         score: 91,
       },
@@ -429,6 +894,8 @@ test("promoted scanner facts reach job threads and their AI context", async () =
   assert.match(request.system, /short, direct sentences/i);
   assert.match(request.system, /raw JSON/i);
   assert.match(request.system, /tool narration/i);
+  assert.equal(request.aiOperation, "paul.conversation");
+  assert.equal(request.tier, undefined);
   assert.equal(application.location, "Remote - United States");
   assert.equal(application.mode, "remote");
   assert.equal(application.compensation, "$185,000 - $215,000");
@@ -481,7 +948,7 @@ test("earned job threads project canonical conversations and communications with
   assert.equal(stored.communications, undefined);
 });
 
-test("job-thread turns persist a typed yes-no answer mode on the assistant message", async () => {
+test("job-thread turns persist and hydrate one resolved binary choice", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {
@@ -507,7 +974,35 @@ test("job-thread turns persist a typed yes-no answer mode on the assistant messa
   });
 
   assert.equal(result.assistantMessage.text, "Should I draft the recruiter reply now?");
-  assert.equal(result.assistantMessage.metadata.answerMode, "yes-no");
+  const prompt = result.assistantMessage.metadata.choicePrompt;
+  assert.equal(result.assistantMessage.metadata.answerMode, undefined);
+  assert.equal(prompt.threadId, "job:app-binary-question");
+  assert.equal(prompt.messageId, result.assistantMessage.id);
+  assert.equal(prompt.state, "pending");
+
+  await api.jobThreadTurn({
+    repoRoot,
+    applicationId: "app-binary-question",
+    text: "Yes",
+    call: async () => ({
+      content: [
+        { type: "text", text: JSON.stringify({ reply: "I’ll draft it.", answerMode: null }) },
+      ],
+    }),
+  });
+
+  closeAll();
+  const hydrated = api.chatFirstStateGet({ repoRoot });
+  const thread = hydrated.jobThreads.find(
+    (candidate) => candidate.applicationId === "app-binary-question"
+  );
+  const question = thread.messages.find((message) => message.id === result.assistantMessage.id);
+  const answer = thread.messages.find(
+    (message) => message.metadata?.choiceResolution?.promptId === prompt.id
+  );
+  assert.equal(question.metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(question.metadata.choicePrompt.selectedOptionIds, ["yes"]);
+  assert.deepEqual(answer.metadata.choiceResolution.optionIds, ["yes"]);
 });
 
 test("unpinning an application that never earned a conversation does not create one", async () => {
@@ -574,6 +1069,46 @@ test("job-thread turns retain authoritative messages and advance an exact rollin
     .jobThreads.find((thread) => thread.applicationId === "app-checkpoint");
   assert.equal(restarted.messages.length, 20);
   assert.equal(restarted.checkpoint.throughSequence, 8);
+});
+
+test("job-thread turn reuses one durable request after a lost response without running the model twice", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-idempotent-turn",
+    company: "Idempotent Corp",
+  });
+  let calls = 0;
+  const request = {
+    repoRoot,
+    applicationId: "app-idempotent-turn",
+    text: "What should I emphasize?",
+    userMessageId: "job-thread-user-request-0001",
+    assistantMessageId: "job-thread-assistant-request-0001",
+    call: async () => {
+      calls += 1;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ reply: "Lead with the measurable result.", answerMode: null }),
+          },
+        ],
+      };
+    },
+  };
+
+  const first = await api.jobThreadTurn(request);
+  const retried = await api.jobThreadTurn(request);
+
+  assert.equal(calls, 1);
+  assert.equal(retried.userMessage.id, first.userMessage.id);
+  assert.equal(retried.assistantMessage.id, first.assistantMessage.id);
+  const thread = api
+    .chatFirstStateGet({ repoRoot })
+    .jobThreads.find((candidate) => candidate.applicationId === "app-idempotent-turn");
+  assert.equal(thread.messages.filter((message) => message.role === "user").length, 1);
+  assert.equal(thread.messages.filter((message) => message.role === "assistant").length, 1);
 });
 
 test("rolling checkpoints keep an early durable decision after later prose exceeds the summary budget", async () => {
@@ -1444,6 +1979,70 @@ test("an operational job mission promotes sourced roles, evaluates applications,
   );
 });
 
+test("recording an application as applied resolves its durable submit gate and completes the mission", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-submit-resolved",
+    company: "Resolved Gate Corp",
+    status: "manual-apply",
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-submit-resolved",
+    jobs: [{ type: "application", id: "app-submit-resolved" }],
+  });
+  await api.missionRun({
+    repoRoot,
+    id: "mission-submit-resolved",
+    executeIntent: async ({ intent }) => ({
+      operationResult: { ok: true },
+      ...(intent.type === "job.prepare-submit"
+        ? { messages: [{ metadata: { state: "awaiting-submit" } }] }
+        : {}),
+    }),
+  });
+
+  const before = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((mission) => mission.id === "mission-submit-resolved");
+  assert.equal(before.status, "paused");
+  assert.equal(before.steps.find((step) => step.action === "submit-gate").status, "blocked");
+
+  appSetStatus({
+    repoRoot,
+    id: "app-submit-resolved",
+    to: "applied",
+    appliedAt: "2026-08-27T20:00:00.000Z",
+  });
+
+  const state = api.chatFirstStateGet({ repoRoot });
+  const after = state.missions.find((mission) => mission.id === "mission-submit-resolved");
+  const gate = after.steps.find((step) => step.action === "submit-gate");
+  assert.equal(after.status, "completed");
+  assert.equal(gate.status, "completed");
+  assert.deepEqual(
+    {
+      requiresUserSubmit: gate.result.requiresUserSubmit,
+      submissionRecorded: gate.result.submissionRecorded,
+      applicationStatus: gate.result.applicationStatus,
+      appliedAt: gate.result.appliedAt,
+    },
+    {
+      requiresUserSubmit: false,
+      submissionRecorded: true,
+      applicationStatus: "applied",
+      appliedAt: "2026-08-27T20:00:00.000Z",
+    }
+  );
+  assert.equal(
+    state.needsYou.some(
+      (item) => item.kind === "submit-gate" && item.applicationId === "app-submit-resolved"
+    ),
+    false
+  );
+});
+
 test("mission pause requests stop the runner before it claims the next step", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
@@ -1755,6 +2354,149 @@ test("mission execution persists leased attempt identity, idempotency classifica
   assert.equal(attempt.receipt.outcome, "completed");
   assert.equal(attempt.receipt.result.status, "ready");
   assert.equal(intents[0].type, "job.generate-documents");
+});
+
+test("a claimed mission step rejects settlement without its attempt identity", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-attempt-fence",
+    company: "Fence Corp",
+    evaluation: { gate: "keep" },
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-attempt-fence",
+    mode: "draft",
+    jobs: [{ type: "application", id: "app-attempt-fence" }],
+  });
+
+  let releaseIntent;
+  let markIntentStarted;
+  const intentStarted = new Promise((resolve) => {
+    markIntentStarted = resolve;
+  });
+  const intentReleased = new Promise((resolve) => {
+    releaseIntent = resolve;
+  });
+  const running = api.missionRun({
+    repoRoot,
+    id: "mission-attempt-fence",
+    executeIntent: async () => {
+      markIntentStarted();
+      await intentReleased;
+      return { operationResult: { status: "ready" } };
+    },
+  });
+  await intentStarted;
+
+  const claimedStep = api
+    .chatFirstStateGet({ repoRoot })
+    .missions[0].steps.find((step) => step.currentAttempt);
+  assert.ok(claimedStep?.currentAttempt?.id);
+  assert.throws(
+    () =>
+      api.missionStepSetStatus({
+        repoRoot,
+        missionId: "mission-attempt-fence",
+        stepId: claimedStep.id,
+        status: "completed",
+        result: { id: "app-forged" },
+      }),
+    /mission step attempt is stale/
+  );
+
+  releaseIntent();
+  const result = await running;
+  assert.equal(result.mission.status, "completed");
+  assert.equal(result.mission.steps[0].result.status, "ready");
+});
+
+test("application mission attempts freeze their provider-neutral plan and reuse it when the submit handoff resumes", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-plan-reuse",
+    company: "Frozen Plan Corp",
+    evaluation: { gate: "keep" },
+  });
+  api.missionCreate({
+    repoRoot,
+    id: "mission-plan-reuse",
+    title: "Prepare Frozen Plan Corp",
+    mode: "prepare-to-submit",
+    steps: [
+      {
+        id: "prepare",
+        label: "Prepare form",
+        action: "prepare-submit",
+        jobRef: { type: "application", id: "app-plan-reuse" },
+      },
+      {
+        id: "submit",
+        label: "Submit form",
+        action: "submit-gate",
+        jobRef: { type: "application", id: "app-plan-reuse" },
+      },
+    ],
+  });
+  const frozenPlan = {
+    policyVersion: 1,
+    operation: "application.drafting",
+    runtimeId: "codex",
+    adapterVersion: 1,
+    requested: { quality: "best", reasoning: "medium" },
+    resolved: {
+      quality: "best",
+      reasoning: "medium",
+      model: "gpt-5.6-sol",
+      modelSource: "alias",
+      effort: "medium",
+      speedTier: null,
+    },
+    installedRuntime: verifiedRuntimeEvidence("/fixture/codex"),
+    fallback: null,
+  };
+  let resolverCalls = 0;
+  const seen = [];
+  const resolveExecutionPlan = () => {
+    resolverCalls += 1;
+    return resolverCalls === 1 ? frozenPlan : { ...frozenPlan, runtimeId: "claude" };
+  };
+  const executeIntent = async ({ intent }) => {
+    seen.push(intent);
+    return {
+      messages: [{ metadata: { state: "awaiting-submit" } }],
+      operationResult: { status: "ready" },
+    };
+  };
+
+  const initial = await api.missionRun({
+    repoRoot,
+    id: "mission-plan-reuse",
+    resolveExecutionPlan,
+    executeIntent,
+  });
+  assert.equal(initial.mission.status, "paused");
+  assert.deepEqual(seen[0].input.executionPlan, frozenPlan);
+  assert.deepEqual(initial.mission.steps[0].attempts[0].executionPlan, frozenPlan);
+
+  const resumed = await api.missionResume({
+    repoRoot,
+    id: "mission-plan-reuse",
+    focusApplicationId: "app-plan-reuse",
+    resolveExecutionPlan,
+    executeIntent,
+  });
+  assert.equal(resumed.mission.status, "paused");
+  assert.equal(seen.length, 2);
+  assert.equal(seen[1].input.focusSession, true);
+  assert.deepEqual(seen[1].input.executionPlan, frozenPlan);
+  assert.equal(resolverCalls, 1, "handoff resume must reuse the persisted plan");
+  assert.deepEqual(
+    resumed.mission.steps[0].attempts.map((attempt) => attempt.executionPlan),
+    [frozenPlan, frozenPlan]
+  );
 });
 
 test("mission execution pauses an expired uncertain operation instead of replaying it and refuses a live lease", async () => {
@@ -2122,6 +2864,24 @@ test("mock start retries the same empty active session after AI failure and turn
     status: "interview",
   });
 
+  const originalPlan = {
+    policyVersion: 1,
+    operation: "coach.deep",
+    runtimeId: "codex",
+    adapterVersion: 1,
+    requested: { quality: "automatic", reasoning: "automatic" },
+    resolved: {
+      quality: "best",
+      reasoning: "high",
+      model: "gpt-5.6-sol",
+      modelSource: "alias",
+      effort: "high",
+      speedTier: null,
+    },
+    installedRuntime: verifiedRuntimeEvidence("/fixture/codex"),
+    fallback: null,
+  };
+  let failedRequest;
   await assert.rejects(
     () =>
       api.mockInterviewStartWithAI({
@@ -2134,15 +2894,19 @@ test("mock start retries the same empty active session after AI failure and turn
           arbitrarySecret: "do-not-send-this",
           schedulingLink: "https://calendly.com/private/mock",
         },
-        runAI: async () => ({
-          status: 502,
-          body: {
-            ok: false,
-            code: "AI_PROVIDER_FAILED",
-            error: { message: "temporary outage" },
-            ai: { used: false },
-          },
-        }),
+        executionPlan: originalPlan,
+        runAI: async (options) => {
+          failedRequest = options;
+          return {
+            status: 502,
+            body: {
+              ok: false,
+              code: "AI_PROVIDER_FAILED",
+              error: { message: "temporary outage" },
+              ai: { used: false },
+            },
+          };
+        },
       }),
     /temporary outage/
   );
@@ -2168,6 +2932,10 @@ test("mock start retries the same empty active session after AI failure and turn
   );
 
   let request;
+  const changedPlan = {
+    ...originalPlan,
+    resolved: { ...originalPlan.resolved, model: "gpt-5.6-luna", effort: "low" },
+  };
   const retried = await api.mockInterviewStartWithAI({
     repoRoot,
     id: "mock-retry",
@@ -2178,6 +2946,7 @@ test("mock start retries the same empty active session after AI failure and turn
       arbitrarySecret: "do-not-send-this",
       schedulingLink: "https://calendly.com/private/mock",
     },
+    executionPlan: changedPlan,
     runAI: async (options) => {
       request = options;
       return {
@@ -2193,6 +2962,11 @@ test("mock start retries the same empty active session after AI failure and turn
 
   assert.equal(retried.session.id, "mock-retry");
   assert.equal(retried.question.questionNumber, 1);
+  assert.equal(request.aiOperation, "coach.deep");
+  assert.equal(request.tier, undefined);
+  assert.deepEqual(failedRequest.executionPlan, originalPlan);
+  assert.deepEqual(request.executionPlan, originalPlan);
+  assert.deepEqual(retried.session.executionPlan, originalPlan);
   session = api.chatFirstStateGet({ repoRoot }).mockSessions.find((row) => row.id === "mock-retry");
   assert.equal(session.messages.filter((message) => message.kind === "question").length, 1);
   const serialized = request.messages[0].content;

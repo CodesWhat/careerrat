@@ -27,6 +27,7 @@ function wrapOps(ops, provider) {
   return {
     available: true,
     provider,
+    networkBoundary: ops.networkBoundary || "untrusted",
     get pageId() {
       return pageId;
     },
@@ -78,6 +79,15 @@ function wrapOps(ops, provider) {
   };
 }
 
+export function unsafePublicBrowserReason(session) {
+  const hasPinnedBoundary = session?.networkBoundary === "pinned-public-http";
+  const isKnownUnsafe = session?.networkBoundary === "untrusted";
+  const isOrcaWithoutBoundary = session?.provider === "orca" && !hasPinnedBoundary;
+  if (!isKnownUnsafe && !isOrcaWithoutBoundary) return null;
+  const label = session?.provider === "orca" ? "the Orca browser" : "that browser connection";
+  return `CareerRat can't safely use ${label} for job-site links. Close and reopen CareerRat, then try again.`;
+}
+
 export function classifyBrowserAuthState(page = {}) {
   const url = String(page.url || "");
   const text = `${page.title || ""}\n${String(page.text || "").slice(0, 4_000)}`;
@@ -101,8 +111,18 @@ function createPlaywrightBrowserSession({
   launchImpl,
   headless = false,
   channel,
+  resolvePublicTargetImpl,
 } = {}) {
-  return wrapOps(createPlaywrightOps({ profileDir, launchImpl, headless, channel }), "playwright");
+  return wrapOps(
+    createPlaywrightOps({
+      profileDir,
+      launchImpl,
+      headless,
+      channel,
+      ...(resolvePublicTargetImpl ? { resolvePublicTargetImpl } : {}),
+    }),
+    "playwright"
+  );
 }
 
 function createOrcaBrowserSession({ repoRoot, env = process.env, runOrcaImpl } = {}) {
@@ -114,11 +134,13 @@ export function createConfiguredBrowserSession({
   repoRoot,
   env = process.env,
   platform,
+  provider: requestedProvider,
   loadAutomationImpl = loadAutomation,
   launchImpl,
   runOrcaImpl,
   headless = false,
   channel,
+  resolvePublicTargetImpl,
 } = {}) {
   let data;
   try {
@@ -126,23 +148,27 @@ export function createConfiguredBrowserSession({
   } catch (error) {
     return unavailable("unknown", `Automation settings could not be read: ${error.message}`);
   }
-  const resolved = resolveSession({ data, env });
-  if (resolved.provider === "playwright") {
+  const resolved = resolveSession({ data, repoRoot, env });
+  const provider = requestedProvider === "playwright" ? "playwright" : resolved.provider;
+  if (provider === "playwright") {
     return createPlaywrightBrowserSession({
       profileDir: profilePath(platform, {
         profileRoot: data?.session?.profile_root || resolved.profileRoot,
+        repoRoot,
+        env,
       }),
       launchImpl,
       headless,
       channel,
+      resolvePublicTargetImpl,
     });
   }
-  if (resolved.provider === "orca") {
+  if (provider === "orca") {
     return createOrcaBrowserSession({ repoRoot, env, runOrcaImpl });
   }
   return unavailable(
-    resolved.provider,
-    `${PROVIDERS[resolved.provider]?.label || resolved.provider} has no callable app-owned browser surface. Choose Playwright or Orca in Settings.`
+    provider,
+    `${PROVIDERS[provider]?.label || provider} has no callable app-owned browser surface.`
   );
 }
 
@@ -154,15 +180,16 @@ export function createBrowserSessionManager({
   return {
     get(options = {}) {
       const platform = String(options.platform || "default");
-      if (sessions.has(platform)) return sessions.get(platform);
+      const key = `${platform}\0${String(options.provider || "configured")}`;
+      if (sessions.has(key)) return sessions.get(key);
       const session = createSessionImpl({ ...defaults, ...options, platform });
       if (!session?.available) return session;
       const close = session.close.bind(session);
       session.close = async () => {
-        if (sessions.get(platform) === session) sessions.delete(platform);
+        if (sessions.get(key) === session) sessions.delete(key);
         await close();
       };
-      sessions.set(platform, session);
+      sessions.set(key, session);
       return session;
     },
     async shutdown() {

@@ -8,12 +8,23 @@
 // abort handling) without spawning a CLI subprocess.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
+import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
+import { resolveAIExecutionPlan } from "../src/core/ai/operation-policy.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { createRuntimeToolPolicy } from "../src/core/ai/runtime-tool-policy.mjs";
 import {
@@ -27,6 +38,41 @@ import {
   runSkillStream,
 } from "../src/core/ai/skill-runtime.mjs";
 import { computeCost, readUsageEvents } from "../src/core/ai/usage-log.mjs";
+
+const VERIFIED_INSTALLED_CAPABILITIES = Object.freeze({
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+});
+
+function verifiedRuntime(id, path) {
+  return {
+    id,
+    name: id === "claude" ? "Claude Code" : "Codex",
+    path,
+    realPath: path,
+    version: "0.149.1",
+    binaryFingerprint: "a".repeat(64),
+    available: true,
+    capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+    capabilitiesVerified: true,
+  };
+}
+
+function frozenRuntimeEvidence(path, overrides = {}) {
+  return {
+    path,
+    realPath: path,
+    version: "0.149.1",
+    binaryFingerprint: "a".repeat(64),
+    capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+    ...overrides,
+  };
+}
 
 // `skillNames` accepts a single name (most tests only need one) or an array
 // — the default-allowlist tests need every default runtime skill fixture
@@ -1070,23 +1116,9 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
       approvedReadPaths: [upload],
       outputSchema: { type: "object", required: ["full_text"] },
       timeoutMs: 480_000,
-      runtimeInventory: [
-        {
-          id: "claude",
-          name: "Claude Code",
-          path: "/safe/claude",
-          available: true,
-          capabilities: {
-            completion: true,
-            structuredOutput: true,
-            appWorkflows: true,
-            exactRead: true,
-            publicWeb: true,
-            liveActivity: true,
-            resumable: true,
-          },
-        },
-      ],
+      model: "opus",
+      effort: "high",
+      runtimeInventory: [verifiedRuntime("claude", "/safe/claude")],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return { text: '{"full_text":"Morgan Hale"}', runtimeId: "claude", usage: null };
@@ -1099,11 +1131,8 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
     assert.deepEqual(result, { ok: true, aborted: false });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].runtime.id, "claude");
-    assert.equal(
-      calls[0].model,
-      "claude-haiku-4-5-20251001",
-      "the Anthropic extraction override is valid for Claude"
-    );
+    assert.equal(calls[0].model, "opus", "an operation-level model overrides the process default");
+    assert.equal(calls[0].effort, "high");
     // Threaded so installed-runtimes.mjs can materialize an isolated skill
     // cwd for the "claude" runtimeId (see tests/installed-runtime.test.mjs) —
     // harmless/unused for every other installed runtime, codex included.
@@ -1129,6 +1158,308 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
   }
 });
 
+test("runSkillStream forwards installed public-web activity but emits only the final structured assistant result", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  const outputSchema = {
+    type: "object",
+    required: ["roles"],
+    additionalProperties: false,
+    properties: { roles: { type: "array", items: { type: "string" } } },
+  };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  try {
+    const events = [];
+    const streamCalls = [];
+    const result = await runSkillStream({
+      skill: "search-jobs",
+      input: "find roles",
+      repoRoot,
+      env,
+      toolProfile: "chat",
+      outputSchema,
+      runtimeInventory: [verifiedRuntime("codex", "/safe/codex")],
+      runInstalledRuntimeImpl: async () => {
+        throw new Error("public-web skill runs must use the installed streaming adapter");
+      },
+      runInstalledRuntimeStreamImpl: async (input) => {
+        streamCalls.push(input);
+        input.onMessage({
+          type: "assistant",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "fetch-1",
+                name: "mcp__careerrat_scoped_tools__fetch",
+                input: { url: "https://example.com/jobs/1" },
+              },
+            ],
+          },
+        });
+        input.onMessage({
+          type: "user",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "fetch-1",
+                content: "Fetched https://example.com/jobs/1",
+                is_error: false,
+              },
+            ],
+          },
+        });
+        input.onMessage({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "intermediate text must stay hidden" }] },
+        });
+        return { text: '{"roles":[]}', runtimeId: "codex", usage: null };
+      },
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed runtime");
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(streamCalls.length, 1);
+    assert.deepEqual(streamCalls[0].tools, ["WebSearch", "WebFetch", "Skill"]);
+    assert.deepEqual(streamCalls[0].outputSchema, outputSchema);
+    assert.deepEqual(
+      events.map(({ type }) => type),
+      ["system", "tool_use", "tool_result", "assistant", "result"]
+    );
+    assert.equal(events[1].data.name, "WebFetch");
+    assert.equal(events.filter(({ type }) => type === "assistant").length, 1);
+    assert.equal(events.at(-2).data.message.content[0].text, '{"roles":[]}');
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream makes an installed public-web correction structurally Skill-only", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "claude" });
+  try {
+    const oneShotCalls = [];
+    await runSkillStream({
+      skill: "search-jobs",
+      input: "Return corrected JSON without tools",
+      repoRoot,
+      env,
+      tools: [],
+      runtimeInventory: [verifiedRuntime("claude", "/safe/claude")],
+      runInstalledRuntimeImpl: async (input) => {
+        oneShotCalls.push(input);
+        return { text: "{}", runtimeId: "claude", usage: null };
+      },
+      runInstalledRuntimeStreamImpl: async () => {
+        throw new Error("a Skill-only correction must preserve the one-shot path");
+      },
+      onEvent: () => {},
+    });
+
+    assert.equal(oneShotCalls.length, 1);
+    assert.deepEqual(oneShotCalls[0].tools, ["Skill"]);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream resolves a named operation once for the selected installed runtime", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  try {
+    const calls = [];
+    const result = await runSkillStream({
+      skill: "search-jobs",
+      input: "find roles",
+      repoRoot,
+      env,
+      aiOperation: "research.web",
+      runtimeInventory: [verifiedRuntime("codex", "/safe/codex")],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "{}", runtimeId: "codex", usage: null };
+      },
+      onEvent: () => {},
+    });
+
+    assert.equal(calls[0].model, "gpt-5.6-terra");
+    assert.equal(calls[0].effort, "medium");
+    assert.equal(result.executionPlan.runtimeId, "codex");
+    assert.equal(result.executionPlan.operation, "research.web");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream can execute a server-owned frozen plan after the selected runtime changed", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "claude" });
+  try {
+    const calls = [];
+    const result = await runSkillStream({
+      skill: "search-jobs",
+      input: "find roles",
+      repoRoot,
+      env,
+      executionPlan: {
+        operation: "research.web",
+        runtimeId: "codex",
+        installedRuntime: frozenRuntimeEvidence("/safe/codex"),
+        resolved: { model: "gpt-5.6-terra", effort: "medium" },
+      },
+      useExecutionPlanRoute: true,
+      runtimeInventory: [
+        verifiedRuntime("claude", "/safe/claude"),
+        verifiedRuntime("codex", "/safe/codex"),
+      ],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "{}", runtimeId: input.runtime.id, usage: null };
+      },
+      onEvent: () => {},
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].runtime.id, "codex");
+    assert.equal(result.executionPlan.runtimeId, "codex");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("durable AI web search hydrates verified Claude and Codex capabilities without injected inventory", async () => {
+  const capabilities = {
+    completion: true,
+    structuredOutput: true,
+    appWorkflows: true,
+    exactRead: true,
+    publicWeb: true,
+    liveActivity: true,
+    resumable: true,
+  };
+  for (const runtimeId of ["claude", "codex"]) {
+    const repoRoot = tempRepoWithSkill("search-jobs");
+    const binDir = join(repoRoot, "bin");
+    const executablePath = join(binDir, runtimeId);
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(executablePath, "#!/bin/sh\nprintf '0.149.1\\n'\nexit 0\n", "utf8");
+    chmodSync(executablePath, 0o755);
+    const env = {
+      PATH: binDir,
+      CAREERRAT_RUNTIME_SKILLS: "search-jobs",
+    };
+    const executionPlan = resolveAIExecutionPlan({
+      operation: "research.web",
+      runtimeId,
+      installedRuntime: {
+        id: runtimeId,
+        path: executablePath,
+        realPath: realpathSync(executablePath),
+        version: "0.149.1",
+        binaryFingerprint: createHash("sha256").update(readFileSync(executablePath)).digest("hex"),
+        available: true,
+        capabilities,
+      },
+    });
+    try {
+      const calls = [];
+      const result = await runSkillStream({
+        skill: "search-jobs",
+        input: "find roles",
+        repoRoot,
+        env,
+        executionPlan,
+        useExecutionPlanRoute: true,
+        toolProfile: "chat",
+        outputSchema: { type: "object", properties: {}, additionalProperties: false },
+        runInstalledRuntimeImpl: async () => {
+          throw new Error("durable public-web search must use installed streaming");
+        },
+        runInstalledRuntimeStreamImpl: async (input) => {
+          calls.push(input);
+          return { text: "{}", runtimeId, usage: null };
+        },
+        onEvent: () => {},
+      });
+
+      assert.equal(result.ok, true, runtimeId);
+      assert.equal(calls.length, 1, runtimeId);
+      assert.equal(calls[0].runtime.path, executablePath, runtimeId);
+      assert.equal(calls[0].runtime.capabilities.publicWeb, true, runtimeId);
+      assert.deepEqual(calls[0].tools, ["WebSearch", "WebFetch", "Skill"], runtimeId);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("runSkillStream applies saved provider-neutral preferences to a new operation", async () => {
+  const repoRoot = tempRepoWithSkill("search-jobs");
+  const env = { CAREERRAT_RUNTIME_SKILLS: "search-jobs" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  writeAIPreferences({ repoRoot, env, quality: "best", reasoning: "high" });
+  try {
+    const calls = [];
+    const result = await runSkillStream({
+      skill: "search-jobs",
+      input: "find roles",
+      repoRoot,
+      env,
+      aiOperation: "research.web",
+      runtimeInventory: [verifiedRuntime("codex", "/safe/codex")],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: "{}", runtimeId: "codex", usage: null };
+      },
+      onEvent: () => {},
+    });
+
+    assert.equal(calls[0].model, "gpt-5.6-sol");
+    assert.equal(calls[0].effort, "high");
+    assert.equal(result.executionPlan.requested.quality, "best");
+    assert.equal(result.executionPlan.requested.reasoning, "high");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream passes provider-neutral operation effort to the Claude SDK route", async () => {
+  const repoRoot = tempRepoWithSkill("evaluate-job");
+  try {
+    let sdkOptions;
+    const result = await runSkillStream({
+      skill: "evaluate-job",
+      input: "evaluate",
+      repoRoot,
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      },
+      aiOperation: "application.judgment",
+      onEvent: () => {},
+      loadSdk: async () => ({
+        query: ({ options }) => {
+          sdkOptions = options;
+          return fakeSdk(SAMPLE_RUN).query({ options });
+        },
+      }),
+    });
+
+    assert.equal(sdkOptions.effort, "high");
+    assert.equal(result.executionPlan.runtimeId, "anthropic-api");
+    assert.equal(result.executionPlan.resolved.quality, "best");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // buildPrompt — Lane A / R1, R4, R6: the confirm-block posture-text addition.
 // Conversational mode only (the one-shot embedded runtime has nobody to click
@@ -1146,6 +1477,8 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   assert.match(prompt, /candidate\.location.*string/i);
   assert.match(prompt, /role_buckets.*name.*priority.*titles/i);
   assert.match(prompt, /capability.*only when.*needed/i);
+  assert.match(prompt, /never.*saved job-source search/i);
+  assert.match(prompt, /site-specific Yes\/No login question/i);
   assert.match(prompt, /voluntary self-identification.*local Application defaults/i);
   assert.match(prompt, /never include it in a candidate_patch/i);
 });

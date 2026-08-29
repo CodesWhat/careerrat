@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -56,12 +58,105 @@ test("computeAllows downshifts or skips discretionary work in lean mode", () => 
   assert.ok(Object.keys(USAGE_OPERATIONS).includes("search:sweep:broad"));
 });
 
+test("computeAllows treats an explicit one-off request as authorization without changing lean breadth", () => {
+  const companyResearch = computeAllows(
+    "research:company",
+    { usage_mode: "lean" },
+    { explicit: true }
+  );
+  assert.equal(companyResearch.decision, "run");
+  assert.equal(companyResearch.allowed, true);
+  assert.equal(companyResearch.explicit, true);
+  assert.match(companyResearch.reason, /explicit request authorizes this run/i);
+
+  const broadSearch = computeAllows(
+    "search:sweep:broad",
+    { usage_mode: "lean" },
+    { explicit: true }
+  );
+  assert.equal(broadSearch.decision, "downshift");
+  assert.equal(broadSearch.allowed, true);
+  assert.equal(broadSearch.explicit, true);
+});
+
+test("modes allows accepts an explicit one-off request without changing saved mode", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-modes-explicit-"));
+  try {
+    mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+    mkdirSync(join(repoRoot, "config"), { recursive: true });
+    writeFileSync(
+      join(repoRoot, "candidate", "modes.yml"),
+      "usage_mode: lean\napplication_mode: balanced\n"
+    );
+    writeFileSync(
+      join(repoRoot, "config", "modes.schema.json"),
+      readFileSync(join(ROOT, "config", "modes.schema.json"))
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(ROOT, "src", "cli", "modes.mjs"),
+        "allows",
+        "research:company",
+        "--explicit",
+        "--json",
+        "--root",
+        repoRoot,
+      ],
+      { encoding: "utf8" }
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    const verdict = JSON.parse(result.stdout);
+    assert.equal(verdict.decision, "run");
+    assert.equal(verdict.explicit, true);
+    assert.match(readFileSync(join(repoRoot, "candidate", "modes.yml"), "utf8"), /lean/);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("search and research skills consume explicit authorization instead of asking again", () => {
+  const skills = [
+    ["research-company", "research:company"],
+    ["research-comp", "research:comp"],
+    ["research-boards", "research:boards"],
+    ["discover-companies", "research:companies"],
+    ["search-jobs", "search:sweep:broad"],
+  ];
+
+  for (const [skill, operation] of skills) {
+    const text = readFileSync(join(ROOT, ".agents", "skills", skill, "SKILL.md"), "utf8");
+    assert.match(
+      text,
+      new RegExp(`careerrat modes allows ${operation.replace(":", "\\:")} --explicit`),
+      `${skill} must pass one-off authorization to the mode verdict`
+    );
+    assert.doesNotMatch(
+      text,
+      /(?:offer to proceed only if|stop unless|proceed only on) (?:the user )?(?:explicitly )?overrides?/i,
+      `${skill} must not ask for a second override after an explicit request`
+    );
+  }
+
+  const searchJobs = readFileSync(
+    join(ROOT, ".agents", "skills", "search-jobs", "SKILL.md"),
+    "utf8"
+  );
+  assert.doesNotMatch(
+    searchJobs,
+    /unless the user explicitly\s+overrides and asks for a partial sweep/i,
+    "an explicit search request must not be blocked by a second discovery-pipeline override"
+  );
+});
+
 test("high-volume application mode promotes medium scanner matches without changing discovery", () => {
   const offer = {
     title: "Operations Manager",
     company: "Acme",
     location: "Remote US",
-    comp: "$200k - $230k",
+    baseComp: "$200k - $230k",
     bodyText:
       "Own cross-functional rollout, customer onboarding, and operational process design. ".repeat(
         8

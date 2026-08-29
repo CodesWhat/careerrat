@@ -197,6 +197,8 @@ export async function buildCoachingPlan({
   applicationId,
   invoke,
   runAI = runBoundedAI,
+  executionPlan,
+  signal,
   now = () => new Date(),
 } = {}) {
   const id = String(applicationId || "").trim();
@@ -278,9 +280,10 @@ export async function buildCoachingPlan({
               "Return only JSON for a local fit-gap coaching plan. Do not include raw prompt text.",
             outputName: "coaching_plan",
             maxTokens: 2048,
-            effort: "low",
+            ...(executionPlan ? { executionPlan } : { aiOperation: "coach.deep" }),
             root: repoRoot,
             env,
+            signal,
           }),
     });
 

@@ -203,6 +203,14 @@ describe("TopBar", () => {
 
     expect(css).toMatch(/\.chat-first-controller-alert\s*\{[^}]*pointer-events:\s*none/s);
   });
+
+  it("styles passive controller notices with the neutral palette", () => {
+    const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
+
+    expect(css).toMatch(
+      /\.chat-first-controller-alert--notice\s*\{[^}]*border-color:\s*var\(--line-cool\)[^}]*background:\s*var\(--tint-cool\)/s
+    );
+  });
 });
 
 describe("ThreadRail", () => {
@@ -522,7 +530,7 @@ describe("ChatFirstWorkspace", () => {
     const browserTab =
       browser.match(/\.cf-browser__tab\[aria-selected="true"\]\s*\{([^}]*)\}/)?.[1] || "";
     const profileTab =
-      profile.match(/\.cf-profile__tabs button\[aria-current="page"\]\s*\{([^}]*)\}/)?.[1] || "";
+      profile.match(/\.cf-profile__tabs button\[aria-selected="true"\]\s*\{([^}]*)\}/)?.[1] || "";
 
     expect(foundation).toMatch(/--gray-selected:\s*#474a4f/);
     expect(foundation).toMatch(/--cf-selection-fill:\s*var\(--gray-selected\)/);

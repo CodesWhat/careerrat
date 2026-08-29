@@ -1026,6 +1026,18 @@ test("forced answer regeneration preserves three prior application answers and g
       },
     ],
   });
+  assert.deepEqual(
+    readApp(repoRoot, "app-packet").packetManifest.questions.answerable.find(
+      (question) => question.id === "q-travel"
+    ),
+    {
+      id: "q-travel",
+      label: "Would you be willing to travel?",
+      type: "radio",
+      required: true,
+      options: ["Yes", "No"],
+    }
+  );
   const seenQuestionIds = [];
   const routes = mountDirectRoutes(repoRoot, {
     packetAnswersCall: async (options) => {

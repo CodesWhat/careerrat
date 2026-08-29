@@ -19,11 +19,17 @@ metadata:
 
 ## AI Web Search mode
 
-Activated when the kickoff input is JSON containing `"mode": "ai-web-search"` (a `prompts: [{id, text}]` array and a `candidate` context object arrive alongside it in that same input). When this mode is active, run this section instead of STEP 0 through STEP 8 above — it is a separate, read-only execution path through the same skill, not a variant of the file-writing sweep.
+Do not stop after the first viable lead while search or fetch budget remains. Keep looking for distinct active postings until the bounded search is genuinely exhausted or the practical result goal below is met, then stop immediately and return.
+
+Activated when the kickoff input is JSON containing `"mode": "ai-web-search"` (a `prompts: [{id, text}]` array, a `candidate` context object, and a server-owned `search_plan` arrive alongside it in that same input). When this mode is active, run this section instead of STEP 0 through STEP 8 above — it is a separate, read-only execution path through the same skill, not a variant of the file-writing sweep.
 
 **Tool surface is restricted to Read, Glob, Grep, WebFetch, WebSearch, and Skill.** No Bash, no Write, no Edit, no session browser, and no `careerrat`/npm CLI commands are available in this mode — the embedded runtime enforces this at the tool-allowlist level, so do not attempt any of them. Everything STEP 0-8 above does through a CLI command, a file write, or the session browser is out of scope here; see "Skip" below.
 
-For each entry in `prompts`, run one or more `WebSearch` calls using that prompt's text (or a close paraphrase) as the query. For every promising result — a real job-posting URL, not an aggregator/search-results page — run `WebFetch` on the URL to pull the actual JD text. Prefer postings you can read directly; drop a result rather than guessing at a JD you couldn't fetch.
+The kickoff `search_plan` is authoritative for every initial, freshness-recovery, and useful-set top-up turn. Run its `query_hints` exactly in the supplied order; do not paraphrase them, retry them, or invent another query. Its per-turn limits are hard stops: use at most 4 `WebSearch` calls per saved prompt and at most 8 job-posting `WebFetch` calls per saved prompt. Count every attempted call before running it. A failed search or fetch consumes that call's budget. Never start a call that would exceed either limit. Stop immediately when every query hint is consumed, the practical result goal is met, or either relevant budget limit is reached, and return the required JSON.
+
+The broad hints split the selected titles into location-preserving queries. The remaining hints are server-derived configured-source, employer-owned career, or direct-ATS queries built only from the selected configured titles, location posture, and bounded host-only `source_hints`. The `source_hints` are advisory inputs to those supplied queries only; never use them to invent another query or search. Search broadly before spending the fetch budget, with a practical goal of 3-5 viable leads per prompt when the open web has them. Keep the candidate set diverse across at least two different source hosts whenever two viable hosts exist, and return no more than one candidate from the same third-party host in one prompt turn. Third-party boards are useful discovery sources: resolve their employer-and-title leads to an employer-owned or direct ATS posting when one is available. Never emit an aggregator search/results page. Every returned URL must identify one posting, never a generic search, category, location, career-hub, or redirect-wrapper page. An employer's own current openings page may be kept only when the named role is visibly present there. For up to eight promising posting URLs, use `WebFetch` to improve the capture. When a fetched page is archived, expired, gone, mismatched, or for a different job, requisition, or posting, discard it and use another lead already returned by the supplied query hints instead of searching again. If a posting-specific third-party URL still needs a browser session or is browser-blocked after a direct-posting resolution attempt, return the title, company, exact URL, visible location/comp/date, and factual search-result evidence with `body_text: null` and `body_partial: true`; CareerRat preserves it as an explicitly unverified partial lead. Reject an expired redirect. Drop generic search, category, location, and career-hub pages; unsafe or private URLs; results that lack a specific role and employer; postings whose canonical evidence names a different job; hard-filter violations; and duplicates. A saved `minimum_base` screens guaranteed annual base pay only. A saved `minimum_annual_earnings` screens comparable annual cash earnings from wages, tips, commission, and recurring cash bonuses. Equity and benefits never count toward either floor. Unknown or unposted pay stays unverified.
+
+Every successfully fetched posting-specific URL must be accounted for in the same JSON reply. Keep it in `roles[]`, or put that exact URL in `rejected_postings[]` with one short factual reason such as expired, wrong role, wrong location, duplicate, or below a hard requirement. Never silently drop a fetched exact posting. `rejected_postings[]` is bounded to the eight-fetch turn limit. If the server asks for a correction because a fetched URL is missing, do not run WebSearch, WebFetch, or any other tool again; return the complete corrected JSON only.
 
 Score every posting you keep using the **STEP 3 — Coarse triage** rules above, verbatim — the same `fitScore`/`fitBucket`/`fitBasis`/`ruleFlags`/one-line-reason shape, no new rules invented here. Score against the `candidate` context object in the kickoff input (role buckets with their fit/down signals, top-level `keep_signals`/`cut_signals`, excluded companies, comp floor, location posture, work authorization) rather than reading `candidate/targeting.yml` directly — `candidate/targeting.yml`, `candidate/profile.yml`, and the learnings inputs STEP 3 also lists are not reachable in this mode (no CLI, no tracker read). The `candidate` context object additionally carries compact `application_limits[]` (`{company, status, reapply_after}`, only companies with a `caution`/`blocked` status) and `company_history[]` (`{company, flags}`, flags drawn from `active`/`recent-rejection`/`prior-sourced`) summaries when the server had tracker data to build them — use those directly to apply `app-limit-*` and `company-history-*`, the same way STEP 3 does from a live tracker read. `oe-candidate` still requires you to confirm all three of its conditions from the posting itself plus the given `candidate` context. If a flag's underlying data isn't present in the context (an empty or absent `application_limits`/`company_history`, or no learnings), omit that flag rather than guessing.
 
@@ -31,7 +37,8 @@ Score every posting you keep using the **STEP 3 — Coarse triage** rules above,
 
 Finish with **exactly one** fenced ` ```json ` block matching `config/ai-web-search.schema.json` and nothing else — no prose before or after the fence, since the server is a machine reading exactly that one block. Shape:
 
-- `roles[]` — one entry per posting kept, each with `company`, `title`, `url`, `fit_score`, `fit_bucket`, `fit_basis`, `rule_flags`, `source_evidence` (required), plus whichever of `location`, `comp_text`, `posted_at`, `body_text`, `body_partial` you actually have.
+- `roles[]` — one entry per posting kept, each with `company`, `title`, `url`, nullable `comp_text`, nullable `base_comp_text`, nullable `annual_earnings_text`, `fit_score`, `fit_bucket`, `fit_basis`, `rule_flags`, and `source_evidence` (required), plus whichever of `location`, `posted_at`, `body_text`, and `body_partial` you actually have. Put guaranteed base pay only in `base_comp_text`; put annual cash earnings including quantified tips or commissions only in `annual_earnings_text`; use `comp_text` only for compensation that can't be assigned safely to one basis. Always return all three compensation keys, using `null` when the posting doesn't supply that basis. `source_evidence` is the concise factual reason this specific result is credible and relevant, not a guessed JD. Use `body_partial: true` whenever `body_text` is absent or incomplete.
+- `rejected_postings[]` — up to eight successfully fetched exact posting URLs that are not in `roles[]`, each as `{url, reason}`. Use the exact fetched URL and one short factual reason. Return an empty array when every successful exact fetch is kept or no exact posting was fetched.
 - `queries_run[]` — `{prompt_id, query, status, error?}` for every `WebSearch` call you actually ran, so the server can report exact search coverage back to the user. Use `status: "completed"` when the query returned normally. Use `status: "failed"` and a short factual `error` when the search call failed; never hide a failed query or report it as completed.
 
 ## STEP 0 — Prerequisites
@@ -39,7 +46,7 @@ Finish with **exactly one** fenced ` ```json ` block matching `config/ai-web-sea
 Read all gate files before touching anything else:
 
 1. `candidate/targeting.yml` — `role_buckets`, `keep_signals`, `cut_signals`, `excluded_companies`, `fit_bands`, `degree_policy`
-2. `candidate/profile.yml` — `compensation.minimum_base`, `location.*`, `candidate.domain` — used for salary floor and location triage. **Do not read or use `compensation.current_base` for any purpose in this skill.**
+2. `candidate/profile.yml` — `compensation.minimum_base`, `compensation.minimum_annual_earnings`, `location.*`, `candidate.domain` — used for guaranteed-base or annual-cash floor triage. Annual cash earnings may include wages, tips, commission, and recurring cash bonuses, but never equity or benefits. **Do not read or use `compensation.current_base` for any purpose in this skill.**
 3. Application limits — in DB mode read `careerrat data candidate get --json` (`application-limits.companies[]`); in legacy mode read `candidate/application-limits.yml`. Build a blocked/capped company set now so the scan can flag them at triage time.
 4. `workspace/tracker.json` — existing `applications[]` and `sourced[]`. Build company-history sets now: active applications, recent rejections, prior cuts/closed sourced rows, and exact req/company-role duplicates. Company history is not the same as an application-limit block, but it must affect warnings and priority.
 5. For a classifiable role, read its learnings via `careerrat learnings read "<role>"` — the helper resolves the family from targeting.yml and skips silently when no file exists. Improves triage scoring.
@@ -54,9 +61,14 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 ```
 
 If `doctor` says the next discovery step is `setup-searches`, `research-boards`, or
-`discover-companies`, stop and run that owning skill first unless the user explicitly
-overrides and asks for a partial sweep. If source config is missing or has no enabled
-entries, stop and run `setup-searches` first:
+`discover-companies`, run that owning skill first during an automatic pipeline handoff.
+When the user explicitly asked to search and at least one enabled source exists, their
+request already authorizes a partial sweep of the configured sources. Run it without a
+second override question. If source config is missing or has no enabled entries, run
+`setup-searches` as part of the same request, then continue the sweep without another
+handoff. A disabled login-backed source is still actionable: start the sweep so its
+contextual Yes/No login question appears. If setup still produces no runnable source,
+settle honestly with the setup recovery instead of inventing a permission gate:
 
 > **Available portals:** the baseline auto-seeds domain-appropriate sources, and
 > `careerrat searches --providers` lists all 77 public deterministic adapters.
@@ -73,7 +85,7 @@ If sources are present but haven't been derived from targeting yet, optionally r
 careerrat searches --from-targeting
 ```
 
-Privacy gate: `profile.compensation.current_base` is private. It must not appear in any scan output, intake file, tracker note, or JD frontmatter produced by this skill. Use `minimum_base` / `target_base` / `expected_base` as the comp floor only.
+Privacy gate: `profile.compensation.current_base` is private. It must not appear in any scan output, intake file, tracker note, or JD frontmatter produced by this skill. Use `minimum_base` for guaranteed base and `minimum_annual_earnings` for annual cash from wages, tips, commission, and cash bonuses. Equity and benefits do not clear either one.
 
 Mode gate: discovery stays broad/recall-oriented. `application_mode` affects how scanner
 ratings are promoted after scoring (`high-volume` queues more medium fits; `selective`
@@ -81,11 +93,13 @@ keeps medium fits in review), not which plausible roles are discovered. Before a
 multi-source sweep, run:
 
 ```
-careerrat modes allows search:sweep:broad
+careerrat modes allows search:sweep:broad --explicit
 ```
 
-If it returns `downshift`, run fewer enabled sources or a narrower recency window and state
-that lean usage mode caused the downshift. If it returns `run`, proceed normally.
+Use `--explicit` when the user asked for this search. Their request authorizes this one
+run and must not trigger another override question or change their saved usage mode. For
+an automatic or background sweep, omit `--explicit`. If the verdict is `downshift`, run
+fewer enabled sources or a narrower recency window. If it is `run`, proceed normally.
 
 ## STEP 1 — Full sweep
 
@@ -123,35 +137,15 @@ These drive the bundled browser session (Layer 2 per `docs/BROWSER.md`). In DB w
 into `workspace/jobs/*.md` with `artifacts.jd` mirrored onto the row. Without `--ingest`, they
 are snapshot-only diagnostics/fallback artifacts. Use them as a manual fallback, not a first step.
 
-### Authenticated browser sources (M12 Phase 2)
+### Login-backed browser sources
 
-Sources with `source_type: "browser"`, `auth: true`, and a `platform` field (one of
-`linkedin`, `indeed`, `wellfound`, `glassdoor`) are authenticated browser sources —
-logged-in saved-search or results pages that require a session. These default to
-`enabled: false` and are never run automatically.
+Sources with `source_type: "browser"`, `auth: true`, and a `platform` field use that site's saved browser session. There is no separate search permission matrix.
 
-**Two gates, both required.** For each such source, run it only if:
+When an enabled source reaches a login wall, ask exactly one contextual question in chat: “Do you want to log into LinkedIn so I can use it?” Render Yes and No choices and accept the same words as text. Yes opens the source's exact saved-search URL in the visible CareerRat browser. No skips that source and continues the rest of the sweep. Keep the decision durable so navigation does not duplicate the prompt or lose the running search.
 
-1. The source's own `enabled` is `true` in source config, AND
-2. `careerrat automation status --json` shows `authenticated_search` `allowed: true` for that source's `platform`.
+For a disabled authenticated source the user explicitly asks to use, ask the same question at that point, then enable only that source on Yes. Do not redirect the user to Settings and do not require capability, platform, terms, or consent switches.
 
-The `allowed` field encodes the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` (capability global switch · per-platform switch · per-platform ToS consent). Never re-derive that predicate here.
-
-**If either gate is not met — skip and explain how to opt in. Do not open a browser.**
-
-To enable a source:
-
-1. Read that platform's terms of service yourself.
-2. Record ToS consent: `careerrat automation consent <platform> --write`
-3. Enable the capability global switch: `careerrat automation enable authenticated_search --write`
-4. Enable for the specific platform: `careerrat automation enable authenticated_search <platform> --write`
-5. Set `enabled: true` for the source entry through the owning source-config command in DB mode,
-   or in `config/search-sources.yml` in legacy mode.
-6. Verify: `careerrat automation status --json`
-
-Then stop for that source and continue with the next.
-
-**If both gates pass — scrape via the session browser.**
+After the session is ready, scrape via the session browser.
 
 Navigate to the source's saved-search URL in the session browser (Layer 3 per
 `docs/BROWSER.md`). Keep the provider on `auto` unless the user explicitly changes it;
@@ -159,7 +153,7 @@ CareerRat resolves the current session browser and reuses its signed-in session.
 Snapshot or read the current page state before each action — never rely on hardcoded
 selectors. Drive the live DOM turn-by-turn.
 
-Scrape the visible postings (title, company, URL, posted date where available). Then feed every scraped posting through the **same** existing pipeline this skill already uses for other sources: intake → dedupe against tracker and `workspace/jobs/` → liveness check → coarse triage (STEP 3) → JD save (STEP 4) → watermark (STEP 5). Do not invent a parallel pipeline.
+Scrape the visible postings (title, company, URL, posted date where available), then open each exact posting in that same session and capture the full visible JD before leaving the authenticated browser path. Preserve an unreadable but posting-specific result as `bodyPartial: true` for later Evaluate; drop it only when its URL is unsafe or the page reaches an auth challenge. Feed every scraped posting through the **same** existing pipeline this skill already uses for other sources: intake → dedupe against tracker and `workspace/jobs/` → liveness check → coarse triage (STEP 3) → JD save (STEP 4) → watermark (STEP 5). A session-captured full body is already canonical input and must not be fetched again over public HTTP. Do not invent a parallel pipeline.
 
 **LinkedIn URL-filter recipe (keep each saved search to ~1 page).** Encode the candidate's hard gates directly in the saved-search URL so the platform pre-filters server-side and you read one page per keyword instead of paging through noise. Build/maintain the `url:` of each `platform: linkedin` source in source config from these query params:
 
@@ -171,7 +165,7 @@ Scrape the visible postings (title, company, URL, posted date where available). 
 
 Verify the salary-band integer renders the expected floor on the live page before trusting it (LinkedIn occasionally renumbers bands). When a term still returns multiple pages after these filters, tighten `f_TPR` rather than paging.
 
-**Safety:** halt immediately and ask the user if you encounter a captcha, a 2FA prompt, a login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge. Keep all scraped pages and screenshots under `workspace/` only. Never run an authenticated source on a schedule — always user-initiated with the agent in the loop.
+**Safety:** halt immediately and ask the user if you encounter a captcha, a 2FA prompt, a login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge. Keep all scraped pages and screenshots under `workspace/` only. Once the user enables a source, it participates in normal searches like every other enabled source.
 
 ## STEP 2 — Incremental delta (if a prior snapshot exists)
 
@@ -280,6 +274,7 @@ If during this session the user said something like "skip \<Company\> from now o
 | "add \<signal\> as a cut signal" | `careerrat gate cut-signal "<signal>" --write` (write-and-report if unambiguous) |
 | "cap \<Company\> at N apps" | `careerrat data candidate limits upsert --data '<json row>'` in DB mode (per-company caps/cooldowns); legacy mode routes to `configure` — never hand-edit `candidate/application-limits.yml` |
 | "below $X is a no" | `careerrat gate comp-floor <N> --write --confirm` (confirm-first — changes comp floor) |
+| "I need to make $X a year including tips/commission" | `careerrat gate comp-annual-floor <N> --write --confirm` (confirm-first — changes annual cash earnings floor; excludes equity and benefits) |
 
 After writing, echo the CLI's confirmation. `careerrat gate` writes SQLite in DB mode and legacy YAML only in legacy mode; never hand-edit `candidate/*.yml`.
 
@@ -366,13 +361,12 @@ coverage before another refresh.
 
 ## Rules — authenticated browser sources
 
-- **Both gates required.** Never scrape an authenticated source unless the source's `enabled` is `true` AND `careerrat automation status --json` shows `authenticated_search` `allowed: true` for its platform. If either is false, skip and explain the opt-in steps; do not open a browser.
-- **`allowed` encodes the three-part AND.** The `allowed` field from `mayRun()` in `src/core/automation/consent.mjs` is the single predicate (capability global · platform · ToS consent). Never re-derive it in prose.
+- **One point-of-use choice.** Ask the site-specific Yes/No login question only when that source needs it. Yes opens that source; No skips it while the sweep continues. Never replace this with a Settings checklist.
 - **Same pipeline, no parallel track.** Postings scraped from authenticated sources flow through the same intake → dedupe → liveness → triage pipeline as every other source. No special path.
-- **User-initiated only. Never on a schedule.**
-- **Halt on any auth challenge** (captcha, 2FA, login wall, unexpected interstitial). Never bypass.
+- **Capture while the session can read it.** Open each exact result in the same session and carry its full visible JD into persistence. Never throw that body away and try to recover a login-only posting over public HTTP.
+- **Visible auth challenges stay with the user.** Ask the point-of-use Yes/No question for a login wall. Stop for CAPTCHA, 2FA, or an unexpected account-selection/interstitial screen. Never bypass them.
 - **Local-only.** Scraped pages and screenshots stay under `workspace/`. Nothing goes outbound.
 - **Tool-agnostic browser prose.** Keep the provider on `auto` and use the available
   session browser. Never ask the user to choose a CLI, extension, or browser driver, and
   never name an MCP namespace or vendor tool.
-- **Domain-neutral.** No hardcoded platforms beyond what source config and `consent.mjs` define. No bracketed placeholder tokens — if a detail is unknown, omit or go generic.
+- **Domain-neutral.** No hardcoded platforms beyond what source config defines. No bracketed placeholder tokens — if a detail is unknown, omit or go generic.

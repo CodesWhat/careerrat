@@ -107,3 +107,114 @@ test("desktop DMG release stops at the first failed container command", async ()
   );
   assert.equal(calls.length, 1);
 });
+
+test("final release smoke mounts the exact canonical DMG read-only and detaches it", async () => {
+  const release = await import("../apps/desktop/mounted-release-acceptance.mjs").catch(() => ({}));
+  assert.equal(typeof release.verifyMountedReleaseDmg, "function");
+  const calls = [];
+
+  const result = await release.verifyMountedReleaseDmg({
+    dmgPath: "/dist/CareerRat-0.16.6-arm64.dmg",
+    expectedVersion: "0.16.6",
+    run(command, args) {
+      calls.push([command, args]);
+      if (command === "hdiutil" && args[0] === "attach") {
+        return {
+          status: 0,
+          stdout:
+            "<plist><dict><key>system-entities</key><array><dict><key>mount-point</key><string>/Volumes/CareerRat</string></dict></array></dict></plist>",
+          stderr: "",
+        };
+      }
+      if (command === "/usr/libexec/PlistBuddy") {
+        return { status: 0, stdout: "0.16.6\n", stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    },
+    listDirectory(path) {
+      assert.equal(path, "/Volumes/CareerRat");
+      return ["Applications", "CareerRat.app"];
+    },
+    smoke({ appPath }) {
+      calls.push(["smoke", appPath]);
+      return "SMOKE OK http://127.0.0.1:47777";
+    },
+    createDataDir() {
+      return "/tmp/careerrat-mounted-smoke";
+    },
+    removeDataDir(path) {
+      calls.push(["remove-data", path]);
+    },
+  });
+
+  assert.equal(result.appPath, "/Volumes/CareerRat/CareerRat.app");
+  assert.deepEqual(calls[0], [
+    "hdiutil",
+    ["attach", "-readonly", "-nobrowse", "-plist", "/dist/CareerRat-0.16.6-arm64.dmg"],
+  ]);
+  assert.ok(calls.some(([command]) => command === "codesign"));
+  assert.ok(calls.some(([command]) => command === "spctl"));
+  assert.ok(calls.some(([command]) => command === "smoke"));
+  assert.deepEqual(calls.at(-1), ["hdiutil", ["detach", "/Volumes/CareerRat"]]);
+});
+
+test("mounted release smoke always detaches and rejects duplicate app bundles", async () => {
+  const release = await import("../apps/desktop/mounted-release-acceptance.mjs").catch(() => ({}));
+  assert.equal(typeof release.verifyMountedReleaseDmg, "function");
+  const calls = [];
+  await assert.rejects(
+    release.verifyMountedReleaseDmg({
+      dmgPath: "/dist/CareerRat-0.16.6-arm64.dmg",
+      expectedVersion: "0.16.6",
+      run(command, args) {
+        calls.push([command, args]);
+        if (args[0] === "attach") {
+          return {
+            status: 0,
+            stdout: "<key>mount-point</key><string>/Volumes/CareerRat</string>",
+            stderr: "",
+          };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+      listDirectory() {
+        return ["CareerRat.app", "Copies/CareerRat.app"];
+      },
+      createDataDir() {
+        return "/tmp/careerrat-mounted-smoke";
+      },
+      removeDataDir() {},
+    }),
+    /exactly one CareerRat\.app/i
+  );
+  assert.deepEqual(calls.at(-1), ["hdiutil", ["detach", "/Volumes/CareerRat"]]);
+});
+
+test("mounted release smoke detaches even when scratch setup fails", async () => {
+  const { verifyMountedReleaseDmg } = await import(
+    "../apps/desktop/mounted-release-acceptance.mjs"
+  );
+  const calls = [];
+  await assert.rejects(
+    verifyMountedReleaseDmg({
+      dmgPath: "/dist/CareerRat-0.16.6-arm64.dmg",
+      expectedVersion: "0.16.6",
+      run(command, args) {
+        calls.push([command, args]);
+        if (args[0] === "attach") {
+          return {
+            status: 0,
+            stdout: "<key>mount-point</key><string>/Volumes/CareerRat</string>",
+            stderr: "",
+          };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+      createDataDir() {
+        throw new Error("scratch unavailable");
+      },
+    }),
+    /scratch unavailable/
+  );
+  assert.deepEqual(calls.at(-1), ["hdiutil", ["detach", "/Volumes/CareerRat"]]);
+});

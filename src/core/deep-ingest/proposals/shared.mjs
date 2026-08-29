@@ -187,6 +187,7 @@ export function createDeepIngestProposalBuilder({
     env = process.env,
     call,
     signal,
+    executionPlan,
     runBoundedAI = defaultRunBoundedAI,
   } = {}) {
     if (sourceNeedsGap(source)) {
@@ -220,6 +221,7 @@ export function createDeepIngestProposalBuilder({
       env,
       call: observedCall,
       signal,
+      executionPlan,
       system: systemPromptForLane(promptLane),
       messages: [
         {

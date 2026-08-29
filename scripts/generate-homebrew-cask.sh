@@ -11,8 +11,7 @@
 #
 # The tap PR itself is still opened by hand, see docs/RELEASE.md's
 # "Updating the Homebrew Cask" section. This only replaces the hand-edited
-# version/sha256 steps, closing the "no cask generator" gap recorded at
-# docs/ROADMAP.md:315-318.
+# version/sha256 steps.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

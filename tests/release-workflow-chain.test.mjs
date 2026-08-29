@@ -101,6 +101,7 @@ test("desktop release blocks upload on a signed native N-to-N+1 acceptance trans
   const acceptanceAt = macJob.indexOf("- name: Verify native N-to-N+1 update");
   const removeSigningAt = macJob.indexOf("- name: Remove signing material from the runner");
   const uploadAt = macJob.indexOf("- name: Upload the macOS release and updater feed");
+  const mountedAt = macJob.indexOf("- name: Mount and smoke the canonical notarized DMG");
 
   assert.ok(acceptanceAt > buildAt, "native acceptance must use the final signed N+1 app");
   assert.ok(
@@ -108,6 +109,11 @@ test("desktop release blocks upload on a signed native N-to-N+1 acceptance trans
     "the separately signed N fixture needs the same signing identity"
   );
   assert.ok(uploadAt > acceptanceAt, "no release asset may upload before native acceptance passes");
+  assert.ok(mountedAt > acceptanceAt && uploadAt > mountedAt);
+  assert.match(
+    macJob.slice(mountedAt, uploadAt),
+    /npm --workspace apps\/desktop run verify:mounted/
+  );
   assert.match(
     macJob.slice(acceptanceAt, removeSigningAt),
     /npm --workspace apps\/desktop run verify:native-update/
@@ -150,6 +156,9 @@ test("desktop release publishes only after the complete macOS updater feed is at
   );
   assert.ok(dispatchAt > publishAt, "downstream workflows must start only after publication");
   assert.match(publishJob, /version="\$\{TAG#v\}"/);
+  assert.match(publishJob, /canonical_dmg="CareerRat-\$version-arm64\.dmg"/);
+  assert.match(publishJob, /dmg_count[\s\S]*-ne 1/);
+  assert.match(publishJob, /unexpected_dmg_count[\s\S]*-ne 0/);
   assert.match(
     publishJob,
     /"\$mac_zip_name" != \*-"\$version"-\*\.zip/,
@@ -168,7 +177,7 @@ test("desktop release publishes only after the complete macOS updater feed is at
   assert.match(publishJob, /GITHUB_TOKEN[\s\S]*workflow_dispatch/i);
 });
 
-test("macOS release upload requires one version-matching ZIP and latest-mac metadata", async () => {
+test("macOS release upload requires exactly the canonical DMG, one ZIP, and metadata", async () => {
   const upload = await readFile(
     new URL("../apps/desktop/scripts/release-upload.mjs", import.meta.url),
     "utf8"
@@ -176,7 +185,7 @@ test("macOS release upload requires one version-matching ZIP and latest-mac meta
 
   assert.match(upload, /name\.endsWith\("\.zip"\)/);
   assert.match(upload, /latest-mac\.yml/);
-  assert.match(upload, /matchingZips\.length !== 1/);
+  assert.match(upload, /selectMacReleaseArtifacts/);
   assert.match(upload, /filesToUpload = \[metadataPath, matchingZips\[0\]/);
   assert.match(upload, /zipBlockmap/);
   assert.doesNotMatch(
@@ -185,6 +194,28 @@ test("macOS release upload requires one version-matching ZIP and latest-mac meta
     "post-builder DMG blockmaps are stale after container signing and stapling"
   );
   assert.doesNotMatch(upload, /--clobber/);
+});
+
+test("release artifact selection rejects extra or renamed DMGs before upload", async () => {
+  const { selectMacReleaseArtifacts } = await import("../apps/desktop/release-artifacts.mjs").catch(
+    () => ({})
+  );
+  assert.equal(typeof selectMacReleaseArtifacts, "function");
+  const complete = [
+    "CareerRat-0.16.6-arm64.dmg",
+    "CareerRat-0.16.6-arm64-mac.zip",
+    "CareerRat-0.16.6-arm64-mac.zip.blockmap",
+    "latest-mac.yml",
+  ];
+  assert.deepEqual(selectMacReleaseArtifacts({ names: complete, version: "0.16.6" }), complete);
+  assert.throws(
+    () =>
+      selectMacReleaseArtifacts({
+        names: [...complete, "CareerRat-copy-0.16.6-arm64.dmg"],
+        version: "0.16.6",
+      }),
+    /exactly CareerRat-0\.16\.6-arm64\.dmg/i
+  );
 });
 
 test("desktop release waits for every dispatched workflow and propagates child failures", async () => {

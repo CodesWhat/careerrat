@@ -24,10 +24,15 @@
 
 ## Rate. Apply. Track
 
-CareerRat reads the full job posting against your location, compensation floor,
+CareerRat reads the full job posting against your location and compensation floor,
 fit, and dealbreakers before it recommends anything. It builds resumes, cover
 letters, and screening answers from your real experience, then fills supported
 application forms for your review. It never presses the final Submit button.
+
+Pay rules work for salaried, hourly, tipped, and commissioned jobs. You can set a
+guaranteed base floor, a minimum for annual cash earnings that includes wages,
+tips, commission, and cash bonuses, or both. Equity and benefits never count as
+cash earnings.
 
 The search stays together in one local workspace: conversations, jobs, recruiter
 threads, missions, files, follow-ups, interviews, and outcomes. You can leave a
@@ -43,7 +48,7 @@ The current macOS release is a signed and notarized Apple Silicon app for macOS
 1. [Download the latest `.dmg`](https://github.com/CodesWhat/careerrat/releases/latest).
 2. Open CareerRat.
 3. Choose Claude Code or Codex if it is ready. If neither is installed, CareerRat
-   walks you through getting Claude, installing it inside the app, and signing in.
+   offers in-app Claude Code setup and the official OpenAI Codex setup guide.
 
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) and
 [OpenAI Codex](https://developers.openai.com/codex/cli/) are CareerRat's only
@@ -53,16 +58,26 @@ directly and never falls back to or silently switches providers. A runtime
 becomes `Ready` only after local availability, authentication, and its readiness
 check pass.
 
-v0.16.5 is the current public release. Its signed, notarized, and stapled Mac
-DMG, updater ZIP, update feed, and SBOM are on GitHub; `careerrat@latest` is
-0.16.5 on npm; the Homebrew cask is 0.16.5; and the installed app reports
-version 0.16.5, passes Gatekeeper, launches cleanly, and reports that it is up to
-date. The release also passed a real signed 0.16.4-to-0.16.5 in-app update.
+The AI controls use the same product language for either runtime. **Automatic**
+chooses by task, keeping Paul on the strongest coaching path while routine
+search and extraction work stays efficient. **Faster**, **Balanced**, and
+**Best** let you choose the overall quality level, while **Thinking depth**
+controls how long the selected runtime reasons. The setting never ranks Claude
+Code against OpenAI Codex or silently changes providers.
 
-v0.16.5 preserves plain-English recovery, remote and office-day limits,
-validated application entry points, and signed in-app Mac updates from v0.16.4.
-It also closes the remaining raw-error paths in guided installation, expanded
-diagnostics, browser-workflow cards, Search status, and browser setup.
+CareerRat gives Claude Code and Codex the same complete workflow, keeps long
+searches and application missions durable across navigation and restart, and
+turns finite questions into normal clickable choices that can also be answered
+in text. Search combines built-in boards with AI open-web discovery, keeps AI
+leads clearly unverified, then checks readable full postings against location,
+office-day, compensation, seniority, eligibility, and fit rules before treating
+them as verified.
+
+Application questions now stay with the exact job thread. CareerRat can prepare
+a reviewed form through the final safe step, but CAPTCHA, sensitive attestations,
+uncertainty, and the final Submit control always stay with the candidate. The Mac
+app checks for signed updates, downloads them in place, and waits for an explicit
+**Restart and install**.
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
 QA. A public Windows installer will ship only after SignPath Foundation signing
@@ -75,16 +90,16 @@ resizable, maximizable, and supports full screen, with a minimum working size of
 
 ## First run
 
-If CareerRat does not find Claude Code or Codex, it gives you one recommended
-Claude path in plain English. Claude Code needs a paid Claude plan. Pro is
-enough; Max provides more usage. You can
+If CareerRat does not find Claude Code or Codex, it shows both supported choices
+in plain English. CareerRat can install Claude Code inside the app. Claude Code
+needs a paid Claude plan. Pro is enough; Max provides more usage. You can
 [get Claude through Scott's referral](https://claude.ai/referral/rOLHwxlsfA),
 then click **Install inside CareerRat**. The app runs Anthropic's official
 installer, shows its progress in the CareerRat window, and reports a clear retry
 if it fails. Click **Sign in**, finish in the browser, and return to CareerRat.
 The app checks for Claude in the background and also keeps a visible **Check
-setup** button. Already use Codex? Expand **I already use another AI tool**
-instead.
+setup** button. To use Codex, expand **Set up OpenAI Codex instead** and follow
+its official install guide.
 
 Choose the available AI engine, then drop a PDF, DOCX, image, or text resume into
 the conversation, or just start talking. Paul fills in “What Paul knows” beside
@@ -107,6 +122,28 @@ prepare an interview, or pick up a saved thread. Tool work appears as compact
 activity rows in the conversation, so you can see what it is reading, searching,
 and writing without a wall of approval prompts.
 
+## Search and Evaluate
+
+CareerRat combines built-in public job-board and ATS sources with broad AI
+open-web discovery. Source setup selects the applicable built-in sources from
+the candidate's saved roles. CareerRat then discovers additional specialist
+boards and employer pages for that search. AI search can also keep a credible
+role from a board, employer page, or aggregator when automated fetching cannot
+read the whole job description.
+
+When a saved site is added or first used and login is needed, CareerRat asks “Do
+you want to log into LinkedIn so I can use it?” with Yes and No buttons. Yes
+opens that exact saved search in CareerRat's visible browser. No skips the site
+and keeps searching everywhere else. There is no separate search permission or
+Settings checklist.
+
+Those partial discoveries are not presented as proven jobs. Search labels them
+**AI · unverified** and preserves the visible title, company, location, pay,
+date, link, and search evidence. **Evaluate** then verifies liveness, captures
+the full posting through the public or supervised browser path, and applies the
+candidate's real location, compensation, eligibility, and fit rules before any
+tailoring or application work begins.
+
 ## The workspace
 
 The app uses one desktop shell with three working areas:
@@ -124,6 +161,11 @@ user gates. Deep ingest gets its own durable thread. Mock interviews preserve
 the session and debrief. “Needs You” groups actions such as reviewing several
 prepared applications into one focused handoff.
 
+Searches and intake continue in the background when you navigate to another
+view. Returning to the view or reloading restores the durable run status. If
+the app or computer stops mid-run, CareerRat marks the interrupted work for a
+clear retry instead of reporting a false success.
+
 CareerRat stores canonical candidate state, conversations, missions, mock
 sessions, and pipeline records in local SQLite. Job descriptions, research,
 interview dossiers, resumes, and exports remain readable Markdown, PDF, or other
@@ -136,14 +178,17 @@ the [chat-first runtime](docs/CHAT_FIRST_RUNTIME.md).
 - Every job is read in full before tailoring or application work begins.
 - Generated claims must trace back to candidate evidence. Missing facts are
   asked for or left out, never invented.
-- Authenticated browser, mail, calendar, and message access is opt-in when a
-  specific workflow needs it.
+- A saved job site asks the plain Yes/No login question above when it is added or
+  first used and login is needed. Other private-account browser, mail, calendar,
+  and message actions keep their own contextual controls.
 - Application automation fills safe, confirmed fields and can attach the
-  generated résumé. Voluntary demographic and self-identification questions stay
-  blank by default. In **Profile > Application defaults**, you can leave them
-  blank or choose the form's decline option when one is available. CareerRat
-  never infers an answer. Exact sensitive answers stay hidden in this editor,
-  and the setting never goes through Paul.
+  generated résumé. When an application needs a candidate answer, the job thread
+  shows that question in its review panel and saves the response against the
+  exact form question before preparation resumes. Voluntary demographic and
+  self-identification questions stay blank by default. In **Profile > Application defaults**,
+  you can leave them blank or choose the form's decline option when
+  one is available. CareerRat never infers an answer. Exact sensitive answers
+  stay hidden in this editor, and the setting never goes through Paul.
 - CAPTCHA, two-factor authentication, sensitive attestations, uncertainty, and
   final submission stop for the user. CareerRat never presses Submit.
 - Durable state changes go through the same local domain layer whether they came
@@ -269,9 +314,10 @@ npm link
 careerrat start claude
 ```
 
-The repository convention is in [AGENTS.md](AGENTS.md). Architecture, release,
-and product direction live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[docs/RELEASE.md](docs/RELEASE.md), and [docs/ROADMAP.md](docs/ROADMAP.md).
+The repository convention is in [AGENTS.md](AGENTS.md). Public architecture and
+release documentation live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+[docs/RELEASE.md](docs/RELEASE.md). Working product planning stays local in
+`.planning/`.
 
 ## Community and trust
 

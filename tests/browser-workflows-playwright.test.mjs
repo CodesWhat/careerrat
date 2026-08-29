@@ -23,6 +23,7 @@ import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { linkedinProposalBatchLatest } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { resolveLocalFixtureTarget } from "./helpers/fixture-server.mjs";
 
 let server;
 let origin;
@@ -141,6 +142,7 @@ function headlessSession(options) {
   return createConfiguredBrowserSession({
     ...options,
     headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
     // GitHub's Linux runner already ships Google Chrome. Use that installed
     // browser for these live fixtures so the full unit suite does not depend
     // on an untracked Playwright browser download. Packaged desktop smoke tests
@@ -300,6 +302,82 @@ test("Playwright fixture: LinkedIn profile read creates proposals without editin
   const batch = linkedinProposalBatchLatest({ repoRoot, env: {} });
   assert.equal(batch.surfaces.length, 2);
   assert.ok(batch.surfaces.every((surface) => surface.decision === null));
+});
+
+test("LinkedIn proposal schema retry keeps the frozen provider plan after provider settings change", async () => {
+  const repoRoot = workspace(
+    { profile_optimize: { enabled: true, platforms: { linkedin: true } } },
+    { linkedin: true }
+  );
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  const executionPlan = {
+    policyVersion: 1,
+    operation: "research.web",
+    runtimeId: "anthropic-api",
+    adapterVersion: 1,
+    requested: { quality: "balanced", reasoning: "medium" },
+    resolved: {
+      quality: "balanced",
+      reasoning: "medium",
+      model: "sonnet",
+      modelSource: "alias",
+      effort: "medium",
+      speedTier: null,
+    },
+    fallback: null,
+  };
+  const calls = [];
+  const result = await optimizeLinkedinInApp({
+    repoRoot,
+    env,
+    executionPlan,
+    createSessionImpl: () => ({ async close() {} }),
+    readProfileImpl: async () => ({
+      ok: true,
+      records: [{ surfaceId: "headline", surface: "Headline", current: "Software Engineer" }],
+    }),
+    callAIImpl: async (options) => {
+      calls.push(options);
+      if (calls.length === 1) {
+        delete env.ANTHROPIC_API_KEY;
+        env.CAREERRAT_AI_PROXY_URL = "http://127.0.0.1:7788";
+        return { content: [{ type: "text", text: "not json" }] };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              surfaces: [
+                {
+                  surfaceId: "headline",
+                  surface: "Headline",
+                  current: "Software Engineer",
+                  proposed: "Applied AI Engineer",
+                  rationale: "Matches the saved target role.",
+                  evidenceRef: "candidate evidence",
+                },
+              ],
+            }),
+          },
+        ],
+      };
+    },
+    now: () => new Date("2026-08-27T16:00:00.000Z"),
+  });
+
+  assert.equal(result.state, "completed");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(
+    calls.map(({ executionPlan: received, useExecutionPlanRoute }) => ({
+      executionPlan: received,
+      useExecutionPlanRoute,
+    })),
+    [
+      { executionPlan, useExecutionPlanRoute: true },
+      { executionPlan, useExecutionPlanRoute: true },
+    ]
+  );
 });
 
 test("Playwright fixture: ATS sync reads status and atomically clears portal CTAs", async () => {

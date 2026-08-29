@@ -53,13 +53,14 @@ If `candidate/research-prefs.yml` exists and specifies `research_axes`, use thos
 Then check usage mode:
 
 ```
-careerrat modes allows research:company
+careerrat modes allows research:company --explicit
 ```
 
-If it returns `skip`, do not run web search by default; explain that lean usage mode
-turns off multi-axis company research and offer to proceed only if the user explicitly
-overrides. If it returns `downshift`, run a single overview query. If it returns `run`,
-continue normally.
+Use `--explicit` when the user asked for this research. Their request authorizes this
+one run and must not trigger another override question or change their saved usage mode.
+For an automatic handoff from another skill, omit `--explicit`; stop if that verdict is
+`skip`. If the explicit verdict is `downshift`, run a single overview query. If it is
+`run`, continue normally.
 
 ---
 

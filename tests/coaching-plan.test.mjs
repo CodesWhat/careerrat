@@ -161,17 +161,23 @@ test("coachingPlanSchema caps gaps at 3, gapText at 80 chars, and forbids extra 
 test("buildCoachingPlan grounds an evidence-claim suggestion and keeps gapText verbatim from fitRisks", async () => {
   const repoRoot = tempRepo();
   seedReviewApp(repoRoot);
+  let seenOptions;
 
   const result = await buildCoachingPlan({
     repoRoot,
     applicationId: "app-coach",
-    runAI: async () => ({
-      body: { ok: true, ai: { used: true, model: "claude-test" }, data: typedPlanVerdict() },
-    }),
+    runAI: async (options) => {
+      seenOptions = options;
+      return {
+        body: { ok: true, ai: { used: true, model: "claude-test" }, data: typedPlanVerdict() },
+      };
+    },
   });
 
   assert.equal(result.status, 200);
   assert.equal(result.body.ok, true);
+  assert.equal(seenOptions.aiOperation, "coach.deep");
+  assert.equal(seenOptions.effort, undefined);
   const plan = result.body.data;
   assert.equal(plan.gaps.length, 1);
   assert.equal(
@@ -189,6 +195,37 @@ test("buildCoachingPlan grounds an evidence-claim suggestion and keeps gapText v
     evaluatedAt: "2026-08-01T12:00:00.000Z",
   });
   assert.match(plan.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("buildCoachingPlan sends the frozen coach plan and abort signal to bounded AI", async () => {
+  const repoRoot = tempRepo();
+  seedReviewApp(repoRoot);
+  const controller = new AbortController();
+  const executionPlan = Object.freeze({
+    version: 1,
+    runtimeId: "claude",
+    operation: "coach.deep",
+    resolved: Object.freeze({ model: "opus", effort: "high" }),
+  });
+  let seenOptions;
+
+  const result = await buildCoachingPlan({
+    repoRoot,
+    applicationId: "app-coach",
+    executionPlan,
+    signal: controller.signal,
+    runAI: async (options) => {
+      seenOptions = options;
+      return {
+        body: { ok: true, ai: { used: true }, data: typedPlanVerdict() },
+      };
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(seenOptions.executionPlan, executionPlan);
+  assert.equal(seenOptions.signal, controller.signal);
+  assert.equal(seenOptions.aiOperation, undefined);
 });
 
 test("buildCoachingPlan accepts an honest no-close-path suggestion as a valid outcome, not a failure", async () => {

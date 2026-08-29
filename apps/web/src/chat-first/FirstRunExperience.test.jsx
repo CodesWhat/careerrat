@@ -249,7 +249,7 @@ describe("FirstRunExperience", () => {
     expect(html).toContain("Detected on this computer. Sign in before CareerRat can use it.");
     expect(html).not.toContain("account already signed in");
     expect(html).toContain("Sign in");
-    expect(html).toContain("I already use another AI tool");
+    expect(html).toContain("Set up another supported AI tool");
     expect(html).toContain("Install guide");
     expect(html).toContain("Runtime check failed.");
     expect(html).toContain("Check again");
@@ -273,6 +273,44 @@ describe("FirstRunExperience", () => {
     expect(onRetryEngine).toHaveBeenCalledWith("claude");
     expect(onStartEngineSignIn).toHaveBeenCalledWith("claude");
     expect(onSelectEngine).not.toHaveBeenCalled();
+  });
+
+  it("shows a failed completion check as a plain retry instead of Ready", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onRetryEngine = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [
+        {
+          id: "codex",
+          name: "Codex",
+          supported: true,
+          detected: true,
+          ready: false,
+          selectable: false,
+          status: "completion_probe_failed",
+          action: "retry",
+          actionLabel: "Try again",
+          probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+        },
+      ],
+      onRetryEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+    const codex = findElement(
+      tree,
+      (node) => node.type?.name === "DetectedEngine" && node.props.engine.id === "codex"
+    );
+    const retry = findElement(
+      codex.type(codex.props),
+      (node) => node.type === "button" && textOf(node) === "Try again"
+    );
+
+    expect(html).toContain("didn&#x27;t return a usable test reply");
+    expect(html).toContain("NEEDS A RETRY");
+    expect(html).not.toContain(">READY</span>");
+    retry.props.onClick();
+    expect(onRetryEngine).toHaveBeenCalledWith("codex");
   });
 
   it("gives a first-time user a plain-English Claude setup path", async () => {
@@ -313,7 +351,10 @@ describe("FirstRunExperience", () => {
     expect(html).not.toMatch(/curl|install\.sh|\| bash/i);
     expect(html).toContain("Install inside CareerRat");
     expect(html).toContain("Check setup");
-    expect(html).toContain("I already use another AI tool");
+    expect(html).toContain("Choose Claude Code or OpenAI Codex");
+    expect(html).toContain("Set up OpenAI Codex instead");
+    expect(html).not.toContain("You only need a Claude account");
+    expect(html).not.toContain("Set up Claude");
     const alternateTools = html.match(
       /<details class="cf-first-run__engine-missing">.*<\/details>/
     )?.[0];
@@ -580,6 +621,53 @@ describe("FirstRunExperience", () => {
     expect(requestedHtml).toContain("Thanks, we’ll email you when it’s ready.");
   });
 
+  it("uses the runtime icon-and-label row for CareerRat AI with a restrained rat mark", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: ENGINES,
+      hostedInterest: { status: "idle", email: "", error: null },
+    });
+    const hostedCard = findElement(tree, (node) => node.type?.name === "HostedInterestCard");
+    const hostedCardView = hostedCard.type(hostedCard.props);
+    const identity = findElement(
+      hostedCardView,
+      (node) => node.props?.className === "cf-first-run__engine-identity"
+    );
+
+    expect(identity).not.toBeNull();
+    const spacer = findElement(
+      hostedCardView,
+      (node) => node.props?.className === "cf-first-run__engine-spacer"
+    );
+    expect(spacer).not.toBeNull();
+    expect(spacer.props["aria-hidden"]).toBe("true");
+    const nameRow = findElement(
+      identity,
+      (node) => node.props?.className === "cf-first-run__engine-name"
+    );
+    expect(nameRow).not.toBeNull();
+    const icon = findElement(nameRow, (node) =>
+      String(node.props?.className || "")
+        .split(" ")
+        .includes("cf-runtime-icon")
+    );
+    expect(textOf(icon)).toBe("🐀");
+    expect(icon.props["aria-hidden"]).toBe("true");
+    expect(textOf(nameRow)).toContain("CareerRat AI");
+
+    const css = readFileSync(fileURLToPath(new URL("./first-run.css", import.meta.url)), "utf8");
+    const ratIconRule = css.match(/\.cf-runtime-icon--careerrat\s*\{([^}]*)\}/)?.[1] || "";
+    expect(css).toMatch(
+      /\.cf-first-run__engine-special \.cf-runtime-icon\s*\{[^}]*filter:\s*grayscale\(1\);[^}]*opacity:\s*0\.58;/s
+    );
+    expect(css).toMatch(
+      /\.cf-first-run__engine-special\s*\{[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto auto;/s
+    );
+    expect(ratIconRule).toMatch(/width:\s*28px/);
+    expect(ratIconRule).toMatch(/height:\s*28px/);
+  });
+
   it("aligns the hosted access action with the email control while retaining its label", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const html = renderToStaticMarkup(
@@ -818,6 +906,35 @@ describe("FirstRunExperience", () => {
     expect(onSave).toHaveBeenCalledWith(item, { remoteScope: "worldwide" });
   });
 
+  it("renders the explicit keep-or-switch compensation mode for two saved floors", async () => {
+    const { KnowledgeSectionEditor } = await loadFirstRun();
+    const { buildFirstRunKnowledge } = await import("./first-run-controller.js");
+    const knowledge = buildFirstRunKnowledge(
+      {
+        setupProgress: {
+          completedCount: 0,
+          total: 8,
+          items: [{ key: "quickFacts", done: false }],
+        },
+        data: {
+          profile: {
+            compensation: { minimum_base: 50000, minimum_annual_earnings: 85000 },
+          },
+        },
+      },
+      { name: "Claude Code" }
+    );
+    const item = knowledge.items.find((entry) => entry.id === "quickFacts");
+    const html = renderToStaticMarkup(<KnowledgeSectionEditor item={item} />);
+
+    expect(html).toContain("How should CareerRat screen pay?");
+    expect(html).toContain("Keep both floors");
+    expect(html).toContain("Guaranteed base pay only");
+    expect(html).toContain("Annual cash earnings only");
+    expect(html).toContain("Minimum guaranteed base pay");
+    expect(html).toContain("Minimum annual cash earnings");
+  });
+
   it("accepts resume files from the conversation drop target and Resume section picker", async () => {
     const { FirstRunChat } = await loadFirstRun();
     const onResumeFile = vi.fn();
@@ -914,6 +1031,29 @@ describe("FirstRunExperience", () => {
     expect(retry).toBeTruthy();
     retry.props.onClick();
     expect(onRetrySearch).toHaveBeenCalledOnce();
+  });
+
+  it("offers the completed company review without replacing the active draft", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const onOpenCompanyReview = vi.fn();
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [],
+      knowledge: [],
+      progress: { completed: 5, total: 8 },
+      draft: "Keep this answer",
+      companyReviewReady: true,
+      onOpenCompanyReview,
+    });
+    const review = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Review companies"
+    );
+    const input = findElement(tree, (node) => node.type === "input" && node.props?.value);
+
+    expect(input.props.value).toBe("Keep this answer");
+    review.props.onClick();
+    expect(onOpenCompanyReview).toHaveBeenCalledOnce();
   });
 
   it("keeps the voluntary-form choice local and offers leave blank as the skip", async () => {

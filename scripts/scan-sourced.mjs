@@ -37,23 +37,29 @@ import {
   loadLegacyCandidateConfig,
   loadCandidateConfig as loadStoredCandidateConfig,
 } from "../src/core/profile/config-store.mjs";
+import { buildSourceUrl } from "../src/core/providers/source-url.mjs";
 import {
   captureAndPersistOffersIfDb,
   offersWithCapturedJobs,
+  revalidatePersistedSourcedRows,
+  sourcedPolicyDigest,
   sourcedRowsFromScanOffers,
 } from "../src/core/scoring/sourced-persistence.mjs";
 import {
+  applyPresentationCaps,
   buildLocationFilter,
   buildTitleFilter,
   computeFamilyOutcomes,
   filterAndDedupeOffers,
   isBoardProviderSupported,
   loadScannerConfig,
+  requalifyCanonicalOffers,
   scanBoards,
   scanCompanies,
   scanSearchSources,
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
+import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
 
 const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
 
@@ -131,30 +137,45 @@ function searchListKey(config) {
   return null;
 }
 
+function materializeBrowserSearchSource(source) {
+  if (!source || source.enabled === false) return null;
+  if (source.url) return source;
+  if (!["url-query", "browser", "aggregator"].includes(source.source_type)) return null;
+  try {
+    const built = buildSourceUrl(source);
+    return {
+      ...source,
+      url: built.url,
+      searchState: built.searchState || source.searchState || {},
+    };
+  } catch {
+    return null;
+  }
+}
+
 function isFetchableSearchSource(source) {
   if (!source || source.enabled === false) return false;
   if (source.source_type === "rss" || source.rssUrl) return true;
-  return ["ats", "board"].includes(source.source_type) && isBoardProviderSupported(source.provider);
+  if (["ats", "board"].includes(source.source_type)) {
+    return isBoardProviderSupported(source.provider) || Boolean(source.url);
+  }
+  return Boolean(materializeBrowserSearchSource(source));
 }
 
-function sameSearchSource(left, right) {
-  for (const field of ["id", "rssUrl", "url", "searchUrl"]) {
-    if (left?.[field] && right?.[field] && left[field] === right[field]) return true;
-  }
-  return (
-    String(left?.label || "")
-      .trim()
-      .toLowerCase() ===
-      String(right?.label || "")
-        .trim()
-        .toLowerCase() &&
-    String(left?.provider || "")
-      .trim()
-      .toLowerCase() ===
-      String(right?.provider || "")
-        .trim()
-        .toLowerCase()
-  );
+function normalizedIdentityValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function searchSourceFetchIdentity(source) {
+  return JSON.stringify({
+    sourceType: normalizedIdentityValue(source?.source_type),
+    provider: normalizedIdentityValue(source?.provider),
+    rssUrl: String(source?.rssUrl || "").trim(),
+    url: String(source?.url || "").trim(),
+    searchUrl: String(source?.searchUrl || "").trim(),
+  });
 }
 
 function persistSearchSourceWatermark({ pathCtx, source, savedAt, guard }) {
@@ -169,7 +190,8 @@ function persistSearchSourceWatermark({ pathCtx, source, savedAt, guard }) {
       return {
         ...current,
         [key]: current[key].map((entry) =>
-          sameSearchSource(entry, source) && isFetchableSearchSource(entry)
+          searchSourceFetchIdentity(entry) === searchSourceFetchIdentity(source) &&
+          isFetchableSearchSource(entry)
             ? {
                 ...entry,
                 recency: { ...(entry.recency || {}), lastRunAt: savedAt.toISOString() },
@@ -181,11 +203,15 @@ function persistSearchSourceWatermark({ pathCtx, source, savedAt, guard }) {
   });
 }
 
-function persistCompanySourceWatermark({ pathCtx, companyName, savedAt, guard }) {
+function companySourceFetchIdentity(company) {
+  return JSON.stringify({
+    provider: normalizedIdentityValue(company?.provider || company?.ats),
+    careersUrl: String(company?.careers_url || company?.careersUrl || "").trim(),
+  });
+}
+
+function persistCompanySourceWatermark({ pathCtx, companySource, savedAt, guard }) {
   if (!dbExists(pathCtx)) return null;
-  const target = String(companyName || "")
-    .trim()
-    .toLowerCase();
   return sourceConfigMutate({
     ...pathCtx,
     name: "sourced-scan",
@@ -194,9 +220,8 @@ function persistCompanySourceWatermark({ pathCtx, companyName, savedAt, guard })
       return {
         ...current,
         tracked_companies: (current.tracked_companies || []).map((company) =>
-          String(company?.name || "")
-            .trim()
-            .toLowerCase() === target
+          companySourceFetchIdentity(company) === companySourceFetchIdentity(companySource) &&
+          company?.enabled !== false
             ? { ...company, lastRunAt: savedAt.toISOString() }
             : company
         ),
@@ -219,6 +244,7 @@ function searchSourceTasks(searchSources) {
   const entries = searchSources[key];
   const rss = [];
   const boards = [];
+  const browsers = [];
   entries.forEach((source, sourceIndex) => {
     if (!source || source.enabled === false) return;
     if (source.source_type === "rss" || source.rssUrl) {
@@ -230,15 +256,51 @@ function searchSourceTasks(searchSources) {
     ) {
       boards.push({ kind: "board", source, sourceIndex });
     }
+    const supportedBoard =
+      ["ats", "board"].includes(source.source_type) && isBoardProviderSupported(source.provider);
+    if (!source.rssUrl && !supportedBoard) {
+      const browserSource = materializeBrowserSearchSource(source);
+      if (browserSource?.url) {
+        browsers.push({ kind: "browser", source, captureSource: browserSource, sourceIndex });
+      }
+    }
   });
   // The whole-scan path concatenated RSS results before board results. Keeping
   // that order makes cross-source dedup choose the exact same winner.
-  return [...rss, ...boards];
+  return [...rss, ...boards, ...browsers];
 }
 
 function singleSearchSourceConfig(searchSources, source) {
   const key = searchListKey(searchSources);
   return { ...searchSources, [key]: [source] };
+}
+
+function sourceCoverageHost(value) {
+  try {
+    return new URL(String(value || "")).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function sourceCoverageStatus(result = {}) {
+  if (result.needsLogin) return "login-required";
+  if (Array.isArray(result.errors) && result.errors.length > 0) return "failed";
+  return Array.isArray(result.offers) && result.offers.length > 0 ? "success" : "zero";
+}
+
+function sourceCoverageReceipt({ kind, label, company, url, result }) {
+  const receipt = {
+    kind,
+    label: String(label || company || kind)
+      .trim()
+      .slice(0, 160),
+    host: sourceCoverageHost(url),
+    status: sourceCoverageStatus(result),
+    found: Array.isArray(result?.offers) ? result.offers.length : 0,
+  };
+  if (company) receipt.company = String(company).trim().slice(0, 160);
+  return receipt;
 }
 
 function captureOffersForOutput({ repoRoot, env, offers, savedAt, guard }) {
@@ -311,6 +373,8 @@ async function hydratePartialOffer(offer, { fetchImpl, resolveHost } = {}) {
 }
 
 const PARTIAL_HYDRATION_CONCURRENCY = 4;
+const SOURCE_SCAN_CONCURRENCY = 4;
+const LIVENESS_VERIFICATION_CONCURRENCY = 6;
 
 async function mapWithConcurrency(items, mapper, concurrency) {
   const results = new Array(items.length);
@@ -371,9 +435,17 @@ export async function runSourcedScan({
   assertActive,
   writeGuard,
   hydrateOfferImpl = hydratePartialOffer,
+  captureBrowserSourceImpl,
+  signal,
 } = {}) {
   const ensureActive = () => {
+    signal?.throwIfAborted();
     if (typeof assertActive === "function") assertActive();
+  };
+  const fetchForRun = (url, init = {}) => {
+    const requestSignal =
+      signal && init.signal ? AbortSignal.any([signal, init.signal]) : signal || init.signal;
+    return fetchImpl(url, requestSignal ? { ...init, signal: requestSignal } : init);
   };
   ensureActive();
   const pathCtx = { repoRoot, env };
@@ -397,7 +469,7 @@ export async function runSourcedScan({
   const titleFilter = buildTitleFilter(config.title_filter);
   const locationFilter = buildLocationFilter(config.location_filter);
 
-  const scanned = { offers: [], errors: [] };
+  const scanned = { offers: [], errors: [], loginRequests: [], sourceCoverage: [] };
   const savedAt = new Date();
   const configuredCompanyCap = Number(
     candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
@@ -415,7 +487,11 @@ export async function runSourcedScan({
   }
   const sourceTasks = searchSourceTasks(searchSources);
   const totalSources = companies.length + sourceTasks.length;
+  scanned.loginRequests.push(...pendingSourceLoginRequests(searchSources));
   let completedSources = 0;
+  let progressFoundCount = 0;
+  let progressErrorCount = scanned.errors.length;
+  let progressQueue = Promise.resolve();
   const successfulCompanySources = [];
   const successfulSearchSources = [];
   const remainingTasksBySource = new Map();
@@ -427,53 +503,110 @@ export async function runSourcedScan({
     );
   }
 
-  async function acceptBatch(result, batch) {
-    scanned.offers.push(...result.offers);
-    scanned.errors.push(...result.errors);
-    completedSources += 1;
-
-    if (typeof onProgress === "function") {
-      await onProgress({
-        foundCount: scanned.offers.length,
-        offerCount: scanned.offers.length,
-        scannedCount: scanned.offers.length,
-        errorCount: scanned.errors.length,
-        completedSources,
-        totalSources,
-        batch,
-      });
-    }
+  function reportBatch(result, batch) {
+    progressQueue = progressQueue.then(async () => {
+      progressFoundCount += result.offers.length;
+      progressErrorCount += result.errors.length;
+      completedSources += 1;
+      if (typeof onProgress === "function") {
+        await onProgress({
+          foundCount: progressFoundCount,
+          offerCount: progressFoundCount,
+          scannedCount: progressFoundCount,
+          errorCount: progressErrorCount,
+          completedSources,
+          totalSources,
+          batch,
+        });
+      }
+    });
+    return progressQueue;
   }
 
-  for (const company of companies) {
-    ensureActive();
-    const result = await scanCompanies(
-      { ...config, tracked_companies: [company] },
-      { fetchImpl, resolveHost, companyFilter: null }
+  function acceptBatch(result) {
+    scanned.offers.push(...(result.offers || []));
+    scanned.errors.push(...(result.errors || []));
+    if (result.needsLogin) scanned.loginRequests.push(result.needsLogin);
+  }
+
+  const companyResults = await mapWithConcurrency(
+    companies,
+    async (company) => {
+      ensureActive();
+      const result = await scanCompanies(
+        { ...config, tracked_companies: [company] },
+        { fetchImpl: fetchForRun, resolveHost, companyFilter: null }
+      );
+      ensureActive();
+      await reportBatch(result, { kind: "company", label: company.name });
+      return { company, result };
+    },
+    SOURCE_SCAN_CONCURRENCY
+  );
+  for (const { company, result } of companyResults) {
+    acceptBatch(result);
+    scanned.sourceCoverage.push(
+      sourceCoverageReceipt({
+        kind: "company",
+        label: company.name,
+        company: company.name,
+        url: company.careers_url || company.careersUrl || company.url,
+        result,
+      })
     );
-    ensureActive();
-    await acceptBatch(result, { kind: "company", label: company.name });
     if (write && !standaloneConfigMode && result.errors.length === 0) {
-      successfulCompanySources.push(company.name);
+      successfulCompanySources.push(company);
     }
   }
 
   // Also scan RSS-bearing and board-wide sources. Record successful sources
   // now, then advance their watermarks only after the run result is durable.
-  for (const task of sourceTasks) {
-    ensureActive();
-    const singleton = singleSearchSourceConfig(searchSources, task.source);
-    const result =
-      task.kind === "rss"
-        ? await scanSearchSources(singleton, { fetchImpl, resolveHost })
-        : await scanBoards(singleton, { fetchImpl, resolveHost });
-    ensureActive();
-    await acceptBatch(result, {
-      kind: task.kind,
-      label: task.source.label || task.source.provider || task.kind,
-    });
+  const searchSourceResults = await mapWithConcurrency(
+    sourceTasks,
+    async (task) => {
+      ensureActive();
+      const singleton = singleSearchSourceConfig(searchSources, task.source);
+      const result =
+        task.kind === "rss"
+          ? await scanSearchSources(singleton, { fetchImpl: fetchForRun, resolveHost })
+          : task.kind === "board"
+            ? await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost })
+            : typeof captureBrowserSourceImpl === "function"
+              ? await captureBrowserSourceImpl(task.captureSource || task.source)
+              : {
+                  offers: [],
+                  errors: [
+                    {
+                      company: task.source.label || task.source.provider || "Browser source",
+                      error: "Open this search in the CareerRat app so its browser can read it.",
+                    },
+                  ],
+                  needsLogin: null,
+                };
+      ensureActive();
+      await reportBatch(result, {
+        kind: task.kind,
+        label: task.source.label || task.source.provider || task.kind,
+      });
+      return { task, result };
+    },
+    SOURCE_SCAN_CONCURRENCY
+  );
+  for (const { task, result } of searchSourceResults) {
+    acceptBatch(result);
+    scanned.sourceCoverage.push(
+      sourceCoverageReceipt({
+        kind: "configured",
+        label: task.source.label || task.source.provider || task.kind,
+        url:
+          task.captureSource?.url || task.source.url || task.source.rssUrl || task.source.searchUrl,
+        result,
+      })
+    );
 
-    if (result.errors.length > 0) failedSourceIndexes.add(task.sourceIndex);
+    if ((result.errors || []).length > 0 || result.needsLogin) {
+      failedSourceIndexes.add(task.sourceIndex);
+    }
     const remaining = (remainingTasksBySource.get(task.sourceIndex) || 1) - 1;
     remainingTasksBySource.set(task.sourceIndex, remaining);
     if (
@@ -494,31 +627,24 @@ export async function runSourcedScan({
     locationFilter,
     config: candidateConfig,
     now: savedAt.getTime(),
-    companyPresentationCounts: new Map(),
     seenRunCompanyRoles: new Set(),
-    perCompanyCap,
+    deferPartialCandidatePolicy: true,
   });
 
-  const outputLimit = limit > 0 ? limit : Infinity;
-  const limitedOffers = filtered.kept.slice(0, outputLimit);
-  const limitedOverflow = filtered.kept.slice(outputLimit).map((offer) => ({
-    ...offer,
-    qualificationReason: "run-presentation-limit",
-  }));
-  filtered = {
-    ...filtered,
-    kept: limitedOffers,
-    overflow: [...filtered.overflow, ...limitedOverflow],
-  };
-
-  if (filtered.kept.some((offer) => offer?.bodyPartial === true)) {
+  if (
+    filtered.kept.some(
+      (offer) => offer?.bodyPartial === true && offer?.bodyCapture !== "session-browser"
+    )
+  ) {
     filtered = {
       ...filtered,
       kept: await mapWithConcurrency(
         filtered.kept,
         (offer) => {
           ensureActive();
-          return hydrateOfferImpl(offer, { fetchImpl, resolveHost });
+          return offer?.bodyPartial === true && offer?.bodyCapture !== "session-browser"
+            ? hydrateOfferImpl(offer, { fetchImpl: fetchForRun, resolveHost })
+            : offer;
         },
         PARTIAL_HYDRATION_CONCURRENCY
       ),
@@ -526,13 +652,44 @@ export async function runSourcedScan({
     ensureActive();
   }
 
+  const canonicalQualification = requalifyCanonicalOffers(filtered.kept, {
+    config: candidateConfig,
+    now: savedAt.getTime(),
+    locationFilter,
+  });
+  const presentation = applyPresentationCaps(canonicalQualification.kept, {
+    companyPresentationCounts: new Map(),
+    perCompanyCap,
+    limit: limit > 0 ? limit : Infinity,
+  });
+  filtered = {
+    ...filtered,
+    kept: presentation.kept,
+    overflow: [...filtered.overflow, ...presentation.overflow],
+    filteredSeniority: [...filtered.filteredSeniority, ...canonicalQualification.filteredSeniority],
+    filteredLocation: [...filtered.filteredLocation, ...canonicalQualification.filteredLocation],
+    filteredAge: [...filtered.filteredAge, ...canonicalQualification.filteredAge],
+    filteredSalary: [...filtered.filteredSalary, ...canonicalQualification.filteredSalary],
+    filteredEligibility: [
+      ...filtered.filteredEligibility,
+      ...canonicalQualification.filteredEligibility,
+    ],
+  };
+
   if (verify && filtered.kept.length > 0) {
     const checked = [];
     const dropped = [];
-    for (const offer of filtered.kept) {
-      ensureActive();
-      const live = await checkUrlLiveness(offer.url, { fetchImpl });
-      ensureActive();
+    const verificationResults = await mapWithConcurrency(
+      filtered.kept,
+      async (offer) => {
+        ensureActive();
+        const live = await checkUrlLiveness(offer.url, { fetchImpl: fetchForRun });
+        ensureActive();
+        return { offer, live };
+      },
+      LIVENESS_VERIFICATION_CONCURRENCY
+    );
+    for (const { offer, live } of verificationResults) {
       if (live.result === "expired") dropped.push({ ...offer, liveness: live });
       else checked.push({ ...offer, liveness: live });
     }
@@ -540,6 +697,28 @@ export async function runSourcedScan({
   }
 
   if (write) ensureActive();
+  const revalidatedExisting =
+    write && !standaloneConfigMode
+      ? revalidatePersistedSourcedRows({
+          repoRoot,
+          env,
+          config: candidateConfig,
+          now: savedAt,
+          locationFilter,
+          policyDigest: sourcedPolicyDigest({
+            config: candidateConfig,
+            locationPolicy: config.location_filter,
+          }),
+          guard: writeGuard,
+        })
+      : {
+          examined: 0,
+          readable: 0,
+          unreadable: 0,
+          hidden: 0,
+          hiddenIds: [],
+          skipped: false,
+        };
   const persistedOffers = write
     ? standaloneConfigMode
       ? offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt })
@@ -554,10 +733,10 @@ export async function runSourcedScan({
 
   if (write && !standaloneConfigMode) {
     ensureActive();
-    for (const companyName of successfulCompanySources) {
+    for (const companySource of successfulCompanySources) {
       persistCompanySourceWatermark({
         pathCtx,
-        companyName,
+        companySource,
         savedAt,
         guard: writeGuard,
       });
@@ -624,7 +803,10 @@ export async function runSourcedScan({
       (filtered.expired?.length || 0) +
       filtered.overflow.length,
     errors: scanned.errors,
+    loginRequests: scanned.loginRequests,
+    sourceCoverage: scanned.sourceCoverage,
     coldFamilies,
+    revalidatedExisting,
     offers: outputOffers,
   };
 

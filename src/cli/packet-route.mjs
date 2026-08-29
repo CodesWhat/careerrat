@@ -66,6 +66,7 @@ import { validatePacketGateRequest } from "../core/packet/schemas/packet-schemas
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { classifyStage } from "../core/tracker/dashboard.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
+import { executeDurableWorkspaceIntent } from "./workspace-agent-route.mjs";
 
 // Mirrors dashboard.mjs's own (unexported) TERMINAL_STAGES set. Not imported
 // directly since dashboard.mjs doesn't export it — see AGENTS.md's stage-
@@ -255,6 +256,7 @@ export function mountPacketRoutes({
   packetResumeCall,
   packetExportArtifact,
   workspaceAgentRuntime,
+  appOperations,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -278,27 +280,33 @@ export function mountPacketRoutes({
     const body = await readPacketBody(req, res);
     if (body === null) return;
 
-    if (workspaceAgentRuntime?.executeIntent) {
+    if (appOperations?.start || workspaceAgentRuntime?.executeIntent) {
       try {
-        const request = validatePacketGateRequest(body);
+        const { requestId, ...packetBody } = body;
+        const request = validatePacketGateRequest(packetBody);
         const input = {};
         if (request.jobBody) input.jobBody = request.jobBody;
         if (request.jobUrl) input.jobUrl = request.jobUrl;
-        const thread = await workspaceAgentRuntime.executeIntent({
-          intent: {
-            type: "job.evaluate",
-            entity: { type: "application", id: request.applicationId },
-            ...(Object.keys(input).length ? { input } : {}),
-          },
-        });
-        const evaluation = [...(thread?.messages || [])]
-          .reverse()
-          .flatMap((message) => message?.artifacts || [])
-          .find(
-            (artifact) =>
-              artifact?.kind === "job_evaluation" &&
-              artifact?.applicationId === request.applicationId
-          )?.evaluation;
+        const intent = {
+          type: "job.evaluate",
+          entity: { type: "application", id: request.applicationId },
+          ...(Object.keys(input).length ? { input } : {}),
+        };
+        const action = appOperations?.start
+          ? (
+              await executeDurableWorkspaceIntent({
+                appOperations,
+                requestId,
+                intent,
+              })
+            ).resultRef?.message
+          : [...((await workspaceAgentRuntime.executeIntent({ intent }))?.messages || [])]
+              .reverse()
+              .find((message) => message?.kind === "action_result");
+        const evaluation = (action?.artifacts || []).find(
+          (artifact) =>
+            artifact?.kind === "job_evaluation" && artifact?.applicationId === request.applicationId
+        )?.evaluation;
         if (!evaluation) {
           const error = new Error("workspace evaluation completed without a typed verdict");
           error.code = "WORKSPACE_EVALUATION_RESULT_MISSING";
@@ -315,9 +323,10 @@ export function mountPacketRoutes({
       return;
     }
 
+    const { requestId: _requestId, ...packetBody } = body;
     const result = await evaluateAndPersistPacketGate({
       ...pathCtx,
-      body,
+      body: packetBody,
       invoke: packetGateInvoke,
     });
     sendJson(res, result.status, result.body);
@@ -383,20 +392,22 @@ export function mountPacketRoutes({
     const body = await readPacketBody(req, res);
     if (body === null) return;
     try {
-      const applicationId = body.applicationId || body.appId || null;
-      if (workspaceAgentRuntime?.executeIntent) {
+      const { requestId, ...packetBody } = body;
+      const applicationId = packetBody.applicationId || packetBody.appId || null;
+      if (appOperations?.start || workspaceAgentRuntime?.executeIntent) {
         const input = {
-          applyIntent: body.applyIntent === true,
-          ...(Array.isArray(body.formats) ? { formats: body.formats } : {}),
+          applyIntent: packetBody.applyIntent === true,
+          ...(Array.isArray(packetBody.formats) ? { formats: packetBody.formats } : {}),
         };
-        const thread = await workspaceAgentRuntime.executeIntent({
-          intent: {
-            type: "job.generate-documents",
-            entity: { type: "application", id: String(applicationId || "") },
-            input,
-          },
-        });
-        const data = thread?.operationResult;
+        const intent = {
+          type: "job.generate-documents",
+          entity: { type: "application", id: String(applicationId || "") },
+          input,
+        };
+        const data = appOperations?.start
+          ? (await executeDurableWorkspaceIntent({ appOperations, requestId, intent })).resultRef
+              ?.data
+          : (await workspaceAgentRuntime.executeIntent({ intent }))?.operationResult;
         if (!data || data.applicationId !== applicationId) {
           const error = new Error("workspace document generation completed without a result");
           error.code = "WORKSPACE_PACKET_RESULT_MISSING";
@@ -408,7 +419,7 @@ export function mountPacketRoutes({
 
       const data = await generateApplicationPacket({
         ...pathCtx,
-        body,
+        body: packetBody,
         coverLetterCall: packetCoverLetterCall,
         resumeCall: packetResumeCall,
         packetAnswersCall,
@@ -430,22 +441,23 @@ export function mountPacketRoutes({
     const body = await readPacketBody(req, res);
     if (body === null) return;
     try {
-      const applicationId = String(body.applicationId || body.appId || "").trim();
-      const data = workspaceAgentRuntime
-        ? (
-            await workspaceAgentRuntime.executeIntent({
-              intent: {
-                type: "job.export-documents",
-                entity: { type: "application", id: applicationId },
-                input: { formats: Array.isArray(body.formats) ? body.formats : ["pdf"] },
-              },
-            })
-          )?.operationResult
-        : await exportPacketArtifacts({
-            ...pathCtx,
-            ...body,
-            exportArtifact: packetExportArtifact,
-          });
+      const { requestId, ...packetBody } = body;
+      const applicationId = String(packetBody.applicationId || packetBody.appId || "").trim();
+      const intent = {
+        type: "job.export-documents",
+        entity: { type: "application", id: applicationId },
+        input: { formats: Array.isArray(packetBody.formats) ? packetBody.formats : ["pdf"] },
+      };
+      const data = appOperations?.start
+        ? (await executeDurableWorkspaceIntent({ appOperations, requestId, intent })).resultRef
+            ?.data
+        : workspaceAgentRuntime
+          ? (await workspaceAgentRuntime.executeIntent({ intent }))?.operationResult
+          : await exportPacketArtifacts({
+              ...pathCtx,
+              ...packetBody,
+              exportArtifact: packetExportArtifact,
+            });
       if (!data) {
         const error = new Error("The workspace agent did not return exported packet files.");
         error.code = "PACKET_EXPORT_ERROR";

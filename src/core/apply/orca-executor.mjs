@@ -15,7 +15,7 @@ export { renderedFieldsFromSnapshot, uploadTargetsFromSnapshot };
 export function createOrcaApplyExecutor({
   repoRoot,
   env = process.env,
-  runOrcaImpl = (args) => runOrcaCommand(args, { env, cwd: repoRoot }),
+  runOrcaImpl = (args, { signal } = {}) => runOrcaCommand(args, { env, cwd: repoRoot, signal }),
   captureQuestionsImpl = capturePacketQuestions,
   candidateConfigGetImpl = candidateConfigGet,
   loadAnswerMapImpl = loadAnswerMap,

@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import * as controller from "./chat-first-app-controller.js";
 import {
+  applicationPreparationPermission,
   calendarAction,
   commitComposerTurn,
   commitJobThreadComposer,
+  confirmPacketGapAnswer,
   createMissionAndRun,
+  createWorkspaceRequestId,
   downloadBinaryArtifact,
   downloadTextArtifact,
+  enableApplicationPreparation,
   engineUnavailable,
   findGate,
   focusApplicationHandoff,
@@ -19,13 +23,83 @@ import {
   packetExportReceipt,
   resolveNeedDecision,
   resolvePersonAction,
+  resumePacketPreparation,
   selectedSourcedDismissal,
   selectMockSession,
   sourceSweepPresentation,
   sourceSweepWithAvailableMatches,
+  workspaceOperationFailure,
+  workspaceOperationFromResponse,
+  workspaceOperationIsActive,
+  workspaceOperationIsOwned,
 } from "./chat-first-app-controller.js";
 
 describe("chat-first app controller", () => {
+  it("extracts only a private app-operation id from an accepted Ask response", () => {
+    expect(
+      workspaceOperationFromResponse({
+        ok: true,
+        operation: {
+          id: "app-operation-workspace-1",
+          kind: "workspace.message",
+          status: "running",
+        },
+      })
+    ).toEqual({
+      id: "app-operation-workspace-1",
+      kind: "workspace.message",
+      status: "running",
+    });
+    expect(workspaceOperationFromResponse({ operation: { id: "not-private" } })).toBeNull();
+  });
+
+  it("gives one composer submission a stable client request identity", () => {
+    expect(
+      createWorkspaceRequestId({ randomUUID: () => "12345678-1234-1234-1234-123456789abc" })
+    ).toBe("workspace-12345678-1234-1234-1234-123456789abc");
+  });
+
+  it("offers an exact linked retry only when the server says the failure is retryable", () => {
+    const retry = vi.fn();
+    const retryable = workspaceOperationFailure(
+      {
+        id: "app-operation-workspace-1",
+        error: {
+          code: "APP_OPERATION_SERVER_RESTARTED",
+          message: "CareerRat restarted before this answer finished. Try it again.",
+          retryable: true,
+        },
+      },
+      retry
+    );
+    expect(retryable).toMatchObject({
+      message: "CareerRat restarted before this answer finished. Try it again.",
+      action: { label: "Try again" },
+    });
+    retryable.action.onRetry();
+    expect(retry).toHaveBeenCalledWith("app-operation-workspace-1");
+
+    const uncertain = workspaceOperationFailure(
+      {
+        id: "app-operation-workspace-2",
+        error: {
+          code: "APP_OPERATION_OUTCOME_UNCERTAIN",
+          message: "CareerRat restarted while that action was running. Check whether it finished.",
+          retryable: false,
+        },
+      },
+      retry
+    );
+    expect(uncertain.action).toBeNull();
+  });
+
+  it("follows only queued or running operations without treating completion as navigation", () => {
+    expect(workspaceOperationIsActive({ status: "queued" })).toBe(true);
+    expect(workspaceOperationIsActive({ status: "running" })).toBe(true);
+    expect(workspaceOperationIsActive({ status: "completed" })).toBe(false);
+    expect(workspaceOperationIsActive({ status: "failed" })).toBe(false);
+  });
+
   it("returns a newly-created mission before its execution reaches the submit gates", async () => {
     let finishRun;
     const onExecutionStart = vi.fn();
@@ -181,15 +255,57 @@ describe("chat-first app controller", () => {
   it("runs plain main-chat answers through the durable workspace thread", async () => {
     const api = { sendWorkspaceMessage: vi.fn().mockResolvedValue({ data: { messages: [] } }) };
     const context = { pathname: "/jobs", jobId: "app-temporal" };
+    const requestId = "workspace-request-message-1";
 
     const result = await commitComposerTurn({
       api,
       text: "What should I do today?",
       context,
+      requestId,
     });
 
-    expect(api.sendWorkspaceMessage).toHaveBeenCalledWith("What should I do today?", context);
+    expect(api.sendWorkspaceMessage).toHaveBeenCalledWith(
+      "What should I do today?",
+      context,
+      undefined,
+      { requestId }
+    );
     expect(result.kind).toBe("message");
+  });
+
+  it("returns the exact committed permission intent so the open job can refresh in place", async () => {
+    const intent = {
+      type: "settings.apply",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "application-preparation",
+        },
+      },
+    };
+    const api = { runWorkspaceIntent: vi.fn().mockResolvedValue({ ok: true }) };
+    const requestId = "workspace-request-intent-1";
+
+    const result = await commitComposerTurn({
+      api,
+      text: "Allow form preparation",
+      preview: { action: { label: "Allow form preparation", intent } },
+      requestId,
+    });
+
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(intent.type, intent.entity, intent.input, {
+      requestId,
+    });
+    expect(result).toEqual({ kind: "intent", intent, response: { ok: true } });
+  });
+
+  it("leaves non-workspace operation ids for their owning foreground controller", () => {
+    expect(workspaceOperationIsOwned({ kind: "workspace.message" })).toBe(true);
+    expect(workspaceOperationIsOwned({ kind: "workspace.intent" })).toBe(true);
+    expect(workspaceOperationIsOwned({ kind: "deep-ingest.analyze" })).toBe(false);
+    expect(workspaceOperationIsOwned({ kind: "company.discovery" })).toBe(false);
   });
 
   it("turns packet export paths into an observable receipt", () => {
@@ -344,6 +460,26 @@ describe("chat-first app controller", () => {
     expect(result.kind).toBe("mission");
   });
 
+  it("keeps the composer request identity on a normal job-thread turn", async () => {
+    const api = {
+      previewWorkspaceQuery: vi.fn().mockResolvedValue({ data: { action: null } }),
+      sendJobThreadTurn: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+
+    await commitJobThreadComposer({
+      api,
+      applicationId: "app-curri",
+      text: "What should I emphasize?",
+      requestId: "job-thread-request-0001",
+    });
+
+    expect(api.sendJobThreadTurn).toHaveBeenCalledWith({
+      applicationId: "app-curri",
+      text: "What should I emphasize?",
+      requestId: "job-thread-request-0001",
+    });
+  });
+
   it("routes job-thread mock-interview language into the durable mock API", async () => {
     expect(controller.isMockInterviewStartRequest).toBeTypeOf("function");
     expect(controller.startMockFromJobThread).toBeTypeOf("function");
@@ -470,6 +606,271 @@ describe("chat-first app controller", () => {
     });
   });
 
+  it("persists an exact packet-gap answer through the typed writer and mirrors the result into the job thread", async () => {
+    const response = {
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Confirmed this answer. 1 packet item still needs review.",
+            metadata: { state: "confirmed", persisted: true, gapCount: 1 },
+          },
+        ],
+      },
+    };
+    const api = {
+      appendJobThreadMessage: vi.fn().mockResolvedValue({ ok: true }),
+      runWorkspaceIntent: vi.fn().mockResolvedValue(response),
+    };
+    const gap = {
+      id: "linkedin-profile",
+      questionId: "linkedin-profile",
+      label: "LinkedIn Profile",
+    };
+    const requestId = "workspace-request-screening-answer";
+
+    await confirmPacketGapAnswer({
+      api,
+      applicationId: "app-hightouch",
+      gap,
+      answer: "https://www.linkedin.com/in/riley",
+      requestId,
+    });
+
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "screening.answer-confirm",
+      { type: "application", id: "app-hightouch" },
+      {
+        questionId: "linkedin-profile",
+        question: "LinkedIn Profile",
+        answer: "https://www.linkedin.com/in/riley",
+      },
+      { requestId }
+    );
+    expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(1, {
+      applicationId: "app-hightouch",
+      id: "packet-answer-user:workspace-request-screening-answer",
+      role: "user",
+      kind: "text",
+      text: "LinkedIn Profile: https://www.linkedin.com/in/riley",
+    });
+    expect(api.appendJobThreadMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        applicationId: "app-hightouch",
+        role: "assistant",
+        text: "Confirmed this answer. 1 packet item still needs review.",
+        metadata: { state: "confirmed", persisted: true, gapCount: 1 },
+      })
+    );
+  });
+
+  it("does not invent a job-thread result while a packet-gap operation is still running", async () => {
+    const response = {
+      operation: {
+        id: "app-operation-workspace-gap-1",
+        kind: "workspace.intent",
+        status: "running",
+      },
+    };
+    const api = {
+      appendJobThreadMessage: vi.fn().mockResolvedValue({ ok: true }),
+      runWorkspaceIntent: vi.fn().mockResolvedValue(response),
+    };
+
+    await expect(
+      confirmPacketGapAnswer({
+        api,
+        applicationId: "app-hightouch",
+        gap: { questionId: "availability", label: "Availability" },
+        answer: "Two weeks",
+        requestId: "workspace-request-screening-running",
+      })
+    ).resolves.toEqual(response);
+
+    expect(api.appendJobThreadMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumes the paused mission that owns a packet instead of starting an orphan prepare action", async () => {
+    const api = {
+      resumeChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "mission-1" } } }),
+      runWorkspaceIntent: vi.fn(),
+    };
+    const missions = [
+      {
+        id: "mission-1",
+        status: "paused",
+        steps: [
+          {
+            id: "prepare",
+            action: "prepare-submit",
+            status: "blocked",
+            result: { applicationId: "app-hightouch", state: "blocked" },
+          },
+        ],
+      },
+    ];
+
+    await expect(
+      resumePacketPreparation({ api, missions, applicationId: "app-hightouch" })
+    ).resolves.toMatchObject({ data: { mission: { id: "mission-1" } } });
+    expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-1");
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
+  });
+
+  it("creates and runs a durable application mission when no paused mission remains", async () => {
+    const api = {
+      resumeChatFirstMission: vi.fn(),
+      createChatFirstMission: vi
+        .fn()
+        .mockResolvedValue({ data: { mission: { id: "mission-fresh" } } }),
+      runChatFirstMission: vi
+        .fn()
+        .mockResolvedValue({ data: { mission: { id: "mission-fresh", status: "paused" } } }),
+      runWorkspaceIntent: vi.fn(),
+    };
+
+    await expect(
+      resumePacketPreparation({ api, missions: [], applicationId: "app-hightouch" })
+    ).resolves.toMatchObject({ data: { mission: { id: "mission-fresh" } } });
+    expect(api.resumeChatFirstMission).not.toHaveBeenCalled();
+    expect(api.createChatFirstMission).toHaveBeenCalledWith({
+      title: "Prepare this application",
+      mode: "prepare-to-submit",
+      requiresUserSubmit: true,
+      jobs: [{ type: "application", id: "app-hightouch" }],
+    });
+    expect(api.runChatFirstMission).toHaveBeenCalledWith("mission-fresh");
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
+  });
+
+  it("ignores unrelated or completed paused missions when resuming packet preparation", async () => {
+    const api = {
+      resumeChatFirstMission: vi.fn().mockResolvedValue({ ok: true }),
+    };
+    const missions = [
+      {
+        id: "mission-unrelated",
+        status: "paused",
+        updatedAt: "2026-08-27T12:00:00.000Z",
+        steps: [
+          {
+            action: "evaluate",
+            status: "blocked",
+            result: { applicationId: "app-hightouch" },
+          },
+        ],
+      },
+      {
+        id: "mission-finished-prepare",
+        status: "paused",
+        updatedAt: "2026-08-27T11:00:00.000Z",
+        steps: [
+          {
+            action: "prepare-submit",
+            status: "completed",
+            result: { applicationId: "app-hightouch" },
+          },
+        ],
+      },
+      {
+        id: "mission-current-prepare",
+        status: "paused",
+        updatedAt: "2026-08-27T10:00:00.000Z",
+        steps: [
+          {
+            action: "prepare-submit",
+            status: "blocked",
+            result: { applicationId: "app-hightouch" },
+          },
+        ],
+      },
+    ];
+
+    await resumePacketPreparation({ api, missions, applicationId: "app-hightouch" });
+
+    expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-current-prepare");
+  });
+
+  it("treats form preparation as ready only when its supported application sites are allowed", () => {
+    expect(applicationPreparationPermission({ capabilities: [] })).toMatchObject({
+      status: "blocked",
+      ready: false,
+    });
+    expect(
+      applicationPreparationPermission({
+        capabilities: [
+          {
+            capability: "authenticated_apply_preparation",
+            enabled: true,
+            platforms: [
+              { platform: "greenhouse", allowed: true },
+              { platform: "external_ats", allowed: false },
+            ],
+          },
+        ],
+      })
+    ).toMatchObject({ status: "blocked", ready: false });
+    expect(
+      applicationPreparationPermission({
+        capabilities: [
+          {
+            capability: "authenticated_apply_preparation",
+            enabled: true,
+            platforms: [
+              { platform: "greenhouse", allowed: true },
+              { platform: "external_ats", allowed: true },
+            ],
+          },
+        ],
+      })
+    ).toMatchObject({ status: "ready", ready: true });
+  });
+
+  it("enables supervised form preparation in place and re-reads the effective permission", async () => {
+    const automation = {
+      capabilities: [
+        {
+          capability: "authenticated_apply_preparation",
+          enabled: true,
+          platforms: [{ platform: "greenhouse", allowed: true }],
+        },
+      ],
+    };
+    const api = {
+      runWorkspaceIntent: vi.fn().mockResolvedValue({ ok: true }),
+      getAutomationSettings: vi.fn().mockResolvedValue(automation),
+    };
+
+    await expect(enableApplicationPreparation({ api })).resolves.toMatchObject({
+      status: "ready",
+      ready: true,
+    });
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "settings.apply",
+      { type: "workspace", id: "workspace-main" },
+      {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "application-preparation",
+        },
+      }
+    );
+    expect(api.getAutomationSettings).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim form permission when the server-owned write fails", async () => {
+    const api = {
+      runWorkspaceIntent: vi.fn().mockRejectedValue(new Error("write failed")),
+      getAutomationSettings: vi.fn(),
+    };
+
+    await expect(enableApplicationPreparation({ api })).rejects.toThrow("write failed");
+    expect(api.getAutomationSettings).not.toHaveBeenCalled();
+  });
+
   it("creates draft-only and prepare-to-submit cart missions from current rows", async () => {
     const api = {
       createChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "m2" } } }),
@@ -548,31 +949,31 @@ describe("chat-first app controller", () => {
     expect(openApplicationHandoff({ handoffUrl: "javascript:alert(1)" }, open)).toBe(false);
   });
 
-  it("returns a submit gate to the retained supervised session instead of opening its URL", async () => {
-    const runWorkspaceIntent = vi.fn().mockResolvedValue({ ok: true });
+  it("returns a submit gate through its durable mission owner instead of a workspace shortcut", async () => {
+    const api = {
+      resumeChatFirstMission: vi.fn().mockResolvedValue({ data: { mission: { id: "mission-1" } } }),
+      runWorkspaceIntent: vi.fn(),
+    };
     const gate = {
+      missionId: "mission-1",
       applicationId: "app-1",
       handoffUrl: "https://jobs.example.test/submit",
     };
 
-    await expect(focusApplicationHandoff(gate, runWorkspaceIntent)).resolves.toBe(true);
-    expect(runWorkspaceIntent).toHaveBeenCalledWith(
-      "job.prepare-submit",
-      { type: "application", id: "app-1" },
-      { resumeSession: true, focusSession: true }
-    );
+    await expect(focusApplicationHandoff(gate, api)).resolves.toBe(true);
+    expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-1", {
+      focusApplicationId: "app-1",
+    });
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
   });
 
   it("does not fall back to a fresh URL when a submit gate has no retained application owner", async () => {
-    const runWorkspaceIntent = vi.fn();
+    const api = { resumeChatFirstMission: vi.fn() };
 
     await expect(
-      focusApplicationHandoff(
-        { handoffUrl: "https://jobs.example.test/submit" },
-        runWorkspaceIntent
-      )
+      focusApplicationHandoff({ handoffUrl: "https://jobs.example.test/submit" }, api)
     ).resolves.toBe(false);
-    expect(runWorkspaceIntent).not.toHaveBeenCalled();
+    expect(api.resumeChatFirstMission).not.toHaveBeenCalled();
   });
 
   it("resolves every canonical Needs You decision to its durable owner action", () => {

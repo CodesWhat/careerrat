@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
 import { executeWorkspaceIntent } from "../core/agent/workspace-agent.mjs";
+import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
+import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import {
+  chatFirstChoiceResolve,
   deepIngestPromptDismiss,
   deepIngestThreadOpen,
   jobThreadMessageAppend,
@@ -10,7 +15,6 @@ import {
   missionResume,
   missionRun,
   missionSetStatus,
-  missionStepSetStatus,
   mockInterviewEnd,
   mockInterviewFeedbackAppend,
   mockInterviewMessageAppend,
@@ -23,12 +27,30 @@ import { exportInterviewDossierPdf } from "../core/documents/dossier-pdf.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+export const JOB_THREAD_TURN_OPERATION_KIND = "job-thread.turn";
+
+function selectedMissionExecutionPlan({ repoRoot, env, operation }) {
+  const route = resolveAIRoute(env, { repoRoot });
+  const runtimeId = aiRuntimeIdForRoute(route);
+  if (!runtimeId) {
+    const error = new Error(route.error || "Select a ready AI CLI before starting this mission.");
+    error.code = "NO_AI_ROUTE";
+    throw error;
+  }
+  return resolveAIExecutionPlan({
+    operation,
+    runtimeId,
+    preferences: loadAIPreferences({ repoRoot, env }),
+    ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
+  });
+}
 
 function statusForError(error) {
   if (Number.isInteger(error?.status)) return error.status;
   if (error?.code === "NO_DATABASE") return 409;
   if (error?.code === "NOT_FOUND") return 404;
   if (error?.code === "CONFLICT") return 409;
+  if (["STALE_CHOICE_PROMPT", "CHOICE_ALREADY_RESOLVED"].includes(error?.code)) return 409;
   if (error?.code === "TEXT_TOO_LONG") return 400;
   return 400;
 }
@@ -51,6 +73,121 @@ function sendResult(res, status, result) {
     ...data
   } = result || {};
   sendJson(res, status, { ok: operationOk, meta, data });
+}
+
+function operationView(operation) {
+  if (!operation) return null;
+  const { request: _request, ownerId: _ownerId, fence: _fence, ...visible } = operation;
+  return visible;
+}
+
+function jobThreadRequestId(value) {
+  const id = String(value || "").trim();
+  if (!/^[a-z0-9][a-z0-9._:-]{7,159}$/i.test(id)) {
+    const error = new Error("requestId must identify one job-thread submission");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  return id;
+}
+
+function parseJobThreadTurnRequest(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    const error = new Error("job-thread turn must be an object");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  if (
+    Object.keys(input).some(
+      (key) => !["applicationId", "text", "choice", "requestId"].includes(key)
+    )
+  ) {
+    const error = new Error("job-thread turn contains unsupported fields");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  const applicationId = String(input.applicationId || "").trim();
+  const text = String(input.text || "").trim();
+  if (!applicationId || !text) {
+    const error = new Error("applicationId and text are required");
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  const requestId = jobThreadRequestId(input.requestId);
+  let choice;
+  if (input.choice !== undefined) {
+    try {
+      choice = JSON.parse(JSON.stringify(input.choice));
+    } catch {
+      const error = new Error("choice must be valid JSON");
+      error.code = "BAD_REQUEST";
+      throw error;
+    }
+  }
+  const digest = createHash("sha256")
+    .update(`job-thread.turn:${requestId}`)
+    .digest("hex")
+    .slice(0, 32);
+  return {
+    requestId,
+    applicationId,
+    text,
+    ...(choice === undefined ? {} : { choice }),
+    userMessageId: `job-thread-operation-user-${digest}`,
+    assistantMessageId: `job-thread-operation-assistant-${digest}`,
+  };
+}
+
+export function createChatFirstOperationKinds({
+  repoRoot,
+  env = process.env,
+  resolveExecutionPlan = selectedMissionExecutionPlan,
+  callAIImpl,
+} = {}) {
+  return {
+    [JOB_THREAD_TURN_OPERATION_KIND]: {
+      parseRequest: parseJobThreadTurnRequest,
+      resumeOnRestart: true,
+      resolveExecutionPlan: ({ request }) =>
+        resolveExecutionPlan({ repoRoot, env, operation: "paul.conversation", request }),
+      normalizeError(error) {
+        return {
+          code: String(error?.code || "JOB_THREAD_TURN_FAILED"),
+          message:
+            error?.code === "NO_AI_ROUTE"
+              ? "Choose a ready AI provider in Settings, then try again."
+              : "CareerRat couldn't finish that reply. Your message is saved, so you can try again.",
+          retryable: error?.retryable !== false,
+        };
+      },
+      async execute({ operation, request, executionPlan, signal }) {
+        const result = await jobThreadTurn({
+          repoRoot,
+          env,
+          applicationId: request.applicationId,
+          text: request.text,
+          choice: request.choice,
+          userMessageId: request.userMessageId,
+          assistantMessageId: request.assistantMessageId,
+          executionPlan,
+          call: callAIImpl,
+          signal,
+          operationAttempt: {
+            id: operation.id,
+            ownerId: operation.ownerId,
+            fence: operation.fence,
+          },
+        });
+        return {
+          resultRef: {
+            type: "job-thread-message",
+            id: result.assistantMessage.id,
+            threadId: result.thread.id,
+          },
+        };
+      },
+    },
+  };
 }
 
 function safeDownloadName(value) {
@@ -83,20 +220,24 @@ export function mountChatFirstRoutes({
   env = process.env,
   workspaceAgentRuntime,
   executeMissionIntent,
+  resolveMissionExecutionPlan = selectedMissionExecutionPlan,
   callAIImpl,
+  appOperations,
   exportInterviewDossierPdfImpl = exportInterviewDossierPdf,
 } = {}) {
   const pathCtx = { repoRoot, env };
   const executeIntent =
     executeMissionIntent || workspaceAgentRuntime?.executeIntent || executeWorkspaceIntent;
   const activeMissionRuns = new Map();
-  async function executeMission(id, { resume = false } = {}) {
+  async function executeMission(id, { resume = false, focusApplicationId = null } = {}) {
     const missionId = String(id ?? "").trim();
     if (activeMissionRuns.has(missionId)) return activeMissionRuns.get(missionId);
     const execution = Promise.resolve().then(() =>
       (resume ? missionResume : missionRun)({
         ...pathCtx,
         id,
+        resolveExecutionPlan: resolveMissionExecutionPlan,
+        ...(focusApplicationId ? { focusApplicationId } : {}),
         executeIntent: (attempt) => executeIntent({ repoRoot, env, ...attempt }),
       })
     );
@@ -106,6 +247,22 @@ export function mountChatFirstRoutes({
     } finally {
       if (activeMissionRuns.get(missionId) === execution) activeMissionRuns.delete(missionId);
     }
+  }
+
+  async function resolveControlChoice(body) {
+    const resolved = chatFirstChoiceResolve({ ...pathCtx, ...body });
+    const mission = resolved?.result?.mission;
+    if (!resolved.reused && resolved.handled && mission?.status === "running") {
+      const { mission: executedMission, ...execution } = await executeMission(mission.id, {
+        resume: true,
+      });
+      return {
+        ...resolved,
+        ...execution,
+        result: { ...resolved.result, mission: executedMission },
+      };
+    }
+    return resolved;
   }
 
   addRoute("POST", "/api/chat-first/job-thread/pin", (req, res) =>
@@ -133,13 +290,30 @@ export function mountChatFirstRoutes({
   );
 
   addRoute("POST", "/api/chat-first/job-thread/turn", (req, res) =>
-    withBody(req, res, (body) =>
-      jobThreadTurn({
-        ...pathCtx,
-        applicationId: body.applicationId,
-        text: body.text,
-        call: callAIImpl,
-      })
+    withBody(
+      req,
+      res,
+      async (body) => {
+        if (appOperations?.start && body.requestId) {
+          const started = await appOperations.start({
+            kind: JOB_THREAD_TURN_OPERATION_KIND,
+            input: body,
+          });
+          return {
+            reused: started.reused,
+            operation: operationView(started.operation),
+          };
+        }
+        return jobThreadTurn({
+          ...pathCtx,
+          applicationId: body.applicationId,
+          text: body.text,
+          choice: body.choice,
+          resolveExecutionPlan: resolveMissionExecutionPlan,
+          call: callAIImpl,
+        });
+      },
+      { status: appOperations ? 202 : 200 }
     )
   );
 
@@ -200,16 +374,21 @@ export function mountChatFirstRoutes({
     withBody(req, res, (body) => missionSetStatus({ ...pathCtx, ...body }))
   );
 
-  addRoute("POST", "/api/chat-first/missions/step", (req, res) =>
-    withBody(req, res, (body) => missionStepSetStatus({ ...pathCtx, ...body }))
-  );
-
   addRoute("POST", "/api/chat-first/missions/run", (req, res) =>
     withBody(req, res, (body) => executeMission(body.id))
   );
 
   addRoute("POST", "/api/chat-first/missions/resume", (req, res) =>
-    withBody(req, res, (body) => executeMission(body.id, { resume: true }))
+    withBody(req, res, (body) =>
+      executeMission(body.id, {
+        resume: true,
+        focusApplicationId: body.focusApplicationId,
+      })
+    )
+  );
+
+  addRoute("POST", "/api/chat-first/choice/resolve", (req, res) =>
+    withBody(req, res, resolveControlChoice)
   );
 
   addRoute("POST", "/api/chat-first/mock/start", (req, res) =>
@@ -221,6 +400,7 @@ export function mountChatFirstRoutes({
           ...pathCtx,
           ...body,
           questionTotal: body.questionTotal ?? body.questionCount,
+          resolveExecutionPlan: resolveMissionExecutionPlan,
           call: callAIImpl,
         }),
       { status: 201 }
@@ -244,6 +424,7 @@ export function mountChatFirstRoutes({
         ...pathCtx,
         sessionId: body.sessionId,
         text: body.text,
+        resolveExecutionPlan: resolveMissionExecutionPlan,
         call: callAIImpl,
       })
     )

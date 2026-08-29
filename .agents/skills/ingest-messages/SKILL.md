@@ -447,10 +447,10 @@ Ingest complete:
   message. Reply drafts belong to `email-comms` (channel-aware for `linkedin` and
   `portal`).
 
-- **Outcome writes belong to `track-outcomes`.** Never write `status` directly for
-  records carrying rejection / offer / interview-advance signals. Hand those to
-  `track-outcomes` with the applicationId and label; it is the only writer of outcome
-  state in `workspace/tracker.json`.
+- **Outcome writes belong to `track-outcomes` on this path.** Never write `status`
+  directly for records carrying rejection / offer / interview-advance signals.
+  Hand those to `track-outcomes` with the applicationId and label so it can apply
+  the transition plus the required learning and follow-up work.
 
 - **Privacy invariant.** Never write `current_base` into any `communications` field,
   message summary, or `workspace/comms/` artifact. Outbound-safe comp fields are
@@ -462,17 +462,17 @@ Ingest complete:
 
 ---
 
-## Conversational workspace path
+## In-app and terminal paths
 
-In the Ask workspace, one narrow piece of this skill is native: the app runs a
-typed `messages.sync-request` intent directly in `workspace-agent.mjs`, not
-this skill's message-reading steps. A terminal or external-agent run still
-follows the steps above exactly as written, and all message reading always
-happens there. The app never opens LinkedIn or Wellfound itself.
+CareerRat's in-app path reads LinkedIn and Wellfound recruiting messages through
+its owned browser workflow after the platform-specific `messaging` permission
+passes. It writes relevant threads into `communications[]`, stores long bodies
+under `workspace/comms/`, and advances each platform watermark. A terminal or
+external-agent run still follows the steps above exactly as written.
 
 - **Requesting a message check** (`messages.sync-request`). "Check my LinkedIn
   messages" or "any new DMs?" offers a "Check for new messages" chip. The
-  handler returns a handoff card showing each platform's real `mayRun` consent
+  handler reports each platform's real `mayRun` consent
   state for the `messaging` capability, the last sweep time from that
   platform's `sources[]` watermark ("Never checked" before a first run), and
   how many LinkedIn threads are currently waiting on a reply. The count is
@@ -480,10 +480,10 @@ happens there. The app never opens LinkedIn or Wellfound itself.
   `portal` channel, so counting that channel would overclaim what a message
   sync covers. With every platform off, the request refuses toward Settings;
   there is no ungated fallback source here, unlike mail's local Apple Mail
-  path. The intent reads no messages and changes no tracker state; the only
-  record it leaves is its own receipt message in the Ask conversation, like
-  every other workspace request.
-- **What stays here.** The session-browser reads, the two-sided relevance
-  classification, the escalation table, body pulls, `communications[]` and
-  watermark writes, and the track-outcomes handoff all remain this skill's
-  agent path. Reply drafting stays with email-comms.
+  path. Otherwise, choosing the action runs every allowed platform and returns
+  the captured count or a retry blocker in the same Ask thread.
+- **Execution and recovery.** The app performs the allowed read when the chip is
+  chosen. Login, captcha, 2FA, and permission blockers return a visible retry
+  state without advancing the watermark. The terminal path keeps the detailed
+  relevance/escalation review and track-outcomes handoff. Reply drafting stays
+  with email-comms.

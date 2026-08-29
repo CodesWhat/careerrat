@@ -28,6 +28,7 @@ function discoveryFingerprintInput(context = {}) {
     excludedCompanies: clone(context.excludedCompanies, []),
     companyPreferences: clone(context.companyPreferences, {}),
     locationPosture: clone(context.locationPosture, {}),
+    compensationFloors: clone(context.compensationFloors, {}),
   };
 }
 

@@ -29,6 +29,12 @@ Codex both run the complete CareerRat product. Local availability,
 authentication, and the complete readiness check decide whether an engine is
 `Ready`. See [Install & First Run](/getting-started/install) for install links.
 
+The provider-neutral AI controls work the same with Claude Code and OpenAI
+Codex. **Automatic** chooses the right level for each task, so Paul stays strong
+while web search and small helpers stay efficient. **Faster**, **Balanced**, and
+**Best** change overall quality, and **Thinking depth** sets how much reasoning
+time the selected runtime uses.
+
 **On any other platform**, use npm (requires Node.js 24 or newer):
 
 ```bash
@@ -44,6 +50,19 @@ As soon as it knows enough about the roles and locations you
 want, CareerRat starts the first search. Finishing setup opens Search and tells
 you whether that search is running, has matches, needs a retry, or is ready to
 start.
+
+Search combines built-in public job-board sources with broad AI open-web
+discovery for the roles you set, then discovers additional specialist boards
+and employer pages for that search. An AI result that cannot be fully read stays
+in Search as an **AI · unverified** lead instead of disappearing. **Evaluate**
+later verifies the live posting, captures the full description, and applies the
+candidate's hard rules before tailoring or form preparation.
+
+When a saved site is added or first used and login is needed, CareerRat asks “Do
+you want to log into LinkedIn so I can use it?” with Yes and No choices. Yes
+opens that exact search in the visible app browser. No skips it and keeps
+searching the other sources. Job-site search does not have a separate permission
+checklist in Settings.
 
 You can also paste a job posting and say **"evaluate this"**. CareerRat returns a
 verdict on whether to keep or cut it, how well it fits, whether the pay clears
@@ -92,3 +111,7 @@ inputs marked private never appear in outbound application artifacts.
 local data. Switching a selected engine does not make a provider's session
 history the source of truth, and the app never silently falls back to another
 provider.
+
+**Durable background work.** Searches and intake can continue while you move
+between views. Reloading restores their saved status. A runtime restart turns
+interrupted work into a visible retry instead of a false completed result.

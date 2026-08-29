@@ -17,6 +17,7 @@ compensation:
   current_base:
   target_base: 165000
   minimum_base: 140000
+  minimum_annual_earnings:
   target_total_comp:
   cash_over_equity: true
   expected_base: 165000

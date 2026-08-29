@@ -117,11 +117,25 @@ async function apiBinaryFetch(path, options = {}, { retried = false } = {}) {
   return { blob, filename, path: artifactPath };
 }
 
+let workspaceRequestSequence = 0;
+
+function durableWorkspaceRequestId(value) {
+  const supplied = String(value || "").trim();
+  if (supplied) return supplied;
+  const random = globalThis.crypto?.randomUUID?.();
+  if (random) return `workspace-${random}`;
+  workspaceRequestSequence += 1;
+  return `workspace-${Date.now().toString(36)}-${workspaceRequestSequence.toString(36)}`;
+}
+
 // Commits a typed workspace intent classified from a free-text query.
-export function runWorkspaceIntent(type, entity, input = {}) {
+export function runWorkspaceIntent(type, entity, input = {}, { requestId } = {}) {
   return apiFetch("/api/workspace/intent", {
     method: "POST",
-    body: JSON.stringify({ intent: { type, entity, input } }),
+    body: JSON.stringify({
+      requestId: durableWorkspaceRequestId(requestId),
+      intent: { type, entity, input },
+    }),
   });
 }
 
@@ -130,13 +144,17 @@ export function runWorkspaceIntent(type, entity, input = {}) {
 // ---------------------------------------------------------------------------
 
 // POST /api/workspace/message — runWorkspaceAgentTurn. Committing the ANSWER
-// row: appends `text` to the one durable workspace thread and returns the
-// assistant's reply already appended (see workspace-agent.mjs's own
-// contract) — no separate poll is needed to see the reply.
-export function sendWorkspaceMessage(text, context) {
+// row: starts a durable workspace operation. The caller follows the returned
+// operation id while the server appends the eventual reply to the one thread.
+export function sendWorkspaceMessage(text, context, choice, { requestId } = {}) {
   return apiFetch("/api/workspace/message", {
     method: "POST",
-    body: JSON.stringify({ text, ...(context ? { context } : {}) }),
+    body: JSON.stringify({
+      requestId: durableWorkspaceRequestId(requestId),
+      text,
+      ...(context ? { context } : {}),
+      ...(choice ? { choice } : {}),
+    }),
   });
 }
 
@@ -181,6 +199,17 @@ export function setPublicSyncPreference(enabled) {
 
 export function getInstalledAiRuntimes() {
   return apiFetch("/api/settings/ai-runtimes");
+}
+
+export function getAiPreferences() {
+  return apiFetch("/api/settings/ai-preferences");
+}
+
+export function saveAiPreferences({ quality, reasoning } = {}) {
+  return apiFetch("/api/settings/ai-preferences", {
+    method: "POST",
+    body: JSON.stringify({ quality, reasoning }),
+  });
 }
 
 export function getRuntimeConfig() {
@@ -270,10 +299,10 @@ export function selectInstalledAiRuntime({ runtimeId, providerFallback = false }
 // in full — never a subset — or the rest silently truncates on write. None
 // of M7's Settings fields are arrays; a future section that edits one
 // (e.g. targeting.role_families) must respect this.
-export function saveCandidateFile(name, patch) {
+export function saveCandidateFile(name, patch, { expectedBaseRevision } = {}) {
   return apiFetch(`/api/onboard/candidate/${name}`, {
     method: "POST",
-    body: JSON.stringify({ data: patch }),
+    body: JSON.stringify({ data: patch, expectedBaseRevision }),
   });
 }
 
@@ -322,8 +351,24 @@ export async function extractResumeAi(file) {
     }
   }
   if (!res.ok) throw new ApiError(res.status, body);
-  if (body?.ok === true && body?.data && typeof body.data === "object") return body.data;
+  if (body?.ok === true && body?.data && typeof body.data === "object") {
+    return {
+      ...body.data,
+      ...(body.operation ? { operation: body.operation } : {}),
+      seedSaved: body.operation?.status === "completed",
+    };
+  }
   return body;
+}
+
+export async function getResumeExtraction({ id, digest } = {}) {
+  const query = new URLSearchParams();
+  if (id) query.set("id", id);
+  if (digest) query.set("digest", digest);
+  const body = await apiFetch(
+    `/api/onboard/resume-ai/operation${query.size ? `?${query.toString()}` : ""}`
+  );
+  return body.operation || null;
 }
 
 // Shared SSE-over-fetch frame parser: frames are `data: <json>\n\n`, plus
@@ -401,43 +446,6 @@ export async function streamResumeAi(file, { onEvent, signal } = {}) {
   await parseSseStream(res.body, { onEvent });
 }
 
-// POST /api/search/ai-web-search/run — the Jobs > Search tab's AI web-search
-// lane. Same `data: <json>\n\n` frame / `: ping` heartbeat contract as
-// resume-ai-stream above (parsed by the same parseSseStream), but this
-// route's own payload shapes: {type:"activity", message} progress lines,
-// {type:"done", data:{searched, found, new, duplicates, errors}}, and
-// {type:"error", message}. No request body — the server reads the saved
-// search prompts itself (see getSearchPrompts/saveSearchPrompts above).
-// Pre-stream failures are ordinary ApiError throws: 409 while a run is
-// already in flight, other 4xx/5xx for no-AI/no-prompts/lean-downshift with
-// the API's standard error shape. Static preview has no run route at all —
-// same immediate-throw contract as streamResumeAi above.
-export async function runAiWebSearchStream({ onEvent, promptIds, searchExecutionId, signal } = {}) {
-  const res = await fetch("/api/search/ai-web-search/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...(Array.isArray(promptIds) ? { promptIds } : {}),
-      ...(searchExecutionId ? { searchExecutionId } : {}),
-    }),
-    signal,
-  });
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "");
-    let body = {};
-    if (text) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = { raw: text };
-      }
-    }
-    throw new ApiError(res.status, body);
-  }
-
-  await parseSseStream(res.body, { onEvent });
-}
-
 export async function extractResumeDocx(file) {
   const res = await fetch(`/api/onboard/resume-docx?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
@@ -492,27 +500,17 @@ export function getSourcingRun({ purpose, id, signal } = {}) {
   });
 }
 
+export function getSearchExecution({ searchExecutionId, signal } = {}) {
+  const params = new URLSearchParams();
+  if (searchExecutionId) params.set("id", searchExecutionId);
+  const query = params.toString();
+  return apiFetch(`/api/sourcing/execution${query ? `?${query}` : ""}`, {
+    ...(signal ? { signal } : {}),
+  });
+}
+
 export function getSearchSourceStatus() {
   return apiFetch("/api/search/sources");
-}
-
-// AI search-assistant prompts (src/cli/search-route.mjs) — generate-first:
-// CareerRat generates the prompts, the user edits/adds/removes afterward.
-// GET/PUT both unwrap to the stored { id, text, source, updatedAt } list;
-// generate additionally persists server-side before returning it.
-export function getSearchPrompts() {
-  return apiFetch("/api/search/prompts", { method: "GET" });
-}
-
-export function generateSearchPrompts() {
-  return apiFetch("/api/search/prompts/generate", { method: "POST" });
-}
-
-export function saveSearchPrompts(prompts) {
-  return apiFetch("/api/search/prompts", {
-    method: "PUT",
-    body: JSON.stringify({ prompts }),
-  });
 }
 
 export function startFirstSearchRun(payload = {}) {
@@ -531,6 +529,39 @@ export function startSearchRun(payload = {}) {
 
 export function createCompanyProposals(payload = {}) {
   return apiFetch("/api/discovery/company-proposals", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getAppOperation(id) {
+  const body = await apiFetch(
+    `/api/app-operations/operation?id=${encodeURIComponent(String(id || ""))}`
+  );
+  return body.operation || null;
+}
+
+export async function getWorkspaceThread() {
+  const body = await apiFetch("/api/workspace/thread");
+  return body?.data || null;
+}
+
+export function retryAppOperation(id) {
+  return apiFetch("/api/app-operations/retry", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export async function getCompanyProposalBatch(batchId) {
+  const body = await apiFetch(
+    `/api/discovery/company-proposals?id=${encodeURIComponent(String(batchId || ""))}`
+  );
+  return body?.data?.batch || null;
+}
+
+export function decideCompanyProposal(payload = {}) {
+  return apiFetch("/api/discovery/company-proposal-decisions", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -555,15 +586,15 @@ export async function suggestAssist(kind, input) {
   };
 }
 
-export function addBoard({ url, label }) {
-  return apiFetch("/api/boards/add", {
-    method: "POST",
-    body: JSON.stringify({ url, label }),
-  });
-}
-
 export function getSourceMaintenance() {
   return apiFetch("/api/boards/sources");
+}
+
+export function addBoardSource(url, label) {
+  return apiFetch("/api/boards/add", {
+    method: "POST",
+    body: JSON.stringify({ url, ...(label ? { label } : {}) }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -578,10 +609,15 @@ export function startChat(skill, input) {
   });
 }
 
-export function sendChatMessage(chatId, text) {
+export function sendChatMessage(chatId, text, choice, { requestId } = {}) {
   return apiFetch("/api/chat/message", {
     method: "POST",
-    body: JSON.stringify({ chatId, text }),
+    body: JSON.stringify({
+      chatId,
+      text,
+      ...(choice ? { choice } : {}),
+      requestId: durableWorkspaceRequestId(requestId),
+    }),
   });
 }
 
@@ -712,10 +748,14 @@ export function setSourcedStatus({ id, to, note } = {}) {
 // markdown sources to real PDF/DOCX files under workspace/tailored/ and
 // registers them on the application row; `userFacing` in the response is
 // {resume:[{format,path,name}], coverLetter:[...], answers:[...]}.
-export function exportPacketDocuments({ applicationId, formats } = {}) {
+export function exportPacketDocuments({ applicationId, formats, requestId } = {}) {
   return apiFetch("/api/packet/export", {
     method: "POST",
-    body: JSON.stringify({ applicationId, formats }),
+    body: JSON.stringify({
+      applicationId,
+      formats,
+      requestId: durableWorkspaceRequestId(requestId),
+    }),
   });
 }
 
@@ -899,6 +939,7 @@ export function decideChatFirstSourced(payload = {}) {
 
 export function appendJobThreadMessage({
   applicationId,
+  id,
   role,
   kind,
   text,
@@ -907,14 +948,19 @@ export function appendJobThreadMessage({
 } = {}) {
   return apiFetch("/api/chat-first/job-thread/message", {
     method: "POST",
-    body: JSON.stringify({ applicationId, role, kind, text, metadata, artifacts }),
+    body: JSON.stringify({ applicationId, id, role, kind, text, metadata, artifacts }),
   });
 }
 
-export function sendJobThreadTurn({ applicationId, text } = {}) {
+export function sendJobThreadTurn({ applicationId, text, choice, requestId } = {}) {
   return apiFetch("/api/chat-first/job-thread/turn", {
     method: "POST",
-    body: JSON.stringify({ applicationId, text }),
+    body: JSON.stringify({
+      applicationId,
+      text,
+      ...(choice ? { choice } : {}),
+      requestId: durableWorkspaceRequestId(requestId),
+    }),
   });
 }
 
@@ -939,10 +985,10 @@ export function runChatFirstMission(id) {
   });
 }
 
-export function resumeChatFirstMission(id) {
+export function resumeChatFirstMission(id, { focusApplicationId } = {}) {
   return apiFetch("/api/chat-first/missions/resume", {
     method: "POST",
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, ...(focusApplicationId ? { focusApplicationId } : {}) }),
   });
 }
 
@@ -953,10 +999,15 @@ export function setChatFirstMissionStatus({ id, status } = {}) {
   });
 }
 
-export function setChatFirstMissionStepStatus({ missionId, stepId, status, result, error } = {}) {
-  return apiFetch("/api/chat-first/missions/step", {
+export function resolveChatFirstChoice({ entityType, entityId, text, choice } = {}) {
+  return apiFetch("/api/chat-first/choice/resolve", {
     method: "POST",
-    body: JSON.stringify({ missionId, stepId, status, result, error }),
+    body: JSON.stringify({
+      entityType,
+      entityId,
+      text,
+      ...(choice ? { choice } : {}),
+    }),
   });
 }
 

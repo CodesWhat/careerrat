@@ -27,11 +27,12 @@ import {
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 function parseArgs(argv) {
-  const opts = { positional: [], write: false, json: false, root: ROOT };
+  const opts = { positional: [], write: false, json: false, explicit: false, root: ROOT };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--write") opts.write = true;
     else if (a === "--json") opts.json = true;
+    else if (a === "--explicit") opts.explicit = true;
     else if (a === "--root") opts.root = argv[++i];
     else if (a === "--help" || a === "-h") opts.help = true;
     else opts.positional.push(a);
@@ -81,7 +82,7 @@ if (cmd === "allows") {
     }
     process.exit(1);
   }
-  const verdict = computeAllows(operation, modes.data);
+  const verdict = computeAllows(operation, modes.data, { explicit: opts.explicit });
   if (opts.json) {
     console.log(JSON.stringify({ ok: true, ...verdict }, null, 2));
   } else {
@@ -211,12 +212,13 @@ function printHelp() {
 
 Usage:
   careerrat modes status [--json]
-  careerrat modes allows <operation> [--json]
+  careerrat modes allows <operation> [--explicit] [--json]
   careerrat modes set usage <lean|standard|full> [--write]
   careerrat modes set application <selective|balanced|high-volume> [--write]
 
 Options:
   --write     Commit the change (default: dry run)
+  --explicit  Authorize this one requested run without changing saved usage mode
   --json      Machine-readable output
   --root DIR  Repo root (default: the careerrat install)
 

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-
+import { runAbortable, throwIfAborted } from "./cancellation.mjs";
 import { uniqueVoluntaryDeclineOption } from "./form-fill.mjs";
 
 // ---------------------------------------------------------------------------
@@ -12,7 +12,7 @@ function orcaExecutable(env) {
   return process.platform === "linux" && !env?.ORCA_WORKTREE_ID ? "orca-ide" : "orca";
 }
 
-export function runOrcaCommand(args, { env = process.env, cwd } = {}) {
+export function runOrcaCommand(args, { env = process.env, cwd, signal } = {}) {
   return new Promise((resolve, reject) => {
     execFile(
       orcaExecutable(env),
@@ -24,6 +24,7 @@ export function runOrcaCommand(args, { env = process.env, cwd } = {}) {
         maxBuffer: 12 * 1024 * 1024,
         timeout: 30_000,
         windowsHide: true,
+        signal,
       },
       (error, stdout) => {
         let payload = null;
@@ -459,123 +460,117 @@ function encodedDataExpression(value) {
 // ---------------------------------------------------------------------------
 
 export function createOrcaOps({ runOrcaImpl } = {}) {
-  async function evaluate(pageId, expression) {
-    const response = await runOrcaImpl([
-      "eval",
-      "--page",
-      pageId,
-      "--expression",
-      expression,
-      "--json",
-    ]);
+  function run(args, signal) {
+    return runAbortable(signal, () => runOrcaImpl(args, signal ? { signal } : {}));
+  }
+
+  async function evaluate(pageId, expression, signal) {
+    const response = await run(
+      ["eval", "--page", pageId, "--expression", expression, "--json"],
+      signal
+    );
     return response?.result;
   }
 
-  async function snapshot(pageId) {
-    const raw = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+  async function snapshot(pageId, signal) {
+    const raw = await run(["snapshot", "--page", pageId, "--json"], signal);
     let probe = [];
     if (needsFormStateProbe(raw)) {
       try {
-        const inspected = await runOrcaImpl([
-          "eval",
-          "--page",
-          pageId,
-          "--expression",
-          FORM_STATE_EXPRESSION,
-          "--json",
-        ]);
+        const inspected = await run(
+          ["eval", "--page", pageId, "--expression", FORM_STATE_EXPRESSION, "--json"],
+          signal
+        );
         probe = parseFormState(inspected);
       } catch {
+        throwIfAborted(signal);
         probe = [];
       }
     }
     let safeAdvanceLabels = [];
     if (needsAdvanceSafetyProbe(raw)) {
       try {
-        const inspected = await runOrcaImpl([
-          "eval",
-          "--page",
-          pageId,
-          "--expression",
-          ADVANCE_SAFETY_EXPRESSION,
-          "--json",
-        ]);
+        const inspected = await run(
+          ["eval", "--page", pageId, "--expression", ADVANCE_SAFETY_EXPRESSION, "--json"],
+          signal
+        );
         const parsed = JSON.parse(String(inspected?.result || "[]"));
         safeAdvanceLabels = Array.isArray(parsed) ? parsed : [];
       } catch {
+        throwIfAborted(signal);
         safeAdvanceLabels = [];
       }
     }
     return normalizeSnapshot(raw, probe, safeAdvanceLabels);
   }
 
-  async function dismissOpenOptions(pageId) {
+  async function dismissOpenOptions(pageId, signal) {
     try {
-      await runOrcaImpl(["keypress", "--page", pageId, "--key", "Escape", "--json"]);
+      await run(["keypress", "--page", pageId, "--key", "Escape", "--json"], signal);
     } catch {
+      throwIfAborted(signal);
       // The original field failure remains the actionable result.
     }
   }
 
-  async function scrollFieldIntoView(pageId, label) {
+  async function scrollFieldIntoView(pageId, label, signal) {
     const input = encodedDataExpression({ label: normalizeText(label) });
     await evaluate(
       pageId,
-      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const fields=Array.from(document.querySelectorAll("[role='combobox']")); const matches=fields.filter((field)=>{const direct=field.getAttribute("aria-label")||"";const labelled=String(field.getAttribute("aria-labelledby")||"").split(/\\s+/).filter(Boolean).map((id)=>document.getElementById(id)?.innerText||"").join(" ");return normalize(direct||labelled)===input.label;}); if(matches.length!==1)return false; matches[0].scrollIntoView({block:"center",inline:"nearest"}); return true; })()`
+      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const fields=Array.from(document.querySelectorAll("[role='combobox']")); const matches=fields.filter((field)=>{const direct=field.getAttribute("aria-label")||"";const labelled=String(field.getAttribute("aria-labelledby")||"").split(/\\s+/).filter(Boolean).map((id)=>document.getElementById(id)?.innerText||"").join(" ");return normalize(direct||labelled)===input.label;}); if(matches.length!==1)return false; matches[0].scrollIntoView({block:"center",inline:"nearest"}); return true; })()`,
+      signal
     );
   }
 
-  async function openTypeaheadControl(pageId, label) {
+  async function openTypeaheadControl(pageId, label, signal) {
     const input = encodedDataExpression({ label: normalizeText(label) });
     await evaluate(
       pageId,
-      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const fields=Array.from(document.querySelectorAll("[role='combobox']")); const matches=fields.filter((field)=>{const direct=field.getAttribute("aria-label")||"";const labelled=String(field.getAttribute("aria-labelledby")||"").split(/\\s+/).filter(Boolean).map((id)=>document.getElementById(id)?.innerText||"").join(" ");return normalize(direct||labelled)===input.label;}); if(matches.length!==1)return false; const field=matches[0]; const control=field.closest(".select__control")||field; field.focus({preventScroll:true}); for(const type of ["pointerdown","mousedown","pointerup","mouseup","click"]){control.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window,button:0,buttons:type.includes("down")?1:0}));} return true; })()`
+      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const fields=Array.from(document.querySelectorAll("[role='combobox']")); const matches=fields.filter((field)=>{const direct=field.getAttribute("aria-label")||"";const labelled=String(field.getAttribute("aria-labelledby")||"").split(/\\s+/).filter(Boolean).map((id)=>document.getElementById(id)?.innerText||"").join(" ");return normalize(direct||labelled)===input.label;}); if(matches.length!==1)return false; const field=matches[0]; const control=field.closest(".select__control")||field; field.focus({preventScroll:true}); for(const type of ["pointerdown","mousedown","pointerup","mouseup","click"]){control.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window,button:0,buttons:type.includes("down")?1:0}));} return true; })()`,
+      signal
     );
   }
 
-  async function chooseExactOpenOption(pageId, value) {
+  async function chooseExactOpenOption(pageId, value, signal) {
     const input = encodedDataExpression({ value: normalizeText(value) });
     const result = await evaluate(
       pageId,
-      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const options=Array.from(document.querySelectorAll("[role='option']")).filter((option)=>{const rect=option.getBoundingClientRect();const style=getComputedStyle(option);return rect.width>0&&rect.height>0&&style.visibility!=="hidden"&&style.display!=="none"&&normalize(option.innerText||option.textContent)===input.value;}); if(options.length!==1)return false; const option=options[0]; for(const type of ["pointerdown","mousedown","pointerup","mouseup","click"]){option.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window,button:0,buttons:type.includes("down")?1:0}));} return true; })()`
+      `(() => { const input=${input}; const normalize=(value)=>String(value||"").toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\\s+/g," ").trim(); const options=Array.from(document.querySelectorAll("[role='option']")).filter((option)=>{const rect=option.getBoundingClientRect();const style=getComputedStyle(option);return rect.width>0&&rect.height>0&&style.visibility!=="hidden"&&style.display!=="none"&&normalize(option.innerText||option.textContent)===input.value;}); if(options.length!==1)return false; const option=options[0]; for(const type of ["pointerdown","mousedown","pointerup","mouseup","click"]){option.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window,button:0,buttons:type.includes("down")?1:0}));} return true; })()`,
+      signal
     );
     return result === true || String(result) === "true";
   }
 
-  async function confirmedSelectedField(pageId, ref, label, expected) {
+  async function confirmedSelectedField(pageId, ref, label, expected, signal) {
     let field = null;
     for (let attempt = 0; attempt < OPTION_SNAPSHOT_ATTEMPTS; attempt += 1) {
-      const after = await snapshot(pageId);
+      const after = await snapshot(pageId, signal);
       field = selectedField(after, ref, label);
       if (field?.stateKnown === true && selectedValueMatches(field.value, expected)) return field;
       if (attempt < OPTION_SNAPSHOT_ATTEMPTS - 1) {
-        await runOrcaImpl([
-          "wait",
-          "--page",
-          pageId,
-          "--timeout",
-          String(OPTION_SNAPSHOT_DELAY_MS),
-          "--json",
-        ]);
+        await run(
+          ["wait", "--page", pageId, "--timeout", String(OPTION_SNAPSHOT_DELAY_MS), "--json"],
+          signal
+        );
       }
     }
     return field;
   }
 
   return {
-    async openTab({ url }) {
-      const opened = await runOrcaImpl(["tab", "create", "--url", url, "--json"]);
+    async openTab({ url, signal }) {
+      const opened = await run(["tab", "create", "--url", url, "--json"], signal);
       return { pageId: String(opened?.browserPageId || "").trim() };
     },
-    async focusTab({ pageId }) {
-      return runOrcaImpl(["tab", "switch", "--page", pageId, "--json"]);
+    async focusTab({ pageId, signal }) {
+      return run(["tab", "switch", "--page", pageId, "--json"], signal);
     },
-    async navigate({ pageId, url }) {
-      await runOrcaImpl(["navigate", "--page", pageId, "--url", String(url), "--json"]);
+    async navigate({ pageId, url, signal }) {
+      await run(["navigate", "--page", pageId, "--url", String(url), "--json"], signal);
       return { pageId, url: String(url) };
     },
-    async back({ pageId }) {
-      await runOrcaImpl(["keypress", "--page", pageId, "--key", "ALT+LEFT", "--json"]);
+    async back({ pageId, signal }) {
+      await run(["keypress", "--page", pageId, "--key", "ALT+LEFT", "--json"], signal);
       return { pageId };
     },
     async pageContent({ pageId, maxText = 20_000 }) {
@@ -633,22 +628,25 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
       await evaluate(pageId, `window.scrollBy(0,${delta}); location.href`);
       return { pageId };
     },
-    async snapshot({ pageId }) {
-      return snapshot(pageId);
+    async snapshot({ pageId, signal }) {
+      return snapshot(pageId, signal);
     },
-    async fillField({ pageId, ref, value }) {
-      return runOrcaImpl([
-        "fill",
-        "--page",
-        pageId,
-        "--element",
-        `@${ref}`,
-        "--value",
-        String(value),
-        "--json",
-      ]);
+    async fillField({ pageId, ref, value, signal }) {
+      return run(
+        ["fill", "--page", pageId, "--element", `@${ref}`, "--value", String(value), "--json"],
+        signal
+      );
     },
-    async selectOption({ pageId, ref, label, value, typeahead = false, optionAliases = [] }) {
+    async selectOption({
+      pageId,
+      ref,
+      label,
+      value,
+      typeahead = false,
+      optionAliases = [],
+      signal,
+    }) {
+      throwIfAborted(signal);
       if (!typeahead) {
         const candidates = [value, ...(Array.isArray(optionAliases) ? optionAliases : [])]
           .map((candidate) => String(candidate || "").trim())
@@ -662,23 +660,19 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
         let selectedAttemptRan = false;
         let lastError = null;
         for (const candidate of candidates) {
+          throwIfAborted(signal);
           try {
-            await runOrcaImpl([
-              "select",
-              "--page",
-              pageId,
-              "--element",
-              `@${ref}`,
-              "--value",
-              candidate,
-              "--json",
-            ]);
+            await run(
+              ["select", "--page", pageId, "--element", `@${ref}`, "--value", candidate, "--json"],
+              signal
+            );
             selectedAttemptRan = true;
-            lastField = await confirmedSelectedField(pageId, ref, label, candidate);
+            lastField = await confirmedSelectedField(pageId, ref, label, candidate, signal);
             if (lastField?.stateKnown && selectedValueMatches(lastField.value, candidate)) {
               return { selectedValue: lastField.value };
             }
           } catch (error) {
+            throwIfAborted(signal);
             lastError = error;
           }
         }
@@ -691,15 +685,15 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
 
       let option = null;
       const attempts = typeaheadSelectionAttempts(value, optionAliases);
-      await scrollFieldIntoView(pageId, label);
-      let optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+      await scrollFieldIntoView(pageId, label, signal);
+      let optionsSnapshot = await run(["snapshot", "--page", pageId, "--json"], signal);
       let currentRef = comboboxRefForField(optionsSnapshot, label) || ref;
-      await runOrcaImpl(["click", "--page", pageId, "--element", `@${currentRef}`, "--json"]);
-      optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+      await run(["click", "--page", pageId, "--element", `@${currentRef}`, "--json"], signal);
+      optionsSnapshot = await run(["snapshot", "--page", pageId, "--json"], signal);
       currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
       if (!comboboxIsExpanded(optionsSnapshot, currentRef, label)) {
-        await openTypeaheadControl(pageId, label);
-        optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+        await openTypeaheadControl(pageId, label, signal);
+        optionsSnapshot = await run(["snapshot", "--page", pageId, "--json"], signal);
         currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
       }
       const openOptions = optionsForField(optionsSnapshot, currentRef, label);
@@ -707,61 +701,61 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
         .map((attemptValue) => optionMatch(openOptions, attemptValue.match))
         .find(Boolean);
       for (const attemptValue of attempts) {
+        throwIfAborted(signal);
         if (option) break;
-        await runOrcaImpl([
-          "fill",
-          "--page",
-          pageId,
-          "--element",
-          `@${currentRef}`,
-          "--value",
-          attemptValue.query,
-          "--json",
-        ]);
+        await run(
+          [
+            "fill",
+            "--page",
+            pageId,
+            "--element",
+            `@${currentRef}`,
+            "--value",
+            attemptValue.query,
+            "--json",
+          ],
+          signal
+        );
         let options = [];
         for (let attempt = 0; attempt < OPTION_SNAPSHOT_ATTEMPTS; attempt += 1) {
-          optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+          optionsSnapshot = await run(["snapshot", "--page", pageId, "--json"], signal);
           currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
           options = optionsForField(optionsSnapshot, currentRef, label);
           option = optionMatch(options, attemptValue.match);
           if (option) break;
           if (attempt < OPTION_SNAPSHOT_ATTEMPTS - 1) {
-            await runOrcaImpl([
-              "wait",
-              "--page",
-              pageId,
-              "--timeout",
-              String(OPTION_SNAPSHOT_DELAY_MS),
-              "--json",
-            ]);
+            await run(
+              ["wait", "--page", pageId, "--timeout", String(OPTION_SNAPSHOT_DELAY_MS), "--json"],
+              signal
+            );
           }
         }
       }
       if (!option) {
-        await dismissOpenOptions(pageId);
+        await dismissOpenOptions(pageId, signal);
         throw new Error(`No unambiguous option matched "${value}".`);
       }
-      const selectedThroughDom = await chooseExactOpenOption(pageId, option.name);
+      const selectedThroughDom = await chooseExactOpenOption(pageId, option.name, signal);
       if (!selectedThroughDom) {
-        await runOrcaImpl(["click", "--page", pageId, "--element", `@${option.ref}`, "--json"]);
+        await run(["click", "--page", pageId, "--element", `@${option.ref}`, "--json"], signal);
       }
-      const field = await confirmedSelectedField(pageId, ref, label, option.name);
+      const field = await confirmedSelectedField(pageId, ref, label, option.name, signal);
       if (!field?.stateKnown || !selectedValueMatches(field.value, option.name)) {
-        await dismissOpenOptions(pageId);
+        await dismissOpenOptions(pageId, signal);
         throw new Error(`The field did not keep the selected option "${option.name}".`);
       }
       return { selectedValue: option.name };
     },
-    async selectDeclineOption({ pageId, ref, label }) {
-      await scrollFieldIntoView(pageId, label);
-      let optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+    async selectDeclineOption({ pageId, ref, label, signal }) {
+      await scrollFieldIntoView(pageId, label, signal);
+      let optionsSnapshot = await run(["snapshot", "--page", pageId, "--json"], signal);
       let currentRef = comboboxRefForField(optionsSnapshot, label) || ref;
-      await runOrcaImpl(["click", "--page", pageId, "--element", `@${currentRef}`, "--json"]);
-      optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+      await run(["click", "--page", pageId, "--element", `@${currentRef}`, "--json"], signal);
+      optionsSnapshot = await run(["snapshot", "--page", pageId, "--json"], signal);
       currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
       if (!comboboxIsExpanded(optionsSnapshot, currentRef, label)) {
-        await openTypeaheadControl(pageId, label);
-        optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+        await openTypeaheadControl(pageId, label, signal);
+        optionsSnapshot = await run(["snapshot", "--page", pageId, "--json"], signal);
         currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
       }
       let option = null;
@@ -769,64 +763,50 @@ export function createOrcaOps({ runOrcaImpl } = {}) {
         option = uniqueVoluntaryDeclineOption(optionsForField(optionsSnapshot, currentRef, label));
         if (option) break;
         if (attempt < OPTION_SNAPSHOT_ATTEMPTS - 1) {
-          await runOrcaImpl([
-            "wait",
-            "--page",
-            pageId,
-            "--timeout",
-            String(OPTION_SNAPSHOT_DELAY_MS),
-            "--json",
-          ]);
-          optionsSnapshot = await runOrcaImpl(["snapshot", "--page", pageId, "--json"]);
+          await run(
+            ["wait", "--page", pageId, "--timeout", String(OPTION_SNAPSHOT_DELAY_MS), "--json"],
+            signal
+          );
+          optionsSnapshot = await run(["snapshot", "--page", pageId, "--json"], signal);
           currentRef = comboboxRefForField(optionsSnapshot, label) || currentRef;
         }
       }
       if (!option) {
-        await dismissOpenOptions(pageId);
+        await dismissOpenOptions(pageId, signal);
         throw new Error(`The "${label}" dropdown did not offer one unambiguous decline option.`);
       }
-      const selectedThroughDom = await chooseExactOpenOption(pageId, option.name);
+      const selectedThroughDom = await chooseExactOpenOption(pageId, option.name, signal);
       if (!selectedThroughDom) {
-        await runOrcaImpl(["click", "--page", pageId, "--element", `@${option.ref}`, "--json"]);
+        await run(["click", "--page", pageId, "--element", `@${option.ref}`, "--json"], signal);
       }
-      const field = await confirmedSelectedField(pageId, ref, label, option.name);
+      const field = await confirmedSelectedField(pageId, ref, label, option.name, signal);
       if (!field?.stateKnown || !selectedValueMatches(field.value, option.name)) {
-        await dismissOpenOptions(pageId);
+        await dismissOpenOptions(pageId, signal);
         throw new Error(`The field did not keep the selected option "${option.name}".`);
       }
       return { selectedValue: option.name };
     },
-    async toggleField({ pageId, ref, checked }) {
-      return runOrcaImpl([
-        checked ? "check" : "uncheck",
-        "--page",
-        pageId,
-        "--element",
-        `@${ref}`,
-        "--json",
-      ]);
+    async toggleField({ pageId, ref, checked, signal }) {
+      return run(
+        [checked ? "check" : "uncheck", "--page", pageId, "--element", `@${ref}`, "--json"],
+        signal
+      );
     },
-    async chooseButtonOption({ pageId, ref }) {
-      await runOrcaImpl(["focus", "--page", pageId, "--element", `@${ref}`, "--json"]);
-      return runOrcaImpl(["keypress", "--page", pageId, "--key", "Enter", "--json"]);
+    async chooseButtonOption({ pageId, ref, signal }) {
+      await run(["focus", "--page", pageId, "--element", `@${ref}`, "--json"], signal);
+      return run(["keypress", "--page", pageId, "--key", "Enter", "--json"], signal);
     },
-    async clickButton({ pageId, ref }) {
-      return runOrcaImpl(["click", "--page", pageId, "--element", `@${ref}`, "--json"]);
+    async clickButton({ pageId, ref, signal }) {
+      return run(["click", "--page", pageId, "--element", `@${ref}`, "--json"], signal);
     },
-    async upload({ pageId, ref, files }) {
-      return runOrcaImpl([
-        "upload",
-        "--page",
-        pageId,
-        "--element",
-        `@${ref}`,
-        "--files",
-        files,
-        "--json",
-      ]);
+    async upload({ pageId, ref, files, signal }) {
+      return run(
+        ["upload", "--page", pageId, "--element", `@${ref}`, "--files", files, "--json"],
+        signal
+      );
     },
-    async screenshot({ pageId }) {
-      const shot = await runOrcaImpl(["screenshot", "--page", pageId, "--json"]);
+    async screenshot({ pageId, signal }) {
+      const shot = await run(["screenshot", "--page", pageId, "--json"], signal);
       return { data: shot.data, format: shot.format };
     },
   };

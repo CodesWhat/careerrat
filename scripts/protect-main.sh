@@ -5,9 +5,9 @@
 # dismiss stale reviews on push, code-owner review, last-push approval, block force-push,
 # block deletion, no bypass for anyone.
 #
-# required_status_checks lists the eight contexts promoted in #96, plus `tests`,
-# promoted here now that #109 runs the full suite in CI and the flaky SSE watcher
-# test it depends on has landed on main and been observed green there. Contexts are
+# required_status_checks includes the deterministic web, docs, Windows package,
+# and real-Chromium application-preparation gates alongside the core/security
+# suite. Contexts are
 # JOB names, not workflow file names, so renaming a workflow file does not change
 # them. Two PR checks are deliberately NOT required because they fail for reasons
 # unrelated to the code: `qlty check` (Qlty Cloud minutes, distinct from the in-repo
@@ -98,6 +98,10 @@ read -r -d '' DESIRED <<'JSON' || true
           { "context": "actionlint" },
           { "context": "analyze (javascript-typescript)" },
           { "context": "dependency-review" },
+          { "context": "web-build" },
+          { "context": "website-build" },
+          { "context": "windows-package-smoke" },
+          { "context": "browser-application-prep" },
           { "context": "qlty" },
           { "context": "knip" },
           { "context": "tests" }

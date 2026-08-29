@@ -493,6 +493,8 @@ export async function draftOneOffScreeningAnswers({
   env = process.env,
   questionText,
   applicationId = null,
+  executionPlan,
+  signal,
   captureQuestionsImpl = capturePacketQuestions,
   draftAnswersImpl = draftPacketAnswers,
   buildContextImpl = buildPacketContext,
@@ -542,6 +544,8 @@ export async function draftOneOffScreeningAnswers({
         repoRoot,
         env,
         applicationId: application?.id,
+        executionPlan,
+        signal,
         context,
         questions: {
           answerable: capture.questions || [],

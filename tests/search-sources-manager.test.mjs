@@ -16,6 +16,7 @@ import {
   toCaptureSource,
   validateConfig,
 } from "../src/core/providers/search-sources.mjs";
+import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
 
 // Load the real schema from disk
 const schemaPath = new URL("../config/search-sources.schema.json", import.meta.url).pathname;
@@ -32,6 +33,21 @@ test("emptyConfig() validates against the real schema", () => {
     result.valid,
     `emptyConfig should be schema-valid; errors: ${JSON.stringify(result.errors)}`
   );
+});
+
+test("parseConfig normalizes legacy manual-auth sources into the current browser shape", () => {
+  const config = parseConfig(`searches:
+  - provider: linkedin.com
+    source_type: manual-auth
+    label: LinkedIn saved search
+    url: https://www.linkedin.com/jobs/search/?keywords=operations
+    enabled: false
+`);
+
+  assert.equal(config.searches[0].source_type, "browser");
+  assert.equal(config.searches[0].auth, true);
+  assert.equal(validateConfig(config, SCHEMA).valid, true);
+  assert.equal(pendingSourceLoginRequests(config)[0].platform, "linkedin");
 });
 
 // ---------------------------------------------------------------------------
@@ -173,6 +189,19 @@ test("addSearchFromUrl with hiring.cafe URL validates against real schema", () =
   assert.ok(result.valid, `schema errors: ${JSON.stringify(result.errors)}`);
 });
 
+test("addSearchFromUrl deduplicates a HiringCafe URL against a generated query source", () => {
+  const generated = addSearchFromQuery(emptyConfig(), { query: "Bartender" });
+  const { url } = buildHiringCafeUrl({ query: "bartender" });
+
+  const result = addSearchFromUrl(generated, url, {
+    label: "HiringCafe bartender",
+    sourceType: "url-query",
+  });
+
+  assert.equal(result, generated);
+  assert.equal(result.searches.length, 1);
+});
+
 // ---------------------------------------------------------------------------
 // addSearchFromUrl — generic (LinkedIn)
 // ---------------------------------------------------------------------------
@@ -212,6 +241,81 @@ test("addSearchFromUrl turns a supported Career Ops URL into a deterministic ATS
 
 test("addSearchFromUrl throws on unparseable URL", () => {
   assert.throws(() => addSearchFromUrl(emptyConfig(), "not-a-url"), /unparseable/i);
+});
+
+test("browser source add and login preflight reject a known site label on another hostname", () => {
+  assert.throws(
+    () =>
+      addSearchFromUrl(emptyConfig(), "https://jobs.example.com/search", {
+        label: "LinkedIn saved search",
+        sourceType: "browser",
+      }),
+    /does not match.*hostname/i
+  );
+
+  assert.deepEqual(
+    pendingSourceLoginRequests({
+      searches: [
+        {
+          provider: "jobs.example.com",
+          platform: "linkedin",
+          source_type: "browser",
+          auth: true,
+          label: "LinkedIn saved search",
+          url: "https://jobs.example.com/search",
+          enabled: false,
+        },
+      ],
+    }),
+    []
+  );
+});
+
+test("login preflight keeps a durable No quiet on later searches", () => {
+  assert.deepEqual(
+    pendingSourceLoginRequests({
+      searches: [
+        {
+          provider: "indeed.com",
+          platform: "indeed",
+          source_type: "browser",
+          auth: true,
+          label: "Indeed saved search",
+          url: "https://www.indeed.com/jobs?q=operations",
+          enabled: false,
+          login_skipped: true,
+        },
+      ],
+    }),
+    []
+  );
+});
+
+test("login preflight ignores ordinary disabled public browser sources", () => {
+  assert.deepEqual(
+    pendingSourceLoginRequests({
+      searches: [
+        {
+          provider: "linkedin.com",
+          platform: "linkedin",
+          source_type: "browser",
+          label: "LinkedIn public search",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: false,
+        },
+        {
+          provider: "indeed.com",
+          platform: "indeed",
+          source_type: "browser",
+          auth: false,
+          label: "Indeed public search",
+          url: "https://www.indeed.com/jobs?q=operations",
+          enabled: false,
+        },
+      ],
+    }),
+    []
+  );
 });
 
 // ---------------------------------------------------------------------------

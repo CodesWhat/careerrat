@@ -9,10 +9,10 @@
 // reason, and the file returns early when sourced, so each case here runs the
 // real comparison over fixture JSON with no network and no `gh` auth.
 //
-// The fixture is the repo's own live ruleset with its server-assigned ids
-// stripped. Each case mutates one field of it, which is what makes the negative
-// cases credible: they differ from the passing case by exactly the drift being
-// tested and nothing else.
+// The fixture is the source-controlled desired ruleset with the no-op defaults
+// GitHub adds on read and its server-assigned ids stripped. It does not claim
+// the live ruleset has already been changed. Each case mutates one field of the
+// passing shape, so negative cases differ by exactly the drift under test.
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

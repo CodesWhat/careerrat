@@ -5,6 +5,7 @@ import sharp from "sharp";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const websiteDir = join(scriptDir, "..");
+const repoRoot = join(websiteDir, "..", "..");
 const fontPath = join(
   websiteDir,
   "..",
@@ -101,10 +102,12 @@ const faviconImages = await Promise.all(
     png: await sharp(faviconSvg(size)).png().toBuffer(),
   })),
 );
+const favicon = icoFromPngs(faviconImages);
 
 await Promise.all([
   sharp(faviconSvg(512)).png().toFile(join(websiteDir, "src", "app", "icon.png")),
   sharp(faviconSvg(180)).png().toFile(join(websiteDir, "src", "app", "apple-icon.png")),
   sharp(socialCardSvg()).png().toFile(join(websiteDir, "src", "app", "opengraph-image.png")),
-  writeFile(join(websiteDir, "src", "app", "favicon.ico"), icoFromPngs(faviconImages)),
+  writeFile(join(websiteDir, "src", "app", "favicon.ico"), favicon),
+  writeFile(join(repoRoot, "assets", "favicon.ico"), favicon),
 ]);

@@ -222,10 +222,21 @@ function domainFillPrompt({ context, names, now }) {
 // Exported so other bounded-AI-gated callers (first-search-run.mjs's
 // company-board backfill rescue) can reuse this exact batched call instead
 // of duplicating the prompt/schema.
-export async function fillManualDomainHints({ repoRoot, env, context, seeds, call, now }) {
+export async function fillManualDomainHints({
+  repoRoot,
+  env,
+  context,
+  seeds,
+  call,
+  now,
+  executionPlan,
+  signal,
+}) {
   const hintless = seeds.filter((seed) => !seed.domain_hint);
   if (hintless.length === 0) return { seeds, ai: { used: false } };
-  if (resolveAIRoute(env, { repoRoot }).type === "none") return { seeds, ai: { used: false } };
+  if (!executionPlan && resolveAIRoute(env, { repoRoot }).type === "none") {
+    return { seeds, ai: { used: false } };
+  }
 
   const safeContext = context || buildCompanySeedContext({ repoRoot, env });
   const fillResult = await runBoundedAI({
@@ -239,8 +250,10 @@ export async function fillManualDomainHints({ repoRoot, env, context, seeds, cal
     root: repoRoot,
     env,
     call,
+    executionPlan,
+    signal,
     system:
-      "You resolve official company domains for a confirm-first company-discovery workflow. Return only JSON matching the supplied schema; omit any company you cannot identify with confidence.",
+      "You resolve official company domains for a validated public-source discovery workflow. Return only JSON matching the supplied schema; omit any company you cannot identify with confidence.",
     messages: [
       {
         role: "user",
@@ -279,8 +292,11 @@ export async function generateCompanySeeds({
   manualSeeds = [],
   requestedCount,
   call,
+  executionPlan,
+  signal,
   now = new Date(),
 } = {}) {
+  signal?.throwIfAborted?.();
   const maxCompanies = clampRequestedCount(requestedCount);
   const safeContext = context || buildCompanySeedContext({ repoRoot, env });
   let normalizedManual;
@@ -313,6 +329,8 @@ export async function generateCompanySeeds({
       context: safeContext,
       seeds: cappedFocus,
       call,
+      executionPlan,
+      signal,
       now,
     });
     filledFocus = filledManual;
@@ -344,8 +362,10 @@ export async function generateCompanySeeds({
     root: repoRoot,
     env,
     call,
+    executionPlan,
+    signal,
     system:
-      "You generate company seed JSON for a confirm-first company-discovery proposal route. Return only JSON matching the supplied schema.",
+      "You generate company seed JSON for a validated public-source discovery route. Return only JSON matching the supplied schema.",
     messages: [
       {
         role: "user",

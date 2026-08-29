@@ -98,6 +98,47 @@ test("onboarding detects a question followed by examples as waiting for the user
   );
 });
 
+test("onboarding detects a question followed by a short consequence as waiting for the user", () => {
+  const salaryQuestion = {
+    id: "salary-question",
+    role: "assistant",
+    text: "What’s the lowest base salary you’d accept for any job? I’ll skip anything clearly below it.",
+    blocks: [{ kind: "candidate_patch", status: "resolved" }],
+  };
+
+  assert.equal(onboardingHasUnansweredTurn([salaryQuestion]), true);
+  assert.deepEqual(
+    collapseUnansweredOnboardingPrompts([
+      salaryQuestion,
+      { ...salaryQuestion, id: "salary-repeat-1", blocks: [] },
+      { ...salaryQuestion, id: "salary-repeat-2", blocks: [] },
+    ]).map((message) => message.id),
+    ["salary-repeat-2"]
+  );
+});
+
+test("onboarding detects a question followed by a short safety clarification as waiting", () => {
+  for (const clarification of [
+    "This is never your current salary.",
+    "It’s never your current salary.",
+    "That’s never your current salary.",
+    "This should never be your current salary.",
+    "The number is never your current salary.",
+  ]) {
+    assert.equal(
+      onboardingHasUnansweredTurn([
+        {
+          role: "assistant",
+          text: `What base salary should I enter when an application form requires one? ${clarification}`,
+          blocks: [{ kind: "candidate_patch", status: "resolved" }],
+        },
+      ]),
+      true,
+      clarification
+    );
+  }
+});
+
 test("onboarding draft read fills a stale browser transcript from canonical skill chat history", () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-onboarding-chat-draft-"));
   const env = {};

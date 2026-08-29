@@ -225,7 +225,7 @@ function matchingOffer(company, overrides = {}) {
     title: "Applied AI Engineer",
     url: `https://jobs.lever.co/${slug}/applied-ai-engineer`,
     location: "Remote",
-    comp: "$220,000 - $260,000",
+    comp: "Base salary: $220,000 - $260,000",
     bodyText: "Build agentic developer workflows and customer-facing AI prototypes.",
     fit: "high",
     score: 91,
@@ -312,6 +312,7 @@ test("manual proposal create, latest pending read, and approval add only the com
   });
 
   const created = await postJson(server, "/api/discovery/company-proposals", {
+    trigger: { kind: "search-run", id: "search-regression" },
     manualSeeds: [
       {
         name: "Local Deterministic AI",
@@ -430,7 +431,7 @@ test("proposal contract and comp plausibility gates stay aligned end to end", as
     [
       "Below Floor Co",
       matchingOffer("Below Floor Co", {
-        comp: "$120,000 - $170,000",
+        comp: "Base salary: $120,000 - $170,000",
         gate: "likely-cut",
         ruleFlags: ["comp-below-floor"],
       }),
@@ -442,7 +443,7 @@ test("proposal contract and comp plausibility gates stay aligned end to end", as
     [
       "Top Band Co",
       matchingOffer("Top Band Co", {
-        comp: "$170,000 - $220,000",
+        comp: "Base salary: $170,000 - $220,000",
         gate: "review",
         ruleFlags: ["top-of-band-only"],
       }),
@@ -466,11 +467,18 @@ test("proposal contract and comp plausibility gates stay aligned end to end", as
   const byName = new Map(
     response.body.data.proposals.map((proposal) => [proposal.company.name, proposal])
   );
+  const autoAdded = new Map(
+    response.body.data.autoAdded.map((proposal) => [proposal.company.name, proposal])
+  );
   const rejected = new Map(
     response.body.data.rejected.map((proposal) => [proposal.company.name, proposal])
   );
-  assertProposalContract(byName.get("Clear Comp Co"));
-  assert.equal(byName.get("Clear Comp Co").confidenceTier, "high-confidence");
+  const { decision: clearDecision, ...clearProposal } = autoAdded.get("Clear Comp Co");
+  assertProposalContract(clearProposal);
+  assert.equal(clearProposal.confidenceTier, "high-confidence");
+  assert.equal(clearDecision.action, "approve-supported-ats");
+  assert.equal(clearDecision.status, "approved");
+  assertProposalContract(byName.get("Unposted Co"));
   assert.equal(byName.get("Unposted Co").confidenceTier, "borderline");
   assert.ok(byName.get("Unposted Co").reviewReasons.includes("comp-unposted"));
   assert.equal(byName.get("Top Band Co").confidenceTier, "borderline");

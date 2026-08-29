@@ -68,20 +68,16 @@ tracker-*.png
 # Local QA evidence bundles (screenshots/logs, 100MB+) — the prose findings get
 # tracked via the roadmap, the raw evidence stays local.
 /qa/
+/output/
 
 # Design handoff archives dropped at repo root — extracted where needed, never committed.
 /*.zip
 
-# Private working roadmap + internal planning docs (names the private origin,
-# competitor analysis, and personal context). The PUBLIC roadmap is docs/ROADMAP.md.
-# Anchor to root with a leading slash — a bare "ROADMAP.md" also ignores the public
-# docs/ROADMAP.md (matches in every directory), which must stay tracked.
+# Private working roadmap + internal planning docs. CI-owned contracts live
+# under docs/ so they remain available in a fresh clone.
+/.planning/
+# Anchor root-only legacy names so matching files elsewhere keep their own policy.
 /ROADMAP.md
-# The whole planning tree is local. It was tracked until 2026-08-27, which put
-# competitor intel and product plans in a public repo. Anything under here that
-# CI needs has been moved out to docs/ instead: contracts belong somewhere the
-# tests can read them on a fresh clone, and nothing untracked survives one.
-.planning/
 /ROADMAP-ARCHIVE.md
 /CLI-PARITY-EXEC-SUMMARY.html
 /RUNTIME-PARITY-PLAN.md

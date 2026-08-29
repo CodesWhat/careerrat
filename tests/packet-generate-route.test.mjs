@@ -4,11 +4,12 @@
 // POST routes and src/core/packet/* owners planned for later Phase 10 waves.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
@@ -35,6 +36,9 @@ function typedGateVerdict({ gate = "keep" } = {}) {
       currency: "USD",
       minBase: 212000,
       maxBase: 286000,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: "base",
       source: "job-description",
       summary: "$212k–$286k base clears the candidate floor.",
     },
@@ -81,7 +85,12 @@ function importTrackerFixture(repoRoot, applications) {
 
 function seedPacketReadyApp(
   repoRoot,
-  { sourceResume = true, packetGate = "keep", evaluatedAt, reviewApproval } = {}
+  {
+    sourceResume = true,
+    packetGate = "keep",
+    evaluatedAt = "2026-07-06T14:00:00.000Z",
+    reviewApproval,
+  } = {}
 ) {
   const jdPath = writeWorkspaceFile(
     repoRoot,
@@ -352,7 +361,44 @@ async function postRaw(server, path, bodyText) {
   return { status: res.status, body };
 }
 
-after(() => {
+// These route tests exercise the real /api/packet/generate → generatePacket
+// → exportPacketArtifacts pipeline, which always renders a PDF (exports.mjs
+// requestedFormats() puts "pdf" in the set unconditionally). mountPacketRoutes
+// has no injection point for exportPacketArtifacts on this route, so the only
+// way to keep real generation coverage without a live Chromium is the same
+// loopback desktop-renderer escape hatch renderPdf() already ships for the
+// Electron client (see tests/pdf-renderer.test.mjs, ISSUE-028): point it at
+// a fake local server that hands back a minimal valid PDF.
+const FAKE_PDF_BYTES = Buffer.from("%PDF-1.4\n%CareerRat test fixture\n%%EOF\n", "utf8");
+
+function startFakePdfRenderer() {
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/pdf" });
+      res.end(FAKE_PDF_BYTES);
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+let fakePdfRenderer;
+let savedDesktopRenderUrl;
+let savedDesktopRenderToken;
+
+before(async () => {
+  fakePdfRenderer = await startFakePdfRenderer();
+  const { port } = fakePdfRenderer.address();
+  savedDesktopRenderUrl = process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
+  savedDesktopRenderToken = process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
+  process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL = `http://127.0.0.1:${port}/render`;
+  process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = "packet-generate-route-test-fixture";
+});
+
+after(async () => {
   closeAll();
   for (const root of cleanupRoots.splice(0)) {
     try {
@@ -361,6 +407,11 @@ after(() => {
       // best-effort cleanup
     }
   }
+  await closeServer(fakePdfRenderer);
+  if (savedDesktopRenderUrl === undefined) delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
+  else process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL = savedDesktopRenderUrl;
+  if (savedDesktopRenderToken === undefined) delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
+  else process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = savedDesktopRenderToken;
 });
 
 test("POST /api/packet/gate: 409 when SQLite has not been initialized", async () => {
@@ -429,12 +480,14 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
     assert.equal(app.fitBucket, "high");
     assert.equal(app.fitBasis, "evaluated");
     assert.equal(app.base, "$212,000 - $286,000");
+    assert.equal(app.tc, null);
     assert.equal(app.compNote, "$212k–$286k base clears the candidate floor.");
     assert.deepEqual(app.roleFit, {
       why: ["JD centers on production AI workflow delivery"],
       risks: [],
     });
     assert.match(seen[0], /minimum_base|targeting|evidence/i);
+    assert.match(seen[0], /minAnnualEarnings\/maxAnnualEarnings/i);
     assert.match(seen[0], /complete plain-English sentences/i);
     assert.match(seen[0], /fitReasons.*72 characters/i);
   } finally {
@@ -559,7 +612,8 @@ test("packet gate reserves output budget for model reasoning plus the typed verd
     seenOptions.maxTokens >= 4096,
     "the packet gate must leave room for model reasoning before its JSON verdict"
   );
-  assert.equal(seenOptions.effort, "low");
+  assert.equal(seenOptions.aiOperation, "application.judgment");
+  assert.equal(seenOptions.effort, undefined);
 });
 
 test("POST /api/packet/gate: keeps budget-limited evaluation copy readable", async () => {
@@ -860,6 +914,9 @@ test("POST /api/packet/gate: preserves unknown compensation as null instead of a
       currency: null,
       minBase: null,
       maxBase: null,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: null,
       source: "job-description",
       summary: "No base compensation range is included in the saved job description.",
     },
@@ -882,6 +939,89 @@ test("POST /api/packet/gate: preserves unknown compensation as null instead of a
     assert.equal(app.compEstimate?.midpointK, null);
     assert.equal(app.compEstimate?.highK, null);
     assert.equal(app.compEstimate?.source, "none");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: persists tipped annual earnings separately from base pay", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { minimum_annual_earnings: 85_000 } },
+  });
+  const verdict = {
+    ...typedGateVerdict(),
+    compensation: {
+      status: "clears-floor",
+      currency: "USD",
+      minBase: 23_608,
+      maxBase: 23_608,
+      minAnnualEarnings: 95_000,
+      maxAnnualEarnings: 120_000,
+      basis: "annual-earnings",
+      source: "job-description",
+      summary: "$95k–$120k expected annual cash earnings include tips.",
+    },
+  };
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.compensation?.status, "clears-floor");
+    assert.equal(body.data?.compensation?.basis, "annual-earnings");
+
+    const app = readApp(repoRoot, "app-packet");
+    assert.equal(app.base, "$23,608 - $23,608");
+    assert.equal(app.tc, "$95,000 - $120,000");
+    assert.equal(app.evaluation.compensation.minBase, 23_608);
+    assert.equal(app.evaluation.compensation.minAnnualEarnings, 95_000);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: deterministically reviews an annual earnings overlap", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { minimum_annual_earnings: 85_000 } },
+  });
+  const verdict = {
+    ...typedGateVerdict(),
+    compensation: {
+      status: "clears-floor",
+      currency: "USD",
+      minBase: 23_608,
+      maxBase: 23_608,
+      minAnnualEarnings: 75_000,
+      maxAnnualEarnings: 95_000,
+      basis: "annual-earnings",
+      source: "job-description",
+      summary: "$75k–$95k expected annual cash earnings include tips.",
+    },
+  };
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.compensation?.status, "unknown");
+    assert.equal(body.data?.gate, "review");
+    assert.equal(body.data?.manual?.required, true);
   } finally {
     await closeServer(server);
   }
@@ -1065,6 +1205,30 @@ test("POST /api/packet/generate: stamps packet source/export artifacts through D
     assert.equal(artifacts.coverLetter, artifacts.coverLetterSource);
     assert.equal(artifacts.answers, artifacts.answersSource);
     assert.match(artifacts.coverLetterPdf, /-cover-letter\.pdf$/);
+    const resumePdf = readFileSync(join(repoRoot, artifacts.resumePdf));
+    assert.equal(resumePdf.subarray(0, 5).toString(), "%PDF-");
+    assert.match(resumePdf.subarray(-32).toString(), /%%EOF/);
+
+    const provenance = app.packetManifest.provenance;
+    assert.equal(provenance.jd.path, app.artifacts.jd);
+    assert.equal(provenance.evaluation.evaluatedAt, app.evaluation.evaluatedAt);
+    assert.equal(provenance.jd.sha256.length, 64);
+    assert.equal(provenance.evaluation.sha256.length, 64);
+    assert.equal(
+      provenance.jd.sha256,
+      createHash("sha256")
+        .update(
+          "Build agentic workflow prototypes with customers and turn them into deployed tools."
+        )
+        .digest("hex")
+    );
+    const storedManifest = JSON.parse(
+      readFileSync(join(repoRoot, artifacts.packetManifest), "utf8")
+    );
+    assert.equal(storedManifest.uploadReady, app.packetManifest.uploadReady);
+    assert.equal(storedManifest.artifacts.resumePdf, artifacts.resumePdf);
+    assert.equal(storedManifest.artifacts.coverLetterPdf, artifacts.coverLetterPdf);
+    assert.equal(storedManifest.provenance.jd.sha256, provenance.jd.sha256);
 
     const readBack = await getJson(server, "/api/packet?id=app-packet");
     assert.equal(readBack.status, 200);
@@ -1141,6 +1305,69 @@ test("POST /api/packet/generate delegates document work to workspace-main when m
           type: "job.generate-documents",
           entity: { type: "application", id: "app-packet" },
           input: { applyIntent: false, formats: ["pdf"] },
+        },
+      },
+    ]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/generate uses the durable workspace operation owner in production", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const generation = {
+    applicationId: "app-packet",
+    submitted: false,
+    uploadReady: false,
+    status: "reviewable",
+    artifacts: { resume: "workspace/tailored/acme-resume.md" },
+    gaps: [],
+  };
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    appOperations: {
+      async start(input) {
+        calls.push(input);
+        return {
+          reused: false,
+          operation: {
+            id: "app-operation-packet-generate",
+            status: "completed",
+            resultRef: { data: generation },
+          },
+        };
+      },
+      async wait() {
+        throw new Error("a completed operation should not need to wait");
+      },
+    },
+    workspaceAgentRuntime: {
+      async executeIntent() {
+        throw new Error("the durable operation owner must be the only production executor");
+      },
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/generate", {
+      applicationId: "app-packet",
+      applyIntent: false,
+      formats: ["pdf"],
+      requestId: "packet-generate-request-1",
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ok: true, data: generation });
+    assert.deepEqual(calls, [
+      {
+        kind: "workspace.intent",
+        input: {
+          requestId: "packet-generate-request-1",
+          intent: {
+            type: "job.generate-documents",
+            entity: { type: "application", id: "app-packet" },
+            input: { applyIntent: false, formats: ["pdf"] },
+          },
         },
       },
     ]);

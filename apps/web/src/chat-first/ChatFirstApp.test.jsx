@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { normalizeSourceReviewArtifact } from "../../../../src/core/discovery/source-review-artifact.mjs";
@@ -121,6 +122,42 @@ describe("ChatFirstAppView", () => {
     expect(module.initialVisibleSearchState({})).toEqual({
       status: "idle",
       summary: "Ready to sweep configured sources",
+    });
+  });
+
+  it("reloads a manual search through its exact durable execution, never latest AI state", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const deterministic = {
+      purpose: "manual-search",
+      run: {
+        id: "manual-1",
+        purpose: "manual-search",
+        status: "running",
+        metadata: { searchExecutionId: "search-execution-1" },
+      },
+    };
+    const execution = {
+      id: "search-execution-1",
+      status: "running",
+      lanes: {
+        deterministic: { status: "running", runId: "manual-1" },
+        aiWeb: { status: "queued", runId: null },
+      },
+    };
+    const getSourcingRun = vi.fn(async ({ purpose }) =>
+      purpose === "manual-search" ? deterministic : { purpose, run: null }
+    );
+    const getSearchExecution = vi.fn(async () => ({ ok: true, execution }));
+
+    await expect(
+      module.loadVisibleSearchState({ getSourcingRun, getSearchExecution })
+    ).resolves.toEqual({ deterministic, execution });
+    expect(getSourcingRun.mock.calls).toEqual([
+      [{ purpose: "manual-search" }],
+      [{ purpose: "first-search" }],
+    ]);
+    expect(getSearchExecution).toHaveBeenCalledWith({
+      searchExecutionId: "search-execution-1",
     });
   });
 
@@ -269,6 +306,33 @@ describe("ChatFirstAppView", () => {
     });
   });
 
+  it("never attaches a current AI run to a legacy deterministic run without an execution id", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const hydrated = module.hydrateVisibleSearchRuns({
+      deterministic: {
+        run: {
+          id: "manual-legacy",
+          purpose: "manual-search",
+          status: "completed",
+          metadata: {},
+          summary: { new: 1 },
+        },
+      },
+      aiWeb: {
+        run: {
+          id: "ai-current",
+          purpose: "ai-web-search",
+          status: "failed",
+          metadata: { searchExecutionId: "search-current" },
+          error: { message: "Current AI run failed" },
+        },
+      },
+    });
+
+    expect(hydrated.sourceSweep.lanes).not.toHaveProperty("aiWeb");
+    expect(hydrated.retry).toBeNull();
+  });
+
   it("hydrates a durable AI failure into a visible exact-prompt retry", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const deterministic = {
@@ -310,23 +374,43 @@ describe("ChatFirstAppView", () => {
       },
     });
 
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true }));
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
     await module.runChatFirstJobSearch({
       api: {
-        getSearchSourceStatus: vi.fn(async () => ({
-          searches: { enabled: 1 },
-          deterministicSources: { attempted: 1 },
-        })),
-        getRuntimeConfig: vi.fn(async () => ({ ai: { available: true } })),
+        startSearchRun: vi.fn(),
+        getSearchExecution: vi.fn(),
       },
       retry: hydrated.retry,
-      runDeterministicLane,
-      runAiLane,
+      runUnifiedSearch,
+      createSearchExecutionId: () => "search-fresh-after-failure",
     });
 
-    expect(runDeterministicLane).not.toHaveBeenCalled();
-    expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
+    expect(runUnifiedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ searchExecutionId: "search-fresh-after-failure" })
+    );
+    expect(runUnifiedSearch.mock.calls[0][0]).not.toHaveProperty("retry");
+  });
+
+  it("lets the server heal sources while AI searches when no boards are pinned", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
+    const getSearchSourceStatus = vi.fn();
+
+    const result = await module.runChatFirstJobSearch({
+      api: {
+        getSearchSourceStatus,
+        startSearchRun: vi.fn(),
+        getSearchExecution: vi.fn(),
+      },
+      runUnifiedSearch,
+      createSearchExecutionId: () => "search-tester-fixture",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(getSearchSourceStatus).not.toHaveBeenCalled();
+    expect(runUnifiedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ searchExecutionId: "search-tester-fixture" })
+    );
   });
 
   it("does not combine an unrelated durable AI failure with a newer deterministic search", async () => {
@@ -384,7 +468,7 @@ describe("ChatFirstAppView", () => {
     expect(hydrated.sourceSweep.summary).not.toContain("retry");
   });
 
-  it("keeps a current AI-only lane visible when the deterministic run has no execution id", async () => {
+  it("does not attach a current AI lane to a legacy first search without an execution id", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const hydrated = module.hydrateVisibleSearchRuns({
       deterministic: {
@@ -408,18 +492,9 @@ describe("ChatFirstAppView", () => {
       },
     });
 
-    expect(hydrated).toMatchObject({
-      retry: {
-        aiPromptIds: ["current-prompt"],
-        searchExecutionId: "search-execution-current",
-      },
-      sourceSweep: {
-        status: "complete",
-        lanes: {
-          deterministic: { status: "succeeded" },
-          aiWeb: { status: "failed", error: "current AI lane failed" },
-        },
-      },
+    expect(hydrated.retry).toBeNull();
+    expect(hydrated.sourceSweep.lanes).toEqual({
+      deterministic: expect.objectContaining({ status: "succeeded" }),
     });
   });
 
@@ -754,7 +829,7 @@ describe("ChatFirstAppView", () => {
     });
   });
 
-  it("preflights source and AI capability before coordinating one user search", async () => {
+  it("starts unified search without a source-permission preflight", async () => {
     const module = await import("./ChatFirstApp.jsx");
     expect(module.runChatFirstJobSearch).toBeTypeOf("function");
     const controller = new AbortController();
@@ -763,93 +838,162 @@ describe("ChatFirstAppView", () => {
       enabledTrackedCompanies: 1,
       deterministicSources: { attempted: 3 },
     };
-    const runtimeStatus = { ai: { available: true, route: "installed" } };
     const api = {
       getSearchSourceStatus: vi.fn(async () => sourceStatus),
-      getRuntimeConfig: vi.fn(async () => runtimeStatus),
+      getRuntimeConfig: vi.fn(),
       getInstalledAiRuntimes: vi.fn(() => {
         throw new Error("a search must not re-probe installed runtimes");
       }),
       startSearchRun: vi.fn(),
-      getSourcingRun: vi.fn(),
+      getSearchExecution: vi.fn(),
     };
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true }));
-    const runCoordinator = vi.fn(async (options) => {
-      expect(options.capabilities).toEqual({
-        deterministic: { configured: true, executable: true, consented: true },
-        aiWeb: { configured: true, executable: true, consented: true },
-      });
-      await options.runDeterministic({ signal: controller.signal, onLaneState: vi.fn() });
-      await options.runAiWeb({ signal: controller.signal, onLaneState: vi.fn() });
-      return { ok: true };
-    });
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
 
     await module.runChatFirstJobSearch({
       api,
       refetch: vi.fn(),
       setSearchState: vi.fn(),
       signal: controller.signal,
-      runCoordinator,
-      runDeterministicLane,
-      runAiLane,
+      runUnifiedSearch,
       createSearchExecutionId: () => "search-execution-shared",
     });
 
-    expect(api.getSearchSourceStatus).toHaveBeenCalledOnce();
-    expect(api.getRuntimeConfig).toHaveBeenCalledOnce();
+    expect(api.getSearchSourceStatus).not.toHaveBeenCalled();
+    expect(api.getRuntimeConfig).not.toHaveBeenCalled();
     expect(api.getInstalledAiRuntimes).not.toHaveBeenCalled();
-    expect(runDeterministicLane).toHaveBeenCalledWith(
+    expect(runUnifiedSearch).toHaveBeenCalledWith(
       expect.objectContaining({
         startSearchRun: api.startSearchRun,
-        getSourcingRun: api.getSourcingRun,
-        searchExecutionId: "search-execution-shared",
-        signal: controller.signal,
-      })
-    );
-    expect(runAiLane).toHaveBeenCalledWith(
-      expect.objectContaining({
+        getSearchExecution: api.getSearchExecution,
         searchExecutionId: "search-execution-shared",
         signal: controller.signal,
       })
     );
   });
 
-  it("retries only the exact failed AI prompts through the chat-first search wrapper", async () => {
+  it("starts one server-owned unified execution and observes its exact durable id", async () => {
     const module = await import("./ChatFirstApp.jsx");
     const api = {
-      getSearchSourceStatus: vi.fn(async () => ({
-        searches: { enabled: 2 },
-        deterministicSources: { attempted: 2 },
+      getRuntimeConfig: vi.fn(),
+      startSearchRun: vi.fn(async () => ({
+        ok: true,
+        searchExecutionId: "search-adopted",
+        execution: { id: "search-adopted", status: "running" },
       })),
-      getRuntimeConfig: vi.fn(async () => ({
-        ai: { available: true, route: "installed" },
-      })),
-      startSearchRun: vi.fn(),
+      getSearchExecution: vi.fn(),
       getSourcingRun: vi.fn(),
     };
-    const runDeterministicLane = vi.fn(async () => ({ ok: true }));
-    const runAiLane = vi.fn(async () => ({ ok: true, data: { new: 1 } }));
+    const runUnifiedSearch = vi.fn(async (options) => ({
+      ok: true,
+      searchExecutionId: "search-adopted",
+      options,
+    }));
+    const refetch = vi.fn();
+    const setSearchState = vi.fn();
+    const controller = new AbortController();
 
-    const result = await module.runChatFirstJobSearch({
+    await module.runChatFirstJobSearch({
       api,
-      retry: { aiPromptIds: ["p2"] },
-      refetch: vi.fn(),
-      setSearchState: vi.fn(),
-      runDeterministicLane,
-      runAiLane,
+      retry: { aiPromptIds: ["old-prompt"] },
+      refetch,
+      setSearchState,
+      signal: controller.signal,
+      runUnifiedSearch,
+      createSearchExecutionId: () => "search-fresh",
     });
 
-    expect(runDeterministicLane).not.toHaveBeenCalled();
-    expect(runAiLane).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
+    expect(runUnifiedSearch).toHaveBeenCalledOnce();
+    expect(runUnifiedSearch).toHaveBeenCalledWith({
+      startSearchRun: api.startSearchRun,
+      getSearchExecution: api.getSearchExecution,
+      searchExecutionId: "search-fresh",
+      refetch,
+      setSearchState,
+      signal: controller.signal,
+    });
+    expect(api.getRuntimeConfig).not.toHaveBeenCalled();
+    expect(api.getSourcingRun).not.toHaveBeenCalled();
+  });
+
+  it("does not block unified search on optional runtime availability preflight", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const getRuntimeConfig = vi.fn(async () => {
+      throw new Error("runtime status unavailable");
+    });
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
+
+    const result = await module.runChatFirstJobSearch({
+      api: {
+        getRuntimeConfig,
+        startSearchRun: vi.fn(),
+        getSearchExecution: vi.fn(),
+      },
+      runUnifiedSearch,
+      createSearchExecutionId: () => "search-without-ai-status",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(getRuntimeConfig).not.toHaveBeenCalled();
+    expect(runUnifiedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ searchExecutionId: "search-without-ai-status" })
+    );
+  });
+
+  it("leaves AI lane availability to the server-owned coordinator", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const getRuntimeConfig = vi.fn();
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true }));
+
+    await module.runChatFirstJobSearch({
+      api: {
+        getRuntimeConfig,
+        startSearchRun: vi.fn(),
+        getSearchExecution: vi.fn(),
+      },
+      runUnifiedSearch,
+    });
+
+    expect(getRuntimeConfig).not.toHaveBeenCalled();
+    expect(runUnifiedSearch).toHaveBeenCalledOnce();
+  });
+
+  it("retries through a fresh unified search instead of replaying a stale AI lane", async () => {
+    const module = await import("./ChatFirstApp.jsx");
+    const api = {
+      startSearchRun: vi.fn(),
+      getSearchExecution: vi.fn(),
+    };
+    const ids = ["search-first", "search-retry"];
+    const runUnifiedSearch = vi.fn(async () => ({ ok: true, partial: false }));
+
+    await module.runChatFirstJobSearch({
+      api,
+      runUnifiedSearch,
+      createSearchExecutionId: () => ids.shift(),
+    });
+    const result = await module.runChatFirstJobSearch({
+      api,
+      retry: { aiPromptIds: ["p2"], searchExecutionId: "search-first" },
+      runUnifiedSearch,
+      createSearchExecutionId: () => ids.shift(),
+    });
+
+    expect(runUnifiedSearch.mock.calls.map(([options]) => options.searchExecutionId)).toEqual([
+      "search-first",
+      "search-retry",
+    ]);
+    expect(runUnifiedSearch.mock.calls[1][0]).not.toHaveProperty("retry");
     expect(result).toMatchObject({ ok: true, partial: false });
   });
 
   it("routes new-shell navigation intents without sending retired href actions to the API", async () => {
-    const { dispatchChatFirstMessageIntent } = await import("./ChatFirstApp.jsx");
+    const { dispatchChatFirstMessageIntent, settingsIntentNavigator } = await import(
+      "./ChatFirstApp.jsx"
+    );
     const openJob = vi.fn();
     const openBrowser = vi.fn();
-    const openSettings = vi.fn();
+    const navigateSettings = vi.fn();
+    const openSettings = settingsIntentNavigator(navigateSettings);
     const openArtifact = vi.fn();
     const openSourced = vi.fn();
     const runWorkspaceIntent = vi.fn();
@@ -917,7 +1061,7 @@ describe("ChatFirstAppView", () => {
       "files",
       "schedule",
     ]);
-    expect(openSettings).toHaveBeenCalledWith("sources");
+    expect(navigateSettings).toHaveBeenCalledWith("/settings?tab=settings&panel=source");
     expect(openArtifact).toHaveBeenCalledWith(
       { type: "application", id: "app-1" },
       "interview-dossier"
@@ -951,6 +1095,7 @@ describe("ChatFirstAppView", () => {
     const { filterSearchJobs } = await import("./browser-model.js");
     const initialFilters = {
       fit80: true,
+      fitFloor: 65,
       comp: true,
       remote: true,
       stage: "interview",
@@ -975,6 +1120,7 @@ describe("ChatFirstAppView", () => {
 
     expect(filters).toEqual({
       fit80: false,
+      fitFloor: 65,
       comp: false,
       remote: false,
       stage: "all",
@@ -1024,6 +1170,7 @@ describe("ChatFirstAppView", () => {
     let query = "platform engineer";
     let filters = {
       fit80: true,
+      fitFloor: 65,
       comp: true,
       remote: true,
       stage: "new",
@@ -1045,6 +1192,7 @@ describe("ChatFirstAppView", () => {
     expect(query).toBe("");
     expect(filters).toEqual({
       fit80: false,
+      fitFloor: 65,
       comp: false,
       remote: false,
       stage: "all",
@@ -1065,6 +1213,7 @@ describe("ChatFirstAppView", () => {
       query: "missing role",
       browserFilters: {
         fit80: true,
+        fitFloor: 65,
         comp: false,
         remote: false,
         stage: "all",
@@ -1186,6 +1335,25 @@ describe("ChatFirstAppView", () => {
     expect(html).not.toMatch(
       /SQLITE_BUSY|route schema|parser failed|\/Users\/person|hunter2|loadDashboard|dashboard\.mjs/i
     );
+  });
+
+  it("renders a passive background completion as a neutral status, not an error alert", async () => {
+    const html = await renderView({
+      error: {
+        tone: "notice",
+        message: "Your company suggestions are ready whenever you want to review them.",
+        action: { label: "Review companies", onAction: vi.fn() },
+        detail: null,
+      },
+    });
+
+    expect(html).toContain(
+      'class="chat-first-controller-alert chat-first-controller-alert--notice"'
+    );
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).not.toContain('role="alert"');
+    expect(html).toContain("Review companies");
   });
 
   it("surfaces dashboard load failures ahead of the setup fallback", async () => {
@@ -1413,7 +1581,7 @@ describe("ChatFirstAppView", () => {
 
     expect(railHtml).toContain("searching now");
     expect(railHtml).toContain("chat-first-browser-launcher--lime");
-    expect(searchHtml).toMatch(/aria-selected="true" class="cf-browser__tab"/);
+    expect(searchHtml).toMatch(/aria-selected="true"[^>]*class="cf-browser__tab"/);
     expect(searchHtml).not.toMatch(/aria-selected="true"[^>]*disabled/);
     expect(searchHtml).toContain("Your first job search is running now.");
   });
@@ -1431,7 +1599,24 @@ describe("ChatFirstAppView", () => {
               role: "assistant",
               kind: "text",
               text: "Should I keep this company in your search?",
-              metadata: { answerMode: "yes-no" },
+              metadata: {
+                choicePrompt: {
+                  id: "choice-company",
+                  version: 1,
+                  threadId: "workspace-main",
+                  messageId: "binary-question",
+                  question: "Should I keep this company in your search?",
+                  mode: "binary",
+                  minSelections: 1,
+                  maxSelections: 1,
+                  allowText: true,
+                  options: [
+                    { id: "yes", label: "Yes", actionRef: { input: { text: "Yes" } } },
+                    { id: "no", label: "No", actionRef: { input: { text: "No" } } },
+                  ],
+                  state: "pending",
+                },
+              },
             },
           ],
         },
@@ -1458,7 +1643,310 @@ describe("ChatFirstAppView", () => {
     visit(tree);
 
     buttons.find((button) => button.props.children === "Yes").props.onClick();
-    expect(submitComposer).toHaveBeenCalledWith("Yes");
+    expect(submitComposer).toHaveBeenCalledWith("Yes", {
+      promptId: "choice-company",
+      version: 1,
+      optionIds: ["yes"],
+    });
+  });
+
+  it("resolves ordinary text only for the exact sole finite application question", async () => {
+    const { resolvePacketGapTextAnswer } = await import("./ChatFirstApp.jsx");
+    const gap = {
+      id: "north-america",
+      questionId: "north-america",
+      label: "Are you currently located in North America?",
+      answerable: true,
+      options: ["Yes", "No"],
+    };
+
+    expect(resolvePacketGapTextAnswer({ gaps: [gap] }, " no ")).toEqual({ gap, answer: "No" });
+    expect(
+      resolvePacketGapTextAnswer(
+        {
+          gaps: [
+            gap,
+            {
+              id: "travel",
+              questionId: "travel",
+              label: "Can you travel?",
+              answerable: true,
+              options: ["Yes", "No"],
+            },
+          ],
+        },
+        "No"
+      )
+    ).toBeNull();
+    expect(resolvePacketGapTextAnswer({ gaps: [gap] }, "Maybe")).toBeNull();
+  });
+
+  it("submits named review options through the same sequential batch writers", async () => {
+    const { submitConversationalReviewText } = await import("./ChatFirstApp.jsx");
+    const sourceDecision = vi.fn(async () => true);
+    const sourceComplete = vi.fn(async () => true);
+    const sourceReview = normalizeSourceReviewArtifact({
+      kind: "source_review",
+      candidates: [
+        {
+          label: "LandEarly",
+          url: "https://landearly.example/jobs",
+          sourceType: "url-query",
+          why: "Current hospitality roles",
+          status: "proposed",
+          confidence: "high",
+        },
+        {
+          label: "Culinary Agents",
+          url: "https://culinaryagents.example/jobs",
+          sourceType: "browser",
+          why: "NYC hospitality roles",
+          status: "proposed",
+          confidence: "high",
+        },
+      ],
+    });
+
+    await expect(
+      submitConversationalReviewText({
+        text: "Add Culinary Agents",
+        sourceReview,
+        onSourceDecision: sourceDecision,
+        onSourceComplete: sourceComplete,
+      })
+    ).resolves.toEqual({ handled: true, completed: true });
+    expect(sourceDecision.mock.calls.map(([candidate, action]) => [candidate.id, action])).toEqual([
+      [sourceReview.candidates[0].id, "discard"],
+      [sourceReview.candidates[1].id, "save"],
+    ]);
+    expect(sourceComplete).toHaveBeenCalledOnce();
+
+    const onCompanyIntent = vi.fn(async () => true);
+    await expect(
+      submitConversationalReviewText({
+        text: "Track Tyrell Systems",
+        companyProposalReview: {
+          kind: "company_proposals",
+          batchId: "batch-1",
+          proposals: [
+            {
+              proposalId: "proposal-acme",
+              company: { name: "Acme AI" },
+              classification: "supported_ats",
+              atsProvider: "greenhouse",
+              jobBoardUrl: "https://boards.example/acme",
+              version: 3,
+            },
+            {
+              proposalId: "proposal-tyrell",
+              company: { name: "Tyrell Systems" },
+              classification: "supported_ats",
+              atsProvider: "ashby",
+              jobBoardUrl: "https://boards.example/tyrell",
+              version: 7,
+            },
+          ],
+        },
+        onCompanyIntent,
+      })
+    ).resolves.toEqual({ handled: true, completed: true });
+    expect(onCompanyIntent.mock.calls.map(([intent]) => intent)).toEqual([
+      expect.objectContaining({
+        entity: { type: "company-proposal", id: "proposal-acme" },
+        input: expect.objectContaining({ action: "reject", expectedVersion: 3 }),
+      }),
+      expect.objectContaining({
+        entity: { type: "company-proposal", id: "proposal-tyrell" },
+        input: expect.objectContaining({ action: "approve-supported-ats", expectedVersion: 7 }),
+      }),
+    ]);
+  });
+
+  it("does not consume ordinary chat when visible review names do not match exactly", async () => {
+    const { submitConversationalReviewText } = await import("./ChatFirstApp.jsx");
+    const sourceDecision = vi.fn();
+    const companyDecision = vi.fn();
+
+    await expect(
+      submitConversationalReviewText({
+        text: "Could you research more boards?",
+        sourceReview: normalizeSourceReviewArtifact({
+          kind: "source_review",
+          candidates: [
+            {
+              label: "Culinary Agents",
+              url: "https://culinaryagents.example/jobs",
+              sourceType: "browser",
+              why: "NYC hospitality roles",
+              status: "proposed",
+              confidence: "high",
+            },
+          ],
+        }),
+        onSourceDecision: sourceDecision,
+      })
+    ).resolves.toEqual({ handled: false, completed: false });
+    expect(sourceDecision).not.toHaveBeenCalled();
+
+    await expect(
+      submitConversationalReviewText({
+        text: "Why is Culinary Agents relevant?",
+        sourceReview: normalizeSourceReviewArtifact({
+          kind: "source_review",
+          candidates: [
+            {
+              label: "Culinary Agents",
+              url: "https://culinaryagents.example/jobs",
+              sourceType: "browser",
+              why: "NYC hospitality roles",
+              status: "proposed",
+              confidence: "high",
+            },
+          ],
+        }),
+        onSourceDecision: sourceDecision,
+      })
+    ).resolves.toEqual({ handled: false, completed: false });
+    expect(sourceDecision).not.toHaveBeenCalled();
+
+    await expect(
+      submitConversationalReviewText({
+        text: "Why is Acme AI relevant?",
+        companyProposalReview: {
+          kind: "company_proposals",
+          batchId: "batch-1",
+          proposals: [
+            {
+              proposalId: "proposal-acme",
+              company: { name: "Acme AI" },
+              classification: "supported_ats",
+              atsProvider: "greenhouse",
+              jobBoardUrl: "https://boards.example/acme",
+              version: 3,
+            },
+          ],
+        },
+        onCompanyIntent: companyDecision,
+      })
+    ).resolves.toEqual({ handled: false, completed: false });
+    expect(companyDecision).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed company decision active and only refreshes a successful review", async () => {
+    const { commitCompanyProposalDecision } = await import("./ChatFirstApp.jsx");
+    const intent = {
+      type: "company.proposal-decide",
+      entity: { type: "company-proposal", id: "proposal-acme" },
+      input: { batchId: "batch-1", action: "reject", expectedVersion: 3 },
+    };
+    const setCompanyProposalReview = vi.fn();
+
+    await expect(
+      commitCompanyProposalDecision({
+        intent,
+        execute: vi.fn(async () => null),
+        setCompanyProposalReview,
+      })
+    ).resolves.toBe(false);
+    expect(setCompanyProposalReview).not.toHaveBeenCalled();
+
+    await expect(
+      commitCompanyProposalDecision({
+        intent,
+        execute: vi.fn(async () => ({
+          messages: [
+            {
+              artifacts: [
+                {
+                  kind: "company_proposals",
+                  batchId: "batch-1",
+                  proposals: [
+                    {
+                      proposalId: "proposal-tyrell",
+                      company: { name: "Tyrell Systems" },
+                      version: 7,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        })),
+        setCompanyProposalReview,
+      })
+    ).resolves.toBe(true);
+    expect(setCompanyProposalReview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ batchId: "batch-1" })
+    );
+  });
+
+  it("restores only the exact saved review artifact from the active conversation", async () => {
+    const { foregroundReviewArtifact } = await import("./ChatFirstApp.jsx");
+    const olderCompany = {
+      kind: "company_proposals",
+      batchId: "batch-older",
+      proposals: [{ proposalId: "proposal-older", version: 1 }],
+    };
+    const newerCompany = {
+      kind: "company_proposals",
+      batchId: "batch-newer",
+      proposals: [{ proposalId: "proposal-newer", version: 1 }],
+    };
+    const olderSource = normalizeSourceReviewArtifact({
+      kind: "source_review",
+      candidates: [
+        {
+          label: "Culinary Agents",
+          url: "https://culinaryagents.example/jobs",
+          sourceType: "browser",
+          why: "NYC hospitality roles",
+          status: "proposed",
+          confidence: "high",
+        },
+      ],
+    });
+    const newerSource = normalizeSourceReviewArtifact({
+      kind: "source_review",
+      candidates: [
+        {
+          label: "Hospitality Online",
+          url: "https://hospitalityonline.example/jobs",
+          sourceType: "url-query",
+          why: "Current hospitality roles",
+          status: "proposed",
+          confidence: "high",
+        },
+      ],
+    });
+    const messages = [
+      { artifacts: [olderCompany, olderSource] },
+      { artifacts: [newerCompany, newerSource] },
+    ];
+
+    expect
+      .soft(
+        foregroundReviewArtifact({
+          reviewKind: "company",
+          reviewId: olderCompany.batchId,
+          messages,
+        })
+      )
+      .toMatchObject({ kind: "company_proposals", batchId: olderCompany.batchId });
+    expect
+      .soft(
+        foregroundReviewArtifact({
+          reviewKind: "source",
+          reviewId: olderSource.id,
+          messages,
+        })
+      )
+      .toMatchObject({ kind: "source_review", id: olderSource.id });
+    expect(
+      foregroundReviewArtifact({ reviewKind: "company", reviewId: "missing-company", messages })
+    ).toBeNull();
+    expect(
+      foregroundReviewArtifact({ reviewKind: "source", reviewId: "missing-source", messages })
+    ).toBeNull();
   });
 
   it("keeps durable Today artifacts actionable without repeating an activity link", async () => {
@@ -1540,8 +2028,11 @@ describe("ChatFirstAppView", () => {
 
     expect(html).toContain('aria-label="Company discovery: 1 to review"');
     expect(html).toContain("Acme AI");
-    expect(html).toContain(">Track<");
-    expect(html).toContain(">Skip<");
+    expect(html).toContain("Which companies should CareerRat track?");
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain(">Save choices<");
+    expect(html).not.toContain(">Track<");
+    expect(html).not.toContain(">Skip<");
     expect(onIntent).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -1702,6 +2193,67 @@ describe("ChatFirstAppView", () => {
     expect(html).not.toContain("Current position");
     expect(html).not.toContain("chat-first-context-card--cream");
     expect(html).not.toContain("Run mock interview");
+  });
+
+  it("wires packet-gap review into the job thread and its composer", async () => {
+    const packetGap = {
+      id: "linkedin-profile",
+      questionId: "linkedin-profile",
+      label: "LinkedIn Profile",
+      answerable: true,
+    };
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        threads: [
+          {
+            ...VIEW.threads[0],
+            messages: [],
+            communications: [],
+            packetReview: {
+              status: "reviewable",
+              uploadReady: false,
+              gapCount: 1,
+              canResume: false,
+              gaps: [packetGap],
+            },
+          },
+        ],
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+      packetAnswerGap: packetGap,
+    });
+
+    expect(html).toContain("I need 1 application answer before I can continue");
+    expect(html).toContain("APPLICATION ANSWERS · 1 NEEDED");
+    expect(html).toContain('placeholder="Answer LinkedIn Profile…"');
+  });
+
+  it("keeps packet resume behind a clear application-preparation permission action", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        threads: [
+          {
+            ...VIEW.threads[0],
+            packetReview: {
+              status: "upload-ready",
+              uploadReady: true,
+              gapCount: 0,
+              canResume: true,
+              gaps: [],
+            },
+          },
+        ],
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+      actions: {
+        applicationPreparation: { status: "blocked", ready: false },
+      },
+    });
+
+    expect(html).toContain("Allow form preparation");
+    expect(html).not.toContain("Resume preparation");
   });
 
   it("labels each canonical job date by what happened", async () => {
@@ -2082,11 +2634,35 @@ describe("ChatFirstAppView", () => {
 
   it("offers an explicit resume action for a durable paused mission", async () => {
     const html = await renderView({
+      actions: { submitComposer: () => {} },
       view: {
         ...VIEW,
         missions: [
           {
             ...VIEW.missions[0],
+            choicePrompt: {
+              id: "choice-resume-mission",
+              version: 2,
+              threadId: "mission:mission-1",
+              messageId: "control:mission.resume",
+              question: "Resume this mission?",
+              mode: "single",
+              minSelections: 1,
+              maxSelections: 1,
+              allowText: true,
+              options: [
+                {
+                  id: "resume",
+                  label: "Resume",
+                  aliases: ["resume mission"],
+                  actionRef: {
+                    type: "mission.resume",
+                    entity: { type: "mission", id: "mission-1" },
+                  },
+                },
+              ],
+              state: "pending",
+            },
             steps: [
               { id: "packet", label: "Draft E Corp packet", status: "completed" },
               { id: "prepare", label: "Prepare E Corp form", status: "pending" },
@@ -2096,8 +2672,8 @@ describe("ChatFirstAppView", () => {
       },
     });
 
-    expect(html).toContain(">resume</button>");
-    expect(html).not.toContain(">pause</button>");
+    expect(html).toContain(">Resume</button>");
+    expect(html).not.toContain(">Pause</button>");
   });
 
   it("mounts the submit gate, artifact viewer, and engine-down cover as real overlays", async () => {
@@ -2116,5 +2692,25 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("Nothing sends until you press submit");
     expect(html).toContain("viewer:Resume preview");
     expect(html).toContain("Paul can&#x27;t think right now");
+  });
+
+  it("wires durable company and Deep operation owners without route-owned background state", async () => {
+    const source = await readFile(new URL("./ChatFirstApp.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("createDeepIngestOperationController({");
+    expect(source).toContain("readDeepIngestOperation(deepOperationStorage)");
+    expect(source).toContain('if (ui.activeThread !== "ingest") return;');
+    expect(source).toContain("controller: deepOperationController");
+    expect(source).toContain("uploadDeepIngestFilesAndRefresh({");
+    expect(source).toContain("companyDiscoveryChildFromWorkspaceResult({");
+    expect(source).toContain("followCompanyDiscoveryOperation({");
+    expect(source).toContain("companyProposalBatchIsResolved(batch)");
+    expect(source).toContain("readWorkspaceOperationId(workspaceOperationStorage)");
+    expect(source).toContain("rememberWorkspaceOperation(workspaceOperationStorage, exactId)");
+    expect(source).toContain("const id = workspaceOperationId;");
+    expect(source).toContain('ui.activeThread === "ingest" && deepBusy');
+    expect(source).not.toContain(
+      "runDeepOperation = useCallback(\n    async (operation, receiptFor) => {\n      setBusy(true)"
+    );
   });
 });

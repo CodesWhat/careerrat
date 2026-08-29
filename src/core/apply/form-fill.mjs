@@ -672,6 +672,155 @@ function yesNo(value) {
   return value === true ? "Yes" : value === false ? "No" : null;
 }
 
+const KNOWN_NORTH_AMERICAN_REGION_CODES = new Set([
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
+  "DC",
+  "AB",
+  "BC",
+  "MB",
+  "NB",
+  "NL",
+  "NS",
+  "NT",
+  "NU",
+  "ON",
+  "PE",
+  "QC",
+  "SK",
+  "YT",
+]);
+
+const KNOWN_NORTH_AMERICAN_REGION_NAMES = new Set(
+  [
+    "Alabama",
+    "Alaska",
+    "Arizona",
+    "Arkansas",
+    "California",
+    "Colorado",
+    "Connecticut",
+    "Delaware",
+    "Florida",
+    "Georgia",
+    "Hawaii",
+    "Idaho",
+    "Illinois",
+    "Indiana",
+    "Iowa",
+    "Kansas",
+    "Kentucky",
+    "Louisiana",
+    "Maine",
+    "Maryland",
+    "Massachusetts",
+    "Michigan",
+    "Minnesota",
+    "Mississippi",
+    "Missouri",
+    "Montana",
+    "Nebraska",
+    "Nevada",
+    "New Hampshire",
+    "New Jersey",
+    "New Mexico",
+    "New York",
+    "North Carolina",
+    "North Dakota",
+    "Ohio",
+    "Oklahoma",
+    "Oregon",
+    "Pennsylvania",
+    "Rhode Island",
+    "South Carolina",
+    "South Dakota",
+    "Tennessee",
+    "Texas",
+    "Utah",
+    "Vermont",
+    "Virginia",
+    "Washington",
+    "West Virginia",
+    "Wisconsin",
+    "Wyoming",
+    "District of Columbia",
+    "Alberta",
+    "British Columbia",
+    "Manitoba",
+    "New Brunswick",
+    "Newfoundland and Labrador",
+    "Nova Scotia",
+    "Northwest Territories",
+    "Nunavut",
+    "Ontario",
+    "Prince Edward Island",
+    "Quebec",
+    "Saskatchewan",
+    "Yukon",
+  ].map((value) => value.toLowerCase())
+);
+
+function homeLooksNorthAmerican(value) {
+  const home = String(value || "").trim();
+  if (!home) return false;
+  if (/\b(?:united states|u\.?s\.?a?\.?|canada|mexico)\b/i.test(home)) return true;
+  return home.split(",").some((segment) => {
+    const region = segment.trim().replace(/\s+\d[\d -]*$/, "");
+    return (
+      KNOWN_NORTH_AMERICAN_REGION_CODES.has(region.toUpperCase()) ||
+      KNOWN_NORTH_AMERICAN_REGION_NAMES.has(region.toLowerCase())
+    );
+  });
+}
+
 function normalizedAnswerEntries(candidate) {
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
   return Object.entries(candidate)
@@ -862,6 +1011,14 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
 
   const location = profile?.location || {};
   const auth = profile?.authorization || {};
+
+  if (
+    normalized.includes("north america") &&
+    /\b(?:located|based|live|living|reside|residing)\b/.test(normalized) &&
+    homeLooksNorthAmerican(location.home)
+  ) {
+    return { action: "fill", value: "Yes", source: "profile.location.home" };
+  }
 
   if (
     normalized.includes("notice period") ||

@@ -29,14 +29,6 @@
             "platforms": { "type": "object", "additionalProperties": { "type": "boolean" } }
           }
         },
-        "authenticated_search": {
-          "type": "object",
-          "additionalProperties": true,
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "platforms": { "type": "object", "additionalProperties": { "type": "boolean" } }
-          }
-        },
         "messaging": {
           "type": "object",
           "additionalProperties": true,

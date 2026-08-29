@@ -7,7 +7,12 @@ import { test } from "node:test";
 import { createApplyDriver, uploadTargetsFromSnapshot } from "../src/core/apply/apply-driver.mjs";
 import { createConfiguredApplyExecutor } from "../src/core/apply/apply-executor-factory.mjs";
 import { createPlaywrightApplyExecutor } from "../src/core/apply/playwright-executor.mjs";
-import { collectControls, createPlaywrightOps } from "../src/core/apply/playwright-ops.mjs";
+import {
+  collectControls,
+  createPlaywrightOps,
+  launchPublicPlaywrightContext,
+} from "../src/core/apply/playwright-ops.mjs";
+import { buildMinimalPdf } from "./fixtures/pdf.mjs";
 
 const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 
@@ -24,7 +29,7 @@ const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 // no-live-browser suite. A click on a non-file-input control resolves any
 // pending waitForEvent("filechooser") listener with a fake chooser, mirroring
 // how a real styled "Attach" button opens the native file picker on click.
-function createFakeBrowser({ controls, bodyText = "" } = {}) {
+function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
   const actions = [];
   let pageOpens = 0;
   let currentUrl = "";
@@ -33,10 +38,14 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
   function elementLocator(index) {
     return {
       async fill(value) {
-        actions.push({ op: "fill", index, value });
+        const action = { op: "fill", index, value };
+        actions.push(action);
+        onAction?.(action);
       },
       async selectOption(arg) {
-        actions.push({ op: "selectOption", index, arg });
+        const action = { op: "selectOption", index, arg };
+        actions.push(action);
+        onAction?.(action);
         // A real Locator.selectOption() returns the option values it
         // actually selected — selectOption() now checks that array is
         // non-empty before trusting a native <select> attempt succeeded, so
@@ -44,10 +53,14 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
         return [String(arg?.label ?? arg)];
       },
       async setChecked(checked) {
-        actions.push({ op: "setChecked", index, checked });
+        const action = { op: "setChecked", index, checked };
+        actions.push(action);
+        onAction?.(action);
       },
       async click() {
-        actions.push({ op: "click", index });
+        const action = { op: "click", index };
+        actions.push(action);
+        onAction?.(action);
         if (controls[index]?.role === "radio") {
           for (const control of controls) {
             if (control.choiceGroup === controls[index].choiceGroup) control.checked = false;
@@ -64,7 +77,9 @@ function createFakeBrowser({ controls, bodyText = "" } = {}) {
         }
       },
       async setInputFiles(files) {
-        actions.push({ op: "setInputFiles", index, files });
+        const action = { op: "setInputFiles", index, files };
+        actions.push(action);
+        onAction?.(action);
       },
     };
   }
@@ -593,7 +608,210 @@ test("playwright-ops forwards an explicit Chromium channel to the lazy launcher"
   await ops.openTab({ url: "about:blank" });
   await ops.close();
 
-  assert.deepEqual(launches, [{ profileDir: "/tmp/profile", headless: true, channel: "chromium" }]);
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].profileDir, "/tmp/profile");
+  assert.equal(launches[0].headless, true);
+  assert.equal(launches[0].channel, "chromium");
+  assert.equal(typeof launches[0].resolvePublicTargetImpl, "function");
+});
+
+test("playwright-ops forwards an explicit target resolver to the lazy launcher", async () => {
+  const fixtureResolver = async (rawUrl) => ({ ok: true, url: new URL(rawUrl).toString() });
+  let launchOptions = null;
+  const ops = createPlaywrightOps({
+    profileDir: "/tmp/profile",
+    headless: true,
+    resolvePublicTargetImpl: fixtureResolver,
+    launchImpl: async (options) => {
+      launchOptions = options;
+      return {
+        async newPage() {
+          return minimalFakePage("about:blank");
+        },
+        async close() {},
+      };
+    },
+  });
+
+  await ops.openTab({ url: "about:blank" });
+  await ops.close();
+
+  assert.equal(launchOptions.resolvePublicTargetImpl, fixtureResolver);
+});
+
+test("default Playwright launch blocks service workers and sends every request through the pinned proxy", async () => {
+  let launchOptions = null;
+  let contextClosed = 0;
+  let proxyClosed = 0;
+  const context = {
+    async close() {
+      contextClosed += 1;
+    },
+  };
+  const launched = await launchPublicPlaywrightContext({
+    profileDir: "/tmp/profile",
+    headless: true,
+    channel: "chromium",
+    createProxyImpl: async () => ({
+      url: "http://127.0.0.1:43123",
+      async close() {
+        proxyClosed += 1;
+      },
+    }),
+    loadPlaywrightImpl: async () => ({
+      chromium: {
+        async launchPersistentContext(_profileDir, options) {
+          launchOptions = options;
+          return context;
+        },
+      },
+    }),
+  });
+
+  assert.equal(launchOptions.proxy.server, "http://127.0.0.1:43123");
+  assert.equal(launchOptions.serviceWorkers, "block");
+  assert.ok(launchOptions.args.includes("--proxy-bypass-list=<-loopback>"));
+  assert.ok(launchOptions.args.includes("--disable-quic"));
+  assert.ok(
+    launchOptions.args.includes("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+  );
+  await launched.close();
+  assert.equal(contextClosed, 1);
+  assert.equal(proxyClosed, 1);
+});
+
+test("default Playwright launch gives its explicit target resolver to the pinned proxy", async () => {
+  const fixtureResolver = async (rawUrl) => ({
+    ok: true,
+    url: new URL(rawUrl).toString(),
+    addresses: [{ address: "127.0.0.1", family: 4 }],
+  });
+  let proxyOptions = null;
+  const context = {
+    async close() {},
+  };
+
+  const launched = await launchPublicPlaywrightContext({
+    profileDir: "/tmp/profile",
+    headless: true,
+    resolvePublicTargetImpl: fixtureResolver,
+    createProxyImpl: async (options) => {
+      proxyOptions = options;
+      return { url: "http://127.0.0.1:43123", async close() {} };
+    },
+    loadPlaywrightImpl: async () => ({
+      chromium: {
+        async launchPersistentContext() {
+          return context;
+        },
+      },
+    }),
+  });
+
+  assert.equal(proxyOptions.resolvePublicTargetImpl, fixtureResolver);
+  await launched.close();
+});
+
+test("Playwright aborts a private subresource before it leaves the browser", async () => {
+  let routeHandler = null;
+  let privateRequestSent = false;
+  const context = {
+    async route(_pattern, handler) {
+      routeHandler = handler;
+    },
+    async newPage() {
+      return minimalFakePage("https://jobs.example.test/");
+    },
+    async close() {},
+  };
+  const ops = createPlaywrightOps({
+    launchImpl: async () => context,
+    profileDir: "/tmp/profile",
+    resolvePublicTargetImpl: async (rawUrl) =>
+      String(rawUrl).includes("127.0.0.1")
+        ? { ok: false, reason: "private or local host is not fetchable" }
+        : { ok: true, url: new URL(rawUrl).toString() },
+  });
+
+  await ops.openTab({ url: "https://jobs.example.test/" });
+  await routeHandler({
+    request: () => ({
+      url: () => "http://127.0.0.1:7777/internal.json",
+      isNavigationRequest: () => false,
+    }),
+    continue: async () => {
+      privateRequestSent = true;
+    },
+    abort: async () => {},
+  });
+
+  assert.equal(privateRequestSent, false);
+  await ops.close();
+});
+
+test("Playwright aborts a redirected private navigation before the request is sent", async () => {
+  let routeHandler = null;
+  let privateRequestSent = false;
+  const frame = {};
+  const context = {
+    async route(pattern, handler) {
+      assert.equal(pattern, "**/*");
+      routeHandler = handler;
+    },
+    async newPage() {
+      return {
+        async goto() {
+          assert.equal(typeof routeHandler, "function");
+          await routeHandler({
+            request: () => ({
+              url: () => "https://jobs.example.test/search",
+              isNavigationRequest: () => true,
+              frame: () => frame,
+            }),
+            continue: async () => {},
+            abort: async () => assert.fail("the public hop must not be aborted"),
+          });
+          let blocked = false;
+          await routeHandler({
+            request: () => ({
+              url: () => "http://127.0.0.1:7777/admin",
+              isNavigationRequest: () => true,
+              frame: () => frame,
+            }),
+            continue: async () => {
+              privateRequestSent = true;
+            },
+            abort: async () => {
+              blocked = true;
+            },
+          });
+          if (blocked)
+            throw new Error("Navigation blocked by CareerRat's public-network boundary.");
+        },
+        async close() {},
+        mainFrame: () => frame,
+      };
+    },
+  };
+  const ops = createPlaywrightOps({
+    launchImpl: async () => context,
+    profileDir: "/tmp/profile",
+    resolvePublicTargetImpl: async (rawUrl) =>
+      String(rawUrl).includes("127.0.0.1")
+        ? { ok: false, reason: "private or local host is not fetchable" }
+        : { ok: true, url: new URL(rawUrl).toString() },
+  });
+
+  await assert.rejects(
+    () => ops.openTab({ url: "https://jobs.example.test/search" }),
+    (error) => {
+      assert.equal(error.code, "UNSAFE_BROWSER_NAVIGATION");
+      assert.equal(error.url, "http://127.0.0.1:7777/admin");
+      assert.match(error.message, /public-network boundary/i);
+      return true;
+    }
+  );
+  assert.equal(privateRequestSent, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -830,6 +1048,36 @@ test("fillField and clickButton resolve refs from the latest snapshot", async ()
     { op: "selectOption", index: 2, arg: { label: "Yes" } },
     { op: "click", index: 3 },
   ]);
+});
+
+test("Playwright select stops before another strategy after an in-flight cancellation", async () => {
+  const controller = new AbortController();
+  const cancellation = new Error("application preparation cancelled");
+  const { launchImpl, actions } = createFakeBrowser({
+    controls: FORM_CONTROLS,
+    onAction(action) {
+      if (action.op === "selectOption") controller.abort(cancellation);
+    },
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  await ops.snapshot({ pageId });
+
+  await assert.rejects(
+    () =>
+      ops.selectOption({
+        pageId,
+        ref: "e3",
+        value: "Yes",
+        optionAliases: ["Authorized"],
+        signal: controller.signal,
+      }),
+    (error) => error === cancellation
+  );
+  assert.deepEqual(
+    actions.filter((action) => action.op === "selectOption"),
+    [{ op: "selectOption", index: 2, arg: { label: "Yes" } }]
+  );
 });
 
 test("playwright-ops focuses the retained page without creating a second tab", async () => {
@@ -1600,7 +1848,10 @@ test("createApplyDriver uploads the resume through playwright-ops when a target 
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-playwright-upload-"));
   try {
     mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-    writeFileSync(join(repoRoot, "workspace", "tailored", "resume.pdf"), "resume");
+    writeFileSync(
+      join(repoRoot, "workspace", "tailored", "resume.pdf"),
+      buildMinimalPdf(["Resume"]).bytes
+    );
 
     const { launchImpl, actions } = createFakeBrowser({ controls: UPLOAD_CONTROLS });
     const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
@@ -1689,6 +1940,40 @@ test("configured executor dispatches to the playwright executor for provider pla
 
   assert.equal(result.session.provider, "playwright");
   assert.ok(pageOpens() > 0, "the playwright executor actually opened a fake browser tab");
+});
+
+test("configured Playwright executor preserves cancellation instead of reporting unavailable", async () => {
+  const { launchImpl, pageOpens } = createFakeBrowser({ controls: FORM_CONTROLS });
+  const controller = new AbortController();
+  const cancellation = new Error("application preparation cancelled");
+  controller.abort(cancellation);
+  const execute = createConfiguredApplyExecutor({
+    repoRoot: "/repo",
+    env: {},
+    loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
+    launchImpl,
+    mayRunImpl: () => ({ allowed: true }),
+    candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
+    loadAnswerMapImpl: async () => new Map(),
+    captureQuestionsImpl: async ({ questions }) => ({
+      questions,
+      excluded: [],
+      demographicSectionPresent: false,
+    }),
+  });
+
+  await assert.rejects(
+    () =>
+      execute({
+        applicationId: "app-pre-cancelled",
+        application: { id: "app-pre-cancelled" },
+        postingUrl: GREENHOUSE_URL,
+        questionCapture: { state: "captured" },
+        signal: controller.signal,
+      }),
+    (error) => error === cancellation
+  );
+  assert.equal(pageOpens(), 0, "a cancelled request must not launch or mutate the browser");
 });
 
 test("configured executor returns to the exact retained Playwright page for final user review", async () => {
@@ -1840,13 +2125,15 @@ test("configured executor fails the extension provider immediately with an hones
   assert.doesNotMatch(result.reason, /playwright/i);
 });
 
-test("configured executor still dispatches provider orca to the orca executor", async () => {
+test("configured executor does not dispatch provider orca without a trustworthy request boundary", async () => {
+  let orcaCalls = 0;
   const execute = createConfiguredApplyExecutor({
     repoRoot: "/repo",
     env: {},
     loadAutomationImpl: () => ({ data: { session: { provider: "orca" } } }),
     mayRunImpl: () => ({ allowed: true }),
     runOrcaImpl: async () => {
+      orcaCalls += 1;
       throw new Error("Orca is not running");
     },
   });
@@ -1857,7 +2144,8 @@ test("configured executor still dispatches provider orca to the orca executor", 
     postingUrl: GREENHOUSE_URL,
   });
   assert.equal(result.available, false);
-  assert.match(result.reason, /Orca is not running/);
+  assert.match(result.reason, /automatic apply isn't available on the .*Orca/i);
+  assert.equal(orcaCalls, 0);
 });
 
 test("createPlaywrightApplyExecutor mirrors createOrcaApplyExecutor's composition shape", async () => {
@@ -1941,4 +2229,43 @@ test("createPlaywrightApplyExecutor uses a custom session.profile_root even when
   } finally {
     rmSync(customRoot, { recursive: true, force: true });
   }
+});
+
+test("createPlaywrightApplyExecutor isolates its default profile by CareerRat home", async () => {
+  async function launchedProfileDir(dataRoot) {
+    const { launchImpl } = createFakeBrowser({ controls: FORM_CONTROLS });
+    let capturedProfileDir = null;
+    const execute = createPlaywrightApplyExecutor({
+      repoRoot: "/repo",
+      env: { CAREERRAT_HOME: dataRoot },
+      loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
+      launchImpl: async (args) => {
+        capturedProfileDir = args.profileDir;
+        return launchImpl(args);
+      },
+      mayRunImpl: () => ({ allowed: true }),
+      candidateConfigGetImpl: () => ({ profile: {}, honesty: {}, "form-defaults": {} }),
+      loadAnswerMapImpl: async () => new Map(),
+      captureQuestionsImpl: async ({ questions }) => ({
+        questions,
+        excluded: [],
+        demographicSectionPresent: false,
+      }),
+    });
+
+    await execute({
+      applicationId: "app-1",
+      application: { id: "app-1" },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+    });
+    return capturedProfileDir;
+  }
+
+  const first = await launchedProfileDir("/private/candidate-a");
+  const second = await launchedProfileDir("/private/candidate-b");
+
+  assert.equal(first, join("/private/candidate-a", "board-profiles", "apply"));
+  assert.equal(second, join("/private/candidate-b", "board-profiles", "apply"));
+  assert.notEqual(first, second);
 });

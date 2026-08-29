@@ -27,6 +27,21 @@ const MIME_TYPES = {
   ".txt": "text/plain; charset=utf-8",
 };
 
+export async function resolveLocalFixtureTarget(rawUrl) {
+  const url = new URL(rawUrl);
+  const isFixtureFile = url.protocol === "file:";
+  const isFixtureServer = url.protocol === "http:" && url.hostname === "127.0.0.1";
+  if (isFixtureFile) return { ok: true, url: url.toString() };
+  if (isFixtureServer) {
+    return {
+      ok: true,
+      url: url.toString(),
+      addresses: [{ address: "127.0.0.1", family: 4 }],
+    };
+  }
+  return { ok: false, reason: "not a local browser fixture target" };
+}
+
 function contentTypeFor(path) {
   return MIME_TYPES[extname(path).toLowerCase()] || "application/octet-stream";
 }

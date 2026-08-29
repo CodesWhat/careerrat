@@ -34,6 +34,7 @@ import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeFileAtomic } from "./atomic-write.mjs";
+import { shutdownDesktopRuntime } from "./desktop-lifecycle.mjs";
 import {
   chooseDesktopRoute,
   normalizeDesktopRoute,
@@ -43,9 +44,12 @@ import { configureCareerRatAppIdentity } from "./desktop-identity.mjs";
 import { buildCareerRatMenuTemplate, runMenuUpdateCheck } from "./menu-template.mjs";
 import {
   beginNativeUpdateAcceptance,
+  bootNativeUpdateAcceptance,
   completeNativeUpdateAcceptance,
+  inspectNativeUpdateAcceptanceState,
   NATIVE_UPDATE_ACCEPTANCE_ARG,
   resolveNativeUpdateAcceptance,
+  seedNativeUpdateAcceptanceState,
 } from "./native-update-acceptance.mjs";
 import {
   choosePreferredPort,
@@ -172,20 +176,8 @@ function log(msg) {
 // bound (relevant when `port` is 0, i.e. "pick any free ephemeral port").
 // Rejects with the raw listen error (e.g. EADDRINUSE) instead of swallowing
 // it — the caller decides whether a retry is warranted.
-function listenOnPort(server, port) {
-  return new Promise((resolve, reject) => {
-    function onError(err) {
-      server.removeListener("listening", onListening);
-      reject(err);
-    }
-    function onListening() {
-      server.removeListener("error", onError);
-      resolve(server.address().port);
-    }
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen(port, "127.0.0.1");
-  });
+function listenOnPort(runtime, port) {
+  return runtime.listen({ port, host: "127.0.0.1" });
 }
 
 // Plain node:http instead of Electron's main-process `fetch()` (which is
@@ -264,11 +256,11 @@ async function boot() {
   const preferredPort = choosePreferredPort({ isPackaged: app.isPackaged, env: process.env });
   let port;
   try {
-    port = await listenOnPort(dev.server, preferredPort);
+    port = await listenOnPort(dev, preferredPort);
   } catch (err) {
     if (err?.code === "EADDRINUSE" && preferredPort !== 0) {
       log(`port ${preferredPort} in use, retrying with an ephemeral port: ${err.message}`);
-      port = await listenOnPort(dev.server, 0);
+      port = await listenOnPort(dev, 0);
     } else {
       throw err;
     }
@@ -289,17 +281,7 @@ async function boot() {
 async function shutdown() {
   const active = dev;
   dev = null;
-  if (active) {
-    active.stopWatching();
-    active.closeClients();
-    // M2's chat runtime — closes every live Agent SDK session and stops the
-    // idle-sweep timer so quitting the app never leaves an orphaned `claude`
-    // CLI child running in the background.
-    await active.chatRuntime.shutdown();
-    active.stopRuntimeSignIns();
-    await active.browserSessionManager.shutdown();
-    await new Promise((resolve) => active.server.close(() => resolve()));
-  }
+  if (active) await shutdownDesktopRuntime(active);
 
   const activePdfRenderer = pdfRenderer;
   pdfRenderer = null;
@@ -429,6 +411,13 @@ function registerUpdateCheckHandlers() {
     push: pushUpdateNoticeToRenderer,
     log,
   });
+
+  if (updateController.needsStartupCheck()) {
+    updateController
+      .reconcileStartup()
+      .catch((err) => log(`update recovery failed: ${err.message}`))
+      .finally(() => scheduleNextUpdateCheck());
+  }
 
   ipcMain.handle(UPDATE_IPC.getState, () => currentUpdateNoticePayload());
 
@@ -704,18 +693,38 @@ app.whenReady().then(async () => {
   if (nativeUpdateAcceptanceError) throw nativeUpdateAcceptanceError;
 
   if (nativeUpdateAcceptance?.mode === "complete") {
+    const { url } = await bootNativeUpdateAcceptance({ boot, timeoutMs: 60_000 });
+    const canonicalState = await inspectNativeUpdateAcceptanceState({
+      acceptance: nativeUpdateAcceptance,
+      baseUrl: url,
+      async readMigrationState() {
+        const [{ requireDb }, { ALL_MIGRATIONS }] = await Promise.all([
+          loadEngineModule("src/core/db/connection.mjs"),
+          loadEngineModule("src/core/db/migrations.mjs"),
+        ]);
+        const db = requireDb({ repoRoot });
+        return {
+          version: db.prepare("PRAGMA user_version").get().user_version,
+          ceiling: ALL_MIGRATIONS.at(-1)?.id || 0,
+        };
+      },
+    });
     const result = completeNativeUpdateAcceptance({
       acceptance: nativeUpdateAcceptance,
       currentVersion: app.getVersion(),
+      canonicalState,
     });
     log(
       `NATIVE UPDATE ACCEPTANCE ${result.ok ? "OK" : "FAILED"} ${result.fromVersion} -> ${result.observedVersion}`
     );
+    await shutdown();
     app.exit(result.ok ? 0 : 1);
     return;
   }
 
   if (nativeUpdateAcceptance?.mode === "start") {
+    const { url } = await bootNativeUpdateAcceptance({ boot, timeoutMs: 60_000 });
+    await seedNativeUpdateAcceptanceState({ acceptance: nativeUpdateAcceptance, baseUrl: url });
     await beginNativeUpdateAcceptance({
       acceptance: nativeUpdateAcceptance,
       updater: autoUpdater,
@@ -844,9 +853,8 @@ app.on("window-all-closed", () => {
 
 // Shutdown: every real quit trigger (Cmd+Q, Dock > Quit, non-darwin
 // window-all-closed's app.quit() above) funnels through this one before-quit
-// handler so stopWatching()/closeClients()/chatRuntime.shutdown()/
-// server.close() always run exactly once before the process actually exits —
-// no orphaned `claude` CLI children left behind. Closing the last window on
+// handler so app-owned searches and intake work settle before browser and
+// server teardown. Closing the last window on
 // darwin does NOT reach here (see window-all-closed above); the app and its
 // server stay alive in the dock until an actual quit.
 app.on("before-quit", (event) => {

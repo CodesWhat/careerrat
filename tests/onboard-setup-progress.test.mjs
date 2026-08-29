@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { quickFactsDetailLine } from "../apps/web/src/onboarding/onboardingSetup.js";
 import { computeSetupProgress, mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
+import { deepIngestConfirmedItemUpsert } from "../src/core/db/verbs/index.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
@@ -184,6 +185,22 @@ describe("computeSetupProgress", () => {
       }).items.find((i) => i.key === "quickFacts").done,
       true,
       "confirmed remote-only candidates do not need a home, hybrid, on-site, or relocation market"
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: {
+          profile: {
+            location: {
+              home: "New York, NY",
+              hybrid: true,
+              mode_preferences_confirmed: true,
+            },
+            compensation: { minimum_annual_earnings: 90000 },
+          },
+        },
+      }).items.find((i) => i.key === "quickFacts").done,
+      true,
+      "a total annual cash earnings floor completes compensation setup for tipped work"
     );
   });
 
@@ -469,6 +486,90 @@ async function getDirect(routes, path) {
 }
 
 describe("GET /api/onboard/state — setupProgress", () => {
+  it("returns an opaque stable draft owner and a canonical candidate-content revision", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    try {
+      await postDirect(routes, "/api/onboard/init", {});
+
+      const first = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+      const repeated = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+      assert.equal(typeof first?.owner?.workspaceId, "string");
+      assert.ok(first.owner.workspaceId.length >= 16);
+      assert.equal(typeof first?.owner?.candidateId, "string");
+      assert.ok(first.owner.candidateId.length >= 16);
+      assert.equal(typeof first?.base?.revision, "string");
+      assert.ok(first.base.revision.length >= 16);
+      assert.deepEqual(repeated, first);
+
+      const alternateRoutes = mountDirectRoutes(repoRoot, {
+        CAREERRAT_HOME: join(repoRoot, "alternate-private-home"),
+      });
+      await postDirect(alternateRoutes, "/api/onboard/init", {});
+      const alternate = (await getDirect(alternateRoutes, "/api/onboard/state")).body.draftContext;
+      assert.notEqual(
+        alternate.owner.workspaceId,
+        first.owner.workspaceId,
+        "separate active data roots served by one installed package must not share drafts"
+      );
+
+      await postDirect(routes, "/api/onboard/candidate/profile", {
+        data: {
+          candidate: {
+            full_name: "Ada Candidate",
+            email: "ada.private@example.test",
+          },
+        },
+      });
+      const changed = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+
+      assert.deepEqual(changed.owner, first.owner);
+      assert.notEqual(changed.base.revision, first.base.revision);
+      const exposedIdentity = JSON.stringify(changed.owner);
+      assert.doesNotMatch(exposedIdentity, /ada|@|example\.test/i);
+      assert.equal(exposedIdentity.includes(repoRoot), false);
+      assert.equal(exposedIdentity.includes(tmpdir()), false);
+
+      deepIngestConfirmedItemUpsert({
+        repoRoot,
+        lane: "writing_voice",
+        fields: { summary: "Plain, direct, and newly updated." },
+      });
+      const voiceChanged = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+      assert.deepEqual(voiceChanged.owner, first.owner);
+      assert.notEqual(voiceChanged.base.revision, changed.base.revision);
+    } finally {
+      closeAll();
+    }
+  });
+
+  it("rejects a Settings editor write when its captured base revision is stale", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    try {
+      await postDirect(routes, "/api/onboard/init", {});
+      const before = (await getDirect(routes, "/api/onboard/state")).body.draftContext;
+      const external = await postDirect(routes, "/api/onboard/candidate/profile", {
+        data: { candidate: { full_name: "New canonical name" } },
+      });
+      assert.equal(external.status, 200);
+
+      const stale = await postDirect(routes, "/api/onboard/candidate/targeting", {
+        expectedBaseRevision: before.base.revision,
+        data: {
+          role_buckets: [
+            { name: "Primary targets", priority: "primary", titles: ["Principal Engineer"] },
+          ],
+        },
+      });
+
+      assert.equal(stale.status, 409);
+      assert.equal(stale.body.code, "SETTINGS_BASE_CHANGED");
+    } finally {
+      closeAll();
+    }
+  });
+
   it("file-fallback mode: template example content never marks a step done on a fresh workspace", async () => {
     // Before POST /api/onboard/init, GET /api/onboard/state's file-fallback
     // read path (readBaseDoc) falls back to the TEMPLATE default for any

@@ -9,10 +9,20 @@
 // write-back, abort/close/interrupt) without spawning a CLI subprocess.
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
 import { isPlainYesNoQuestion, parseChatAnswerMode } from "../src/core/ai/chat-answer-mode.mjs";
 import {
   buildChatKickoffPrompt,
@@ -23,6 +33,7 @@ import {
   resolveDirectChatSkills,
 } from "../src/core/ai/chat-runtime.mjs";
 import { CHAT_SESSION_RUNTIME_TIMEOUT_MS } from "../src/core/ai/installed-runtimes.mjs";
+import { resolveAIExecutionPlan } from "../src/core/ai/operation-policy.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
@@ -33,6 +44,7 @@ import {
   candidateEvidenceMerge,
   candidateSetupInitialize,
   skillChatThreadRead,
+  sourceConfigGet,
 } from "../src/core/db/verbs.mjs";
 
 const VERIFIED_CAPABILITIES = Object.freeze({
@@ -48,6 +60,9 @@ const VERIFIED_CAPABILITIES = Object.freeze({
 function runtimeVerification(path) {
   return {
     path,
+    realPath: realpathSync(path),
+    version: "0.149.1",
+    binaryFingerprint: createHash("sha256").update(readFileSync(path)).digest("hex"),
     capabilities: VERIFIED_CAPABILITIES,
     checkedAt: "2026-08-25T12:00:00.000Z",
   };
@@ -68,7 +83,7 @@ function runtimeVerification(path) {
 function selectFakeCodexRuntime({ repoRoot, env }) {
   const binDir = mkdtempSync(join(tmpdir(), "careerrat-fake-codex-bin-"));
   const codexPath = join(binDir, "codex");
-  writeFileSync(codexPath, "#!/bin/sh\nexit 0\n", "utf8");
+  writeFileSync(codexPath, "#!/bin/sh\nprintf '0.149.1\\n'\nexit 0\n", "utf8");
   chmodSync(codexPath, 0o755);
   env.PATH = "";
   env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
@@ -85,7 +100,7 @@ function selectInstalledRuntime({ repoRoot, env }) {
   const binDir = join(repoRoot, ".internal", "fake-runtime-bin");
   mkdirSync(binDir, { recursive: true });
   const codexPath = join(binDir, "codex");
-  writeFileSync(codexPath, "#!/bin/sh\nexit 0\n", "utf8");
+  writeFileSync(codexPath, "#!/bin/sh\nprintf '0.149.1\\n'\nexit 0\n", "utf8");
   chmodSync(codexPath, 0o755);
   env.PATH = "";
   env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
@@ -105,7 +120,7 @@ function selectInstalledRuntime({ repoRoot, env }) {
 function selectFakeClaudeRuntime({ repoRoot, env }) {
   const binDir = mkdtempSync(join(tmpdir(), "careerrat-fake-claude-bin-"));
   const claudePath = join(binDir, "claude");
-  writeFileSync(claudePath, "#!/bin/sh\nexit 0\n", "utf8");
+  writeFileSync(claudePath, "#!/bin/sh\nprintf '0.149.1\\n'\nexit 0\n", "utf8");
   chmodSync(claudePath, 0o755);
   env.PATH = "";
   env.CAREERRAT_RUNTIME_EXTRA_PATHS = binDir;
@@ -409,6 +424,7 @@ test("classifyChatEvent: every other event type/subtype (including plain system 
 test("buildChatKickoffPrompt: asks ONE question at a time and drops the one-shot headless framing", () => {
   const prompt = buildChatKickoffPrompt({ skill: "ingest-profile" });
   assert.match(prompt, /ONE question/);
+  assert.match(prompt, /one decision.*Do not combine/i);
   assert.match(prompt, /careerrat:answer/);
   assert.match(prompt, /genuinely answerable with Yes or No/i);
   assert.match(prompt, /ingest-profile/);
@@ -769,7 +785,10 @@ test("createChatRuntime: broadcasts a typed yes-no mode and strips its control f
       );
       const stored = skillChatThreadRead({ repoRoot, env, skill: "ingest-profile" }).messages[0];
       assert.equal(stored.text, "Do you require employment sponsorship?");
-      assert.deepEqual(stored.metadata, { answerMode: "yes-no" });
+      assert.equal(stored.metadata.answerMode, undefined);
+      assert.equal(stored.metadata.choicePrompt.mode, "binary");
+      assert.equal(stored.metadata.choicePrompt.messageId, stored.id);
+      assert.equal(stored.metadata.choicePrompt.state, "pending");
     } finally {
       chatRuntime.shutdown();
     }
@@ -859,6 +878,183 @@ test("createChatRuntime: a replacement process waits on the durable unanswered a
       replacementRuntime.shutdown();
     }
   } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: a durable thread reuses and exposes its frozen execution plan after restart", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  writeAIPreferences({ repoRoot, env, quality: "faster", reasoning: "low" });
+  try {
+    let persistedBeforeDispatch = null;
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => ({
+        query: (args) => {
+          persistedBeforeDispatch = skillChatThreadRead({
+            repoRoot,
+            env,
+            skill: "research-company",
+          }).thread.executionPlan;
+          return fakeStreamingSdk([turnMessagesWithReply("Research ready.", 1)]).query(args);
+        },
+      }),
+    });
+    const first = await firstRuntime.startSession({ skill: "research-company" });
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.shutdown();
+
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "research-company" });
+    assert.equal(stored.thread.executionPlan.runtimeId, "anthropic-api");
+    assert.equal(stored.thread.executionPlan.resolved.model, "haiku");
+    assert.equal(stored.thread.executionPlan.resolved.effort, "low");
+    assert.deepEqual(persistedBeforeDispatch, stored.thread.executionPlan);
+
+    writeAIPreferences({ repoRoot, env, quality: "best", reasoning: "high" });
+    let resumedOptions;
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => ({
+        query: (args) => {
+          resumedOptions = args.options;
+          return fakeStreamingSdk([turnMessagesWithReply("Continued.", 2)]).query(args);
+        },
+      }),
+    });
+    try {
+      const resumed = await replacementRuntime.startSession({ skill: "research-company" });
+      assert.equal(resumed.executionPlan.runtimeId, "anthropic-api");
+      assert.equal(resumed.executionPlan.resolved.model, "haiku");
+      assert.equal(resumed.executionPlan.resolved.effort, "low");
+      assert.equal(Object.isFrozen(resumed.executionPlan), true);
+      assert.equal(Object.isFrozen(resumed.executionPlan.resolved), true);
+      assert.equal(resumedOptions.model, "haiku");
+      assert.equal(resumedOptions.effort, "low");
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: a durable thread fails closed when its frozen provider is unavailable", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  try {
+    const firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => fakeStreamingSdk([turnMessagesWithReply("Research ready.", 1)]),
+    });
+    const first = await firstRuntime.startSession({ skill: "research-company" });
+    await waitForPredicate(() => firstRuntime.getSession(first.chatId)?.state === "idle");
+    firstRuntime.shutdown();
+
+    delete env.ANTHROPIC_API_KEY;
+    env.CAREERRAT_AI_PROXY_URL = "http://127.0.0.1:7788";
+    let loadedSdk = false;
+    const replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        loadedSdk = true;
+        return fakeStreamingSdk([]);
+      },
+    });
+    try {
+      await assert.rejects(
+        replacementRuntime.startSession({ skill: "research-company" }),
+        (error) =>
+          error.code === "NO_AI_ROUTE" &&
+          /Anthropic API credential.*unavailable/i.test(error.message)
+      );
+      assert.equal(loadedSdk, false, "a missing saved provider must not fall back to the proxy");
+    } finally {
+      replacementRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: two app processes cannot dispatch the same durable turn", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  let providerDispatches = 0;
+  const loadSdk = async () => ({
+    query: (args) => {
+      providerDispatches += 1;
+      return fakeStreamingSdk([turnMessagesWithReply("Research ready.", providerDispatches)]).query(
+        args
+      );
+    },
+  });
+  const firstRuntime = createChatRuntime({ repoRoot, env, loadSdk });
+  const secondRuntime = createChatRuntime({ repoRoot, env, loadSdk });
+  try {
+    const results = await Promise.allSettled([
+      firstRuntime.startSession({ skill: "research-company" }),
+      secondRuntime.startSession({ skill: "research-company" }),
+    ]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+    const rejected = results.find((result) => result.status === "rejected");
+    assert.equal(rejected.reason.code, "CHAT_TURN_ALREADY_CLAIMED");
+    assert.equal(providerDispatches, 1);
+  } finally {
+    firstRuntime.shutdown();
+    secondRuntime.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime: a durable skill rejects a saved plan for another operation", async () => {
+  const repoRoot = tempRepoWithSkill("research-company");
+  const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
+  candidateSetupInitialize({ repoRoot, env });
+  const wrongPlan = resolveAIExecutionPlan({
+    operation: "coach.deep",
+    runtimeId: "anthropic-api",
+  });
+  const db = openDb({ repoRoot, env });
+  db.prepare("INSERT INTO skill_chat_threads (id, data) VALUES (?, ?)").run(
+    "skill:research-company",
+    JSON.stringify({
+      id: "skill:research-company",
+      skill: "research-company",
+      status: "active",
+      messageCount: 0,
+      turnState: "awaiting-assistant",
+      executionPlan: wrongPlan,
+      createdAt: "2026-08-27T12:00:00.000Z",
+      updatedAt: "2026-08-27T12:00:00.000Z",
+    })
+  );
+  let loadedSdk = false;
+  const runtime = createChatRuntime({
+    repoRoot,
+    env,
+    loadSdk: async () => {
+      loadedSdk = true;
+      return fakeStreamingSdk([]);
+    },
+  });
+  try {
+    await assert.rejects(
+      runtime.startSession({ skill: "research-company" }),
+      (error) =>
+        error.code === "AI_EXECUTION_PLAN_OPERATION_MISMATCH" &&
+        /coach\.deep.*research\.web/i.test(error.message)
+    );
+    assert.equal(loadedSdk, false);
+  } finally {
+    runtime.shutdown();
     cleanup(repoRoot);
   }
 });
@@ -968,13 +1164,23 @@ test("createChatRuntime: board research persists one validated review artifact i
 
     const stored = skillChatThreadRead({ repoRoot, env, skill: "research-boards" });
     assert.equal(stored.messages.length, 1);
-    assert.equal(stored.messages[0].text, "I found 6 useful sources. Nothing has been added yet.");
+    assert.equal(stored.messages[0].text, "Added 4 strong sources. 2 need a closer look.");
     assert.equal(stored.messages[0].artifacts.length, 1);
     assert.equal(stored.messages[0].artifacts[0].kind, "source_review");
     assert.equal(stored.messages[0].artifacts[0].candidates.length, 7);
     assert.equal(
       stored.messages[0].artifacts[0].candidates[6].rejectionReason,
       "no visible dated listing"
+    );
+    assert.equal(
+      stored.messages[0].artifacts[0].candidates.filter(
+        (candidate) => candidate.decision?.action === "save"
+      ).length,
+      4
+    );
+    assert.equal(
+      sourceConfigGet({ repoRoot, env, name: "search-sources" }).data.searches.length,
+      4
     );
     assert.doesNotMatch(JSON.stringify(stored), /BOARDS FOUND|\| # \| Board|careerrat:discovery/);
   } finally {
@@ -1656,6 +1862,123 @@ test("createChatRuntime.startSession (installed route): runs turns through the s
   }
 });
 
+test("createChatRuntime installed chats keep a bounded prompt window and durable rolling checkpoint across restart", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = {};
+  candidateSetupInitialize({ repoRoot, env });
+  selectInstalledRuntime({ repoRoot, env });
+  const accepted = [];
+  let chatRuntime;
+  let replacementRuntime;
+  try {
+    const calls = [];
+    chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      installedTranscriptWindowChars: 360,
+      installedCheckpointChars: 260,
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        return {
+          text: `Reply ${calls.length}: ${"assistant context ".repeat(6)}`,
+          usage: null,
+          model: null,
+        };
+      },
+    });
+    const started = await chatRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => chatRuntime.getSession(started.chatId)?.state === "idle");
+    const baselinePromptLength = calls[0].prompt.length;
+
+    for (let index = 1; index <= 24; index += 1) {
+      const text =
+        index === 1
+          ? "Decision: I will not relocate from Boston for this search."
+          : `accepted message ${index}: ${"background detail ".repeat(6)}`.trim();
+      accepted.push(text);
+      chatRuntime.postMessage(started.chatId, text);
+      await waitForPredicate(
+        () => calls.length === index + 1 && chatRuntime.getSession(started.chatId)?.state === "idle"
+      );
+    }
+
+    const lastLivePrompt = calls.at(-1).prompt;
+    assert.match(lastLivePrompt, /Earlier durable conversation checkpoint/i);
+    assert.match(lastLivePrompt, /will not relocate from Boston/);
+    assert.match(lastLivePrompt, /accepted message 24/);
+    assert.ok(
+      lastLivePrompt.length <= baselinePromptLength + 2_400,
+      `installed prompt grew from ${baselinePromptLength} to ${lastLivePrompt.length}`
+    );
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "ingest-profile" });
+    assert.deepEqual(
+      stored.messages.filter((message) => message.role === "user").map((message) => message.text),
+      accepted,
+      "prompt compaction must not delete or rewrite an accepted durable turn"
+    );
+
+    chatRuntime.shutdown();
+    chatRuntime = null;
+    const restartCalls = [];
+    replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      installedTranscriptWindowChars: 360,
+      installedCheckpointChars: 260,
+      runInstalledRuntimeImpl: async (args) => {
+        restartCalls.push(args);
+        return { text: "The restarted reply.", usage: null, model: null };
+      },
+    });
+    const resumed = await replacementRuntime.startSession({ skill: "ingest-profile" });
+    assert.equal(resumed.state, "idle");
+    replacementRuntime.postMessage(resumed.chatId, "accepted message after restart");
+    await waitForPredicate(() => replacementRuntime.getSession(resumed.chatId)?.state === "idle");
+    assert.equal(restartCalls.length, 1);
+    assert.match(restartCalls[0].prompt, /Earlier durable conversation checkpoint/i);
+    assert.match(restartCalls[0].prompt, /will not relocate from Boston/);
+    assert.match(restartCalls[0].prompt, /accepted message after restart/);
+    assert.ok(restartCalls[0].prompt.length <= baselinePromptLength + 2_400);
+  } finally {
+    chatRuntime?.shutdown();
+    replacementRuntime?.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime bounds the replay event buffer without breaking monotonic cursors", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = {};
+  selectInstalledRuntime({ repoRoot, env });
+  const chatRuntime = createChatRuntime({
+    repoRoot,
+    env,
+    eventRecordLimit: 10,
+    runInstalledRuntimeImpl: async () => ({ text: "A bounded reply.", usage: null, model: null }),
+  });
+  try {
+    const started = await chatRuntime.startSession({ skill: "ingest-profile" });
+    await waitForPredicate(() => chatRuntime.getSession(started.chatId)?.state === "idle");
+    for (let index = 1; index <= 8; index += 1) {
+      chatRuntime.postMessage(started.chatId, `message ${index}`);
+      await waitForPredicate(() => chatRuntime.getSession(started.chatId)?.state === "idle");
+    }
+
+    const replay = subscribeCollect(chatRuntime, started.chatId);
+    assert.ok(replay.length <= 10, `late subscriber received ${replay.length} buffered events`);
+    assert.ok(replay[0].id > 1, "old event records should have been released from memory");
+    assert.deepEqual(
+      replay.map((event) => event.id),
+      replay.map((event) => event.id).toSorted((a, b) => a - b)
+    );
+    assert.equal(replay.at(-1).type, "chat_state");
+    assert.equal(replay.at(-1).data.state, "idle");
+  } finally {
+    chatRuntime.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
 // P0 regression — a CHAT_RUNTIME_TOOLS session (research-company,
 // research-comp, company-health, research-boards) grants only WebSearch/
 // WebFetch/Skill, never Read, so it depends entirely on the Skill tool to
@@ -1710,6 +2033,118 @@ test("createChatRuntime.startSession (installed route): threads skill + repoRoot
     }
   } finally {
     cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime freezes saved Faster/Low research policy for every direct Codex research chat", async () => {
+  const skills = ["research-company", "research-comp", "research-boards", "company-health"];
+  const repoRoot = tempRepoWithSkill(skills);
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+    writeAIPreferences({ repoRoot, env, quality: "faster", reasoning: "low" });
+    const calls = [];
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        return { text: "Research ready.", usage: null, model: args.model };
+      },
+    });
+    try {
+      for (const skill of skills) {
+        const { chatId } = await chatRuntime.startSession({ skill });
+        await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+      }
+
+      assert.deepEqual(
+        calls.map(({ runtime, skill, model, effort }) => ({
+          runtimeId: runtime.id,
+          skill,
+          model,
+          effort,
+        })),
+        skills.map((skill) => ({
+          runtimeId: "codex",
+          skill,
+          model: "gpt-5.6-luna",
+          effort: "low",
+        }))
+      );
+
+      writeAIPreferences({ repoRoot, env, quality: "best", reasoning: "high" });
+      const companySession = chatRuntime.findBySkill("research-company");
+      chatRuntime.postMessage(companySession.chatId, "Check one more source.");
+      await waitForPredicate(() => calls.length === skills.length + 1);
+      assert.equal(calls.at(-1).model, "gpt-5.6-luna");
+      assert.equal(calls.at(-1).effort, "low");
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime passes saved provider-neutral policy to Claude CLI and Agent SDK research chats", async () => {
+  const installedRoot = tempRepoWithSkill("research-company");
+  try {
+    const installedEnv = {};
+    selectFakeClaudeRuntime({ repoRoot: installedRoot, env: installedEnv });
+    writeAIPreferences({
+      repoRoot: installedRoot,
+      env: installedEnv,
+      quality: "balanced",
+      reasoning: "high",
+    });
+    const installedCalls = [];
+    const installedRuntime = createChatRuntime({
+      repoRoot: installedRoot,
+      env: installedEnv,
+      runInstalledRuntimeStreamImpl: async (args) => {
+        installedCalls.push(args);
+        return { text: "Research ready.", usage: null, model: args.model };
+      },
+    });
+    try {
+      const { chatId } = await installedRuntime.startSession({ skill: "research-company" });
+      await waitForPredicate(() => installedRuntime.getSession(chatId)?.state === "idle");
+      assert.equal(installedCalls[0].runtime.id, "claude");
+      assert.equal(installedCalls[0].model, "sonnet");
+      assert.equal(installedCalls[0].effort, "high");
+    } finally {
+      installedRuntime.shutdown();
+    }
+  } finally {
+    cleanup(installedRoot);
+  }
+
+  const sdkRoot = tempRepoWithSkill("research-comp");
+  try {
+    const sdkEnv = { ANTHROPIC_API_KEY: "sk-ant-test" };
+    writeAIPreferences({ repoRoot: sdkRoot, env: sdkEnv, quality: "faster", reasoning: "low" });
+    let sdkOptions;
+    const sdkRuntime = createChatRuntime({
+      repoRoot: sdkRoot,
+      env: sdkEnv,
+      loadSdk: async () => ({
+        query: (args) => {
+          sdkOptions = args.options;
+          return fakeStreamingSdk([turnMessagesWithReply("Benchmark ready.")]).query(args);
+        },
+      }),
+    });
+    try {
+      const { chatId } = await sdkRuntime.startSession({ skill: "research-comp" });
+      await waitForPredicate(() => sdkRuntime.getSession(chatId)?.state === "idle");
+      assert.equal(sdkOptions.model, "haiku");
+      assert.equal(sdkOptions.effort, "low");
+    } finally {
+      sdkRuntime.shutdown();
+    }
+  } finally {
+    cleanup(sdkRoot);
   }
 });
 
@@ -2121,7 +2556,7 @@ test("createChatRuntime (installed route): a runtime failure surfaces as an erro
   }
 });
 
-test("createChatRuntime does not pass a Claude model override into a selected Codex runtime", async () => {
+test("createChatRuntime ignores a Claude override and keeps the selected Codex model family", async () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   const env = { ANTHROPIC_MODEL: "claude-only-model" };
   const binDir = selectFakeCodexRuntime({ repoRoot, env });
@@ -2143,7 +2578,9 @@ test("createChatRuntime does not pass a Claude model override into a selected Co
       await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
       assert.equal(calls.length, 1);
       assert.equal(calls[0].runtime.id, "codex");
-      assert.equal(calls[0].model, undefined);
+      assert.equal(calls[0].model, "gpt-5.6-sol");
+      assert.equal(calls[0].effort, "medium");
+      assert.doesNotMatch(calls[0].model, /^claude/i);
     } finally {
       chatRuntime.shutdown();
     }
@@ -2558,6 +2995,73 @@ test("createChatRuntime.postMessage (installed route): durably replays a queued 
     );
   } finally {
     chatRuntime?.shutdown();
+    replacementRuntime?.shutdown();
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.postMessage (installed route): an accepted queued request survives shutdown and replays once after restart", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  const env = {};
+  candidateSetupInitialize({ repoRoot, env });
+  selectInstalledRuntime({ repoRoot, env });
+
+  let firstRuntime;
+  let replacementRuntime;
+  try {
+    firstRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async ({ signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              const error = new Error("Installed AI request was cancelled.");
+              error.code = "RUNTIME_CANCELLED";
+              reject(error);
+            },
+            { once: true }
+          );
+        }),
+    });
+
+    const { chatId } = await firstRuntime.startSession({ skill: "ingest-profile" });
+    const accepted = firstRuntime.postMessage(
+      chatId,
+      "Remote in the US works for me.",
+      undefined,
+      "chat-request-restart-0001"
+    );
+    assert.equal(accepted.accepted, true);
+
+    firstRuntime.shutdown();
+    firstRuntime = null;
+
+    const prompts = [];
+    replacementRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      runInstalledRuntimeImpl: async ({ prompt }) => {
+        prompts.push(prompt);
+        return { text: "What is your minimum base salary?", usage: null, model: null };
+      },
+    });
+    const resumed = await replacementRuntime.startSession({ skill: "ingest-profile" });
+    assert.equal(resumed.state, "running");
+    await waitForPredicate(() => replacementRuntime.getSession(resumed.chatId)?.state === "idle");
+
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /Remote in the US works for me\./);
+    const stored = skillChatThreadRead({ repoRoot, env, skill: "ingest-profile" });
+    assert.equal(
+      stored.messages.filter(
+        (message) => message.role === "user" && message.text === "Remote in the US works for me."
+      ).length,
+      1
+    );
+  } finally {
+    firstRuntime?.shutdown();
     replacementRuntime?.shutdown();
     cleanup(repoRoot);
   }

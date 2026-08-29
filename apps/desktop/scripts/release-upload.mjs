@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { selectMacReleaseArtifacts } from "../release-artifacts.mjs";
 
 const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8"));
@@ -29,8 +30,9 @@ if (expectedReleaseId && !/^\d+$/.test(expectedReleaseId)) {
   fail("CAREERRAT_RELEASE_ID must be a numeric GitHub release id.");
 }
 
-const dmgFiles = readdirSync(distDir).filter((name) => name.endsWith(".dmg"));
-const zipFiles = readdirSync(distDir).filter((name) => name.endsWith(".zip"));
+const distNames = readdirSync(distDir);
+const dmgFiles = distNames.filter((name) => name.endsWith(".dmg"));
+const zipFiles = distNames.filter((name) => name.endsWith(".zip"));
 const metadataPath = join(distDir, "latest-mac.yml");
 
 if (dmgFiles.length === 0) {
@@ -49,7 +51,13 @@ function escapeRegExp(value) {
 }
 
 const versionToken = new RegExp(`(?<![0-9.])${escapeRegExp(version)}(?![0-9.])`);
-const matchingDmgs = dmgFiles.filter((name) => versionToken.test(name));
+let selectedNames;
+try {
+  selectedNames = selectMacReleaseArtifacts({ names: distNames, version });
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
+}
+const matchingDmgs = selectedNames.filter((name) => name.endsWith(".dmg"));
 const staleDmgs = dmgFiles.filter((name) => !versionToken.test(name));
 const matchingZips = zipFiles
   .filter((name) => versionToken.test(name))
@@ -84,9 +92,7 @@ if (staleZips.length > 0) {
 const filesToUpload = [metadataPath, matchingZips[0]];
 const zipBlockmap = `${matchingZips[0]}.blockmap`;
 if (existsSync(zipBlockmap)) filesToUpload.push(zipBlockmap);
-for (const dmgFile of matchingDmgs) {
-  filesToUpload.push(join(distDir, dmgFile));
-}
+filesToUpload.push(join(distDir, matchingDmgs[0]));
 
 function resolveExactDraftRelease() {
   let pages;

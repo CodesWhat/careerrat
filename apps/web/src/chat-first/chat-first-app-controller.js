@@ -6,6 +6,55 @@ function list(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function privateOperationId(value) {
+  const id = String(value || "").trim();
+  return /^app-operation-[a-z0-9-]{1,140}$/i.test(id) ? id : null;
+}
+
+export function workspaceOperationFromResponse(response) {
+  const operation = response?.operation || response?.data?.operation;
+  const id = privateOperationId(operation?.id);
+  if (!id) return null;
+  return {
+    id,
+    kind: String(operation?.kind || ""),
+    status: String(operation?.status || ""),
+  };
+}
+
+export function workspaceOperationIsActive(operation) {
+  return new Set(["queued", "running"]).has(String(operation?.status || ""));
+}
+
+export function workspaceOperationIsOwned(operation) {
+  return new Set(["workspace.message", "workspace.intent"]).has(String(operation?.kind || ""));
+}
+
+export function createWorkspaceRequestId(cryptoRef = globalThis.crypto) {
+  const id = cryptoRef?.randomUUID?.();
+  if (id) return `workspace-${id}`;
+  return `workspace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
+export function workspaceOperationFailure(operation, retry) {
+  const id = privateOperationId(operation?.id);
+  const message = String(
+    operation?.error?.message || "CareerRat couldn't finish that work. Try it again."
+  );
+  const retryable = operation?.error?.retryable === true && id && typeof retry === "function";
+  return {
+    message,
+    action: retryable
+      ? {
+          label: "Try again",
+          retry: true,
+          onRetry: () => retry(id),
+        }
+      : null,
+    detail: operation?.error?.code ? String(operation.error.code) : null,
+  };
+}
+
 function firstCalendarExport(groups) {
   return list(groups)
     .flatMap((group) => list(group?.items))
@@ -259,7 +308,11 @@ export function resumeHydratedMission({ api, mission, inFlight }) {
   });
 }
 
-export async function commitComposerTurn({ api, text, preview, context }) {
+export async function commitComposerTurn({ api, text, preview, context, choice, requestId }) {
+  if (choice) {
+    const response = await api.sendWorkspaceMessage(text, context, choice, { requestId });
+    return { kind: "message", response };
+  }
   const commit = resolveComposerCommit(preview, text);
   if (commit.kind === "mission") {
     const entity = commit.jobs?.[0] || {};
@@ -279,11 +332,11 @@ export async function commitComposerTurn({ api, text, preview, context }) {
   }
   if (commit.kind === "intent") {
     const { type, entity, input } = commit.intent;
-    const response = await api.runWorkspaceIntent(type, entity, input || {});
-    return { kind: "intent", response };
+    const response = await api.runWorkspaceIntent(type, entity, input || {}, { requestId });
+    return { kind: "intent", intent: commit.intent, response };
   }
   if (!commit.text) throw new Error("Write a message first");
-  const response = await api.sendWorkspaceMessage(commit.text, context);
+  const response = await api.sendWorkspaceMessage(commit.text, context, undefined, { requestId });
   return { kind: "message", response };
 }
 
@@ -307,11 +360,12 @@ export async function projectWorkspaceResultToJobThread({
   });
 }
 
-export async function commitJobThreadComposer({ api, applicationId, text }) {
+export async function commitJobThreadComposer({ api, applicationId, text, choice, requestId }) {
+  if (choice) return api.sendJobThreadTurn({ applicationId, text, choice, requestId });
   const context = { pathname: "/jobs", jobId: applicationId };
   const previewResponse = await api.previewWorkspaceQuery(text, context);
   const preview = previewResponse?.data || previewResponse;
-  if (!preview?.action?.intent) return api.sendJobThreadTurn({ applicationId, text });
+  if (!preview?.action?.intent) return api.sendJobThreadTurn({ applicationId, text, requestId });
 
   await api.appendJobThreadMessage({
     applicationId,
@@ -319,7 +373,8 @@ export async function commitJobThreadComposer({ api, applicationId, text }) {
     kind: "text",
     text,
   });
-  const result = await commitComposerTurn({ api, text, preview, context });
+  const result = await commitComposerTurn({ api, text, preview, context, requestId });
+  if (workspaceOperationFromResponse(result.response)) return result;
   await projectWorkspaceResultToJobThread({
     api,
     applicationId,
@@ -330,6 +385,134 @@ export async function commitJobThreadComposer({ api, applicationId, text }) {
         : `${preview.action.label || "That action"} is complete.`,
   });
   return result;
+}
+
+export async function confirmPacketGapAnswer({ api, applicationId, gap, answer, requestId }) {
+  const id = String(applicationId || "").trim();
+  const questionId = String(gap?.questionId || "").trim();
+  const question = String(gap?.label || gap?.question || "").trim();
+  const cleanAnswer = String(answer || "").trim();
+  const stableRequestId = String(requestId || "").trim();
+  if (!id || !questionId || !question) throw new Error("This application question is unavailable");
+  if (!cleanAnswer) throw new Error("Write an answer first");
+  if (!stableRequestId) throw new Error("This application answer needs a request id");
+
+  await api.appendJobThreadMessage({
+    applicationId: id,
+    id: `packet-answer-user:${stableRequestId}`,
+    role: "user",
+    kind: "text",
+    text: `${question}: ${cleanAnswer}`,
+  });
+  const response = await api.runWorkspaceIntent(
+    "screening.answer-confirm",
+    { type: "application", id },
+    { questionId, question, answer: cleanAnswer },
+    { requestId: stableRequestId }
+  );
+  if (workspaceOperationFromResponse(response)) return response;
+  await projectWorkspaceResultToJobThread({
+    api,
+    applicationId: id,
+    response,
+    fallbackText: "That application answer is saved.",
+  });
+  return response;
+}
+
+function missionApplicationIds(mission) {
+  const ids = new Set();
+  for (const step of list(mission?.steps)) {
+    if (step?.jobRef?.type === "application" && step.jobRef.id) ids.add(step.jobRef.id);
+    for (const value of [step?.result?.applicationId, step?.result?.id]) {
+      const id = String(value || "").trim();
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+function resumablePacketStep(mission, applicationId) {
+  return list(mission?.steps).some(
+    (step) =>
+      step?.action === "prepare-submit" &&
+      ["blocked", "pending"].includes(step?.status) &&
+      missionApplicationIds({ steps: [step] }).has(applicationId)
+  );
+}
+
+export async function resumePacketPreparation({ api, missions, applicationId }) {
+  const id = String(applicationId || "").trim();
+  if (!id) return false;
+  const mission = [...list(missions)]
+    .sort((left, right) => Date.parse(right?.updatedAt || 0) - Date.parse(left?.updatedAt || 0))
+    .find(
+      (candidate) =>
+        ["paused", "running"].includes(candidate?.status) && resumablePacketStep(candidate, id)
+    );
+  if (
+    mission?.id &&
+    mission.status === "paused" &&
+    typeof api?.resumeChatFirstMission === "function"
+  ) {
+    return api.resumeChatFirstMission(mission.id);
+  }
+  if (
+    mission?.id &&
+    mission.status === "running" &&
+    typeof api?.runChatFirstMission === "function"
+  ) {
+    return api.runChatFirstMission(mission.id);
+  }
+  if (
+    typeof api?.createChatFirstMission !== "function" ||
+    typeof api?.runChatFirstMission !== "function"
+  ) {
+    return false;
+  }
+  const created = await api.createChatFirstMission({
+    title: "Prepare this application",
+    mode: "prepare-to-submit",
+    requiresUserSubmit: true,
+    jobs: [{ type: "application", id }],
+  });
+  const createdMission = missionFromResponse(created);
+  if (!createdMission?.id) throw new Error("Application mission did not return an id");
+  return api.runChatFirstMission(createdMission.id);
+}
+
+export function applicationPreparationPermission(automation) {
+  const value = automation?.automation || automation?.data || automation || {};
+  const capability = list(value.capabilities).find(
+    (row) => row?.capability === "authenticated_apply_preparation"
+  );
+  const platforms = list(capability?.platforms);
+  const ready =
+    capability?.enabled === true &&
+    platforms.length > 0 &&
+    platforms.every((platform) => platform?.allowed === true);
+  return { status: ready ? "ready" : "blocked", ready };
+}
+
+export async function enableApplicationPreparation({ api }) {
+  if (
+    typeof api?.runWorkspaceIntent !== "function" ||
+    typeof api?.getAutomationSettings !== "function"
+  ) {
+    throw new Error("Application form permission is unavailable");
+  }
+  await api.runWorkspaceIntent(
+    "settings.apply",
+    { type: "workspace", id: "workspace-main" },
+    {
+      change: {
+        kind: "automation",
+        op: "contextual-permission",
+        permission: "application-preparation",
+      },
+    }
+  );
+  return applicationPreparationPermission(await api.getAutomationSettings());
 }
 
 export function isMockInterviewStartRequest(text) {
@@ -587,14 +770,12 @@ export function openApplicationHandoff(gate, openWindow = globalThis.window?.ope
   return true;
 }
 
-export async function focusApplicationHandoff(gate, runWorkspaceIntent) {
+export async function focusApplicationHandoff(gate, api) {
+  const missionId = String(gate?.missionId || "").trim();
   const applicationId = String(gate?.applicationId || "").trim();
-  if (!applicationId || typeof runWorkspaceIntent !== "function") return false;
-  await runWorkspaceIntent(
-    "job.prepare-submit",
-    { type: "application", id: applicationId },
-    { resumeSession: true, focusSession: true }
-  );
+  if (!missionId || !applicationId || typeof api?.resumeChatFirstMission !== "function")
+    return false;
+  await api.resumeChatFirstMission(missionId, { focusApplicationId: applicationId });
   return true;
 }
 
@@ -736,6 +917,7 @@ export function mapMockSession(session) {
         }
       : null,
     retryPrompt: null,
+    ...(session?.choicePrompt ? { choicePrompt: session.choicePrompt } : {}),
     turns,
   };
 }

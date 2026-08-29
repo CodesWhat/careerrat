@@ -117,6 +117,11 @@ const RULES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    match: ({ code }) => code === "EMPTY_AI_RESPONSE",
+    message: "CareerRat didn't get a response from your AI. Try again.",
+    action: { label: "Try again", retry: true },
+  },
+  {
     match: ({ raw }) => startsWith(raw, "no database yet"),
     message: "This workspace hasn't finished setup yet. Finish setup, then try again.",
     action: null,
@@ -134,9 +139,9 @@ const RULES = [
     action: { label: "Finish setup", to: "/onboarding" },
   },
   {
-    match: ({ raw, code }) =>
-      code === "SOURCE_SETUP_REQUIRED" || startsWith(raw, "No search config found"),
-    message: "No search sources are set up yet.",
+    match: ({ code }) => code === "BOARD_DISCOVERY_UNAVAILABLE",
+    message:
+      "CareerRat can't look for new job boards automatically right now. Add one yourself in Settings.",
     action: { label: "Open Settings", to: "/settings" },
   },
   {
@@ -155,6 +160,12 @@ const RULES = [
     message:
       "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",
     action: null,
+  },
+  {
+    match: ({ code }) => code === "APPLICATION_PREPARATION_FAILED",
+    message:
+      "CareerRat couldn't finish preparing this application. It didn't mark the job as applied. Review the job before trying again.",
+    action: { label: "Try again", retry: true },
   },
   {
     match: ({ code }) => code === "JOB_BODY_REQUIRES_BROWSER",
@@ -228,6 +239,11 @@ const RULES = [
     match: ({ code }) => code === "COMMUNICATION_EXECUTOR_UNAVAILABLE",
     message:
       "CareerRat can't send email for you yet. Use Open in your email app, send it yourself, then choose I sent this.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMMUNICATION_DRAFT_REQUIRED",
+    message: "There isn't a reply ready to send yet. Draft and review one first.",
     action: null,
   },
   {
@@ -330,13 +346,15 @@ const RULES = [
   },
   {
     match: ({ code }) => code === "CALENDAR_WRITE_NOT_ALLOWED",
-    message: "Automated calendar sync is off for that provider. You can turn it on in Settings.",
-    action: { label: "Open Settings", to: "/settings" },
+    message:
+      "CareerRat couldn't save permission to add that calendar event. Ask Paul to try that task again.",
+    action: null,
   },
   {
     match: ({ code }) => code === "RELATIONSHIP_SOURCING_NOT_ALLOWED",
-    message: "Relationship sourcing is off. You can turn it on in Settings.",
-    action: { label: "Open Settings", to: "/settings" },
+    message:
+      "CareerRat couldn't save permission for LinkedIn and Wellfound relationship sourcing. Ask Paul to try that task again.",
+    action: null,
   },
   {
     match: ({ code }) => code === "RELATIONSHIP_SOURCING_COMPANY_REQUIRED",
@@ -355,8 +373,9 @@ const RULES = [
   },
   {
     match: ({ code }) => code === "STATUS_SYNC_NOT_ALLOWED",
-    message: "Portal status polling is off. You can turn it on in Settings.",
-    action: { label: "Open Settings", to: "/settings" },
+    message:
+      "CareerRat couldn't save permission to check Greenhouse, Workday, Ashby, and Lever statuses. Ask Paul to try that task again.",
+    action: null,
   },
   {
     match: ({ code }) => code === "STATUS_PORTAL_URL_INVALID",
@@ -371,14 +390,14 @@ const RULES = [
   {
     match: ({ code }) => code === "MAIL_SYNC_NOT_ALLOWED",
     message:
-      "Mail sync isn't available on this device yet. Turn on mail access for Gmail or Outlook in Settings first.",
-    action: { label: "Open Settings", to: "/settings" },
+      "CareerRat couldn't save permission to check Gmail or Outlook. Ask Paul to try that task again.",
+    action: null,
   },
   {
     match: ({ code }) => code === "MESSAGES_SYNC_NOT_ALLOWED",
     message:
-      "Message sync isn't turned on yet. Turn on in-platform messaging for LinkedIn or Wellfound in Settings first.",
-    action: { label: "Open Settings", to: "/settings" },
+      "CareerRat couldn't save permission to check LinkedIn or Wellfound messages. Ask Paul to try that task again.",
+    action: null,
   },
   {
     match: ({ code }) => code === "STATUS_UPDATE_INVALID",

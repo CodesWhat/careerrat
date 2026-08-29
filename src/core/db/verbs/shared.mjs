@@ -8,7 +8,7 @@
 // action, and CLI + HTTP always call that same function.
 import { existsSync } from "node:fs";
 import { userPath } from "../../paths/workspace.mjs";
-import { computeAppend } from "../../tracker/activity-log.mjs";
+import { activityRetentionLimit, computeAppend } from "../../tracker/activity-log.mjs";
 import { requireDb } from "../connection.mjs";
 import { exportToTracker } from "../export-to-tracker.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -166,11 +166,51 @@ export class ExportFailedError extends Error {
   }
 }
 
+function trackerExportRevision(db) {
+  const meta = db
+    .prepare("SELECT version, last_updated_at, last_sweep_at FROM meta WHERE id = 1")
+    .get();
+  const analytics = db.prepare("SELECT updated_at FROM analytics WHERE id = 1").get();
+  return [
+    meta?.version ?? null,
+    meta?.last_updated_at ?? null,
+    meta?.last_sweep_at ?? null,
+    analytics?.updated_at ?? null,
+  ];
+}
+
+function activityExportRevision(db) {
+  const row = db
+    .prepare("SELECT COUNT(*) AS count, MAX(rowid) AS newest FROM activity_events")
+    .get();
+  return [row.count, row.newest ?? null];
+}
+
+function revisionsDiffer(before, after) {
+  return before.some((value, index) => value !== after[index]);
+}
+
+function pruneActivityEvents(db, max) {
+  const count = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+  if (count <= max) return;
+  db.prepare(
+    `DELETE FROM activity_events
+     WHERE rowid IN (
+       SELECT rowid FROM activity_events ORDER BY rowid DESC LIMIT -1 OFFSET ?
+     )`
+  ).run(max);
+}
+
 // The one call site every verb funnels through: open the db (fail-closed —
 // requireDb throws NoDatabaseError when no db file exists yet, decision 7),
 // run `fn(db, pathCtx)` inside one BEGIN IMMEDIATE ... COMMIT, then — OUTSIDE
-// and AFTER that transaction — regenerate tracker.json + activity.jsonl
-// (decision 8) so the legacy dashboard render never goes stale.
+// and AFTER that transaction — regenerate each compatibility surface whose
+// canonical revision changed. tracker.json follows the required meta/analytics
+// revision contract; activity.jsonl follows its own row revision. This keeps
+// both fs.watch signals current without rebuilding an unrelated full file.
+// The transaction also applies the same bounded Activity Pulse retention used
+// by the legacy JSONL writer, so the canonical table and recovery export cannot
+// grow forever.
 //
 // The transaction and the export are two different failure domains: a thrown
 // error from `fn`/withTransaction means nothing was written (rolled back),
@@ -194,13 +234,27 @@ export class ExportFailedError extends Error {
 export function runVerb({ repoRoot, env }, fn, { requireExistingTracker = false } = {}) {
   const pathCtx = { repoRoot, env };
   const db = requireDb(pathCtx);
-  const result = withTransaction(db, () => fn(db, pathCtx));
+  const transaction = withTransaction(db, () => {
+    const trackerBefore = trackerExportRevision(db);
+    const activityBefore = activityExportRevision(db);
+    const result = fn(db, pathCtx);
+    pruneActivityEvents(db, activityRetentionLimit(env));
+    return {
+      result,
+      trackerChanged: revisionsDiffer(trackerBefore, trackerExportRevision(db)),
+      activityChanged: revisionsDiffer(activityBefore, activityExportRevision(db)),
+    };
+  });
+  const { result, trackerChanged, activityChanged } = transaction;
   if (requireExistingTracker && !existsSync(userPath(pathCtx, "workspace/tracker.json"))) {
     return { ok: true, ...result, exported: false };
   }
   let exported;
   try {
-    exported = exportToTracker(pathCtx);
+    exported = exportToTracker(pathCtx, {
+      tracker: trackerChanged,
+      activity: activityChanged,
+    });
   } catch (err) {
     throw new ExportFailedError(`db write committed, but exportToTracker failed: ${err.message}`, {
       cause: err,

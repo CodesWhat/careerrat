@@ -73,6 +73,161 @@ test("website presents Claude Code and Codex as neutral direct runtime choices",
   );
 });
 
+test("public copy explains provider-neutral AI controls without ranking providers", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    docsIndex: "apps/docs/content/docs/index.mdx",
+    configuration: "apps/docs/content/docs/advanced/configuration.mdx",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(copy[name], /Automatic/i, `${paths[name]} should explain Automatic routing`);
+    assert.match(copy[name], /Faster/i, `${paths[name]} should name the Faster choice`);
+    assert.match(copy[name], /Balanced/i, `${paths[name]} should name the Balanced choice`);
+    assert.match(copy[name], /Best/i, `${paths[name]} should name the Best choice`);
+    assert.match(copy[name], /thinking depth/i, `${paths[name]} should explain thinking depth`);
+    assert.match(
+      copy[name],
+      /Claude Code[\s\S]{0,500}OpenAI\s+Codex|OpenAI\s+Codex[\s\S]{0,500}Claude Code/i,
+      `${paths[name]} should keep both runtime choices in the same product contract`
+    );
+    assert.doesNotMatch(
+      copy[name],
+      /Claude(?: Code)?[^\n.]{0,100}(?:better|best|stronger|preferred|recommended)[^\n.]{0,100}Codex|Codex[^\n.]{0,100}(?:better|best|stronger|preferred|recommended)[^\n.]{0,100}Claude/i
+    );
+  }
+});
+
+test("public copy keeps AI discovery broad and evaluation honest", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    docsIndex: "apps/docs/content/docs/index.mdx",
+    firstJob: "apps/docs/content/docs/getting-started/first-job.mdx",
+    sources: "docs/SOURCES.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(copy[name], /open[- ]web/i, `${paths[name]} should name open-web discovery`);
+    assert.match(copy[name], /unverified/i, `${paths[name]} should label discovery honestly`);
+    assert.match(copy[name], /Evaluate/i, `${paths[name]} should hand verification to Evaluate`);
+    assert.match(
+      copy[name],
+      /(?:built-in|public)[^.]{0,32}(?:job[- ]board|ATS) source/i,
+      `${paths[name]} should name the built-in source layer`
+    );
+    assert.doesNotMatch(
+      copy[name],
+      /engineering and hospitality|hospitality and engineering|hospitality sources?[^.]{0,100}engineering|engineering sources?[^.]{0,100}hospitality/i,
+      `${paths[name]} should not position source coverage around two job families`
+    );
+  }
+  assert.match(copy.website, /roles you set/i);
+});
+
+test("public copy explains job-site login as one point-of-use choice", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    docsIndex: "apps/docs/content/docs/index.mdx",
+    firstJob: "apps/docs/content/docs/getting-started/first-job.mdx",
+    browserAutomation: "apps/docs/content/docs/advanced/browser-automation.mdx",
+    sources: "docs/SOURCES.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(
+      copy[name],
+      /Do\s+you\s+want\s+to\s+log\s+into\s+[^?]+?\s+so\s+I\s+can\s+use\s+it\?/i,
+      `${paths[name]} should show the actual site-login question`
+    );
+    assert.match(
+      copy[name],
+      /Yes[\s\S]{0,160}opens[\s\S]{0,160}No[\s\S]{0,160}skip/i,
+      `${paths[name]} should explain both answers`
+    );
+    assert.match(
+      copy[name],
+      /added or first used/i,
+      `${paths[name]} should describe the actual point-of-use timing`
+    );
+    assert.doesNotMatch(copy[name], /authenticated_search|authenticated search permission/i);
+  }
+});
+
+test("architecture copy separates saved job-source login from private-account permissions", async () => {
+  const paths = {
+    rootArchitecture: "docs/ARCHITECTURE.md",
+    docsArchitecture: "apps/docs/content/docs/advanced/architecture.mdx",
+    whatIsCareerRat: "apps/docs/content/docs/getting-started/what-is-careerrat.mdx",
+    runtimeRouting: "docs/architecture/runtime-routing-policy.md",
+    skillDecomposition: "docs/architecture/skill-decomposition.yml",
+    companyDiscovery: "docs/architecture/discover-companies-target-contract.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  assert.match(copy.rootArchitecture, /private-account browser workflows/i);
+  assert.match(copy.docsArchitecture, /private-account browser workflows/i);
+  assert.match(copy.whatIsCareerRat, /private-account browser automation/i);
+  for (const name of Object.keys(paths)) {
+    assert.match(
+      copy[name],
+      /job-source|saved job-site|saved search/i,
+      `${paths[name]} should name the saved job-source exception`
+    );
+  }
+  assert.doesNotMatch(copy.runtimeRouting, /Do not use for \|[^\n]*browser-authenticated tasks/i);
+  assert.doesNotMatch(copy.skillDecomposition, /authenticated browser automation remains v2/i);
+  assert.doesNotMatch(
+    copy.companyDiscovery,
+    /Logged-in LinkedIn,[\s\S]{0,120}session-browser work remain v2/i
+  );
+});
+
+test("public docs explain durable background work without claiming interrupted work completed", async () => {
+  const paths = {
+    readme: "README.md",
+    website: "apps/website/src/app/page.tsx",
+    dashboard: "apps/docs/content/docs/getting-started/dashboard.mdx",
+    runtime: "docs/CHAT_FIRST_RUNTIME.md",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(
+      copy[name],
+      /navigate|move between|leave (?:the )?(?:view|page|thread)/i,
+      `${paths[name]} should explain navigation continuity`
+    );
+    assert.match(copy[name], /background/i, `${paths[name]} should name background work`);
+    assert.match(copy[name], /retry/i, `${paths[name]} should explain interrupted-work recovery`);
+  }
+});
+
 test("website explains the first-run handoff and supervised apply boundary plainly", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
 
@@ -94,7 +249,6 @@ test("public copy keeps local Application defaults and plain-English onboarding 
     browserAutomation: "apps/docs/content/docs/advanced/browser-automation.mdx",
     architecture: "docs/ARCHITECTURE.md",
     changelog: "CHANGELOG.md",
-    roadmap: "docs/ROADMAP.md",
     acceptance: "docs/QA-ACCEPTANCE.md",
   };
   const copy = Object.fromEntries(
@@ -103,7 +257,7 @@ test("public copy keeps local Application defaults and plain-English onboarding 
     )
   );
 
-  for (const name of ["readme", "docsIndex", "changelog", "roadmap"]) {
+  for (const name of ["readme", "docsIndex", "changelog"]) {
     assert.match(
       copy[name],
       /what would make one job worth applying to before another/i,
@@ -138,20 +292,6 @@ test("public copy keeps local Application defaults and plain-English onboarding 
 
   assert.match(copy.architecture, /excluded from AI drafting/i);
   assert.match(copy.architecture, /explicit saved local policy or exact answer/i);
-  for (const name of ["roadmap", "acceptance"]) {
-    assert.match(
-      copy[name],
-      /(?:PASS:[^\n]*Application defaults|Application defaults[\s\S]{0,500}(?:implemented|now offers)|implemented[\s\S]{0,500}Application defaults)/i
-    );
-    assert.match(
-      copy[name],
-      /Application defaults[\s\S]{0,1200}(?:follow-up )?live (?:Greenhouse )?run[\s\S]{0,220}filled 22 fields[\s\S]{0,180}zero\s+unresolved fields/i
-    );
-    assert.doesNotMatch(
-      copy[name],
-      /Application defaults[\s\S]{0,500}(?:needs implementation plus fresh live acceptance|live (?:application )?retest[\s\S]{0,120}(?:is |remains )?pending)/i
-    );
-  }
 });
 
 test("website sections keep a calm vertical rhythm", async () => {
@@ -171,7 +311,6 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
     runtime: "docs/CHAT_FIRST_RUNTIME.md",
     windows: "docs/WINDOWS.md",
     architecture: "docs/ARCHITECTURE.md",
-    roadmap: "docs/ROADMAP.md",
   };
   const copy = Object.fromEntries(
     await Promise.all(
@@ -196,12 +335,48 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
     assert.doesNotMatch(copy[name], /Gemini CLI|OpenCode|GitHub Copilot|Hermes Agent/);
   }
 
-  assert.match(copy.roadmap, /Claude Code and Codex are the only supported runtime choices/);
-  assert.match(copy.roadmap, /packaged app invokes the selected\s+installed CLI directly/i);
-
   assert.doesNotMatch(
     combined,
     /Codex (?:remains unavailable|task-tool and research work fails closed)|only (?:Claude|Claude Code)|needs Claude|Claude Code · full tasks|Codex · chat \+ drafting|(?:Claude Code|OpenAI Codex)[\s\S]{0,120}first-class|ACP verified|equal, complete CareerRat engines/i
+  );
+});
+
+test("first-run setup presents Claude Code and Codex as choices, not a preferred provider", async () => {
+  const paths = {
+    readme: "README.md",
+    install: "apps/docs/content/docs/getting-started/install.mdx",
+    firstRun: "apps/web/src/chat-first/FirstRunExperience.jsx",
+  };
+  const copy = Object.fromEntries(
+    await Promise.all(
+      Object.entries(paths).map(async ([name, path]) => [name, await readFile(path, "utf8")])
+    )
+  );
+
+  for (const name of Object.keys(paths)) {
+    assert.match(copy[name], /Claude Code/i, `${paths[name]} should name Claude Code`);
+    assert.match(copy[name], /(?:OpenAI )?Codex/i, `${paths[name]} should name Codex`);
+    assert.doesNotMatch(
+      copy[name],
+      /only need a Claude account|recommended Claude path|another AI tool|Set up Claude/i,
+      `${paths[name]} should not make Codex the secondary setup path`
+    );
+  }
+});
+
+test("search docs reserve capability gates for separate private-account workflows", async () => {
+  const setup = await readFile("docs/SETUP.md", "utf8");
+  const browser = await readFile("apps/docs/content/docs/advanced/browser-automation.mdx", "utf8");
+  const decomposition = await readFile("docs/architecture/skill-decomposition.yml", "utf8");
+
+  assert.match(setup, /private-account browser/i);
+  assert.match(setup, /saved job-site\s+search/i);
+  assert.doesNotMatch(setup, /External browser,[\s\S]{0,80}permissions stay off/i);
+  assert.match(browser, /private-account uses\s+below/i);
+  assert.doesNotMatch(browser, /Logged-in Layer-3 uses are\s+opt-in/i);
+  assert.doesNotMatch(
+    decomposition,
+    /Browser-authenticated LinkedIn, Wellfound, webmail, or logged-in portal discovery/i
   );
 });
 
@@ -380,6 +555,19 @@ test("website publishes canonical social metadata with a large CareerRat sharing
     Array.from({ length: faviconCount }, (_, index) => favicon[6 + index * 16] || 256),
     [16, 32, 48, 64]
   );
+});
+
+test("the app shell and website share the selected CR favicon", async () => {
+  const iconBuild = await readFile("apps/website/scripts/generate-brand-icons.mjs", "utf8");
+  const appFavicon = await readFile("assets/favicon.ico");
+  const websiteFavicon = await readFile("apps/website/src/app/favicon.ico");
+
+  assert.equal(
+    Buffer.compare(appFavicon, websiteFavicon),
+    0,
+    "the app shell favicon must match the generated website CR favicon"
+  );
+  assert.match(iconBuild, /writeFile\(join\(repoRoot, "assets", "favicon\.ico"\), favicon\)/);
 });
 
 test("deployed sites bundle fonts without Google build-time fetches", async () => {

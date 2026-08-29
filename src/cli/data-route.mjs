@@ -57,6 +57,13 @@ function readMeta(db) {
   return { version: row?.version ?? null, lastUpdatedAt: row?.last_updated_at ?? null };
 }
 
+export function readActivityEvents(db, { limit = null } = {}) {
+  const hasLimit = Number.isInteger(limit) && limit > 0;
+  const sql = `SELECT data FROM activity_events ORDER BY at DESC, rowid DESC${hasLimit ? " LIMIT ?" : ""}`;
+  const rows = hasLimit ? db.prepare(sql).all(limit) : db.prepare(sql).all();
+  return rows.map((row) => JSON.parse(row.data));
+}
+
 // Every verb result already carries its own `meta: {version, lastUpdatedAt}`
 // (from bumpMeta) — hoist that to the response envelope's top-level `meta`
 // and put everything else under `data`.
@@ -194,12 +201,8 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
     withDb(res, (db) => {
       const limitParam = queryParam(req, "limit");
       const limit = limitParam ? Number.parseInt(limitParam, 10) : null;
-      const rows = db
-        .prepare("SELECT data FROM activity_events ORDER BY at DESC, rowid DESC")
-        .all();
-      const events = rows.map((row) => JSON.parse(row.data));
-      const limited = Number.isInteger(limit) && limit > 0 ? events.slice(0, limit) : events;
-      sendJson(res, 200, { ok: true, meta: readMeta(db), data: limited });
+      const events = readActivityEvents(db, { limit });
+      sendJson(res, 200, { ok: true, meta: readMeta(db), data: events });
     });
   });
 

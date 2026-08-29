@@ -178,6 +178,245 @@ test("captured job text rejects an on-site role even when the board calls it rem
   assert.equal(result.filteredLocation[0].qualificationReason, "onsite-not-allowed");
 });
 
+test("full-body work-model blockers apply when the posting header omits location", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const inPerson = offer("blank-location-in-person", "In Person Corp", "");
+  inPerson.bodyText = "Location: San Francisco Bay Area, CA (in-person).";
+  const fiveDays = offer("blank-location-five-days", "Five Day Corp", "");
+  fiveDays.bodyText = "We work in the office 5 days per week in New York City.";
+
+  const result = qualifyByLocation(profile, [inPerson, fiveDays]);
+
+  assert.equal(result.kept.length, 0);
+  assert.deepEqual(
+    result.filteredLocation.map((row) => row.qualificationReason),
+    ["onsite-not-allowed", "office-days-exceed-preference"]
+  );
+});
+
+test("incidental in-person customer meetings do not turn a remote role into on-site work", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const remote = offer("customer-meetings", "Customer Corp", "Remote - United States");
+  remote.bodyText =
+    "This role includes meeting customers in person twice a year. Daily work is fully remote.";
+
+  const result = qualifyByLocation(profile, [remote]);
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
+test("captured in-person text overrides a false remote label", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const mislabeled = offer("stealth-in-person", "Stealth Startup", "San Francisco, CA (Remote)");
+  mislabeled.bodyText = "Location: San Francisco Bay Area, CA (in-person).";
+
+  const result = qualifyByLocation(profile, [mislabeled]);
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "onsite-not-allowed");
+});
+
+test("a declarative five-day office schedule is required even without policy keywords", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const mislabeled = offer("david-office", "David", "New York, NY (Remote)");
+  mislabeled.bodyText = "We work in the office 5 days per week in New York City.";
+
+  const result = qualifyByLocation(profile, [mislabeled]);
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "office-days-exceed-preference");
+});
+
+test("conditional remote outside a metro stays eligible and gets an honest location label", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-remote", "ngrok", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco. Our Bay Area employees commute to the office on Tuesdays and Wednesdays. All candidates must be US-based.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.kept[0].location, "Remote outside the Bay Area · Hybrid near San Francisco");
+});
+
+test("multi-location hybrid postings stay eligible when any listed metro is allowed", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "San Francisco, CA",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      relocation: ["Boston, MA"],
+    },
+  };
+  const homeMetro = offer(
+    "hybrid-home-metro",
+    "Home Metro Corp",
+    "New York, NY; San Francisco, CA (Hybrid)"
+  );
+  homeMetro.bodyText = "Employees are required in a listed office 2 days per week.";
+  const relocationMetro = offer(
+    "hybrid-relocation-metro",
+    "Relocation Metro Corp",
+    "New York, NY; Boston, MA (Hybrid)"
+  );
+  relocationMetro.bodyText = "Employees are required in a listed office 2 days per week.";
+
+  const result = qualifyByLocation(profile, [homeMetro, relocationMetro]);
+
+  assert.deepEqual(
+    result.kept.map((row) => row.company),
+    ["Home Metro Corp", "Relocation Metro Corp"]
+  );
+  assert.equal(result.filteredLocation.length, 0);
+});
+
+test("full US state names qualify a home for conditional US-only remote work", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, New York",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-us-full-state", "US Remote Corp", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco. All candidates must be US-based.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
+test("conditional hybrid work still enforces the saved office-day maximum", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "San Francisco, CA",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-three-days", "ngrok", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco. Employees are required in the office 3 days per week.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "office-days-exceed-preference");
+});
+
+test("Oakland candidates enter the Bay Area hybrid branch instead of the outside-area remote branch", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Oakland, CA",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-oakland", "ngrok", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "hybrid-not-allowed");
+});
+
+test("conditional US remote does not widen to a foreign home under worldwide mode", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Toronto, Canada",
+      remote: true,
+      remote_scope: "worldwide",
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const conditional = offer("conditional-us-remote", "ngrok", "San Francisco, CA");
+  conditional.bodyText =
+    "This is a remote position for candidates outside of the Bay Area and a hybrid role for candidates within commuting distance to San Francisco. All candidates must be US-based.";
+
+  const result = qualifyByLocation(profile, [conditional], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "remote-region-mismatch");
+});
+
 test("the scanner recognizes NYC as US even without a generated source filter", () => {
   const profile = {
     candidate: { domain: "software engineering" },
@@ -208,6 +447,161 @@ test("the scanner recognizes NYC as US even without a generated source filter", 
   );
 });
 
+test("US country-only locations qualify as remote for a US candidate who allows remote work", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Boston, MA",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const result = qualifyByLocation(profile, [
+    offer("country-us", "US Corp", "US"),
+    offer("country-usa", "USA Corp", "USA"),
+    offer("country-united-states", "United States Corp", "United States"),
+    offer("city-country", "New York Country Corp", "New York, USA"),
+    offer("foreign-country", "Canada Corp", "Canada"),
+  ]);
+
+  assert.deepEqual(result.kept.map((row) => row.company).sort(), [
+    "US Corp",
+    "USA Corp",
+    "United States Corp",
+  ]);
+  assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Canada Corp",
+    "New York Country Corp",
+  ]);
+});
+
+test("US country-only locations do not override remote permission or an explicit local work model", () => {
+  const remoteDisabled = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: false,
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const remoteAllowed = {
+    ...remoteDisabled,
+    location: { ...remoteDisabled.location, remote: true, hybrid: true },
+  };
+  const hybrid = offer("country-hybrid", "Hybrid Corp", "United States");
+  hybrid.bodyText = "This role follows a hybrid work model.";
+  const onsite = offer("country-onsite", "Onsite Corp", "USA");
+  onsite.bodyText = "This is a fully on-site role.";
+
+  const disabledResult = qualifyByLocation(remoteDisabled, [
+    offer("country-remote-disabled", "Remote Disabled Corp", "United States"),
+  ]);
+  const localWorkResult = qualifyByLocation(remoteAllowed, [hybrid, onsite], {
+    generatedFilter: false,
+  });
+
+  assert.equal(disabledResult.kept.length, 0);
+  assert.equal(disabledResult.filteredLocation[0]?.qualificationReason, "onsite-not-allowed");
+  assert.equal(localWorkResult.kept.length, 0);
+  assert.deepEqual(
+    localWorkResult.filteredLocation.map((row) => row.qualificationReason),
+    ["outside-commute-area", "onsite-not-allowed"]
+  );
+});
+
+test("US country-only locations respect body text that requires working on-site", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const onsite = offer("country-required-onsite", "Required Onsite Corp", "United States");
+  onsite.bodyText = "This position requires working on-site at our New York office.";
+
+  const result = qualifyByLocation(profile, [onsite], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "onsite-not-allowed");
+});
+
+test("incidental hybrid-workplace wording does not classify a remote role as hybrid", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const remote = offer("country-hybrid-product", "Hybrid Product Corp", "United States");
+  remote.bodyText = "Build tools that support our hybrid workplace.";
+
+  const result = qualifyByLocation(profile, [remote], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
+test("declarative hybrid wording classifies the role itself as hybrid", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      hybrid: false,
+      onsite: false,
+      relocation: [],
+    },
+  };
+  const hybridRole = offer("country-hybrid-role", "Hybrid Role Corp", "United States");
+  hybridRole.bodyText = "This is a hybrid role.";
+  const hybridModel = offer("country-hybrid-model", "Hybrid Model Corp", "United States");
+  hybridModel.bodyText = "We offer a hybrid work model.";
+
+  const result = qualifyByLocation(profile, [hybridRole, hybridModel], {
+    generatedFilter: false,
+  });
+
+  assert.equal(result.kept.length, 0);
+  assert.deepEqual(
+    result.filteredLocation.map((row) => row.qualificationReason),
+    ["hybrid-not-allowed", "hybrid-not-allowed"]
+  );
+});
+
+test("a required two-day on-site schedule is hybrid when hybrid work is allowed", () => {
+  const profile = {
+    candidate: { domain: "software engineering" },
+    location: {
+      home: "Brooklyn, NY",
+      remote: true,
+      hybrid: true,
+      onsite: false,
+      max_commute_days_per_week: 2,
+      relocation: [],
+    },
+  };
+  const hybrid = offer("required-two-day-onsite", "Two Day Corp", "New York, NY");
+  hybrid.bodyText = "This position requires working on-site two days per week.";
+
+  const result = qualifyByLocation(profile, [hybrid], { generatedFilter: false });
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
 test("US-only remote scope rejects foreign, global, and region-unknown remote roles", () => {
   const profile = {
     candidate: { domain: "software engineering" },
@@ -225,6 +619,14 @@ test("US-only remote scope rejects foreign, global, and region-unknown remote ro
       offer("remote-us-strict", "Remote US Strict", "Remote - United States"),
       offer("remote-de", "Remote DE Corp", "Remote DE; Aachen; Munich"),
       offer("remote-germany", "Remote Germany Corp", "Remote - Germany"),
+      {
+        ...offer(
+          "remote-germany-postal-country",
+          "Remote Germany Postal Corp",
+          "Offenbach am Main, HESSE, 63071, DE"
+        ),
+        title: "Platform Engineer - Full Remote",
+      },
       offer("remote-emea-strict", "Remote EMEA Strict", "Remote - EMEA"),
       offer("remote-global", "Remote Global Corp", "Remote - Worldwide"),
       offer("remote-anywhere", "Remote Anywhere Corp", "Remote - Anywhere"),
@@ -242,6 +644,7 @@ test("US-only remote scope rejects foreign, global, and region-unknown remote ro
     [
       ["Remote DE Corp", "remote-region-mismatch"],
       ["Remote Germany Corp", "remote-region-mismatch"],
+      ["Remote Germany Postal Corp", "remote-region-mismatch"],
       ["Remote EMEA Strict", "remote-region-mismatch"],
       ["Remote Global Corp", "remote-region-unverified"],
       ["Remote Anywhere Corp", "remote-region-unverified"],
@@ -279,6 +682,96 @@ test("NYC-only local scope accepts the metro and rejects other US cities", () =>
   assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
     "Austin Local Corp",
     "Boston Local Corp",
+  ]);
+});
+
+test("New York home accepts every NYC borough without admitting nearby non-NYC places", () => {
+  const profile = {
+    candidate: { domain: "hospitality operations" },
+    location: {
+      home: "New York, NY",
+      remote: false,
+      hybrid: true,
+      onsite: true,
+      relocation: [],
+    },
+  };
+  const result = qualifyByLocation(
+    profile,
+    [
+      offer("manhattan", "Manhattan Corp", "Manhattan, New York, USA"),
+      offer("brooklyn", "Brooklyn Corp", "Brooklyn, New York, USA"),
+      offer("queens", "Queens Corp", "Queens, New York, USA"),
+      offer("bronx", "Bronx Corp", "Bronx, New York, USA"),
+      offer("staten-island", "Staten Island Corp", "Staten Island, New York, USA"),
+      offer("nyc-country-label", "NYC Country Label Corp", "New York, USA"),
+      offer("new-york-state", "New York State Corp", "New York State, USA"),
+      offer("jersey-city", "Jersey City Corp", "Jersey City, NJ"),
+      offer("newark", "Newark Corp", "Newark, NJ"),
+      offer("yonkers", "Yonkers Corp", "Yonkers, NY"),
+      offer("long-island", "Long Island Corp", "Long Island, NY"),
+    ],
+    { generatedFilter: false }
+  );
+
+  assert.deepEqual(result.kept.map((row) => row.company).sort(), [
+    "Bronx Corp",
+    "Brooklyn Corp",
+    "Manhattan Corp",
+    "NYC Country Label Corp",
+    "Queens Corp",
+    "Staten Island Corp",
+  ]);
+  assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Jersey City Corp",
+    "Long Island Corp",
+    "New York State Corp",
+    "Newark Corp",
+    "Yonkers Corp",
+  ]);
+});
+
+test("New York home accepts an NYC postal code without admitting nearby or non-NYC postal codes", () => {
+  const profile = {
+    candidate: { domain: "hospitality operations" },
+    location: {
+      home: "New York, NY",
+      remote: false,
+      hybrid: true,
+      onsite: true,
+      relocation: [],
+    },
+  };
+  const result = qualifyByLocation(
+    profile,
+    [
+      offer("manhattan-postal", "Manhattan Postal Corp", "New York, 10010, USA"),
+      offer("brooklyn-postal", "Brooklyn Postal Corp", "New York, 11201, USA"),
+      offer("jersey-city-postal", "Jersey City Postal Corp", "Jersey City, 07302, USA"),
+      offer("newark-postal", "Newark Postal Corp", "Newark, 07102, USA"),
+      offer("yonkers-postal", "Yonkers Postal Corp", "Yonkers, 10701, USA"),
+      offer("long-island-postal", "Long Island Postal Corp", "Long Island, 11501, USA"),
+      offer("non-nyc-new-york-postal", "Non-NYC New York Postal Corp", "New York, 10701, USA"),
+      offer(
+        "contradictory-new-york-postal",
+        "Contradictory New York Postal Corp",
+        "New York, NY 10701, USA"
+      ),
+    ],
+    { generatedFilter: false }
+  );
+
+  assert.deepEqual(result.kept.map((row) => row.company).sort(), [
+    "Brooklyn Postal Corp",
+    "Manhattan Postal Corp",
+  ]);
+  assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Contradictory New York Postal Corp",
+    "Jersey City Postal Corp",
+    "Long Island Postal Corp",
+    "Newark Postal Corp",
+    "Non-NYC New York Postal Corp",
+    "Yonkers Postal Corp",
   ]);
 });
 
@@ -343,6 +836,11 @@ test("NYC plus US-remote policy handles office labels and multisite postings wit
       offer("nyc-hybrid", "NYC Hybrid", "New York, NY (Hybrid)"),
       offer("remote-us", "Remote US", "Remote · United States"),
       offer(
+        "remote-us-except-ny",
+        "Remote Except New York",
+        "Remote · United States, except New York"
+      ),
+      offer(
         "remote-nyc-multisite",
         "Remote NYC Multisite",
         "Remote · United States · New York City Office · New York"
@@ -368,10 +866,43 @@ test("NYC plus US-remote policy handles office labels and multisite postings wit
     "Remote US",
   ]);
   assert.deepEqual(result.filteredLocation.map((row) => row.company).sort(), [
+    "Remote Except New York",
     "San Francisco Only",
     "Seattle Only",
     "West Coast Multisite",
   ]);
+  assert.equal(
+    result.filteredLocation.find((row) => row.company === "Remote Except New York")
+      ?.qualificationReason,
+    "remote-home-region-excluded"
+  );
+});
+
+test("US remote body exclusions reject a New York resident without false positives", () => {
+  const profile = {
+    candidate: { domain: "hospitality operations" },
+    location: {
+      home: "New York, NY",
+      remote: true,
+      remote_scope: "home-country",
+      hybrid: true,
+      onsite: true,
+      relocation: [],
+    },
+  };
+  const excluded = offer("body-excludes-ny", "Excluded Corp", "Remote · United States");
+  excluded.bodyText = "This role is remote across the United States, except New York residents.";
+  const included = offer("body-includes-ny", "Included Corp", "Remote · United States");
+  included.bodyText = "This role is available to remote workers in New York, with no exceptions.";
+
+  const result = qualifyByLocation(profile, [excluded, included], { generatedFilter: false });
+
+  assert.deepEqual(
+    result.kept.map((row) => row.company),
+    ["Included Corp"]
+  );
+  assert.equal(result.filteredLocation[0]?.company, "Excluded Corp");
+  assert.equal(result.filteredLocation[0]?.qualificationReason, "remote-home-region-excluded");
 });
 
 test("remote-only RSS provenance keeps a USA-scoped role eligible", () => {

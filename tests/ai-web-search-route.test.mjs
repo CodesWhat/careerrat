@@ -7,9 +7,16 @@ import { Readable } from "node:stream";
 import { after, test } from "node:test";
 
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
-import { closeAll } from "../src/core/db/connection.mjs";
+import { createWorkspaceAgentRuntime } from "../src/core/agent/workspace-agent.mjs";
+import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
+import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourcingRunLatest } from "../src/core/db/verbs.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
+import {
+  createVerifiedRuntimeExecutable,
+  VERIFIED_RUNTIME_CAPABILITIES,
+} from "./helpers/installed-runtime-fixture.mjs";
 
 const roots = [];
 
@@ -25,17 +32,46 @@ function handlerFor({
   repoRoot,
   env = { ANTHROPIC_API_KEY: "test-key" },
   runAiWebSearch,
+  generateSearchPrompts,
   workspaceAgentRuntime,
+  setIntervalImpl,
+  clearIntervalImpl,
+}) {
+  return mountedRoutesFor({
+    repoRoot,
+    env,
+    runAiWebSearch,
+    generateSearchPrompts,
+    workspaceAgentRuntime,
+    setIntervalImpl,
+    clearIntervalImpl,
+  }).handler;
+}
+
+function mountedRoutesFor({
+  repoRoot,
+  env = { ANTHROPIC_API_KEY: "test-key" },
+  runAiWebSearch,
+  generateSearchPrompts,
+  workspaceAgentRuntime,
+  setIntervalImpl,
+  clearIntervalImpl,
 }) {
   const routes = new Map();
-  mountSearchRoutes({
+  const lifecycle = mountSearchRoutes({
     addRoute: (method, path, handler) => routes.set(`${method} ${path}`, handler),
     repoRoot,
     env,
     runAiWebSearch,
+    ...(generateSearchPrompts ? { generateSearchPromptsImpl: generateSearchPrompts } : {}),
     workspaceAgentRuntime,
+    ...(setIntervalImpl ? { setIntervalImpl } : {}),
+    ...(clearIntervalImpl ? { clearIntervalImpl } : {}),
   });
-  return routes.get("POST /api/search/ai-web-search/run");
+  return {
+    handler: routes.get("POST /api/search/ai-web-search/run"),
+    lifecycle,
+  };
 }
 
 function request(body = "{}") {
@@ -97,7 +133,7 @@ test("AI web-search route returns 501/422/400/413 before opening SSE", async () 
 
   const noPrompts = response();
   await handlerFor({ repoRoot: tempRepo({ prompts: 0 }), runAiWebSearch: async () => ({}) })(
-    request(),
+    request('{"promptIds":["missing"]}'),
     noPrompts
   );
   assert.equal(noPrompts.status, 422);
@@ -117,21 +153,185 @@ test("AI web-search route returns 501/422/400/413 before opening SSE", async () 
   assert.equal(tooLarge.status, 413);
 });
 
+test("mounting the AI route registers a durable unified-search starter", async () => {
+  const repoRoot = tempRepo();
+  let workerDefinition;
+  let starterDefinition;
+  let searchInput;
+  const events = [];
+  const workspaceAgentRuntime = {
+    registerSourcingWorker(definition) {
+      workerDefinition = definition;
+    },
+    registerAiWebSearchStarter(definition) {
+      starterDefinition = definition;
+    },
+    startSourcingWorker({ run, context }) {
+      return {
+        run,
+        promise: Promise.resolve(
+          workerDefinition.execute({
+            run,
+            context,
+            signal: new AbortController().signal,
+            reportProgress() {},
+          })
+        ).then((result) => ({ run: { ...run, status: "completed" }, value: result.value })),
+      };
+    },
+    async recordSearchStart() {},
+  };
+
+  mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime,
+    runAiWebSearch: async (input) => {
+      searchInput = input;
+      const { onProgress } = input;
+      onProgress({ type: "activity", message: "Searching the open web" });
+      return { searched: 1, found: 1, new: 1, errors: [] };
+    },
+  });
+
+  assert.equal(starterDefinition.isAvailable(), true);
+  const deterministic = {
+    status: "succeeded",
+    result: {
+      ok: true,
+      run: { summary: { scanned: 3, presented: 1 } },
+      value: {
+        scanned: 3,
+        presented: 1,
+        sourceCoverage: [
+          {
+            kind: "configured",
+            label: "Existing source",
+            host: "existing.example",
+            status: "success",
+            found: 1,
+          },
+        ],
+        offers: [
+          {
+            company: "Existing Company",
+            title: "Existing Role",
+            url: "https://existing.example/jobs/existing-role",
+          },
+        ],
+      },
+    },
+  };
+  const result = await starterDefinition.start({
+    searchExecutionId: "search-unified-route",
+    deterministic,
+    onProgress: (event) => events.push(event),
+  });
+  const stored = sourcingRunLatest({ repoRoot, env: {}, purpose: "ai-web-search" }).run;
+  const expectedCoverage = {
+    status: "succeeded",
+    sources: [
+      {
+        kind: "configured",
+        label: "Existing source",
+        host: "existing.example",
+        status: "success",
+        found: 1,
+      },
+    ],
+    offers: [
+      {
+        company: "Existing Company",
+        title: "Existing Role",
+        url: "https://existing.example/jobs/existing-role",
+      },
+    ],
+  };
+
+  assert.equal(result.ok, true);
+  assert.equal(stored.metadata.searchExecutionId, "search-unified-route");
+  assert.deepEqual(stored.metadata.deterministic, expectedCoverage);
+  assert.deepEqual(searchInput.deterministic, expectedCoverage);
+  assert.deepEqual(events, [{ type: "activity", message: "Searching the open web" }]);
+});
+
+test("unified AI starter reports app shutdown as resumable instead of completed", async () => {
+  const repoRoot = tempRepo();
+  let starterDefinition;
+  const workspaceAgentRuntime = {
+    registerSourcingWorker() {},
+    registerAiWebSearchStarter(definition) {
+      starterDefinition = definition;
+    },
+    startSourcingWorker({ run }) {
+      return {
+        run,
+        promise: Promise.resolve({ run: null, value: null, resumable: true }),
+      };
+    },
+    async recordSearchStart() {},
+  };
+
+  mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime,
+    runAiWebSearch: async () => assert.fail("resumable fixture must not run the provider"),
+  });
+
+  const result = await starterDefinition.start({ searchExecutionId: "search-paused" });
+  const stored = sourcingRunLatest({ repoRoot, env: {}, purpose: "ai-web-search" }).run;
+
+  assert.equal(result.ok, false);
+  assert.equal(result.resumable, true);
+  assert.equal(result.run.id, stored.id);
+  assert.equal(stored.status, "running");
+});
+
+test("AI web-search generates candidate prompts automatically when none are saved", async () => {
+  const repoRoot = tempRepo({ prompts: 0 });
+  let searches = 0;
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    generateSearchPrompts: async () => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: { prompts: [{ text: "Find current operations roles in New York" }] },
+      },
+    }),
+    runAiWebSearch: async ({ promptIds }) => {
+      searches += 1;
+      assert.equal(promptIds.length, 1);
+      return { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] };
+    },
+  })(request(), res);
+
+  assert.equal(res.status, 200);
+  assert.equal(searches, 1);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.status, "completed");
+});
+
 test("AI web-search route streams activity before done and emits heartbeat comments", async () => {
   const repoRoot = tempRepo();
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
+  const scheduled = [];
+  const cleared = [];
   globalThis.setInterval = (callback, ms) => {
-    assert.equal(ms, 10000);
-    callback();
-    return 17;
+    scheduled.push(ms);
+    if (ms === 10000) callback();
+    return ms;
   };
-  globalThis.clearInterval = (token) => assert.equal(token, 17);
+  globalThis.clearInterval = (id) => cleared.push(id);
   try {
     const res = response();
+    let receivedExecutionPlan;
     const handler = handlerFor({
       repoRoot,
-      runAiWebSearch: async ({ onProgress }) => {
+      runAiWebSearch: async ({ onProgress, writeGuard, executionPlan }) => {
+        receivedExecutionPlan = executionPlan;
+        assert.equal(typeof writeGuard, "function");
+        assert.doesNotThrow(() => writeGuard(openDb({ repoRoot })));
         onProgress({ type: "activity", message: "Searching saved prompt…" });
         return { searched: 1, found: 2, new: 1, duplicates: 1, errors: [] };
       },
@@ -139,7 +339,11 @@ test("AI web-search route streams activity before done and emits heartbeat comme
     await handler(request('{"searchExecutionId":"search-execution-ai"}'), res);
     assert.equal(res.status, 200);
     assert.match(res.chunks.join(""), /: ping\n\n/);
-    assert.deepEqual(sseFrames(res), [
+    const frames = sseFrames(res);
+    assert.equal(frames[0].type, "started");
+    assert.equal(frames[0].run.purpose, "ai-web-search");
+    assert.equal(frames[0].run.status, "running");
+    assert.deepEqual(frames.slice(1), [
       { type: "activity", message: "Searching saved prompt…" },
       {
         type: "done",
@@ -151,7 +355,17 @@ test("AI web-search route streams activity before done and emits heartbeat comme
     assert.equal(durable.summary.new, 1);
     assert.deepEqual(durable.metadata.promptIds, ["p1"]);
     assert.equal(durable.metadata.searchExecutionId, "search-execution-ai");
+    assert.equal(durable.metadata.aiExecutionPlan.operation, "research.web");
+    assert.equal(durable.metadata.aiExecutionPlan.runtimeId, "anthropic-api");
+    assert.equal(durable.metadata.aiExecutionPlan.resolved.quality, "balanced");
+    assert.equal(durable.metadata.aiExecutionPlan.resolved.effort, "medium");
+    assert.deepEqual(receivedExecutionPlan, durable.metadata.aiExecutionPlan);
     assert.match(durable.metadata.inputFingerprint, /^[a-f0-9]{64}$/);
+    assert.deepEqual(scheduled, [10000, 30000]);
+    assert.deepEqual(
+      cleared.sort((a, b) => a - b),
+      [10000, 30000]
+    );
   } finally {
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
@@ -237,6 +451,143 @@ test("AI web-search route persists exact failed prompts and accepts retry prompt
   assert.equal(durable.error.sources[0].url, "https://jobs.example.test");
 });
 
+test("AI web-search route durably warns when only an auxiliary top-up query failed", async () => {
+  const repoRoot = tempRepo();
+  const res = response();
+  const warning = "The additional search query timed out.";
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 1,
+      new: 1,
+      presented: 1,
+      duplicates: 0,
+      errors: [],
+      warnings: [warning],
+      failedPromptIds: [],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find AI roles",
+          status: "completed",
+          queries: [
+            { query: "AI roles", status: "completed", error: null },
+            {
+              query: "Find AI roles",
+              status: "failed",
+              error: warning,
+            },
+          ],
+        },
+      ],
+      sources: [{ url: "https://jobs.example.test/role", status: "completed" }],
+    }),
+  })(request(), res);
+
+  assert.equal(sseFrames(res).at(-1).type, "done");
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "completed");
+  assert.equal(durable.summary.new, 1);
+  assert.deepEqual(durable.summary.failedPromptIds, []);
+  assert.deepEqual(durable.summary.errors, []);
+  assert.deepEqual(durable.summary.warnings, [warning]);
+  assert.equal(durable.summary.queryResults[0].queries[1].error, warning);
+});
+
+test("AI web-search route preserves candidate-safe provider-cap guidance", async () => {
+  const repoRoot = tempRepo();
+  const message =
+    "The selected AI provider has reached its usage limit. It resets at 4pm (America/New_York). Try again after the reset.";
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 0,
+      new: 0,
+      duplicates: 0,
+      errors: [message],
+      failedPromptIds: ["p1"],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find AI roles",
+          status: "failed",
+          queries: [{ query: "Find AI roles", status: "failed", error: message }],
+          error: message,
+        },
+      ],
+      sources: [],
+    }),
+  })(request(), res);
+
+  const frames = sseFrames(res);
+  assert.equal(frames.at(-1).type, "done");
+  assert.deepEqual(frames.at(-1).data.errors, [message]);
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "failed");
+  assert.equal(durable.error.message, message);
+  assert.doesNotMatch(JSON.stringify(durable.error), /CLI|schema|RUNTIME_/i);
+});
+
+test("AI web-search route freezes the saved provider-neutral preferences at run start", async () => {
+  const repoRoot = tempRepo();
+  writeAIPreferences({ repoRoot, env: {}, quality: "best", reasoning: "high" });
+  let receivedExecutionPlan;
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async ({ executionPlan }) => {
+      receivedExecutionPlan = executionPlan;
+      return { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] };
+    },
+  })(request(), res);
+
+  assert.equal(res.status, 200);
+  assert.equal(receivedExecutionPlan.requested.quality, "best");
+  assert.equal(receivedExecutionPlan.requested.reasoning, "high");
+  assert.equal(receivedExecutionPlan.resolved.quality, "best");
+  assert.equal(receivedExecutionPlan.resolved.effort, "high");
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.deepEqual(durable.metadata.aiExecutionPlan, receivedExecutionPlan);
+});
+
+test("AI web-search route freezes verified installed-runtime evidence for durable execution", async () => {
+  for (const runtimeId of ["claude", "codex"]) {
+    const repoRoot = tempRepo();
+    const executable = createVerifiedRuntimeExecutable({ root: repoRoot, runtimeId });
+    const env = { PATH: join(repoRoot, "bin"), CAREERRAT_DESKTOP_SHELL: "1" };
+    writeInstalledRuntimeSelection({
+      repoRoot,
+      env,
+      runtimeId,
+      verification: {
+        ...executable.evidence,
+        capabilities: VERIFIED_RUNTIME_CAPABILITIES,
+        checkedAt: "2026-08-27T16:00:00.000Z",
+      },
+    });
+    let receivedExecutionPlan;
+    const res = response();
+    await handlerFor({
+      repoRoot,
+      env,
+      runAiWebSearch: async ({ executionPlan }) => {
+        receivedExecutionPlan = executionPlan;
+        return { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] };
+      },
+    })(request(), res);
+
+    assert.equal(res.status, 200, runtimeId);
+    assert.deepEqual(receivedExecutionPlan.installedRuntime, executable.evidence);
+    assert.deepEqual(
+      sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.metadata.aiExecutionPlan,
+      receivedExecutionPlan
+    );
+  }
+});
+
 test("AI web-search route rejects a concurrent run with 409", async () => {
   const repoRoot = tempRepo();
   let release;
@@ -281,39 +632,187 @@ test("AI web-search route stops writing frames after the response closes", async
   res.emit("close");
   release();
   await running;
-  assert.deepEqual(sseFrames(res), [{ type: "activity", message: "started" }]);
+  const frames = sseFrames(res);
+  assert.equal(frames[0].type, "started");
+  assert.deepEqual(frames.slice(1), [{ type: "activity", message: "started" }]);
 });
 
-test("AI web-search disconnect aborts the underlying run via an AbortSignal", async () => {
+test("AI web-search disconnect leaves the durable worker running to completion", async () => {
   const repoRoot = tempRepo();
-  let sawAbort;
-  const abortSeen = new Promise((resolve) => {
-    sawAbort = resolve;
+  let release;
+  let providerSignal;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
   });
   const handler = handlerFor({
     repoRoot,
-    runAiWebSearch: ({ onProgress, signal }) =>
-      new Promise((resolve) => {
-        onProgress({ type: "activity", message: "started" });
-        signal.addEventListener("abort", () => {
-          sawAbort();
-          resolve({ searched: 1, found: 0, new: 0, duplicates: 0, errors: [] });
-        });
-        // Never resolves on its own — only the abort listener settles it,
-        // simulating a long-running search the client walks away from. See
-        // skill-run-route.test.mjs's matching client-disconnect test for the
-        // same pattern.
-      }),
+    runAiWebSearch: async ({ onProgress, signal }) => {
+      providerSignal = signal;
+      onProgress({ type: "activity", message: "started" });
+      await blocked;
+      return { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] };
+    },
   });
   const res = response();
   const running = handler(request(), res);
   await new Promise((resolve) => setImmediate(resolve));
   res.emit("close");
-  await abortSeen;
+
+  assert.equal(providerSignal.aborted, false);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.status, "running");
+
+  release();
   await running;
 
   const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
-  assert.equal(durable.status, "failed");
-  assert.equal(durable.summary, null);
-  assert.equal(durable.error.code, "AI_WEB_SEARCH_ABORTED");
+  assert.equal(durable.status, "completed");
+  assert.equal(durable.error, null);
+});
+
+test("the workspace search worker owns AI web-search execution", async () => {
+  const repoRoot = tempRepo();
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const workspaceAgentRuntime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  const { handler } = mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime,
+    runAiWebSearch: async () => {
+      await blocked;
+      return { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] };
+    },
+  });
+  const res = response();
+  const running = handler(request(), res);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "running");
+  assert.equal(workspaceAgentRuntime.ownsSourcingRun(durable.id), true);
+
+  release();
+  await running;
+  await workspaceAgentRuntime.shutdownSourcingWorkers();
+});
+
+test("AI web-search refreshes its durable lease while the provider is quiet", async () => {
+  const repoRoot = tempRepo();
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const scheduled = new Map();
+  let nextId = 0;
+  const handler = handlerFor({
+    repoRoot,
+    setIntervalImpl(callback, ms) {
+      nextId += 1;
+      scheduled.set(ms, { id: nextId, callback });
+      return nextId;
+    },
+    clearIntervalImpl(id) {
+      for (const [ms, entry] of scheduled) {
+        if (entry.id === id) scheduled.delete(ms);
+      }
+    },
+    runAiWebSearch: async () => {
+      await blocked;
+      return { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] };
+    },
+  });
+  const res = response();
+  const running = handler(request(), res);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const before = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(typeof scheduled.get(30000)?.callback, "function");
+  scheduled.get(30000).callback();
+  const refreshed = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.ok(Date.parse(refreshed.updatedAt) > Date.parse(before.updatedAt));
+  assert.equal(refreshed.progress.workerStatus, "running");
+
+  release();
+  await running;
+});
+
+test("AI web-search lifecycle leaves the durable worker resumable on app shutdown", async () => {
+  const repoRoot = tempRepo();
+  let providerSignal;
+  const { handler, lifecycle } = mountedRoutesFor({
+    repoRoot,
+    runAiWebSearch: ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        providerSignal = signal;
+        signal.addEventListener(
+          "abort",
+          () => reject(signal.reason || new DOMException("Aborted", "AbortError")),
+          { once: true }
+        );
+      }),
+  });
+  const res = response();
+  const running = handler(request(), res);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(providerSignal.aborted, false);
+  await lifecycle.shutdownAiWebSearch();
+  await running;
+
+  assert.equal(providerSignal.aborted, true);
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "running");
+  assert.equal(durable.error, null);
+});
+
+test("a replacement workspace owner resumes the same AI web-search run", async () => {
+  const repoRoot = tempRepo();
+  let firstSignal;
+  const firstRuntime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  const firstMounted = mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime: firstRuntime,
+    runAiWebSearch: ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        firstSignal = signal;
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  });
+  const firstResponse = response();
+  const firstRequest = firstMounted.handler(request(), firstResponse);
+  await new Promise((resolve) => setImmediate(resolve));
+  const original = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+
+  await firstRuntime.shutdownSourcingWorkers();
+  await firstRequest;
+  assert.equal(firstSignal.aborted, true);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.status, "running");
+
+  let resumedInput;
+  const replacementRuntime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime: replacementRuntime,
+    runAiWebSearch: async (input) => {
+      resumedInput = input;
+      return { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] };
+    },
+  });
+  replacementRuntime.recoverOrphanedSourcingRuns();
+  for (
+    let attempt = 0;
+    attempt < 50 && replacementRuntime.ownsSourcingRun(original.id);
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  const completed = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(completed.id, original.id);
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.metadata.recoveryCount, 1);
+  assert.deepEqual(resumedInput.promptIds, ["p1"]);
+  assert.deepEqual(resumedInput.executionPlan, original.metadata.aiExecutionPlan);
+  await replacementRuntime.shutdownSourcingWorkers();
 });

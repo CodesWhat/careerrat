@@ -4,6 +4,37 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.6] - 2026-08-28
+
+### Changed
+
+- Configured-board and AI web-search results are requalified after CareerRat captures the canonical job description. Location and office-day rules, compensation floor, seniority, posting age, work eligibility, and the candidate's saved fit bands now use the full posting before a role is saved, and per-company presentation limits apply only after that check. Job cards also recover clearly labeled salary or base-pay ranges from complete postings while leaving bonus, OTE, equity, total-comp, and partial-body ambiguity marked for verification.
+- Conditional location policies stay visible instead of being flattened into a misleading city label, and RSS roles no longer repeat “at Company” inside a job card that already shows the company. Search also warns when the candidate already has an active application at the same company.
+- Job threads now surface unresolved application answers in the right-side review panel. The candidate chooses **Answer**, writes the response in the normal composer, and CareerRat saves it against the exact application question before rebuilding the packet.
+- Once the packet is ready, the same review panel explains supervised form preparation, offers the existing opt-in permission in place, and resumes only the matching paused application mission. CareerRat may fill confirmed fields and advance safe form steps, but the candidate always reviews and presses the final Submit control.
+- Claude Code and OpenAI Codex remain the only supported product runtime choices. Both use the same CareerRat-owned workflows, skills, and durable state through direct installed-CLI adapters; v0.16.6 does not silently promote or fall back to another detected CLI.
+- First-run setup presents CareerRat AI as an icon-and-label row matching the other runtime choices, instead of a bare text label, so the options read as one consistent list.
+- Workspace, job, and research choices now share one durable click-or-type contract. Finite job, recruiter-thread, and company ambiguities render equal neutral choices that act on exact saved records without guessing or exposing internal IDs.
+- Activity shows the twelve most recent steps instead of growing without a bound. The complete audit history remains local and durable.
+
+### Fixed
+
+- AI web search no longer stops at the old two-minute runtime limit and reports a misleading structured-output error. Claude Code and Codex now share an explicit eight-minute bound, and real runtime failures stop immediately instead of repeating the entire search as a schema retry.
+- Long searches keep their sourcing run alive while CareerRat reads and saves full job descriptions, so a completed model search cannot be marked failed during post-search capture.
+- Paul and the durable chat history show a plain-English retry message instead of model schemas, provider output, runtime codes, or parser details when AI search fails.
+- Yes/No buttons appear only for genuinely binary questions. Either-or questions stay as normal text responses, while binary questions with a short lead-in still get buttons.
+- Packet lineage recognizes unanswered question IDs as live review state instead of rebuilding a valid reviewable packet forever. A confirmed final answer resumes the owning paused mission instead of starting an unrelated preparation action.
+- Saved North American home locations can answer the corresponding location screen deterministically, while voluntary demographic and self-identification answers remain explicit, local, and never inferred.
+- Onboarding no longer advances to the next topic while a plain question with a short safety clarification is still waiting for the candidate's answer.
+- First, manual, and AI searches now share one durable worker owner for progress, cancellation, settlement, clean shutdown, and restart recovery. AI search resumes its frozen prompts and provider plan instead of being orphaned by a route-local controller.
+- Recording an application as Applied resolves its durable Submit gate and completes the owning mission in the same transaction, so a finished application cannot leave a ghost **Review & submit** action.
+- Common AI, communication-draft, application-preparation, and board-discovery failures now explain what happened and what to do next in plain English.
+
+### Verification
+
+- Promotion requires one clean source revision to pass the repository and web suites, production web/docs/website builds, Biome, Qlty, Knip, placeholder and dependency checks, real Chromium UI and supervised application preparation, and the exact Claude Code/Codex hospitality and engineering native-search matrix with every emitted role manually reviewed.
+- The tagged release workflow must then build and verify the signed, notarized, and stapled Mac app and updater feed, prove a real native update from the previous public version, and complete unsigned Windows packaging QA. A public Windows installer remains conditional on trusted SignPath Foundation signing and is not a macOS release blocker.
+
 ## [0.16.5] - 2026-08-27
 
 ### Changed

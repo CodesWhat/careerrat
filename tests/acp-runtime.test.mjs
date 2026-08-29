@@ -149,6 +149,33 @@ test("buildAcpRuntimeInvocation uses the registry-owned ACP argv and keeps promp
   );
 });
 
+test("runAcpRuntime rechecks the frozen executable immediately before spawn", async () => {
+  const changed = Object.assign(new Error("runtime changed"), {
+    code: "RUNTIME_EXECUTABLE_CHANGED",
+  });
+  let checked = false;
+  let spawned = false;
+
+  await assert.rejects(
+    runAcpRuntime({
+      runtime: hermesRuntime(),
+      prompt: "hello",
+      cwd: "/safe/task",
+      beforeSpawn() {
+        checked = true;
+        throw changed;
+      },
+      spawnImpl() {
+        spawned = true;
+        return successfulAcpChild();
+      },
+    }),
+    (error) => error === changed
+  );
+  assert.equal(checked, true);
+  assert.equal(spawned, false);
+});
+
 test("Windows ACP runtimes launch npm cmd shims through the fixed command boundary", async () => {
   const calls = [];
   const comspec = "C:\\Windows\\System32\\cmd.exe";

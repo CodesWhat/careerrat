@@ -32,6 +32,7 @@ import { loadModes } from "../core/profile/modes.mjs";
 import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
 import { parseConfig } from "../core/providers/search-sources.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
+import { pendingSourceLoginRequests } from "../core/search/source-login-preflight.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
 const pathCtx = { repoRoot: root };
@@ -69,7 +70,6 @@ const systemPrereqs = [
   "AGENTS.md",
   "CLAUDE.md",
   "docs/DATA_CONTRACT.md",
-  "docs/ROADMAP.md",
   ".agents/skills/ingest-profile/SKILL.md",
   ".agents/skills/evaluate-job/SKILL.md",
   ".agents/skills/email-comms/SKILL.md",
@@ -158,7 +158,7 @@ const modes = loadModes({ root });
 // best-effort, never-throwing presence probe. `mayRun()` is unaffected: provider is
 // HOW a session runs, not WHETHER a capability is allowed. Never fails doctor.
 const automationData = loadAutomation({ root }).data;
-const sessionBrowser = detectSession({ data: automationData });
+const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 
 // Setup resume state (workspace/setup-state.json). Written by ingest-profile and
 // the explicit discovery-skip helper; read-only here.
@@ -415,6 +415,7 @@ function loadSearchReadiness() {
         valid: false,
         total: 0,
         enabled: 0,
+        pendingLogin: 0,
         withLastRun: 0,
         providers: [],
         error: err.message,
@@ -429,6 +430,7 @@ function loadSearchReadiness() {
       valid: true,
       total: 0,
       enabled: 0,
+      pendingLogin: 0,
       withLastRun: 0,
       providers: [],
     };
@@ -442,6 +444,7 @@ function loadSearchReadiness() {
       valid: false,
       total: 0,
       enabled: 0,
+      pendingLogin: 0,
       withLastRun: 0,
       providers: [],
       error: err.message,
@@ -457,6 +460,7 @@ function summarizeSearchReadiness(config, { exists }) {
     valid: true,
     total: searches.length,
     enabled: enabled.length,
+    pendingLogin: pendingSourceLoginRequests(config).length,
     withLastRun: searches.filter((search) => search.recency?.lastRunAt).length,
     providers: [...new Set(enabled.map((search) => search.provider).filter(Boolean))].sort(),
   };
@@ -511,6 +515,12 @@ function printSearchReadiness(readiness) {
   console.log(
     `- Broad sources: ${readiness.enabled} enabled ${searchWord}${providerText}${runText}.`
   );
+  if (readiness.pendingLogin > 0) {
+    const sourceWord = readiness.pendingLogin === 1 ? "source" : "sources";
+    console.log(
+      `  ${readiness.pendingLogin} saved ${sourceWord} waiting for a point-of-use login choice.`
+    );
+  }
 }
 
 function printCompanyAtsReadiness(readiness) {
@@ -540,6 +550,10 @@ function printDiscoveryPipeline(searches, companies, discoverySkips = []) {
   console.log(
     "- Order after onboarding: setup-searches -> research-boards -> discover-companies -> search-jobs."
   );
+  if (searches.pendingLogin > 0) {
+    console.log("  Next discovery step: search-jobs login handoff.");
+    return;
+  }
   if (!searches.exists || !searches.valid || searches.enabled === 0) {
     console.log("  Next discovery step: setup-searches.");
     return;

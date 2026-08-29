@@ -1,7 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { runBoundedAI } from "../ai/bounded-ai.mjs";
-import { appRegisterPacketArtifacts } from "../db/verbs.mjs";
 import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import {
   buildCoverLetterScaffold,
@@ -14,6 +13,8 @@ import { resolveUserPaths } from "../paths/workspace.mjs";
 import { draftPacketAnswers as draftPacketAnswersCore } from "./answers.mjs";
 import { buildPacketContext } from "./context.mjs";
 import { selectPacketStories } from "./deep-ingest-sources.mjs";
+import { exportPacketArtifacts as exportPacketArtifactsDefault } from "./exports.mjs";
+import { packetProvenanceForContext } from "./provenance.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
 import {
   packetCoverLetterProposalSchema,
@@ -407,6 +408,8 @@ export async function draftCoverLetterBlocks({
   context = {},
   call,
   runAI = runBoundedAI,
+  executionPlan,
+  signal,
 } = {}) {
   // Built once so the same storyHints selection both goes into the prompt
   // and scopes validatePacketEvidenceIds's allowed `story:<id>` set below —
@@ -432,6 +435,8 @@ export async function draftCoverLetterBlocks({
     maxTokens: 4000,
     root: repoRoot,
     env,
+    executionPlan,
+    signal,
   });
 
   // The packet lane never writes a degraded cover letter: an AI-call failure
@@ -615,6 +620,8 @@ export async function draftResumeProposal({
   context = {},
   call,
   runAI = runBoundedAI,
+  executionPlan,
+  signal,
 } = {}) {
   // The packet lane never writes a degraded résumé: every failure path below
   // throws instead of falling back to the deterministic claims-list resume —
@@ -651,6 +658,8 @@ export async function draftResumeProposal({
       maxTokens: 10000,
       root: repoRoot,
       env,
+      executionPlan,
+      signal,
     });
 
   let aiResult = await runResumeAI(baseMessages);
@@ -868,15 +877,7 @@ function sourceBase({ context, appId }) {
   return `${slugPart(app.company)}-${slugPart(app.role)}-${slugPart(appId)}`;
 }
 
-function writeWorkspaceArtifacts({
-  repoRoot,
-  env,
-  appId,
-  context,
-  sources,
-  manifest,
-  formats = [],
-}) {
+function writeWorkspaceArtifacts({ repoRoot, env, appId, context, sources, manifest }) {
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
   const tailoredDir = join(workspaceDir, "tailored");
   mkdirSync(tailoredDir, { recursive: true });
@@ -887,7 +888,6 @@ function writeWorkspaceArtifacts({
     // Omitted entirely (not written as an empty/placeholder file) when the
     // answers artifact was skipped — see buildSourceArtifacts.
     ...(sources.answers != null ? { answersSource: [`${base}-answers.md`, sources.answers] } : {}),
-    packetManifest: [`${base}-packet-manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`],
   };
 
   const artifacts = {};
@@ -895,21 +895,6 @@ function writeWorkspaceArtifacts({
     const full = join(tailoredDir, file);
     writeFileSync(full, body, "utf8");
     artifacts[key] = workspaceDisplayPath(relative(workspaceDir, full));
-  }
-
-  const selectedFormats = formats.includes("docx") ? ["pdf", "docx"] : ["pdf"];
-  for (const format of selectedFormats) {
-    for (const [key, body] of Object.entries(sources)) {
-      const artifactKey =
-        key === "coverLetter"
-          ? `coverLetter${format === "pdf" ? "Pdf" : "Docx"}`
-          : `${key}${format === "pdf" ? "Pdf" : "Docx"}`;
-      const fileKind = key === "coverLetter" ? "cover-letter" : key;
-      const full = join(tailoredDir, `${base}-${fileKind}.${format}`);
-      const content = format === "pdf" ? `%PDF-1.4\n% CareerRat packet artifact\n${body}\n` : body;
-      writeFileSync(full, content, format === "pdf" ? "utf8" : "utf8");
-      artifacts[artifactKey] = workspaceDisplayPath(relative(workspaceDir, full));
-    }
   }
 
   // BUG: the read path (GET /api/packet, isGatedIn, GET /api/packet/artifact
@@ -927,6 +912,11 @@ function writeWorkspaceArtifacts({
     artifacts.answers = artifacts.answersSource;
     artifacts.answersGeneratedAt = manifest.generatedAt;
   }
+
+  const manifestFull = join(tailoredDir, `${base}-packet-manifest.json`);
+  artifacts.packetManifest = workspaceDisplayPath(relative(workspaceDir, manifestFull));
+  manifest.artifacts = artifacts;
+  writeFileSync(manifestFull, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
   return artifacts;
 }
@@ -961,6 +951,7 @@ function manifestFor({
   confirmedAnswers = [],
   deepIngestWarnings = [],
   warnings = [],
+  provenance = null,
 }) {
   const generatedAt = new Date().toISOString();
   const artifacts = {};
@@ -983,6 +974,7 @@ function manifestFor({
     uploadReady,
     status: uploadReady ? "upload-ready" : "reviewable",
     gapCount: gaps.length,
+    ...(provenance ? { provenance } : {}),
     questions: questionCapture.questions,
     excludedQuestions: questionCapture.excluded,
     questionCaptureSource: questionCapture.path,
@@ -1021,33 +1013,6 @@ function manifestFor({
     // becoming upload-ready. This field is purely informational.
     deepIngestWarnings,
   };
-}
-
-function dbManifestFor({ manifest, context, artifacts }) {
-  const existingQuestions = appFromContext(context).packetManifest?.questions;
-  // In the artifacts-only degrade path (no question capture) there is no
-  // capture source to point at — packetManifestSchema's questions.source is a
-  // workspacePath, so a null-source fallback fails validation
-  // (BAD_PACKET_MANIFEST). Omit the questions section entirely instead of
-  // fabricating one; the manifest schema doesn't require it.
-  const fallbackQuestions = manifest.questionCaptureSource
-    ? {
-        source: manifest.questionCaptureSource,
-        capturedAt: manifest.generatedAt,
-        answerableCount: manifest.questions.length,
-        excludedCount: manifest.excludedQuestions.length,
-        answerableIds: manifest.questions.map((q) => String(q.id)),
-        excludedIds: manifest.excludedQuestions.map((q) => String(q.id)),
-        demographicSectionPresent: false,
-      }
-    : undefined;
-  const questions = existingQuestions || fallbackQuestions;
-  const dbManifest = { ...manifest, artifacts };
-  // `manifest.questions` is the captured-question ARRAY (manifestFor); the DB
-  // manifest wants the summary OBJECT here — never let the array leak through.
-  if (questions) dbManifest.questions = questions;
-  else delete dbManifest.questions;
-  return dbManifest;
 }
 
 function gapObjects(...lists) {
@@ -1143,10 +1108,12 @@ export async function generatePacket({
   draftCoverLetterBlocks: coverDraft = draftCoverLetterBlocks,
   draftResumeProposal: resumeDraft = draftResumeProposal,
   draftPacketAnswers = draftPacketAnswersCore,
-  exportPacketArtifacts,
+  exportPacketArtifacts: exportPacketArtifactsImpl = exportPacketArtifactsDefault,
   coverLetterCall,
   resumeCall,
   packetAnswersCall,
+  executionPlan,
+  signal,
 } = {}) {
   const id = cleanText(
     applicationId || appId || context?.applicationId || appFromContext(context).id
@@ -1195,8 +1162,22 @@ export async function generatePacket({
   // schemas, different prompts) — run them concurrently rather than
   // sequentially. answers stays sequential where it already was.
   const [resumeProposal, coverLetter] = await Promise.all([
-    resumeDraft({ repoRoot, env, context: packetContext, call: resumeCall }),
-    coverDraft({ repoRoot, env, context: packetContext, call: coverLetterCall }),
+    resumeDraft({
+      repoRoot,
+      env,
+      context: packetContext,
+      call: resumeCall,
+      executionPlan,
+      signal,
+    }),
+    coverDraft({
+      repoRoot,
+      env,
+      context: packetContext,
+      call: coverLetterCall,
+      executionPlan,
+      signal,
+    }),
   ]);
   const answers = skipAnswers
     ? {
@@ -1214,6 +1195,8 @@ export async function generatePacket({
         context: packetContext,
         questions: capture,
         call: packetAnswersCall,
+        executionPlan,
+        signal,
       });
   const sources = buildSourceArtifacts({
     context: packetContext,
@@ -1278,12 +1261,21 @@ export async function generatePacket({
   });
   const gaps = reviewState.gaps;
   const warnings = [...reviewState.warnings, ...gapObjects(resumeProposal?.gaps)];
+  const provenance = packetProvenanceForContext(packetContext);
+  if (repoRoot && !provenance) {
+    gaps.push({
+      kind: "review",
+      code: "PACKET_PROVENANCE_REQUIRED",
+      message: "Re-evaluate this job before preparing application files.",
+    });
+  }
   const uploadReady =
     Boolean(applyIntent) &&
     gaps.length === 0 &&
     validation.ok &&
     coverLetter.uploadReady !== false &&
-    answers.uploadReady !== false;
+    answers.uploadReady !== false &&
+    (!repoRoot || Boolean(provenance));
   const manifest = manifestFor({
     appId: id,
     questionCapture: capture,
@@ -1299,6 +1291,7 @@ export async function generatePacket({
       ? packetContext.deepIngestDiagnostics
       : [],
     warnings,
+    provenance,
   });
 
   let artifacts = {};
@@ -1310,34 +1303,37 @@ export async function generatePacket({
       context: packetContext,
       sources,
       manifest,
-      formats,
     });
-    manifest.artifacts = artifacts;
-
-    if (typeof exportPacketArtifacts === "function") {
-      await exportPacketArtifacts({ repoRoot, env, appId: id, sources, manifest, formats });
-    }
-
-    appRegisterPacketArtifacts({
+    const exported = await exportPacketArtifactsImpl({
       repoRoot,
       env,
-      id,
-      artifacts,
-      manifest: dbManifestFor({ manifest, context: packetContext, artifacts }),
-      note: uploadReady ? "packet upload-ready" : "packet reviewable",
+      appId: id,
+      packetSources: artifacts,
+      formats,
     });
+    artifacts = { ...artifacts, ...(exported?.artifacts || {}) };
+    const registeredManifest = exported?.registered?.packetManifest;
+    if (registeredManifest) Object.assign(manifest, registeredManifest);
+    else {
+      manifest.artifacts = artifacts;
+      manifest.uploadReady = false;
+      manifest.status = "reviewable";
+    }
   }
+
+  const finalUploadReady = repoRoot ? manifest.uploadReady === true : uploadReady;
+  const finalGaps = Array.isArray(manifest.gaps) ? manifest.gaps : gaps;
 
   return {
     appId: id,
     applicationId: id,
     submitted: false,
-    uploadReady,
-    status: uploadReady ? "upload-ready" : "reviewable",
+    uploadReady: finalUploadReady,
+    status: finalUploadReady ? "upload-ready" : "reviewable",
     artifacts,
     manifest,
     sources,
-    gaps,
-    manual: { required: !uploadReady },
+    gaps: finalGaps,
+    manual: { required: !finalUploadReady },
   };
 }

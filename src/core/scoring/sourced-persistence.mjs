@@ -2,13 +2,145 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { dbExists } from "../db/connection.mjs";
-import { buildDbSeenSets } from "../db/scan-context.mjs";
-import { sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
+import { sourceConfigGet, sourceConfigMutate } from "../db/verbs/source-config.mjs";
+import { sourcedReconcilePolicyBatch, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import { readJobDescriptionArtifact } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
 import { stringifyYaml } from "../profile/yaml.mjs";
 import { trimEdgeCharacter } from "../text/slug.mjs";
 import { addPostingIdentity, postingIdentityIsSeen } from "./sourced-identity.mjs";
+import {
+  extractCompBand,
+  requalifyCanonicalOffers,
+  resolveCompensationEvidence,
+} from "./sourced-scanner.mjs";
+
+const ACTIVE_SOURCED_STATUSES = new Set(["sourced", "prospect", "saved", "gated"]);
+const POLICY_FAILURE_BUCKETS = Object.freeze([
+  ["seniority", "filteredSeniority"],
+  ["location", "filteredLocation"],
+  ["age", "filteredAge"],
+  ["salary", "filteredSalary"],
+  ["eligibility", "filteredEligibility"],
+]);
+
+function activeSourcedRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((row) =>
+    ACTIVE_SOURCED_STATUSES.has(String(row?.status || "sourced").toLowerCase())
+  );
+}
+
+function persistedRowOffer(row, artifact) {
+  return {
+    id: row.id,
+    company: row.company,
+    title: row.role || row.title,
+    url: row.link || row.url,
+    location: row.loc || row.location || row.mode || "",
+    postedAt: row.postedAt,
+    bodyText: artifact.markdown,
+    bodyPartial: artifact.completeness === "partial",
+  };
+}
+
+export function revalidatePersistedSourcedRows({
+  repoRoot,
+  env,
+  config,
+  now = new Date(),
+  locationFilter,
+  policyDigest,
+  guard,
+} = {}) {
+  const empty = {
+    examined: 0,
+    readable: 0,
+    unreadable: 0,
+    hidden: 0,
+    hiddenIds: [],
+    skipped: false,
+  };
+  if (!dbExists({ repoRoot, env })) return empty;
+  if (
+    policyDigest &&
+    sourceConfigGet({ repoRoot, env, name: "sourced-scan" }).data.policyRevalidation?.digest ===
+      policyDigest
+  ) {
+    return { ...empty, skipped: true };
+  }
+
+  const activeRows = activeSourcedRows(readDbScannerRows({ repoRoot, env }));
+  const rowsById = new Map(activeRows.map((row) => [String(row.id), row]));
+  const offers = [];
+  let unreadable = 0;
+  for (const row of activeRows) {
+    try {
+      const capture = readJobDescriptionArtifact({ repoRoot, env, source: "sourced", id: row.id });
+      offers.push(persistedRowOffer(row, capture.artifact));
+    } catch {
+      // A missing or unsafe capture is unknown, never evidence for hiding a row.
+      unreadable += 1;
+    }
+  }
+
+  const qualification = requalifyCanonicalOffers(offers, {
+    config,
+    now: now instanceof Date ? now.getTime() : Number(now),
+    locationFilter,
+  });
+  const decisions = [];
+  for (const [bucket, resultKey] of POLICY_FAILURE_BUCKETS) {
+    for (const offer of qualification[resultKey]) {
+      const row = rowsById.get(String(offer.id));
+      if (!row) continue;
+      decisions.push({
+        id: row.id,
+        bucket,
+        reason: offer.qualificationReason,
+        expectedStatus: row.status || "sourced",
+        expectedUpdatedAt: row.updatedAt || "",
+        expectedJobArtifact: row.artifacts?.jd || "",
+      });
+    }
+  }
+
+  const reconciled = decisions.length
+    ? sourcedReconcilePolicyBatch({ repoRoot, env, decisions, guard })
+    : { hidden: 0, hiddenIds: [] };
+  if (policyDigest && unreadable === 0) {
+    sourceConfigMutate({
+      repoRoot,
+      env,
+      name: "sourced-scan",
+      guard,
+      mutate(current) {
+        return {
+          ...current,
+          policyRevalidation: {
+            digest: policyDigest,
+            checkedAt: (now instanceof Date ? now : new Date(now)).toISOString(),
+          },
+        };
+      },
+    });
+  }
+  return {
+    examined: activeRows.length,
+    readable: offers.length,
+    unreadable,
+    hidden: reconciled.hidden,
+    hiddenIds: reconciled.hiddenIds,
+    skipped: false,
+  };
+}
+
+export function sourcedPolicyDigest({ config, locationPolicy } = {}) {
+  return createHash("sha256")
+    .update(JSON.stringify({ config: config || {}, locationPolicy: locationPolicy || null }))
+    .digest("hex");
+}
 
 function slug(value, fallback = "unknown") {
   const collapsed = String(value || "")
@@ -48,6 +180,42 @@ function offerBodyText(offer) {
   return String(offer?.bodyText || offer?.description || offer?.rawText || "").trim();
 }
 
+const EXPLICIT_BASE_COMPENSATION_RE = /\b(?:base\s+(?:salary|pay)|salary(?:\s+(?:range|band))?)\b/i;
+const ADJACENT_BASE_COMPENSATION_LABEL_RE =
+  /^(?:(?:estimated|annual|posted)\s+)*(?:base\s+(?:salary|pay)|salary)\s+(?:range|band)\s*:?$/i;
+const NON_BASE_COMPENSATION_RE =
+  /\b(?:bonus(?:es)?|ote|on[- ]target\s+earnings?|equity|stock(?:\s+(?:options?|grants?))?|total\s+(?:cash\s+)?comp(?:ensation)?|commission|variable\s+comp(?:ensation)?|incentive)\b/i;
+const COMPENSATION_RANGE_RE =
+  /(?:(?:USD|CAD|MXN|EUR|GBP)\s*)?[$£€]?\s*(\d{2,6}(?:,\d{3})*(?:\.\d+)?)\s*([kK])?\s*(?:-|–|—|to)\s*(?:(?:USD|CAD|MXN|EUR|GBP)\s*)?[$£€]?\s*(\d{2,6}(?:,\d{3})*(?:\.\d+)?)\s*([kK])?(?:\s*(?:USD|CAD|MXN|EUR|GBP))?/g;
+
+function normalizedCompensationAmount(value, suffix) {
+  const numeric = Number(String(value || "").replace(/,/g, ""));
+  if (!Number.isFinite(numeric)) return null;
+  return suffix || numeric < 1000 ? numeric * 1000 : numeric;
+}
+
+function explicitBaseCompensationRange(bodyText) {
+  const clauses = String(bodyText || "")
+    .split(/\n+|[.;!?]\s+/)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  for (const [index, clause] of clauses.entries()) {
+    const adjacentLabel = ADJACENT_BASE_COMPENSATION_LABEL_RE.test(clauses[index - 1] || "");
+    if (!EXPLICIT_BASE_COMPENSATION_RE.test(clause) && !adjacentLabel) continue;
+    if (NON_BASE_COMPENSATION_RE.test(clause)) continue;
+    const compensationClause = adjacentLabel ? `${clauses[index - 1]} ${clause}` : clause;
+    if (!extractCompBand(compensationClause, { baseOnly: true })) continue;
+    for (const match of clause.matchAll(COMPENSATION_RANGE_RE)) {
+      const min = normalizedCompensationAmount(match[1], match[2]);
+      const max = normalizedCompensationAmount(match[3], match[4]);
+      if (min >= 50_000 && max >= min && max <= 1_200_000) {
+        return match[0].trim().replace(/\s+/g, " ");
+      }
+    }
+  }
+  return null;
+}
+
 function sourceMetaFromOffer(offer) {
   const meta = {};
   for (const key of [
@@ -79,15 +247,18 @@ function jobCaptureRelPath(offer) {
 
 function renderCapturedJob({ offer, savedAt }) {
   const body = offerBodyText(offer);
+  const compensation = resolveCompensationEvidence(offer);
   const dateSaved = savedAt.toISOString().slice(0, 10);
   const frontmatter = {
     company: offer.company || "",
     role: offer.title || "",
     reqId: offer.reqId || null,
-    comp: offer.comp || null,
+    comp: compensation.baseComp || null,
+    tc: compensation.annualEarningsComp || null,
     location: offer.location || null,
     source: offer.url || "",
     sourceName: offer.source || "capture",
+    postedAt: offer.postedAt ?? null,
     dateSaved,
     channel: "board",
     status: "sourced",
@@ -112,7 +283,9 @@ function renderCapturedJob({ offer, savedAt }) {
     `# ${offer.title || "Open role"} - ${offer.company || "Unknown company"}`,
     "",
     offer.location ? `- Location: ${offer.location}` : "",
-    offer.comp ? `- Compensation: ${offer.comp}` : "",
+    compensation.baseComp ? `- Base pay: ${compensation.baseComp}` : "",
+    compensation.annualEarningsComp ? `- Annual earnings: ${compensation.annualEarningsComp}` : "",
+    compensation.unclassifiedComp ? `- Compensation shown: ${compensation.unclassifiedComp}` : "",
     offer.url ? `- Source: ${offer.url}` : "",
     "",
     "## Capture triage",
@@ -162,6 +335,7 @@ function offerWithCapturedJob({ repoRoot, env, offer, savedAt }) {
 export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOString()) {
   if (!Array.isArray(offers)) return [];
   return offers.filter(hasRequiredSourcedFields).map((offer) => {
+    const compensation = resolveCompensationEvidence(offer);
     const fitScore = Number(offer.score);
     const sourceMeta = sourceMetaFromOffer(offer);
     return {
@@ -173,13 +347,21 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
       channel: "board",
       link: offer.url,
       loc: offer.location || "",
-      base: offer.comp || "verify",
+      base:
+        compensation.baseComp ||
+        (offer.bodyPartial === true ? null : explicitBaseCompensationRange(offerBodyText(offer))) ||
+        "verify",
+      tc: compensation.annualEarningsComp || null,
+      ...(compensation.annualEarningsComp ? { compBasis: "annual-earnings" } : {}),
       fitScore: Number.isFinite(fitScore) ? fitScore : 0,
       fitBucket: offer.fit || "",
       fitBasis: "triage",
       gate: offer.gate || "review",
       sourcedAt: nowIso,
       updatedAt: nowIso,
+      ...(offer.postedAt === null || offer.postedAt === undefined || offer.postedAt === ""
+        ? {}
+        : { postedAt: offer.postedAt }),
       artifacts: offer.artifacts || {},
       note: compactNote(offer),
       ...(sourceMeta ? { sourceMeta } : {}),
@@ -188,6 +370,10 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
         key: offer.key || null,
         bodyChars: Number.isFinite(Number(offer.bodyChars)) ? Number(offer.bodyChars) : null,
         bodyPartial: jobDescriptionIsPartial(offer),
+        qualificationUnknowns: Array.isArray(offer.qualificationUnknowns)
+          ? [...new Set(offer.qualificationUnknowns.map(String).filter(Boolean))].slice(0, 8)
+          : [],
+        unverified: offer.source === "ai-web-search",
         possibleDuplicate: Boolean(offer.possibleDuplicate),
       },
     };

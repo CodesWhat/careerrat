@@ -3,12 +3,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
 import { guardedFetch } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { assessCompensationFloors } from "../profile/compensation.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
 import {
   fetchCareerOpsProvider,
   inferCareerOpsProvider,
   isCareerOpsProviderSupported,
 } from "../providers/career-ops-registry.mjs";
+import {
+  fetchCulinaryAgents,
+  fetchHcareers,
+  fetchHospitalityOnline,
+  fetchIHireHospitality,
+  fetchOysterLink,
+} from "../providers/hospitality-public.mjs";
 import { fetchRemoteOk } from "../providers/remoteok.mjs";
 import { fetchRemotive } from "../providers/remotive.mjs";
 import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
@@ -33,9 +41,14 @@ const RSS_TIMEOUT_MS = 15_000;
 // as a small registry (rather than inline in scanBoards) so countDeterministicSources
 // in first-search-run.mjs can check provider support without duplicating the list.
 const BOARD_PROVIDERS = {
-  remoteok: fetchRemoteOk,
-  remotive: fetchRemotive,
-  workingnomads: fetchWorkingNomads,
+  remoteok: (entry, { fetchImpl }) => fetchRemoteOk(entry, fetchImpl),
+  remotive: (entry, { fetchImpl }) => fetchRemotive(entry, fetchImpl),
+  workingnomads: (entry, { fetchImpl }) => fetchWorkingNomads(entry, fetchImpl),
+  culinaryagents: fetchCulinaryAgents,
+  oysterlink: fetchOysterLink,
+  hcareers: fetchHcareers,
+  hospitalityonline: fetchHospitalityOnline,
+  ihirehospitality: fetchIHireHospitality,
 };
 
 export function isBoardProviderSupported(provider) {
@@ -325,6 +338,7 @@ export function buildLocationFilter(locationFilter = null) {
     if (!hasPolicy) return true;
     const lower = location.toLowerCase();
     if (alwaysAllow.some((term) => keywordMatches(lower, term))) return true;
+    if (placeMatchesAllowed(location, alwaysAllow)) return true;
     if (block.some((term) => keywordMatches(lower, term))) return false;
     return allow.some((term) => keywordMatches(lower, term));
   };
@@ -336,19 +350,86 @@ const EARLY_CAREER_TITLE_RE = /\b(intern(ship)?|junior|jr\.?|entry[ -]level|grad
 const SENIOR_TITLE_RE = /\b(senior|sr\.?|staff|principal|distinguished|fellow)\b/i;
 const REMOTE_RE = /\b(remote|work from home|wfh|distributed)\b/i;
 const HYBRID_RE = /\bhybrid\b/i;
-const ONSITE_RE = /\b(on[ -]?site|in[ -]?office|office[ -]?based)\b/i;
+const ONSITE_RE = /\b(on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b/i;
 const GLOBAL_REMOTE_RE = /\b(worldwide|anywhere|global)\b/i;
 const US_REMOTE_RE = /\b(united states|u\.?s\.?a?\.?|us[- ](?:only|based)|north america)\b/i;
+const US_COUNTRY_ONLY_LOCATION_RE =
+  /^\s*(?:u\.?\s*s\.?(?:\s*a\.?)?|united\s+states(?:\s+of\s+america)?)\s*$/i;
+const US_BASED_CANDIDATE_RE =
+  /\b(?:all\s+)?candidates?\s+(?:must|required to)\s+be\s+(?:(?:based|located)\s+in\s+(?:the\s+)?(?:u\.?s\.?a?\.?|united states)|(?:u\.?s\.?a?\.?|united states)[ -]?based)\b/i;
 const FOREIGN_REMOTE_RE =
   /\b(de|ireland|united kingdom|uk|europe|emea|canada|india|asia|apac|australia|new zealand|singapore|germany|france|spain|portugal|poland|netherlands|sweden|norway|denmark|switzerland|israel|brazil|mexico)\b/i;
 const NO_SPONSORSHIP_RE =
   /\b(?:no|not|cannot|can't|unable to|do not|does not|won't|will not)\b[^.\n]{0,50}\b(?:visa )?sponsor(?:ship)?\b|\b(?:visa )?sponsorship\b[^.\n]{0,50}\b(?:not available|is unavailable)\b/i;
 const US_STATE_RE =
   /(?:^|[,\s])(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)(?:$|[,\s])/i;
+const FOREIGN_POSTAL_COUNTRY_SUFFIX_RE =
+  /\b(?:[A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{4,6})\s*,\s*[A-Z]{2}(?:\s*,\s*remote)?$/i;
+const US_STATE_NAMES = Object.freeze([
+  ["AL", "Alabama"],
+  ["AK", "Alaska"],
+  ["AZ", "Arizona"],
+  ["AR", "Arkansas"],
+  ["CA", "California"],
+  ["CO", "Colorado"],
+  ["CT", "Connecticut"],
+  ["DE", "Delaware"],
+  ["FL", "Florida"],
+  ["GA", "Georgia"],
+  ["HI", "Hawaii"],
+  ["ID", "Idaho"],
+  ["IL", "Illinois"],
+  ["IN", "Indiana"],
+  ["IA", "Iowa"],
+  ["KS", "Kansas"],
+  ["KY", "Kentucky"],
+  ["LA", "Louisiana"],
+  ["ME", "Maine"],
+  ["MD", "Maryland"],
+  ["MA", "Massachusetts"],
+  ["MI", "Michigan"],
+  ["MN", "Minnesota"],
+  ["MS", "Mississippi"],
+  ["MO", "Missouri"],
+  ["MT", "Montana"],
+  ["NE", "Nebraska"],
+  ["NV", "Nevada"],
+  ["NH", "New Hampshire"],
+  ["NJ", "New Jersey"],
+  ["NM", "New Mexico"],
+  ["NY", "New York"],
+  ["NC", "North Carolina"],
+  ["ND", "North Dakota"],
+  ["OH", "Ohio"],
+  ["OK", "Oklahoma"],
+  ["OR", "Oregon"],
+  ["PA", "Pennsylvania"],
+  ["RI", "Rhode Island"],
+  ["SC", "South Carolina"],
+  ["SD", "South Dakota"],
+  ["TN", "Tennessee"],
+  ["TX", "Texas"],
+  ["UT", "Utah"],
+  ["VT", "Vermont"],
+  ["VA", "Virginia"],
+  ["WA", "Washington"],
+  ["WV", "West Virginia"],
+  ["WI", "Wisconsin"],
+  ["WY", "Wyoming"],
+  ["DC", "District of Columbia"],
+]);
+const REMOTE_REGION_EXCLUSION_RE =
+  /\b(?:except|excluding|excluded|unavailable|not\s+available|cannot\s+hire|can't\s+hire|do\s+not\s+hire|does\s+not\s+hire|won't\s+hire|not\s+eligible|ineligible)\b/i;
 const EXPLICIT_ONSITE_BODY_RE =
-  /\b(?:fully|entirely|100%|strictly)\s+(?:on[ -]?site|in[ -]?office|office[ -]?based)\b|\b(?:on[ -]?site|in[ -]?office)\s+only\b/i;
-const OFFICE_CONTEXT_RE = /\b(?:office|on[ -]?site|in[ -]?office)\b/i;
+  /\b(?:fully|entirely|100%|strictly)\s+(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\b(?:on[ -]?site|in[ -]?office)\s+only\b|\b(?:location|workplace)\s*:\s*[^.\n]{0,80}\b(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\b(?:role|position|work)\s+(?:is|will be)\s+(?:fully\s+)?(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b|\bin[ -]?person\s+(?:role|position|work)\b/i;
+const REQUIRED_ONSITE_WORK_BODY_RE =
+  /\b(?:this|the)\s+(?:role|position|job)\s+(?:requires?|will require)\s+(?:(?:employees?|you)\s+to\s+)?(?:work(?:ing)?\s+)?(?:fully\s+)?(?:on[ -]?site|in[ -]?office|office[ -]?based|in[ -]?person)\b/i;
+const EXPLICIT_HYBRID_BODY_RE =
+  /\b(?:this|the)\s+(?:role|position|job)\s+(?:is|will be)\s+(?:a\s+)?hybrid\b|\b(?:this|the)\s+(?:role|position|job)\s+(?:follows?|uses?)\s+(?:a\s+)?hybrid\s+(?:work model|schedule)\b|\bthis\s+is\s+(?:a\s+)?hybrid\s+(?:role|position|job)\b|\bwe\s+(?:offer|use|follow|have)\s+(?:a\s+)?hybrid\s+(?:work model|schedule)\b|\b(?:work model|workplace|location)\s*:\s*hybrid\b/i;
+const OFFICE_CONTEXT_RE = /\b(?:office|on[ -]?site|in[ -]?office|in[ -]?person)\b/i;
 const REQUIRED_OFFICE_DAYS_RE = /\b(?:must|require(?:d|s)?|expect(?:ed|s)?|mandatory)\b/i;
+const DECLARATIVE_OFFICE_POSTURE_RE =
+  /\b(?:we|employees?|team(?: members)?)\s+(?:all\s+)?(?:work|commute|come|are)\b[^.\n]{0,80}\b(?:office|on[ -]?site|in[ -]?office|in[ -]?person)\b/i;
 const OFFICE_DAYS_RE =
   /\b(one|two|three|four|five|six|seven|[1-7])\s*days?\s*(?:\/\s*week|(?:per|a|each)\s+week)\b/gi;
 const OFFICE_DAY_WORDS = Object.freeze({
@@ -364,7 +445,12 @@ const OFFICE_DAY_WORDS = Object.freeze({
 function requiredOfficeDaysPerWeek(value) {
   let maximum = null;
   for (const sentence of String(value || "").split(/[.!?;\n]+/)) {
-    if (!OFFICE_CONTEXT_RE.test(sentence) || !REQUIRED_OFFICE_DAYS_RE.test(sentence)) continue;
+    if (
+      !OFFICE_CONTEXT_RE.test(sentence) ||
+      (!REQUIRED_OFFICE_DAYS_RE.test(sentence) && !DECLARATIVE_OFFICE_POSTURE_RE.test(sentence))
+    ) {
+      continue;
+    }
     for (const match of sentence.matchAll(OFFICE_DAYS_RE)) {
       const raw = match[1].toLowerCase();
       const days = OFFICE_DAY_WORDS[raw] || Number(raw);
@@ -399,11 +485,50 @@ const NEW_YORK_CITY_ALIASES = new Set([
   "new york ny",
   "new york new york",
   "manhattan ny",
+  "manhattan new york",
   "brooklyn ny",
+  "brooklyn new york",
   "queens ny",
+  "queens new york",
   "bronx ny",
+  "bronx new york",
   "staten island ny",
+  "staten island new york",
 ]);
+const NEW_YORK_CITY_POSTAL_RANGES = Object.freeze([
+  [10001, 10282],
+  [10301, 10314],
+  [10451, 10475],
+  [11004, 11005],
+  [11101, 11109],
+  [11201, 11256],
+  [11351, 11697],
+]);
+const NEW_YORK_CITY_COUNTRY_LABELS = new Set([
+  "new york usa",
+  "new york united states",
+  "new york united states of america",
+]);
+const SAN_FRANCISCO_BAY_AREA_ALIASES = new Set([
+  "bay area",
+  "sf bay area",
+  "san francisco bay area",
+  "san francisco",
+  "san francisco ca",
+  "oakland",
+  "oakland ca",
+  "berkeley",
+  "berkeley ca",
+]);
+
+function hasNewYorkCityPostalCode(value) {
+  return [...String(value || "").matchAll(/\b(\d{5})(?:-\d{4})?\b/g)].some((match) => {
+    const postalCode = Number(match[1]);
+    return NEW_YORK_CITY_POSTAL_RANGES.some(
+      ([minimum, maximum]) => postalCode >= minimum && postalCode <= maximum
+    );
+  });
+}
 
 function normalizePlace(value) {
   const normalized = String(value || "")
@@ -411,7 +536,31 @@ function normalizePlace(value) {
     .replace(/\b(remote|hybrid|on[ -]?site|in[ -]?office)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-  return NEW_YORK_CITY_ALIASES.has(normalized) ? "new york city" : normalized;
+  if (/(?:^| )new york(?: |$)/.test(normalized) && /\b\d{5}(?: \d{4})?\b/.test(normalized)) {
+    return hasNewYorkCityPostalCode(normalized) ? "new york city" : normalized;
+  }
+  if (NEW_YORK_CITY_COUNTRY_LABELS.has(normalized)) return "new york city";
+  if (placeContainsAlias(normalized, NEW_YORK_CITY_ALIASES)) return "new york city";
+  if (placeContainsAlias(normalized, SAN_FRANCISCO_BAY_AREA_ALIASES)) {
+    return "san francisco bay area";
+  }
+  return normalized;
+}
+
+function placeContainsAlias(normalized, aliases) {
+  if (!normalized) return false;
+  return [...aliases].some((alias) =>
+    new RegExp(`(?:^| )${escapeRegExp(alias)}(?: |$)`).test(normalized)
+  );
+}
+
+function listedPlaces(value) {
+  const source = String(value || "").trim();
+  if (!source) return [];
+  return source
+    .split(/\s*(?:;|\||•|\n|\s\/\s)\s*/)
+    .map((place) => place.trim())
+    .filter(Boolean);
 }
 
 function coordinatesForPlace(value) {
@@ -458,18 +607,51 @@ function seniorityEligibility(offer, config) {
 
 function homeLooksUs(home) {
   return (
-    US_STATE_RE.test(String(home || "")) ||
+    homeRegionAliases(home).length > 0 ||
     /\bunited states|\busa\b/i.test(String(home || "")) ||
     NEW_YORK_CITY_ALIASES.has(normalizePlace(home))
   );
 }
 
+function homeRegionAliases(home) {
+  const source = String(home || "");
+  const normalized = normalizePlace(source);
+  const aliases = new Set();
+  for (const [code, name] of US_STATE_NAMES) {
+    const codeMatch = new RegExp(`(?:^|[^a-z])${code.toLowerCase()}(?:$|[^a-z])`, "i").test(source);
+    const normalizedName = name.toLowerCase();
+    if (codeMatch || normalized.includes(normalizedName)) {
+      aliases.add(code.toLowerCase());
+      aliases.add(normalizedName);
+    }
+  }
+  if (NEW_YORK_CITY_ALIASES.has(normalized)) {
+    aliases.add("ny");
+    aliases.add("new york");
+  }
+  return [...aliases];
+}
+
+function remoteExcludesHomeRegion(value, home) {
+  const aliases = homeRegionAliases(home);
+  if (!aliases.length) return false;
+  return String(value || "")
+    .split(/[.!?;\n]+/)
+    .some(
+      (clause) =>
+        REMOTE_REGION_EXCLUSION_RE.test(clause) &&
+        aliases.some((alias) => new RegExp(`\\b${escapeRegExp(alias)}\\b`, "i").test(clause))
+    );
+}
+
 function placeMatchesAllowed(location, places) {
-  const normalized = normalizePlace(location);
-  if (!normalized) return false;
-  return places.some((place) => {
-    const candidate = normalizePlace(place);
-    return candidate && (normalized.includes(candidate) || candidate.includes(normalized));
+  return listedPlaces(location).some((listedPlace) => {
+    const normalized = normalizePlace(listedPlace);
+    if (!normalized) return false;
+    return places.some((place) => {
+      const candidate = normalizePlace(place);
+      return candidate && (normalized.includes(candidate) || candidate.includes(normalized));
+    });
   });
 }
 
@@ -489,9 +671,14 @@ function commuteEligibility(location, profileLocation) {
           longitude: Number(profileLocation.home_longitude),
         }
       : coordinatesForPlace(home);
-  const jobCoordinates = coordinatesForPlace(location);
-  if (Number.isFinite(radius) && radius > 0 && homeCoordinates && jobCoordinates) {
-    const distanceMiles = haversineMiles(homeCoordinates, jobCoordinates);
+  const distances = homeCoordinates
+    ? listedPlaces(location)
+        .map((place) => coordinatesForPlace(place))
+        .filter(Boolean)
+        .map((jobCoordinates) => haversineMiles(homeCoordinates, jobCoordinates))
+    : [];
+  if (Number.isFinite(radius) && radius > 0 && homeCoordinates && distances.length > 0) {
+    const distanceMiles = Math.min(...distances);
     return {
       eligible: distanceMiles <= radius,
       reason: distanceMiles <= radius ? undefined : "outside-commute-radius",
@@ -511,31 +698,57 @@ function locationEligibility(offer, config) {
     (Array.isArray(profileLocation?.relocation) && profileLocation.relocation.length > 0) ||
     ["remote", "hybrid", "onsite"].some((mode) => typeof profileLocation?.[mode] === "boolean");
   if (!hasLocationPolicy) return { eligible: true };
-  if (!location) return { eligible: true, unknown: "location" };
 
   const officeDays = requiredOfficeDaysPerWeek(body);
-  const bodyOnsite = EXPLICIT_ONSITE_BODY_RE.test(body) || (officeDays != null && officeDays >= 4);
-  const bodyHybrid = !bodyOnsite && officeDays != null && officeDays > 0;
-  const remote = REMOTE_RE.test(`${title}\n${location}`) && !bodyHybrid && !bodyOnsite;
+  const conditional = conditionalLocationPosture(body);
+  const requiredOnsiteWork = REQUIRED_ONSITE_WORK_BODY_RE.test(body);
+  const bodyOnsite =
+    EXPLICIT_ONSITE_BODY_RE.test(body) ||
+    (officeDays != null && officeDays >= 4) ||
+    (requiredOnsiteWork && officeDays == null);
+  const bodyHybrid =
+    !bodyOnsite && (EXPLICIT_HYBRID_BODY_RE.test(body) || (officeDays != null && officeDays > 0));
+  if (!location && !conditional && !bodyOnsite && !bodyHybrid) {
+    return { eligible: true, unknown: "location" };
+  }
+  if (conditional) {
+    const home = String(profileLocation?.home || "").trim();
+    const hybridCommute = commuteEligibility(conditional.hybridNear, profileLocation);
+    const displayLocation = `Remote outside ${conditional.remoteOutside} · Hybrid near ${conditional.hybridNear}`;
+    if (conditional.usOnly && !homeLooksUs(home)) {
+      return { eligible: false, reason: "remote-region-mismatch" };
+    }
+    if (hybridCommute.eligible) {
+      if (profileLocation.hybrid !== true) {
+        return { eligible: false, reason: "hybrid-not-allowed" };
+      }
+      if (officeDaysExceedPreference(officeDays, profileLocation)) {
+        return { eligible: false, reason: "office-days-exceed-preference" };
+      }
+      return { ...hybridCommute, displayLocation };
+    }
+    if (profileLocation.remote !== true) {
+      return { eligible: false, reason: "remote-not-allowed" };
+    }
+    if (profileLocation.remote_scope !== "worldwide" && !homeLooksUs(home)) {
+      return { eligible: false, reason: "remote-region-unverified" };
+    }
+    return { eligible: true, displayLocation };
+  }
+
+  const countryWideUsRemote =
+    profileLocation.remote === true &&
+    homeLooksUs(profileLocation.home) &&
+    US_COUNTRY_ONLY_LOCATION_RE.test(location);
+  const remote =
+    (REMOTE_RE.test(`${title}\n${location}`) || countryWideUsRemote) && !bodyHybrid && !bodyOnsite;
   const hybrid = HYBRID_RE.test(`${title}\n${location}`) || bodyHybrid;
   const onsite = ONSITE_RE.test(`${title}\n${location}`) || bodyOnsite;
   const hasExplicitModes = ["remote", "hybrid", "onsite"].some(
     (mode) => typeof profileLocation?.[mode] === "boolean"
   );
 
-  const savedMaxOfficeDays = profileLocation.max_commute_days_per_week;
-  const maxOfficeDays =
-    savedMaxOfficeDays === null ||
-    savedMaxOfficeDays === undefined ||
-    String(savedMaxOfficeDays).trim() === ""
-      ? null
-      : Number(savedMaxOfficeDays);
-  if (
-    officeDays != null &&
-    Number.isInteger(maxOfficeDays) &&
-    maxOfficeDays >= 0 &&
-    officeDays > maxOfficeDays
-  ) {
+  if (officeDaysExceedPreference(officeDays, profileLocation)) {
     return { eligible: false, reason: "office-days-exceed-preference" };
   }
 
@@ -546,11 +759,16 @@ function locationEligibility(offer, config) {
     if (hasExplicitModes && profileLocation.remote !== true) {
       return { eligible: false, reason: "remote-not-allowed" };
     }
+    if (remoteExcludesHomeRegion(`${location}\n${body}`, profileLocation.home)) {
+      return { eligible: false, reason: "remote-home-region-excluded" };
+    }
     if (profileLocation.remote_scope === "worldwide") return { eligible: true };
     if (homeLooksUs(profileLocation.home)) {
       const local = commuteEligibility(location, profileLocation);
       if (local.eligible) return { eligible: true };
-      const usRemoteLocation = US_REMOTE_RE.test(location) || US_STATE_RE.test(location);
+      const foreignPostalCountry = FOREIGN_POSTAL_COUNTRY_SUFFIX_RE.test(location);
+      const usRemoteLocation =
+        US_REMOTE_RE.test(location) || (US_STATE_RE.test(location) && !foreignPostalCountry);
       if (FOREIGN_REMOTE_RE.test(location) && !usRemoteLocation) {
         return { eligible: false, reason: "remote-region-mismatch" };
       }
@@ -572,6 +790,33 @@ function locationEligibility(offer, config) {
     return { eligible: false, reason: hybrid ? "hybrid-not-allowed" : "onsite-not-allowed" };
   }
   return commuteEligibility(location, profileLocation);
+}
+
+function officeDaysExceedPreference(officeDays, profileLocation) {
+  const savedMaxOfficeDays = profileLocation?.max_commute_days_per_week;
+  const maxOfficeDays =
+    savedMaxOfficeDays === null ||
+    savedMaxOfficeDays === undefined ||
+    String(savedMaxOfficeDays).trim() === ""
+      ? null
+      : Number(savedMaxOfficeDays);
+  return (
+    officeDays != null &&
+    Number.isInteger(maxOfficeDays) &&
+    maxOfficeDays >= 0 &&
+    officeDays > maxOfficeDays
+  );
+}
+
+function conditionalLocationPosture(body) {
+  const match = String(body || "").match(
+    /\bremote\s+(?:position|role)\s+for\s+candidates\s+outside\s+(?:of\s+)?(.+?)\s+and\s+(?:a\s+)?hybrid\s+(?:position|role)\s+for\s+candidates\s+within\s+commuting\s+distance\s+to\s+(.+?)(?:[.;]|$)/i
+  );
+  if (!match) return null;
+  const remoteOutside = match[1].trim().replace(/^(?:the\s+)/i, "the ");
+  const hybridNear = match[2].trim();
+  if (!remoteOutside || !hybridNear) return null;
+  return { remoteOutside, hybridNear, usOnly: US_BASED_CANDIDATE_RE.test(body) };
 }
 
 function maxPostingAgeDays(config = {}) {
@@ -596,15 +841,27 @@ function postingAgeEligibility(offer, config, now) {
 }
 
 function salaryEligibility(offer, config) {
-  const floor = Number(config?.profile?.compensation?.minimum_base);
-  const band = extractCompBand(
-    [offer?.comp, offer?.bodyText, offer?.description].filter(Boolean).join("\n")
-  );
-  if (!band) return { eligible: true, unknown: "compensation" };
-  if (Number.isFinite(floor) && floor > 0 && band.max < floor) {
-    return { eligible: false, reason: "comp-below-floor", band };
+  const compensation = config?.profile?.compensation || {};
+  const bands = extractCompensationBands(compensationEvidenceText(offer));
+  const standing = assessCompensationFloors({
+    baseBand: bands.base,
+    annualEarningsBand: bands.annualEarnings,
+    minimumBase: compensation.minimum_base,
+    minimumAnnualEarnings: compensation.minimum_annual_earnings,
+  });
+  if (standing.base === "below") {
+    return { eligible: false, reason: "comp-below-floor", band: bands.base };
   }
-  return { eligible: true };
+  if (standing.annualEarnings === "below") {
+    return {
+      eligible: false,
+      reason: "annual-earnings-below-floor",
+      annualEarningsBand: bands.annualEarnings,
+    };
+  }
+  const unknown =
+    standing.base === "unknown" || standing.annualEarnings === "unknown" ? "compensation" : null;
+  return { eligible: true, unknown };
 }
 
 function contentEligibility(offer, config) {
@@ -618,6 +875,123 @@ function contentEligibility(offer, config) {
   return { eligible: true };
 }
 
+const QUALIFICATION_BUCKETS = Object.freeze({
+  seniority: "filteredSeniority",
+  location: "filteredLocation",
+  age: "filteredAge",
+  salary: "filteredSalary",
+  eligibility: "filteredEligibility",
+});
+
+function qualifyCandidateOffer(
+  offer,
+  {
+    config = {},
+    now = Date.now(),
+    locationFilter = () => true,
+    deferBodyDependentPolicy = false,
+  } = {}
+) {
+  const seniority = seniorityEligibility(offer, config);
+  if (!seniority.eligible) {
+    return { eligible: false, bucket: "seniority", reason: seniority.reason };
+  }
+  if (deferBodyDependentPolicy) {
+    const age = postingAgeEligibility(offer, config, Number(now));
+    if (!age.eligible) return { eligible: false, bucket: "age", reason: age.reason };
+    return {
+      eligible: true,
+      qualificationUnknowns: ["location", "compensation", age.unknown].filter(Boolean),
+    };
+  }
+  if (!locationFilter(offer.location || "", offer.url, offer.title, offer)) {
+    return { eligible: false, bucket: "location", reason: "location-policy-mismatch" };
+  }
+  const qualifiedLocation = locationEligibility(offer, config);
+  if (!qualifiedLocation.eligible) {
+    return {
+      eligible: false,
+      bucket: "location",
+      reason: qualifiedLocation.reason,
+      ...(qualifiedLocation.distanceMiles == null
+        ? {}
+        : { distanceMiles: qualifiedLocation.distanceMiles }),
+    };
+  }
+  const age = postingAgeEligibility(offer, config, Number(now));
+  if (!age.eligible) return { eligible: false, bucket: "age", reason: age.reason };
+  const salary = salaryEligibility(offer, config);
+  if (!salary.eligible) {
+    return {
+      eligible: false,
+      bucket: "salary",
+      reason: salary.reason,
+      compBand: salary.band,
+      annualEarningsBand: salary.annualEarningsBand,
+    };
+  }
+  const content = contentEligibility(offer, config);
+  if (!content.eligible) {
+    return { eligible: false, bucket: "eligibility", reason: content.reason };
+  }
+  return {
+    eligible: true,
+    qualificationUnknowns: [qualifiedLocation.unknown, age.unknown, salary.unknown].filter(Boolean),
+    ...(qualifiedLocation.displayLocation
+      ? { displayLocation: qualifiedLocation.displayLocation }
+      : {}),
+  };
+}
+
+export function requalifyCanonicalOffers(
+  offers,
+  { config = {}, now = Date.now(), locationFilter = () => true } = {}
+) {
+  const result = {
+    kept: [],
+    filteredSeniority: [],
+    filteredLocation: [],
+    filteredAge: [],
+    filteredSalary: [],
+    filteredEligibility: [],
+  };
+  for (const offer of Array.isArray(offers) ? offers : []) {
+    const qualification = qualifyCandidateOffer(offer, { config, now, locationFilter });
+    if (!qualification.eligible) {
+      const bucket = QUALIFICATION_BUCKETS[qualification.bucket];
+      result[bucket].push({
+        ...offer,
+        qualificationReason: qualification.reason,
+        ...(qualification.distanceMiles == null
+          ? {}
+          : { distanceMiles: qualification.distanceMiles }),
+        ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
+        ...(qualification.annualEarningsBand
+          ? { annualEarningsBand: qualification.annualEarningsBand }
+          : {}),
+      });
+      continue;
+    }
+    const qualifiedOffer = qualification.displayLocation
+      ? { ...offer, location: qualification.displayLocation }
+      : offer;
+    const rating = scoreSourcedOffer(qualifiedOffer, config);
+    if (rating.ruleFlags?.includes("title-target-mismatch")) {
+      result.filteredSeniority.push({
+        ...qualifiedOffer,
+        qualificationReason: "title-target-mismatch",
+      });
+      continue;
+    }
+    result.kept.push({
+      ...qualifiedOffer,
+      qualificationUnknowns: qualification.qualificationUnknowns,
+      ...rating,
+    });
+  }
+  return result;
+}
+
 function scoreSourcedOfferFromConfig(
   offer = {},
   { targeting, profile, modes, familyOutcomes, roleSignals }
@@ -625,7 +999,8 @@ function scoreSourcedOfferFromConfig(
   const title = String(offer.title || "").toLowerCase();
   const company = String(offer.company || "").toLowerCase();
   const location = String(offer.location || "").toLowerCase();
-  const compText = String(offer.comp || "");
+  const compEvidence = resolveCompensationEvidence(offer);
+  const compText = compensationEvidenceText(offer, { includeBody: false });
   const body = String(offer.bodyText || offer.description || "");
   const text = `${title}\n${body}`.toLowerCase();
   const hasBody = body.trim().length > 300;
@@ -701,7 +1076,7 @@ function scoreSourcedOfferFromConfig(
     }
   }
   for (const term of bucketTitles.filter(Boolean)) {
-    if (keywordMatches(title, term) || boundedRoleTitleEquivalent(title, term)) {
+    if (targetRoleTitleMatches(title, [term])) {
       setBase(82, `matches target title: ${term}`);
     }
   }
@@ -734,28 +1109,56 @@ function scoreSourcedOfferFromConfig(
     }
   }
 
-  // --- Comp floor from profile.compensation.minimum_base ---
+  // --- Compensation floors ---
   const minimumBase =
     profile && profile.compensation && profile.compensation.minimum_base != null
       ? Number(profile.compensation.minimum_base)
       : null;
-  const comp = extractCompBand(`${compText}\n${body}`);
-  if (minimumBase !== null && Number.isFinite(minimumBase)) {
-    if (comp) {
-      if (comp.max < minimumBase) {
+  const minimumAnnualEarnings =
+    profile?.compensation?.minimum_annual_earnings != null
+      ? Number(profile.compensation.minimum_annual_earnings)
+      : null;
+  const hasMinimumBase = Number.isFinite(minimumBase) && minimumBase > 0;
+  const hasMinimumAnnualEarnings =
+    Number.isFinite(minimumAnnualEarnings) && minimumAnnualEarnings > 0;
+  const compBands = extractCompensationBands(`${compText}\n${body}`);
+  const compStanding = assessCompensationFloors({
+    baseBand: compBands.base,
+    annualEarningsBand: compBands.annualEarnings,
+    minimumBase: hasMinimumBase ? minimumBase : null,
+    minimumAnnualEarnings: hasMinimumAnnualEarnings ? minimumAnnualEarnings : null,
+  });
+  if (hasMinimumBase) {
+    if (compBands.base) {
+      if (compStanding.base === "below") {
         add(-24, "base below floor");
         flag("comp-below-floor");
-      } else if (comp.min < minimumBase) {
+      } else if (compStanding.base === "overlap") {
         add(-6, "must land top of band");
         flag("top-of-band-only");
       } else {
         add(4, "comp clears floor");
       }
     } else {
-      flag("comp-unposted");
+      flag(compEvidence.unclassifiedComp ? "comp-uncertain" : "comp-unposted");
     }
   } else {
-    if (!comp) flag("comp-unposted");
+    if (!compBands.base && !compBands.annualEarnings) {
+      flag(compEvidence.unclassifiedComp ? "comp-uncertain" : "comp-unposted");
+    }
+  }
+  if (hasMinimumAnnualEarnings) {
+    if (compStanding.annualEarnings === "below") {
+      add(-24, "annual earnings below floor");
+      flag("annual-earnings-below-floor");
+    } else if (compStanding.annualEarnings === "overlap") {
+      add(-6, "annual earnings range overlaps floor");
+      flag("annual-earnings-overlap");
+    } else if (compStanding.annualEarnings === "clear") {
+      add(4, "annual earnings clear floor");
+    } else {
+      flag("annual-earnings-unverified");
+    }
   }
 
   // --- Location bonus from profile.location ---
@@ -797,7 +1200,7 @@ function scoreSourcedOfferFromConfig(
 
   const clamped = Math.max(35, Math.min(95, Math.round(score)));
   return {
-    fit: fitFromScore(clamped),
+    fit: fitFromScore(clamped, targeting?.fit_bands),
     score: clamped,
     gate: gateFromScoreAndFlags(clamped, flags, modes),
     ratingReason: reasons.slice(0, 5).join("; "),
@@ -810,17 +1213,89 @@ export function scoreSourcedOffer(offer = {}, config = {}) {
   return scoreSourcedOfferFromConfig(offer, config);
 }
 
-export function fitFromScore(score) {
-  if (score >= 82) return "high";
-  if (score >= 65) return "med";
+export function fitFromScore(score, fitBands) {
+  const savedHigh =
+    fitBands?.high_min == null || String(fitBands.high_min).trim() === ""
+      ? Number.NaN
+      : Number(fitBands.high_min);
+  const savedMed =
+    fitBands?.med_min == null || String(fitBands.med_min).trim() === ""
+      ? Number.NaN
+      : Number(fitBands.med_min);
+  const highMin = Number.isFinite(savedHigh) ? savedHigh : 85;
+  const medMin = Number.isFinite(savedMed) ? savedMed : 65;
+  if (score >= Math.max(highMin, medMin)) return "high";
+  if (score >= Math.min(highMin, medMin)) return "med";
   return "stretch";
+}
+
+export function applyPresentationCaps(
+  offers,
+  { companyPresentationCounts = new Map(), perCompanyCap = Infinity, limit = Infinity } = {}
+) {
+  const candidates = (Array.isArray(offers) ? offers : []).map((offer, inputIndex) => ({
+    offer,
+    inputIndex,
+  }));
+  const normalizedCompanyCap = Number(perCompanyCap);
+  const companyCap =
+    Number.isFinite(normalizedCompanyCap) && normalizedCompanyCap > 0
+      ? normalizedCompanyCap
+      : Infinity;
+  if (Number.isFinite(companyCap)) {
+    candidates.sort((left, right) => {
+      const scoreDelta = Number(right.offer.score || 0) - Number(left.offer.score || 0);
+      if (scoreDelta) return scoreDelta;
+      const rightPosted = Date.parse(String(right.offer.postedAt || ""));
+      const leftPosted = Date.parse(String(left.offer.postedAt || ""));
+      if (
+        Number.isFinite(rightPosted) &&
+        Number.isFinite(leftPosted) &&
+        rightPosted !== leftPosted
+      ) {
+        return rightPosted - leftPosted;
+      }
+      return left.inputIndex - right.inputIndex;
+    });
+  }
+
+  const presented = [];
+  const overflow = [];
+  for (const { offer } of candidates) {
+    const companyKey = String(offer.company || "")
+      .trim()
+      .toLowerCase();
+    const companyCount = Number(companyPresentationCounts.get(companyKey) || 0);
+    const { _qualificationInputIndex, ...cleanOffer } = offer;
+    if (companyCount >= companyCap) {
+      overflow.push({ ...cleanOffer, qualificationReason: "per-company-cap" });
+      continue;
+    }
+    companyPresentationCounts.set(companyKey, companyCount + 1);
+    presented.push(cleanOffer);
+  }
+
+  const normalizedLimit = Number(limit);
+  const runLimit =
+    Number.isFinite(normalizedLimit) && normalizedLimit > 0 ? normalizedLimit : Infinity;
+  const kept = presented.slice(0, runLimit);
+  overflow.push(
+    ...presented.slice(runLimit).map((offer) => ({
+      ...offer,
+      qualificationReason: "run-presentation-limit",
+    }))
+  );
+  return { kept, overflow };
 }
 
 function gateFromScoreAndFlags(score, flags, modes = {}) {
   if (
     flags.some(
       (flag) =>
-        flag.startsWith("cut-risk") || flag === "excluded-company" || flag === "comp-below-floor"
+        flag.startsWith("cut-risk") ||
+        flag === "excluded-company" ||
+        flag === "comp-below-floor" ||
+        flag === "annual-earnings-below-floor"
     )
   )
     return "likely-cut";
@@ -828,7 +1303,10 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
     flags.some(
       (flag) =>
         flag === "comp-unposted" ||
+        flag === "comp-uncertain" ||
         flag === "top-of-band-only" ||
+        flag === "annual-earnings-overlap" ||
+        flag === "annual-earnings-unverified" ||
         flag === "ca-comp-unverified" ||
         flag === "family-cold"
     )
@@ -838,25 +1316,244 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
   return "review";
 }
 
-export function extractCompBand(text = "") {
+const ANNUAL_WORK_HOURS = 2_080;
+const BASE_COMP_LABEL_RE =
+  /\b(?:base\s+(?:salary|pay|comp(?:ensation)?)|salary(?:\s+(?:range|band))?)\b/i;
+const ADJACENT_BARE_BASE_PREFIX_RE = /(?:^|[:;,|•])\s*base\s*:?\s*$/i;
+const ADJACENT_BARE_BASE_SUFFIX_RE =
+  /^[\s,]*(?:(?:USD|CAD|MXN|EUR|GBP)\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b(?=\s*(?:$|[,.;:!?()[\]{}•–—]|(?:per\s+(?:year|annum|hour|hr)|a\s+year|annually|annualized|hourly|\/\s*(?:year|yr|hour|hr))\b))/iu;
+const VARIABLE_COMP_LABEL_RE =
+  /\b(?:on-target\s+earnings|ote|bonus|equity|commission|total\s+comp(?:ensation)?|variable\s+(?:pay|compensation)|incentive\s+(?:pay|compensation))\b/i;
+const ANNUAL_EARNINGS_LABEL_RE =
+  /\b(?:annual\s+(?:cash\s+)?earnings|estimated\s+annual\s+earnings|on-target\s+earnings|ote|total\s+cash\s+comp(?:ensation)?|including\s+(?:tips|commissions?))\b/i;
+const EQUITY_COMP_LABEL_RE = /\b(?:equity|stock|options?)\b/i;
+const HOURLY_COMP_RE = /\b(?:hourly|per\s+(?:hour|hr))\b|\/\s*(?:hour|hr)\b/i;
+const WEEKLY_HOURS_RE = /\b(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:\/|per|a|each)\s*week\b/i;
+const ANNUAL_PAY_UNIT_RE =
+  /\b(?:annually|annualized|per\s+(?:year|annum)|a\s+year)\b|\/\s*(?:year|yr)\b/i;
+
+function annualWorkHours(line) {
+  const explicit = String(line || "").match(WEEKLY_HOURS_RE);
+  if (!explicit) return ANNUAL_WORK_HOURS;
+  const hours = Number(explicit[1]);
+  return Number.isFinite(hours) && hours > 0 && hours <= 80
+    ? Math.round(hours * 52)
+    : ANNUAL_WORK_HOURS;
+}
+
+function isCalendarYear(value) {
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric >= 1900 && numeric <= 2100;
+}
+
+function plausibleCompensationMatch(line, match, values, suffixes, { hourly = false } = {}) {
+  const matchedText = String(match?.[0] || "");
+  const monetaryMarker = /[$£€]|\b(?:USD|CAD|MXN|EUR|GBP)\b/i.test(matchedText);
+  const abbreviated = suffixes.some(
+    (suffix) =>
+      String(suffix || "")
+        .trim()
+        .toLowerCase() === "k"
+  );
+  if (values.some(isCalendarYear) && !monetaryMarker && !abbreviated) return false;
+  if (
+    values.some((value) => Number(value) < 1000) &&
+    !monetaryMarker &&
+    !abbreviated &&
+    !hourly &&
+    !ANNUAL_PAY_UNIT_RE.test(line)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function lastLabelIndex(value, pattern) {
+  let index = -1;
+  for (const match of value.matchAll(new RegExp(pattern.source, "gi"))) index = match.index;
+  return index;
+}
+
+export function extractCompBand(text = "", { baseOnly = false } = {}) {
   const source = String(text || "");
+  const explicitBaseCandidates = [];
+  const nonVariableCandidates = [];
   const candidates = [];
   const lines = source
     .split(/\n|\. /)
     .filter((line) => /\$|\b(compensation|salary|base|pay range|annual|usd)\b/i.test(line));
 
   for (const line of lines) {
-    const normalized = line.replace(/,/g, "");
+    const normalized = line.replace(/(?<=\d),(?=\d{3}\b)/g, "");
+    const explicitBase = BASE_COMP_LABEL_RE.test(line);
+    const variableComp = VARIABLE_COMP_LABEL_RE.test(line);
+    const annualEarnings = ANNUAL_EARNINGS_LABEL_RE.test(line);
+    const hourly = HOURLY_COMP_RE.test(line);
+    const workHours = annualWorkHours(line);
+    if (baseOnly && annualEarnings && !explicitBase) continue;
     const re =
-      /(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?\s*(?:-|–|—|to)\s*(?:usd\s*)?\$?\s*(\d{2,6}(?:\.\d+)?)(\s*k)?/gi;
+      /(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?\s{0,4}(?:-|–|—|to)\s{0,4}(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?/gi;
+    let foundRange = false;
     for (const match of normalized.matchAll(re)) {
-      const min = normalizeMoney(match[1], match[2]);
-      const max = normalizeMoney(match[3], match[4]);
-      if (min >= 50000 && max >= min && max <= 1200000) candidates.push({ min, max });
+      const prefix = normalized.slice(0, match.index);
+      const suffix = normalized.slice(match.index + match[0].length);
+      const prefixBareBaseMatch = prefix.match(ADJACENT_BARE_BASE_PREFIX_RE);
+      const prefixBareBaseIndex = prefixBareBaseMatch?.index ?? -1;
+      const baseLabelIndex = Math.max(
+        lastLabelIndex(prefix, BASE_COMP_LABEL_RE),
+        prefixBareBaseIndex
+      );
+      const variableLabelIndex = lastLabelIndex(prefix, VARIABLE_COMP_LABEL_RE);
+      const suffixBareBaseMatch = suffix.match(ADJACENT_BARE_BASE_SUFFIX_RE);
+      const suffixBareBaseIndex = suffixBareBaseMatch
+        ? suffixBareBaseMatch[0].toLowerCase().lastIndexOf("base")
+        : -1;
+      const suffixStrongBaseLabelIndex = suffix.search(BASE_COMP_LABEL_RE);
+      const suffixBaseLabelIndex =
+        suffixBareBaseIndex < 0
+          ? suffixStrongBaseLabelIndex
+          : suffixStrongBaseLabelIndex < 0
+            ? suffixBareBaseIndex
+            : Math.min(suffixBareBaseIndex, suffixStrongBaseLabelIndex);
+      const suffixVariableLabelIndex = suffix.search(VARIABLE_COMP_LABEL_RE);
+      const prefixIsBase = baseLabelIndex >= 0 && baseLabelIndex > variableLabelIndex;
+      const prefixIsVariable = variableLabelIndex >= 0 && variableLabelIndex > baseLabelIndex;
+      const rangeIsBase =
+        prefixIsBase ||
+        (!prefixIsVariable &&
+          suffixBaseLabelIndex >= 0 &&
+          (suffixVariableLabelIndex < 0 || suffixBaseLabelIndex < suffixVariableLabelIndex));
+      const rangeIsVariable =
+        prefixIsVariable ||
+        (!prefixIsBase &&
+          suffixVariableLabelIndex >= 0 &&
+          (suffixBaseLabelIndex < 0 || suffixVariableLabelIndex < suffixBaseLabelIndex));
+      const rangeIsHourly = rangeIsBase && hourly;
+      if (
+        !plausibleCompensationMatch(line, match, [match[1], match[3]], [match[2], match[4]], {
+          hourly: rangeIsHourly,
+        })
+      ) {
+        continue;
+      }
+      const min = rangeIsHourly ? Number(match[1]) * workHours : normalizeMoney(match[1], match[2]);
+      const max = rangeIsHourly ? Number(match[3]) * workHours : normalizeMoney(match[3], match[4]);
+      const minimum = rangeIsBase ? 1_000 : 50_000;
+      if (min >= minimum && max >= min && max <= 1200000) {
+        const candidate = { min, max };
+        candidates.push(candidate);
+        if (rangeIsBase) explicitBaseCandidates.push(candidate);
+        else if (!rangeIsVariable && !variableComp) nonVariableCandidates.push(candidate);
+        foundRange = true;
+      }
+    }
+    if (foundRange) continue;
+    if (!/\b(?:salary|base\s+(?:salary|pay)|annual\s+(?:salary|pay|compensation))\b/i.test(line)) {
+      continue;
+    }
+    if (variableComp && !explicitBase) {
+      continue;
+    }
+    const single = normalized.match(/(?:USD\s{0,4})?\$?\s{0,4}(\d{2,7}(?:\.\d+)?)(\s{0,4}k)?\b/i);
+    if (!single) continue;
+    if (
+      !plausibleCompensationMatch(line, single, [single[1]], [single[2]], {
+        hourly: explicitBase && hourly,
+      })
+    ) {
+      continue;
+    }
+    const amount =
+      explicitBase && hourly ? Number(single[1]) * workHours : normalizeMoney(single[1], single[2]);
+    const minimum = explicitBase ? 1_000 : 50_000;
+    if (amount >= minimum && amount <= 1200000) {
+      const candidate = { min: amount, max: amount };
+      candidates.push(candidate);
+      if (explicitBase) explicitBaseCandidates.push(candidate);
+      else if (!variableComp) nonVariableCandidates.push(candidate);
     }
   }
 
-  return candidates.sort((a, b) => b.max - b.min - (a.max - a.min) || b.max - a.max)[0] || null;
+  return (
+    explicitBaseCandidates[0] ||
+    (baseOnly ? null : nonVariableCandidates[0] || candidates[0]) ||
+    null
+  );
+}
+
+function extractAnnualEarningsBand(text = "") {
+  const lines = String(text || "")
+    .split(/\n|\. /)
+    .filter((line) => ANNUAL_EARNINGS_LABEL_RE.test(line) && !EQUITY_COMP_LABEL_RE.test(line));
+
+  for (const line of lines) {
+    const normalized = line.replace(/,/g, "");
+    const hourly = HOURLY_COMP_RE.test(line);
+    // An hourly base rate with "including tips" does not quantify the tips.
+    // Keep annual cash unknown until the posting supplies an annual amount.
+    if (hourly) continue;
+    const range = normalized.match(
+      /(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?\s{0,4}(?:-|–|—|to)\s{0,4}(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?/i
+    );
+    if (range) {
+      if (!plausibleCompensationMatch(line, range, [range[1], range[3]], [range[2], range[4]])) {
+        continue;
+      }
+      const min = normalizeMoney(range[1], range[2]);
+      const max = normalizeMoney(range[3], range[4]);
+      if (min >= 1_000 && max >= min && max <= 1_200_000) return { min, max };
+    }
+    const single = normalized.match(/(?:USD\s{0,4})?\$?\s{0,4}(\d{2,7}(?:\.\d+)?)(\s{0,4}k)?\b/i);
+    if (!single) continue;
+    if (!plausibleCompensationMatch(line, single, [single[1]], [single[2]])) continue;
+    const amount = normalizeMoney(single[1], single[2]);
+    if (amount >= 1_000 && amount <= 1_200_000) return { min: amount, max: amount };
+  }
+  return null;
+}
+
+export function extractCompensationBands(text = "") {
+  return {
+    base: extractCompBand(text, { baseOnly: true }),
+    annualEarnings: extractAnnualEarningsBand(text),
+  };
+}
+
+function classifyCompensationText(text = "") {
+  const value = String(text || "").trim();
+  if (!value) return "unknown";
+  const bands = extractCompensationBands(value);
+  if (bands.base && !bands.annualEarnings) return "base";
+  if (bands.annualEarnings && !bands.base) return "annual-earnings";
+  return bands.base && bands.annualEarnings ? "mixed" : "unknown";
+}
+
+export function resolveCompensationEvidence(offer = {}) {
+  const generic = String(offer.comp || "").trim();
+  const genericBasis = classifyCompensationText(generic);
+  const baseComp = String(offer.baseComp || "").trim() || (genericBasis === "base" ? generic : "");
+  const annualEarningsComp =
+    String(offer.annualEarningsComp || "").trim() ||
+    (genericBasis === "annual-earnings" ? generic : "");
+  return {
+    baseComp,
+    annualEarningsComp,
+    unclassifiedComp:
+      generic && generic !== baseComp && generic !== annualEarningsComp ? generic : "",
+  };
+}
+
+function compensationEvidenceText(offer = {}, { includeBody = true } = {}) {
+  const evidence = resolveCompensationEvidence(offer);
+  return [
+    evidence.baseComp ? `Base pay: ${evidence.baseComp}` : "",
+    evidence.annualEarningsComp ? `Annual earnings: ${evidence.annualEarningsComp}` : "",
+    evidence.unclassifiedComp ? `Compensation: ${evidence.unclassifiedComp}` : "",
+    includeBody ? offer?.bodyText : "",
+    includeBody ? offer?.description : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function normalizeMoney(value, suffix = "") {
@@ -1033,6 +1730,7 @@ export function filterAndDedupeOffers(
     companyPresentationCounts = new Map(),
     seenRunCompanyRoles = new Set(),
     perCompanyCap = Infinity,
+    deferPartialCandidatePolicy = false,
   }
 ) {
   const kept = [];
@@ -1099,39 +1797,32 @@ export function filterAndDedupeOffers(
         continue;
       }
     }
-    const seniority = seniorityEligibility(offer, config);
-    if (!seniority.eligible) {
-      filteredSeniority.push({ ...offer, qualificationReason: seniority.reason });
-      continue;
-    }
-    if (!locationFilter(offer.location || "", offer.url, offer.title, offer)) {
-      filteredLocation.push({ ...offer, qualificationReason: "location-policy-mismatch" });
-      continue;
-    }
-    const qualifiedLocation = locationEligibility(offer, config);
-    if (!qualifiedLocation.eligible) {
-      filteredLocation.push({
+    const qualification = qualifyCandidateOffer(offer, {
+      config,
+      now,
+      locationFilter,
+      deferBodyDependentPolicy: deferPartialCandidatePolicy && offer.bodyPartial === true,
+    });
+    if (!qualification.eligible) {
+      const bucket = QUALIFICATION_BUCKETS[qualification.bucket];
+      const buckets = {
+        filteredSeniority,
+        filteredLocation,
+        filteredAge,
+        filteredSalary,
+        filteredEligibility,
+      };
+      buckets[bucket].push({
         ...offer,
-        qualificationReason: qualifiedLocation.reason,
-        ...(qualifiedLocation.distanceMiles == null
+        qualificationReason: qualification.reason,
+        ...(qualification.distanceMiles == null
           ? {}
-          : { distanceMiles: qualifiedLocation.distanceMiles }),
+          : { distanceMiles: qualification.distanceMiles }),
+        ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
+        ...(qualification.annualEarningsBand
+          ? { annualEarningsBand: qualification.annualEarningsBand }
+          : {}),
       });
-      continue;
-    }
-    const age = postingAgeEligibility(offer, config, Number(now));
-    if (!age.eligible) {
-      filteredAge.push({ ...offer, qualificationReason: age.reason });
-      continue;
-    }
-    const salary = salaryEligibility(offer, config);
-    if (!salary.eligible) {
-      filteredSalary.push({ ...offer, qualificationReason: salary.reason, compBand: salary.band });
-      continue;
-    }
-    const content = contentEligibility(offer, config);
-    if (!content.eligible) {
-      filteredEligibility.push({ ...offer, qualificationReason: content.reason });
       continue;
     }
     const key = normalizeCompanyRoleKey(offer.company, offer.title);
@@ -1141,55 +1832,27 @@ export function filterAndDedupeOffers(
     const possibleDuplicate = seenCompanyRoles.has(key);
     if (possibleDuplicate) possibleDuplicates.push(offer);
     seenCompanyRoles.add(key);
-    const qualificationUnknowns = [qualifiedLocation.unknown, age.unknown, salary.unknown].filter(
-      Boolean
-    );
+    const qualifiedOffer = qualification.displayLocation
+      ? { ...offer, location: qualification.displayLocation }
+      : offer;
     qualified.push({
-      ...offer,
+      ...qualifiedOffer,
       key,
       reqId: req.id,
       possibleDuplicate,
-      qualificationUnknowns,
+      qualificationUnknowns: qualification.qualificationUnknowns,
       ...(titleRelevance ? { titleRelevance } : {}),
       _qualificationInputIndex: inputIndex,
-      ...(rating || scoreSourcedOffer(offer, config)),
+      ...(rating || scoreSourcedOffer(qualifiedOffer, config)),
     });
   }
 
-  // A company board is usually newest-first, but not all providers guarantee
-  // it. Rank the already-qualified survivors before applying the presentation
-  // cap so one employer cannot fill the default inbox with weaker roles.
-  const normalizedCap = Number(perCompanyCap);
-  const cap = Number.isFinite(normalizedCap) && normalizedCap > 0 ? normalizedCap : Infinity;
-  if (Number.isFinite(cap)) {
-    qualified.sort((left, right) => {
-      const scoreDelta = Number(right.score || 0) - Number(left.score || 0);
-      if (scoreDelta) return scoreDelta;
-      const rightPosted = Date.parse(String(right.postedAt || ""));
-      const leftPosted = Date.parse(String(left.postedAt || ""));
-      if (
-        Number.isFinite(rightPosted) &&
-        Number.isFinite(leftPosted) &&
-        rightPosted !== leftPosted
-      ) {
-        return rightPosted - leftPosted;
-      }
-      return left._qualificationInputIndex - right._qualificationInputIndex;
-    });
-  }
-  for (const offer of qualified) {
-    const companyKey = String(offer.company || "")
-      .trim()
-      .toLowerCase();
-    const presented = Number(companyPresentationCounts.get(companyKey) || 0);
-    const { _qualificationInputIndex, ...cleanOffer } = offer;
-    if (presented >= cap) {
-      overflow.push({ ...cleanOffer, qualificationReason: "per-company-cap" });
-      continue;
-    }
-    companyPresentationCounts.set(companyKey, presented + 1);
-    kept.push(cleanOffer);
-  }
+  const presentation = applyPresentationCaps(qualified, {
+    companyPresentationCounts,
+    perCompanyCap,
+  });
+  kept.push(...presentation.kept);
+  overflow.push(...presentation.overflow);
 
   return {
     kept,
@@ -1208,7 +1871,7 @@ export function filterAndDedupeOffers(
 
 export async function scanCompanies(
   config,
-  { fetchImpl = fetch, resolveHost, dispatcherFactory, companyFilter = null } = {}
+  { fetchImpl = fetch, resolveHost, dispatcherFactory, companyFilter = null, signal } = {}
 ) {
   const companies = (config.tracked_companies || [])
     .filter((entry) => entry && entry.enabled !== false)
@@ -1220,6 +1883,7 @@ export async function scanCompanies(
   const errors = [];
 
   for (const company of companies) {
+    signal?.throwIfAborted?.();
     const provider = inferProvider(company);
     if (!provider || !isCompanyProviderSupported(provider)) {
       errors.push({ company: company.name, error: "no supported provider inferred" });
@@ -1230,6 +1894,7 @@ export async function scanCompanies(
         fetchImpl,
         resolveHost,
         dispatcherFactory,
+        signal,
       });
       results.push(...jobs.map((job) => ({ ...job, source: `${provider}-api` })));
     } catch (error) {
@@ -1374,7 +2039,11 @@ export async function scanBoards(
     const provider = BOARD_PROVIDERS[providerId];
     try {
       const offers = provider
-        ? await provider(source, fetchImpl)
+        ? await provider(source, {
+            fetchImpl,
+            resolveHost,
+            dispatcherFactory,
+          })
         : await fetchProvider(providerId, source, { fetchImpl, resolveHost, dispatcherFactory });
       const sourceKind = source.source_type === "ats" ? "api" : "board";
       results.push(...offers.map((offer) => ({ ...offer, source: `${providerId}-${sourceKind}` })));

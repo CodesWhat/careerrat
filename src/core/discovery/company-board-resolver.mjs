@@ -209,12 +209,12 @@ async function assertSafeUrl(url, { lookupHost = defaultLookupHost } = {}) {
   }
 }
 
-async function fetchWithTimeout(url, fetchImpl, timeoutMs) {
+async function fetchWithTimeout(url, fetchImpl, timeoutMs, signal) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetchImpl(url.toString(), {
-      signal: controller.signal,
+      signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
       redirect: "manual",
     });
   } finally {
@@ -261,7 +261,7 @@ function linkPriority(url) {
   return 10;
 }
 
-function supportedResult({ seed, url, provider, observedAt, provenance: proof }) {
+function supportedResult({ seed, url, provider, provenance: proof }) {
   const companyName = String(seed?.name || "").trim();
   const companyKey = normalizeCompanyKey(companyName);
   const companyDomain = domainFromUrl(url);
@@ -282,23 +282,23 @@ function supportedResult({ seed, url, provider, observedAt, provenance: proof })
   };
 }
 
-function unsupportedResult({ seed, url, observedAt, provenance: proof }) {
+function genericPublicResult({ seed, url, provenance: proof }) {
   const companyName = String(seed?.name || "").trim();
   const companyKey = normalizeCompanyKey(companyName);
   return {
     ok: true,
-    status: "unsupported_public",
+    status: "generic_public",
     companyKey,
     companyName,
     companyDomain: domainFromUrl(url),
     careersUrl: url.toString(),
-    jobBoardUrl: "",
+    jobBoardUrl: url.toString(),
     atsProvider: null,
     apiUrl: "",
-    confidence: "low",
-    provenance: [...proof, provenance("public-page-cache", url, observedAt)],
-    proposedAction: "cache-only",
-    promotable: false,
+    confidence: "medium",
+    provenance: proof,
+    proposedAction: "approve-public-source",
+    promotable: true,
   };
 }
 
@@ -316,7 +316,7 @@ function cacheRecordFromResult(result, { existing = null, observedAt }) {
     first_resolved_at: existing?.first_resolved_at || observedAt,
     last_verified_at: observedAt,
     last_scan_result: existing?.last_scan_result || {
-      status: result.status === "supported_ats" ? "resolved" : "unsupported-public",
+      status: result.status === "supported_ats" ? "resolved" : "generic-public",
     },
     failure_count: 0,
     zero_job_count: 0,
@@ -329,14 +329,17 @@ function cacheRecordFromResult(result, { existing = null, observedAt }) {
 
 function resultFromCache(record) {
   if (!record) return null;
+  const genericPublic =
+    record.status === "generic_public" || record.status === "unsupported_public";
+  const publicUrl = record.job_board_url || record.careers_url || "";
   return {
     ok: true,
-    status: record.status || "unresolved",
+    status: genericPublic ? "generic_public" : record.status || "unresolved",
     companyKey: record.company_key,
     companyName: record.company_name,
     companyDomain: record.company_domain || "",
     careersUrl: record.careers_url || "",
-    jobBoardUrl: record.job_board_url || "",
+    jobBoardUrl: genericPublic ? publicUrl : record.job_board_url || "",
     atsProvider: record.ats_provider || null,
     apiUrl: record.api_url || "",
     confidence: record.confidence || "low",
@@ -346,10 +349,11 @@ function resultFromCache(record) {
           ...record.provenance,
         ]
       : [{ source: "cache-hit", url: record.job_board_url || record.careers_url || "" }],
-    proposedAction:
-      record.proposed_action ||
-      (record.status === "supported_ats" ? "approve-supported-ats" : "cache-only"),
-    promotable: Boolean(record.promotable ?? record.status === "supported_ats"),
+    proposedAction: genericPublic
+      ? "approve-public-source"
+      : record.proposed_action ||
+        (record.status === "supported_ats" ? "approve-supported-ats" : "cache-only"),
+    promotable: genericPublic || Boolean(record.promotable ?? record.status === "supported_ats"),
   };
 }
 
@@ -360,13 +364,11 @@ function readCachedResolution({ repoRoot, env, companyKey, companyDomain }) {
   return companyBoardResolutionGet({ repoRoot, env, companyDomain }).resolution;
 }
 
-function writeCachedResolution({ repoRoot, env, result, existing, observedAt }) {
+function writeCachedResolution({ repoRoot, env, result, existing, observedAt, stageResolution }) {
   if (!repoRoot) return result;
-  companyBoardResolutionUpsert({
-    repoRoot,
-    env,
-    resolution: cacheRecordFromResult(result, { existing, observedAt }),
-  });
+  const resolution = cacheRecordFromResult(result, { existing, observedAt });
+  if (typeof stageResolution === "function") stageResolution(resolution);
+  else companyBoardResolutionUpsert({ repoRoot, env, resolution });
   return result;
 }
 
@@ -410,7 +412,9 @@ async function resolveSupportedUrl({
   timeoutMs,
   depth,
   visited,
+  signal,
 }) {
+  signal?.throwIfAborted?.();
   await assertSafeUrl(url, { lookupHost });
   const provider = directProvider(url);
   if (provider) {
@@ -427,15 +431,15 @@ async function resolveSupportedUrl({
   }
 
   if (depth >= RESOLVER_REDIRECT_CAP) {
-    return unsupportedResult({ seed, url, observedAt, provenance: proof });
+    return genericPublicResult({ seed, url, observedAt, provenance: proof });
   }
 
   if (visited.has(url.toString())) {
-    return unsupportedResult({ seed, url, observedAt, provenance: proof });
+    return genericPublicResult({ seed, url, observedAt, provenance: proof });
   }
   visited.add(url.toString());
 
-  const response = await fetchWithTimeout(url, fetchImpl, timeoutMs);
+  const response = await fetchWithTimeout(url, fetchImpl, timeoutMs, signal);
   const redirected = redirectTarget(response, url);
   if (redirected) {
     await assertSafeUrl(redirected, { lookupHost });
@@ -455,6 +459,7 @@ async function resolveSupportedUrl({
       timeoutMs,
       depth: depth + 1,
       visited,
+      signal,
     });
   }
 
@@ -492,11 +497,12 @@ async function resolveSupportedUrl({
       timeoutMs,
       depth: depth + 1,
       visited,
+      signal,
     });
     if (result.status === "supported_ats") return result;
   }
 
-  return unsupportedResult({ seed, url, observedAt, provenance: pageProof });
+  return genericPublicResult({ seed, url, observedAt, provenance: pageProof });
 }
 
 export async function resolveCompanyBoard({
@@ -508,7 +514,10 @@ export async function resolveCompanyBoard({
   forceRefresh = false,
   now = new Date(),
   timeoutMs = RESOLVER_FETCH_TIMEOUT_MS,
+  signal,
+  stageResolution,
 } = {}) {
+  signal?.throwIfAborted?.();
   const companyName = String(seed?.name || "").trim();
   const companyKey = normalizeCompanyKey(companyName);
   if (!companyKey) {
@@ -539,7 +548,15 @@ export async function resolveCompanyBoard({
     timeoutMs,
     depth: 0,
     visited: new Set(),
+    signal,
   });
 
-  return writeCachedResolution({ repoRoot, env, result, existing, observedAt });
+  return writeCachedResolution({
+    repoRoot,
+    env,
+    result,
+    existing,
+    observedAt,
+    stageResolution,
+  });
 }

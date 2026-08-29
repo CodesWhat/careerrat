@@ -525,8 +525,9 @@ export function skillChatSubmitBlocked(thread) {
   return Boolean(thread && !cleanString(thread.chatId, 500));
 }
 
-export function skillChatEventNeedsHydration(type) {
-  return type === "result" || type === "error";
+export function skillChatEventNeedsHydration(type, raw) {
+  if (type === "result" || type === "error") return true;
+  return type === "assistant" && parseRaw(raw)?.answerMode === "yes-no";
 }
 
 export function skillChatStreamUrl(thread) {

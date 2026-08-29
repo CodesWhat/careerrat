@@ -107,9 +107,11 @@ import {
   buildCapExceededBody,
   buildResponseHeaders,
   buildTokenEntries,
+  buildUnpricedModelBody,
   buildUpstreamHeaders,
   buildUsageRow,
   fireAndForgetDbWrite,
+  isAllowedProxyRequest,
   newUsageAccumulator,
   normalizeUpstreamBase,
   parseProxyTokensEnv,
@@ -144,13 +146,57 @@ async function requireAuth(req, res, tokenEntries) {
   return auth;
 }
 
-function readRequestBody(req) {
+function readRequestBody(req, maxBytes) {
   return new Promise((resolve, reject) => {
+    const tooLarge = () => {
+      const error = new Error(`request body exceeds ${maxBytes} byte limit`);
+      error.status = 413;
+      error.code = "REQUEST_TOO_LARGE";
+      return error;
+    };
+    const declared = Number(req.headers?.["content-length"]);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      req.on("error", () => {});
+      req.resume();
+      reject(tooLarge());
+      return;
+    }
+
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
+    let size = 0;
+    let overflowed = false;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        overflowed = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (overflowed) reject(tooLarge());
+      else resolve(Buffer.concat(chunks));
+    });
     req.on("error", reject);
   });
+}
+
+function requestAbortGuard(req, res) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const abortIfUnfinished = () => {
+    if (!res.writableEnded) abort();
+  };
+  if (req.aborted) abort();
+  req.once("aborted", abort);
+  res.once("close", abortIfUnfinished);
+  return {
+    signal: controller.signal,
+    cleanup() {
+      req.off("aborted", abort);
+      res.off("close", abortIfUnfinished);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +215,7 @@ export function createProxyServer({
   meterDbUrl = null,
   meterDbKey = null,
   meterDbTable = "usage_events",
+  maxRequestBytes = 1024 * 1024,
   fetchImpl = fetch,
   env = process.env,
 } = {}) {
@@ -181,6 +228,8 @@ export function createProxyServer({
   // Per-tester spend cap: a global default (CAREERRAT_PROXY_USER_CAP_USD) plus
   // optional per-label overrides (CAREERRAT_PROXY_USER_CAPS). 0/absent = no cap.
   const globalUserCap = Number.isFinite(userCapUsd) && userCapUsd > 0 ? userCapUsd : null;
+  const requestByteLimit =
+    Number.isSafeInteger(maxRequestBytes) && maxRequestBytes > 0 ? maxRequestBytes : 1024 * 1024;
   function capForUser(label) {
     return resolveUserCap({ label, globalUserCap, userCaps });
   }
@@ -215,6 +264,24 @@ export function createProxyServer({
   // only so the per-request cap check is O(1) instead of re-reading the
   // whole file on every call.
   const userCostByUserId = new Map();
+  const userAdmissionTails = new Map();
+
+  async function withUserAdmission(userId, operation) {
+    const prior = userAdmissionTails.get(userId) || Promise.resolve();
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const tail = prior.catch(() => {}).then(() => gate);
+    userAdmissionTails.set(userId, tail);
+    await prior.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (userAdmissionTails.get(userId) === tail) userAdmissionTails.delete(userId);
+    }
+  }
   for (const event of readUsageEvents({ root: meterRoot })) {
     if (event.source !== "proxy") continue;
     counters.requests += 1;
@@ -325,106 +392,147 @@ export function createProxyServer({
     const userId = reportingUserId(auth.token);
     const userLabel = auth.label;
     const shouldMeter = shouldMeterRequest(path, req.method);
+    const cap = shouldMeter ? capForUser(userLabel) : null;
+    const requestAbort = requestAbortGuard(req, res);
 
-    // Per-tester spend cap — checked BEFORE forwarding, using only the
-    // in-memory accumulator (no upstream call, no request body read). "At or
-    // over cap already" is the trip condition: this gates the next request
-    // once prior spend has reached the cap, not the request that pushes it
-    // over (the cost of the in-flight request isn't known until it returns).
-    if (shouldMeter) {
-      const cap = capForUser(userLabel);
+    const forward = async () => {
+      if (requestAbort.signal.aborted) return;
+
+      // Capped requests for one user enter this section one at a time. The
+      // prior request records its completed spend before releasing the next,
+      // so concurrent calls cannot all pass against the same old balance.
       if (cap !== null && (userCostByUserId.get(userId) || 0) >= cap) {
+        req.resume();
         sendJson(res, 402, buildCapExceededBody());
         return;
       }
-    }
 
-    let bodyBuffer = Buffer.alloc(0);
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      bodyBuffer = await readRequestBody(req);
-    }
-
-    const outboundHeaders = buildUpstreamHeaders(req.headers, upstreamKey, upstreamHeaders, {
-      env,
-    });
-    const upstreamUrlFull = `${base}${path}${url.search}`;
-
-    let upstreamRes;
-    try {
-      upstreamRes = await fetch(upstreamUrlFull, {
-        method: req.method,
-        headers: outboundHeaders,
-        body: bodyBuffer.length ? bodyBuffer : undefined,
-      });
-    } catch (err) {
-      // err.message may echo the target URL but never body content — safe to log.
-      log(`upstream unreachable: ${err.message}`);
-      sendJson(res, 502, { error: "upstream_unreachable" });
-      return;
-    }
-
-    const resHeaders = buildResponseHeaders(upstreamRes.headers);
-    res.writeHead(upstreamRes.status, resHeaders);
-
-    if (!upstreamRes.body) {
-      res.end();
-      return;
-    }
-
-    const contentType = upstreamRes.headers.get("content-type") || "";
-    const isSSE = contentType.includes("text/event-stream");
-
-    const decoder = shouldMeter && isSSE ? new TextDecoder() : null;
-    let sseBuffer = "";
-    const jsonChunks = shouldMeter && !isSSE ? [] : null;
-
-    const acc = newUsageAccumulator();
-
-    const reader = upstreamRes.body.getReader();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        // Forward the exact bytes first — metering parses a copy, never mutates
-        // what's sent to the client.
-        res.write(value);
-        if (!shouldMeter) continue;
-
-        if (isSSE) {
-          sseBuffer += decoder.decode(value, { stream: true });
-          const { events, remainder } = extractSSEEvents(sseBuffer);
-          sseBuffer = remainder;
-          for (const event of events) applySSEUsageEvent(acc, event);
-        } else {
-          jsonChunks.push(value);
+      let bodyBuffer = Buffer.alloc(0);
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        try {
+          bodyBuffer = await readRequestBody(req, requestByteLimit);
+        } catch (error) {
+          if (error?.status === 413 && !requestAbort.signal.aborted) {
+            sendJson(res, 413, {
+              type: "error",
+              error: {
+                type: "request_too_large",
+                message: `Request body exceeds the ${requestByteLimit} byte limit.`,
+              },
+            });
+            return;
+          }
+          throw error;
         }
       }
-    } finally {
-      res.end();
-    }
+      if (requestAbort.signal.aborted) return;
 
-    if (!shouldMeter) return;
-
-    if (!isSSE) {
-      try {
-        const parsed = JSON.parse(Buffer.concat(jsonChunks).toString("utf8"));
-        applyNonStreamUsage(acc, parsed);
-      } catch {
-        // malformed/non-JSON upstream body — nothing to meter, never logged
+      if (cap !== null) {
+        let requestModel = null;
+        try {
+          requestModel = JSON.parse(bodyBuffer.toString("utf8"))?.model || null;
+        } catch {
+          // Invalid JSON is still unpriceable and therefore cannot use a capped credential.
+        }
+        if (!computeCost(requestModel, {}, { env }).priced) {
+          sendJson(res, 402, buildUnpricedModelBody());
+          return;
+        }
       }
-    }
 
-    if (acc.sawUsage) {
-      recordUsage({
-        model: acc.modelSeen,
-        feature: featureLabel,
-        skill: skillLabel,
-        action: actionLabel,
-        operation: operationLabel,
-        usage: acc.usage,
-        user: userId,
-        userLabel,
+      const outboundHeaders = buildUpstreamHeaders(req.headers, upstreamKey, upstreamHeaders, {
+        env,
       });
+      const upstreamUrlFull = `${base}${path}${url.search}`;
+
+      let upstreamRes;
+      try {
+        upstreamRes = await fetch(upstreamUrlFull, {
+          method: req.method,
+          headers: outboundHeaders,
+          body: bodyBuffer.length ? bodyBuffer : undefined,
+          signal: requestAbort.signal,
+        });
+      } catch (err) {
+        if (requestAbort.signal.aborted) return;
+        // err.message may echo the target URL but never body content — safe to log.
+        log(`upstream unreachable: ${err.message}`);
+        sendJson(res, 502, { error: "upstream_unreachable" });
+        return;
+      }
+
+      const resHeaders = buildResponseHeaders(upstreamRes.headers);
+      res.writeHead(upstreamRes.status, resHeaders);
+
+      if (!upstreamRes.body) {
+        res.end();
+        return;
+      }
+
+      const contentType = upstreamRes.headers.get("content-type") || "";
+      const isSSE = contentType.includes("text/event-stream");
+
+      const decoder = shouldMeter && isSSE ? new TextDecoder() : null;
+      let sseBuffer = "";
+      const jsonChunks = shouldMeter && !isSSE ? [] : null;
+
+      const acc = newUsageAccumulator();
+
+      const reader = upstreamRes.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          // Forward the exact bytes first — metering parses a copy, never mutates
+          // what's sent to the client.
+          res.write(value);
+          if (!shouldMeter) continue;
+
+          if (isSSE) {
+            sseBuffer += decoder.decode(value, { stream: true });
+            const { events, remainder } = extractSSEEvents(sseBuffer);
+            sseBuffer = remainder;
+            for (const event of events) applySSEUsageEvent(acc, event);
+          } else {
+            jsonChunks.push(value);
+          }
+        }
+      } finally {
+        res.end();
+      }
+
+      if (!shouldMeter) return;
+
+      if (!isSSE) {
+        try {
+          const parsed = JSON.parse(Buffer.concat(jsonChunks).toString("utf8"));
+          applyNonStreamUsage(acc, parsed);
+        } catch {
+          // malformed/non-JSON upstream body — nothing to meter, never logged
+        }
+      }
+
+      if (acc.sawUsage) {
+        recordUsage({
+          model: acc.modelSeen,
+          feature: featureLabel,
+          skill: skillLabel,
+          action: actionLabel,
+          operation: operationLabel,
+          usage: acc.usage,
+          user: userId,
+          userLabel,
+        });
+      }
+    };
+
+    try {
+      if (cap === null) await forward();
+      else await withUserAdmission(userId, forward);
+    } catch (error) {
+      if (!requestAbort.signal.aborted) throw error;
+    } finally {
+      requestAbort.cleanup();
     }
   }
 
@@ -449,7 +557,7 @@ export function createProxyServer({
       return;
     }
 
-    if (path.startsWith("/v1/")) {
+    if (isAllowedProxyRequest(path, req.method)) {
       await proxyPass(req, res, auth);
       return;
     }

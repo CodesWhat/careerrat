@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 
 import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
 import { createPlaywrightOps } from "../src/core/apply/playwright-ops.mjs";
-import { startFixtureServer } from "./helpers/fixture-server.mjs";
+import { resolveLocalFixtureTarget, startFixtureServer } from "./helpers/fixture-server.mjs";
 
 const FIXTURE_DIR = fileURLToPath(new URL("./fixtures/apply-form/", import.meta.url));
 const RADIO_FIXTURE_DIR = fileURLToPath(new URL("./fixtures/apply-radio-form/", import.meta.url));
@@ -48,13 +48,17 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
   const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-profile-"));
   const resumeDir = mkdtempSync(join(tmpdir(), "careerrat-live-resume-"));
   const resumePath = join(resumeDir, "resume.pdf");
-  writeFileSync(resumePath, "%PDF-1.4 fake resume content for the live harness test\n");
+  writeFileSync(resumePath, "%PDF-1.4\nfake resume content for the live harness test\n%%EOF\n");
 
   const { url: baseUrl, close: closeServer } = await startFixtureServer(FIXTURE_DIR);
   // No launchImpl override — this is the real default launch path
   // (chromium.launchPersistentContext) that every other test in the repo
   // stubs out.
-  const ops = createPlaywrightOps({ profileDir, headless: true });
+  const ops = createPlaywrightOps({
+    profileDir,
+    headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
+  });
 
   try {
     // --- Step 1: Basics ---
@@ -164,9 +168,13 @@ test("real Chromium prepare-only driver advances structured steps and never clic
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-live-driver-root-"));
   const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
   mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-  writeFileSync(resumePath, "%PDF-1.4 fake resume content for the live driver test\n");
+  writeFileSync(resumePath, "%PDF-1.4\nfake resume content for the live driver test\n%%EOF\n");
   const { url: baseUrl, close: closeServer } = await startFixtureServer(FIXTURE_DIR);
-  const ops = createPlaywrightOps({ profileDir, headless: true });
+  const ops = createPlaywrightOps({
+    profileDir,
+    headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
+  });
   const clicked = [];
   const driverOps = {
     ...ops,
@@ -207,8 +215,8 @@ test("real Chromium prepare-only driver advances structured steps and never clic
       questionCapture: { state: "captured" },
       prepareOnly: true,
     });
-
     assert.equal(result.state, "awaiting-submit");
+    assert.notEqual(result.state, "applied");
     assert.equal(result.verified, false);
     assert.equal(result.session.prepareOnly, true);
     assert.equal(result.session.stepIndex, 3);
@@ -229,7 +237,11 @@ test("real Chromium snapshots and selects a native required radio fieldset witho
 }, async () => {
   const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-radio-profile-"));
   const { url, close: closeServer } = await startFixtureServer(RADIO_FIXTURE_DIR);
-  const ops = createPlaywrightOps({ profileDir, headless: true });
+  const ops = createPlaywrightOps({
+    profileDir,
+    headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
+  });
 
   try {
     const opened = [];
@@ -270,6 +282,7 @@ test("real Chromium snapshots and selects a native required radio fieldset witho
     const group = snapshot.refs[groupRef];
 
     assert.equal(result.state, "awaiting-submit");
+    assert.notEqual(result.state, "applied");
     assert.equal(result.verified, false);
     assert.equal(result.session.filledCount, 1);
     assert.deepEqual(result.session.unresolved, []);
@@ -298,7 +311,11 @@ test("real Chromium groups unwrapped native radios by form owner and name withou
 }, async () => {
   const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-radio-owner-profile-"));
   const { url, close: closeServer } = await startFixtureServer(RADIO_FIXTURE_DIR);
-  const ops = createPlaywrightOps({ profileDir, headless: true });
+  const ops = createPlaywrightOps({
+    profileDir,
+    headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
+  });
 
   try {
     const opened = [];
@@ -351,6 +368,7 @@ test("real Chromium groups unwrapped native radios by form owner and name withou
       .map(([ref]) => ref);
 
     assert.equal(result.state, "awaiting-submit");
+    assert.notEqual(result.state, "applied");
     assert.equal(result.verified, false);
     assert.equal(result.session.filledCount, 2);
     assert.deepEqual(result.session.unresolved, []);

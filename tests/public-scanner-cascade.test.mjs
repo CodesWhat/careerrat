@@ -108,6 +108,29 @@ test("deterministic custom public page extraction records metadata and skips rev
   assert.equal(cleanNoResult.aiEligible, false);
 });
 
+test("public discovery follows a supported ATS link despite indexing metadata or job-alert login copy", async () => {
+  const { extractPublicCareersPage } = await extractorModule();
+  const found = await extractPublicCareersPage({
+    url: "https://acme.example/careers",
+    fetchImpl: async () =>
+      response(`
+        <html>
+          <head><meta name="robots" content="noindex,nofollow"></head>
+          <body>
+            <a href="https://jobs.ashbyhq.com/acme">Open roles</a>
+            <a href="/job-alerts">Sign in for job alerts</a>
+          </body>
+        </html>
+      `),
+    resolveHost: publicResolver,
+    now: NOW,
+  });
+
+  assert.equal(found.extractionStatus, "metadata_found");
+  assert.equal(found.metadata.jobBoardUrl, "https://jobs.ashbyhq.com/acme");
+  assert.equal(found.metadata.atsProvider, "ashby");
+});
+
 test("public page extraction rejects DNS-resolved private hosts before fetch", async () => {
   const { extractPublicCareersPage } = await extractorModule();
   let called = false;
@@ -126,16 +149,12 @@ test("public page extraction rejects DNS-resolved private hosts before fetch", a
   assert.equal(called, false);
 });
 
-test("empty, blocked, robots-disallowed, login-gated, and useless pages do not call AI or create review items", async () => {
+test("empty, blocked, login-gated, and useless pages do not call AI or create review items", async () => {
   const { scanPublicIntelSeed } = await scannerModule();
   const repoRoot = tempRepo();
   const cases = [
     ["empty", response("")],
     ["blocked", response("Forbidden", { status: 403 })],
-    [
-      "robots",
-      response('<html><head><meta name="robots" content="noindex,nofollow"></head></html>'),
-    ],
     ["login", response("<html><body>Please sign in to view careers.</body></html>")],
     ["useless", response("<html><body><nav>Home</nav></body></html>")],
   ];

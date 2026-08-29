@@ -507,7 +507,7 @@
 }
 
 .cf-job-row__meta strong,
-.cf-job-row__meta > span:last-child {
+.cf-job-row__meta > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -517,7 +517,7 @@
   font-size: 11.5px;
 }
 
-.cf-job-row__meta > span:last-child {
+.cf-job-row__meta > span {
   color: var(--slate);
   font-size: 11px;
 }

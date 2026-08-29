@@ -283,6 +283,21 @@ test("computeGateEdit: comp-floor sets a number, confirm-first", () => {
   assert.equal(parseYaml(plan.nextText).compensation.minimum_base, 215000);
 });
 
+test("computeGateEdit: annual cash earnings floor stays separate from guaranteed base", () => {
+  const plan = computeGateEdit({
+    type: "comp-annual-floor",
+    value: "$95,000",
+    currentText: PROFILE,
+    schema: PROFILE_SCHEMA,
+  });
+  const compensation = parseYaml(plan.nextText).compensation;
+  assert.equal(plan.changed, true);
+  assert.equal(plan.valid, true);
+  assert.equal(plan.friction, "confirm");
+  assert.equal(compensation.minimum_annual_earnings, 95000);
+  assert.equal(compensation.minimum_base, 140000);
+});
+
 test("computeGateEdit: do-not-claim appends to honesty", () => {
   const plan = computeGateEdit({
     type: "do-not-claim",

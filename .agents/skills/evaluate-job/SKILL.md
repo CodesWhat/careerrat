@@ -86,7 +86,7 @@ Read the following files (all under `candidate/`):
 | File | Fields used |
 | --- | --- |
 | `targeting.yml` **(from digest, if supplied)** | `keep_signals`, `cut_signals`, `excluded_companies`, `degree_policy`, `fit_bands` (default `{high_min:85, med_min:65}`), `role_buckets[].priority` |
-| `profile.yml` **(from digest, if supplied)** | `compensation.comp_floors` (arrangement floors: `remote`/`hybrid`/`onsite`/`relocation` + `home_metro` + `relocation_by_metro[]` — the HARD comp gate; relocation miss = cut), `compensation.minimum_base` (fallback floor), `compensation.target_base`, `compensation.expected_base`, `compensation.oe_min_base`, `compensation.oe_max_base`, `location.remote`, `location.relocation`, `location.travel_tolerance` — **NEVER read `compensation.current_base` for any outbound purpose** |
+| `profile.yml` **(from digest, if supplied)** | `compensation.comp_floors` (arrangement guaranteed-base floors), `compensation.minimum_base` (guaranteed-base fallback), `compensation.minimum_annual_earnings` (annual cash earnings from wages, tips, commission, and recurring cash bonuses; excludes equity and benefits), `compensation.target_base`, `compensation.expected_base`, `compensation.oe_min_base`, `compensation.oe_max_base`, `location.remote`, `location.relocation`, `location.travel_tolerance` — **NEVER read `compensation.current_base` for any outbound purpose** |
 | `honesty.yml` | honesty boundaries (education policy, do_not_claim, do_not_fabricate) — always a fresh read; never part of the STEP 0 digest |
 | `modes.yml` | optional `application_mode`; absent = `balanced`. Read via `careerrat modes status`. It changes pursuit posture after discovery/evaluation, never the evidence/honesty/comp gates. Always a fresh read. |
 | `application-limits` config **(from digest, if supplied)** | `companies[].status`, `companies[].reapply_after`, `companies[].cooldown_days`, `companies[].bypass` |
@@ -217,13 +217,14 @@ On `CUT`: open the saved JD file and set `fitBucket: "cut"` in its YAML frontmat
 Extract the comp band from the JD (may be missing; note "unlisted" if so).
 
 1. **OE bucket check**: if the matching `role_buckets[]` entry has `priority: oe`, emit `COMP: OE-bucket - use profile.compensation.oe_min_base / oe_max_base range`. The regular floor does not apply to OE buckets.
-2. **Arrangement-floor check (HARD GATE)**: the floor is **not** a single number — it depends on the posting's work arrangement, read from `profile.compensation.comp_floors` (set at ingestion). The deterministic check in `careerrat evaluate <path> --json` already resolves this via `resolveCompFloor`; honor its `comp.verdict` / `comp.relo` and do not loosen it. Resolution:
+2. **Floor kind:** use the deterministic gate result. `minimum_base` and arrangement `comp_floors` compare only against guaranteed base pay. `minimum_annual_earnings` compares against an explicit comparable annual cash range made from wages, tips, commission, and recurring cash bonuses. Never count equity or benefits. Unknown tips, commission, bonus, or total earnings stay `review`; do not invent them.
+3. **Arrangement-floor check (HARD GATE)**: the guaranteed-base floor is **not** a single number — it depends on the posting's work arrangement, read from `profile.compensation.comp_floors` (set at ingestion). The deterministic check in `careerrat evaluate <path> --json` already resolves this via `resolveCompFloor`; honor its `comp.verdict` / `comp.relo` and do not loosen it. Resolution:
    - **Remote** posting → floor = `comp_floors.remote`.
    - **Onsite/hybrid in the home metro** (JD location matches `comp_floors.home_metro`) → floor = `comp_floors.onsite` / `comp_floors.hybrid`.
    - **Onsite/hybrid requiring relocation** (location not in `home_metro`) → floor = the matching `comp_floors.relocation_by_metro[].floor`, else `comp_floors.relocation`. This is a **relocation floor**.
    - If `band.max < floor` → `COMP: below-floor`. **When the miss is a relocation floor, it is a hard CUT, not a hold** — relocating for under-floor comp is a real-cost no-go. Emit `COMP: below-floor - relocation to <metro> requires $<floor>; band tops at $<max>` and set `ACTION: cut`.
    - Falls back to `minimum_base` for any arrangement when `comp_floors` is absent.
-3. If band is unlisted or spans a wide range requiring body-read judgment:
+4. If band is unlisted or spans a wide range requiring body-read judgment:
    - **Estimate from tracker comparables first.** The gate runs `estimateCompFromComparables()` automatically — it finds roles in `workspace/tracker.json` (both `sourced[]` and `applications[]`, including rejected rows) in the same role family (`classifyRoleFamily`) and same arrangement/metro area, and computes a low/mid/high range from those with a real posted band. If enough comparables exist, `comp.verdict` will be `"estimated"` or `"estimated-below-floor"` and `comp.estimate` will carry `{lowK, midpointK, highK, sampleSize, tier, confidence, basis}`:
      - **`estimated`** (estimate midpoint clears the arrangement floor) → `COMP: review - estimated $<low>K–$<high>K (mid $<mid>K) from <N> comparables; confirm live before anchoring`. This is ADVISORY; action stays `manual`, never a hard cut.
      - **`estimated-below-floor`** (estimate midpoint falls under the arrangement floor) → `COMP: review - estimated $<low>K–$<high>K (mid $<mid>K) likely below floor; hold unless strong non-cash benefits`. ADVISORY; action is `hold`, never a hard cut. An estimate is a guess, not a posted band — never trigger `cut` on an estimate.
@@ -234,7 +235,7 @@ Extract the comp band from the JD (may be missing; note "unlisted" if so).
      - The `renderGateBlock` output includes a `COMP ESTIMATE: $<low>K–$<high>K (mid $<mid>K) - <N> <tier> comparables...; confidence <X> (confirm live before anchoring)` line when an estimate exists. Emit it in the Required Output block.
      - The estimate strengthens as more tracker rows accumulate (tighter tier match: `family` → `arrangement` → `metro`; higher confidence: `low` → `medium` → `high`). Encourage the user to confirm the real band in the first screen call to ground the anchor.
    - **No comparables available** → fall back to a market benchmark artifact. Run `careerrat research list` (or `read --name comp-bench-<role-slug>-<loc-slug>-<yyyy-mm>`) to find a non-stale `comp-benchmark` artifact for this role+location. If one exists, fold its `benchmark` floor/mid/ceiling in as the market reference → `COMP: review - market data: <floor>/<mid>/<ceiling> [artifact]`. If neither comparables nor a benchmark artifact exist, emit `COMP: review - band unclear` and offer to benchmark it via `research-comp`.
-4. Otherwise → `COMP: clear - band max <X> clears the <arrangement> floor`.
+5. Otherwise → `COMP: clear - band max <X> clears the <arrangement> floor`.
 
 Emit:
 
@@ -442,5 +443,6 @@ All fields below are shipped (Foundations B+C); each has a code-side default so 
 - `targeting.fit_bands.fit_floor` (optional) — roles with a body-read fit score below this threshold are automatically cut (action "cut") without manual triage. Domain-neutral: when absent, no roles auto-drop and default behavior applies.
 - `profile.compensation.expected_base` — falls back to `target_base` if absent.
 - `profile.compensation.comp_floors` — also read by `estimateCompFromComparables()` to select the arrangement floor when checking whether a tracker-derived comp estimate clears the gate.
+- `profile.compensation.minimum_annual_earnings` — annual cash floor for wages, tips, commission, and recurring cash bonuses. Equity and benefits do not count.
 - `profile.compensation.oe_min_base` / `oe_max_base` — emitted only when the matching `role_buckets[].priority === 'oe'`; if unset, note "OE range not configured — use target_base as anchor."
 - `profile.location.travel_tolerance` — lifestyle adjustment in STEP 5 reads it; if absent, no lifestyle uplift is applied.

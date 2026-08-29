@@ -14,10 +14,45 @@ function slug(s) {
     .replace(/^-|-$/g, "");
 }
 
-// Map a hostname to the automation platform an authenticated search source binds
-// to (the `mayRun({capability:"authenticated_search", platform})` key). Returns null
-// for hosts that don't need a logged-in session. Kept in sync with the
-// authenticated_search platforms in src/core/automation/consent.mjs.
+export function canonicalSearchSourceUrl(value) {
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    if (parsed.pathname !== "/") parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    parsed.searchParams.sort();
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeLegacySearchSource(source) {
+  if (!source || typeof source !== "object" || source.source_type !== "manual-auth") {
+    return source;
+  }
+  return {
+    ...source,
+    source_type: "browser",
+    auth: source.auth !== false,
+  };
+}
+
+export function normalizeSearchSourceConfig(config) {
+  if (!config || typeof config !== "object") return config;
+  const key = Array.isArray(config.searches)
+    ? "searches"
+    : Array.isArray(config.sources)
+      ? "sources"
+      : null;
+  if (!key) return config;
+  const normalized = config[key].map(normalizeLegacySearchSource);
+  return normalized.some((entry, index) => entry !== config[key][index])
+    ? { ...config, [key]: normalized }
+    : config;
+}
+
+// Map a hostname to the saved browser session used when that source needs login.
+// Returns null for hosts that do not have a site-specific session.
 export function platformForHost(hostname) {
   const host = String(hostname || "")
     .replace(/^www\./, "")
@@ -27,6 +62,68 @@ export function platformForHost(hostname) {
   if (host === "glassdoor.com" || host.endsWith(".glassdoor.com")) return "glassdoor";
   if (host === "wellfound.com" || host.endsWith(".wellfound.com")) return "wellfound";
   return null;
+}
+
+const BROWSER_PLATFORM_LABELS = Object.freeze({
+  glassdoor: "Glassdoor",
+  indeed: "Indeed",
+  linkedin: "LinkedIn",
+  wellfound: "Wellfound",
+});
+
+const BROWSER_PLATFORM_PATTERNS = Object.freeze({
+  glassdoor: /\bglassdoor(?:\.com)?\b/i,
+  indeed: /\bindeed(?:\.com)?\b/i,
+  linkedin: /\blinked[\s-]?in(?:\.com)?\b/i,
+  wellfound: /\bwellfound(?:\.com)?\b/i,
+});
+
+function browserPlatformClaims(source = {}) {
+  const claims = new Set();
+  for (const value of [source.platform, source.provider, source.label]) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    for (const [platform, pattern] of Object.entries(BROWSER_PLATFORM_PATTERNS)) {
+      if (pattern.test(text)) claims.add(platform);
+    }
+  }
+  return claims;
+}
+
+export function resolveBrowserSourceIdentity(source = {}, value = source.url || source.target) {
+  const canonicalUrl = canonicalSearchSourceUrl(value);
+  if (!canonicalUrl) return { ok: false, reason: "Browser source URL is invalid." };
+  const parsed = new URL(String(value).trim());
+  if (!new Set(["http:", "https:"]).has(parsed.protocol)) {
+    return { ok: false, reason: "Browser source URL must use HTTP or HTTPS." };
+  }
+  const hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
+  if (!hostname) return { ok: false, reason: "Browser source URL has no hostname." };
+  const knownPlatform = platformForHost(hostname);
+  const claims = browserPlatformClaims(source);
+  if ([...claims].some((claim) => claim !== knownPlatform)) {
+    return {
+      ok: false,
+      reason: "Browser source identity does not match its URL hostname.",
+    };
+  }
+  return {
+    ok: true,
+    url: parsed.toString(),
+    canonicalUrl,
+    hostname,
+    platform: knownPlatform || hostname,
+    label: BROWSER_PLATFORM_LABELS[knownPlatform] || hostname,
+    knownPlatform,
+  };
+}
+
+export function requireBrowserSourceIdentity(source = {}, value = source.url || source.target) {
+  const identity = resolveBrowserSourceIdentity(source, value);
+  if (identity.ok) return identity;
+  const error = new Error(identity.reason);
+  error.code = "BAD_REQUEST";
+  throw error;
 }
 
 function resolveSelector(searches, selector) {
@@ -149,7 +246,11 @@ export function addProviderSource(
 // addSearchFromUrl
 // ---------------------------------------------------------------------------
 
-export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = {}) {
+export function addSearchFromUrl(
+  config,
+  pastedUrl,
+  { label, enabled = true, sourceType = null } = {}
+) {
   let parsed;
   try {
     parsed = new URL(pastedUrl);
@@ -158,12 +259,32 @@ export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = 
   }
 
   const host = parsed.hostname.replace(/^www\./, "");
+  const canonicalTarget = canonicalSearchSourceUrl(pastedUrl);
+  const duplicate = (config.searches ?? []).some((source) => {
+    const existingTarget = source.url || source.rssUrl;
+    return existingTarget && canonicalSearchSourceUrl(existingTarget) === canonicalTarget;
+  });
+  if (duplicate) return config;
+
+  if (sourceType === "rss") {
+    const entry = {
+      provider: host,
+      source_type: "rss",
+      label: label || host,
+      rssUrl: pastedUrl,
+      enabled,
+      recency: { mode: "since-last-run", safetyMinutes: 30 },
+    };
+    return { ...config, searches: [...(config.searches ?? []), entry] };
+  }
 
   // www. is already stripped by the line above, so host is never 'www.wellfound.com' here.
   if (host === "wellfound.com") {
+    const identity = requireBrowserSourceIdentity({ provider: "Wellfound", label }, pastedUrl);
     const entry = {
       provider: "Wellfound",
       source_type: "browser",
+      platform: identity.platform,
       label: label || "Wellfound import",
       url: pastedUrl,
       enabled,
@@ -187,6 +308,19 @@ export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = 
   if (host.includes("hiring.cafe")) {
     const searchState = parseHiringCafeSearchState(pastedUrl);
     const query = searchState.searchQuery ?? undefined;
+    const normalizedQuery = String(query || "")
+      .trim()
+      .toLowerCase();
+    const duplicateQuery =
+      normalizedQuery &&
+      (config.searches ?? []).some(
+        (source) =>
+          slug(source.provider) === "hiringcafe" &&
+          String(source.query || source.searchState?.searchQuery || "")
+            .trim()
+            .toLowerCase() === normalizedQuery
+      );
+    if (duplicateQuery) return config;
 
     const entry = {
       provider: "HiringCafe",
@@ -202,21 +336,37 @@ export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = 
     return { ...config, searches: [...(config.searches ?? []), entry] };
   }
 
-  // Authenticated-search hosts (LinkedIn / Indeed / Glassdoor): logged-in result
-  // pages that need a session. Create a browser source bound to its automation
-  // platform, OFF by default — it stays inert until the user enables the source AND
-  // grants the `authenticated_search` consent (npm run automation). Two switches by
-  // design; see AGENTS.md → Browser Automation Contract.
+  // Authenticated-search hosts (LinkedIn / Indeed / Glassdoor) use the app's saved
+  // browser session. The source starts disabled so its first use can ask one clear,
+  // site-specific Yes/No question instead of hiding the choice in Settings.
   const authPlatform = platformForHost(host);
   if (authPlatform) {
+    const identity = requireBrowserSourceIdentity({ provider: host, label }, pastedUrl);
     const entry = {
       provider: host,
       source_type: "browser",
       auth: true,
-      platform: authPlatform,
+      platform: identity.platform,
       label: label || `${host} (authenticated)`,
       url: pastedUrl,
       enabled: false,
+    };
+    return { ...config, searches: [...(config.searches ?? []), entry] };
+  }
+
+  if (sourceType === "url-query" || sourceType === "browser") {
+    const identity =
+      sourceType === "browser"
+        ? requireBrowserSourceIdentity({ provider: host, label }, pastedUrl)
+        : null;
+    const entry = {
+      provider: host,
+      source_type: sourceType,
+      ...(identity ? { platform: identity.platform } : {}),
+      label: label || host,
+      url: pastedUrl,
+      enabled,
+      recency: { mode: "since-last-run", safetyMinutes: 30 },
     };
     return { ...config, searches: [...(config.searches ?? []), entry] };
   }
@@ -236,9 +386,11 @@ export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = 
   }
 
   // Generic URL-based source
+  const identity = requireBrowserSourceIdentity({ provider: host, label }, pastedUrl);
   const entry = {
     provider: host,
     source_type: "browser",
+    platform: identity.platform,
     label: label || host,
     url: pastedUrl,
     enabled,
@@ -302,6 +454,7 @@ export function listSearches(config) {
     enabled: s.enabled,
     lastRunAt: s.recency?.lastRunAt ?? null,
     ...(s.auth ? { auth: true, platform: s.platform ?? null } : {}),
+    ...(s.login_skipped === true ? { login_skipped: true } : {}),
   }));
 }
 
@@ -396,7 +549,7 @@ export function mergeSearchConfigs(existing, baseline) {
 // ---------------------------------------------------------------------------
 
 export function parseConfig(text) {
-  return parseYaml(text);
+  return normalizeSearchSourceConfig(parseYaml(text));
 }
 
 export function serializeConfig(config) {

@@ -63,9 +63,12 @@ export function filterSearchJobs(jobs, filters = {}, now = new Date()) {
   const query = String(filters.query || "")
     .trim()
     .toLowerCase();
+  const fitFloor = filters.fitFloor == null ? null : Number(filters.fitFloor);
   return asArray(jobs).filter((job) => {
     const fit = Number(job?.fit);
-    if (filters.fit80 && Number.isFinite(fit) && fit < 80) return false;
+    if (filters.fit80 && Number.isFinite(fitFloor) && Number.isFinite(fit) && fit < fitFloor) {
+      return false;
+    }
     if (
       filters.comp &&
       !/✓|cleared|works|above|pass/i.test(

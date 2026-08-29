@@ -14,6 +14,7 @@ export async function fetchDeepIngestUrl(
     resolveHost,
     timeoutMs = DEEP_INGEST_FETCH_TIMEOUT_MS,
     maxBytes = DEEP_INGEST_FETCH_MAX_BYTES,
+    signal,
   } = {}
 ) {
   const fetched = await fetchPublicHttpText(rawUrl, {
@@ -22,6 +23,7 @@ export async function fetchDeepIngestUrl(
     timeoutMs,
     maxBytes,
     readErrorBody: false,
+    signal,
   });
   if (!fetched.ok) {
     if (fetched.code === "fetch_failed" || fetched.code === "timeout") {

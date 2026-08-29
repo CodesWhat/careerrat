@@ -10,6 +10,7 @@ export {
   appApproveReview,
   appCaptureInterviewIntake,
   appPersistEvaluation,
+  appRecordOutcome,
   appRecordRoundOutcome,
   appRegisterArtifact,
   appRegisterInterviewDossier,
@@ -20,6 +21,18 @@ export {
   appSetStatus,
   appUpsert,
 } from "./app.mjs";
+export {
+  APP_OPERATION_LIMITS,
+  APP_OPERATION_STATUSES,
+  appOperationComplete,
+  appOperationFail,
+  appOperationGet,
+  appOperationHeartbeat,
+  appOperationProgress,
+  appOperationRecoverOrphans,
+  appOperationRetryStart,
+  appOperationStart,
+} from "./app-operations.mjs";
 export { calendarBusyUpsert, calendarWriteAppend } from "./calendar.mjs";
 export {
   authorizationDeclared,
@@ -35,6 +48,7 @@ export {
   candidateSetupInitialize,
 } from "./candidate.mjs";
 export {
+  chatFirstChoiceResolve,
   chatFirstStateFromDb,
   chatFirstStateGet,
   deepIngestPromptDismiss,
@@ -124,21 +138,45 @@ export {
   publicSyncPreferenceSet,
 } from "./public-intel.mjs";
 export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
+export {
+  resumeExtractionComplete,
+  resumeExtractionFail,
+  resumeExtractionGet,
+  resumeExtractionProgress,
+  resumeExtractionRecoverOrphans,
+  resumeExtractionStart,
+} from "./resume-extractions.mjs";
+export {
+  searchExecutionEnsure,
+  searchExecutionGet,
+  searchExecutionListRecoverable,
+  searchExecutionSetLane,
+} from "./search-executions.mjs";
 export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
 export {
   skillChatDecisionSet,
   skillChatMessageAppend,
+  skillChatPendingMessageEnqueue,
+  skillChatPendingMessagesDrain,
+  skillChatThreadPrepare,
   skillChatThreadRead,
+  skillChatThreadReleaseTurn,
   skillChatThreadSetTurnState,
 } from "./skill-chat.mjs";
 export { sourceWatermarkUpsert } from "./source.mjs";
 export {
   companyAtsRemove,
   companyAtsUpsert,
+  publicSearchSourceUpsert,
   sourceConfigGet,
   sourceConfigPut,
 } from "./source-config.mjs";
-export { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "./sourced.mjs";
+export {
+  sourcedPromote,
+  sourcedReconcilePolicyBatch,
+  sourcedSetStatus,
+  sourcedUpsertBatch,
+} from "./sourced.mjs";
 export {
   SOURCING_RUN_STATUSES,
   sourcingRunComplete,

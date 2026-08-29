@@ -38,10 +38,17 @@
 // resolve.mjs's own conventions) so every path here is testable without a
 // real network, SDK devDependency, or subprocess.
 
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
+import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForOperation,
+  resolveAIExecutionPlan,
+} from "../core/ai/operation-policy.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { requireDb } from "../core/db/connection.mjs";
 import {
@@ -63,6 +70,7 @@ import { extractDocxResumeText, normalizeDocxResumeText } from "../core/onboardi
 import { userPath } from "../core/paths/workspace.mjs";
 import { sanitizeUploadFilename } from "./onboard-route.mjs";
 import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
+import { executeDurableWorkspaceIntent } from "./workspace-agent-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap every other JSON-body route uses.
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // binary intake artifacts: PDFs/images/JDs.
@@ -542,16 +550,21 @@ export async function captureIntakeText({
   return withDispatchSummary(finalItem);
 }
 
-async function executeLaneA({ repoRoot, env, id, dispatch, workspaceAgentRuntime }) {
+async function executeLaneA({ repoRoot, env, id, dispatch, workspaceAgentRuntime, appOperations }) {
   const { applicationId, to, note } = dispatch.params;
-  if (typeof workspaceAgentRuntime?.executeIntent === "function") {
-    const result = await workspaceAgentRuntime.executeIntent({
-      intent: {
-        type: "outcome.record",
-        entity: { type: "application", id: applicationId },
-        input: { to, note: note || null, sourceIntakeId: id },
-      },
-    });
+  const intent = {
+    type: "outcome.record",
+    entity: { type: "application", id: applicationId },
+    input: { to, note: note || null, sourceIntakeId: id },
+  };
+  if (appOperations?.start || typeof workspaceAgentRuntime?.executeIntent === "function") {
+    const result = appOperations?.start
+      ? await executeDurableWorkspaceIntent({
+          appOperations,
+          requestId: `intake-confirm:${id}`,
+          intent,
+        })
+      : await workspaceAgentRuntime.executeIntent({ intent });
     return intakeUpdate({
       repoRoot,
       env,
@@ -561,7 +574,7 @@ async function executeLaneA({ repoRoot, env, id, dispatch, workspaceAgentRuntime
         result: {
           applicationId,
           to,
-          threadId: result.thread?.id || "workspace-main",
+          threadId: result.resultRef?.threadId || result.thread?.id || "workspace-main",
         },
         error: null,
       },
@@ -597,52 +610,208 @@ function buildLaneBInput(item) {
   };
 }
 
-// Fires runSkillStream() in the background and returns immediately with the
-// item already flipped to "running" — this confirm endpoint is a plain JSON
-// responder, not the SSE stream POST /api/skill/run normally is, so nothing
-// here awaits the run itself; onEvent is a no-op (a future iteration could
-// persist progress events onto the item, or re-expose them over its own SSE
-// — out of this milestone's scope).
-function executeLaneB({ repoRoot, env, id, item, dispatch, runSkillStream }) {
-  const running = intakeUpdate({ repoRoot, env, id, patch: { status: "running" } }).item;
-  const skill = dispatch.params.skill;
-  const input = buildLaneBInput(item);
-  const controller = new AbortController();
-  runSkillStream({ skill, input, repoRoot, env, onEvent: () => {}, signal: controller.signal })
-    .then((resultData) => {
-      const failed = resultData?.ok === false;
+function createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs = 30_000 }) {
+  const workers = new Map();
+
+  function updateActive(id, operationId, patch) {
+    const current = intakeOne({ repoRoot, env, id });
+    if (current?.status !== "running" || current.operation?.id !== operationId) return null;
+    return intakeUpdate({ repoRoot, env, id, patch }).item;
+  }
+
+  function recoverOrphans() {
+    let running = [];
+    try {
+      running = intakeList({ repoRoot, env, status: "running" });
+    } catch {
+      return;
+    }
+    for (const item of running) {
+      const now = new Date().toISOString();
       intakeUpdate({
         repoRoot,
         env,
-        id,
+        id: item.id,
         patch: {
-          status: failed ? "error" : "done",
-          result: resultData,
-          error: failed ? resultData?.error || "skill run did not complete" : null,
+          status: "error",
+          error: "CareerRat restarted before this intake work finished. Try it again.",
+          operation: {
+            ...(item.operation || {}),
+            status: "error",
+            completedAt: now,
+            error: {
+              code: "INTAKE_SERVER_RESTARTED",
+              message: "CareerRat restarted before this intake work finished. Try it again.",
+            },
+          },
         },
       });
-    })
-    .catch((err) => {
-      intakeUpdate({ repoRoot, env, id, patch: { status: "error", error: err.message } });
-    });
-  return running;
+    }
+  }
+
+  function start({ id, item, dispatch }) {
+    if (workers.has(id)) return intakeOne({ repoRoot, env, id });
+    const skill = dispatch.params.skill;
+    let executionPlan = item.operation?.executionPlan || null;
+    if (!executionPlan) {
+      const route = resolveAIRoute(env, { repoRoot });
+      if (route.type === "none") {
+        const error = new Error(route.error);
+        error.code = "NO_AI_ROUTE";
+        throw error;
+      }
+      executionPlan = resolveAIExecutionPlan({
+        operation: "application.judgment",
+        runtimeId: aiRuntimeIdForRoute(route),
+        preferences: loadAIPreferences({ repoRoot, env }),
+        ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
+      });
+    }
+    executionPlan = assertAIExecutionPlanForOperation(executionPlan, "application.judgment");
+    const operationId = `${id}:${randomUUID()}`;
+    const startedAt = new Date().toISOString();
+    const operation = {
+      id: operationId,
+      status: "running",
+      skill,
+      startedAt,
+      heartbeatAt: startedAt,
+      executionPlan,
+      ...(item.operation?.id ? { retryOf: item.operation.id } : {}),
+    };
+    const running = intakeUpdate({
+      repoRoot,
+      env,
+      id,
+      patch: { status: "running", result: null, error: null, operation },
+    }).item;
+    const controller = new AbortController();
+    const heartbeat = setInterval(
+      () => {
+        const heartbeatAt = new Date().toISOString();
+        try {
+          updateActive(id, operationId, {
+            operation: { ...operation, status: "running", heartbeatAt },
+          });
+        } catch {
+          // The completion path remains authoritative if a heartbeat races it.
+        }
+      },
+      Math.max(1, Number(heartbeatMs) || 30_000)
+    );
+    heartbeat.unref?.();
+
+    const input = buildLaneBInput(item);
+    const promise = Promise.resolve()
+      .then(() =>
+        runSkillStream({
+          skill,
+          input,
+          repoRoot,
+          env,
+          onEvent: () => {},
+          signal: controller.signal,
+          executionPlan,
+          useExecutionPlanRoute: true,
+        })
+      )
+      .then((resultData) => {
+        controller.signal.throwIfAborted();
+        const failed = resultData?.ok === false;
+        const completedAt = new Date().toISOString();
+        updateActive(id, operationId, {
+          status: failed ? "error" : "done",
+          result: resultData,
+          error: failed
+            ? resultData?.error || "The intake work did not finish. Try it again."
+            : null,
+          operation: {
+            ...operation,
+            status: failed ? "error" : "done",
+            heartbeatAt: completedAt,
+            completedAt,
+            ...(failed
+              ? {
+                  error: {
+                    code: resultData?.code || "INTAKE_SKILL_FAILED",
+                    message: resultData?.error || "The intake work did not finish. Try it again.",
+                  },
+                }
+              : {}),
+          },
+        });
+      })
+      .catch((error) => {
+        const failure =
+          controller.signal.aborted && controller.signal.reason ? controller.signal.reason : error;
+        const completedAt = new Date().toISOString();
+        try {
+          updateActive(id, operationId, {
+            status: "error",
+            error: failure?.message || "The intake work stopped. Try it again.",
+            operation: {
+              ...operation,
+              status: "error",
+              heartbeatAt: completedAt,
+              completedAt,
+              error: {
+                code: failure?.code || "INTAKE_SKILL_FAILED",
+                message: failure?.message || "The intake work stopped. Try it again.",
+              },
+            },
+          });
+        } catch {
+          // A stale worker cannot overwrite a later retry or decision.
+        }
+      })
+      .finally(() => {
+        clearInterval(heartbeat);
+        workers.delete(id);
+      });
+    workers.set(id, { controller, promise });
+    return running;
+  }
+
+  async function shutdownLaneB() {
+    const stopped = new Error(
+      "CareerRat stopped this intake work because the app closed. Try it again."
+    );
+    stopped.code = "INTAKE_SERVER_STOPPED";
+    const active = [...workers.values()];
+    for (const { controller } of active) controller.abort(stopped);
+    await Promise.allSettled(active.map(({ promise }) => promise));
+  }
+
+  return {
+    start,
+    recoverOrphans,
+    ownsLaneB(id) {
+      return workers.has(id);
+    },
+    shutdownLaneB,
+  };
 }
 
-async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime }) {
-  if (typeof workspaceAgentRuntime?.executeIntent !== "function") {
+async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime, appOperations }) {
+  if (!appOperations?.start && typeof workspaceAgentRuntime?.executeIntent !== "function") {
     const error = new Error("the workspace agent is unavailable for this confirmed intake item");
     error.code = "WORKSPACE_AGENT_UNAVAILABLE";
     throw error;
   }
-  const result = await workspaceAgentRuntime.executeIntent({
-    intent: {
-      type: dispatch.params.intentType,
-      entity: { type: "intake", id },
-    },
-  });
-  const actionResult = [...(result.messages || [])]
-    .reverse()
-    .find((message) => message.kind === "action_result");
+  const intent = {
+    type: dispatch.params.intentType,
+    entity: { type: "intake", id },
+  };
+  const result = appOperations?.start
+    ? await executeDurableWorkspaceIntent({
+        appOperations,
+        requestId: `intake-confirm:${id}`,
+        intent,
+      })
+    : await workspaceAgentRuntime.executeIntent({ intent });
+  const actionResult = appOperations?.start
+    ? result.resultRef?.message
+    : [...(result.messages || [])].reverse().find((message) => message.kind === "action_result");
   const evaluationArtifact = actionResult?.artifacts?.find(
     (artifact) => artifact.kind === "job_evaluation"
   );
@@ -658,7 +827,7 @@ async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime
     patch: {
       status: "done",
       result: {
-        threadId: result.thread?.id || "workspace-main",
+        threadId: result.resultRef?.threadId || result.thread?.id || "workspace-main",
         intentType: dispatch.params.intentType,
         summary: actionResult?.text || null,
         communicationId: actionResult?.metadata?.communicationId || null,
@@ -685,8 +854,11 @@ export function mountIntakeRoutes({
   loadSdk,
   runSkillStream = defaultRunSkillStream,
   workspaceAgentRuntime,
+  appOperations,
   captureTextImpl = captureIntakeText,
+  heartbeatMs = 30_000,
 }) {
+  const laneB = createLaneBManager({ repoRoot, env, runSkillStream, heartbeatMs });
   addRoute("POST", "/api/intake", async (req, res) => {
     let body;
     try {
@@ -947,6 +1119,14 @@ export function mountIntakeRoutes({
       });
       return;
     }
+    if (existing.dispatch?.lane === "B" && existing.operation?.executionPlan) {
+      try {
+        assertAIExecutionPlanForOperation(existing.operation.executionPlan, "application.judgment");
+      } catch (err) {
+        respondError(res, err);
+        return;
+      }
+    }
 
     let decided;
     try {
@@ -972,9 +1152,10 @@ export function mountIntakeRoutes({
           id,
           dispatch,
           workspaceAgentRuntime,
+          appOperations,
         });
       } else if (dispatch?.lane === "B") {
-        finalItem = executeLaneB({ repoRoot, env, id, item: existing, dispatch, runSkillStream });
+        finalItem = laneB.start({ id, item: existing, dispatch });
       } else if (dispatch?.lane === "W") {
         finalItem = await executeLaneW({
           repoRoot,
@@ -982,6 +1163,7 @@ export function mountIntakeRoutes({
           id,
           dispatch,
           workspaceAgentRuntime,
+          appOperations,
         });
       } else {
         // Defensive only: dispatch.mjs never returns a lane-less action
@@ -1023,4 +1205,5 @@ export function mountIntakeRoutes({
       respondError(res, err);
     }
   });
+  return laneB;
 }

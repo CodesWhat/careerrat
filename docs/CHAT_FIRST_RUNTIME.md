@@ -21,6 +21,20 @@ Every job-conversation turn follows the same runtime-neutral cycle:
 CareerRat owns these workflows and threads. Their state stays provider-neutral,
 even when the selected execution engine changes between turns.
 
+## Quality and thinking policy
+
+User settings are provider-neutral rather than raw model names. **Automatic**
+resolves quality and thinking depth from the operation: Paul and high-stakes
+application judgment stay strong, web research uses the balanced path, and small
+bounded classification uses the faster path. **Faster**, **Balanced**, and
+**Best** set an overall quality preference; **Thinking depth** can be Automatic,
+Low, Medium, or High. The adapter maps that plan to Claude Code or OpenAI Codex
+without ranking providers or crossing between them.
+
+Each operation freezes its resolved runtime, quality, model, and reasoning plan
+when it starts. A Settings change applies to new work only, and a retry reuses
+the original plan rather than changing quality halfway through the task.
+
 The context pack includes candidate constraints and evidence, current application
 and communication facts, a rolling thread checkpoint with an exact sequence
 boundary, messages after that checkpoint, unresolved mission gates, and bounded
@@ -39,6 +53,15 @@ Vendor-specific exact-session resume handles may be added later as optional
 acceleration metadata. They cannot become the source of truth because retention,
 privacy, working-directory identity, and resume behavior differ by runtime. If a
 native resume fails, canonical rehydration must still work.
+
+## Background work
+
+Search and intake workers are owned by the single CareerRat runtime for the
+workspace, not by a mounted page or open conversation. They continue in the
+background when the user navigates to another view, and the UI restores their
+durable status after reload. Clean shutdown aborts and awaits active workers. If
+the process stops unexpectedly, startup reconciles the orphaned operation and
+surfaces a retry; it never rewrites an interrupted run as completed.
 
 ## Missions
 

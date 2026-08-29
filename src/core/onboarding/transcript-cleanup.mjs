@@ -96,6 +96,11 @@ export function onboardingMessageIsInternal(message) {
 }
 
 function onboardingAssistantPromptsUser(message) {
+  if (
+    message?.metadata?.choicePrompt?.mode === "binary" &&
+    message.metadata.choicePrompt.state === "pending"
+  )
+    return true;
   if (message?.answerMode === "yes-no" || message?.metadata?.answerMode === "yes-no") return true;
   const text = String(message?.text || "").trim();
   if (/\?\s*$/.test(text)) return true;
@@ -105,6 +110,11 @@ function onboardingAssistantPromptsUser(message) {
   return (
     trailingInstruction.length <= 360 &&
     (/^(?:for example|for instance|examples?\b|e\.g\.|such as)\b/i.test(trailingInstruction) ||
+      /^i(?:['’]ll| will)\s+skip\b/i.test(trailingInstruction) ||
+      (trailingInstruction.length <= 200 &&
+        /^(?:(?:this|that|it)(?:['’]s|\s+(?:is|was|will|won['’]t|does|can|should|must)(?:n['’]t)?)|the\s+(?:answer|amount|number|value)\s+(?:is|was|will|won['’]t|does|can|should|must)(?:n['’]t)?)\b/i.test(
+          trailingInstruction
+        )) ||
       /\b(?:answer|choose|include|paste|pick|reply|select|send|share|say|tell|type|use)\b/i.test(
         trailingInstruction
       ))

@@ -4,6 +4,7 @@ import { parseChatAnswerMode, stripChatConfirmationBlocks } from "../ai/chat-ans
 import { requireDb } from "../db/connection.mjs";
 import { withTransaction } from "../db/transaction.mjs";
 import { collapseUnansweredOnboardingPrompts } from "../onboarding/transcript-cleanup.mjs";
+import { choiceMetadataForMessage, resolvePendingMessageChoice } from "./choice-prompt.mjs";
 
 export const WORKSPACE_THREAD_ID = "workspace-main";
 
@@ -40,6 +41,7 @@ export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "application.record-external": ["application"],
   "application.record-external-request": ["workspace"],
   "source.add": ["workspace"],
+  "source.auth-decision": ["workspace"],
   "source.query-add": ["workspace"],
   "source.set-enabled": ["workspace"],
   "source.discover": ["workspace"],
@@ -152,6 +154,24 @@ function readMessages(db) {
     .map((row) => JSON.parse(row.data));
 }
 
+function assertActiveOperation(db, attempt) {
+  if (!attempt) return;
+  const id = String(attempt.id || "").trim();
+  const ownerId = String(attempt.ownerId || "").trim();
+  const fence = Number(attempt.fence);
+  const row = id
+    ? db.prepare("SELECT status, owner_id, fence FROM app_operations WHERE id = ?").get(id)
+    : null;
+  if (
+    !row ||
+    !new Set(["queued", "running"]).has(row.status) ||
+    row.owner_id !== ownerId ||
+    row.fence !== fence
+  ) {
+    throw makeError("workspace result belongs to a stale operation", "STALE_WRITE");
+  }
+}
+
 export function workspaceMessagesForDisplay(messages) {
   const rows = Array.isArray(messages) ? messages : [];
   const onboarding = collapseUnansweredOnboardingPrompts(
@@ -258,22 +278,30 @@ export function workspaceOnboardingHandoff({
     const preserved = currentMessages.filter(
       (message) => message.metadata?.source !== "onboarding"
     );
-    const imported = [...messages, { role: "assistant", text: finalText }].map(
-      (message, index) => ({
-        id: `onboarding-${transcriptHash.slice(0, 20)}-${index + 1}`,
+    const imported = [...messages, { role: "assistant", text: finalText }].map((message, index) => {
+      const id = `onboarding-${transcriptHash.slice(0, 20)}-${index + 1}`;
+      const metadata = choiceMetadataForMessage({
+        metadata: {
+          ...(message.metadata || {}),
+          source: "onboarding",
+          handoffHash: transcriptHash,
+        },
+        role: message.role,
+        threadId: WORKSPACE_THREAD_ID,
+        messageId: id,
+        text: message.text,
+      });
+      return {
+        id,
         threadId: WORKSPACE_THREAD_ID,
         sequence: index + 1,
         role: message.role,
         kind: "text",
         text: message.text,
         createdAt: completedAt,
-        metadata: {
-          ...(message.metadata || {}),
-          source: "onboarding",
-          handoffHash: transcriptHash,
-        },
-      })
-    );
+        metadata,
+      };
+    });
     const ordered = [...imported, ...preserved].map((message, index) => ({
       ...message,
       sequence: index + 1,
@@ -323,8 +351,10 @@ export function workspaceMessageAppend({
   artifacts,
   error,
   metadata,
+  choice,
   now,
   id,
+  operationAttempt,
 } = {}) {
   const cleanRole = String(role || "").trim();
   const cleanKind = String(kind || "").trim();
@@ -338,16 +368,57 @@ export function workspaceMessageAppend({
   });
   const at = dateIso(now);
   const db = requireDb({ repoRoot, env });
+  const messageId = String(id || randomUUID());
+  const safeMetadata = jsonClone(metadata, "metadata");
+  const safeChoice = jsonClone(choice, "choice reply");
 
   const result = withTransaction(db, () => {
     const thread = ensureThread(db, at);
+    assertActiveOperation(db, operationAttempt);
+    const existingRow = db
+      .prepare("SELECT data FROM workspace_messages WHERE id = ?")
+      .get(messageId);
+    if (existingRow) {
+      const existing = JSON.parse(existingRow.data);
+      if (
+        existing.threadId !== WORKSPACE_THREAD_ID ||
+        existing.role !== cleanRole ||
+        existing.kind !== cleanKind ||
+        existing.text !== cleanMessageText
+      ) {
+        throw makeError(`workspace message id already exists: ${messageId}`, "CONFLICT");
+      }
+      return { thread, message: existing, reused: true };
+    }
     const sequence = db
       .prepare(
         "SELECT coalesce(max(sequence), 0) + 1 AS next FROM workspace_messages WHERE thread_id = ?"
       )
       .get(WORKSPACE_THREAD_ID).next;
+    const choiceResult =
+      cleanRole === "user"
+        ? resolvePendingMessageChoice(readMessages(db), {
+            text: cleanMessageText,
+            choice: safeChoice,
+            now: at,
+          })
+        : null;
+    if (choiceResult) {
+      db.prepare("UPDATE workspace_messages SET data = ? WHERE id = ?").run(
+        JSON.stringify(choiceResult.message),
+        choiceResult.message.id
+      );
+    }
+    const messageMetadata = choiceMetadataForMessage({
+      metadata: safeMetadata,
+      role: cleanRole,
+      threadId: WORKSPACE_THREAD_ID,
+      messageId,
+      text: cleanMessageText,
+    });
+    if (choiceResult) messageMetadata.choiceResolution = choiceResult.resolution;
     const message = {
-      id: String(id || randomUUID()),
+      id: messageId,
       threadId: WORKSPACE_THREAD_ID,
       sequence,
       role: cleanRole,
@@ -359,7 +430,7 @@ export function workspaceMessageAppend({
     if (entity !== undefined) message.entity = jsonClone(entity, "entity");
     if (artifacts !== undefined) message.artifacts = jsonClone(artifacts, "artifacts");
     if (error !== undefined) message.error = jsonClone(error, "error");
-    if (metadata !== undefined) message.metadata = jsonClone(metadata, "metadata");
+    if (Object.keys(messageMetadata).length) message.metadata = messageMetadata;
 
     db.prepare(
       "INSERT INTO workspace_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
@@ -419,6 +490,7 @@ function intentText(intent) {
     "application.record-external": "Record that I applied elsewhere",
     "application.record-external-request": "Resolve and record that I applied elsewhere",
     "source.add": "Add this job board",
+    "source.auth-decision": "Choose whether to sign into this job site",
     "source.query-add": "Add a job search",
     "source.set-enabled": "Change this search source",
     "source.discover": "Find and review new job boards",
@@ -478,7 +550,14 @@ function intentText(intent) {
   return `${descriptions[intent.type]}.`;
 }
 
-export function workspaceIntentAppend({ repoRoot, env = process.env, intent, now, id } = {}) {
+export function workspaceIntentAppend({
+  repoRoot,
+  env = process.env,
+  intent,
+  now,
+  id,
+  operationAttempt,
+} = {}) {
   const normalized = normalizeWorkspaceIntent(intent);
   return workspaceMessageAppend({
     repoRoot,
@@ -490,5 +569,6 @@ export function workspaceIntentAppend({ repoRoot, env = process.env, intent, now
     entity: normalized.entity,
     now,
     id,
+    operationAttempt,
   });
 }

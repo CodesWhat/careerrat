@@ -22,7 +22,8 @@ const waitForUser =
 const limit = Number(valueAfter("--limit") || 250);
 const outPath = valueAfter("--out");
 const ingest = args.includes("--ingest");
-const profileRoot = valueAfter("--profile-root") || defaultProfileRoot();
+const profileRoot =
+  valueAfter("--profile-root") || defaultProfileRoot({ repoRoot: ROOT, env: process.env });
 const browserChannel = (
   valueAfter("--browser") ||
   valueAfter("--channel") ||
@@ -43,7 +44,7 @@ Options:
   --no-manual          Do not pause for login/filter adjustment.
   --limit N            Max offers to keep. Default: 250.
   --browser NAME       Playwright browser channel. Use "chrome" for Google OAuth. Default: chromium.
-  --profile-root DIR   Persistent browser profile root. Default: ~/.careerrat/board-profiles
+  --profile-root DIR   Persistent browser profile root. Default: ${profileRoot}
   --out FILE           Output JSON file. Default: scan-results/<provider>-browser-<timestamp>.json.
   --ingest             After capture, write offers to SQLite sourced rows and JD artifacts.
 

@@ -1,7 +1,9 @@
+import { loadAIPreferences, writeAIPreferences } from "../core/ai/ai-preferences.mjs";
 import {
   CLAUDE_NATIVE_INSTALL_COMMAND,
   detectInstalledRuntimes,
   hasCompleteCareerRatCapabilities,
+  hasInstalledRuntimeCompletion,
   installedRuntimeCapabilities,
   installedRuntimeSignInCommand,
   isSupportedInstalledRuntime,
@@ -61,6 +63,7 @@ function withProbeReadiness(runtime, probe) {
   });
   const supported = isSupportedInstalledRuntime(runtime.id);
   const complete = hasCompleteCareerRatCapabilities(capabilityState.capabilities, runtime.id);
+  const completionReady = hasInstalledRuntimeCompletion(capabilityState.capabilities, runtime.id);
   const capabilityReason = !supported
     ? "Detected for diagnostics. This runtime has not passed complete CareerRat acceptance yet."
     : complete
@@ -73,15 +76,26 @@ function withProbeReadiness(runtime, probe) {
     capabilities: capabilityState.capabilities,
     capabilitiesVerified: probe?.capabilities !== null && typeof probe?.capabilities === "object",
     capabilityTier: capabilityState.capabilityTier,
-    selectable: supported && runtime.available === true && probe?.ready === true && complete,
+    selectable: supported && runtime.available === true && probe?.ready === true && completionReady,
     capabilityReason,
   };
 }
 
 function runtimeVerification(runtime) {
-  if (!runtime?.path || runtime.capabilities?.completion !== true) return null;
+  if (
+    !runtime?.path ||
+    !runtime.realPath ||
+    !runtime.version ||
+    !/^[a-f0-9]{64}$/i.test(String(runtime.binaryFingerprint || "")) ||
+    runtime.capabilities?.completion !== true
+  ) {
+    return null;
+  }
   return {
     path: runtime.path,
+    realPath: runtime.realPath,
+    version: runtime.version,
+    binaryFingerprint: String(runtime.binaryFingerprint).toLowerCase(),
     capabilities: runtime.capabilities,
     checkedAt: new Date().toISOString(),
   };
@@ -97,13 +111,18 @@ export async function inspectInstalledRuntimeState({
   detectImpl = detectInstalledRuntimes,
   probeImpl = probeInstalledRuntime,
   autoSelect = true,
+  forceCompletionProbeFor = null,
 } = {}) {
   const runtimes = await Promise.all(
     detectImpl({ env }).map(async (runtime) => {
       const supported = isSupportedInstalledRuntime(runtime.id);
       const probe =
         runtime.available && supported
-          ? await probeImpl(runtime, { env, cwd: repoRoot })
+          ? await probeImpl(runtime, {
+              env,
+              cwd: repoRoot,
+              forceCompletionProbe: runtime.id === forceCompletionProbeFor,
+            })
           : runtime.available
             ? { status: "detected_unverified", ready: false, action: null, capabilities: null }
             : { status: "not_installed", ready: false, action: null, capabilities: null };
@@ -210,14 +229,60 @@ export function mountInstalledRuntimeRoutes({
   probeCustomImpl = probeCustomRuntimeCommand,
   platform = process.platform,
 } = {}) {
-  const inspect = (autoSelect = true) =>
+  const inspect = (autoSelect = true, { forceCompletionProbeFor = null } = {}) =>
     inspectInstalledRuntimeState({
       repoRoot,
       env,
       detectImpl,
       probeImpl,
       autoSelect,
+      forceCompletionProbeFor,
     });
+
+  addRoute("GET", "/api/settings/ai-preferences", (_req, res) => {
+    sendJson(res, 200, loadAIPreferences({ repoRoot, env }));
+  });
+
+  addRoute("POST", "/api/settings/ai-preferences", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (error) {
+      sendJson(res, error.status || 400, { ok: false, error: error.message });
+      return;
+    }
+    const keys = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body) : [];
+    if (keys.length !== 2 || !keys.includes("quality") || !keys.includes("reasoning")) {
+      sendJson(res, 400, {
+        ok: false,
+        code: "AI_PREFERENCES_INVALID",
+        error: "Only Paul quality and thinking depth can be changed here.",
+      });
+      return;
+    }
+    try {
+      sendJson(
+        res,
+        200,
+        writeAIPreferences({
+          repoRoot,
+          env,
+          quality: body.quality,
+          reasoning: body.reasoning,
+        })
+      );
+    } catch (error) {
+      if (error?.code === "AI_PREFERENCES_INVALID") {
+        sendJson(res, 400, { ok: false, code: error.code, error: error.message });
+        return;
+      }
+      sendJson(res, 500, {
+        ok: false,
+        code: "AI_PREFERENCES_SAVE_FAILED",
+        error: "CareerRat couldn't save those AI settings. Try again.",
+      });
+    }
+  });
 
   addRoute("GET", "/api/settings/ai-runtimes", async (_req, res) => {
     sendJson(res, 200, await inspect(true));
@@ -232,7 +297,7 @@ export function mountInstalledRuntimeRoutes({
       return;
     }
     const runtimeId = String(body?.runtimeId || "").trim();
-    const state = await inspect(false);
+    const state = await inspect(false, { forceCompletionProbeFor: runtimeId });
     const runtime = state.runtimes.find(({ id }) => id === runtimeId);
     if (!runtime) {
       sendJson(res, 400, { ok: false, code: "RUNTIME_UNKNOWN" });
@@ -297,7 +362,17 @@ export function mountInstalledRuntimeRoutes({
       });
       return;
     }
-    if (!hasCompleteCareerRatCapabilities(runtime.capabilities, runtime.id)) {
+    if (!runtime.ready && runtime.status === "completion_probe_failed") {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_PROBE_FAILED",
+        error: runtime.probeMessage || "This AI tool did not finish its connection check.",
+        action: runtime.action || "retry",
+        actionLabel: runtime.actionLabel || "Try again",
+      });
+      return;
+    }
+    if (!hasInstalledRuntimeCompletion(runtime.capabilities, runtime.id)) {
       sendJson(res, 409, {
         ok: false,
         code: "RUNTIME_CAPABILITY_UNSUPPORTED",
@@ -308,8 +383,10 @@ export function mountInstalledRuntimeRoutes({
     if (!runtime.ready) {
       sendJson(res, 409, {
         ok: false,
-        code: "RUNTIME_AUTH_REQUIRED",
-        action: runtime.action || "start_sign_in",
+        code: "RUNTIME_PROBE_FAILED",
+        error: runtime.probeMessage || "This AI tool did not finish its connection check.",
+        action: runtime.action || "retry",
+        actionLabel: runtime.actionLabel || "Try again",
       });
       return;
     }

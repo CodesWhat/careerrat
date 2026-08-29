@@ -244,13 +244,13 @@ draft. Never send automatically.
 
 ---
 
-## Conversational workspace path
+## In-app and terminal paths
 
-In the Ask workspace, two narrow pieces of this skill are native: the app runs
-typed intents directly in `workspace-agent.mjs`, not this skill's browser
-steps. A terminal or external-agent run still follows STEP 0 → 5 exactly as
-written, and the actual people search always happens there — the app never
-drives LinkedIn or Wellfound itself.
+CareerRat's in-app path searches LinkedIn and Wellfound through its owned
+browser workflow after the platform-specific `relationship_sourcing` permission
+passes. Results are saved as review-only leads in Network; the app never sends a
+message, connection request, or outreach. A terminal or external-agent run still
+follows STEP 0 → 5 exactly as written.
 
 - **Recording a contact the candidate found** (`relationship.record-lead`).
   Self-reports like "I found a recruiter at Acme on LinkedIn, named Jordan
@@ -267,14 +267,14 @@ drives LinkedIn or Wellfound itself.
   "find a recruiter at Acme" or "who can refer me at Globex" offer a "Request
   people sourcing" chip. The handler checks `mayRun` for `relationship_sourcing`
   per platform: with every platform off it refuses and points at Settings;
-  with at least one allowed it returns a handoff card showing each platform's
-  real consent state and, when the linked application has no pending next
-  action, writes `nextAction: "Run relationship-sourcing for <Company>"` so
-  the request survives reload. That CTA deliberately uses this skill's
+  with at least one allowed it runs the native search and reports each
+  platform's result. When the linked application has no pending next action,
+  it writes `nextAction: "Run relationship-sourcing for <Company>"` so the
+  request survives reload. That CTA deliberately uses this skill's
   sourcing vocabulary: STEP 4's lead upsert auto-clears it to the review CTA
   the moment leads land, in the same transaction. An existing next action is
   never overwritten.
-- **What stays here.** Searching the platforms, the one-browser rule, halting
-  on login walls, and every provider interaction remain this skill's agent
-  path. Approval, rejection, and outreach handoff to `email-comms` are
-  unchanged.
+- **Execution and recovery.** The app performs the allowed search when the chip
+  is chosen. Login, captcha, 2FA, and permission blockers leave a durable retry
+  action instead of clearing the request. Approval, rejection, and outreach
+  handoff to `email-comms` are unchanged.

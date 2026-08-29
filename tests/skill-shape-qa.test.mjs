@@ -7,8 +7,14 @@
 // manually or by dispatch, never in CI.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { callInstalledRuntimeForJson } from "../scripts/eval/lib/installed-cli-call.mjs";
 import { SINGLE_ROLE_SCHEMA } from "../scripts/eval/lib/single-role-schema.mjs";
-import { LANES } from "../scripts/eval/skill-shape-qa.mjs";
+import {
+  LANES,
+  parseSkillShapeQaArgs,
+  probeSkillShapeRuntimes,
+  selectSkillShapeRuntimes,
+} from "../scripts/eval/skill-shape-qa.mjs";
 import { coachingPlanSchema } from "../src/core/coaching/schemas.mjs";
 import { validateCompanyHealth } from "../src/core/db/verbs/company-health.mjs";
 import { packetGateAiVerdictSchema } from "../src/core/packet/schemas/packet-schemas.mjs";
@@ -28,6 +34,9 @@ function makePacketVerdict(overrides = {}) {
       currency: "USD",
       minBase: 190000,
       maxBase: 230000,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: "base",
       source: "job-description",
       summary: "$190K-$230K base clears the remote floor.",
     },
@@ -304,4 +313,104 @@ test("skill-shape-qa LANES: enumerates exactly the four AI-shaped lanes", () => 
     assert.equal(typeof lane.buildPrompt, "function");
     assert.equal(typeof lane.check, "function");
   }
+});
+
+test("company-health live schema closes every object for Codex structured output", () => {
+  const schema = LANES.find((lane) => lane.name === "company-health").schema;
+  function assertClosedObjects(node, path = "root") {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "object") {
+      assert.equal(node.additionalProperties, false, `${path} must reject undeclared fields`);
+      assert.equal(typeof node.properties, "object", `${path} must declare its fields`);
+    }
+    for (const [key, value] of Object.entries(node.properties || {})) {
+      assertClosedObjects(value, `${path}.${key}`);
+    }
+    if (node.items) assertClosedObjects(node.items, `${path}[]`);
+  }
+
+  assertClosedObjects(schema);
+});
+
+test("skill-shape-qa defaults to every supported installed runtime", () => {
+  assert.deepEqual(parseSkillShapeQaArgs([]), { list: false, lane: null, runtime: "all" });
+  const runtimes = selectSkillShapeRuntimes(
+    [
+      { id: "claude", available: true },
+      { id: "codex", available: true },
+      { id: "gemini", available: true },
+    ],
+    "all"
+  );
+  assert.deepEqual(
+    runtimes.map((runtime) => runtime.id),
+    ["claude", "codex"]
+  );
+});
+
+test("skill-shape-qa can target one supported runtime explicitly", () => {
+  assert.deepEqual(parseSkillShapeQaArgs(["--runtime", "codex", "--lane", "search-jobs"]), {
+    list: false,
+    lane: "search-jobs",
+    runtime: "codex",
+  });
+  assert.deepEqual(
+    selectSkillShapeRuntimes(
+      [
+        { id: "claude", available: true },
+        { id: "codex", available: true },
+      ],
+      "codex"
+    ).map((runtime) => runtime.id),
+    ["codex"]
+  );
+  assert.throws(() => parseSkillShapeQaArgs(["--runtime", "gemini"]), /claude, codex, or all/);
+});
+
+test("skill-shape-qa uses the production installed-runtime adapter for structured output", async () => {
+  const calls = [];
+  const result = await callInstalledRuntimeForJson({
+    runRuntime: async (options) => {
+      calls.push(options);
+      return { text: '{"fit_score":88}', usage: { output_items: 1 }, runtimeId: "codex" };
+    },
+    runtime: { id: "codex", path: "/usr/local/bin/codex" },
+    prompt: "Score this role.",
+    schema: { type: "object", properties: { fit_score: { type: "number" } } },
+    timeoutMs: 1_000,
+  });
+
+  assert.deepEqual(result.structured, { fit_score: 88 });
+  assert.deepEqual(result.usage, { output_items: 1 });
+  assert.deepEqual(calls[0], {
+    runtime: { id: "codex", path: "/usr/local/bin/codex" },
+    prompt: "Score this role.",
+    outputSchema: { type: "object", properties: { fit_score: { type: "number" } } },
+    tools: [],
+    timeoutMs: 1_000,
+  });
+});
+
+test("skill-shape-qa carries verified capabilities from the auth probe into live calls", async () => {
+  const runtimes = await probeSkillShapeRuntimes(
+    [
+      { id: "claude", path: "/claude", available: true, capabilities: { completion: false } },
+      { id: "codex", path: "/codex", available: true, capabilities: { completion: false } },
+    ],
+    {
+      probe: async (runtime) =>
+        runtime.id === "codex"
+          ? { ready: true, capabilities: { completion: true, structuredOutput: true } }
+          : { ready: false, status: "authentication_required" },
+    }
+  );
+
+  assert.deepEqual(runtimes, [
+    {
+      id: "codex",
+      path: "/codex",
+      available: true,
+      capabilities: { completion: true, structuredOutput: true },
+    },
+  ]);
 });

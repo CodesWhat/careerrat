@@ -94,3 +94,65 @@ test("buildCompanyProposal domain matching stays exact (unaffected by the legal-
   );
   assert.notEqual(notExcluded.rejected?.reason, "excluded-company");
 });
+
+function compensationProposal(offer, compensationFloors) {
+  const capturedOffer = { bodyChars: 120, bodyPartial: false, ...offer };
+  return buildCompanyProposal(
+    proposalArgs({
+      resolution: {
+        companyName: offer.company,
+        atsProvider: "lever",
+        jobBoardUrl: "https://jobs.example.test/company",
+      },
+      scanResult: { offers: [offer], errors: [] },
+      capturedOffers: [capturedOffer],
+      context: { compensationFloors },
+    })
+  );
+}
+
+test("company proposals keep unlabeled pay reviewable instead of rejecting it as base", () => {
+  const result = compensationProposal(
+    {
+      company: "Unknown Basis Co",
+      title: "Lead Bartender",
+      url: "https://jobs.example.test/company/unknown-basis",
+      comp: "$95k-$120k",
+      gate: "review",
+      ruleFlags: ["comp-below-floor"],
+    },
+    { minimum_base: 130_000 }
+  );
+
+  assert.equal(result.rejected, undefined);
+  assert.equal(result.proposal.confidenceTier, "borderline");
+  assert.ok(result.proposal.reviewReasons.includes("comp-uncertain"));
+});
+
+test("company proposals apply annual cash floors to tipped roles by basis", () => {
+  const below = compensationProposal(
+    {
+      company: "Below Tips Co",
+      title: "Lead Bartender",
+      url: "https://jobs.example.test/company/below-tips",
+      baseComp: "$11.35 per hour",
+      annualEarningsComp: "$60,000-$75,000",
+    },
+    { minimum_base: 20_000, minimum_annual_earnings: 85_000 }
+  );
+  const unknown = compensationProposal(
+    {
+      company: "Unknown Tips Co",
+      title: "Lead Bartender",
+      url: "https://jobs.example.test/company/unknown-tips",
+      baseComp: "$11.35 per hour including tips",
+    },
+    { minimum_base: 20_000, minimum_annual_earnings: 85_000 }
+  );
+
+  assert.equal(below.rejected?.reason, "annual-earnings-below-floor");
+  assert.ok(below.rejected?.rejectReasons.includes("annual-earnings-below-floor"));
+  assert.equal(unknown.rejected, undefined);
+  assert.equal(unknown.proposal.confidenceTier, "borderline");
+  assert.ok(unknown.proposal.reviewReasons.includes("annual-earnings-unverified"));
+});

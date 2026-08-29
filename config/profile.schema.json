@@ -33,6 +33,11 @@
         "current_base": { "type": ["number", "null"], "minimum": 0 },
         "target_base": { "type": ["number", "null"], "minimum": 0 },
         "minimum_base": { "type": ["number", "null"], "minimum": 0 },
+        "minimum_annual_earnings": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Minimum expected annual cash earnings from base pay, wages, tips, commissions, and recurring cash bonuses; excludes equity and benefits."
+        },
         "target_total_comp": { "type": ["number", "null"], "minimum": 0 },
         "cash_over_equity": { "type": "boolean", "default": true },
         "expected_base": { "type": ["number", "null"], "minimum": 0 },

@@ -45,6 +45,10 @@ compensation:
   expected_base: 165000            # NEW — the number to put in a salary FORM FIELD
                                    # (may differ from target_base negotiation anchor).
                                    # OUTBOUND-SAFE. Falls back to target_base if unset.
+  minimum_base: 120000             # Guaranteed base pay floor.
+  minimum_annual_earnings: 150000  # Annual cash earnings floor: wages/base, tips,
+                                   # commission, and recurring cash bonuses only.
+                                   # Excludes equity and benefits.
   oe_min_base: null                # NEW — OE bucket comp range (used when a role_bucket
   oe_max_base: null                # NEW — has priority "oe"); floor/target do NOT apply.
   relo_package_needs: ""           # NEW — free-text relo requirements (gate on relo offers).
@@ -187,6 +191,8 @@ The demo persona (Jane Candidate, tech) stays — it's the coherent showcase. Bu
 
 `profile.compensation.current_base` is a private gate input. Outbound comp comes
 only from `expected_base` (form field) / `target_base` (negotiation anchor) /
-`minimum_base` (walk-away). Code and skills route around `current_base` by field
+`minimum_base` (guaranteed base walk-away) / `minimum_annual_earnings` (annual cash
+earnings from wages, tips, commission, and cash bonuses, excluding equity and
+benefits). Code and skills route around `current_base` by field
 path — never echo it into a résumé, cover letter, form field, message, packet, or
 shareable tracker note. `current_comp_shareable` stays `false` by default.

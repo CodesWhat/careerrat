@@ -129,12 +129,17 @@ function createApi(draft = { transcript: [] }) {
     }),
     getOnboardingDraft: vi.fn().mockResolvedValue({ draft }),
     getOnboardState: vi.fn().mockResolvedValue(ONBOARD_STATE),
+    getAppOperation: vi.fn(),
+    getCompanyProposalBatch: vi.fn(),
+    getResumeExtraction: vi.fn().mockResolvedValue(null),
     initOnboard: vi.fn().mockResolvedValue({ ok: true }),
     parseResumeText: vi.fn().mockResolvedValue({ profileSeed: {}, evidenceSeed: { claims: [] } }),
     probeInstalledAiRuntime: vi.fn().mockResolvedValue({ ok: true }),
     removeEvidenceClaim: vi.fn().mockResolvedValue({ ok: true }),
     replaceEvidenceClaims: vi.fn().mockResolvedValue({ ok: true }),
     requestHostedInterest: vi.fn().mockResolvedValue({ ok: true }),
+    retryAppOperation: vi.fn(),
+    decideCompanyProposal: vi.fn(),
     saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
     saveEvidenceSeed: vi.fn().mockResolvedValue({ ok: true }),
     saveOnboardingDraft: vi.fn().mockResolvedValue({ ok: true }),
@@ -1195,6 +1200,27 @@ describe("FirstRunController chat event reconciliation", () => {
     ).toEqual(["chat-chat-1-event-2", "chat-chat-1-event-6"]);
   });
 
+  it("reuses the accepted chat request identity when a lost response is retried", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    api.sendChatMessage.mockRejectedValueOnce(new Error("response lost"));
+
+    await view.props.onSubmitAnswer("Remote in the US works for me.");
+    view = rerender(module, api);
+    await view.props.onSubmitAnswer("Remote in the US works for me.");
+
+    const requestIds = api.sendChatMessage.mock.calls.map((call) => call[3]?.requestId);
+    expect(requestIds).toHaveLength(2);
+    expect(requestIds[0]).toBeTruthy();
+    expect(requestIds[1]).toBe(requestIds[0]);
+    expect(
+      rerender(module, api).props.messages.filter(
+        (message) => message.role === "user" && message.text === "Remote in the US works for me."
+      )
+    ).toHaveLength(1);
+  });
+
   it("keeps the server-provided binary answer mode on the assistant message", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -1599,6 +1625,48 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 
+  it("does not repeat a salary question followed by a short explanation", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    await bootController(module, api);
+    const reply = [
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Search priorities","payload":{"doc":"targeting","patch":{"keep_signals":["strong pay"]}}}',
+      "```",
+      "What’s the lowest base salary you’d accept for any job? I’ll skip anything clearly below it.",
+    ].join("\n");
+
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+    rerender(module, api);
+    await flushEffects();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      keep_signals: ["strong pay"],
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not advance past a question followed by a safety clarification", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    await bootController(module, api);
+    const reply = [
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Negotiation target","payload":{"doc":"profile","patch":{"compensation":{"target_base":210000}}}}',
+      "```",
+      "What base salary should I enter when an application form requires one? This is never your current salary.",
+    ].join("\n");
+
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+    rerender(module, api);
+    await flushEffects();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      compensation: { target_base: 210000 },
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("does not request another turn when the saved assistant turn expects yes or no", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -1695,7 +1763,7 @@ describe("FirstRunController chat event reconciliation", () => {
       expect.objectContaining({ status: "error" }),
     ]);
     expect(view.props.error).toBe(
-      "One profile detail isn't supported yet. The other valid details were saved."
+      "CareerRat skipped one setting it doesn't support. The other valid details were saved, so you can keep going."
     );
     expect(view.props.error).not.toContain("auto_submit");
     expect(api.getOnboardState.mock.calls.length).toBeGreaterThan(stateReadsBeforeReply);
@@ -1776,6 +1844,27 @@ describe("FirstRunController chat event reconciliation", () => {
     });
   });
 
+  it("applies a typed exact confirmation label through the durable confirmation path", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(companyAddReply()), {
+      lastEventId: "2",
+    });
+    view = rerender(module, api);
+
+    expect(view.props.messages.at(-1).options.map((option) => option.label)).toEqual([
+      "Add company",
+      "Not now",
+    ]);
+    await view.props.onSubmitAnswer("Add company");
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      company_preferences: { confirmed: true, examples: ["Acme"] },
+    });
+    expect(api.sendChatMessage).not.toHaveBeenCalledWith("chat-1", "Add company");
+  });
+
   it("keeps a failed decline visible and retryable without claiming a save", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -1835,9 +1924,7 @@ describe("FirstRunController chat event reconciliation", () => {
     const view = await bootController(module, api);
 
     view.props.onEditKnowledgeSection({ id: "engine", label: "ENGINE" });
-    expect(navigate).toHaveBeenCalledWith("/settings", {
-      state: { activeTab: "settings", openEnginePicker: true },
-    });
+    expect(navigate).toHaveBeenCalledWith("/settings?tab=settings&panel=engine");
   });
 
   it("writes whole-section modal edits through canonical candidate APIs", async () => {
@@ -1866,7 +1953,9 @@ describe("FirstRunController chat event reconciliation", () => {
         email: "jordan@example.test",
         phone: "+1 212 555 0199",
         home: "New York, NY",
+        compensationFloorType: "guaranteed-base",
         minimumBase: "$190,000",
+        minimumAnnualEarnings: "$85,000",
         remoteScope: "worldwide",
         hybrid: true,
         onsite: false,
@@ -1887,8 +1976,52 @@ describe("FirstRunController chat event reconciliation", () => {
         onsite: false,
         mode_preferences_confirmed: true,
       },
-      compensation: { minimum_base: 190000 },
+      compensation: { minimum_base: 190000, minimum_annual_earnings: null },
     });
+
+    await view.props.onSaveKnowledgeSection(
+      { id: "quickFacts" },
+      {
+        name: "Jordan Rivera",
+        email: "jordan@example.test",
+        phone: "+1 212 555 0199",
+        home: "New York, NY",
+        compensationFloorType: "annual-cash",
+        minimumBase: "$50,000",
+        minimumAnnualEarnings: "$90,000",
+        remoteScope: "home-country",
+        hybrid: true,
+        onsite: false,
+      }
+    );
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      expect.objectContaining({
+        compensation: { minimum_base: null, minimum_annual_earnings: 90000 },
+      })
+    );
+
+    await view.props.onSaveKnowledgeSection(
+      { id: "quickFacts" },
+      {
+        name: "Jordan Rivera",
+        email: "jordan@example.test",
+        phone: "+1 212 555 0199",
+        home: "New York, NY",
+        minimumBase: "$50,000",
+        minimumAnnualEarnings: "$85,000",
+        compensationFloorType: "both",
+        remoteScope: "home-country",
+        hybrid: true,
+        onsite: false,
+      }
+    );
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      expect.objectContaining({
+        compensation: { minimum_base: 50000, minimum_annual_earnings: 85000 },
+      })
+    );
 
     await view.props.onSaveKnowledgeSection(
       {
@@ -2149,6 +2282,139 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.sendChatMessage.mock.calls.at(-1)[1]).toContain(
       'The resume "jordan-resume.md" was uploaded and parsed'
     );
+  });
+
+  it("does not replay candidate writes after the server commits an AI resume operation", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.extractResumeAi.mockResolvedValue({
+      seedSaved: true,
+      operation: { id: "resume-extraction-1", status: "completed" },
+      profileSeed: { candidate: { full_name: "Jordan Rivera" } },
+      evidenceSeed: {
+        claims: [{ claim: "Led a platform team", evidence: "Candidate resume" }],
+      },
+      targetingSeed: {
+        role_buckets: [
+          { name: "Primary", priority: "primary", titles: ["Staff Software Engineer"] },
+        ],
+      },
+    });
+    const view = await bootController(module, api);
+
+    await view.props.onResumeFile({
+      name: "jordan-resume.pdf",
+      size: 42,
+      lastModified: 1,
+    });
+
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    expect(api.saveEvidenceSeed).not.toHaveBeenCalled();
+    expect(api.sendChatMessage.mock.calls.at(-1)[1]).toContain(
+      'The resume "jordan-resume.pdf" was uploaded and parsed'
+    );
+  });
+
+  it("follows the exact durable resume operation after a reload", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const runningState = {
+      ...ONBOARD_STATE,
+      resumeExtraction: {
+        id: "resume-extraction-1",
+        uploadDigest: "a".repeat(64),
+        filename: "jordan-resume.pdf",
+        status: "running",
+      },
+    };
+    api.getResumeExtraction.mockResolvedValue({
+      ...runningState.resumeExtraction,
+      status: "completed",
+      result: { evidenceSeed: { claims: [] } },
+    });
+    api.getOnboardState.mockResolvedValue({
+      ...ONBOARD_STATE,
+      sourceResumePresent: true,
+      resumeExtraction: {
+        ...runningState.resumeExtraction,
+        status: "completed",
+      },
+    });
+
+    await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { initialOnboardState: runningState },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.getResumeExtraction).toHaveBeenCalledWith({ id: "resume-extraction-1" });
+    expect(api.getOnboardState).toHaveBeenCalled();
+  });
+
+  it("follows a saved company operation after reload without changing the route or active draft", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getAppOperation.mockResolvedValue({
+      id: "app-operation-company-1",
+      status: "completed",
+      resultRef: { type: "company-proposal-batch", id: "cpb-exact" },
+    });
+    api.getCompanyProposalBatch.mockResolvedValue({
+      batchId: "cpb-exact",
+      proposals: [{ proposalId: "proposal-1", version: 1 }],
+      rejected: [],
+    });
+    const values = new Map([["careerrat:operation:company-discovery", "app-operation-company-1"]]);
+    const operationStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    };
+
+    let view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { operationStorage },
+    });
+    view.props.onDraftChange("Keep this answer");
+    await Promise.resolve();
+    view = rerender(module, api, { operationStorage });
+    await flushEffects();
+    view = rerender(module, api, { operationStorage });
+
+    expect(api.getAppOperation).toHaveBeenCalledWith("app-operation-company-1");
+    expect(api.getCompanyProposalBatch).toHaveBeenCalledWith("cpb-exact");
+    expect(view.props.companyReviewReady).toBe(true);
+    expect(view.props.draft).toBe("Keep this answer");
+    expect(values.get("careerrat:operation:company-discovery")).toBe("app-operation-company-1");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a resume operation that startup reconciled as stopped", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const stoppedState = {
+      ...ONBOARD_STATE,
+      resumeExtraction: {
+        id: "resume-extraction-stopped",
+        filename: "jordan-resume.pdf",
+        status: "failed",
+        error: {
+          code: "RESUME_EXTRACTION_SERVER_STOPPED",
+          message: "CareerRat stopped before it finished reading this resume. Try it again.",
+        },
+      },
+    };
+
+    const view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { initialOnboardState: stoppedState },
+    });
+
+    expect(view.props.error).toBe(
+      "CareerRat stopped before it finished reading this resume. Try it again."
+    );
+    expect(api.getResumeExtraction).not.toHaveBeenCalled();
   });
 
   it("keeps one unanswered work-mode prompt when a resume upload triggers the same gap again", async () => {

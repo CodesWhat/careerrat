@@ -331,7 +331,7 @@ test("POST /api/discovery/complete durably resolves an explicit discovery step",
   assert.deepEqual(body.completion.completedDiscoverySteps, ["research-boards"]);
 });
 
-test("POST /api/discovery/complete continues from board research into confirm-first company discovery", async () => {
+test("POST /api/discovery/complete continues from board research into validated company discovery", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-discovery-company-handoff-"));
   roots.push(repoRoot);
   const intents = [];
@@ -356,7 +356,7 @@ test("POST /api/discovery/complete continues from board research into confirm-fi
       type: "company.discover",
       entity: { type: "workspace", id: "workspace-main" },
       input: {
-        request: "Continue post-onboarding discovery from approved job boards.",
+        request: "Continue post-onboarding discovery from validated job boards.",
       },
     },
   ]);

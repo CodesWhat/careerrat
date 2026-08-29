@@ -341,7 +341,7 @@ test("discovers a supported ATS board from public homepage and careers links wit
   assert.equal(cached.job_board_url, "https://jobs.lever.co/acme");
 });
 
-test("persists unsupported public pages as cache-only and non-promotable", async () => {
+test("persists unrecognized public careers pages as promotable generic browser sources", async () => {
   const repoRoot = setupRepo();
   const fetchImpl = fetchFrom({
     "https://plain.example/careers": response(
@@ -360,18 +360,18 @@ test("persists unsupported public pages as cache-only and non-promotable", async
     now: NOW,
   });
 
-  assert.equal(result.status, "unsupported_public");
-  assert.equal(result.proposedAction, "cache-only");
-  assert.equal(result.promotable, false);
+  assert.equal(result.status, "generic_public");
+  assert.equal(result.proposedAction, "approve-public-source");
+  assert.equal(result.promotable, true);
   assert.equal(result.atsProvider, null);
-  assert.equal(result.jobBoardUrl, "");
-  assert.ok(result.provenance.some((entry) => entry.source === "public-page-cache"));
+  assert.equal(result.jobBoardUrl, "https://plain.example/careers");
+  assert.ok(result.provenance.some((entry) => entry.source === "public-page-fetch"));
 
   const cached = companyBoardResolutionGet({ repoRoot, companyKey: "plain-co" }).resolution;
-  assert.equal(cached.status, "unsupported_public");
+  assert.equal(cached.status, "generic_public");
   assert.equal(cached.ats_provider, null);
-  assert.equal(cached.proposed_action, "cache-only");
-  assert.equal(cached.job_board_url, "");
+  assert.equal(cached.proposed_action, "approve-public-source");
+  assert.equal(cached.job_board_url, "https://plain.example/careers");
 });
 
 test("resolutionNeedsRefresh covers explicit, stale, scan, threshold, and stored enum reasons", () => {

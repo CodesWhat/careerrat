@@ -11,6 +11,7 @@ export function activityAppend({ repoRoot, env, event } = {}) {
   if (!event || typeof event !== "object") throw new Error("activityAppend: event is required");
   return runVerb({ repoRoot, env }, (db) => {
     const logged = logActivityEvent(db, event);
-    return { event: logged };
+    const deduped = db.prepare("SELECT changes() AS n").get().n === 0;
+    return { event: logged, deduped };
   });
 }

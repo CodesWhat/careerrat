@@ -24,7 +24,10 @@ targeting, fit-calibration, or channel-mix changes when outcome thresholds trip.
 
 ## Intent Router
 
-The root router in `AGENTS.md` and `CLAUDE.md` maps user intent to all 28 skills.
+The root router in `AGENTS.md` maps user intent to 26 user-facing skills;
+`CLAUDE.md` adds Claude-specific reminders without defining a second contract.
+`intake-extract` and `resume-extract` are backend-only helpers invoked by the
+Universal Intake and onboarding upload routes, not user-intent destinations.
 Routes are grouped below by cluster.
 
 ### Onboarding
@@ -68,7 +71,8 @@ Routes are grouped below by cluster.
 
 - Rejection, offer, status change, outcome update → `track-outcomes`
 - "Check my statuses", "sync my pipeline", poll ATS dashboards → `sync-status`
-  (opt-in browser automation; reads portals, hands transitions to `track-outcomes`)
+  (opt-in browser automation; applies verified advances atomically and leaves
+  regressions or low-confidence labels for review)
 - "Why am I getting filtered", strategy review, re-rank, or when outcome
   thresholds trip → `reevaluate-strategy`
 
@@ -102,6 +106,26 @@ silently start chat or the full skill runtime.
 Confirmed company writes remain confirm-first source config or DB-owner work,
 not React state, generated tracker files, or model output.
 
+### CareerRat-owned private-account browser workflows
+
+The in-app private-account browser workflows read permitted Apple Mail, Gmail,
+Outlook, LinkedIn, Wellfound, Greenhouse, Workday, Ashby, and Lever surfaces
+without delegating the product action to the selected agent CLI. Their contextual
+permissions remain off by default and are checked per capability and platform.
+Saved job-source login is separate: when a source is added or first used and login
+is needed, CareerRat asks one site-specific Yes/No question instead of using the
+permission matrix. Login walls, captchas, 2FA, and other challenges return visible
+retry state without advancing the workflow watermark.
+
+Mail and message reads capture relevant communications locally. Relationship
+sourcing writes review-only leads. LinkedIn optimization writes proposal batches;
+approvals remain local until a separate `profile_apply` permission and per-field
+confirmation authorize a live edit. Status sync applies only `autoApplicable`
+results atomically, including stale portal-CTA cleanup, activity, and analytics.
+Regressions and low-confidence labels remain review-only. `track-outcomes` still
+owns candidate-reported outcome follow-up, coaching, learning capture, and
+strategy checks; the native portal poll does not invent that context.
+
 Public company intelligence is a separate local data lane. Migration 009 creates
 `public_*` SQLite tables for company metadata, board metadata, careers-page scan
 metadata, review items, and the public sync preference. These rows are public
@@ -116,8 +140,8 @@ The public-intel scanner path is local-first:
 
 1. Resolve supported ATS boards deterministically.
 2. Extract public careers-page links and metadata without AI.
-3. Record clean no-results, empty pages, blocked pages, robots-disallowed pages,
-   login-gated pages, and useless pages as metadata only.
+3. Record clean no-results, empty pages, blocked pages, login-gated pages, and
+   useless pages as metadata only.
 4. Use bounded AI only for ambiguous reachable public text, with schema
    validation and one corrective retry.
 5. Treat model-suggested URLs/providers as advisory until deterministic
@@ -198,11 +222,24 @@ typed routes and the workspace agent. The generic chat surface exposes only
 `ingest-profile`, `research-boards`, `research-company`, `research-comp`, and
 `company-health`. Company discovery stays on the app-owned reviewed proposal
 path, and `search-jobs` stays on its dedicated AI web-search route.
+`CAREERRAT_RUNTIME_SKILLS` controls only the generic `POST /api/skill/run`
+surface. An explicitly empty generic allowlist does not disable dedicated,
+app-owned routes such as AI web search; each dedicated route grants only its
+own scoped skill for that call.
 
 CareerRat owns the workflow executor, durable threads, context assembly, and
 write-back. That product layer is provider-neutral. Runtime adapters translate a
 capability-scoped request into one local CLI call and normalize text, activity,
 usage, cancellation, and errors back into the same app contract.
+
+A provider-neutral operation policy resolves **Automatic**, **Faster**,
+**Balanced**, or **Best** quality plus **Automatic**, **Low**, **Medium**, or
+**High** thinking depth before each call. Automatic keeps Paul and high-stakes
+judgment on the strongest path, routes web research to the balanced path, and
+uses the faster path for small bounded classification. The resolved execution
+plan is immutable for the life of the operation and its retries. Adapters map
+that plan to Claude Code or OpenAI Codex; the user never needs to choose a
+provider based on model capability.
 
 Claude Code 2.1.241 or newer and OpenAI Codex 0.149.1 or newer are the supported
 engines for the complete CareerRat product. Each runtime must pass local
@@ -263,6 +300,12 @@ Search sources are provider adapters under `src/core/providers/`.
 - ATS sources should use stable public endpoints where possible.
 - Browser-rendered sources should preserve the generated URL, raw capture, and
   exact recency cutoff.
+- AI open-web discovery preserves a credible specific role as explicitly
+  unverified when the full body cannot be fetched. Evaluate owns later liveness
+  and full-description verification.
+- Hospitality baselines use OysterLink, Hcareers, Hospitality Online, and
+  iHireHospitality; engineering baselines keep their engineering, remote, ATS,
+  and general sources.
 
 See [SOURCES.md](SOURCES.md).
 

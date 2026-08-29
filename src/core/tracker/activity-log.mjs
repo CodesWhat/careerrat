@@ -260,7 +260,14 @@ export function listActivity({ root = DEFAULT_ROOT, limit = null } = {}) {
 // events (drafted/tailored/sourced) have no tracker.json anchor so backfill can't
 // rebuild them. Default high (2000) and overridable so a normal job-search cycle
 // never silently loses history; lower it via CAREERRAT_ACTIVITY_MAX if needed.
-const DEFAULT_ACTIVITY_MAX = Number(process.env.CAREERRAT_ACTIVITY_MAX) || 2000;
+const DEFAULT_ACTIVITY_MAX = 2000;
+
+export function activityRetentionLimit(env = process.env) {
+  const configured = Number(env?.CAREERRAT_ACTIVITY_MAX);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_ACTIVITY_MAX;
+}
 
 // WRITE side (the mutating skills): append one event. Refuses on schema / lint /
 // comp-leak. Dedupes on the content-derived id so backfill is idempotent.
@@ -271,7 +278,7 @@ export function appendActivity(
     now = new Date(),
     dedupe = true,
     autoPrune = true,
-    max = DEFAULT_ACTIVITY_MAX,
+    max = activityRetentionLimit(),
     pruneAt = 0,
   } = {}
 ) {
@@ -323,7 +330,7 @@ export function appendActivity(
 
 // Retention/rollup: keep the most recent `max` events, rewritten atomically. The
 // only path that rewrites the whole file (append is the normal path).
-export function pruneActivity({ root = DEFAULT_ROOT, max = DEFAULT_ACTIVITY_MAX } = {}) {
+export function pruneActivity({ root = DEFAULT_ROOT, max = activityRetentionLimit() } = {}) {
   const path = activityAbsPath(root);
   if (!existsSync(path)) return { ok: true, kept: 0, dropped: 0 };
   const events = readActivity({ root });
