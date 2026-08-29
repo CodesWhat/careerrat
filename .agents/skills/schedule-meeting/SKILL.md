@@ -332,7 +332,7 @@ none, use `interviewAt`.
 **DB workspace — (c-i)/(c-ii)/(c-iii) composition.** No single verb covers all three, so
 compose, back-to-back in the same turn as (a)/(b):
 
-1. ```
+1. ```sh
    careerrat data app schedule-interview <id> --at <iso> --round "<kind>" --note "<interviewNote text>"
    ```
 
@@ -349,7 +349,7 @@ compose, back-to-back in the same turn as (a)/(b):
    `track-outcomes`' STEP 2 routing table): `careerrat data app set-fields <id> --data
    '{"conversations":[...]}'`.
 
-3. ```
+3. ```sh
    careerrat data app set-status <id> "<stage>"
    ```
 
@@ -389,13 +389,13 @@ draft awaiting send → log it as needing the user:
 - **DB workspace:** the (a)/(c) calls above already auto-logged their own generic events. For
   the richer, scheduling-specific type, log an additional event:
 
-  ```
+  ```sh
   careerrat data activity append --data '{"type":"drafted","actor":"agent","needsUser":true,"title":"Scheduling reply — <Company>","summary":"<one line: proposed/confirmed slot>","refs":{"applicationId":"<application id>","company":"<Company>"},"cta":{"label":"Review & send"}}'
   ```
 
 - **Legacy workspace (no DB):**
 
-  ```
+  ```sh
   careerrat activity append --type drafted --actor agent --needs-user \
     --title "Scheduling reply — <Company>" \
     --summary "<one line: proposed/confirmed slot>" \

@@ -50,7 +50,7 @@ Read all of the following before doing anything else:
 7. Read prior lessons for this role family before building the packet — they
    sharpen fit signals, likely questions, and comp anchoring. Run:
 
-   ```
+   ```sh
    careerrat learnings read "<role title or family>"
    ```
 
@@ -58,7 +58,7 @@ Read all of the following before doing anything else:
 8. Read any company research artifact before building the packet — it sharpens the
    Positioning Thesis and the questions-to-ask. Run:
 
-   ```
+   ```sh
    careerrat research read "<company>"
    ```
 
@@ -71,7 +71,7 @@ Read all of the following before doing anything else:
 9. Read the STAR+R **story bank** before building the packet — it holds reusable
    behavioural answers that already trace to evidence. Run:
 
-   ```
+   ```sh
    careerrat stories match "workspace/jobs/<jd-file>.md.json"
    ```
 
@@ -83,7 +83,7 @@ Read all of the following before doing anything else:
 10. Run `careerrat tracker --summary` to confirm funnel state.
 11. Check usage mode before building a deep multi-audience packet:
 
-   ```
+   ```sh
    careerrat modes allows interview:packet:deep
    ```
 
@@ -148,7 +148,7 @@ Call `renderInterviewPacket()` from `src/core/interview/packet.mjs` with:
 
 Write the rendered output to:
 
-```
+```text
 workspace/interview-prep/<company>-<role>.md
 ```
 
@@ -334,7 +334,7 @@ to retrieve it under pressure. Pull each "say" line from the strongest backing i
 The story bank compounds across loops — build it as you prep, don't restart each
 round. After writing the packet, check behavioural coverage:
 
-```
+```sh
 careerrat stories gaps
 ```
 
@@ -368,7 +368,7 @@ For each uncovered competency (or a Likely Question with no Prepared Story):
    (never bracket placeholders). List every claim id used in `evidence_ids`.
 3. Write the draft to a temp YAML file and propose it (dry run):
 
-   ```
+   ```sh
    careerrat stories add --file <draft.yml>
    ```
 
@@ -376,7 +376,7 @@ For each uncovered competency (or a Likely Question with no Prepared Story):
    field, carries placeholder residue, or leaks comp. On the candidate's
    confirmation, commit (atomic upsert by id):
 
-   ```
+   ```sh
    careerrat stories add --file <draft.yml> --write
    ```
 
@@ -622,7 +622,7 @@ Run `careerrat tracker --verify` immediately after. Then write the outcome to th
 
 Run:
 
-```
+```sh
 node src/cli/lint-placeholders.mjs workspace/interview-prep/<company>-<role>.md
 ```
 
@@ -637,7 +637,7 @@ clean.
 After lint passes clean (STEP 4), render the styled PDF — the only export the
 packet ships:
 
-```
+```sh
 careerrat export workspace/interview-prep/<company>-<role>.md --pdf
 ```
 
@@ -655,13 +655,13 @@ a transcript, or a debrief.*
 
 Write a debrief file to:
 
-```
+```text
 workspace/interview-prep/<company>-<role>-<yyyy-mm-dd>.md
 ```
 
 Structure the debrief file with these sections verbatim:
 
-```
+```text
 ## Status
 Outcome: <advancing / rejected / pending / offer / withdrawn>
 Next step: <what and by when>
@@ -861,7 +861,7 @@ This makes the Focus card and Next Steps CTA reflect the actual next event. A pa
 
 **Legacy workspace (no DB):** after editing `tracker.json`, run in sequence:
 
-```
+```sh
 careerrat tracker --verify
 npm run verify:tracker
 careerrat tracker
@@ -871,7 +871,7 @@ Both verify commands must pass clean before snapshotting.
 
 Then log the packet or debrief to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md):
 
-```
+```sh
 careerrat activity append --type interview --actor agent \
   --title "Interview prep — <Company>" --summary "<packet built / debrief captured>" \
   --company "<Company>" --app-id <application id> --write
@@ -897,7 +897,7 @@ Write the composed body to a temp file, then dry-run (lint) and commit via the
 learnings CLI (the helper creates `candidate/learnings/` and the family file on
 first write):
 
-```
+```sh
 # dry run — lints for placeholders and comp leaks, prints what would be appended
 careerrat learnings append "<role>" --title "<short label>" --body-file <path>
 

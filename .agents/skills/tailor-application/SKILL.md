@@ -14,7 +14,7 @@ contains `GATE: KEEP` or `GATE: REVIEW` for this role.
 
 - If the gate output is present, echo the full block:
 
-  ```
+  ```text
   GATE: KEEP|REVIEW - <reason>
   FIT: <band> <score> - <why>
   COMP: <verdict> - <reason>
@@ -55,7 +55,7 @@ analysis defaults only when both are absent. Record the resolved family (e.g. `f
 
 Run:
 
-```
+```sh
 careerrat learnings read "<role>"
 ```
 
@@ -201,7 +201,7 @@ hand off to `email-comms` instead.
 
 Run:
 
-```
+```sh
 node src/cli/lint-placeholders.mjs workspace/tailored/
 ```
 
@@ -212,7 +212,7 @@ Do not mark any artifact as upload-ready or build-ready until this exits 0.
 Then log the tailored artifacts to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md). One event per tailoring run:
 
-```
+```sh
 careerrat activity append --type tailored --actor agent \
   --title "Tailored application — <Company>" --summary "<what was built, e.g. 'résumé + cover letter'>" \
   --company "<Company>" --role "<Role>" --app-id <application id> --write
@@ -227,7 +227,7 @@ it with the user, not deleting it, is the fix.)
 write the produced artifact paths back to the application row in a single
 `tracker.json` write before proceeding to STEP 8 or STEP 12:
 
-```
+```text
 applications[<id>].artifacts.resume      = "workspace/tailored/<Company> — <Role>.md"
 applications[<id>].artifacts.coverLetter = "<cover letter path or inline text, if produced>"
 applications[<id>].artifacts.answers     = "workspace/tailored/<Company> — <Role> — answers.md" (when form answers were produced)
@@ -236,7 +236,7 @@ applications[<id>].artifacts.resumeNote  = "<one-line tailoring approach>"
 
 Then run the AGENTS.md verify+snapshot gate:
 
-```
+```sh
 careerrat tracker --verify && careerrat tracker
 ```
 
@@ -266,7 +266,7 @@ Read `candidate/profile.yml#candidate.toolchain` (set at onboarding via
 
 **a. `pandoc`:**
 
-```
+```sh
 pandoc "workspace/tailored/<Company> — <Role>.md" -o "workspace/tailored/<Company> — <Role>.docx"
 soffice --headless --convert-to pdf "workspace/tailored/<Company> — <Role>.docx"
 ```
@@ -283,7 +283,7 @@ For PDF, prefer STEP 11b (`careerrat export … --pdf`) — `soffice` opens a ra
 `.md` as plain text and will not render Markdown structure reliably. Use
 LibreOffice only as a last-resort fallback when the bundled export can't run:
 
-```
+```sh
 soffice --headless --convert-to pdf "workspace/tailored/<Company> — <Role>.md"
 ```
 
@@ -337,7 +337,7 @@ without the check, run it now as a final review.
 
 If the role-family has prior tracked applications, run:
 
-```
+```sh
 npm run analyze:outcomes -- --summary
 ```
 
@@ -353,7 +353,7 @@ step.
 After artifacts pass placeholder lint (STEP 7) and ATS-safe validation, render
 print-quality output on request or when the user needs a file for upload/print:
 
-```
+```sh
 careerrat export workspace/tailored/<Company> — <Role>.md --pdf --ats   # the copy you upload to an ATS
 careerrat export workspace/tailored/<Company> — <Role>.md --pdf          # brand/print copy (Geist)
 careerrat export workspace/tailored/<Company> — <Role>.md --pdf --docx
@@ -376,7 +376,7 @@ document title (defaults to the file's stem).
 renders (resume and cover letter), copy it there unconditionally, under the
 per-company folder (Artifact Contract: organized by company, then by round):
 
-```
+```text
 ~/Downloads/careerrat/<Company>/<Company> - Resume.pdf
 ~/Downloads/careerrat/<Company>/<Company> - Cover Letter.pdf   # if produced
 ```
@@ -392,7 +392,7 @@ truth; Downloads is a convenience copy for quick access. Plain-text artifacts
 
 Confirm final artifact locations:
 
-```
+```text
 workspace/tailored/<Company> — <Role>.md
 workspace/tailored/<Company> — <Role>.docx   (if built)
 workspace/tailored/<Company> — <Role>.pdf    (if built)
@@ -415,7 +415,7 @@ artifacts to the user, scan `communications[]` for any thread on this role where
 a cover letter. If such a thread exists, include these fields in the SAME
 `tracker.json` write:
 
-```
+```text
 thread.status        = "waiting"
 thread.nextActionDue = null
 thread.nextAction    = "Await recruiter response"   # rewrite to reflect what's next
@@ -429,7 +429,7 @@ the same write. A ghost comm CTA is a broken contract (see AGENTS.md
 
 After any write at this step, run the verify+snapshot gate again:
 
-```
+```sh
 careerrat tracker --verify && careerrat tracker
 ```
 
