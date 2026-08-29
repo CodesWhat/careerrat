@@ -58,17 +58,21 @@ location:
   Everything else under `config/` (schemas, `*.example.yml`) ships with the
   package and always stays at the repo root.
 
-`candidate/`, `workspace/`, `.internal/`, and the four generated `config/` files
-each resolve independently. A given install can have a legacy top-level
+`candidate/`, `workspace/`, `.internal/`, and `config/` each resolve
+independently of each other. A given install can have a legacy top-level
 `candidate/` while `workspace/` already moved to the data root, or the reverse;
-don't assume one implies the other.
+don't assume one implies the other. The four generated `config/` files are one
+group, not four: if any of them exists at the repo root, all four resolve there.
 
 **Resolve once per session, don't guess.** Run `careerrat doctor` (already part of
 the cold-start flow below): its `User data root: <path>` line is the data root
 from the rule above, and every path it lists under "User setup missing" is
 already shown resolved for whatever layout is actually on disk. For a path
-`doctor` doesn't surface, check directly: `ls candidate` (or `workspace`,
-`.internal`) at the repo root tells you which layout is active for that segment.
+`doctor` doesn't surface, and only when `CAREERRAT_HOME` is unset, check
+directly: `ls candidate` (or `workspace`, `.internal`) at the repo root tells you
+which layout is active for that segment. With `CAREERRAT_HOME` set nothing is
+probed at the repo root, so a leftover directory there proves nothing; read the
+resolved root from `doctor` instead.
 
 This is the same resolution `src/core/paths/workspace.mjs` performs in code
 (`userPath()` / `resolveUserPaths()`). This router and every skill use the bare

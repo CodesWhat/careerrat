@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_PRIVATE_DIR = ".careerrat";
 
 const DEFAULT_REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const GENERATED_CONFIG_FILES = [
+// Exported so the update tarball guard rejects exactly the files the resolver
+// treats as user-owned. Two hand-maintained copies of this list would drift.
+export const GENERATED_CONFIG_FILES = [
   "search-sources.yml",
   "search-sources.json",
   "sourced-scan.json",
