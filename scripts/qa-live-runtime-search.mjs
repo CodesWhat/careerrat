@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -29,18 +28,29 @@ import {
   liveSearchReceiptFilename,
   verifyLiveSearchReceiptForReview,
 } from "./lib/live-search-receipts.mjs";
+import { assertExpectedSourceRevision } from "./lib/live-search-revision-guard.mjs";
 import { containsPersonalSentinel } from "./lib/personal-sentinels.mjs";
 import { runSourcedScan } from "./scan-sourced.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const runtimeId = String(process.argv[2] || "").trim();
-const fixtureId = String(process.argv[3] || "hospitality").trim();
+const cliArgs = process.argv.slice(2);
+const expectedRevisionFlag = cliArgs.indexOf("--expected-revision");
+const expectedRevision =
+  expectedRevisionFlag === -1 ? "" : String(cliArgs[expectedRevisionFlag + 1] || "").trim();
+const positionalArgs =
+  expectedRevisionFlag === -1
+    ? cliArgs
+    : [...cliArgs.slice(0, expectedRevisionFlag), ...cliArgs.slice(expectedRevisionFlag + 2)];
+const runtimeId = String(positionalArgs[0] || "").trim();
+const fixtureId = String(positionalArgs[1] || "hospitality").trim();
 if (
   !new Set(["claude", "codex"]).has(runtimeId) ||
-  !new Set(["hospitality", "engineering"]).has(fixtureId)
+  !new Set(["hospitality", "engineering"]).has(fixtureId) ||
+  positionalArgs.length > 2 ||
+  !expectedRevision
 ) {
   console.error(
-    "Usage: node scripts/qa-live-runtime-search.mjs <claude|codex> [hospitality|engineering]"
+    "Usage: node scripts/qa-live-runtime-search.mjs <claude|codex> [hospitality|engineering] --expected-revision <full-40-hex-sha>"
   );
   process.exit(2);
 }
@@ -53,35 +63,6 @@ const env = {
 };
 const receiptDirectory = resolve(join(repoRoot, LIVE_SEARCH_RECEIPT_DIRECTORY));
 const MAX_DIAGNOSTIC_CAPTURE_FAILURES = 10;
-
-function currentSourceRevision() {
-  return execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  }).trim();
-}
-
-function assertCleanSourceRevision(expectedRevision) {
-  const currentRevision = currentSourceRevision();
-  if (currentRevision !== expectedRevision) {
-    throw new Error("The source revision changed while the native AI search was running.");
-  }
-  const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
-  const receiptPrefix = `${LIVE_SEARCH_RECEIPT_DIRECTORY}/`;
-  const changedSourcePath = status
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => line.slice(3).split(" -> ").at(-1))
-    .find((path) => !String(path).startsWith(receiptPrefix));
-  if (changedSourcePath) {
-    throw new Error(
-      `Native AI search evidence requires a clean source revision (${changedSourcePath}).`
-    );
-  }
-}
 
 function safeResult(result) {
   return {
@@ -300,8 +281,7 @@ const FIXTURES = {
 };
 
 try {
-  const sourceRevision = currentSourceRevision();
-  assertCleanSourceRevision(sourceRevision);
+  const sourceRevision = assertExpectedSourceRevision({ repoRoot, expectedRevision });
   const fixture = FIXTURES[fixtureId];
   candidateSetupInitialize({ repoRoot, env });
   candidateConfigPatch({
@@ -471,7 +451,7 @@ try {
     rows,
   });
   verifyLiveSearchReceiptForReview(receipt);
-  assertCleanSourceRevision(sourceRevision);
+  assertExpectedSourceRevision({ repoRoot, expectedRevision });
   mkdirSync(receiptDirectory, { recursive: true });
   const receiptPath = join(receiptDirectory, liveSearchReceiptFilename(runtimeId, fixtureId));
   writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");

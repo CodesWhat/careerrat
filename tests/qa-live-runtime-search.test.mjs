@@ -1,6 +1,34 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+
+import { assertExpectedSourceRevision } from "../scripts/lib/live-search-revision-guard.mjs";
+
+function git(repoRoot, args) {
+  return execFileSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "CareerRat Test",
+      GIT_AUTHOR_EMAIL: "test@careerrat.invalid",
+      GIT_COMMITTER_NAME: "CareerRat Test",
+      GIT_COMMITTER_EMAIL: "test@careerrat.invalid",
+    },
+  }).trim();
+}
+
+function committedRepo() {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-live-search-revision-"));
+  git(repoRoot, ["init", "--quiet"]);
+  writeFileSync(join(repoRoot, "source.mjs"), "export const value = 1;\n", "utf8");
+  git(repoRoot, ["add", "source.mjs"]);
+  git(repoRoot, ["commit", "--quiet", "-m", "test: initial source"]);
+  return repoRoot;
+}
 
 test("both native AI search fixtures require three presented roles across two target buckets", () => {
   const script = readFileSync(
@@ -199,4 +227,99 @@ test("native AI search acceptance keeps the version-one receipt path compatible"
   assert.match(receipts, /\.github\/release-evidence\/live-search/);
   assert.match(receipts, /schemaVersion:\s*1/);
   assert.doesNotMatch(receipts, /Unsupported live-search|Unexpected live-search/i);
+});
+
+test("native AI search revision guard rejects refs, short SHAs, and malformed revisions", () => {
+  const repoRoot = committedRepo();
+  try {
+    const expectedRevision = git(repoRoot, ["rev-parse", "HEAD"]);
+    git(repoRoot, ["branch", "release-candidate"]);
+    for (const invalidRevision of [
+      "HEAD",
+      "refs/heads/release-candidate",
+      expectedRevision.slice(0, 12),
+      "not a revision",
+      "f".repeat(39),
+      "z".repeat(40),
+    ]) {
+      assert.throws(
+        () => assertExpectedSourceRevision({ repoRoot, expectedRevision: invalidRevision }),
+        /expected source revision must be a full 40-character hexadecimal commit SHA/i,
+        invalidRevision
+      );
+    }
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("native AI search revision guard rejects a full SHA that does not match HEAD", () => {
+  const repoRoot = committedRepo();
+  try {
+    const firstRevision = git(repoRoot, ["rev-parse", "HEAD"]);
+    writeFileSync(join(repoRoot, "source.mjs"), "export const value = 2;\n", "utf8");
+    git(repoRoot, ["add", "source.mjs"]);
+    git(repoRoot, ["commit", "--quiet", "-m", "test: move head"]);
+    assert.throws(
+      () => assertExpectedSourceRevision({ repoRoot, expectedRevision: firstRevision }),
+      /expected source revision .* does not match HEAD/i
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("native AI search revision guard rejects dirty non-receipt source", () => {
+  const repoRoot = committedRepo();
+  try {
+    const expectedRevision = git(repoRoot, ["rev-parse", "HEAD"]);
+    writeFileSync(join(repoRoot, "source.mjs"), "export const value = 2;\n", "utf8");
+    assert.throws(
+      () => assertExpectedSourceRevision({ repoRoot, expectedRevision }),
+      /requires a clean source revision \(source\.mjs\)/i
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("native AI search revision guard accepts the exact full SHA without running a search", () => {
+  const repoRoot = committedRepo();
+  try {
+    const expectedRevision = git(repoRoot, ["rev-parse", "HEAD"]);
+    assert.equal(assertExpectedSourceRevision({ repoRoot, expectedRevision }), expectedRevision);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("native AI search revision guard preserves receipt-only drift", () => {
+  const repoRoot = committedRepo();
+  try {
+    const expectedRevision = git(repoRoot, ["rev-parse", "HEAD"]);
+    const receiptDirectory = join(repoRoot, ".github/release-evidence/live-search");
+    mkdirSync(receiptDirectory, { recursive: true });
+    writeFileSync(join(receiptDirectory, "receipt.json"), "{}\n", "utf8");
+    assert.equal(assertExpectedSourceRevision({ repoRoot, expectedRevision }), expectedRevision);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("native AI search checks the explicit expected revision before setup and after the run", () => {
+  const script = readFileSync(
+    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
+    "utf8"
+  );
+  const checks = [...script.matchAll(/assertExpectedSourceRevision\(/g)].map(
+    (match) => match.index
+  );
+  const setup = script.indexOf("candidateSetupInitialize(");
+  const receiptWrite = script.indexOf("writeFileSync(receiptPath");
+
+  assert.match(script, /--expected-revision <full-40-hex-sha>/);
+  assert.doesNotMatch(script, /full-sha-or-ref/);
+  assert.equal(checks.length, 2, "the expected revision must be checked twice");
+  assert.ok(checks[0] < setup, "the first check must happen before temporary candidate setup");
+  assert.ok(checks[1] < receiptWrite, "the final check must happen before receipt writes");
 });
