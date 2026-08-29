@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { currencyCodePatternSource } from "../currency-format.mjs";
 import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../db/verbs/source-config.mjs";
@@ -185,8 +186,11 @@ const ADJACENT_BASE_COMPENSATION_LABEL_RE =
   /^(?:(?:estimated|annual|posted)\s+)*(?:base\s+(?:salary|pay)|salary)\s+(?:range|band)\s*:?$/i;
 const NON_BASE_COMPENSATION_RE =
   /\b(?:bonus(?:es)?|ote|on[- ]target\s+earnings?|equity|stock(?:\s+(?:options?|grants?))?|total\s+(?:cash\s+)?comp(?:ensation)?|commission|variable\s+comp(?:ensation)?|incentive)\b/i;
-const COMPENSATION_RANGE_RE =
-  /(?:(?:USD|CAD|MXN|EUR|GBP)\s*)?[$£€]?\s*(\d{2,6}(?:,\d{3})*(?:\.\d+)?)\s*([kK])?\s*(?:-|–|—|to)\s*(?:(?:USD|CAD|MXN|EUR|GBP)\s*)?[$£€]?\s*(\d{2,6}(?:,\d{3})*(?:\.\d+)?)\s*([kK])?(?:\s*(?:USD|CAD|MXN|EUR|GBP))?/g;
+const CURRENCY_CODE_SOURCE = currencyCodePatternSource();
+const COMPENSATION_RANGE_RE = new RegExp(
+  `(?:${CURRENCY_CODE_SOURCE}\\s*)?[$£€]?\\s*(\\d{2,6}(?:,\\d{3})*(?:\\.\\d+)?)\\s*([kK])?\\s*(?:-|–|—|to)\\s*(?:${CURRENCY_CODE_SOURCE}\\s*)?[$£€]?\\s*(\\d{2,6}(?:,\\d{3})*(?:\\.\\d+)?)\\s*([kK])?(?:\\s*${CURRENCY_CODE_SOURCE})?`,
+  "gi"
+);
 
 function normalizedCompensationAmount(value, suffix) {
   const numeric = Number(String(value || "").replace(/,/g, ""));

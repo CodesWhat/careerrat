@@ -111,6 +111,7 @@ function scoringConfigFromContext(context = {}) {
     },
     profile: {
       compensation: {
+        currency: context.compensationFloors?.currency,
         minimum_base: context.compensationFloors?.minimum_base,
         minimum_annual_earnings: context.compensationFloors?.minimum_annual_earnings,
       },

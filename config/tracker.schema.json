@@ -475,6 +475,7 @@
       "description": "Persisted comp model for the dashboard's provenance-aware Compensation Range card. Written by the evaluate gate / backfill, rendered (never recomputed) by the browser. source records where the market figures come from.",
       "properties": {
         "source":     { "type": "string", "enum": ["comparables", "posted", "none"] },
+        "currency":   { "type": ["string", "null"] },
         "lowK":       { "type": ["number", "null"] },
         "midpointK":  { "type": ["number", "null"] },
         "highK":      { "type": ["number", "null"] },

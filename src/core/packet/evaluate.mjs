@@ -1,11 +1,22 @@
 import { appPersistEvaluation } from "../db/verbs/app.mjs";
 import { evaluatePacketGate } from "./gate.mjs";
 
-function formatRange(minValue, maxValue) {
+function normalizedCurrency(value) {
+  const currency = String(value || "")
+    .trim()
+    .toUpperCase();
+  return currency || null;
+}
+
+function formatRange(minValue, maxValue, currency) {
   const min = optionalNumber(minValue);
   const max = optionalNumber(maxValue);
   if (min === null && max === null) return null;
-  const money = (value) => `$${Math.round(value).toLocaleString("en-US")}`;
+  const code = normalizedCurrency(currency);
+  const money = (value) => {
+    const amount = Math.round(value).toLocaleString("en-US");
+    return !code || code === "USD" ? `$${amount}` : `${code} ${amount}`;
+  };
   if (min !== null && max !== null) return `${money(min)} - ${money(max)}`;
   return money(min ?? max);
 }
@@ -32,13 +43,14 @@ function packetEvaluationProjection(evaluation) {
   const hasMin = min !== null;
   const hasMax = max !== null;
   const hasBand = hasMin || hasMax;
+  const currency = normalizedCurrency(compensation.currency);
   return {
     ...projection,
     fitScore: evaluation.fitScore ?? null,
     fitBucket: evaluation.fitBucket ?? null,
     fitBasis: "evaluated",
-    base: formatRange(compensation.minBase, compensation.maxBase),
-    tc: formatRange(compensation.minAnnualEarnings, compensation.maxAnnualEarnings),
+    base: formatRange(compensation.minBase, compensation.maxBase, currency),
+    tc: formatRange(compensation.minAnnualEarnings, compensation.maxAnnualEarnings, currency),
     compNote: String(compensation.summary || "").slice(0, 140),
     compEstimate: {
       source:
@@ -47,6 +59,7 @@ function packetEvaluationProjection(evaluation) {
           : hasBand && compensation.source === "market"
             ? "comparables"
             : "none",
+      currency,
       lowK: hasMin ? Math.round(min / 1000) : null,
       midpointK: hasMin && hasMax ? Math.round((min + max) / 2000) : null,
       highK: hasMax ? Math.round(max / 1000) : null,

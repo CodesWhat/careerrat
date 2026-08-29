@@ -780,6 +780,46 @@ test("a salary disclosure answer states expected_base, never the private minimum
   assert.equal(answer.source, "profile");
 });
 
+test("CR5 closeout: salary disclosures use the saved ISO currency and preserve USD output", async () => {
+  const { draftPacketAnswers } = await loadAnswersModule();
+
+  for (const [currency, expected] of [
+    ["GBP", "GBP 180,000"],
+    ["USD", "$180,000"],
+  ]) {
+    const result = await draftPacketAnswers({
+      context: {
+        ...PACKET_CONTEXT,
+        profile: {
+          candidate: { full_name: "Alex Rivera" },
+          compensation: {
+            current_base: "PRIVATE_CURRENT_BASE_SENTINEL",
+            currency,
+            minimum_base: 150000,
+            expected_base: 180000,
+          },
+        },
+      },
+      questions: {
+        answerable: [
+          {
+            id: `q-salary-${currency}`,
+            label: "What are your salary expectations?",
+            required: true,
+          },
+        ],
+        excluded: [],
+      },
+      runAI: async () => {
+        throw new Error("deterministic disclosure must not call AI");
+      },
+    });
+
+    assert.match(result.answers[0].answer, new RegExp(expected.replace("$", "\\$")), currency);
+    if (currency !== "USD") assert.doesNotMatch(result.answers[0].answer, /\$/);
+  }
+});
+
 test("a salary disclosure question with no expected_base on file degrades to NEEDS YOU rather than stating minimum_base", async () => {
   const { draftPacketAnswers } = await loadAnswersModule();
   const result = await draftPacketAnswers({

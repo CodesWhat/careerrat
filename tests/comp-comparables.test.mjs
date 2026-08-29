@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import test, { describe, it } from "node:test";
 
 import { estimateCompFromComparables } from "../src/core/evaluate/comp-comparables.mjs";
 
@@ -113,4 +113,299 @@ describe("estimateCompFromComparables", () => {
       ["$120,000 - $140,000", "$100,000 - $120,000"]
     );
   });
+});
+
+test("historical unlabeled hourly pay enters the comparable estimate pool", () => {
+  const estimate = estimateCompFromComparables({
+    role: "Bar Manager",
+    loc: "New York, NY",
+    mode: "onsite",
+    tracker: {
+      applications: [
+        {
+          id: "past-bar-manager",
+          company: "Example Hospitality",
+          role: "Bar Manager",
+          loc: "New York, NY",
+          mode: "onsite",
+          base: "Pay: $18-$22/hour",
+          status: "rejected",
+        },
+      ],
+    },
+    targeting: {
+      role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }],
+    },
+    compFloors: { home_metro: ["New York"] },
+  });
+
+  assert.equal(estimate?.sampleSize, 1);
+  assert.equal(estimate?.midpointK, 42);
+  assert.equal(estimate?.lowK, 42);
+  assert.equal(estimate?.highK, 42);
+  assert.deepEqual(estimate?.comparables, [
+    {
+      company: "Example Hospitality",
+      role: "Bar Manager",
+      base: "Pay: $18-$22/hour",
+      status: "rejected",
+    },
+  ]);
+});
+
+test("hourly comparable honors later weekly hours and unquantified bonus language", () => {
+  const estimate = estimateCompFromComparables({
+    role: "Bar Manager",
+    loc: "New York, NY",
+    mode: "onsite",
+    tracker: {
+      applications: [
+        {
+          id: "past-bar-manager",
+          company: "Example Hospitality",
+          role: "Bar Manager",
+          loc: "New York, NY",
+          mode: "onsite",
+          base: "Pay: $20/hour plus bonus. Schedule: 30 hours per week.",
+          status: "rejected",
+        },
+      ],
+    },
+    targeting: {
+      role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }],
+    },
+    compFloors: { home_metro: ["New York"] },
+  });
+
+  assert.equal(estimate?.sampleSize, 1);
+  assert.equal(estimate?.midpointK, 31);
+  assert.equal(estimate?.lowK, 31);
+  assert.equal(estimate?.highK, 31);
+});
+
+test("non-dollar hourly comparable ignores volunteer weekly hours", () => {
+  const estimate = estimateCompFromComparables({
+    role: "Bar Manager",
+    loc: "London, UK",
+    mode: "onsite",
+    tracker: {
+      applications: [
+        {
+          id: "past-bar-manager",
+          company: "Example Hospitality",
+          role: "Bar Manager",
+          loc: "London, UK",
+          mode: "onsite",
+          base: "Pay: EUR 20/hour. Volunteer commitment: 10 hours per week.",
+          status: "rejected",
+        },
+      ],
+    },
+    targeting: {
+      role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }],
+    },
+    compFloors: { home_metro: ["London"] },
+  });
+
+  assert.equal(estimate?.sampleSize, 1);
+  assert.equal(estimate?.midpointK, 42);
+  assert.equal(estimate?.lowK, 42);
+  assert.equal(estimate?.highK, 42);
+});
+
+test("CR5: comparable estimation excludes explicit foreign currencies and preserves candidate currency", () => {
+  const estimate = estimateCompFromComparables({
+    role: "Bar Manager",
+    loc: "New York, NY",
+    mode: "onsite",
+    tracker: {
+      applications: [
+        {
+          company: "Matching Currency",
+          role: "Bar Manager",
+          loc: "New York, NY",
+          mode: "onsite",
+          base: "USD 90k-110k",
+          status: "rejected",
+        },
+        {
+          company: "Legacy Currency",
+          role: "Bar Manager",
+          loc: "New York, NY",
+          mode: "onsite",
+          base: "100k-120k",
+          status: "rejected",
+        },
+        {
+          company: "Foreign Currency",
+          role: "Bar Manager",
+          loc: "New York, NY",
+          mode: "onsite",
+          base: "GBP 300k-400k",
+          status: "rejected",
+        },
+      ],
+    },
+    targeting: {
+      role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }],
+    },
+    compFloors: { currency: "USD", home_metro: ["New York"] },
+  });
+
+  assert.equal(estimate?.currency, "USD");
+  assert.equal(estimate?.sampleSize, 2);
+  assert.deepEqual(
+    estimate?.comparables.map(({ company }) => company),
+    ["Legacy Currency", "Matching Currency"]
+  );
+  assert.equal(estimate?.lowK, 100);
+  assert.equal(estimate?.midpointK, 105);
+  assert.equal(estimate?.highK, 110);
+});
+
+test("CR5 closeout: comparables exclude every adjacent foreign ISO marker but keep legacy evidence", () => {
+  const estimate = estimateCompFromComparables({
+    role: "Bar Manager",
+    loc: "New York, NY",
+    mode: "onsite",
+    tracker: {
+      applications: [
+        ...["CHF", "AUD", "PLN"].map((currency) => ({
+          company: `${currency} Co`,
+          role: "Bar Manager",
+          loc: "New York, NY",
+          mode: "onsite",
+          base: `90k-110k ${currency}`,
+          status: "rejected",
+        })),
+        {
+          company: "Legacy Co",
+          role: "Bar Manager",
+          loc: "New York, NY",
+          mode: "onsite",
+          base: "90k-110k",
+          status: "rejected",
+        },
+      ],
+    },
+    targeting: { role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }] },
+    compFloors: { currency: "USD", home_metro: ["New York"] },
+  });
+
+  assert.equal(estimate?.currency, "USD");
+  assert.equal(estimate?.sampleSize, 1);
+  assert.deepEqual(
+    estimate?.comparables.map(({ company }) => company),
+    ["Legacy Co"]
+  );
+});
+
+test("CR5 closeout: comparable hourly pay ignores store hours but honors employee schedules", () => {
+  function estimate(base) {
+    return estimateCompFromComparables({
+      role: "Bar Manager",
+      loc: "New York, NY",
+      mode: "onsite",
+      tracker: {
+        applications: [
+          {
+            company: "Schedule Co",
+            role: "Bar Manager",
+            loc: "New York, NY",
+            mode: "onsite",
+            base,
+            status: "rejected",
+          },
+        ],
+      },
+      targeting: { role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }] },
+      compFloors: { home_metro: ["New York"] },
+    });
+  }
+
+  assert.equal(estimate("Pay: $20/hour. Store hours: 30 hours per week.")?.midpointK, 42);
+  assert.equal(estimate("Pay: $20/hour. Employee schedule: 30 hours per week.")?.midpointK, 31);
+});
+
+test("CR5: semantic business operating hours never add the bad 83K midpoint to comparables", () => {
+  function estimate(base) {
+    return estimateCompFromComparables({
+      role: "Bar Manager",
+      loc: "New York, NY",
+      mode: "onsite",
+      tracker: {
+        applications: [
+          {
+            company: "Schedule Co",
+            role: "Bar Manager",
+            loc: "New York, NY",
+            mode: "onsite",
+            base,
+            status: "rejected",
+          },
+        ],
+      },
+      targeting: { role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }] },
+      compFloors: { home_metro: ["New York"] },
+    });
+  }
+
+  for (const base of [
+    "Store operates 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store operates 80 hours per week.",
+    "Store operates for 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store operates for 80 hours per week.",
+    "Store operates a total of 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store operates a total of 80 hours per week.",
+    "Store is operating 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store is operating 80 hours per week.",
+    "Store currently operates 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store currently operates 80 hours per week.",
+  ]) {
+    const comparableEstimate = estimate(base);
+
+    assert.equal(comparableEstimate?.sampleSize, 1, base);
+    assert.equal(comparableEstimate?.midpointK, 42, base);
+    assert.notEqual(comparableEstimate?.midpointK, 83, base);
+  }
+});
+
+test("CR5: business-entity hours stay out of comparables while generic schedules remain", () => {
+  function estimate(base) {
+    return estimateCompFromComparables({
+      role: "Bar Manager",
+      loc: "New York, NY",
+      mode: "onsite",
+      tracker: {
+        applications: [
+          {
+            company: "Context Co",
+            role: "Bar Manager",
+            loc: "New York, NY",
+            mode: "onsite",
+            base,
+            status: "rejected",
+          },
+        ],
+      },
+      targeting: { role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }] },
+      compFloors: { home_metro: ["New York"] },
+    });
+  }
+
+  for (const base of [
+    "Restaurant stays open 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Restaurant stays open 80 hours per week.",
+    "Store runs 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store runs 80 hours per week.",
+    "Facility open 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Facility open 80 hours per week.",
+  ]) {
+    const result = estimate(base);
+    assert.equal(result?.sampleSize, 1, base);
+    assert.equal(result?.midpointK, 42, base);
+    assert.notEqual(result?.midpointK, 83, base);
+  }
+
+  assert.equal(estimate("Schedule: 30 hours per week. Pay: $20/hour.")?.midpointK, 31);
 });

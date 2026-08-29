@@ -2476,6 +2476,34 @@ describe("ChatFirstAppView", () => {
     expect(html).not.toContain("[object Object]");
   });
 
+  it("CR5 closeout: offer context formats non-USD negotiation values without dollar signs", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        jobDetails: {
+          "app-1": {
+            currency: "CHF",
+            floor: 215,
+            marketP50: 235,
+            ask: 240,
+            nextAction: {
+              state: "needs-action",
+              label: "Offer",
+              title: "Review offer",
+              summary: "Respond to the E Corp offer this week.",
+            },
+          },
+        },
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+    });
+
+    expect(html).toContain("your floor CHF 215k · market midpoint CHF 235k · target CHF 240k");
+    expect(html).not.toContain("$215k");
+    expect(html).not.toContain("$235k");
+    expect(html).not.toContain("$240k");
+  });
+
   it("renders deep ingest and its evidence context inside the same shell", async () => {
     const html = await renderView({
       ui: { ...BASE_UI, activeThread: "ingest" },

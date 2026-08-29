@@ -80,10 +80,12 @@ function resolveMetroGroup(loc, mode, compFloors) {
 // estimate built on a catch-all family is capped to low confidence and labeled.
 const CATCHALL_FAMILIES = new Set(["other", "uncategorized"]);
 
-function midpointKFromComp(compensation) {
-  const band = extractCompBand(compensation);
-  if (!band) return null;
-  return Math.round((band.min + band.max) / 2 / 1000);
+function comparableCompensationBand(compensation, compensationBasis) {
+  if (compensationBasis === "annual-earnings") return extractCompBand(compensation);
+  return (
+    extractCompBand(compensation, { baseOnly: true }) ||
+    extractCompBand(`Base pay: ${compensation}`, { baseOnly: true })
+  );
 }
 
 function hasAnnualEarningsProvenance(row) {
@@ -134,6 +136,9 @@ export function estimateCompFromComparables({
   const family = classifyRoleFamily(role || "", targeting);
   const targetMetro = resolveMetroGroup(loc, mode, compFloors);
   const targetMode = normalizeArrangement(mode, loc);
+  const currency = String(compFloors?.currency || "")
+    .trim()
+    .toUpperCase();
 
   const apps = Array.isArray(tracker?.applications) ? tracker.applications : [];
   const sourced = Array.isArray(tracker?.sourced)
@@ -153,14 +158,16 @@ export function estimateCompFromComparables({
           ? r.tc || r.comp?.tc || ""
           : ""
         : r.base || r.comp?.base || "";
-    const mid = midpointKFromComp(compensation);
-    if (mid == null) continue;
+    const band = comparableCompensationBand(compensation, compensationBasis);
+    if (!band || (currency && band.currency && band.currency !== currency)) continue;
+    const mid = Math.round((band.min + band.max) / 2 / 1000);
     pool.push({
       company: r.company || "",
       role: r.role || "",
       compensation,
       status: r.status || "",
       mid,
+      currency: band.currency || null,
       metro: resolveMetroGroup(r.loc, r.mode, compFloors),
       mode: normalizeArrangement(r.mode, r.loc),
     });
@@ -210,6 +217,7 @@ export function estimateCompFromComparables({
   const familyNote = catchAll ? " (role family unclassified, rough)" : "";
 
   return {
+    ...(currency ? { currency } : {}),
     midpointK,
     lowK,
     highK,

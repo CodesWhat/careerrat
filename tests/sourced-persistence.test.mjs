@@ -115,6 +115,23 @@ test("sourced rows persist base pay and annual earnings separately", () => {
   assert.equal(row.compBasis, "annual-earnings");
 });
 
+test("CR5 closeout: sourced persistence retains explicit unsupported ISO currency evidence", () => {
+  const rows = sourcedRowsFromScanOffers(
+    ["CHF", "AUD", "PLN"].map((currency, index) =>
+      offer({
+        title: `Staff Engineer ${index}`,
+        url: `https://jobs.example.test/acme/staff-engineer-${index}`,
+        bodyText: `Base salary: 90k-110k ${currency} per year.`,
+      })
+    )
+  );
+
+  assert.deepEqual(
+    rows.map(({ base }) => base),
+    ["90k-110k CHF", "90k-110k AUD", "90k-110k PLN"]
+  );
+});
+
 test("partial bodies do not infer compensation but existing offer compensation still wins", () => {
   const rows = sourcedRowsFromScanOffers([
     offer({

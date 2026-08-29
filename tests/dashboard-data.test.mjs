@@ -7,6 +7,11 @@ import { buildLibrarySnapshot } from "../src/core/tracker/library-snapshot.mjs";
 
 const root = new URL("..", import.meta.url);
 
+test("Dashboard adapter remains dependency-free for workspace copies", async () => {
+  const source = await readFile(new URL("src/core/tracker/dashboard-data.js", root), "utf8");
+  assert.doesNotMatch(source, /^\s*import\s/m);
+});
+
 test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
   const tracker = JSON.parse(
     await readFile(new URL("examples/demo-workspace/tracker.json", root), "utf8")
@@ -120,6 +125,44 @@ test("Dashboard labels annual cash separately while legacy total compensation st
   assert.equal(rows.get("legacy-total-comp")?.compCompact, "$200K");
   assert.equal(rows.get("legacy-total-comp")?.compMidpointK, 200);
   assert.equal(rows.get("legacy-total-comp")?.drawer?.floor, 50);
+});
+
+test("CR5 closeout: Dashboard preserves non-USD comp estimates through compact and drawer surfaces", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        {
+          id: "chf-offer",
+          company: "Swiss Co",
+          role: "Staff Engineer",
+          status: "offer",
+          base: "CHF 90,000 - CHF 110,000",
+          compEstimate: {
+            source: "posted",
+            lowK: 90,
+            midpointK: 100,
+            highK: 110,
+            currency: "CHF",
+          },
+        },
+      ],
+      sourced: [],
+      sources: [],
+      communications: [],
+    },
+    {
+      now: new Date("2026-08-28T12:00:00.000Z"),
+      settings: {
+        profile: { currency: "CHF", minimumBaseK: 85, targetBaseK: 120 },
+      },
+    }
+  );
+  const row = vm.jobs.rows.find(({ id }) => id === "chf-offer");
+
+  assert.equal(row?.compCompact, "CHF 100K");
+  assert.equal(row?.drawer?.currency, "CHF");
+  assert.doesNotMatch(row?.compSummary || "", /\$/);
+  assert.doesNotMatch(row?.drawer?.compSummary || "", /\$/);
 });
 
 test("Dashboard adapter limits Activity to the 12 most recent events without pruning history", () => {
