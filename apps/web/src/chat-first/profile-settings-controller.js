@@ -1,4 +1,5 @@
 import { UserFacingError } from "../lib/errorCopy.js";
+import { calculateAnnualCashWorksheet, emptyAnnualCashWorksheet } from "./annual-cash-worksheet.js";
 import { runtimePresentation } from "./first-run-controller.js";
 import { buildLocationPolicy } from "./location-policy.js";
 
@@ -358,15 +359,11 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
               }
             ),
             field(
-              "minimumAnnualEarnings",
+              "annualCashWorksheet",
               "Minimum annual cash earnings",
-              "number",
-              numberValue(compensation.minimum_annual_earnings),
-              {
-                min: "0",
-                step: "1000",
-                help: "Includes wages, tips, commission, and cash bonuses. Excludes equity and benefits.",
-              }
+              "annual-cash-worksheet",
+              emptyAnnualCashWorksheet(compensation.minimum_annual_earnings),
+              { currency: compensation.currency || "USD" }
             ),
             field(
               "targetBase",
@@ -578,10 +575,14 @@ export function profileSectionSavePlan(
   }
   if (section === "compensation") {
     const minimumBase = amountOrNull(values.minimumBase, "Minimum base");
-    const minimumAnnualEarnings = amountOrNull(
-      values.minimumAnnualEarnings,
-      "Minimum annual cash earnings"
-    );
+    const hasAnnualCashWorksheet = Object.hasOwn(values, "annualCashWorksheet");
+    const annualCash = hasAnnualCashWorksheet
+      ? calculateAnnualCashWorksheet(values.annualCashWorksheet)
+      : null;
+    if (annualCash?.error) throw new UserFacingError(annualCash.error);
+    const minimumAnnualEarnings = hasAnnualCashWorksheet
+      ? annualCash.annual
+      : amountOrNull(values.minimumAnnualEarnings, "Minimum annual cash earnings");
     const targetBase = amountOrNull(values.targetBase, "Target base");
     if (minimumBase !== null && targetBase !== null && targetBase < minimumBase) {
       throw new UserFacingError("Target base must be at least the floor.");

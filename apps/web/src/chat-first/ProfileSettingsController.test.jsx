@@ -793,6 +793,195 @@ describe("ProfileSettingsController foreground", () => {
     expect(props.editorValues.titles).toBe("Principal Engineer");
   });
 
+  it("hydrates a legacy annual earnings draft into the visible worksheet before interaction", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const draftContext = onboardState().draftContext;
+    const normalizedContext = {
+      owner: draftContext.owner,
+      base: { revision: "1:2026-08-28T12:00:00.000Z" },
+    };
+    const storageEntries = new Map([
+      [
+        "careerrat:profile-editor-draft:workspace-a:candidate-a:compensation",
+        JSON.stringify({
+          ...normalizedContext,
+          savedAt: "2026-08-28T12:30:00.000Z",
+          value: {
+            minimumBase: "50000",
+            minimumAnnualEarnings: "85000",
+            targetBase: "90000",
+          },
+        }),
+      ],
+    ]);
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => storageEntries.get(key) ?? null),
+      setItem: vi.fn((key, value) => storageEntries.set(key, value)),
+      removeItem: vi.fn((key) => storageEntries.delete(key)),
+    });
+    api.getOnboardState.mockResolvedValue({
+      draftContext,
+      data: {
+        profile: {
+          compensation: {
+            currency: "CAD",
+            minimum_base: 50_000,
+            minimum_annual_earnings: 70_000,
+            target_base: 90_000,
+          },
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=compensation",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+
+    expect(props.editorValues.annualCashWorksheet).toEqual(
+      expect.objectContaining({ annualOverride: "85000" })
+    );
+
+    props.onEditorChange("annualCashWorksheet", {
+      ...props.editorValues.annualCashWorksheet,
+      hoursPerWeek: "30",
+    });
+    expect(
+      JSON.parse(
+        storageEntries.get("careerrat:profile-editor-draft:workspace-a:candidate-a:compensation")
+      ).value
+    ).toEqual(
+      expect.not.objectContaining({
+        minimumAnnualEarnings: expect.anything(),
+      })
+    );
+    props = settingsProps(renderController(module, api));
+    await props.onSaveEditor();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      {
+        compensation: {
+          minimum_base: 50_000,
+          minimum_annual_earnings: 85_000,
+          target_base: 90_000,
+        },
+      },
+      { expectedBaseRevision: "1:2026-08-28T12:00:00.000Z" }
+    );
+  });
+
+  it("surfaces a zero-derived worksheet error without writing Profile Settings", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue({
+      draftContext: onboardState().draftContext,
+      data: {
+        profile: {
+          compensation: {
+            currency: "USD",
+            minimum_annual_earnings: 70_000,
+          },
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=compensation",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    const props = settingsProps(renderController(module, api));
+    props.onEditorChange("annualCashWorksheet", {
+      hourlyRate: "0",
+      hoursPerWeek: "35",
+      weeksPerYear: "52",
+    });
+    let view = renderController(module, api);
+
+    await settingsProps(view).onSaveEditor();
+    view = renderController(module, api);
+
+    expect(controllerAlertText(view)).toBe(
+      "Minimum annual cash earnings must be a positive amount."
+    );
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+  });
+
+  it("hydrates invalid legacy annual floors losslessly and refuses to save them", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const draftContext = onboardState().draftContext;
+    const normalizedContext = {
+      owner: draftContext.owner,
+      base: { revision: "1:2026-08-28T12:00:00.000Z" },
+    };
+
+    for (const rawFloor of ["0", "-5000", "not-an-amount"]) {
+      hooks.clear();
+      const api = createApi();
+      const storageEntries = new Map([
+        [
+          "careerrat:profile-editor-draft:workspace-a:candidate-a:compensation",
+          JSON.stringify({
+            ...normalizedContext,
+            savedAt: "2026-08-28T12:30:00.000Z",
+            value: {
+              minimumBase: "50000",
+              minimumAnnualEarnings: rawFloor,
+              targetBase: "90000",
+            },
+          }),
+        ],
+      ]);
+      vi.stubGlobal("localStorage", {
+        getItem: vi.fn((key) => storageEntries.get(key) ?? null),
+        setItem: vi.fn((key, value) => storageEntries.set(key, value)),
+        removeItem: vi.fn((key) => storageEntries.delete(key)),
+      });
+      api.getOnboardState.mockResolvedValue({
+        draftContext,
+        data: {
+          profile: {
+            compensation: {
+              minimum_base: 50_000,
+              minimum_annual_earnings: 70_000,
+              target_base: 90_000,
+            },
+          },
+        },
+        publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+      });
+      router.location = {
+        pathname: "/settings",
+        search: "?panel=editor&section=compensation",
+        state: null,
+      };
+
+      renderController(module, api);
+      await flushEffects();
+      let view = renderController(module, api);
+
+      expect(settingsProps(view).editorValues.annualCashWorksheet.annualOverride).toBe(rawFloor);
+
+      await settingsProps(view).onSaveEditor();
+      view = renderController(module, api);
+
+      expect(controllerAlertText(view)).toBe(
+        "Minimum annual cash earnings must be a positive amount."
+      );
+      expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    }
+  });
+
   it("never renders a panel on the contradictory Settings tab", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();

@@ -1,3 +1,4 @@
+import { AnnualCashWorksheet } from "./AnnualCashWorksheet.jsx";
 import { cleanAgentCopy } from "./agent-copy.js";
 import { SendUpIcon } from "./chat-first-icons.jsx";
 import {
@@ -740,6 +741,16 @@ function editorValues(item, form) {
 
 function EditorField({ itemId, field }) {
   const inputId = `cf-first-run-edit-${itemId}-${field.id}`;
+  if (field.type === "annual-cash-worksheet") {
+    return (
+      <AnnualCashWorksheet
+        currency={field.currency}
+        idPrefix={inputId}
+        name={field.id}
+        value={field.value}
+      />
+    );
+  }
   if (field.type === "textarea") {
     return (
       <label className="cf-first-run__editor-field" htmlFor={inputId}>
