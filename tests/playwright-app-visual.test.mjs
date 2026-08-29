@@ -77,6 +77,11 @@ test("real Chromium renders the built chat-first workspace without selection glo
   const dev = createDevServer(pathCtx);
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  // Playwright's own default wait is 30s, exactly this test's budget, so a stuck
+  // locator used to surface as a bare "test timed out after 30000ms" that never
+  // said which element it was waiting on. Failing the locator first keeps the
+  // element name in the error.
+  page.setDefaultTimeout(10_000);
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
