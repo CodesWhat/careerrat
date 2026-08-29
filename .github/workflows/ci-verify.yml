@@ -221,7 +221,14 @@ jobs:
       - name: Build the app used by the visual contract
         run: npm run build --workspace apps/web
       - name: Verify application preparation and rendered workspace geometry
-        run: node --test tests/playwright-live.test.mjs tests/playwright-live-dropdowns.test.mjs tests/playwright-app-visual.test.mjs
+        # Serialized on purpose. Each of these files drives its own real
+        # Chromium, and node --test runs files in parallel by default, so on a
+        # hosted runner all three launch browsers at once and starve each other.
+        # The render-bound visual contract is the one that loses: it takes ~2s
+        # alone, ~4s alongside the other two on a 14-core box, and blew past its
+        # 30s budget twice on a 4-vCPU runner while the fixed-wait dropdown tests
+        # next to it barely moved.
+        run: node --test --test-concurrency=1 tests/playwright-live.test.mjs tests/playwright-live-dropdowns.test.mjs tests/playwright-app-visual.test.mjs
       - name: Retain the rendered workspace screenshot
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
