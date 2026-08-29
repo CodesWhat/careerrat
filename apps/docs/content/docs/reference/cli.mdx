@@ -72,7 +72,7 @@ developing from a source checkout or running lower-level maintenance tools.
 
 | Script | What it does |
 |--------|-------------|
-| `verify:tracker` | Validate `workspace/tracker.json` schema and integrity |
+| `verify:tracker` | Validate `.careerrat/workspace/tracker.json` schema and integrity |
 | `lint:placeholders` | Check tailored artifacts for unresolved placeholders |
 
 ### Capture and analysis
@@ -90,6 +90,6 @@ developing from a source checkout or running lower-level maintenance tools.
 ## Environment variables
 
 | Variable | Default | Purpose |
-|----------|---------|---------|
-| `CAREERRAT_HOME` | `<repo root>` | Override location of `candidate/` and `workspace/` |
+| -------- | ------- | ------- |
+| `CAREERRAT_HOME` | `<repo root>/.careerrat` | Override location of `.careerrat/` (holding `candidate/` and `workspace/`) |
 | `NEXT_PUBLIC_SITE_URL` | *(unset)* | Docs-site base URL for metadata |

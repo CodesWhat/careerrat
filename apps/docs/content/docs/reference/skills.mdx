@@ -32,8 +32,8 @@ private config, not hardcoded preferences.
 
 | Skill | Description |
 | ------- | ----------- |
-| `research-company` | Web-search a company across six domain-neutral axes and compose a cited `workspace/research/<slug>.md` artifact that feeds interview-prep and evaluate-job FIT context. |
-| `research-comp` | Web-search market comp for a role+location and produce a cited `workspace/research/comp-bench-*.md` that feeds evaluate-job COMP CHECK/ANCHOR and a confirm-first gate write-back. |
+| `research-company` | Web-search a company across six domain-neutral axes and compose a cited `.careerrat/workspace/research/<slug>.md` artifact that feeds interview-prep and evaluate-job FIT context. |
+| `research-comp` | Web-search market comp for a role+location and produce a cited `.careerrat/workspace/research/comp-bench-*.md` that feeds evaluate-job COMP CHECK/ANCHOR and a confirm-first gate write-back. |
 | `research-boards` | Web-search and legitimacy-screen new job boards for the candidate's domain/role families, then propose adding to `search-sources.yml` confirm-first. |
 | `discover-companies` | Web-search companies likely to be hiring the candidate's target roles, resolve each to a scannable ATS careers board, legitimacy-screen and dedup, then propose adding to `config/sourced-scan.json` tracked_companies confirm-first. Upstream of search-jobs. |
 | `company-health` | Score a role-scoped company-risk rating (`healthy\|watch\|risky`) from web-searched layoff, hiring-momentum, financial, sentiment, and leadership signals with provenance; persist it to the tracker and feed the fit score only where it cross-cuts a stated candidate need. Cost-gated; an internal signal that never enters an outbound artifact. |
