@@ -235,6 +235,96 @@ describe("evaluateCompensation", () => {
     assert.match(result.reason, /annual earnings are unverified/i);
   });
 
+  it("estimates an unposted annual-earnings band from annual cash comparables", () => {
+    const result = evaluateCompensation({
+      body: "Competitive compensation offered.",
+      frontmatter: { role: "Bar Manager", location: "Remote", mode: "remote" },
+      profile: { compensation: { minimum_annual_earnings: 85_000 } },
+      targeting: {
+        role_families: [{ name: "Hospitality Management", patterns: ["bar manager"] }],
+      },
+      tracker: {
+        applications: [
+          {
+            company: "One",
+            role: "Bar Manager",
+            loc: "Remote",
+            mode: "remote",
+            tc: "$70,000 - $80,000",
+            compBasis: "annual-earnings",
+          },
+          {
+            company: "Two",
+            role: "Bar Manager",
+            loc: "Remote",
+            mode: "remote",
+            tc: "$75,000 - $85,000",
+            compBasis: "annual-earnings",
+          },
+          {
+            company: "Three",
+            role: "Bar Manager",
+            loc: "Remote",
+            mode: "remote",
+            comp: { tc: "$80,000 - $90,000", basis: "annual-earnings" },
+          },
+        ],
+      },
+    });
+
+    assert.equal(result.verdict, "estimated-below-floor");
+    assert.equal(result.basis, "annual-earnings");
+    assert.equal(result.floor, 85_000);
+    assert.equal(result.estimate.compensationBasis, "annual-earnings");
+    assert.match(result.reason, /annual earnings/i);
+    assert.match(result.reason, /confirm live before deciding/i);
+    assert.doesNotMatch(result.reason, /non-cash benefits/i);
+  });
+
+  it("keeps annual earnings unverified when tracker comparables contain only base pay", () => {
+    const result = evaluateCompensation({
+      body: "Competitive compensation offered.",
+      frontmatter: { role: "Bar Manager" },
+      profile: { compensation: { minimum_annual_earnings: 85_000 } },
+      targeting: {
+        role_families: [{ name: "Hospitality Management", patterns: ["bar manager"] }],
+      },
+      tracker: {
+        applications: [
+          { company: "One", role: "Bar Manager", base: "$70,000 - $80,000" },
+          { company: "Two", role: "Bar Manager", base: "$80,000 - $90,000" },
+        ],
+      },
+    });
+
+    assert.equal(result.verdict, "review");
+    assert.equal(result.basis, "annual-earnings");
+    assert.match(result.reason, /annual earnings are unverified/i);
+  });
+
+  it("does not let base comparables satisfy a separate annual-earnings floor", () => {
+    const result = evaluateCompensation({
+      body: "Competitive compensation offered.",
+      frontmatter: { role: "Bar Manager" },
+      profile: {
+        compensation: { minimum_base: 25_000, minimum_annual_earnings: 85_000 },
+      },
+      targeting: {
+        role_families: [{ name: "Hospitality Management", patterns: ["bar manager"] }],
+      },
+      tracker: {
+        applications: [
+          { company: "One", role: "Bar Manager", base: "$70,000 - $80,000" },
+          { company: "Two", role: "Bar Manager", base: "$80,000 - $90,000" },
+        ],
+      },
+    });
+
+    assert.equal(result.verdict, "review");
+    assert.equal(result.basis, "annual-earnings");
+    assert.match(result.reason, /annual earnings are unverified/i);
+  });
+
   it("returns below-floor when explicit annual earnings top out below the floor", () => {
     const result = evaluateCompensation({
       body: "Estimated annual earnings including tips: $60,000 - $75,000.",

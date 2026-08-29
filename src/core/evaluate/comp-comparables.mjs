@@ -80,10 +80,21 @@ function resolveMetroGroup(loc, mode, compFloors) {
 // estimate built on a catch-all family is capped to low confidence and labeled.
 const CATCHALL_FAMILIES = new Set(["other", "uncategorized"]);
 
-function midpointKFromBase(base) {
-  const band = extractCompBand(base);
+function midpointKFromComp(compensation) {
+  const band = extractCompBand(compensation);
   if (!band) return null;
   return Math.round((band.min + band.max) / 2 / 1000);
+}
+
+function hasAnnualEarningsProvenance(row) {
+  if (row?.compBasis === "annual-earnings" || row?.comp?.basis === "annual-earnings") {
+    return true;
+  }
+  const evaluated = row?.evaluation?.compensation;
+  return (
+    (evaluated?.minAnnualEarnings !== null && evaluated?.minAnnualEarnings !== undefined) ||
+    (evaluated?.maxAnnualEarnings !== null && evaluated?.maxAnnualEarnings !== undefined)
+  );
 }
 
 /**
@@ -95,15 +106,15 @@ function midpointKFromBase(base) {
  *   2. mode   — same role family AND same arrangement (remote/hybrid/onsite)
  *   3. family — same role family, any location
  *
- * Only comparables with a parseable posted band contribute (we learn real comp
- * from history, including rejected roles). Returns null when no same-family
- * comparable with comp data exists.
+ * Only comparables with a parseable band for the requested compensation basis
+ * contribute (we learn real comp from history, including rejected roles).
+ * Returns null when no same-family comparable with matching comp data exists.
  *
  * @returns {{
  *   midpointK:number, lowK:number, highK:number, sampleSize:number,
  *   tier:'metro'|'mode'|'family', confidence:'low'|'medium'|'high',
- *   family:string, basis:string,
- *   comparables:Array<{company:string, role:string, base:string, status:string}>
+ *   family:string, basis:string, compensationBasis:'base'|'annual-earnings',
+ *   comparables:Array<{company:string, role:string, base?:string, annualEarnings?:string, status:string}>
  * } | null}
  */
 export function estimateCompFromComparables({
@@ -115,7 +126,11 @@ export function estimateCompFromComparables({
   compFloors,
   excludeId,
   minMetroSamples = 3,
+  compensationBasis = "base",
 } = {}) {
+  if (!new Set(["base", "annual-earnings"]).has(compensationBasis)) {
+    throw new Error(`Unsupported comparable compensation basis: ${compensationBasis}`);
+  }
   const family = classifyRoleFamily(role || "", targeting);
   const targetMetro = resolveMetroGroup(loc, mode, compFloors);
   const targetMode = normalizeArrangement(mode, loc);
@@ -132,12 +147,18 @@ export function estimateCompFromComparables({
     if (!r) continue;
     if (excludeId && r.id === excludeId) continue;
     if (classifyRoleFamily(r.role || "", targeting) !== family) continue;
-    const mid = midpointKFromBase(r.base || r.comp?.base || "");
+    const compensation =
+      compensationBasis === "annual-earnings"
+        ? hasAnnualEarningsProvenance(r)
+          ? r.tc || r.comp?.tc || ""
+          : ""
+        : r.base || r.comp?.base || "";
+    const mid = midpointKFromComp(compensation);
     if (mid == null) continue;
     pool.push({
       company: r.company || "",
       role: r.role || "",
-      base: r.base || r.comp?.base || "",
+      compensation,
       status: r.status || "",
       mid,
       metro: resolveMetroGroup(r.loc, r.mode, compFloors),
@@ -196,20 +217,28 @@ export function estimateCompFromComparables({
     tier,
     confidence,
     family,
+    compensationBasis,
     basis: `${sampleSize} ${tierLabel} comparable${sampleSize === 1 ? "" : "s"} in your tracker${familyNote}`,
     comparables: set
       .slice()
       .sort((a, b) => b.mid - a.mid)
       .slice(0, 6)
-      .map((p) => ({ company: p.company, role: p.role, base: p.base, status: p.status })),
+      .map((p) => ({
+        company: p.company,
+        role: p.role,
+        ...(compensationBasis === "annual-earnings"
+          ? { annualEarnings: p.compensation }
+          : { base: p.compensation }),
+        status: p.status,
+      })),
   };
 }
 
 /**
  * Compare a comp estimate against the resolved arrangement floor.
- *   below  — even the estimate midpoint lands under the floor (likely a pass
- *            unless strong non-cash benefits; advisory, never a hard cut since
- *            it's a guess, not a posted band)
+ *   below  — even the estimate midpoint lands under the floor (confirm live
+ *            before deciding; advisory, never a hard cut since it's a guess,
+ *            not a posted band)
  *   thin   — estimate top end is under the floor too (stronger pass signal)
  *   clear  — estimate midpoint clears the floor
  * Returns null when there is no estimate or no floor to compare against.

@@ -80,3 +80,14 @@ test("tracker evaluation schema keeps annual earnings separate from base pay", (
     enum: ["base", "annual-earnings", null],
   });
 });
+
+test("tracker comp estimates persist their compensation basis", () => {
+  const trackerSchema = JSON.parse(
+    readFileSync(new URL("../config/tracker.schema.json", import.meta.url), "utf8")
+  );
+  const compEstimate = trackerSchema.$defs.compEstimate.properties;
+  assert.deepEqual(compEstimate.compensationBasis, {
+    type: ["string", "null"],
+    enum: ["base", "annual-earnings", null],
+  });
+});

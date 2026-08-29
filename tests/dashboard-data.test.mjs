@@ -63,6 +63,20 @@ test("Dashboard labels annual cash separately while legacy total compensation st
           base: "$180,000 - $220,000",
           tc: "$240,000 - $300,000",
         },
+        {
+          id: "annual-cash-estimate",
+          company: "Estimate Co",
+          role: "Bartender",
+          status: "sourced",
+          base: "verify",
+          compEstimate: {
+            source: "comparables",
+            compensationBasis: "annual-earnings",
+            lowK: 75,
+            midpointK: 80,
+            highK: 85,
+          },
+        },
       ],
       sources: [],
       communications: [],
@@ -101,6 +115,8 @@ test("Dashboard labels annual cash separately while legacy total compensation st
   assert.equal(rows.get("evaluated-annual-cash")?.compCompact, "$108K");
   assert.equal(rows.get("evaluated-annual-cash")?.compMidpointK, 107.5);
   assert.equal(rows.get("evaluated-annual-cash")?.drawer?.floor, 85);
+  assert.equal(rows.get("annual-cash-estimate")?.drawer?.floor, 85);
+  assert.equal(rows.get("annual-cash-estimate")?.drawer?.ask, null);
   assert.equal(rows.get("legacy-total-comp")?.compCompact, "$200K");
   assert.equal(rows.get("legacy-total-comp")?.compMidpointK, 200);
   assert.equal(rows.get("legacy-total-comp")?.drawer?.floor, 50);

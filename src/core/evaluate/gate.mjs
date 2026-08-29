@@ -319,6 +319,71 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     };
   }
 
+  // No comp posted: instead of just handing the question back, estimate the
+  // likely band from comparable roles already in the tracker (same role family
+  // + same area, rejected ones included). An estimate is advisory only — it
+  // pushes to REVIEW and never hard-cuts, since it's a guess, not a posted band.
+  if (!bands.base && !bands.annualEarnings && !(hasBaseFloor && hasAnnualEarningsFloor)) {
+    const estimateBasis = !hasBaseFloor && hasAnnualEarningsFloor ? "annual-earnings" : "base";
+    const estimateFloor =
+      estimateBasis === "annual-earnings" ? minimumAnnualEarnings : hasBaseFloor ? floor : null;
+    const estimate = estimateCompFromComparables({
+      role: frontmatter?.role,
+      loc: frontmatter?.location,
+      mode: frontmatter?.mode,
+      tracker,
+      targeting,
+      compFloors: profile?.compensation?.comp_floors,
+      compensationBasis: estimateBasis,
+    });
+
+    if (!estimate) {
+      if (estimateBasis === "base") {
+        return {
+          verdict: "review",
+          reason: "no comp in JD",
+          band: null,
+        };
+      }
+    } else {
+      const estimateStanding = classifyEstimateAgainstFloor(estimate, estimateFloor);
+      const range = `$${estimate.lowK}K–$${estimate.highK}K (mid $${estimate.midpointK}K)`;
+      const floorText =
+        estimateFloor != null && Number.isFinite(estimateFloor)
+          ? `$${Math.round(estimateFloor / 1000)}K`
+          : "";
+      const floorBasis = estimateBasis === "annual-earnings" ? " annual earnings" : "";
+
+      if (estimateStanding === "below" || estimateStanding === "thin") {
+        const advisory =
+          estimateBasis === "annual-earnings"
+            ? "confirm live before deciding"
+            : "likely pass unless strong non-cash benefits";
+        return {
+          verdict: "estimated-below-floor",
+          reason: `no comp posted; estimated ${range} from ${estimate.basis}${floorText ? `, under your ${floorText}${floorBasis} floor` : ""}, ${advisory}`,
+          band: null,
+          estimate,
+          confirmNeeded: true,
+          floor: estimateFloor ?? undefined,
+          basis: estimateBasis,
+          ...bandFields,
+        };
+      }
+
+      return {
+        verdict: "estimated",
+        reason: `no comp posted; estimated ${range} from ${estimate.basis}${estimateStanding === "clear" && floorText ? `, clears your ${floorText}${floorBasis} floor` : ""} (confirm live)`,
+        band: null,
+        estimate,
+        confirmNeeded: true,
+        floor: estimateFloor ?? undefined,
+        basis: estimateBasis,
+        ...bandFields,
+      };
+    }
+  }
+
   if (hasAnnualEarningsFloor && standing.annualEarnings === "unknown") {
     return {
       verdict: "review",
@@ -327,58 +392,6 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
       band: bands.base,
       basis: "annual-earnings",
       floor: minimumAnnualEarnings,
-      ...bandFields,
-    };
-  }
-
-  // No comp posted: instead of just handing the question back, estimate the
-  // likely band from comparable roles already in the tracker (same role family
-  // + same area, rejected ones included). An estimate is advisory only — it
-  // pushes to REVIEW and never hard-cuts, since it's a guess, not a posted band.
-  if (!bands.base && !bands.annualEarnings) {
-    const estimate = estimateCompFromComparables({
-      role: frontmatter?.role,
-      loc: frontmatter?.location,
-      mode: frontmatter?.mode,
-      tracker,
-      targeting,
-      compFloors: profile?.compensation?.comp_floors,
-    });
-
-    if (!estimate) {
-      return {
-        verdict: "review",
-        reason: "no comp in JD",
-        band: null,
-      };
-    }
-
-    const standing = classifyEstimateAgainstFloor(estimate, hasBaseFloor ? floor : null);
-    const range = `$${estimate.lowK}K–$${estimate.highK}K (mid $${estimate.midpointK}K)`;
-    const floorText =
-      floor != null && Number.isFinite(floor) ? `$${Math.round(floor / 1000)}K` : "";
-
-    if (standing === "below" || standing === "thin") {
-      return {
-        verdict: "estimated-below-floor",
-        reason: `no comp posted; estimated ${range} from ${estimate.basis}${floorText ? `, under your ${floorText} floor` : ""}, likely pass unless strong non-cash benefits`,
-        band: null,
-        estimate,
-        confirmNeeded: true,
-        floor: floor ?? undefined,
-        basis: "base",
-        ...bandFields,
-      };
-    }
-
-    return {
-      verdict: "estimated",
-      reason: `no comp posted; estimated ${range} from ${estimate.basis}${standing === "clear" && floorText ? `, clears your ${floorText} floor` : ""} (confirm live)`,
-      band: null,
-      estimate,
-      confirmNeeded: true,
-      floor: floor ?? undefined,
-      basis: "base",
       ...bandFields,
     };
   }

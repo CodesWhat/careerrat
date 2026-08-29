@@ -483,7 +483,8 @@
         "sampleSize": { "type": ["number", "null"] },
         "tier":       { "type": ["string", "null"], "enum": ["metro", "mode", "family", null] },
         "confidence": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
-        "basis":      { "type": ["string", "null"] }
+        "basis":      { "type": ["string", "null"] },
+        "compensationBasis": { "type": ["string", "null"], "enum": ["base", "annual-earnings", null] }
       }
     }
   }

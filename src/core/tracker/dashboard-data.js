@@ -3695,7 +3695,11 @@ function fitLabel(row) {
 }
 
 function secondaryCompBasis(row = {}) {
-  if (row.compBasis === "annual-earnings" || row.comp?.basis === "annual-earnings") {
+  if (
+    row.compBasis === "annual-earnings" ||
+    row.comp?.basis === "annual-earnings" ||
+    row.compEstimate?.compensationBasis === "annual-earnings"
+  ) {
     return "annual-earnings";
   }
   const evaluated = row.evaluation?.compensation;
