@@ -56,8 +56,8 @@ searching the other sources.
 ## Opt-in private-account capabilities
 
 Reading public posting bodies requires no permission. The private-account uses
-below are opt-in and default OFF. With no `candidate/automation.yml`, none of
-them run.
+below are opt-in and default OFF. With no `.careerrat/candidate/automation.yml`,
+none of them run.
 
 | Capability | Skill | What it does |
 |------------|-------|-------------|
@@ -103,7 +103,7 @@ careerrat automation session extension --write            # set provider
 - **Never submit an application.** CareerRat prepares the form and the candidate
   presses the final submit control. Other outward-facing actions, such as sending
   a message, require explicit confirmation.
-- **Capture artifacts are scratch.** Screenshots go to `workspace/captures/`
+- **Capture artifacts are scratch.** Screenshots go to `.careerrat/workspace/captures/`
   (gitignored), never the repo root.
 - **No credential storage.** The session browser holds your logins. CareerRat does
   not export or cache them.

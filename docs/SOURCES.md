@@ -190,7 +190,7 @@ never written here.
 > **This shipped registry lists only field-neutral provider infrastructure.** Boards you
 > discover via `research-boards` are candidate-specific (they match your domain and role
 > families), so they are NEVER written here — they persist to your own gitignored
-> `config/search-sources.yml` and your `workspace/research/` log. Keeping this file neutral is
+> `.careerrat/config/search-sources.yml` and your `.careerrat/workspace/research/` log. Keeping this file neutral is
 > a hard invariant (enforced by `tests/release-safety.test.mjs`): a shipped, published doc must
 > not carry one user's discovered boards.
 

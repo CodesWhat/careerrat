@@ -9,7 +9,7 @@ reach for.
 > authenticated automation model (status polling, in-platform
 > messaging, supervised apply preparation, profile optimization, webmail access) is specified by the
 > **Browser Automation Contract** in
-> `AGENTS.md` and configured by `candidate/automation.yml` (see *Opt-in authenticated
+> `AGENTS.md` and configured by `.careerrat/candidate/automation.yml` (see *Opt-in authenticated
 > automation* below) — this doc describes the layers that contract builds on.
 
 ## The three layers
@@ -44,8 +44,8 @@ the page (snapshot / read DOM) **before each action**, never relies on hardcoded
 selectors, and stays confirm-first per the Public Default in `AGENTS.md`.
 
 **Capture artifacts are scratch.** Screenshots and scraped page fragments from any
-layer are throwaway: write them under `workspace/captures/` (gitignored) — never the
-repo root or `workspace/` root, where stray PNGs are also backstop-ignored. Don't
+layer are throwaway: write them under `.careerrat/workspace/captures/` (gitignored), never the
+repo root or `.careerrat/workspace/` root, where stray PNGs are also backstop-ignored. Don't
 commit them. Surface a screenshot in the app only by writing it to a deliberately
 tracked path. See the **Browser Automation Contract** (Local-only + safety) in `AGENTS.md`.
 
@@ -84,7 +84,7 @@ Reading public posting bodies (above) needs no permission. But **logged-in** Lay
 uses — polling your ATS dashboards for application status, reading in-platform DMs,
 supervised apply preparation, profile optimization, and
 webmail access — are gated. They are
-**opt-in and default OFF**: with no `candidate/automation.yml`, none of them run.
+**opt-in and default OFF**: with no `.careerrat/candidate/automation.yml`, none of them run.
 
 The authenticated capabilities are live behind the switchboard: `status_polling`
 (**`sync-status`** skill), `messaging` (**`ingest-messages`** skill), and
@@ -94,7 +94,7 @@ which always stops at the user-submit gate),
 (generic `webmail` for one recent verification-code message; Gmail/Outlook for
 verification-code reads and opted-in `ingest-mail` webmail reads).
 
-The switchboard is `candidate/automation.yml` (gitignored; schema
+The switchboard is `.careerrat/candidate/automation.yml` (gitignored; schema
 `config/automation.schema.json`, template `templates/automation.example.yml`). A
 capability runs on a platform **only if all three are true** — the capability's global
 switch, that platform's per-capability switch, and that platform's one-time ToS

@@ -35,7 +35,7 @@ After a KEEP verdict, say "tailor this" or "write a resume and cover letter":
 
 > tailor this / write a resume and cover letter for this role
 
-The `tailor-application` skill reads your evidence bank (`candidate/evidence.yml`),
+The `tailor-application` skill reads your evidence bank (`.careerrat/candidate/evidence.yml`),
 the saved JD body, your writing-style calibration, and any learning-memory files
 for the role family. It produces:
 
@@ -47,7 +47,7 @@ A placeholder-lint step runs before any artifact is marked build-ready. Any
 unresolved token (`[Company]`, `[Name]`, etc.) blocks the build. The agent does
 not invent facts.
 
-Artifacts land in `workspace/tailored/` and are also exported to
+Artifacts land in `.careerrat/workspace/tailored/` and are also exported to
 `~/Downloads/careerrat/<Company>/` for easy access.
 
 ## Step 3 — Apply (apply-job)
@@ -92,7 +92,7 @@ control.
 
 ## Application limits
 
-`candidate/application-limits.yml` governs per-company caps and cooldowns. Before
+`.careerrat/candidate/application-limits.yml` governs per-company caps and cooldowns. Before
 starting an apply flow, the agent checks whether you are within limit for that
 company. A cap breach surfaces as `ACTION: hold` in the gate output.
 

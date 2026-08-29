@@ -48,10 +48,10 @@ That scaffolds your workspace, installs the skills, opens the local app at
 
 `start` does the whole arc in one shot:
 
-1. Scaffolds `candidate/` and `workspace/` directories (idempotent).
+1. Scaffolds `.careerrat/candidate/` and `.careerrat/workspace/` directories (idempotent).
 2. Installs the canonical skills so the selected agent sees `/apply-job`,
    `/evaluate-job`, etc.
-3. Seeds `workspace/tracker.json` from the demo template (if not yet present).
+3. Seeds `.careerrat/workspace/tracker.json` from the demo template (if not yet present).
 4. Boots the live local app at <http://localhost:7777> with event-driven data updates.
 5. Launches your agent with the starter message that asks it to read
    `AGENTS.md`, run `careerrat doctor`, and follow the next unfinished skill.
@@ -69,7 +69,7 @@ careerrat update     # fetches the latest published code; your data is untouched
 ```
 
 The update command pulls the latest release from npm and overwrites only the
-code. Your `workspace/` and `candidate/` data are not touched. If the local app
+code. Your `.careerrat/workspace/` and `.careerrat/candidate/` data are not touched. If the local app
 is running, the updated launcher verifies its version and safely replaces only
 that recorded CareerRat process. An unrelated process on the preferred port is
 left alone and CareerRat uses another loopback port.
@@ -100,7 +100,7 @@ retry instead of claiming success.
 ## Candidate Setup
 
 `ingest-profile` (or `careerrat ingest`) interviews you and produces these files
-under `candidate/` (gitignored):
+under `.careerrat/candidate/` (gitignored):
 
 - `profile.yml` — identity, location, comp floor and targets, domain/toolchain
 - `targeting.yml` — role buckets, keep/cut signals, excluded companies
@@ -145,7 +145,7 @@ careerrat tracker-dev    # live-updating app server on :7777
 ```
 
 `careerrat start [agent]` runs that dashboard as a separate local process and
-writes `.internal/tracker-dev.pid` plus `.internal/tracker-dev.log`, so the page
+writes `.careerrat/internal/tracker-dev.pid` plus `.careerrat/internal/tracker-dev.log`, so the page
 stays available while the launched agent works.
 
 `careerrat tracker` creates a deduplicated recovery snapshot and prints a summary.
@@ -154,8 +154,10 @@ state, and refreshes the open page over Server-Sent Events.
 
 ## Workspace Directories
 
-By default `workspace/` and `candidate/` are created inside the cloned repo.
-Set `CAREERRAT_HOME` to put them somewhere else:
+By default `.careerrat/` (holding both `workspace/` and `candidate/`) is created
+inside the cloned repo. An older install that already has top-level `candidate/`,
+`workspace/`, `config/`, or `.internal/` directories at the repo root keeps
+using those instead. Set `CAREERRAT_HOME` to put it somewhere else:
 
 ```bash
 export CAREERRAT_HOME=~/careerrat-data
@@ -166,7 +168,7 @@ Everything under `CAREERRAT_HOME` is gitignored and never touches the repo tree.
 Useful if you want to share one data directory across multiple checkouts or keep
 your personal files off a work machine's repo path.
 
-Generated and private artifacts live under `workspace/` (gitignored):
+Generated and private artifacts live under `.careerrat/workspace/` (gitignored):
 
 - `jobs/` — saved job-description files
 - `tailored/` — tailored resume, cover letter, and short-answer artifacts

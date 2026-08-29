@@ -171,7 +171,7 @@ launching retained skills:
   `src/core/packet/exports.mjs` and `src/core/documents/export.mjs`.
 
 Packet APIs write canonical application artifacts through SQLite DB verbs. They
-do not treat generated `workspace/tracker.json` or `activity.jsonl` exports as
+do not treat generated `.careerrat/workspace/tracker.json` or `activity.jsonl` exports as
 product source of truth. Generated packet source markdown and manifests remain
 internal artifacts; user-facing exports default to PDF. DOCX is generated only
 when an upload requirement requests it or a user explicitly selects it. EEO,
@@ -286,7 +286,7 @@ needed.
 ### Communication Layer
 
 Tracker state stores concise communication thread metadata. Longer message
-bodies and summaries live in `workspace/comms/`.
+bodies and summaries live in `.careerrat/workspace/comms/`.
 
 `email-comms` should read both before drafting so the user does not need to
 re-provide thread history.

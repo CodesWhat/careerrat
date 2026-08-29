@@ -13,7 +13,7 @@ offer — paste the signal into the agent and say what happened:
 > I got an offer
 
 The agent routes to `track-outcomes`, which is **the only writer of status
-transitions** in `workspace/tracker.json`. No other skill promotes a role through
+transitions** in `.careerrat/workspace/tracker.json`. No other skill promotes a role through
 the pipeline. This keeps the dashboard's funnel and stage ladder accurate.
 
 ## What track-outcomes does
@@ -55,7 +55,7 @@ strategy-review nudge stays quiet until enough new outcomes accumulate.
 ## Learning memory
 
 Every role family gets a private learning file at
-`candidate/learnings/<family>.md`. Interview debriefs, rejection patterns, and win
+`.careerrat/candidate/learnings/<family>.md`. Interview debriefs, rejection patterns, and win
 signals accumulate here. The next time the agent evaluates or tailors for that
 same role family, it reads the file and incorporates the lessons.
 
