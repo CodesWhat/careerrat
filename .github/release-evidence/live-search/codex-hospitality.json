@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceRevision": "0d968d6deedfb4671666fb8bec05cf16edebe419",
+  "sourceRevision": "3bb786f004b01c74f7134c2ab7facccb5b056664",
   "runtimeId": "codex",
   "fixtureId": "hospitality",
   "providerFallback": false,
@@ -26,7 +26,7 @@
     "deterministic": "succeeded",
     "aiWeb": "succeeded"
   },
-  "completedAt": "2026-08-29T05:55:21.397Z",
+  "completedAt": "2026-08-29T13:06:43.995Z",
   "thresholds": {
     "fitFloor": 65,
     "minimumPresentedRows": 3,
@@ -34,14 +34,14 @@
     "minimumPresentedBuckets": 2
   },
   "counts": {
-    "presentedRows": 18,
-    "distinctRoles": 13,
+    "presentedRows": 20,
+    "distinctRoles": 15,
     "presentedBuckets": 3,
-    "canonicalAiRows": 1,
+    "canonicalAiRows": 2,
     "canonicalAiOverlapRows": 0
   },
   "summary": {
-    "presented": 18,
+    "presented": 20,
     "fitFloor": 65,
     "errors": [],
     "failedPromptIds": []
@@ -123,7 +123,7 @@
     ],
     "errors": [],
     "failedPromptIds": [],
-    "canonicalRows": 1,
+    "canonicalRows": 2,
     "canonicalOverlapRows": []
   },
   "presentedBuckets": [
@@ -132,6 +132,18 @@
     "Hospitality operations"
   ],
   "rows": [
+    {
+      "identity": "81354103b1a1d609f8b6017d9171652e6346e72099b92e28216b49ee997072ca",
+      "company": "Sentry Centers Holdings LLC",
+      "role": "General Manager, Live Events",
+      "location": "New York, NY, 10001, US",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://www.ihirehospitality.com/jobs/view/535316760"
+    },
     {
       "identity": "c508db1976ee68db77b9a862c0ea50916cf4ee30fe1f1581b12112db7c0b9e9c",
       "company": "Major Food Group - New York",
@@ -145,28 +157,28 @@
       "source": "https://culinaryagents.com/jobs/719032-Assistant-General-Manager"
     },
     {
-      "identity": "8685af0c1139087f747da328c188365a5d3d739f39bdb3bc49ed5f5977eb3d47",
-      "company": "Din Tai Fung North America",
-      "role": "General Manager",
-      "location": "New York, NY, 10001, US",
-      "fitScore": 91,
+      "identity": "6a51e48830b259e18f69c66e9316484025555ed76f4d731f5763f622139ac071",
+      "company": "CBRE Group Inc",
+      "role": "Meeting & Events Coordinator - New York City, NY",
+      "location": "Bronx, NY, 10451, US",
+      "fitScore": 87,
       "canonicalReadable": true,
       "discoveryLane": "deterministic",
       "partial": false,
       "unverified": false,
-      "source": "https://www.ihirehospitality.com/jobs/view/535266624"
+      "source": "https://www.ihirehospitality.com/jobs/view/535324452"
     },
     {
-      "identity": "3dddfbc3c68ca3829481bfcc42be13a42f52d0475ab4ced23be5eb6d129b5eda",
-      "company": "Tao Group Hospitality",
-      "role": "Lounge General Manager - New York",
+      "identity": "671ca9f49c425a5eac5fe347dfdb8552b0d547d1d424a0b99c71fe15a19f75a6",
+      "company": "TikTok Inc",
+      "role": "Client Solutions Manager - Food & Beverage - New York",
       "location": "New York, NY, 10001, US",
       "fitScore": 87,
       "canonicalReadable": true,
       "discoveryLane": "deterministic",
       "partial": false,
       "unverified": false,
-      "source": "https://www.ihirehospitality.com/jobs/view/535260936"
+      "source": "https://www.ihirehospitality.com/jobs/view/535313625"
     },
     {
       "identity": "069ac08f6eae775e03330163d1021c300a15d72d5c0bc228e33146a8bf3ee54c",
@@ -265,6 +277,18 @@
       "source": "https://culinaryagents.com/jobs/678855-Bar-Manager"
     },
     {
+      "identity": "c384db0525e2923093e98b927403612c17f4c8fea29c4535e4261f5f439157c4",
+      "company": "Global Relay Communications Inc",
+      "role": "Workplace & Events Coordinator",
+      "location": "New York, NY, 10001, US",
+      "fitScore": 82,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://www.ihirehospitality.com/jobs/view/535305610"
+    },
+    {
       "identity": "40ddf81d94e6970660aca148583a55a349088f2f02f88cb82463ae47394023fd",
       "company": "Summit Events",
       "role": "Event Coordinator",
@@ -287,18 +311,6 @@
       "partial": false,
       "unverified": false,
       "source": "https://culinaryagents.com/jobs/713124-Bar-Manager"
-    },
-    {
-      "identity": "1e532f9a963d8c8c6fd061eb0265a1c2a4e6b808b8b2fa83a1f8f6fe075d2eaa",
-      "company": "Elior-Collegiate-Dining",
-      "role": "Catering Coordinator",
-      "location": "New York, NY, 10001, US",
-      "fitScore": 82,
-      "canonicalReadable": true,
-      "discoveryLane": "deterministic",
-      "partial": false,
-      "unverified": false,
-      "source": "https://www.ihirehospitality.com/jobs/view/530908575"
     },
     {
       "identity": "d5b05c955713453350b120cbc121a0ac12ceef658987957846ece2892025b970",
@@ -347,28 +359,42 @@
       "partial": false,
       "unverified": true,
       "source": "https://asmglobal.wd1.myworkdayjobs.com/careers/job/New-York-NY/General-Manager---Central-Park-Boathouse_R100123149"
+    },
+    {
+      "identity": "cd5adc46d123526c29835664be038c1184ac978062d2b08099bd6ce45e4d9f6b",
+      "company": "Smartly",
+      "role": "Event Operations Manager, (Contract)",
+      "location": "New York, New York, United States",
+      "fitScore": 76,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/smartlyio/jobs/6030600004"
     }
   ],
   "manualLiveness": {
     "verified": true,
     "reviewer": "careerrat-release-agent",
-    "verifiedAt": "2026-08-29T05:56:31.267Z",
+    "verifiedAt": "2026-08-29T13:26:08.670Z",
     "rowIdentities": [
       "069ac08f6eae775e03330163d1021c300a15d72d5c0bc228e33146a8bf3ee54c",
       "155245477b0a7d8d605f551b71b77b63db7e6c62dc5bc9c1f501d5aa5faa4c6f",
       "1673bb3c39dfd0da5c7c97781afee3698ae457b65044297b549c4ff25d602023",
-      "1e532f9a963d8c8c6fd061eb0265a1c2a4e6b808b8b2fa83a1f8f6fe075d2eaa",
       "3b2aa60ab39c1bd0b935752da33f32617c53fda3e432ccf0dd4610ee27031858",
-      "3dddfbc3c68ca3829481bfcc42be13a42f52d0475ab4ced23be5eb6d129b5eda",
       "40ddf81d94e6970660aca148583a55a349088f2f02f88cb82463ae47394023fd",
       "4f039636fbb22563893beb29ebdd5e180b0ee99d4f019e4774a148b1725859c6",
       "5473de1de6e5a8733a8fafe9af621ab40cc1d82635ff4866570ce757677f0537",
+      "671ca9f49c425a5eac5fe347dfdb8552b0d547d1d424a0b99c71fe15a19f75a6",
+      "6a51e48830b259e18f69c66e9316484025555ed76f4d731f5763f622139ac071",
       "7638a94fd2ab11a13e21d84b5ca38f7ee7a0156d45a7c35e7aeefa079005e7d3",
+      "81354103b1a1d609f8b6017d9171652e6346e72099b92e28216b49ee997072ca",
       "864ee40c374dd10e3ac06f02782af7a876521df154511180c2932c2f26351d44",
-      "8685af0c1139087f747da328c188365a5d3d739f39bdb3bc49ed5f5977eb3d47",
       "90e5f9983a0161453c8d3a103663b5989a586030f3eeef84bd9020309c5a5d58",
       "a3a781b42fb3f6016ac1381f6447e7705f51eccde136dab8968a8836dd3ebd25",
+      "c384db0525e2923093e98b927403612c17f4c8fea29c4535e4261f5f439157c4",
       "c508db1976ee68db77b9a862c0ea50916cf4ee30fe1f1581b12112db7c0b9e9c",
+      "cd5adc46d123526c29835664be038c1184ac978062d2b08099bd6ce45e4d9f6b",
       "d5b05c955713453350b120cbc121a0ac12ceef658987957846ece2892025b970",
       "ded29e2a0036d7d32d6d3cd9a2817cc6f8d4523cb8c8601d8f2ffedad6cd499a",
       "e358763630b104eefbd26d513276da4365ed337e38b02dfde442a3734e41f765"
