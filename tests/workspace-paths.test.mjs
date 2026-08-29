@@ -62,6 +62,29 @@ test("privateDataRoot honors CAREERRAT_HOME for portable/private instance data",
   }
 });
 
+test("privateDataRoot honors an injected env's home instead of the process's own", () => {
+  // Every other read in the resolver goes through the injected env, so reading the
+  // process home directly would silently ignore a caller that passed one.
+  const installed = join("/x", "node_modules", "careerrat");
+  assert.equal(
+    privateDataRoot({ repoRoot: installed, env: { HOME: "/tmp/injected" } }),
+    join("/tmp/injected", ".careerrat")
+  );
+  assert.equal(
+    privateDataRoot({ repoRoot: installed, env: { USERPROFILE: "/tmp/winhome" } }),
+    join("/tmp/winhome", ".careerrat")
+  );
+  // An env with neither still resolves, and CAREERRAT_HOME keeps beating both.
+  assert.equal(privateDataRoot({ repoRoot: installed, env: {} }), join(homedir(), ".careerrat"));
+  assert.equal(
+    privateDataRoot({
+      repoRoot: installed,
+      env: { HOME: "/tmp/injected", CAREERRAT_HOME: "/tmp/explicit" },
+    }),
+    "/tmp/explicit"
+  );
+});
+
 test("a legacy workspace holding only .snapshots still reads as legacy", () => {
   // The case that needs restore is a workspace whose tracker.json is gone or
   // corrupt, which drops every WORKSPACE_RUNTIME_FILES hit. If .snapshots didn't

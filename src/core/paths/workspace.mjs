@@ -74,11 +74,22 @@ export function isPackageInstall(repoRoot) {
 // same version) silently delete a user's tracker/profile/db on reinstall; anchoring at
 // home also means N installs across N project folders share one job search rather than
 // fragmenting into N silos.
+// Prefers the injected env over the process's own home. Every other read in this
+// module goes through `env`, so calling homedir() directly would silently ignore a
+// caller that passed one, which is a footgun for tests and for any embedder that
+// resolves paths for an env other than its own. Falls back to homedir() so the
+// default (env === process.env) is unchanged, including on Windows where the
+// variable is USERPROFILE.
+function userHome(env = process.env) {
+  const raw = String(env.HOME || env.USERPROFILE || "").trim();
+  return raw || homedir();
+}
+
 export function privateDataRoot({ repoRoot = DEFAULT_REPO_ROOT, env = process.env } = {}) {
   const explicit = envHome({ repoRoot, env });
   if (explicit) return explicit;
   return isPackageInstall(repoRoot)
-    ? join(homedir(), DEFAULT_PRIVATE_DIR)
+    ? join(userHome(env), DEFAULT_PRIVATE_DIR)
     : join(repoRoot, DEFAULT_PRIVATE_DIR);
 }
 

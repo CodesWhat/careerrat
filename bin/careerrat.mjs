@@ -40,7 +40,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   findInstalledExecutable,
@@ -189,7 +189,7 @@ function runInit(extra) {
   if (code === 0) {
     console.log("");
     console.log(`Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
-    console.log("Workspace ready. Open your agent in this folder and say:");
+    console.log(`Workspace ready. Open your agent in ${agentStartDir()} and say:`);
     console.log(`    ${STARTER_PROMPT}`);
     console.log("Use `careerrat next` anytime to print the current next agent task.");
   }
@@ -298,8 +298,18 @@ async function runStart(extra) {
   return exitCode;
 }
 
+// The agent has to start where AGENTS.md and .agents/skills/ live, which is the
+// install directory, not wherever the user happens to be standing. `careerrat start`
+// already spawns it with cwd: root; this is the same instruction for the manual
+// handoff. Says "this folder" only when that is actually where they are, since on a
+// global npm install it never is.
+function agentStartDir() {
+  if (root === process.cwd()) return "this folder";
+  return root.length > 1 && root.endsWith(sep) ? root.slice(0, -1) : root;
+}
+
 function printManualAgentHandoff(dash) {
-  console.log("Open your agent in this folder and say:");
+  console.log(`Open your agent in ${agentStartDir()} and say:`);
   console.log("");
   console.log(`    ${STARTER_PROMPT}`);
   console.log("");
