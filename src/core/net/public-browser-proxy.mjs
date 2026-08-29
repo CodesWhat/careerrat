@@ -139,6 +139,15 @@ export async function createPublicBrowserProxy({
   const trackSocket = (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
+    // A raw socket (an inbound browser connection, an outgoing request's
+    // underlying socket, or a CONNECT/upgrade tunnel leg) can reset at any
+    // point in its life, including while idle on keep-alive between
+    // requests when nothing else is listening for it. Every socket this
+    // proxy ever touches funnels through here, so this is the one place
+    // that guarantees an 'error' listener always exists. Without it, an
+    // EventEmitter 'error' with no listener is an uncaught exception that
+    // kills the whole process, not just this one connection.
+    socket.on("error", () => socket.destroy());
   };
 
   const server = createServer(async (req, res) => {
@@ -181,10 +190,19 @@ export async function createPublicBrowserProxy({
     upstream.on("socket", trackSocket);
     upstream.on("response", (upstreamResponse) => {
       res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
+      // pipe() does not forward 'error' from the source to the destination, so
+      // each side needs its own listener. Otherwise a mid-stream reset (the
+      // browser cancelling a subresource, the fixture server closing early)
+      // is an unhandled 'error' event, which Node treats as an uncaught
+      // exception and takes down the whole process rather than just this
+      // proxied request.
+      upstreamResponse.on("error", () => res.destroy());
       upstreamResponse.pipe(res);
     });
     upstream.on("error", () => sendHttpError(res, 502, "Public destination unavailable"));
     req.on("aborted", () => upstream.destroy());
+    req.on("error", () => upstream.destroy());
+    res.on("error", () => upstream.destroy());
     req.pipe(upstream);
   });
 
@@ -210,6 +228,11 @@ export async function createPublicBrowserProxy({
       const upstreamSocket = await connectApproved(target.addresses, port, trackSocket);
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head.length) upstreamSocket.write(head);
+      // Same unhandled-'error' hazard as the plain HTTP path above, once
+      // ownership of both sockets moves into the raw pipe: a reset on either
+      // side must tear down the other instead of throwing.
+      clientSocket.on("error", () => upstreamSocket.destroy());
+      upstreamSocket.on("error", () => clientSocket.destroy());
       clientSocket.pipe(upstreamSocket).pipe(clientSocket);
     } catch {
       sendSocketError(clientSocket, 502, "Public destination unavailable");
@@ -236,6 +259,8 @@ export async function createPublicBrowserProxy({
       const upstreamSocket = await connectApproved(target.addresses, port, trackSocket);
       upstreamSocket.write(websocketRequestHead(req, requestedUrl));
       if (head.length) upstreamSocket.write(head);
+      clientSocket.on("error", () => upstreamSocket.destroy());
+      upstreamSocket.on("error", () => clientSocket.destroy());
       clientSocket.pipe(upstreamSocket).pipe(clientSocket);
     } catch {
       sendSocketError(clientSocket, 502, "Public destination unavailable");
