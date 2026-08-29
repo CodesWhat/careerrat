@@ -234,3 +234,38 @@ test("Grep denies sweeping the candidate root itself because it would sweep in f
     }
   }
 });
+
+test("Grep denies a directory sweep when an approved workspace contains a nested env file", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-tool-policy-grep-env-"));
+  try {
+    writeShippedAssets(repoRoot, "evaluate-job");
+    const workspaceDir = join(repoRoot, "workspace");
+    const jobsDir = join(workspaceDir, "jobs");
+    mkdirSync(jobsDir, { recursive: true });
+    writeFileSync(join(jobsDir, "role.md"), "# role", "utf8");
+    writeFileSync(join(jobsDir, ".env.local"), "SECRET=1", "utf8");
+
+    const policy = createRuntimeToolPolicy({
+      repoRoot,
+      skill: "evaluate-job",
+      tools: ["Grep"],
+      env: {},
+    });
+
+    assert.equal(
+      (await policy.canUseTool("Grep", { path: workspaceDir, pattern: "SECRET" })).behavior,
+      "deny"
+    );
+    assert.equal(
+      (
+        await policy.canUseTool("Grep", {
+          path: join(jobsDir, "role.md"),
+          pattern: "role",
+        })
+      ).behavior,
+      "allow"
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});

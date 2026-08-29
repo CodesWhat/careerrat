@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { validatePublicHttpUrl } from "../deep-ingest/source-fetch.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
@@ -39,6 +39,27 @@ function requestedFilePath(toolName, input) {
   return null;
 }
 
+function isEnvFileName(name) {
+  const normalized = name.toLowerCase();
+  return normalized === ".env" || normalized.startsWith(".env.");
+}
+
+function hasBlockedGrepDescendant(root) {
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch (error) {
+    return error?.code !== "ENOTDIR" && error?.code !== "ENOENT";
+  }
+
+  for (const entry of entries) {
+    const normalized = entry.name.toLowerCase();
+    if (isEnvFileName(normalized) || BLOCKED_SEGMENTS.has(normalized)) return true;
+    if (entry.isDirectory() && hasBlockedGrepDescendant(join(root, entry.name))) return true;
+  }
+  return false;
+}
+
 function pathDecision({ repoRoot, env, skill, toolName, input }) {
   const rawPath = requestedFilePath(toolName, input);
   if (typeof rawPath !== "string" || !rawPath.trim()) {
@@ -48,7 +69,7 @@ function pathDecision({ repoRoot, env, skill, toolName, input }) {
   const canonicalRepo = nearestCanonicalPath(resolve(repoRoot));
   const target = nearestCanonicalPath(resolve(repoRoot, rawPath));
   const leaf = basename(target).toLowerCase();
-  if (leaf === ".env" || leaf.startsWith(".env.")) {
+  if (isEnvFileName(leaf)) {
     return deny(
       `${toolName} cannot access credentials, internal state, or paths outside CareerRat`
     );
@@ -125,6 +146,12 @@ function pathDecision({ repoRoot, env, skill, toolName, input }) {
         `${toolName} cannot access credentials, internal state, or paths outside CareerRat`
       );
     }
+  }
+
+  if (toolName === "Grep" && hasBlockedGrepDescendant(target)) {
+    return deny(
+      `${toolName} cannot recursively scan directories containing credentials or internal state`
+    );
   }
 
   return { behavior: "allow" };
