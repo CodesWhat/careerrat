@@ -242,17 +242,15 @@ function mergeSourceCatalog(existing = {}, generated = {}) {
 
 // mergeEntries above always keeps the EXISTING stored entry on a key
 // collision (never clobbering a user's other edits to that entry) — which
-// means an `enabled:false` seeded by an earlier run (e.g. before
-// candidate.domain/titles told generate-search-sources.mjs's domain gate
-// these tech-only boards should default on) would otherwise shadow a freshly
-// generated `enabled:true` forever. Entries generate-search-sources.mjs
-// marks `enabled_reason: "domain-gate"` are machine-set by that gate, not a
-// user's own toggle, so this post-pass re-syncs ONLY `enabled` (nothing
-// else on the entry) from the freshly generated copy whenever the merged
-// entry still carries that marker. Nothing clears the marker today; a
-// future settings-UI toggle that lets a user pin a board on/off by hand
-// would need to delete `enabled_reason` at that point so this re-sync stops
-// overriding the user's explicit choice.
+// means an `enabled:false` seeded by an earlier generator default would
+// otherwise shadow a freshly generated `enabled:true` forever. Entries
+// generate-search-sources.mjs marks `enabled_reason: "domain-gate"` are
+// machine-set, not a user's own toggle, so this post-pass re-syncs ONLY
+// `enabled` (nothing else on the entry) from the freshly generated copy
+// whenever the merged entry still carries that marker. The source Settings
+// writers in boards-route.mjs and the `careerrat searches` setEnabled owner
+// remove `enabled_reason` on every explicit edit or toggle, transferring
+// ownership to the user so this re-sync stops.
 function resyncDomainGatedEntries(mergedEntries, generatedEntries, keyForEntry) {
   const generatedByKey = new Map();
   for (const entry of Array.isArray(generatedEntries) ? generatedEntries : []) {
@@ -266,6 +264,59 @@ function resyncDomainGatedEntries(mergedEntries, generatedEntries, keyForEntry) 
     if (!generated || generated.enabled === entry.enabled) return entry;
     return { ...entry, enabled: generated.enabled };
   });
+}
+
+// Before generated sources carried enabled_reason, one release wrote this
+// complete disabled trio. A single unmarked row is ambiguous and stays
+// user-owned. The exact three-row cohort is the provenance signal: remove all
+// untouched copies only when every historical row is still present, then let
+// the current generator add one enabled canonical copy of each board.
+const LEGACY_UNMARKED_REMOTE_BOARD_BUNDLE = Object.freeze([
+  Object.freeze({
+    provider: "remoteok",
+    label: "Remote OK",
+    source_type: "board",
+    url: "https://remoteok.com/api",
+    enabled: false,
+  }),
+  Object.freeze({
+    provider: "remotive",
+    label: "Remotive",
+    source_type: "board",
+    url: "https://remotive.com/api/remote-jobs",
+    enabled: false,
+  }),
+  Object.freeze({
+    provider: "workingnomads",
+    label: "Working Nomads",
+    source_type: "board",
+    url: "https://www.workingnomads.com/jobsapi/job/_search",
+    enabled: false,
+  }),
+]);
+
+function isExactLegacyRemoteBoard(entry, expected) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  const entryKeys = Object.keys(entry);
+  const expectedKeys = Object.keys(expected);
+  return (
+    entryKeys.length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(entry, key) && Object.is(entry[key], expected[key]))
+  );
+}
+
+function reconcileLegacyUnmarkedRemoteBoards(existingEntries) {
+  const entries = asArray(existingEntries);
+  const hasCompleteBundle = LEGACY_UNMARKED_REMOTE_BOARD_BUNDLE.every((expected) =>
+    entries.some((entry) => isExactLegacyRemoteBoard(entry, expected))
+  );
+  if (!hasCompleteBundle) return entries;
+  return entries.filter(
+    (entry) =>
+      !LEGACY_UNMARKED_REMOTE_BOARD_BUNDLE.some((expected) =>
+        isExactLegacyRemoteBoard(entry, expected)
+      )
+  );
 }
 
 // Pre-6de6fa6b installs can carry stored RemoteVibeCodingJobs/Wellfound
@@ -319,7 +370,7 @@ function isLegacyHardcodedAggregatorEntry(entry = {}, generatedEntries = []) {
 }
 
 function mergeSearchSources(existing = {}, generated = {}) {
-  const reconciledExistingSearches = asArray(existing.searches).filter(
+  const reconciledExistingSearches = reconcileLegacyUnmarkedRemoteBoards(existing.searches).filter(
     (entry) => !isLegacyHardcodedAggregatorEntry(entry, asArray(generated.searches))
   );
   return {
@@ -730,9 +781,10 @@ export function countDeterministicSources({ searchSources, sourcedScan } = {}) {
 // seeded with zero deterministic sources (company boards seeded
 // `enabled:false`, no tech RSS, no `enabled_reason: "domain-gate"` marker
 // yet) — the only thing that ever repaired that doc was
-// prepareFirstSearchSources's generate + mergeSearchSources (which folds in
-// resyncDomainGatedEntries) pass, and that only ever runs inside an actual
-// search run. That's a deadlock: the config can't heal because a search
+// prepareFirstSearchSources's generate + mergeSearchSources (which reconciles
+// the exact legacy cohort and re-syncs marked generated entries) pass, and
+// that only ever runs inside an actual search run. That's a deadlock: the
+// config can't heal because a search
 // can't run because the config isn't healed. Callers on the readiness READ
 // path (GET /api/search/sources, GET /api/onboard/state) call this whenever
 // the stored count is 0, so readiness can flip true from a page load alone —

@@ -348,7 +348,7 @@ test("an explicit manual search can start before the onboarding readiness gate",
 
 test("prepareFirstSearchSources only re-syncs stored entries owned by the domain gate", async () => {
   const repoRoot = tempRepo();
-  markSearchReady(repoRoot);
+  markSearchReady(repoRoot, { domain: "hospitality and food service" });
   const storedRemoteOk = {
     provider: "remoteok",
     label: "Stored RemoteOK label",
@@ -366,6 +366,13 @@ test("prepareFirstSearchSources only re-syncs stored entries owned by the domain
     enabled: false,
     stored_only: "user choice",
   };
+  const storedUnmarkedLegacyShape = {
+    provider: "workingnomads",
+    label: "Working Nomads",
+    source_type: "board",
+    url: "https://www.workingnomads.com/jobsapi/job/_search",
+    enabled: false,
+  };
   const orphanedMarker = {
     provider: "custom",
     label: "Retired domain-gated board",
@@ -381,7 +388,7 @@ test("prepareFirstSearchSources only re-syncs stored entries owned by the domain
     data: {
       title_filter: {},
       location_filter: null,
-      searches: [storedRemoteOk, storedUserOwned, orphanedMarker],
+      searches: [storedRemoteOk, storedUserOwned, storedUnmarkedLegacyShape, orphanedMarker],
       tracked_companies: [],
       source_catalog: {},
     },
@@ -393,12 +400,17 @@ test("prepareFirstSearchSources only re-syncs stored entries owned by the domain
   assert.deepEqual(
     stored.find((source) => source.url === storedRemoteOk.url),
     { ...storedRemoteOk, enabled: true },
-    "the generated tech gate may update enabled but must preserve every other stored field"
+    "the generated baseline may update enabled but must preserve every other stored field"
   );
   assert.deepEqual(
     stored.find((source) => source.url === storedUserOwned.url),
     storedUserOwned,
     "an unmarked entry is user-owned and must stay disabled"
+  );
+  assert.deepEqual(
+    stored.find((source) => source.url === storedUnmarkedLegacyShape.url),
+    storedUnmarkedLegacyShape,
+    "one legacy-shaped row is ambiguous and must stay user-owned without the complete cohort"
   );
   assert.deepEqual(
     stored.find((source) => source.url === orphanedMarker.url),
@@ -765,7 +777,7 @@ test("countDeterministicSources counts generated query-only HiringCafe searches"
   });
 });
 
-test("first-search starts honestly when source healing still leaves no deterministic sources", async () => {
+test("first-search source healing enables the broad remote baseline without configured titles", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot, { domain: "operations" });
   candidateConfigPatch({
@@ -779,7 +791,7 @@ test("first-search starts honestly when source healing still leaves no determini
   assert.equal(started.reused, false);
   assert.equal(started.run.status, "running");
   assert.equal(started.run.error, null);
-  assert.equal(started.sources.deterministicSources.attempted, 0);
+  assert.equal(started.sources.deterministicSources.attempted, 3);
 });
 
 test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {
@@ -957,7 +969,7 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.status, "completed");
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
-  assert.equal(latest.run.summary.deterministicSources.attempted, 3);
+  assert.equal(latest.run.summary.deterministicSources.attempted, 6);
 });
 
 test("the shared worker can own deterministic terminal settlement", async () => {
@@ -1066,7 +1078,7 @@ test("background search runs browser sources and preserves point-of-use login re
   ]);
 });
 
-test("a manual search with only a disabled login source starts so the login preflight can settle", async () => {
+test("a manual search tracks a disabled login source alongside the broad remote baseline", async () => {
   const repoRoot = tempRepo();
   sourceConfigPut({
     repoRoot,
@@ -1095,7 +1107,7 @@ test("a manual search with only a disabled login source starts so the login pref
   const operation = await startManualSearchRun({ repoRoot, env: {} });
 
   assert.equal(operation.run.status, "running");
-  assert.equal(operation.sources.deterministicSources.attempted, 0);
+  assert.equal(operation.sources.deterministicSources.attempted, 3);
   assert.equal(operation.sources.deterministicSources.pendingLogins, 1);
 });
 

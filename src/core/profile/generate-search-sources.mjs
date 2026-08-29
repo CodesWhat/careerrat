@@ -580,18 +580,16 @@ export function buildSearchSources(targeting, profile) {
 
   // Board-wide remote aggregator feeds (RemoteOK / Remotive / Working Nomads): unlike
   // RemoteVibeCodingJobs/Wellfound above (tech-only, omitted entirely for other
-  // domains), these three are seeded for EVERY domain so the user can enable
-  // them later, but are enabled by default only for tech domains. Any domain
-  // can flip one on in config/search-sources.yml;
+  // domains), these three are seeded and enabled for EVERY candidate domain.
   // title_filter/location_filter narrow the broad feed the same way they
   // narrow every other sourced-scan lane. `provider` values are lowercase to
   // match sourced-scanner.mjs's BOARD_PROVIDERS registry keys exactly.
-  // `enabled_reason: "domain-gate"` marks these three as machine-set by this
-  // domain/title gate (not a user's own toggle) — first-search-run.mjs's
-  // mergeSearchSources reads that marker to re-sync `enabled` from a fresh
-  // regeneration even when a stored copy already exists on disk, so a stale
-  // enabled:false from an earlier run (e.g. before candidate.domain/titles
-  // told this gate to turn tech boards on) doesn't shadow it forever.
+  // `enabled_reason: "domain-gate"` is retained as the generator-ownership
+  // marker so first-search-run.mjs can migrate an older non-tech candidate's
+  // generated enabled:false entries to this baseline. Settings removes the
+  // marker when the user explicitly toggles a source, so that choice wins.
+  // On regeneration, first-search-run.mjs reads that marker to re-sync
+  // `enabled` even when a stored copy already exists on disk.
   const boardAggregators = [
     { provider: "remoteok", label: "RemoteOK", url: "https://remoteok.com/api" },
     { provider: "remotive", label: "Remotive", url: "https://remotive.com/api/remote-jobs" },
@@ -607,7 +605,7 @@ export function buildSearchSources(targeting, profile) {
       source_type: "board",
       label: board.label,
       url: board.url,
-      enabled: techDomain,
+      enabled: true,
       enabled_reason: "domain-gate",
     });
   }
