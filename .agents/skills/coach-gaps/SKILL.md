@@ -20,6 +20,8 @@ the DB/web workspace's coaching loop, not a scanner: it only ever fires on a rol
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Honesty
 > Firewall, Placeholder/Bracket Ban, Domain-Neutral Rule, and the Tracker Write Contract
 > (stamp → verify → snapshot → activity). Inline reminders at point-of-use are intentional.
+> Bare `candidate/` and `workspace/` paths below are symbolic; resolve them per
+> AGENTS.md's Path Resolution rule.
 > **One hard rail specific to this skill: a suggestion is never invented.** An evidence-claim
 > draft may only restate what is already in `candidate/evidence.yml` or the current
 > conversation — nothing new is fabricated to make a gap look closeable. A gap with nothing

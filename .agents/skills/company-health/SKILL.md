@@ -31,6 +31,8 @@ doubling down on it may still be worth a shot.
 > are intentional. **One extra hard rail for this skill: the rating is an INTERNAL signal
 > only — it must never appear in any outbound artifact** (cover letter, recruiter reply,
 > LinkedIn). No "your company is in freefall" energy reaches a human at the company.
+> Bare `candidate/` and `workspace/` paths below are symbolic; resolve them per
+> AGENTS.md's Path Resolution rule.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before
 > presenting the rating. Apply the register from AGENTS.md#mode-switches. The persisted

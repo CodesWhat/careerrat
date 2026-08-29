@@ -16,7 +16,7 @@ writes scheduling state back to the tracker.
 scheduling, hand it back to `email-comms`. This skill draws on the same comms machinery
 (thread match, style gate, message capture, activity logging) but adds the scheduling layer.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 ## Inputs
 
@@ -78,6 +78,7 @@ drafting. Don't draft against a thread that isn't recorded.
 ## STEP 2 — Load context
 
 Read, before drafting:
+
 1. `workspace/comms/<thread-id>.md` — prior exchanges, if saved.
 2. The linked `applications[]` row — role, stage, who you've spoken to
    (`conversations[]`), any artifacts.
@@ -183,6 +184,7 @@ Build the candidate set of proposed (or accepted) slots from STEP 2 + STEP 3, ho
 `working_hours`, `preferred_days`, `buffer_minutes`, and `blackout`.
 
 **Double-booking check — depends on calendar context:**
+
 - **If `calendarBusy[]` (or a user-provided free/busy export) is available** (from STEP 3b):
   **exclude any slot that overlaps a busy block** or violates the buffer around one. Use the
   most recent ingest; if the snapshot is stale, re-ingest or say so. Never assume a connector
@@ -271,6 +273,7 @@ live after the reply has gone out.
   `workspace/tracker.json`.
 
 **(b) Update the parent `communications[]` record** in that same write:
+
 - `status`: `scheduled` once a slot is agreed; `waiting` while awaiting their pick/confirm;
   `needs-reply` if the ball is back with the candidate.
 - `nextActionDue`: **null it first** (the scheduling reply IS the expected event — it has
@@ -293,6 +296,7 @@ live after the reply has gone out.
 
 **(c-i)** Add the `applications[].conversations[]` entry so it shows on the application
 timeline and feeds `interview-prep`:
+
 ```json
 {
   "date": "<ISO-8601 meeting datetime>",
@@ -327,9 +331,11 @@ none, use `interviewAt`.
 
 **DB workspace — (c-i)/(c-ii)/(c-iii) composition.** No single verb covers all three, so
 compose, back-to-back in the same turn as (a)/(b):
+
 1. ```
    careerrat data app schedule-interview <id> --at <iso> --round "<kind>" --note "<interviewNote text>"
    ```
+
    In one transaction this sets `interviewAt` (or `nextInterviewAt`, auto-detected from whether
    a future `interviewAt` already exists — same "first round vs. follow-on" rule above), sets
    `interviewNote`, and appends a `conversations[]` entry `{date: at, kind: round, notes: note}` —
@@ -342,9 +348,11 @@ compose, back-to-back in the same turn as (a)/(b):
    entry, then persist the whole array (wholesale array replace, same pattern as
    `track-outcomes`' STEP 2 routing table): `careerrat data app set-fields <id> --data
    '{"conversations":[...]}'`.
+
 3. ```
    careerrat data app set-status <id> "<stage>"
    ```
+
    Advances `applications[].status` to the matching stage (`recruiter screen`, `technical`,
    `onsite`, etc.) — outcome-changing, refreshes analytics, and (since entering, not leaving, the
    interview band) never triggers the round-completion clearing.
@@ -354,6 +362,7 @@ compose, back-to-back in the same turn as (a)/(b):
 in the SAME `tracker.json` write as (a) and (b).
 
 **(d) Validate + snapshot:**
+
 - **DB workspace:** the calls in (a)–(c) already persisted and auto-exported. Run
   `careerrat data verify` (re-exports + domain integrity) and `careerrat tracker --verify`
   (schema-level parity).
@@ -363,24 +372,29 @@ in the SAME `tracker.json` write as (a) and (b).
 **(e) Out-of-band completion.** If the user reports "I already confirmed / scheduled /
 rescheduled this" without the agent having sent the reply: record it immediately in the same
 single write — do not leave the CTA live because the agent did not perform the action.
-  - Append a `messages[]` entry: `direction: note`, `summary` describing the user-reported
+
+- Append a `messages[]` entry: `direction: note`, `summary` describing the user-reported
     completion (e.g. "User confirmed slot out-of-band: Thu Jun 26 2pm ET").
-  - If a meeting was booked out-of-band, add the `conversations[]` entry (c-i) and advance
+- If a meeting was booked out-of-band, add the `conversations[]` entry (c-i) and advance
     `applications[].status` (c-ii) in the same write.
-  - Set `comm.draft = null`; null `nextActionDue`, then set a fresh value if the next event
+- Set `comm.draft = null`; null `nextActionDue`, then set a fresh value if the next event
     is known; advance `comm.status` to `scheduled` / `waiting` as appropriate.
-  - Run verify + snapshot (STEP 7d).
-  - **DB workspace:** `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"<user-reported completion>"}'`, then the same (c) composition above if a meeting was booked, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `draft`/`nextActionDue`/`status`, then STEP 7(d)'s DB verify.
-  - **Legacy workspace (no DB):** apply the bullets above directly in `workspace/tracker.json`, then run STEP 7(d)'s legacy verify.
+- Run verify + snapshot (STEP 7d).
+- **DB workspace:** `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"<user-reported completion>"}'`, then the same (c) composition above if a meeting was booked, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `draft`/`nextActionDue`/`status`, then STEP 7(d)'s DB verify.
+- **Legacy workspace (no DB):** apply the bullets above directly in `workspace/tracker.json`, then run STEP 7(d)'s legacy verify.
 
 **(f) Log to the Activity Pulse feed** (see **Activity Pulse** in AGENTS.md). The reply is a
 draft awaiting send → log it as needing the user:
+
 - **DB workspace:** the (a)/(c) calls above already auto-logged their own generic events. For
   the richer, scheduling-specific type, log an additional event:
+
   ```
   careerrat data activity append --data '{"type":"drafted","actor":"agent","needsUser":true,"title":"Scheduling reply — <Company>","summary":"<one line: proposed/confirmed slot>","refs":{"applicationId":"<application id>","company":"<Company>"},"cta":{"label":"Review & send"}}'
   ```
+
 - **Legacy workspace (no DB):**
+
   ```
   careerrat activity append --type drafted --actor agent --needs-user \
     --title "Scheduling reply — <Company>" \

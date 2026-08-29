@@ -5,7 +5,7 @@ description: Draft, reply to, follow up on, summarize, and track job-search emai
 
 # email-comms
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing in-chat commentary around drafts. Apply the register from AGENTS.md#mode-switches. The **drafted artifact itself** (email subject + body) is always written in full regardless of register — `writing-style.md` governs its tone. Register governs the **agent commentary**: `exec-summary` = draft only + one action line; `standard` = draft + short bullets on intent/next-step; `technical` = draft + thread-context summary + strategy note; `verbose` = draft + full thread reconstruction + alternatives.
 
@@ -161,6 +161,7 @@ legacy workspace (no DB yet) — every write step below gives the existing direc
 JSON-edit instructions, unchanged.
 
 Read `workspace/tracker.json`. Find the `communications[]` record whose:
+
 - `applicationId` matches a known application, OR
 - `company` + `role` match, OR
 - `threadId` or `subject` matches the inbound message.
@@ -168,6 +169,7 @@ Read `workspace/tracker.json`. Find the `communications[]` record whose:
 If no match and this is a real communication (not a test note):
 
 Create a new communications record with at minimum:
+
 ```json
 {
   "id": "comm-<applicationId or slug>",
@@ -269,6 +271,7 @@ Read `candidate/honesty.yml` (`claims.do_not_fabricate`) before this sub-step. T
 Do not fabricate one. Say so plainly to the user before drafting: `No competing offer or deadline found — coaching to honest alternatives only.`
 
 Coach and draft using only:
+
 - Market anchor from the benchmark artifact (4b-1), if one exists.
 - Unique value from `candidate/evidence.yml` — measurable impact, rare skills, or domain depth.
 - Time: a genuine response window the candidate controls. Ask the candidate for a specific day and write that real day into the sentence — e.g. "I'd like to give this proper consideration — could we reconnect on Tuesday?" Never emit a bracket placeholder for the date; use the day the candidate actually gives.
@@ -302,6 +305,7 @@ For ongoing negotiation threads (round ≥ 2), read the full `communications[].m
 When `cash_over_equity` is `true`, do not offer equity concessions before exhausting sign-on and start-date options.
 
 **Deadline discipline:**
+
 - If the employer sets a deadline, acknowledge it and respond within it, or ask for a short extension (24–48 h) once.
 - If no deadline is set, the candidate controls timing. Do not volunteer one.
 - When to hold: round 1 (opening) and any round where the gap to `target_base` is > 10% — conceding early signals the floor is lower than it is.
@@ -357,6 +361,7 @@ Execute the following mutation sequence in order:
 - **Legacy workspace (no DB):** append to `communications[].messages[]` directly in `workspace/tracker.json`.
 
 **(b) Update the parent communications record** with:
+
 - `status`: `needs-reply | drafted | waiting | scheduled | closed | blocked`
 - `nextAction`: what to do next
 - `nextActionDue`: ISO date
@@ -377,18 +382,21 @@ Execute the following mutation sequence in order:
 **(c) Save long raw body** to `workspace/comms/<thread-id>.md` if the body exceeds one paragraph. Reference the path in `artifactPath`. `workspace/comms/` files are local-only and must not appear in any outbound artifact. (This is a local file write outside `tracker.json` — unaffected by DB vs legacy mode.)
 
 **(d) Validate:**
+
 - **DB workspace:** the calls in (a)/(b) already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write Contract, AGENTS.md). Run `careerrat data verify` (re-exports + domain integrity) and `careerrat tracker --verify` (schema-level parity).
 - **Legacy workspace (no DB):** run `careerrat tracker --verify`.
 
 Confirm it exits clean before proceeding. If it fails, fix the JSON (legacy) or the DB row via another verb call (DB — never hand-edit `tracker.json`, it is a regenerated file) and re-run.
 
 **(e) Snapshot:**
+
 - **DB workspace:** already exported by the calls above; if `careerrat tracker-dev` is running its `fs.watch` already picked it up. Run `careerrat tracker` only for a recovery checkpoint.
 - **Legacy workspace (no DB):** run `careerrat tracker`.
 
 Then log it to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). If the message is a draft awaiting the user to send, log it as needing the user; if it was already sent, log it sent:
 
 - **DB workspace:** the (a)/(b) calls above already auto-logged their own generic events (`message` type) in their own transactions. For the richer, outcome-specific type below, log an additional event (this verb only logs, it never bumps the stamp):
+
   ```
   # draft awaiting send:
   careerrat data activity append --data '{"type":"drafted","actor":"agent","needsUser":true,"title":"Drafted reply — <Company>","summary":"<one line: what the message does>","refs":{"applicationId":"<application id>","company":"<Company>"},"cta":{"label":"Review & send"}}'
@@ -396,7 +404,9 @@ Then log it to the Activity Pulse feed (the dashboard's live timeline — see **
   # already sent:
   careerrat data activity append --data '{"type":"message","actor":"agent","title":"Sent — <Company>","summary":"<one line: what the message does>","refs":{"applicationId":"<application id>","company":"<Company>"}}'
   ```
+
 - **Legacy workspace (no DB):**
+
   ```
   # draft awaiting send:
   careerrat activity append --type drafted --actor agent --needs-user \
@@ -429,6 +439,7 @@ Branch on message type after capture:
 ## STEP 8 — Follow-up timer management
 
 After every `outbound-sent` or `outbound-draft` capture, set `nextActionDue`:
+
 - Waiting for recruiter reply: 5–7 business days from send date.
 - Awaiting scheduling follow-up: 2 business days before the event deadline (or 3 days if no deadline given).
 - Thank-you: no follow-up needed unless the user requests one. After the thank-you is captured via STEP 6, set `nextActionDue = null` on the comm record in that same write — the thank-you satisfies the due event. Do NOT set a new follow-up timer unless the user explicitly asks for one.

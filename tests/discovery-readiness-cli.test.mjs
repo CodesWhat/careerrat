@@ -554,7 +554,12 @@ test("careerrat start --no-agent prints the manual agent handoff", () => {
     const result = runCareerRat(["start", "--no-agent", "--no-dashboard"], home);
 
     assert.equal(result.status, 0);
-    assert.match(result.stdout, /Open your agent in this folder and say:/);
+    // Names the install directory rather than saying "this folder". The agent has to
+    // start where AGENTS.md and .agents/skills/ live, and on a global npm install
+    // that is never the directory the user is standing in. runCareerRat spawns from
+    // a temp cwd, so this exercises the same mismatch a real install has.
+    assert.match(result.stdout, /Open your agent in \/.*careerrat.* and say:/);
+    assert.doesNotMatch(result.stdout, /Open your agent in this folder/);
     assert.match(result.stdout, /run careerrat doctor/);
     assert.match(result.stdout, /next unfinished CareerRat skill/);
   } finally {

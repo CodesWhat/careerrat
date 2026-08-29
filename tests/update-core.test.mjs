@@ -35,6 +35,52 @@ test("findUserDataLeaks catches candidate/workspace entries regardless of case",
   ]);
 });
 
+test("findUserDataLeaks catches a leaked .careerrat/ data root", () => {
+  // Since the data root moved, candidate/, workspace/, config/, internal/ and the
+  // sqlite db all nest under .careerrat/, so a tarball carrying any of them shows up
+  // only under that one prefix and the two bare legacy prefixes would never see it.
+  const leaks = findUserDataLeaks([
+    ".careerrat/candidate/resume.json",
+    ".careerrat/workspace/tracker.json",
+    ".CareerRat/internal/ai.env",
+    "./.careerrat/db/careerrat.sqlite",
+    "careerrat-data/notes.md",
+    "src/index.mjs",
+  ]);
+  assert.deepEqual(leaks, [
+    ".careerrat/candidate/resume.json",
+    ".careerrat/workspace/tracker.json",
+    ".CareerRat/internal/ai.env",
+    "./.careerrat/db/careerrat.sqlite",
+  ]);
+});
+
+test("findUserDataLeaks catches legacy .internal/ and the generated config files", () => {
+  // resolveUserPaths treats these as user-owned too, so an archive carrying them
+  // would extract straight over live state. config/ is matched by exact filename,
+  // not by prefix, because it also ships schemas and *.example.* that must pass.
+  const leaks = findUserDataLeaks([
+    ".internal/ai.env",
+    "./.INTERNAL/tracker-dev.log",
+    "config/search-sources.yml",
+    "config/search-sources.json",
+    "config/sourced-scan.json",
+    "config/ai.json",
+    "config/careerrat.schema.json",
+    "config/search-sources.example.yml",
+    "config/paste-intake-routes.json",
+    "src/index.mjs",
+  ]);
+  assert.deepEqual(leaks, [
+    ".internal/ai.env",
+    "./.INTERNAL/tracker-dev.log",
+    "config/search-sources.yml",
+    "config/search-sources.json",
+    "config/sourced-scan.json",
+    "config/ai.json",
+  ]);
+});
+
 test("findUserDataLeaks still exempts workspace/.gitkeep regardless of case", () => {
   const leaks = findUserDataLeaks([
     "workspace/.gitkeep",

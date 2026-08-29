@@ -5,7 +5,7 @@ description: Evidence-grounded drafted answers to one-off application-form or sc
 
 # answer-question
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: the Privacy Invariant (`current_base` never outbound), the Honesty Firewall (never fabricate an answer — the unanswerable case is the literal `NEEDS YOU` marker, not a guess), the Placeholder/Bracket Ban, the Domain-Neutral Rule, Activity Pulse logging, and Tracker verify+snapshot (only when a tracked application's answers artifact gets stamped). Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: the Privacy Invariant (`current_base` never outbound), the Honesty Firewall (never fabricate an answer — the unanswerable case is the literal `NEEDS YOU` marker, not a guess), the Placeholder/Bracket Ban, the Domain-Neutral Rule, Activity Pulse logging, and Tracker verify+snapshot (only when a tracked application's answers artifact gets stamped). Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 ## Boundary — when this runs
 

@@ -526,7 +526,10 @@ describe("GET /api/onboard/state — setupProgress", () => {
       assert.deepEqual(changed.owner, first.owner);
       assert.notEqual(changed.base.revision, first.base.revision);
       const exposedIdentity = JSON.stringify(changed.owner);
-      assert.doesNotMatch(exposedIdentity, /ada|@|example\.test/i);
+      // Match the submitted PII itself, not a bare "ada". owner is opaque hex ids, and
+      // "ada" is three hex characters, so a bare substring check false-positives on
+      // roughly 3% of runs (seen: candidateId "...0ecad741adac...").
+      assert.doesNotMatch(exposedIdentity, /ada candidate|ada\.private|@|example\.test/i);
       assert.equal(exposedIdentity.includes(repoRoot), false);
       assert.equal(exposedIdentity.includes(tmpdir()), false);
 

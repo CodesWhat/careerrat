@@ -12,7 +12,8 @@ metadata:
 > Firewall: never fabricate a fact the source document doesn't contain. Most other
 > AGENTS.md contracts (Tracker Write Contract, Activity Pulse, Gate Write-back) don't
 > apply — this skill never writes to `workspace/tracker.json` or `activity.jsonl`; it
-> only reads one file and replies with text.
+> only reads one file and replies with text. (Bare `workspace/` paths are symbolic;
+> see AGENTS.md's Path Resolution rule.)
 
 ## Boundary — when this runs
 
