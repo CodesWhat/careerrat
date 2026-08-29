@@ -7,11 +7,15 @@ import { after, test } from "node:test";
 import { mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
 import { BOUNDED_AI_CODES } from "../src/core/ai/bounded-ai.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
-import { companyProposalBatchLatest } from "../src/core/db/verbs/company-discovery.mjs";
+import {
+  companyProposalBatchLatest,
+  companyProposalBatchPut,
+} from "../src/core/db/verbs/company-discovery.mjs";
 import {
   appUpsert,
   candidateConfigPatch,
   candidateSetupInitialize,
+  companyAtsUpsert,
   sourceConfigGet,
   sourceConfigPut,
   sourcedUpsertBatch,
@@ -174,13 +178,89 @@ function bootServer(repoRoot, opts = {}) {
     fetchImpl: opts.fetchImpl,
     now: opts.now || FIXED_NOW,
     runSkillStream: opts.runSkillStream,
-    companyAtsUpsert: opts.companyAtsUpsert,
-    sourcedUpsertBatch: opts.sourcedUpsertBatch,
+    companyAtsUpsertImpl: opts.companyAtsUpsert,
+    sourcedUpsertBatchImpl: opts.sourcedUpsertBatch,
     captureAndPersistOffersIfDb: opts.captureAndPersistOffersIfDb,
     writeTracker: opts.writeTracker,
+    appOperations: opts.appOperations,
   });
   return { routes };
 }
+
+test("POST /api/discovery/company-proposals starts one durable background operation", async () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  const calls = [];
+  const server = bootServer(repoRoot, {
+    appOperations: {
+      async start(args) {
+        calls.push(args);
+        return {
+          reused: false,
+          operation: {
+            id: "app-operation-company-1",
+            kind: "company.discovery",
+            status: "running",
+            progress: { phase: "starting" },
+          },
+        };
+      },
+    },
+  });
+
+  const response = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }],
+  });
+
+  assert.equal(response.status, 202);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.reused, false);
+  assert.equal(response.body.operation.id, "app-operation-company-1");
+  assert.deepEqual(calls, [
+    {
+      kind: "company.discovery",
+      input: {
+        manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }],
+        requestedByUser: true,
+      },
+    },
+  ]);
+});
+
+test("GET /api/discovery/company-proposals loads only the exact completed operation batch", async () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  companyProposalBatchPut({
+    repoRoot,
+    batch: {
+      batchId: "cpb_exact",
+      status: "pending",
+      createdAt: FIXED_NOW.toISOString(),
+      version: 1,
+      proposals: [],
+      rejected: [],
+      counts: { seeds: 0, proposals: 0, rejected: 0 },
+    },
+  });
+  companyProposalBatchPut({
+    repoRoot,
+    batch: {
+      batchId: "cpb_other",
+      status: "pending",
+      createdAt: new Date(FIXED_NOW.getTime() + 1_000).toISOString(),
+      version: 1,
+      proposals: [],
+      rejected: [],
+      counts: { seeds: 0, proposals: 0, rejected: 0 },
+    },
+  });
+  const server = bootServer(repoRoot);
+
+  const response = await invokeJson(server, "GET", "/api/discovery/company-proposals?id=cpb_exact");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.data.batch.batchId, "cpb_exact");
+});
 
 const PROPOSAL_CONTRACT_FIELDS = [
   "proposalId",
@@ -229,7 +309,7 @@ function matchingOffer(company, overrides = {}) {
     title: "Applied AI Engineer",
     url: `https://jobs.lever.co/${company.toLowerCase().replace(/[^a-z0-9]+/g, "-")}/ai-engineer`,
     location: "Remote",
-    comp: "$220,000 - $260,000",
+    comp: "Base salary: $220,000 - $260,000",
     bodyText: "Build agentic developer workflows, LLM tool use, and customer-facing AI prototypes.",
     fit: "high",
     score: 88,
@@ -249,7 +329,8 @@ async function postRaw(server, path, rawBody) {
 }
 
 async function invokeJson(server, method, path, rawBody) {
-  const route = server.routes.get(`${method} ${path}`);
+  const routePath = new URL(path, "http://127.0.0.1").pathname;
+  const route = server.routes.get(`${method} ${routePath}`);
   assert.ok(route, `missing route: ${method} ${path}`);
 
   let resolveEnded;
@@ -282,7 +363,7 @@ async function invokeJson(server, method, path, rawBody) {
   return { status: res.status, body };
 }
 
-test("POST /api/discovery/company-proposals creates a persisted manual-seed proposal batch without confirmed writes", async () => {
+test("POST /api/discovery/company-proposals auto-adds a validated manual-seed company board", async () => {
   const repoRoot = tempRepo();
   candidateSetupInitialize({ repoRoot });
   const calls = [];
@@ -312,7 +393,7 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
             title: "Applied AI Engineer",
             url: "https://jobs.lever.co/acme/ai-engineer",
             location: "Remote",
-            comp: "$220,000 - $260,000",
+            comp: "Base salary: $220,000 - $260,000",
             bodyText:
               "Build agentic developer workflows, LLM tool use, and customer-facing AI prototypes.",
             fit: "high",
@@ -325,7 +406,10 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
       };
     },
     runSkillStream: forbidden("runSkillStream", calls),
-    companyAtsUpsert: forbidden("companyAtsUpsert", calls),
+    companyAtsUpsert: (args) => {
+      calls.push({ name: "companyAtsUpsert", args });
+      return companyAtsUpsert(args);
+    },
     sourcedUpsertBatch: forbidden("sourcedUpsertBatch", calls),
     captureAndPersistOffersIfDb: forbidden("captureAndPersistOffersIfDb", calls),
     writeTracker: forbidden("writeTracker", calls),
@@ -341,13 +425,15 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   assert.match(body.data.batchId, /^cpb_/);
   assert.deepEqual(body.data.counts, {
     seeds: 1,
-    proposals: 1,
+    proposals: 0,
     rejected: 0,
+    autoAdded: 1,
   });
   assert.deepEqual(body.data.rejected, []);
-  assert.equal(body.data.proposals.length, 1);
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.autoAdded.length, 1);
 
-  const proposal = body.data.proposals[0];
+  const proposal = body.data.autoAdded[0];
   assert.match(proposal.proposalId, /^cpp_/);
   assert.equal(proposal.company.name, "Acme AI");
   assert.equal(proposal.company.domain, "acme.example");
@@ -356,7 +442,8 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   assert.equal(proposal.confidenceTier, "high-confidence");
   assert.equal(proposal.proposedAction, "approve-supported-ats");
   assert.equal(proposal.roleSeen, "Applied AI Engineer");
-  assert.equal(proposal.version, 1);
+  assert.equal(proposal.version, 2);
+  assert.equal(proposal.decision.decidedBy, "explicit-discovery");
   assert.deepEqual(proposal.scanSummary, {
     status: "matching-roles-found",
     currentRoleCount: 1,
@@ -366,10 +453,10 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   });
 
   const { companyProposalBatchLatest } = await import("../src/core/db/verbs/company-discovery.mjs");
-  const latest = companyProposalBatchLatest({ repoRoot });
+  const latest = companyProposalBatchLatest({ repoRoot, status: null });
   assert.equal(latest.ok, true);
   assert.equal(latest.batch.batchId, body.data.batchId);
-  assert.equal(latest.batch.proposals[0].proposalId, proposal.proposalId);
+  assert.equal(latest.batch.autoAdded[0].proposalId, proposal.proposalId);
 
   assert.equal(chatRuntime.starts.length, 0);
   assert.equal(calls.filter((call) => call.name === "resolveCompanyBoard").length, 1);
@@ -380,7 +467,7 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   );
   assert.equal(
     calls.some((call) => call.name === "companyAtsUpsert"),
-    false
+    true
   );
   assert.equal(
     calls.some((call) => call.name === "sourcedUpsertBatch"),
@@ -394,10 +481,69 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
     calls.some((call) => call.name === "writeTracker"),
     false
   );
-  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, []);
+  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
+    { name: "Acme AI", careers_url: "https://jobs.lever.co/acme", provider: "lever" },
+  ]);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.html")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/activity.jsonl")), false);
+});
+
+test("an explicit discovery request auto-adds a deterministically validated company board", async () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async ({ seed }) => ({
+      ok: true,
+      companyName: seed.name,
+      companyDomain: "acme.example",
+      careersUrl: "https://jobs.lever.co/acme",
+      jobBoardUrl: "https://jobs.lever.co/acme",
+      atsProvider: "lever",
+      apiUrl: "https://api.lever.co/v0/postings/acme",
+      confidence: "high",
+      provenance: [{ source: "manual-domain-hint", url: "https://acme.example" }],
+    }),
+    scanCompaniesImpl: async () => ({
+      offers: [
+        {
+          company: "Acme AI",
+          title: "Applied AI Engineer",
+          url: "https://jobs.lever.co/acme/ai-engineer",
+          location: "Remote",
+          comp: "Base salary: $220,000 - $260,000",
+          bodyText: "Build agentic developer workflows and customer-facing AI prototypes.",
+          fit: "high",
+          score: 88,
+          gate: "likely-keep",
+          ratingReason: "matches keep signal",
+        },
+      ],
+      errors: [],
+    }),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }],
+    requestedByUser: true,
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.data.proposals, []);
+  assert.equal(body.data.autoAdded.length, 1);
+  assert.equal(body.data.autoAdded[0].company.name, "Acme AI");
+  assert.equal(body.data.autoAdded[0].decision.decidedBy, "explicit-discovery");
+  assert.deepEqual(body.data.counts, {
+    seeds: 1,
+    proposals: 0,
+    rejected: 0,
+    autoAdded: 1,
+  });
+  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
+    { name: "Acme AI", careers_url: "https://jobs.lever.co/acme", provider: "lever" },
+  ]);
+  assert.equal(companyProposalBatchLatest({ repoRoot, status: null }).batch.status, "approved");
 });
 
 test("POST /api/discovery/company-proposals turns AI seeds into deterministic resolver/scanner proposals", async () => {
@@ -457,7 +603,7 @@ test("POST /api/discovery/company-proposals turns AI seeds into deterministic re
             title: "Applied AI Engineer",
             url: "https://jobs.lever.co/seeded/ai-engineer",
             location: "Remote",
-            comp: "$220,000 - $260,000",
+            comp: "Base salary: $220,000 - $260,000",
             bodyText: "Build agentic developer workflows and customer-facing prototypes.",
             fit: "high",
             score: 90,
@@ -478,12 +624,13 @@ test("POST /api/discovery/company-proposals turns AI seeds into deterministic re
   assert.equal(body.ok, true);
   assert.deepEqual(body.data.counts, {
     seeds: 1,
-    proposals: 1,
+    proposals: 0,
     rejected: 0,
+    autoAdded: 1,
   });
-  assert.equal(body.data.proposals.length, 1);
-  assert.equal(body.data.proposals[0].company.name, "Seeded AI Co");
-  assert.equal(body.data.proposals[0].confidenceTier, "high-confidence");
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.autoAdded[0].company.name, "Seeded AI Co");
+  assert.equal(body.data.autoAdded[0].confidenceTier, "high-confidence");
   assert.equal(body.meta.ai.used, true);
   assert.equal(body.meta.ai.skill, "discover-companies");
   assert.equal(body.meta.ai.action, "seed-generate");
@@ -532,7 +679,7 @@ test("company proposal rescoring preserves worldwide remote scope in its candida
           title: "Applied AI Engineer",
           url: "https://jobs.lever.co/worldwide-remote/ai-engineer",
           location: "Remote - EMEA",
-          comp: "$220,000 - $260,000",
+          comp: "Base salary: $220,000 - $260,000",
           bodyText: "Build agentic developer workflows and customer-facing prototypes.",
         },
       ],
@@ -550,8 +697,8 @@ test("company proposal rescoring preserves worldwide remote scope in its candida
   });
 
   assert.equal(status, 200);
-  assert.equal(body.data.proposals.length, 1);
-  assert.equal(body.data.proposals[0].company.name, "Worldwide Remote Co");
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.autoAdded[0].company.name, "Worldwide Remote Co");
 });
 
 test("POST /api/discovery/company-proposals maps malformed JSON to 400", async () => {
@@ -616,7 +763,10 @@ test("POST /api/discovery/company-proposals returns the pinned high-confidence p
         errors: [],
       };
     },
-    companyAtsUpsert: forbidden("companyAtsUpsert", calls),
+    companyAtsUpsert: (args) => {
+      calls.push({ name: "companyAtsUpsert", args });
+      return companyAtsUpsert(args);
+    },
     sourcedUpsertBatch: forbidden("sourcedUpsertBatch", calls),
     captureAndPersistOffersIfDb: forbidden("captureAndPersistOffersIfDb", calls),
     writeTracker: forbidden("writeTracker", calls),
@@ -635,10 +785,13 @@ test("POST /api/discovery/company-proposals returns the pinned high-confidence p
 
   assert.equal(status, 200);
   assertNoCurrentCompLeak(body);
-  assert.equal(body.data.proposals.length, 1);
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.autoAdded.length, 1);
   assert.deepEqual(body.data.rejected, []);
-  const proposal = body.data.proposals[0];
-  assertProposalContract(proposal);
+  const proposal = body.data.autoAdded[0];
+  const { decision, ...proposalContract } = proposal;
+  assertProposalContract(proposalContract);
+  assert.equal(decision.decidedBy, "explicit-discovery");
   assert.equal(proposal.company.name, "Contract AI");
   assert.equal(proposal.company.domain, "contract.example");
   assert.equal(proposal.classification, "supported_ats");
@@ -658,7 +811,7 @@ test("POST /api/discovery/company-proposals returns the pinned high-confidence p
   assert.match(jdText, /Build agentic developer workflows/);
   assert.equal(
     calls.some((call) => call.name === "companyAtsUpsert"),
-    false
+    true
   );
   assert.equal(
     calls.some((call) => call.name === "sourcedUpsertBatch"),
@@ -677,7 +830,7 @@ test("POST /api/discovery/company-proposals applies comp-plausibility flags to c
     [
       "Below Floor Co",
       matchingOffer("Below Floor Co", {
-        comp: "$120,000 - $170,000",
+        comp: "Base salary: $120,000 - $170,000",
         gate: "likely-cut",
         fit: "stretch",
         score: 42,
@@ -695,7 +848,7 @@ test("POST /api/discovery/company-proposals applies comp-plausibility flags to c
     [
       "Top Band Co",
       matchingOffer("Top Band Co", {
-        comp: "$170,000 - $220,000",
+        comp: "Base salary: $170,000 - $220,000",
         gate: "review",
         ruleFlags: ["top-of-band-only"],
       }),
@@ -745,23 +898,112 @@ test("POST /api/discovery/company-proposals applies comp-plausibility flags to c
   }
 });
 
+test("POST /api/discovery/company-proposals scores annual cash floors before proposal gating", async () => {
+  const repoRoot = tempRepo();
+  seedCandidateForAICompanyDiscovery(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: {
+        minimum_base: null,
+        minimum_annual_earnings: 200_000,
+      },
+    },
+  });
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async ({ seed }) => supportedResolution(seed),
+    scanCompaniesImpl: async () => ({
+      offers: [
+        matchingOffer("Annual Cash Co", {
+          location: "Remote - United States",
+          comp: "",
+          baseComp: "$120,000-$140,000 base salary",
+          annualEarningsComp: "$180,000-$220,000 annual cash earnings",
+          score: null,
+          fit: null,
+          gate: null,
+          ruleFlags: [],
+        }),
+      ],
+      errors: [],
+    }),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Annual Cash Co", domain_hint: "annual-cash.example" }],
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.data.rejected.length, 0, JSON.stringify(body.data.rejected, null, 2));
+  assert.equal(body.data.proposals.length, 1);
+  const proposal = body.data.proposals[0];
+  assert.ok(proposal.reviewReasons.includes("annual-earnings-overlap"));
+  assert.ok(proposal.capturedOffers[0].ruleFlags.includes("annual-earnings-overlap"));
+});
+
+test("POST /api/discovery/company-proposals preserves annual cash hard misses for an honest rejection", async () => {
+  const repoRoot = tempRepo();
+  seedCandidateForAICompanyDiscovery(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: {
+        minimum_base: null,
+        minimum_annual_earnings: 200_000,
+      },
+    },
+  });
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async ({ seed }) => supportedResolution(seed),
+    scanCompaniesImpl: async () => ({
+      offers: [
+        matchingOffer("Low Annual Cash Co", {
+          location: "Remote - United States",
+          comp: "",
+          baseComp: "$20 per hour",
+          annualEarningsComp: "$140,000-$180,000 annual cash earnings",
+          score: null,
+          fit: null,
+          gate: null,
+          ruleFlags: [],
+        }),
+      ],
+      errors: [],
+    }),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Low Annual Cash Co", domain_hint: "low-annual-cash.example" }],
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.data.proposals.length, 0);
+  assert.equal(body.data.rejected.length, 1);
+  assert.equal(body.data.rejected[0].reason, "annual-earnings-below-floor");
+  assert.ok(body.data.rejected[0].rejectReasons.includes("annual-earnings-below-floor"));
+});
+
 test("POST /api/discovery/company-proposals returns review-only non-comp borderline states", async () => {
   const repoRoot = tempRepo();
   seedCandidateForAICompanyDiscovery(repoRoot);
   const server = bootServer(repoRoot, {
     resolveCompanyBoard: async ({ seed }) => {
-      if (seed.name === "Unsupported Cache Co") {
+      if (seed.name === "Generic Public Co") {
         return {
           ok: true,
           companyName: seed.name,
-          companyDomain: "unsupported.example",
-          careersUrl: "https://unsupported.example/careers",
-          jobBoardUrl: "",
+          companyDomain: "generic.example",
+          careersUrl: "https://generic.example/careers",
+          jobBoardUrl: "https://generic.example/careers",
           atsProvider: "",
-          classification: "unsupported_public",
+          status: "generic_public",
+          classification: "generic_public",
           confidence: "medium",
-          provenance: [{ source: "cache", url: "https://unsupported.example/careers" }],
-          cacheOnly: true,
+          provenance: [{ source: "public-page-fetch", url: "https://generic.example/careers" }],
+          proposedAction: "approve-public-source",
+          promotable: true,
         };
       }
       return supportedResolution(seed);
@@ -770,7 +1012,12 @@ test("POST /api/discovery/company-proposals returns review-only non-comp borderl
       const company = config.tracked_companies[0].name;
       if (company === "Partial Body Co") {
         return {
-          offers: [matchingOffer(company, { bodyText: "" })],
+          offers: [
+            matchingOffer(company, {
+              bodyText: "A useful upstream excerpt that ends before the complete job description.",
+              bodyPartial: true,
+            }),
+          ],
           errors: [],
         };
       }
@@ -780,15 +1027,12 @@ test("POST /api/discovery/company-proposals returns review-only non-comp borderl
           errors: [],
         };
       }
-      return {
-        offers: [],
-        errors: [{ company, error: "unsupported provider" }],
-      };
+      throw new Error(`generic public source must not use deterministic scanner: ${company}`);
     },
   });
 
   const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
-    manualSeeds: ["Partial Body Co", "Scanner Review Co", "Unsupported Cache Co"],
+    manualSeeds: ["Partial Body Co", "Scanner Review Co", "Generic Public Co"],
   });
 
   assert.equal(status, 200);
@@ -810,14 +1054,12 @@ test("POST /api/discovery/company-proposals returns review-only non-comp borderl
   assert.equal(scannerReview.proposedAction, "review");
   assert.ok(scannerReview.reviewReasons.includes("scanner-review"));
 
-  const unsupported = body.data.proposals.find(
-    (entry) => entry.company.name === "Unsupported Cache Co"
-  );
-  assertProposalContract(unsupported);
-  assert.equal(unsupported.classification, "unsupported_public");
-  assert.equal(unsupported.confidenceTier, "borderline");
-  assert.equal(unsupported.proposedAction, "cache-only");
-  assert.ok(unsupported.reviewReasons.includes("unsupported-public-cache"));
+  const generic = body.data.proposals.find((entry) => entry.company.name === "Generic Public Co");
+  assertProposalContract(generic);
+  assert.equal(generic.classification, "generic_public");
+  assert.equal(generic.confidenceTier, "borderline");
+  assert.equal(generic.proposedAction, "approve-public-source");
+  assert.ok(generic.reviewReasons.includes("generic-public-source"));
 });
 
 test("POST /api/discovery/company-proposals hard-rejects tracked, excluded, in-play, unreachable, unsupported, and no-role companies", async () => {
@@ -855,7 +1097,7 @@ test("POST /api/discovery/company-proposals hard-rejects tracked, excluded, in-p
           ok: false,
           companyName: seed.name,
           companyDomain: "unsupported-no-cache.example",
-          careersUrl: "",
+          careersUrl: "https://unsupported-no-cache.example/careers",
           jobBoardUrl: "",
           atsProvider: "",
           provenance: [],
@@ -939,23 +1181,25 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
     chatRuntime,
     resolveCompanyBoard: async ({ seed }) => {
       calls.push({ name: "resolveCompanyBoard", seed });
-      if (seed.name === "Unsupported Cache Co") {
+      if (seed.name === "Generic Public Co") {
         return {
           ok: true,
           companyName: seed.name,
-          companyDomain: "unsupported-cache.example",
-          careersUrl: "https://unsupported-cache.example/careers",
-          jobBoardUrl: "",
+          companyDomain: "generic.example",
+          careersUrl: "https://generic.example/careers",
+          jobBoardUrl: "https://generic.example/careers",
           atsProvider: "",
-          classification: "unsupported_public",
+          status: "generic_public",
+          classification: "generic_public",
           confidence: "medium",
           provenance: [
             {
-              source: "cache",
-              url: "https://unsupported-cache.example/careers",
+              source: "public-page-fetch",
+              url: "https://generic.example/careers",
             },
           ],
-          cacheOnly: true,
+          proposedAction: "approve-public-source",
+          promotable: true,
         };
       }
       return supportedResolution(seed);
@@ -963,12 +1207,7 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
     scanCompaniesImpl: async (config) => {
       const company = config.tracked_companies[0].name;
       calls.push({ name: "scanCompanies", company });
-      if (company === "Unsupported Cache Co") {
-        return {
-          offers: [],
-          errors: [{ company, error: "unsupported provider" }],
-        };
-      }
+      if (company === "Generic Public Co") throw new Error("generic source must not use ATS scan");
       return { offers: [matchingOffer(company)], errors: [] };
     },
     companyAtsUpsert: forbidden("companyAtsUpsert", calls),
@@ -984,13 +1223,18 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
       "Excluded Co",
       "Applied Already Co",
       "Sourced Already Co",
-      "Unsupported Cache Co",
+      "Generic Public Co",
     ],
   });
 
   assert.equal(status, 200);
   assert.equal(body.ok, true);
-  assert.deepEqual(body.data.counts, { seeds: 6, proposals: 1, rejected: 5 });
+  assert.deepEqual(body.data.counts, {
+    seeds: 6,
+    proposals: 1,
+    rejected: 5,
+    autoAdded: 0,
+  });
 
   const rejectedReasons = new Map(
     body.data.rejected.map((entry) => [entry.company.name, entry.rejectReasons])
@@ -1008,16 +1252,15 @@ test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail 
     assert.equal(rejected.capturedOffers.length, 0, rejected.company.name);
   }
 
-  const unsupported = body.data.proposals[0];
-  assertProposalContract(unsupported);
-  assert.equal(unsupported.company.name, "Unsupported Cache Co");
-  assert.equal(unsupported.classification, "unsupported_public");
-  assert.equal(unsupported.confidenceTier, "borderline");
-  assert.equal(unsupported.proposedAction, "cache-only");
-  assert.notEqual(unsupported.proposedAction, "approve-supported-ats");
-  assert.equal(unsupported.atsProvider, "");
-  assert.ok(unsupported.reviewReasons.includes("unsupported-public-cache"));
-  assert.equal(unsupported.capturedOffers.length, 0);
+  const generic = body.data.proposals[0];
+  assertProposalContract(generic);
+  assert.equal(generic.company.name, "Generic Public Co");
+  assert.equal(generic.classification, "generic_public");
+  assert.equal(generic.confidenceTier, "borderline");
+  assert.equal(generic.proposedAction, "approve-public-source");
+  assert.equal(generic.atsProvider, "");
+  assert.ok(generic.reviewReasons.includes("generic-public-source"));
+  assert.equal(generic.capturedOffers.length, 0);
 
   assert.equal(chatRuntime.starts.length, 0);
   for (const name of [

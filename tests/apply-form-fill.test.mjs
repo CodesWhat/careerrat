@@ -713,6 +713,33 @@ describe("buildFillPlan", () => {
 // ---------------------------------------------------------------------------
 
 describe("resolveScreeningAnswer", () => {
+  it("answers North America yes from known North American homes", () => {
+    for (const home of [
+      "Brooklyn, NY",
+      "Austin, TX",
+      "Toronto, ON, Canada",
+      "Mexico City, Mexico",
+    ]) {
+      const answer = resolveScreeningAnswer("Are you currently located in North America?", {
+        profile: { location: { home } },
+      });
+
+      assert.equal(answer.action, "fill", home);
+      assert.equal(answer.value, "Yes", home);
+      assert.equal(answer.source, "profile.location.home", home);
+    }
+  });
+
+  it("leaves North America unresolved when the saved home is unknown", () => {
+    const answer = resolveScreeningAnswer("Are you currently located in North America?", {
+      profile: { location: { home: "Location not provided" } },
+    });
+
+    assert.equal(answer.action, "skip");
+    assert.equal(answer.value, null);
+    assert.equal(answer.reason, "unresolved");
+  });
+
   it("does not let saved screening answers bypass voluntary self-identification policy", () => {
     const labels = [
       "Do you identify as LGBTQ+?",

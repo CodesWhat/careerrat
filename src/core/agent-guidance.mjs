@@ -154,6 +154,17 @@ export function buildAgentGuidance({
         : "Candidate setup is not search-ready yet.",
     };
   }
+  if (searchReadiness.pendingLogin > 0) {
+    return {
+      ...base,
+      nextSkill: "search-jobs",
+      command: null,
+      message:
+        "Ask your agent to run search-jobs. CareerRat will ask whether you want to log into the saved job site.",
+      reason:
+        "A saved job source is ready for its point-of-use login choice; it does not need another setup or permission gate.",
+    };
+  }
   if (!searchReadiness.exists || !searchReadiness.valid || searchReadiness.enabled === 0) {
     return {
       ...base,

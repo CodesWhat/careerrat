@@ -171,6 +171,9 @@ const ANSWER_DRAFT = async () => ({
   gaps: [],
 });
 
+// These tests exercise resume drafting/assembly, not PDF export. Stub
+// exportPacketArtifacts the same way tests/packet-engine.test.mjs does so the
+// suite doesn't need a real Chromium to assert on generated markdown.
 async function generateWithResume(repoRoot, resumeDraft, services = {}) {
   return generatePacket({
     repoRoot,
@@ -183,6 +186,7 @@ async function generateWithResume(repoRoot, resumeDraft, services = {}) {
     draftResumeProposal: resumeDraft,
     draftCoverLetterBlocks: COVER_DRAFT,
     draftPacketAnswers: ANSWER_DRAFT,
+    exportPacketArtifacts: async () => ({ formats: [], outputs: {} }),
   });
 }
 

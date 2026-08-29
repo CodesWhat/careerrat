@@ -40,6 +40,8 @@ function acceptanceFixture(overrides = {}) {
       fromVersion: "0.16.2",
       expectedVersion: "0.16.3",
       sentinel,
+      durableCandidateName: "Native Update Durable Candidate",
+      expectedMigrationCeiling: 17,
       ...overrides,
     })}\n`
   );
@@ -81,6 +83,8 @@ test("native update acceptance is explicit, packaged-only, and loopback-only", a
   assert.equal(resolved.feedUrl, "http://127.0.0.1:48191/");
   assert.equal(resolved.homeDir, fixture.homeDir);
   assert.equal(resolved.resultPath, join(fixture.root, "result.json"));
+  assert.equal(resolved.durableCandidateName, "Native Update Durable Candidate");
+  assert.equal(resolved.expectedMigrationCeiling, 17);
 
   assert.throws(
     () =>
@@ -197,7 +201,45 @@ test("native update acceptance drives the updater and leaves a one-shot restart 
   });
 });
 
-test("restarted native update acceptance reports the new version and preserved home", async () => {
+test("prior packaged app seeds canonical candidate state through its normal local server", async () => {
+  const acceptance = await optionalImport("../apps/desktop/native-update-acceptance.mjs");
+  assert.ok(acceptance, "the packaged acceptance helper must exist");
+  const fixture = acceptanceFixture();
+  const resolved = acceptance.resolveNativeUpdateAcceptance({
+    argv: [`--native-update-acceptance=${fixture.requestPath}`],
+    isPackaged: true,
+    platform: "darwin",
+    currentVersion: "0.16.2",
+    userDataDir: fixture.userDataDir,
+    acceptancePublicKey,
+  });
+  const calls = [];
+
+  await acceptance.seedNativeUpdateAcceptanceState({
+    acceptance: resolved,
+    baseUrl: "http://127.0.0.1:48192",
+    async requestJson(url, options = {}) {
+      calls.push([url, options]);
+      return { ok: true, data: {} };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    ["http://127.0.0.1:48192/api/data/candidate/init", { method: "POST", body: {} }],
+    [
+      "http://127.0.0.1:48192/api/data/candidate/config",
+      {
+        method: "POST",
+        body: {
+          name: "profile",
+          patch: { candidate: { full_name: "Native Update Durable Candidate" } },
+        },
+      },
+    ],
+  ]);
+});
+
+test("restarted native update acceptance reports normal migration boot and canonical row durability", async () => {
   const acceptance = await optionalImport("../apps/desktop/native-update-acceptance.mjs");
   assert.ok(acceptance, "the packaged acceptance helper must exist");
   const fixture = acceptanceFixture();
@@ -215,9 +257,14 @@ test("restarted native update acceptance reports the new version and preserved h
   assert.equal(resolved.mode, "complete");
 
   const mutations = [];
-  const result = acceptance.completeNativeUpdateAcceptance({
+  const result = await acceptance.completeNativeUpdateAcceptance({
     acceptance: resolved,
     currentVersion: "0.16.3",
+    canonicalState: {
+      durableCandidateName: "Native Update Durable Candidate",
+      migrationVersion: 17,
+      migrationCeiling: 17,
+    },
     removePointer(path) {
       mutations.push("remove-pointer");
       rmSync(path, { force: true });
@@ -234,6 +281,10 @@ test("restarted native update acceptance reports the new version and preserved h
     expectedVersion: "0.16.3",
     observedVersion: "0.16.3",
     sentinelPreserved: true,
+    durableRowPreserved: true,
+    observedMigrationVersion: 17,
+    expectedMigrationCeiling: 17,
+    migrationCeilingRespected: true,
   });
   assert.deepEqual(JSON.parse(readFileSync(resolved.resultPath, "utf8")), result);
   assert.equal(existsSync(pointerPath), false, "the restart marker must be one-shot");
@@ -254,9 +305,14 @@ test("native acceptance runner rejects any result that did not transition and pr
         expectedVersion: "0.16.3",
         observedVersion: "0.16.3",
         sentinelPreserved: true,
+        durableRowPreserved: true,
+        observedMigrationVersion: 17,
+        expectedMigrationCeiling: 17,
+        migrationCeilingRespected: true,
       },
       fromVersion: "0.16.2",
       expectedVersion: "0.16.3",
+      expectedMigrationCeiling: 17,
     })
   );
   assert.throws(
@@ -276,22 +332,26 @@ test("native acceptance runner rejects any result that did not transition and pr
   );
 });
 
-test("desktop main handles native acceptance before normal boot and through clean shutdown", () => {
+test("desktop main runs native acceptance through bounded normal boot and clean shutdown", () => {
   const main = readFileSync(new URL("../apps/desktop/main.mjs", import.meta.url), "utf8");
   const resolveAt = main.indexOf("resolveNativeUpdateAcceptance(");
   const pathsAt = main.indexOf("resolveDesktopRuntimePaths(");
-  const acceptanceAt = main.indexOf("beginNativeUpdateAcceptance(");
-  const bootAt = main.lastIndexOf("const { url, route } = await boot()");
+  const acceptanceAt = main.lastIndexOf("await beginNativeUpdateAcceptance(");
+  const bootAt = main.lastIndexOf("await bootNativeUpdateAcceptance(", acceptanceAt);
 
   assert.ok(resolveAt >= 0, "main must resolve the explicit packaged acceptance launch");
   assert.ok(resolveAt < pathsAt, "acceptance CAREERRAT_HOME must be known before runtime paths");
-  assert.ok(acceptanceAt >= 0 && acceptanceAt < bootAt, "acceptance must bypass normal app boot");
+  assert.ok(
+    bootAt >= 0 && bootAt < acceptanceAt,
+    "the prior package must boot before seeding state"
+  );
   assert.match(main, /careerratHomeOverride:\s*nativeUpdateAcceptance\?\.homeDir/);
   assert.match(
     main,
     /requestInstall\(controller\)[\s\S]*installUpdateAfterShutdown = true[\s\S]*app\.quit\(\)/,
     "the acceptance installer must use the existing clean-shutdown path"
   );
+  assert.match(main, /bootNativeUpdateAcceptance\(\{[\s\S]*boot[\s\S]*timeoutMs/);
   assert.match(main, /completeNativeUpdateAcceptance\([\s\S]*app\.exit\(result\.ok \? 0 : 1\)/);
   assert.match(
     main,

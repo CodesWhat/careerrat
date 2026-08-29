@@ -78,24 +78,9 @@ Do not assume HiringCafe is the only importable provider. Any board URL a user p
 
 **(b.1) Authenticated browser sources (LinkedIn / Indeed / Glassdoor)**
 
-When the user pastes a search or results URL from LinkedIn, Indeed, or Glassdoor, `--add-url` automatically creates an **authenticated browser source**: `source_type: browser`, `auth: true`, bound to its `platform` (e.g. `linkedin`), and **`enabled: false` by default**. It is off until the user explicitly opts in — `search-jobs` skips any authenticated source that is not both enabled and consented.
+When the user pastes a search or results URL from LinkedIn, Indeed, or Glassdoor, `--add-url` creates a browser source bound to that site. Ask one question in the current conversation: “Do you want to log into LinkedIn so I can use it?” with Yes and No choices. Yes enables that source and opens its exact URL in the visible CareerRat browser. No leaves that source disabled and continues with every other source. Do not send the user to Settings or require a capability, platform, consent, or terms-of-service switch matrix.
 
-Two switches are required before `search-jobs` will run such a source:
-
-1. **Enable the source** — the normal enable path (`careerrat searches --enable <index or label>`).
-2. **Grant automation consent and enable the capability for that platform** — the user must read the platform's terms of service, then:
-
-```
-careerrat automation consent <platform> --write
-careerrat automation enable authenticated_search <platform> --write
-careerrat automation status
-```
-
-No credentials are stored. Keep the session provider on `auto` unless the user explicitly
-changes it; CareerRat resolves the current session browser and that browser holds the
-login. See AGENTS.md → Browser Automation Contract and `docs/BROWSER.md`. Do not proceed with the
-platform if `mayRun({ capability: "authenticated_search", platform })` returns `allowed: false`;
-surface the `reasons` and stop.
+CareerRat never stores the password. The browser session holds the login. Stop for CAPTCHA, 2FA, or an unexpected account-selection screen so the user can handle it visibly, then resume the same source.
 
 **(c) Enable / disable entries:**
 
@@ -106,7 +91,7 @@ careerrat searches --disable <index or label>
 
 Use `careerrat searches` to get current indices before enabling/disabling by index.
 
-**(d) Surface disabled-by-default entries.** Some providers (e.g. LinkedIn) are in the source catalog but disabled by default due to auth brittleness or rate limits. List them with `careerrat searches` and tell the user which entries are `enabled: false` so they can make an informed choice.
+**(d) Surface disabled entries.** List intentionally disabled sources with `careerrat searches`. When the user wants one, ask the site-specific Yes/No login question in the current conversation.
 
 ## STEP 4 — Tune global filters
 
@@ -122,12 +107,14 @@ Review the generated filters and adjust as needed:
   - `manual` — no automatic date filter; the agent applies no recency constraint (use for sources with their own pagination).
   
   To tune: use the owning source-config command when available. Do not hand-edit exported source YAML in DB workspaces. If no DB-aware command exists for recency yet, stop and report the helper gap rather than editing `config/search-sources.yml`. In legacy workspaces only, edit the `recency` block directly in `config/search-sources.yml` for the relevant entry. Example for a 7-day lookback on a fixed-hours source:
+
   ```yaml
   recency:
     mode: fixed-hours
     windowHours: 168
     safetyMinutes: 60
   ```
+
   After tuning, run `careerrat doctor` to confirm the schema validates.
 
 Use `careerrat searches` to review the current state before finalizing.
@@ -140,6 +127,7 @@ Verify the auto-selected aggregator and board set is appropriate for the candida
 - If the user mentions a board or aggregator they always want included: add it now, and apply the gate write-back below.
 
 **Auto-seeded portals (review these):**
+
 - **Wellfound** (`wellfound.com`) — tech-domain candidates only; one entry per primary role title, `source_type: browser`. If the candidate is not in a tech-adjacent domain, disable these entries.
 - **Lever** (`jobs.lever.co`) — domain-neutral ATS; one entry per company in `targeting.tracked_companies`, `source_type: ats`. Verify each company slug matches the company's actual Lever subdomain — a wrong slug returns an empty result set (HTTP 200, no postings), not a 404.
 

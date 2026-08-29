@@ -46,6 +46,15 @@ const RULE_CASES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    name: "empty AI response",
+    err: new ApiError(400, {
+      code: "EMPTY_AI_RESPONSE",
+      error: "The selected AI runtime returned an empty response.",
+    }),
+    message: "CareerRat didn't get a response from your AI. Try again.",
+    action: { label: "Try again", retry: true },
+  },
+  {
     name: "no ai route configured raw regex",
     err: new ApiError(400, { error: "No AI route configured" }),
     message: "No AI engine is connected yet.",
@@ -78,9 +87,13 @@ const RULE_CASES = [
     action: { label: "Finish setup", to: "/onboarding" },
   },
   {
-    name: "No search config found",
-    err: new ApiError(400, { error: "No search config found for this workspace" }),
-    message: "No search sources are set up yet.",
+    name: "board discovery unavailable",
+    err: new ApiError(501, {
+      code: "BOARD_DISCOVERY_UNAVAILABLE",
+      error: "Guided board discovery is not connected in this runtime.",
+    }),
+    message:
+      "CareerRat can't look for new job boards automatically right now. Add one yourself in Settings.",
     action: { label: "Open Settings", to: "/settings" },
   },
   {
@@ -107,6 +120,17 @@ const RULE_CASES = [
     message:
       "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",
     action: null,
+  },
+  {
+    name: "application preparation failed",
+    err: new ApiError(400, {
+      code: "APPLICATION_PREPARATION_FAILED",
+      error:
+        "The supervised preparation ended without a safe handoff. The application was not marked Applied.",
+    }),
+    message:
+      "CareerRat couldn't finish preparing this application. It didn't mark the job as applied. Review the job before trying again.",
+    action: { label: "Try again", retry: true },
   },
   {
     name: "job body requires browser",
@@ -255,6 +279,15 @@ const RULE_CASES = [
     }),
     message:
       "CareerRat can't send email for you yet. Use Open in your email app, send it yourself, then choose I sent this.",
+    action: null,
+  },
+  {
+    name: "communication draft required",
+    err: new ApiError(409, {
+      code: "COMMUNICATION_DRAFT_REQUIRED",
+      error: "A saved draft is required before this communication can be sent.",
+    }),
+    message: "There isn't a reply ready to send yet. Draft and review one first.",
     action: null,
   },
   {
@@ -496,8 +529,9 @@ const RULE_CASES = [
       error:
         "Automated calendar sync isn't enabled for that provider. Turn it on in Settings first.",
     }),
-    message: "Automated calendar sync is off for that provider. You can turn it on in Settings.",
-    action: { label: "Open Settings", to: "/settings" },
+    message:
+      "CareerRat couldn't save permission to add that calendar event. Ask Paul to try that task again.",
+    action: null,
   },
   {
     name: "RELATIONSHIP_SOURCING_NOT_ALLOWED code",
@@ -505,8 +539,9 @@ const RULE_CASES = [
       code: "RELATIONSHIP_SOURCING_NOT_ALLOWED",
       error: "Relationship sourcing isn't turned on yet. Turn it on in Settings first.",
     }),
-    message: "Relationship sourcing is off. You can turn it on in Settings.",
-    action: { label: "Open Settings", to: "/settings" },
+    message:
+      "CareerRat couldn't save permission for LinkedIn and Wellfound relationship sourcing. Ask Paul to try that task again.",
+    action: null,
   },
   {
     name: "RELATIONSHIP_SOURCING_COMPANY_REQUIRED code",
@@ -541,8 +576,9 @@ const RULE_CASES = [
       code: "STATUS_SYNC_NOT_ALLOWED",
       error: "Portal status polling isn't turned on yet. Turn it on in Settings first.",
     }),
-    message: "Portal status polling is off. You can turn it on in Settings.",
-    action: { label: "Open Settings", to: "/settings" },
+    message:
+      "CareerRat couldn't save permission to check Greenhouse, Workday, Ashby, and Lever statuses. Ask Paul to try that task again.",
+    action: null,
   },
   {
     name: "STATUS_PORTAL_URL_INVALID code",
@@ -569,8 +605,8 @@ const RULE_CASES = [
       error: "Mail sync isn't available on this device yet. Turn on mail access first.",
     }),
     message:
-      "Mail sync isn't available on this device yet. Turn on mail access for Gmail or Outlook in Settings first.",
-    action: { label: "Open Settings", to: "/settings" },
+      "CareerRat couldn't save permission to check Gmail or Outlook. Ask Paul to try that task again.",
+    action: null,
   },
   {
     name: "MESSAGES_SYNC_NOT_ALLOWED code",
@@ -579,8 +615,8 @@ const RULE_CASES = [
       error: "Message sync isn't turned on yet. Turn on in-platform messaging first.",
     }),
     message:
-      "Message sync isn't turned on yet. Turn on in-platform messaging for LinkedIn or Wellfound in Settings first.",
-    action: { label: "Open Settings", to: "/settings" },
+      "CareerRat couldn't save permission to check LinkedIn or Wellfound messages. Ask Paul to try that task again.",
+    action: null,
   },
   {
     name: "STATUS_UPDATE_INVALID code",

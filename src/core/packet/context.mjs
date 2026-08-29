@@ -208,6 +208,7 @@ export function buildPacketContext({
       interviewNote: app.interviewNote ?? null,
       conversations: Array.isArray(app.conversations) ? app.conversations : [],
       artifacts: { ...(app.artifacts || {}) },
+      evaluation: app.evaluation ? { ...app.evaluation } : null,
       packetManifest: app.packetManifest || null,
     },
     job: {
@@ -267,7 +268,7 @@ export function packetPromptFromContext(context) {
     "Candidate context (private, local, current compensation removed):",
     JSON.stringify(candidateContext, null, 2),
     "",
-    "Return one typed packet-gate verdict. Base fit only on the candidate context and saved job description. Parse posted base compensation into numeric minBase/maxBase when present; otherwise use nulls and status unknown. Never invent compensation or evidence.",
+    "Return one typed packet-gate verdict. Base fit only on the candidate context and saved job description. Parse guaranteed base pay into numeric minBase/maxBase. Parse expected annual cash earnings, including wages, tips, commissions, and recurring cash bonuses but excluding equity and benefits, into minAnnualEarnings/maxAnnualEarnings. Never copy annual earnings into base pay. Set basis to base or annual-earnings for the candidate floor being evaluated, or null when no comparable band exists. An explicit comparable maximum below the floor is below-floor, an overlapping range stays unknown for review, and an unposted range stays unknown. Guaranteed base pay may clear an annual-earnings floor. Never invent compensation or evidence.",
     "Use complete plain-English sentences. Keep fitSummary within 150 characters, compensation.summary within 130 characters, and every fitReasons/fitRisks item within 72 characters. Never shorten copy by switching languages, clipping words, or appending fragments.",
     "Every display string must be final user-facing copy. Do not include questions, drafting notes, self-corrections, editing chatter, or markdown fences inside a field.",
   ].join("\n");

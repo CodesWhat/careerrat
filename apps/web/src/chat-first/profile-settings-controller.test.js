@@ -6,6 +6,44 @@ import {
 } from "./profile-settings-controller.js";
 
 describe("profile settings controller mapping", () => {
+  it("builds stable settings URLs for tabs, dialogs, and section editors", async () => {
+    const module = await import("./profile-settings-controller.js");
+
+    expect(module.profileSettingsRoute).toBeTypeOf("function");
+    expect(module.profileSettingsRoute({ tab: "settings" })).toBe("/settings?tab=settings");
+    expect(module.profileSettingsRoute({ tab: "settings", panel: "engine" })).toBe(
+      "/settings?tab=settings&panel=engine"
+    );
+    expect(module.profileSettingsRoute({ panel: "editor", section: "location-policy" })).toBe(
+      "/settings?panel=editor&section=location-policy"
+    );
+  });
+
+  it("routes a Settings sources intent to the exact source panel", async () => {
+    const { profileSettingsRoute } = await import("./profile-settings-controller.js");
+
+    expect(profileSettingsRoute({ tab: "settings", section: "sources" })).toBe(
+      "/settings?tab=settings&panel=source"
+    );
+  });
+
+  it("canonicalizes contradictory sources and rejects unknown profile editor sections", async () => {
+    const { profileSettingsLocation } = await import("./profile-settings-controller.js");
+
+    expect(profileSettingsLocation("?tab=settings&panel=editor&section=sources")).toMatchObject({
+      route: "/settings?tab=settings&panel=source",
+      activeTab: "settings",
+      panel: "source",
+      section: null,
+    });
+    expect(profileSettingsLocation("?panel=editor&section=not-a-section")).toMatchObject({
+      route: "/settings",
+      activeTab: "profile",
+      panel: null,
+      section: null,
+    });
+  });
+
   it("treats an older completed quick-facts location as confirmed when the explicit flag is absent", () => {
     const model = buildProfileSettingsModel({
       onboard: {
@@ -66,7 +104,11 @@ describe("profile settings controller mapping", () => {
         data: {
           profile: {
             candidate: { name: "Scott" },
-            compensation: { oe_min_base: 210000, expected_base: 230000 },
+            compensation: {
+              oe_min_base: 210000,
+              minimum_annual_earnings: 226000,
+              expected_base: 230000,
+            },
             location: {
               home: "NYC",
               remote: true,
@@ -124,7 +166,6 @@ describe("profile settings controller mapping", () => {
       },
       automation: {
         capabilities: [
-          { capability: "authenticated_search", enabled: true },
           { capability: "authenticated_apply_preparation", enabled: false },
           { capability: "mail_access", enabled: false },
         ],
@@ -181,7 +222,7 @@ describe("profile settings controller mapping", () => {
 
     expect(model.profile).toMatchObject({
       targets: ["Staff Software Engineer", "Engineering Lead"],
-      compensation: { floor: "$210k", target: "$230k" },
+      compensation: { floor: "$210k", annualEarningsFloor: "$226k", target: "$230k" },
       dealbreakers: ["Fully onsite"],
       locationPolicy: {
         home: "NYC",
@@ -204,6 +245,7 @@ describe("profile settings controller mapping", () => {
       compensation: {
         fields: [
           { id: "minimumBase", value: "210000" },
+          { id: "minimumAnnualEarnings", value: "226000" },
           { id: "targetBase", value: "230000" },
         ],
       },
@@ -244,11 +286,6 @@ describe("profile settings controller mapping", () => {
     ).toBe("Scout fills authenticated forms, you press every submit");
     expect(model.permissions.filter((row) => row.mutable)).toMatchObject([
       {
-        id: "authenticated_search",
-        providerScope:
-          "Turning this on records consent for LinkedIn, Indeed, Wellfound, and Glassdoor.",
-      },
-      {
         id: "authenticated_apply_preparation",
         providerScope:
           "Turning this on records consent for Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and external ATS sites.",
@@ -263,7 +300,6 @@ describe("profile settings controller mapping", () => {
     expect(model.engine.choices.map((choice) => choice.id)).toEqual(["codex", "custom"]);
     expect(model.permissions.map((row) => [row.id, row.enabled])).toEqual([
       ["draft_documents", true],
-      ["authenticated_search", true],
       ["authenticated_apply_preparation", false],
       ["mail_access", false],
     ]);
@@ -473,32 +509,26 @@ describe("profile settings controller mapping", () => {
     expect(permissionPatch("draft_documents", false)).toBeNull();
   });
 
-  it("keeps shared provider consent while another enabled permission still needs it", () => {
+  it("does not carry a hidden job-source login switch in Settings state", () => {
+    const model = buildProfileSettingsModel({
+      automation: {
+        capabilities: [{ capability: "source_login", enabled: true }],
+      },
+    });
+    expect(model.permissions.some((permission) => permission.id === "source_login")).toBe(false);
+    expect(model.permissionState.some((permission) => permission.id === "source_login")).toBe(
+      false
+    );
+    expect(permissionPatch("source_login", true, model.permissions)).toBeNull();
+  });
+
+  it("does not preserve consent for a removed hidden job-source permission", () => {
     const permissions = [
-      { id: "authenticated_search", enabled: true },
+      { id: "source_login", enabled: true },
       { id: "authenticated_apply_preparation", enabled: true },
       { id: "mail_access", enabled: false },
     ];
 
-    expect(permissionPatch("authenticated_search", false, permissions)).toMatchObject({
-      consent: {
-        linkedin: true,
-        indeed: false,
-        wellfound: false,
-        glassdoor: false,
-      },
-      capabilities: {
-        authenticated_search: {
-          enabled: false,
-          platforms: {
-            linkedin: false,
-            indeed: false,
-            wellfound: false,
-            glassdoor: false,
-          },
-        },
-      },
-    });
     expect(permissionPatch("authenticated_apply_preparation", false, permissions)).toMatchObject({
       consent: {
         greenhouse: false,
@@ -506,7 +536,7 @@ describe("profile settings controller mapping", () => {
         ashby: false,
         workable: false,
         smartrecruiters: false,
-        linkedin: true,
+        linkedin: false,
         external_ats: false,
       },
       capabilities: {
@@ -567,13 +597,20 @@ describe("profile settings controller mapping", () => {
     expect(
       profileSectionSavePlan("compensation", {
         minimumBase: "210000",
+        minimumAnnualEarnings: "226000",
         targetBase: "235000",
       })
     ).toEqual([
       {
         kind: "candidate",
         name: "profile",
-        patch: { compensation: { minimum_base: 210000, target_base: 235000 } },
+        patch: {
+          compensation: {
+            minimum_base: 210000,
+            minimum_annual_earnings: 226000,
+            target_base: 235000,
+          },
+        },
       },
     ]);
     expect(

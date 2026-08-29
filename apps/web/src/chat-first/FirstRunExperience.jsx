@@ -59,16 +59,24 @@ function engineDescription(engine) {
     return "Detected on this computer. Sign in before CareerRat can use it.";
   if (presentation.state === "ready")
     return `Ready to run the complete CareerRat workflow with ${engine.name || "this AI CLI"}.`;
+  if (engine?.probeMessage) return engine.probeMessage;
   return "This provider is not available on this computer.";
 }
 
-function SearchRetryControl({ onRetrySearch, submitting }) {
-  if (!onRetrySearch) return null;
+function RetryControl({ onRetrySearch, onRetryCompany, submitting }) {
+  if (!onRetrySearch && !onRetryCompany) return null;
   return (
     <div className="cf-first-run__answer-options">
-      <button type="button" disabled={submitting} onClick={onRetrySearch}>
-        Retry search
-      </button>
+      {onRetrySearch ? (
+        <button type="button" disabled={submitting} onClick={onRetrySearch}>
+          Retry search
+        </button>
+      ) : null}
+      {onRetryCompany ? (
+        <button type="button" disabled={submitting} onClick={onRetryCompany}>
+          Retry company search
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -98,7 +106,7 @@ function DetectedEngine({
           <strong>{engine.name || "AI engine"}</strong>
         </span>
         <span className="cf-first-run__engine-description">{engineDescription(engine)}</span>
-        {engine.capabilityReason ? (
+        {engine.capabilityReason && engine.capabilityReason !== engine.probeMessage ? (
           <span className="cf-first-run__engine-capability">{engine.capabilityReason}</span>
         ) : null}
       </span>
@@ -142,7 +150,7 @@ function DetectedEngine({
               disabled={submitting}
               onClick={() => onRetryEngine?.(engine.id)}
             >
-              Check again
+              {engine.actionLabel || "Check again"}
             </button>
           ) : null}
         </span>
@@ -182,7 +190,10 @@ function ClaudeSetupGuide({ guidedSetup, submitting, onStartGuidedSetup, onRefre
       <div className="cf-first-run__beginner-heading">
         <span className="cf-first-run__beginner-kicker">NO IDEA WHERE TO START?</span>
         <h2>New to AI tools? We’ll walk you through it.</h2>
-        <p>You only need a Claude account and about two minutes.</p>
+        <p>
+          Choose Claude Code or OpenAI Codex. Claude Code has an in-app installer, and Codex has a
+          setup guide.
+        </p>
       </div>
       <ol className="cf-first-run__setup-steps">
         <li>
@@ -285,8 +296,14 @@ function HostedInterestCard({
 
   return (
     <article className="cf-first-run__engine-special cf-first-run__engine-special--managed">
-      <span>
-        <strong>CareerRat AI</strong>
+      <span className="cf-first-run__engine-spacer" aria-hidden="true" />
+      <span className="cf-first-run__engine-identity">
+        <span className="cf-first-run__engine-name">
+          <span className="cf-runtime-icon cf-runtime-icon--careerrat" aria-hidden="true">
+            🐀
+          </span>
+          <strong>CareerRat AI</strong>
+        </span>
         <small>Hosted CareerRat AI is planned, but it is not available today.</small>
       </span>
       <span className="cf-first-run__engine-coming-soon">COMING SOON</span>
@@ -369,6 +386,7 @@ export function EngineSelection({
   onHostedInterestChange,
   onHostedInterestSubmit,
   onRetrySearch,
+  onRetryCompany,
 }) {
   const choices = safeArray(engines).filter(
     (engine) =>
@@ -410,12 +428,12 @@ export function EngineSelection({
         {error ? (
           <div className="cf-first-run__engine-error" role="alert">
             <span>{error}</span>
-            {SearchRetryControl({ onRetrySearch, submitting })}
+            {RetryControl({ onRetrySearch, onRetryCompany, submitting })}
           </div>
         ) : null}
         <fieldset className="cf-first-run__engine-choices">
           <legend className="cf-first-run__engine-legend">
-            {needsFirstTool ? "Set up Claude" : "Detected AI tools"}
+            {needsFirstTool ? "Set up an AI tool" : "Detected AI tools"}
           </legend>
           {detectedChoices.length > 0 ? (
             detectedChoices.map((engine) => (
@@ -439,7 +457,9 @@ export function EngineSelection({
         </fieldset>
         {alternateMissingChoices.length > 0 ? (
           <details className="cf-first-run__engine-missing">
-            <summary>I already use another AI tool</summary>
+            <summary>
+              {needsFirstTool ? "Set up OpenAI Codex instead" : "Set up another supported AI tool"}
+            </summary>
             <div className="cf-first-run__engine-missing-list">
               {alternateMissingChoices.map((engine) => (
                 <div className="cf-first-run__engine-missing-row" key={engine.id}>
@@ -910,6 +930,9 @@ export function FirstRunChat({
   onResumeFile,
   onDraftChange,
   onRetrySearch,
+  onRetryCompany,
+  companyReviewReady = false,
+  onOpenCompanyReview,
   onSubmitAnswer,
 }) {
   const rows = safeArray(messages);
@@ -969,7 +992,17 @@ export function FirstRunChat({
             role="alert"
           >
             <span>{error}</span>
-            {SearchRetryControl({ onRetrySearch, submitting })}
+            {RetryControl({ onRetrySearch, onRetryCompany, submitting })}
+          </div>
+        ) : null}
+        {companyReviewReady ? (
+          <div className="cf-first-run__composer-notice" role="status">
+            <span>Company suggestions are ready. Your current answer is still here.</span>
+            <div className="cf-first-run__answer-options">
+              <button type="button" disabled={submitting} onClick={onOpenCompanyReview}>
+                Review companies
+              </button>
+            </div>
           </div>
         ) : null}
         {resumeUploading ? (
@@ -1017,8 +1050,9 @@ export function FirstRunChat({
 }
 
 export function FirstRunExperience(props) {
+  let content;
   if (props?.stage === "voluntary-defaults" || props?.voluntaryDefaultsRequired === true) {
-    return (
+    content = (
       <VoluntaryDefaultsPrompt
         agentName={props.agentName || "Paul"}
         submitting={props.submitting}
@@ -1026,7 +1060,17 @@ export function FirstRunExperience(props) {
         onChoose={props.onChooseVoluntaryDefaults}
       />
     );
+  } else if (props?.stage === "chat") {
+    content = FirstRunChat(props);
+  } else {
+    content = EngineSelection(props);
   }
-  if (props?.stage === "chat") return FirstRunChat(props);
-  return EngineSelection(props);
+  return props?.companyReview ? (
+    <>
+      {content}
+      {props.companyReview}
+    </>
+  ) : (
+    content
+  );
 }

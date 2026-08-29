@@ -3,6 +3,7 @@
 // spawn the resolved executable directly with fixed argv and shell:false.
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   accessSync,
   chmodSync,
@@ -15,21 +16,35 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, delimiter, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  delimiter,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
-import { runtimeProcessInvocation, scheduleRuntimeProcessKill } from "./runtime-process.mjs";
+import {
+  runtimeProcessIdentityFiles,
+  runtimeProcessInvocation,
+  scheduleRuntimeProcessKill,
+} from "./runtime-process.mjs";
 
 const CLAUDE_BOUNDARY_MINIMUM_VERSION = "2.1.241";
-const CODEX_COMPLETION_MINIMUM_VERSION = "0.149.1";
 const UNVERIFIED_COMPLETION_REASON =
   "Detected, but this CLI has not passed the complete CareerRat workflow yet.";
 const SCOPED_TOOLS_SERVER_NAME = "careerrat_scoped_tools";
@@ -63,6 +78,10 @@ export function isSupportedInstalledRuntime(runtimeId) {
   return installedRuntimeDefinition(runtimeId)?.supported === true;
 }
 
+export function hasInstalledRuntimeCompletion(capabilities, runtimeId) {
+  return isSupportedInstalledRuntime(runtimeId) && capabilities?.completion === true;
+}
+
 export function hasCompleteCareerRatCapabilities(capabilities, runtimeId) {
   const definition = installedRuntimeDefinition(runtimeId);
   if (runtimeId && definition?.supported !== true) return false;
@@ -86,6 +105,7 @@ export function sanitizeInstalledRuntimeCapabilityEvidence(runtimeId, capabiliti
 
 const INSTALLED_CHILD_ENV_KEYS = Object.freeze([
   "PATH",
+  "Path",
   "HOME",
   "USER",
   "LOGNAME",
@@ -112,6 +132,7 @@ const INSTALLED_CHILD_ENV_KEYS = Object.freeze([
   "WINDIR",
   "PATHEXT",
   "COMSPEC",
+  "ComSpec",
   "CAREERRAT_HOME",
   "CAREERRAT_INSTALLED_AI_MODEL",
   "ANTHROPIC_MODEL",
@@ -162,7 +183,6 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     installUrl: "https://learn.chatgpt.com/docs/codex/cli",
     capabilities: FULL_WORKFLOW_ACCEPTED_CAPABILITIES,
     acceptedCapabilities: FULL_WORKFLOW_ACCEPTED_CAPABILITIES,
-    minimumCompletionVersion: CODEX_COMPLETION_MINIMUM_VERSION,
   },
   {
     id: "gemini",
@@ -364,6 +384,8 @@ export function findInstalledExecutable(
 export function detectInstalledRuntimes(options = {}) {
   return INSTALLED_RUNTIME_DEFINITIONS.map((definition) => {
     const path = findInstalledExecutable(definition.binaries, options);
+    const realPath = path ? existingCanonicalPath(path) : null;
+    const binaryFingerprint = realPath ? runtimeBinaryFingerprint(realPath, options) : null;
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       available: Boolean(path),
     });
@@ -373,6 +395,8 @@ export function detectInstalledRuntimes(options = {}) {
       supported: definition.supported === true,
       commandShape: definition.commandShape,
       path,
+      realPath,
+      binaryFingerprint,
       available: Boolean(path),
       warning: definition.warning || null,
       installUrl: definition.installUrl || null,
@@ -546,6 +570,371 @@ function versionAtLeast(value, floor) {
 }
 
 const MAX_RUNTIME_PROBE_BYTES = 64 * 1024;
+const COMPLETION_SMOKE_RECEIPT = "CAREERRAT_COMPLETION_READY";
+const COMPLETION_SMOKE_TIMEOUT_MS = 30_000;
+const COMPLETION_SMOKE_SUCCESS_TTL_MS = 24 * 60 * 60 * 1000;
+const COMPLETION_SMOKE_FAILURE_TTL_MS = 30 * 1000;
+const COMPLETION_SMOKE_CACHE_RELPATH = ".internal/runtime-completion-smoke.json";
+const ACTIVE_COMPLETION_SMOKES = new Map();
+
+const COMPLETION_SMOKE_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    receipt: { type: "string", const: COMPLETION_SMOKE_RECEIPT },
+  },
+  required: ["receipt"],
+});
+
+function runtimeBinaryFingerprint(
+  path,
+  {
+    env = process.env,
+    platform = process.platform,
+    runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+  } = {}
+) {
+  try {
+    if (platform === "win32" && /\.(?:bat|cmd)$/i.test(String(path || ""))) {
+      const resolvedBytes = new Map();
+      const readIdentityFile = (filePath) => {
+        const bytes = readFileSync(filePath);
+        resolvedBytes.set(String(filePath).toLowerCase(), bytes);
+        return bytes;
+      };
+      const files = runtimeIdentityFilesImpl(path, {
+        env,
+        platform,
+        readFileImpl: readIdentityFile,
+      });
+      if (!Array.isArray(files) || files.length < 3) return null;
+      const hash = createHash("sha256").update("careerrat-runtime-chain-v1\0");
+      const seenRoles = new Set();
+      for (const file of files) {
+        const role = String(file?.role || "").trim();
+        const filePath = String(file?.path || "").trim();
+        if (!role || !filePath || seenRoles.has(role)) return null;
+        seenRoles.add(role);
+        const bytes = resolvedBytes.get(filePath.toLowerCase()) || readIdentityFile(filePath);
+        hash.update(`${role}\0${filePath.toLowerCase()}\0${bytes.length}\0`).update(bytes);
+      }
+      if (!seenRoles.has("launcher") || !seenRoles.has("wrapper") || !seenRoles.has("payload")) {
+        return null;
+      }
+      return hash.digest("hex");
+    }
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+export function installedRuntimeExecutionIdentity(
+  runtime,
+  {
+    env = process.env,
+    platform = process.platform,
+    spawnSyncImpl = spawnSync,
+    runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+    requireCurrentExecutable = false,
+  } = {}
+) {
+  const path = String(runtime?.path || "").trim();
+  if (!path) return null;
+  const currentRealPath = existingCanonicalPath(path);
+  const realPath =
+    currentRealPath || (requireCurrentExecutable ? "" : String(runtime?.realPath || "").trim());
+  const resolvedFingerprint = currentRealPath
+    ? runtimeBinaryFingerprint(currentRealPath, { env, platform, runtimeIdentityFilesImpl })
+    : null;
+  const requiresResolvedChain = platform === "win32" && /\.(?:bat|cmd)$/i.test(String(realPath));
+  const binaryFingerprint =
+    resolvedFingerprint ||
+    (requireCurrentExecutable || requiresResolvedChain
+      ? null
+      : String(runtime?.binaryFingerprint || "")
+          .trim()
+          .toLowerCase());
+  let version = String(runtime?.version || "").trim();
+  if (!version) {
+    const childEnv = buildInstalledRuntimeChildEnv({ env });
+    const invocation = runtimeProcessInvocation(path, ["--version"], {
+      env: childEnv,
+      platform,
+    });
+    try {
+      const result = spawnSyncImpl(invocation.command, invocation.args, {
+        ...invocation.options,
+        env: childEnv,
+        encoding: "utf8",
+        maxBuffer: MAX_RUNTIME_PROBE_BYTES,
+        timeout: 5_000,
+        shell: false,
+        windowsHide: true,
+      });
+      if (!result?.error && result?.status === 0) {
+        version = parseVersion(`${result.stdout || ""}\n${result.stderr || ""}`)?.join(".") || "";
+      }
+    } catch {
+      version = "";
+    }
+  }
+  if (!realPath || !/^[a-f0-9]{64}$/.test(binaryFingerprint) || !version) return null;
+  return { path, realPath, version, binaryFingerprint };
+}
+
+function assertInstalledRuntimeExecutionIdentity(
+  runtime,
+  {
+    env = process.env,
+    platform = process.platform,
+    runtimeIdentityImpl = installedRuntimeExecutionIdentity,
+  } = {}
+) {
+  const expected = {
+    path: String(runtime?.path || "").trim(),
+    realPath: String(runtime?.realPath || "").trim(),
+    version: String(runtime?.version || "").trim(),
+    binaryFingerprint: String(runtime?.binaryFingerprint || "")
+      .trim()
+      .toLowerCase(),
+  };
+  if (
+    !expected.path ||
+    !expected.realPath ||
+    !expected.version ||
+    !/^[a-f0-9]{64}$/.test(expected.binaryFingerprint)
+  ) {
+    throw runtimeError(
+      "The selected AI CLI has no complete verified execution identity. Re-check it in Settings.",
+      "RUNTIME_EXECUTION_IDENTITY_REQUIRED",
+      { runtimeId: runtime?.id || null }
+    );
+  }
+  let current = null;
+  try {
+    current = runtimeIdentityImpl(runtime, { env, platform, requireCurrentExecutable: true });
+  } catch {
+    current = null;
+  }
+  if (
+    !current ||
+    current.path !== expected.path ||
+    current.realPath !== expected.realPath ||
+    current.version !== expected.version ||
+    current.binaryFingerprint !== expected.binaryFingerprint
+  ) {
+    throw runtimeError(
+      "The selected AI CLI changed after CareerRat verified it. Start this work again.",
+      "RUNTIME_EXECUTABLE_CHANGED",
+      { runtimeId: runtime?.id || null }
+    );
+  }
+  return current;
+}
+
+function completionSmokeCachePath({ cwd, env }) {
+  return userPath({ repoRoot: cwd, env }, COMPLETION_SMOKE_CACHE_RELPATH);
+}
+
+function sanitizedCompletionSmokeEntry(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const path = String(value.path || "").trim();
+  const version = String(value.version || "").trim();
+  const binaryFingerprint = String(value.binaryFingerprint || "").trim();
+  const checkedAt = String(value.checkedAt || "").trim();
+  if (
+    !path ||
+    !version ||
+    !binaryFingerprint ||
+    !checkedAt ||
+    Number.isNaN(Date.parse(checkedAt)) ||
+    typeof value.ok !== "boolean"
+  ) {
+    return null;
+  }
+  return { path, version, binaryFingerprint, checkedAt, ok: value.ok };
+}
+
+function loadCompletionSmokeCache({ runtimeId, cwd, env }) {
+  try {
+    const path = completionSmokeCachePath({ cwd, env });
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    return sanitizedCompletionSmokeEntry(parsed?.runtimes?.[runtimeId]);
+  } catch {
+    return null;
+  }
+}
+
+function saveCompletionSmokeCache({ runtimeId, cwd, env, entry }) {
+  const path = completionSmokeCachePath({ cwd, env });
+  const runtimes = {};
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (
+      parsed?.runtimes &&
+      typeof parsed.runtimes === "object" &&
+      !Array.isArray(parsed.runtimes)
+    ) {
+      for (const [id, value] of Object.entries(parsed.runtimes)) {
+        if (!installedRuntimeDefinition(id)?.supported) continue;
+        const sanitized = sanitizedCompletionSmokeEntry(value);
+        if (sanitized) runtimes[id] = sanitized;
+      }
+    }
+  } catch {
+    // A missing or damaged cache is replaced by the one bounded receipt below.
+  }
+  runtimes[runtimeId] = sanitizedCompletionSmokeEntry(entry);
+  mkdirSync(dirname(path), { recursive: true });
+  const tmpPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify({ schemaVersion: 1, runtimes }, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  chmodSync(tmpPath, 0o600);
+  renameSync(tmpPath, path);
+  chmodSync(path, 0o600);
+}
+
+function completionSmokeMessage(runtime, ok) {
+  const name = runtime?.name || installedRuntimeDefinition(runtime?.id)?.name || "This AI CLI";
+  return ok
+    ? `${name} returned a test reply and is ready.`
+    : `${name} is installed and signed in, but it didn't return a usable test reply.`;
+}
+
+function completionSmokeResult({ runtime, entry, cached }) {
+  return {
+    ok: entry.ok,
+    cached,
+    checkedAt: entry.checkedAt,
+    probeMessage: completionSmokeMessage(runtime, entry.ok),
+    action: entry.ok ? null : "retry",
+    actionLabel: entry.ok ? null : "Try again",
+  };
+}
+
+function cachedCompletionSmoke({ runtime, version, binaryFingerprint, entry, nowMs }) {
+  if (
+    !entry ||
+    entry.path !== runtime.path ||
+    entry.version !== version ||
+    entry.binaryFingerprint !== binaryFingerprint
+  ) {
+    return null;
+  }
+  const ageMs = nowMs - Date.parse(entry.checkedAt);
+  const ttlMs = entry.ok ? COMPLETION_SMOKE_SUCCESS_TTL_MS : COMPLETION_SMOKE_FAILURE_TTL_MS;
+  return ageMs >= 0 && ageMs < ttlMs
+    ? completionSmokeResult({ runtime, entry, cached: true })
+    : null;
+}
+
+export async function probeInstalledRuntimeCompletion({
+  runtime,
+  version,
+  cwd = process.cwd(),
+  env = process.env,
+  platform = process.platform,
+  force = false,
+  timeoutMs = COMPLETION_SMOKE_TIMEOUT_MS,
+  nowImpl = Date.now,
+  runtimeIdentityImpl = installedRuntimeExecutionIdentity,
+  loadCompletionSmokeCacheImpl = loadCompletionSmokeCache,
+  saveCompletionSmokeCacheImpl = saveCompletionSmokeCache,
+  runInstalledRuntimeImpl = runInstalledRuntime,
+} = {}) {
+  const definition = installedRuntimeDefinition(runtime?.id);
+  if (!definition?.supported || !runtime?.path || !version) {
+    return completionSmokeResult({
+      runtime,
+      cached: false,
+      entry: { ok: false, checkedAt: new Date(nowImpl()).toISOString() },
+    });
+  }
+  let executionIdentity = null;
+  try {
+    executionIdentity = runtimeIdentityImpl(
+      { ...runtime, version },
+      { env, platform, requireCurrentExecutable: true }
+    );
+  } catch {
+    executionIdentity = null;
+  }
+  const binaryFingerprint = executionIdentity?.binaryFingerprint;
+  const nowMs = nowImpl();
+  if (!binaryFingerprint) {
+    return completionSmokeResult({
+      runtime,
+      cached: false,
+      entry: { ok: false, checkedAt: new Date(nowMs).toISOString() },
+    });
+  }
+  if (!force) {
+    const cached = cachedCompletionSmoke({
+      runtime,
+      version,
+      binaryFingerprint,
+      entry: loadCompletionSmokeCacheImpl({ runtimeId: runtime.id, cwd, env }),
+      nowMs,
+    });
+    if (cached) return cached;
+  }
+
+  const key = `${runtime.id}:${runtime.path}:${version}:${binaryFingerprint}`;
+  const active = ACTIVE_COMPLETION_SMOKES.get(key);
+  if (active) return active;
+  const smoke = (async () => {
+    let ok = false;
+    try {
+      const capabilityEvidence = Object.fromEntries(
+        Object.keys(definition.capabilities || {}).map((capability) => [
+          capability,
+          capability === "completion" || capability === "structuredOutput",
+        ])
+      );
+      const result = await runInstalledRuntimeImpl({
+        runtime: { ...runtime, ...executionIdentity, capabilities: capabilityEvidence },
+        prompt:
+          "Return the exact CareerRat readiness receipt requested by the output schema. Do not use tools or inspect files.",
+        outputSchema: COMPLETION_SMOKE_SCHEMA,
+        tools: [],
+        skill: null,
+        repoRoot: null,
+        approvedReadPaths: [],
+        env,
+        timeoutMs: Math.min(COMPLETION_SMOKE_TIMEOUT_MS, Math.max(1, timeoutMs)),
+      });
+      const parsed = JSON.parse(String(result?.text || ""));
+      ok =
+        parsed?.receipt === COMPLETION_SMOKE_RECEIPT &&
+        Object.keys(parsed).length === 1 &&
+        !Array.isArray(parsed);
+    } catch {
+      ok = false;
+    }
+    const entry = {
+      path: runtime.path,
+      version,
+      binaryFingerprint,
+      checkedAt: new Date(nowImpl()).toISOString(),
+      ok,
+    };
+    try {
+      saveCompletionSmokeCacheImpl({ runtimeId: runtime.id, cwd, env, entry });
+    } catch {
+      // Readiness stays factual even when the private optimization cache cannot be written.
+    }
+    return completionSmokeResult({ runtime, entry, cached: false });
+  })();
+  ACTIVE_COMPLETION_SMOKES.set(key, smoke);
+  try {
+    return await smoke;
+  } finally {
+    if (ACTIVE_COMPLETION_SMOKES.get(key) === smoke) ACTIVE_COMPLETION_SMOKES.delete(key);
+  }
+}
 
 async function runInstalledRuntimeProbe(
   invocation,
@@ -557,6 +946,7 @@ async function runInstalledRuntimeProbe(
     platform = process.platform,
     timeoutMs = 5000,
     signal,
+    beforeSpawn,
   } = {}
 ) {
   const options = {
@@ -567,6 +957,7 @@ async function runInstalledRuntimeProbe(
     stdio: ["ignore", "pipe", "pipe"],
   };
   if (platform !== "win32") {
+    beforeSpawn?.();
     try {
       return spawnSyncImpl(invocation.command, invocation.args, {
         ...options,
@@ -590,6 +981,7 @@ async function runInstalledRuntimeProbe(
   return new Promise((resolve) => {
     let child;
     try {
+      beforeSpawn?.();
       child = spawnImpl(invocation.command, invocation.args, {
         ...options,
         detached: false,
@@ -681,6 +1073,7 @@ async function assertInstalledRuntimeBoundaryVersion(
     platform = process.platform,
     timeoutMs = 5000,
     signal,
+    beforeSpawn,
   } = {}
 ) {
   const definition = installedRuntimeDefinition(runtime?.id);
@@ -698,8 +1091,15 @@ async function assertInstalledRuntimeBoundaryVersion(
     platform,
     timeoutMs,
     signal,
+    beforeSpawn,
   });
   if (result?.error?.code === "RUNTIME_CANCELLED") throw result.error;
+  if (
+    result?.error?.code === "RUNTIME_EXECUTABLE_CHANGED" ||
+    result?.error?.code === "RUNTIME_EXECUTION_IDENTITY_REQUIRED"
+  ) {
+    throw result.error;
+  }
   if (
     result?.status !== 0 ||
     !versionAtLeast(
@@ -725,6 +1125,8 @@ export async function probeInstalledRuntime(
     timeoutMs = 5000,
     cwd = process.cwd(),
     probeAcpRuntimeImpl = probeAcpRuntime,
+    completionProbeImpl = probeInstalledRuntimeCompletion,
+    forceCompletionProbe = false,
     platform = process.platform,
   } = {}
 ) {
@@ -734,8 +1136,11 @@ export async function probeInstalledRuntime(
   const definition = installedRuntimeDefinition(runtime.id);
   if (!definition) return { status: "unsupported", ready: false, action: null };
   const childEnv = buildInstalledRuntimeChildEnv({ env });
+  let runtimeVersion = null;
+  let capabilityOverrides = {};
+  let capabilityReason = null;
 
-  if (definition.minimumCompletionVersion) {
+  if (definition.supported === true || definition.minimumBoundaryVersion) {
     const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
       env: childEnv,
       platform,
@@ -749,57 +1154,22 @@ export async function probeInstalledRuntime(
       timeoutMs,
     });
     if (
-      versionResult?.status !== 0 ||
-      !versionAtLeast(
-        `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
-        definition.minimumCompletionVersion
-      )
+      definition.minimumBoundaryVersion &&
+      (versionResult?.status !== 0 ||
+        !versionAtLeast(
+          `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
+          definition.minimumBoundaryVersion
+        ))
     ) {
-      return {
-        status: "unsupported_capability",
-        ready: false,
-        action: null,
-        capabilities: installedRuntimeCapabilities(definition.id, {
-          capabilityEvidence: capabilityEvidenceForProbe(definition, { completion: false }),
-        }).capabilities,
-        capabilityReason: `Update ${definition.name} to ${definition.minimumCompletionVersion} or newer for the complete CareerRat workflow.`,
+      capabilityOverrides = {
+        exactRead: false,
+        publicWeb: false,
       };
+      capabilityReason = `Update ${definition.name} to ${definition.minimumBoundaryVersion} or newer for secure CareerRat tool runs.`;
     }
-  }
-
-  if (definition.minimumBoundaryVersion) {
-    const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
-      env: childEnv,
-      platform,
-    });
-    const versionResult = await runInstalledRuntimeProbe(versionInvocation, {
-      spawnImpl,
-      spawnSyncImpl,
-      treeKillImpl,
-      env: childEnv,
-      platform,
-      timeoutMs,
-    });
-    if (
-      versionResult?.status !== 0 ||
-      !versionAtLeast(
-        `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
-        definition.minimumBoundaryVersion
-      )
-    ) {
-      return {
-        status: "unsupported_capability",
-        ready: false,
-        action: null,
-        capabilities: installedRuntimeCapabilities(definition.id, {
-          capabilityEvidence: capabilityEvidenceForProbe(definition, {
-            exactRead: false,
-            publicWeb: false,
-          }),
-        }).capabilities,
-        capabilityReason: `Update ${definition.name} to ${definition.minimumBoundaryVersion} or newer for secure CareerRat tool runs.`,
-      };
-    }
+    runtimeVersion = parseVersion(
+      `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`
+    )?.join(".");
   }
 
   if (definition.protocol === "acp") {
@@ -813,14 +1183,18 @@ export async function probeInstalledRuntime(
       });
       const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
         capabilityEvidence:
-          definition.supported === true ? capabilityEvidenceForProbe(definition) : {},
+          definition.supported === true
+            ? capabilityEvidenceForProbe(definition, capabilityOverrides)
+            : {},
       }).capabilities;
       return {
         status: "ready",
         ready: true,
         action: null,
+        version: runtimeVersion,
         capabilities: runtimeCapabilities,
-        capabilityReason: runtimeCapabilities.taskTools ? null : UNVERIFIED_COMPLETION_REASON,
+        capabilityReason:
+          capabilityReason || (runtimeCapabilities.taskTools ? null : UNVERIFIED_COMPLETION_REASON),
       };
     } catch (error) {
       if (error?.code === "RUNTIME_AUTH_REQUIRED") {
@@ -849,19 +1223,47 @@ export async function probeInstalledRuntime(
     return { status: "probe_failed", ready: false, action: "retry" };
   }
   if (result?.status === 0) {
+    if (definition.supported === true) {
+      const completionProbe = await completionProbeImpl({
+        runtime: { ...runtime, name: definition.name },
+        version: runtimeVersion,
+        cwd,
+        env: childEnv,
+        force: forceCompletionProbe,
+        timeoutMs: Math.min(COMPLETION_SMOKE_TIMEOUT_MS, Math.max(1, timeoutMs * 6)),
+      });
+      if (completionProbe?.ok !== true) {
+        const capabilityReason =
+          completionProbe?.probeMessage || completionSmokeMessage(runtime, false);
+        return {
+          status: "completion_probe_failed",
+          ready: false,
+          action: completionProbe?.action || "retry",
+          actionLabel: completionProbe?.actionLabel || "Try again",
+          probeMessage: capabilityReason,
+          capabilities: installedRuntimeCapabilities(definition.id, {
+            capabilityEvidence: capabilityEvidenceForProbe(definition, { completion: false }),
+          }).capabilities,
+          capabilityReason,
+        };
+      }
+    }
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
-      capabilityEvidence: capabilityEvidenceForProbe(definition),
+      capabilityEvidence: capabilityEvidenceForProbe(definition, capabilityOverrides),
     }).capabilities;
     return {
       status: definition.authProbe.launchOnly ? "ready_unverified" : "ready",
       ready: true,
       action: null,
+      version: runtimeVersion,
       capabilities: runtimeCapabilities,
-      capabilityReason: runtimeCapabilities.taskTools
-        ? null
-        : runtimeCapabilities.completion
-          ? "Ready for chat and drafting. Task tools and research are not verified for this CLI yet."
-          : UNVERIFIED_COMPLETION_REASON,
+      capabilityReason:
+        capabilityReason ||
+        (runtimeCapabilities.taskTools
+          ? null
+          : runtimeCapabilities.completion
+            ? "Ready for chat and drafting. Task tools and research are not verified for this CLI yet."
+            : UNVERIFIED_COMPLETION_REASON),
     };
   }
   return {
@@ -1131,6 +1533,7 @@ export function buildInstalledRuntimeInvocation({
   schema,
   schemaPath,
   model,
+  effort,
   tools = [],
   // Set by runInstalledRuntime only once it has actually materialized an
   // isolated cwd for this skill (see materializeIsolatedSkillCwd below) —
@@ -1186,6 +1589,7 @@ export function buildInstalledRuntimeInvocation({
       args.push("--allowedTools", boundary.allowedTools.join(","));
     }
     if (model) args.push("--model", model);
+    if (effort) args.push("--effort", effort);
     if (schema) args.push("--json-schema", JSON.stringify(sanitizeInstalledOutputSchema(schema)));
     return { ...common, args };
   }
@@ -1243,6 +1647,7 @@ export function buildInstalledRuntimeInvocation({
       "--skip-git-repo-check",
     ];
     if (model) args.push("--model", model);
+    if (effort) args.push("-c", `model_reasoning_effort=${JSON.stringify(effort)}`);
     if (schemaPath) args.push("--output-schema", schemaPath);
     args.push("-");
     return { ...common, args };
@@ -1485,7 +1890,7 @@ export async function startInstalledRuntimeGuidedSetup(
 ) {
   if (runtimeId !== "claude" || platform !== "darwin") {
     throw runtimeError(
-      "Guided setup is only available for Claude Code on macOS.",
+      "In-app installation isn't available for this AI tool or operating system. Use its setup guide instead.",
       "RUNTIME_GUIDED_SETUP_UNSUPPORTED"
     );
   }
@@ -1668,6 +2073,30 @@ function safeRuntimeDiagnostic(value) {
     .slice(0, 4000);
 }
 
+export function candidateSafeRuntimeUsageLimit(
+  value,
+  { providerName = "The selected AI provider" } = {}
+) {
+  const diagnostic = safeRuntimeDiagnostic(value);
+  if (
+    !/(?:\byou(?:'ve| have)\s+hit\b|\bhas\s+reached\b|\breached\b|\bexceeded\b)[^\n\r]{0,60}\b(?:weekly\s+|monthly\s+|usage\s+)?limit\b|\busage limit\b[^\n\r]{0,40}\b(?:reached|exceeded)\b/i.test(
+      diagnostic
+    )
+  ) {
+    return null;
+  }
+  const resetMatch = diagnostic.match(
+    /\bresets?(?:\s+at)?\s+((?:\d{1,2}(?::\d{2})?\s*(?:am|pm))(?:\s*\([A-Za-z][A-Za-z0-9_+/-]{0,63}\))?)/i
+  );
+  const resetAt = resetMatch?.[1]?.replace(/\s+/g, " ").trim() || null;
+  return {
+    message: resetAt
+      ? `${providerName} has reached its usage limit. It resets at ${resetAt}. Try again after the reset.`
+      : `${providerName} has reached its usage limit. Try again later.`,
+    resetAt,
+  };
+}
+
 function claudeFailureDiagnostic(value) {
   let envelope = value;
   if (typeof value === "string") {
@@ -1770,6 +2199,7 @@ export async function runInstalledRuntime({
   prompt,
   outputSchema,
   model,
+  effort,
   tools = [],
   cwd,
   env = process.env,
@@ -1779,6 +2209,7 @@ export async function runInstalledRuntime({
   spawnSyncImpl = spawnSync,
   treeKillImpl = spawnSync,
   runAcpRuntimeImpl = runAcpRuntime,
+  runtimeIdentityImpl = installedRuntimeExecutionIdentity,
   platform = process.platform,
   onEvent,
   // A named skill always runs in materializeIsolatedSkillCwd()'s single-skill
@@ -1791,6 +2222,12 @@ export async function runInstalledRuntime({
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No installed AI runtime is selected.", "RUNTIME_NOT_SELECTED");
   }
+  runtime = Object.freeze({
+    ...runtime,
+    ...(runtime.capabilities && typeof runtime.capabilities === "object"
+      ? { capabilities: Object.freeze({ ...runtime.capabilities }) }
+      : {}),
+  });
   if (signal?.aborted) {
     throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
   }
@@ -1801,6 +2238,12 @@ export async function runInstalledRuntime({
   const toolBearing = providerTools.length > 0;
   assertRuntimeCapabilities({ runtime, definition, skill, tools: providerTools, outputSchema });
   const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const assertExecutionIdentity = () =>
+    assertInstalledRuntimeExecutionIdentity(runtime, {
+      env: childEnv,
+      platform,
+      runtimeIdentityImpl,
+    });
   if (toolBearing) {
     await assertInstalledRuntimeBoundaryVersion(runtime, {
       spawnImpl,
@@ -1809,6 +2252,7 @@ export async function runInstalledRuntime({
       env: childEnv,
       platform,
       signal,
+      beforeSpawn: assertExecutionIdentity,
     });
     if (signal?.aborted) {
       throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
@@ -1878,6 +2322,7 @@ export async function runInstalledRuntime({
         mcpServers,
         spawnImpl,
         platform,
+        beforeSpawn: assertExecutionIdentity,
       });
     }
     const invocation = buildInstalledRuntimeInvocation({
@@ -1886,6 +2331,7 @@ export async function runInstalledRuntime({
       schema: outputSchema,
       schemaPath,
       model,
+      effort,
       tools: providerTools,
       // Only tell the arg-builder a skill is "ready" once isolation actually
       // succeeded — never claim --setting-sources project against a plain
@@ -1904,6 +2350,7 @@ export async function runInstalledRuntime({
       platform,
     });
     const result = await new Promise((resolve, reject) => {
+      assertExecutionIdentity();
       let child;
       try {
         child = spawnImpl(processInvocation.command, processInvocation.args, {
@@ -2007,6 +2454,19 @@ export async function runInstalledRuntime({
             const diagnostic =
               (definition?.protocol === "claude-json" ? claudeFailureDiagnostic(stdout) : "") ||
               safeRuntimeDiagnostic(stderr);
+            const usageLimit = candidateSafeRuntimeUsageLimit(diagnostic, {
+              providerName: definition?.name || "The selected AI provider",
+            });
+            if (usageLimit) {
+              reject(
+                runtimeError(usageLimit.message, "RUNTIME_USAGE_LIMIT", {
+                  exitStatus: status,
+                  signal: closeSignal || null,
+                  resetAt: usageLimit.resetAt,
+                })
+              );
+              return;
+            }
             reject(
               runtimeError(
                 `Installed AI CLI exited with status ${status}${diagnostic ? `: ${diagnostic}` : "."}`,
@@ -2131,7 +2591,9 @@ export const RUNTIME_STREAMING_UNSUPPORTED = "RUNTIME_STREAMING_UNSUPPORTED";
 export async function runInstalledRuntimeStream({
   runtime,
   prompt,
+  outputSchema,
   model,
+  effort,
   tools = [],
   cwd,
   env = process.env,
@@ -2141,6 +2603,7 @@ export async function runInstalledRuntimeStream({
   spawnSyncImpl = spawnSync,
   treeKillImpl = spawnSync,
   runAcpRuntimeImpl = runAcpRuntime,
+  runtimeIdentityImpl = installedRuntimeExecutionIdentity,
   platform = process.platform,
   // Skill this call is running — same isolated-cwd semantics as
   // runInstalledRuntime's own skill/repoRoot params (see
@@ -2156,6 +2619,12 @@ export async function runInstalledRuntimeStream({
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No installed AI runtime is selected.", "RUNTIME_NOT_SELECTED");
   }
+  runtime = Object.freeze({
+    ...runtime,
+    ...(runtime.capabilities && typeof runtime.capabilities === "object"
+      ? { capabilities: Object.freeze({ ...runtime.capabilities }) }
+      : {}),
+  });
   if (!supportsInstalledRuntimeStreaming(runtime.id)) {
     throw runtimeError(
       `${runtime.name || runtime.id} has no streaming output mode, so it cannot run a streaming ` +
@@ -2176,10 +2645,17 @@ export async function runInstalledRuntimeStream({
     definition,
     skill,
     tools: providerTools,
+    outputSchema,
     streaming: true,
   });
   const childEnv = buildInstalledRuntimeChildEnv({ env });
-  if (skill || tools.length > 0) {
+  const assertExecutionIdentity = () =>
+    assertInstalledRuntimeExecutionIdentity(runtime, {
+      env: childEnv,
+      platform,
+      runtimeIdentityImpl,
+    });
+  if (providerTools.length > 0) {
     await assertInstalledRuntimeBoundaryVersion(runtime, {
       spawnImpl,
       spawnSyncImpl,
@@ -2187,16 +2663,27 @@ export async function runInstalledRuntimeStream({
       env: childEnv,
       platform,
       signal,
+      beforeSpawn: assertExecutionIdentity,
     });
     if (signal?.aborted) {
       throw runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED");
     }
   }
 
+  let tempDir = null;
   let skillCwd = null;
   let taskCwd = null;
   let stagedReadPath = null;
   try {
+    let schemaPath = null;
+    if (definition?.protocol === "codex-jsonl" && outputSchema) {
+      tempDir = mkdtempSync(join(tmpdir(), "careerrat-runtime-schema-"));
+      chmodSync(tempDir, 0o700);
+      schemaPath = join(tempDir, "output-schema.json");
+      writeFileSync(schemaPath, `${JSON.stringify(sanitizeCodexOutputSchema(outputSchema))}\n`, {
+        mode: 0o600,
+      });
+    }
     let installedPrompt = String(prompt || "");
     if (skill) {
       skillCwd = materializeIsolatedSkillCwd({ repoRoot, skill });
@@ -2229,6 +2716,9 @@ export async function runInstalledRuntimeStream({
       chmodSync(taskCwd, 0o700);
     }
     if (definition?.protocol === "acp") {
+      installedPrompt = promptWithStructuredContract({ prompt: installedPrompt, outputSchema });
+    }
+    if (definition?.protocol === "acp") {
       const mcpServers = acpScopedToolsServers({
         allowPublicWeb: providerTools.includes("WebSearch") || providerTools.includes("WebFetch"),
         stagedReadPath,
@@ -2245,12 +2735,16 @@ export async function runInstalledRuntimeStream({
         onMessage,
         spawnImpl,
         platform,
+        beforeSpawn: assertExecutionIdentity,
       });
     }
     const invocation = buildInstalledRuntimeInvocation({
       runtimeId: runtime.id,
       executablePath: runtime.path,
+      schema: outputSchema,
+      schemaPath,
       model,
+      effort,
       tools,
       skill: skillCwd ? skill : undefined,
       repoRoot,
@@ -2266,6 +2760,7 @@ export async function runInstalledRuntimeStream({
       platform,
     });
     const result = await new Promise((resolve, reject) => {
+      assertExecutionIdentity();
       let child;
       try {
         child = spawnImpl(processInvocation.command, processInvocation.args, {
@@ -2440,6 +2935,19 @@ export async function runInstalledRuntimeStream({
               (definition?.protocol === "claude-json"
                 ? claudeFailureDiagnostic(finalResult)
                 : "") || safeRuntimeDiagnostic(stderr);
+            const usageLimit = candidateSafeRuntimeUsageLimit(diagnostic, {
+              providerName: definition?.name || "The selected AI provider",
+            });
+            if (usageLimit) {
+              reject(
+                runtimeError(usageLimit.message, "RUNTIME_USAGE_LIMIT", {
+                  exitStatus: status,
+                  signal: closeSignal || null,
+                  resetAt: usageLimit.resetAt,
+                })
+              );
+              return;
+            }
             reject(
               runtimeError(
                 `Installed AI CLI exited with status ${status}${diagnostic ? `: ${diagnostic}` : "."}`,
@@ -2490,6 +2998,7 @@ export async function runInstalledRuntimeStream({
 
     return { ...result, runtimeId: runtime.id };
   } finally {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
     if (skillCwd) rmSync(skillCwd, { recursive: true, force: true });
     if (taskCwd) rmSync(taskCwd, { recursive: true, force: true });
   }

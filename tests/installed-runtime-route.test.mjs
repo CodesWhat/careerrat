@@ -31,6 +31,7 @@ function readyProbe() {
     status: "ready",
     ready: true,
     action: null,
+    version: "0.149.1",
     capabilities: VERIFIED_CAPABILITIES,
   };
 }
@@ -71,8 +72,8 @@ function boot({
     repoRoot,
     env,
     detectImpl: () => inventory,
-    probeImpl: (runtime) => {
-      onProbe?.(runtime.id);
+    probeImpl: (runtime, options) => {
+      onProbe?.(runtime.id, options);
       return probes[runtime.id];
     },
     startSignInImpl,
@@ -142,6 +143,8 @@ const INVENTORY = [
     name: "Claude Code",
     commandShape: "claude -p --output-format json",
     path: "/Users/morgan/.local/bin/claude",
+    realPath: "/Users/morgan/.local/bin/claude",
+    binaryFingerprint: "a".repeat(64),
     available: true,
     warning: null,
   },
@@ -150,6 +153,8 @@ const INVENTORY = [
     name: "Codex",
     commandShape: "codex exec --json -",
     path: "/opt/homebrew/bin/codex",
+    realPath: "/opt/homebrew/bin/codex",
+    binaryFingerprint: "b".repeat(64),
     available: true,
     warning: null,
   },
@@ -195,6 +200,9 @@ test("inventory auto-selects the sole verified full-workflow CLI", async () => {
   assert.equal(selected.providerFallback, false);
   assert.deepEqual(selected.verification?.capabilities, VERIFIED_CAPABILITIES);
   assert.equal(selected.verification?.path, "/opt/homebrew/bin/codex");
+  assert.equal(selected.verification?.realPath, "/opt/homebrew/bin/codex");
+  assert.equal(selected.verification?.version, "0.149.1");
+  assert.equal(selected.verification?.binaryFingerprint, "b".repeat(64));
   assert.equal(JSON.stringify(response.body).includes("morgan@example.com"), false);
   // The registry's installUrl passes through the route untouched — the
   // onboarding not-found row's "INSTALL GUIDE" link depends on this.
@@ -202,6 +210,145 @@ test("inventory auto-selects the sole verified full-workflow CLI", async () => {
     response.body.runtimes.find(({ id }) => id === "gemini").installUrl,
     "https://github.com/google-gemini/gemini-cli"
   );
+});
+
+test("a signed-in CLI without a usable completion stays unselected with a plain retry action", async () => {
+  const probeCalls = [];
+  const failedProbe = {
+    status: "completion_probe_failed",
+    ready: false,
+    action: "retry",
+    actionLabel: "Try again",
+    probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+    capabilityReason: "Codex is signed in, but it didn't return a usable test reply.",
+    capabilities: {
+      completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
+    },
+  };
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      codex: failedProbe,
+    },
+    onProbe(runtimeId, options) {
+      probeCalls.push({ runtimeId, options });
+    },
+  });
+
+  const inventory = await request(server, "GET", "/api/settings/ai-runtimes");
+  const codex = inventory.body.runtimes.find(({ id }) => id === "codex");
+  assert.equal(inventory.body.selectedId, null);
+  assert.equal(codex.selectable, false);
+  assert.equal(codex.probeMessage, "Codex is signed in, but it didn't return a usable test reply.");
+  assert.equal(codex.action, "retry");
+  assert.equal(codex.actionLabel, "Try again");
+  assert.equal(
+    probeCalls.find(({ runtimeId }) => runtimeId === "codex").options.forceCompletionProbe,
+    false
+  );
+
+  const retried = await request(server, "POST", "/api/settings/ai-runtime/probe", {
+    runtimeId: "codex",
+  });
+  assert.equal(retried.status, 200);
+  assert.deepEqual(
+    probeCalls.slice(-2).map(({ runtimeId, options }) => ({
+      runtimeId,
+      forceCompletionProbe: options.forceCompletionProbe,
+    })),
+    [
+      { runtimeId: "claude", forceCompletionProbe: false },
+      { runtimeId: "codex", forceCompletionProbe: true },
+    ]
+  );
+
+  const selected = await request(server, "POST", "/api/settings/ai-runtime/select", {
+    runtimeId: "codex",
+  });
+  assert.equal(selected.status, 409);
+  assert.deepEqual(selected.body, {
+    ok: false,
+    code: "RUNTIME_PROBE_FAILED",
+    error: "Codex is signed in, but it didn't return a usable test reply.",
+    action: "retry",
+    actionLabel: "Try again",
+  });
+});
+
+test("AI preference routes load defaults and persist provider-neutral choices", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      codex: readyProbe(),
+    },
+  });
+
+  const initial = await request(server, "GET", "/api/settings/ai-preferences");
+  assert.equal(initial.status, 200);
+  assert.deepEqual(initial.body, {
+    quality: "automatic",
+    reasoning: "automatic",
+    source: "default",
+    updatedAt: null,
+  });
+
+  const saved = await request(server, "POST", "/api/settings/ai-preferences", {
+    quality: "balanced",
+    reasoning: "high",
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body, {
+    quality: "balanced",
+    reasoning: "high",
+    source: "saved",
+    updatedAt: saved.body.updatedAt,
+  });
+  assert.equal(Number.isNaN(Date.parse(saved.body.updatedAt)), false);
+
+  const reloaded = await request(server, "GET", "/api/settings/ai-preferences");
+  assert.deepEqual(reloaded.body, saved.body);
+});
+
+test("AI preference routes reject unknown fields and invalid choices cleanly", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: { claude: readyProbe(), codex: readyProbe() },
+  });
+
+  const unknown = await request(server, "POST", "/api/settings/ai-preferences", {
+    quality: "best",
+    reasoning: "high",
+    model: "provider-specific-model",
+  });
+  assert.deepEqual(unknown, {
+    status: 400,
+    body: {
+      ok: false,
+      code: "AI_PREFERENCES_INVALID",
+      error: "Only Paul quality and thinking depth can be changed here.",
+    },
+  });
+
+  const invalid = await request(server, "POST", "/api/settings/ai-preferences", {
+    quality: "provider-specific-model",
+    reasoning: "high",
+  });
+  assert.deepEqual(invalid, {
+    status: 400,
+    body: {
+      ok: false,
+      code: "AI_PREFERENCES_INVALID",
+      error: "Paul quality must be Automatic, Faster, Balanced, or Best.",
+    },
+  });
 });
 
 test("inventory leaves selection open when both a full runtime and completion runtime are ready", async () => {
@@ -330,7 +477,7 @@ test("backend support and workflow capability rules follow the installed definit
     });
     const incompleteInventory = await request(incompleteServer, "GET", "/api/settings/ai-runtimes");
     const incompleteCodex = incompleteInventory.body.runtimes.find(({ id }) => id === "codex");
-    assert.equal(incompleteCodex.selectable, false);
+    assert.equal(incompleteCodex.selectable, true);
   } finally {
     if (previousSupported === undefined) delete supportDefinition.supported;
     else supportDefinition.supported = previousSupported;
@@ -340,8 +487,10 @@ test("backend support and workflow capability rules follow the installed definit
   }
 });
 
-test("selection rejects a ready supported runtime missing any full-workflow capability", async () => {
-  for (const missingCapability of Object.keys(VERIFIED_CAPABILITIES)) {
+test("selection accepts a completion-ready runtime with unrelated capabilities unverified", async () => {
+  for (const missingCapability of Object.keys(VERIFIED_CAPABILITIES).filter(
+    (capability) => capability !== "completion"
+  )) {
     const server = boot({
       inventory: INVENTORY,
       probes: {
@@ -360,13 +509,37 @@ test("selection rejects a ready supported runtime missing any full-workflow capa
       runtimeId: "codex",
     });
 
-    assert.equal(response.status, 409, `${missingCapability} must be required for selection`);
-    assert.equal(response.body.code, "RUNTIME_CAPABILITY_UNSUPPORTED");
+    assert.equal(response.status, 200, `${missingCapability} must not block selection`);
+    assert.equal(response.body.selectedId, "codex");
     assert.equal(
       loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }).runtimeId,
-      null
+      "codex"
     );
   }
+});
+
+test("selection still rejects a runtime without verified completion", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "start_sign_in" },
+      codex: {
+        ...readyProbe(),
+        capabilities: { ...VERIFIED_CAPABILITIES, completion: false },
+      },
+    },
+  });
+
+  const response = await request(server, "POST", "/api/settings/ai-runtime/select", {
+    runtimeId: "codex",
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "RUNTIME_CAPABILITY_UNSUPPORTED");
+  assert.equal(
+    loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }).runtimeId,
+    null
+  );
 });
 
 test("an unaccepted adapter remains diagnostic-only even after a successful full-capability probe", async () => {
@@ -542,7 +715,7 @@ test("ready Codex is selectable for the full CareerRat workflow", async () => {
   assert.equal(selected.body.selectedId, "codex");
 });
 
-test("a Codex probe below the completion boundary stays visible but unselectable", async () => {
+test("a Codex probe without completion evidence stays visible but unselectable", async () => {
   const server = boot({
     inventory: INVENTORY,
     probes: {

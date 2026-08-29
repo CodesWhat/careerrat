@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { companyProposalBatchPut } from "../db/verbs/company-discovery.mjs";
+import {
+  companyBoardResolutionUpsert,
+  companyProposalBatchPut,
+} from "../db/verbs/company-discovery.mjs";
+import { companyAtsUpsert as defaultCompanyAtsUpsert } from "../db/verbs/source-config.mjs";
 import { offersWithCapturedJobs as defaultOffersWithCapturedJobs } from "../scoring/sourced-persistence.mjs";
 import {
   buildLocationFilter,
@@ -62,6 +66,35 @@ function discoveryTriggerFromBody(body = {}) {
   return kind === "search-run" && id ? { kind, id: id.slice(0, 160) } : null;
 }
 
+function isExplicitDiscoveryRequest(body = {}) {
+  return body.requestedByUser === true || body.requested_by_user === true;
+}
+
+function canAutoAddProposal(proposal) {
+  return (
+    proposal?.classification === "supported_ats" &&
+    proposal?.confidenceTier === "high-confidence" &&
+    proposal?.proposedAction === "approve-supported-ats" &&
+    Boolean(String(proposal?.company?.name || "").trim()) &&
+    Boolean(String(proposal?.jobBoardUrl || "").trim())
+  );
+}
+
+function autoAddDecision({ sourceConfig, decidedAt }) {
+  return {
+    action: "approve-supported-ats",
+    status: "approved",
+    decidedAt,
+    decidedBy: "explicit-discovery",
+    sourceConfig: {
+      status: sourceConfig.status,
+      entry: sourceConfig.entry,
+      total: sourceConfig.total,
+    },
+    sourced: { created: 0, updated: 0, rows: 0 },
+  };
+}
+
 function scoringConfigFromContext(context = {}) {
   return {
     targeting: {
@@ -79,6 +112,7 @@ function scoringConfigFromContext(context = {}) {
     profile: {
       compensation: {
         minimum_base: context.compensationFloors?.minimum_base,
+        minimum_annual_earnings: context.compensationFloors?.minimum_annual_earnings,
       },
       location: {
         home: context.locationPosture?.home,
@@ -110,7 +144,9 @@ function prepareScanResult(scanResult = {}, context = {}) {
     locationFilter: buildLocationFilter(),
     config: scoringConfigFromContext(context),
   });
-  const scoredByUrl = new Map(scored.kept.map((offer) => [offer.url, offer]));
+  const scoredByUrl = new Map(
+    [...scored.kept, ...scored.filteredSalary].map((offer) => [offer.url, offer])
+  );
   const preparedOffers = offers
     .map((offer) => (offerHasScannerGate(offer) ? offer : scoredByUrl.get(offer.url)))
     .filter(Boolean);
@@ -120,6 +156,7 @@ function prepareScanResult(scanResult = {}, context = {}) {
     offers: preparedOffers,
     filteredTitle: scored.filteredTitle,
     filteredLocation: scored.filteredLocation,
+    filteredSalary: scored.filteredSalary,
     duplicates: scored.duplicates,
     possibleDuplicates: scored.possibleDuplicates,
     invalid: scored.invalid,
@@ -135,10 +172,12 @@ async function proposalForSeed({
   fetchImpl,
   resolveCompanyBoard,
   scanCompaniesImpl,
-  offersWithCapturedJobs,
   createdAt,
   context,
+  signal,
+  stageResolution,
 }) {
+  signal?.throwIfAborted?.();
   const proposalId = stableId("cpp", [batchId, seed.name, String(index), createdAt]);
   try {
     const resolution = await resolveCompanyBoard({
@@ -146,7 +185,10 @@ async function proposalForSeed({
       env,
       seed,
       fetchImpl,
+      signal,
+      stageResolution,
     });
+    signal?.throwIfAborted?.();
     const scanConfig = {
       tracked_companies: [
         {
@@ -157,24 +199,15 @@ async function proposalForSeed({
         },
       ],
     };
-    const rawScanResult = await scanCompaniesImpl(scanConfig, { fetchImpl });
+    const canScanDeterministically = Boolean(resolution.atsProvider && resolution.jobBoardUrl);
+    const rawScanResult = canScanDeterministically
+      ? await scanCompaniesImpl(scanConfig, { fetchImpl, signal })
+      : { offers: [], errors: [] };
+    signal?.throwIfAborted?.();
     const scanResult = prepareScanResult(rawScanResult, context);
-    const capturedOffers = offersWithCapturedJobs({
-      repoRoot,
-      env,
-      offers: Array.isArray(scanResult?.offers) ? scanResult.offers : [],
-      savedAt: new Date(createdAt),
-    });
-    return buildCompanyProposal({
-      seed,
-      resolution,
-      scanResult: { ...scanResult, offers: capturedOffers },
-      context,
-      capturedOffers,
-      proposalId,
-      version: 1,
-    });
+    return { candidate: { seed, resolution, scanResult, proposalId } };
   } catch (err) {
+    if (signal?.aborted || err === signal?.reason) throw signal.reason || err;
     return {
       rejected: {
         proposalId,
@@ -192,17 +225,25 @@ export async function createCompanyProposalBatch({
   repoRoot,
   env = process.env,
   body = {},
+  batchId: requestedBatchId,
   fetchImpl = fetch,
   resolveCompanyBoard = defaultResolveCompanyBoard,
   scanCompaniesImpl = scanCompanies,
   offersWithCapturedJobs = defaultOffersWithCapturedJobs,
+  persistResolution = companyBoardResolutionUpsert,
+  companyAtsUpsertImpl = defaultCompanyAtsUpsert,
   buildSeedContext = buildCompanySeedContext,
+  seedContext,
   generateSeeds = generateCompanySeeds,
   seedCall,
+  executionPlan,
+  signal,
+  reportProgress = async () => {},
   now = new Date(),
 } = {}) {
+  signal?.throwIfAborted?.();
   const manualSeeds = manualSeedsFromBody(body);
-  const baseContext = buildSeedContext({ repoRoot, env });
+  const baseContext = seedContext || buildSeedContext({ repoRoot, env });
   const discoveryRequest = discoveryRequestFromBody(body);
   const context = discoveryRequest ? { ...baseContext, discoveryRequest } : baseContext;
   const seedResult = await generateSeeds({
@@ -212,20 +253,34 @@ export async function createCompanyProposalBatch({
     manualSeeds,
     requestedCount: requestedCountFromBody(body),
     call: seedCall,
+    executionPlan,
+    signal,
     now,
   });
   if (!seedResult.body?.ok) return { status: seedResult.status, body: seedResult.body };
 
   const seeds = seedResult.body.data.companies;
 
+  await reportProgress({
+    phase: "seeds-ready",
+    completed: 0,
+    total: seeds.length,
+    message: `CareerRat found ${seeds.length} ${seeds.length === 1 ? "company" : "companies"} to check.`,
+  });
+
   const createdDate = nowDate(now);
   const createdAt = createdDate.toISOString();
-  const batchId = stableId("cpb", [createdAt, seeds.map((seed) => seed.name).join(",")]);
+  const batchId =
+    String(requestedBatchId || "").trim() ||
+    stableId("cpb", [createdAt, seeds.map((seed) => seed.name).join(",")]);
   const trigger = discoveryTriggerFromBody(body);
   const proposals = [];
   const rejected = [];
+  const candidates = [];
+  const stagedResolutions = [];
 
   for (const [index, seed] of seeds.entries()) {
+    signal?.throwIfAborted?.();
     const result = await proposalForSeed({
       repoRoot,
       env,
@@ -235,27 +290,87 @@ export async function createCompanyProposalBatch({
       fetchImpl,
       resolveCompanyBoard,
       scanCompaniesImpl,
-      offersWithCapturedJobs,
       createdAt,
       context,
+      signal,
+      stageResolution: (resolution) => stagedResolutions.push(resolution),
+    });
+    if (result.candidate) candidates.push(result.candidate);
+    if (result.rejected) rejected.push(result.rejected);
+    await reportProgress({
+      phase: "resolving",
+      completed: index + 1,
+      total: seeds.length,
+      message: `Checked ${index + 1} of ${seeds.length} company boards.`,
+    });
+  }
+
+  signal?.throwIfAborted?.();
+
+  for (const candidate of candidates) {
+    const capturedOffers = offersWithCapturedJobs({
+      repoRoot,
+      env,
+      offers: Array.isArray(candidate.scanResult?.offers) ? candidate.scanResult.offers : [],
+      savedAt: new Date(createdAt),
+    });
+    const result = buildCompanyProposal({
+      ...candidate,
+      scanResult: { ...candidate.scanResult, offers: capturedOffers },
+      context,
+      capturedOffers,
+      version: 1,
     });
     if (result.proposal) proposals.push(result.proposal);
     if (result.rejected) rejected.push(result.rejected);
   }
 
+  for (const resolution of stagedResolutions) {
+    persistResolution({ repoRoot, env, resolution });
+  }
+
+  const autoAdded = [];
+  let reviewProposals = proposals;
+  if (isExplicitDiscoveryRequest(body)) {
+    reviewProposals = [];
+    for (const proposal of proposals) {
+      if (!canAutoAddProposal(proposal)) {
+        reviewProposals.push(proposal);
+        continue;
+      }
+      const sourceConfig = companyAtsUpsertImpl({
+        repoRoot,
+        env,
+        entry: {
+          name: proposal.company.name,
+          careers_url: proposal.jobBoardUrl,
+          provider: proposal.atsProvider,
+        },
+      });
+      const decision = autoAddDecision({ sourceConfig, decidedAt: createdAt });
+      autoAdded.push({
+        ...proposal,
+        version: Number(proposal.version || 0) + 1,
+        decision,
+      });
+    }
+  }
+
   const batch = {
     batchId,
-    status: "pending",
+    status: reviewProposals.length ? "pending" : autoAdded.length ? "approved" : "complete",
     createdAt,
     version: 1,
     contextFingerprint: companyDiscoveryFingerprint(context),
     ...(trigger ? { trigger } : {}),
-    proposals,
+    proposals: reviewProposals,
+    ...(isExplicitDiscoveryRequest(body) ? { autoAdded } : {}),
     rejected,
     counts: {
       seeds: seeds.length,
-      proposals: proposals.length,
+      proposals: reviewProposals.length,
       rejected: rejected.length,
+      ...(isExplicitDiscoveryRequest(body) ? { autoAdded: autoAdded.length } : {}),
     },
   };
   companyProposalBatchPut({ repoRoot, env, batch });
@@ -263,7 +378,8 @@ export async function createCompanyProposalBatch({
   return {
     data: {
       batchId,
-      proposals,
+      proposals: reviewProposals,
+      ...(isExplicitDiscoveryRequest(body) ? { autoAdded } : {}),
       rejected,
       counts: batch.counts,
     },

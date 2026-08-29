@@ -46,6 +46,12 @@ function canonicalSkillNames() {
     .sort();
 }
 
+const BACKEND_ONLY_SKILLS = new Set(["intake-extract", "resume-extract"]);
+
+function userRoutableSkillNames() {
+  return canonicalSkillNames().filter((name) => !BACKEND_ONLY_SKILLS.has(name));
+}
+
 function readSkill(name) {
   const text = readFileSync(join(skillsRoot, name, "SKILL.md"), "utf8");
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -145,15 +151,129 @@ test("the published skills catalog lists every shipped skill exactly once", () =
   assert.deepEqual(listed, expected);
 });
 
-test("architecture docs do not advertise a stale shipped skill count", () => {
-  const expected = canonicalSkillNames().length;
+test("architecture docs distinguish user-routable skills from backend-only helpers", () => {
+  const expected = userRoutableSkillNames().length;
   for (const path of [
     join(root, "docs", "ARCHITECTURE.md"),
     join(root, "apps", "docs", "content", "docs", "advanced", "architecture.mdx"),
   ]) {
     const source = readFileSync(path, "utf8");
-    assert.match(source, new RegExp(`maps user intent to (?:all )?${expected} skills`, "i"));
+    assert.match(
+      source,
+      new RegExp(`maps user intent\\s+to (?:all )?${expected} user-facing skills`, "i")
+    );
+    for (const name of BACKEND_ONLY_SKILLS) {
+      assert.match(source, new RegExp(`\\b${name}\\b[\\s\\S]{0,180}backend-only`, "i"));
+    }
     assert.doesNotMatch(source, /\b(?:16|21) skills\b/i);
+  }
+});
+
+test("the canonical agent router maps every user-facing skill and classifies backend helpers", () => {
+  const router = readFileSync(join(root, "AGENTS.md"), "utf8");
+
+  for (const name of userRoutableSkillNames()) {
+    assert.ok(router.includes(`\`${name}\``), `${name} is not mapped in AGENTS.md`);
+  }
+  for (const name of BACKEND_ONLY_SKILLS) {
+    assert.match(
+      router,
+      new RegExp(`\`${name}\`[\\s\\S]{0,180}backend-only`, "i"),
+      `${name} is not classified as a backend-only helper in AGENTS.md`
+    );
+  }
+});
+
+test("native browser workflow skills describe their CareerRat-owned in-app boundary", async (t) => {
+  const contracts = new Map([
+    [
+      "ingest-mail",
+      [
+        /\bin-app\b/i,
+        /reads Apple Mail[\s\S]*Gmail[\s\S]*Outlook/i,
+        /communications[\s\S]*watermark/i,
+      ],
+    ],
+    [
+      "ingest-messages",
+      [/\bin-app\b/i, /reads LinkedIn[\s\S]*Wellfound/i, /communications[\s\S]*watermark/i],
+    ],
+    [
+      "relationship-sourcing",
+      [/\bin-app\b/i, /searches LinkedIn[\s\S]*Wellfound/i, /review-only/i],
+    ],
+    [
+      "optimize-linkedin",
+      [
+        /\bin-app\b/i,
+        /reads (?:the candidate's )?LinkedIn profile/i,
+        /approved[\s\S]*live[\s\S]*confirm/i,
+      ],
+    ],
+    [
+      "sync-status",
+      [
+        /\bin-app\b/i,
+        /reads Greenhouse[\s\S]*Workday[\s\S]*Ashby[\s\S]*Lever/i,
+        /autoApplicable[\s\S]*atomic/i,
+        /track-outcomes[\s\S]*(?:candidate-reported|coaching|learning)/i,
+      ],
+    ],
+  ]);
+
+  for (const [name, required] of contracts) {
+    await t.test(name, () => {
+      const { body } = readSkill(name);
+      assert.doesNotMatch(
+        body,
+        /app never opens|returns a handoff card|intent reads no (?:mail|messages)|handler never refuses/i
+      );
+      for (const pattern of required) assert.match(body, pattern);
+    });
+  }
+});
+
+test("public docs scope CareerRat-owned browser workflows to private accounts", () => {
+  const catalog = readFileSync(
+    join(root, "apps", "docs", "content", "docs", "reference", "skills.mdx"),
+    "utf8"
+  );
+  for (const name of [
+    "ingest-mail",
+    "ingest-messages",
+    "relationship-sourcing",
+    "optimize-linkedin",
+    "sync-status",
+  ]) {
+    const description = catalog.match(new RegExp(`^\\| \`${name}\` \\| ([^\\n]+)`, "m"))?.[1] || "";
+    assert.match(description, /\bin-app\b/i, `${name} catalog copy must describe its in-app path`);
+  }
+  assert.doesNotMatch(catalog, /track-outcomes[^\n]*only writer/i);
+  assert.match(catalog, /sync-status[^\n]*atomic/i);
+
+  for (const path of [
+    join(root, "docs", "ARCHITECTURE.md"),
+    join(root, "apps", "docs", "content", "docs", "advanced", "architecture.mdx"),
+  ]) {
+    const source = readFileSync(path, "utf8");
+    assert.match(source, /CareerRat-owned private-account browser workflows/i);
+    assert.doesNotMatch(source, /robots-disallowed/i);
+    assert.match(source, /autoApplicable[\s\S]{0,300}atomic/i);
+    assert.match(source, /track-outcomes[\s\S]{0,300}candidate-reported/i);
+  }
+
+  assert.doesNotMatch(readFileSync(join(root, "docs", "SOURCES.md"), "utf8"), /robots-disallowed/i);
+});
+
+test("public setup docs derive their shipped skill count from the canonical catalog", () => {
+  const expected = canonicalSkillNames().length;
+  for (const path of [
+    join(root, "apps", "docs", "content", "docs", "getting-started", "keeping-current.mdx"),
+    join(root, "apps", "docs", "content", "docs", "advanced", "data-model.mdx"),
+  ]) {
+    const source = readFileSync(path, "utf8");
+    assert.match(source, new RegExp(`\\b${expected} skill definitions\\b`, "i"));
+    assert.doesNotMatch(source, /\\b(?:16|21) skill definitions\\b/i);
   }
 });
 

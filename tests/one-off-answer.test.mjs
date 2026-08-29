@@ -155,6 +155,58 @@ test("drafts one-off questions without overwriting a tracked packet capture and 
   assert.equal(calls.activity[0].event.title, "Answered a screening question");
 });
 
+test("one-off screening drafts preserve the operation's frozen plan and abort signal", async () => {
+  const { draftOneOffScreeningAnswers } = await import("../src/core/packet/one-off-answer.mjs");
+  const repoRoot = tempRepo();
+  const controller = new AbortController();
+  const executionPlan = Object.freeze({
+    version: 1,
+    runtimeId: "codex",
+    operation: "application.drafting",
+    resolved: Object.freeze({ model: "gpt-5.4", effort: "high" }),
+  });
+  let draftInput;
+
+  await draftOneOffScreeningAnswers({
+    repoRoot,
+    env: {},
+    questionText: "Why are you interested in this role?",
+    executionPlan,
+    signal: controller.signal,
+    captureQuestionsImpl: async () => ({
+      questions: [
+        {
+          id: "q-interest",
+          label: "Why are you interested in this role?",
+          type: "text",
+          required: true,
+        },
+      ],
+      excluded: [],
+    }),
+    draftAnswersImpl: async (input) => {
+      draftInput = input;
+      return {
+        answers: [
+          {
+            questionId: "q-interest",
+            question: "Why are you interested in this role?",
+            answer: "NEEDS YOU: confirm why this role is a priority",
+            evidenceIds: [],
+            uploadReady: false,
+            gap: "confirm why this role is a priority",
+          },
+        ],
+        ai: { used: true },
+      };
+    },
+    activityAppendImpl: () => {},
+  });
+
+  assert.equal(draftInput.executionPlan, executionPlan);
+  assert.equal(draftInput.signal, controller.signal);
+});
+
 test("saving a reviewed durable answer writes candidate screening defaults and rejects job-specific prose", async () => {
   const { saveOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
   const repoRoot = tempRepo();

@@ -23,6 +23,7 @@ import {
 } from "../src/core/db/verbs.mjs";
 import {
   buildSearchPromptContext,
+  generateSearchPrompts,
   getSearchPrompts,
   saveSearchPrompts,
 } from "../src/core/search/search-prompts.mjs";
@@ -76,6 +77,130 @@ test("saved search prompts carry the candidate-input fingerprint they were gener
   const stale = getSearchPrompts({ repoRoot });
   assert.notEqual(stale.inputFingerprint, fresh.inputFingerprint);
   assert.equal(stale.savedInputFingerprint, fresh.savedInputFingerprint);
+});
+
+test("generateSearchPrompts uses the exact frozen research.web execution plan", async () => {
+  const repoRoot = repo();
+  const executionPlan = {
+    policyVersion: 1,
+    operation: "research.web",
+    runtimeId: "codex",
+    adapterVersion: 1,
+    requested: { quality: "balanced", reasoning: "medium" },
+    resolved: {
+      quality: "balanced",
+      reasoning: "medium",
+      model: "gpt-5.6-terra",
+      modelSource: "alias",
+      effort: "medium",
+      speedTier: null,
+    },
+    fallback: null,
+  };
+  const signal = new AbortController().signal;
+  let received;
+
+  const outcome = await generateSearchPrompts({
+    repoRoot,
+    config: {
+      targeting: {
+        role_buckets: [{ name: "Engineering", titles: ["Staff Software Engineer"] }],
+      },
+      profile: {},
+    },
+    executionPlan,
+    signal,
+    call: async (options) => {
+      received = options;
+      return {
+        text: JSON.stringify({
+          prompts: [
+            { text: "Find Staff Software Engineer roles." },
+            { text: "Find senior software engineering openings." },
+          ],
+        }),
+        executionPlan: options.executionPlan,
+      };
+    },
+  });
+
+  assert.equal(outcome.body.ok, true);
+  assert.deepEqual(received.executionPlan, executionPlan);
+  assert.equal(received.useExecutionPlanRoute, true);
+  assert.equal(received.signal, signal);
+  assert.deepEqual(outcome.body.ai.executionPlan, executionPlan);
+});
+
+test("generateSearchPrompts keeps overlapping base bands for review", async () => {
+  const repoRoot = repo();
+  let received;
+
+  const outcome = await generateSearchPrompts({
+    repoRoot,
+    config: {
+      targeting: {
+        role_buckets: [{ name: "Operations", titles: ["Operations Manager"] }],
+      },
+      profile: {
+        compensation: { currency: "USD", minimum_base: 85_000 },
+      },
+    },
+    call: async (options) => {
+      received = options;
+      return {
+        text: JSON.stringify({
+          prompts: [
+            { text: "Find Operations Manager roles with an $85,000 annual base salary." },
+            { text: "Find operations leadership openings with an $85,000 base salary." },
+          ],
+        }),
+      };
+    },
+  });
+
+  assert.equal(outcome.body.ok, true);
+  const instructions = received.messages[0].content;
+  assert.match(instructions, /minimum_base is a hard annual base-salary floor/i);
+  assert.match(instructions, /maximum is below minimum_base/i);
+  assert.match(instructions, /overlaps minimum_base, keep it for review/i);
+  assert.match(instructions, /tips, commissions, bonuses, equity, OTE, or total compensation/i);
+  assert.match(instructions, /compensation is not posted, keep it unverified/i);
+});
+
+test("generateSearchPrompts keeps annual earnings distinct from base salary", async () => {
+  const repoRoot = repo();
+  let received;
+
+  const outcome = await generateSearchPrompts({
+    repoRoot,
+    config: {
+      targeting: {
+        role_buckets: [{ name: "Bar leadership", titles: ["Lead Bartender"] }],
+      },
+      profile: {
+        compensation: { currency: "USD", minimum_annual_earnings: 85_000 },
+      },
+    },
+    call: async (options) => {
+      received = options;
+      return {
+        text: JSON.stringify({
+          prompts: [
+            { text: "Find Lead Bartender roles expected to earn at least $85,000 annually." },
+            { text: "Find bar leadership jobs with at least $85,000 in annual cash earnings." },
+          ],
+        }),
+      };
+    },
+  });
+
+  assert.equal(outcome.body.ok, true);
+  const instructions = received.messages[0].content;
+  assert.match(instructions, /"minimum_annual_earnings": 85000/);
+  assert.match(instructions, /includes wages, tips, commissions, and recurring cash bonuses/i);
+  assert.match(instructions, /does not include equity or benefits/i);
+  assert.match(instructions, /unknown or unposted earnings stay unverified/i);
+  assert.doesNotMatch(instructions, /minimum_annual_earnings[^\n]*base-salary floor/i);
 });
 
 test("buildSearchPromptContext: omits application_limits/company_history by default", () => {

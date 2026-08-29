@@ -2,8 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyOnSite,
   completeDiscovery,
+  exportPacketDocuments,
+  extractResumeAi,
   finishOnboarding,
+  getResumeExtraction,
   getRuntimeConfig,
+  getSearchExecution,
   getSourcingRun,
   markCommSent,
   openDeepIngestThread,
@@ -14,8 +18,9 @@ import {
   replaceEvidenceClaims,
   requestHostedInterest,
   retryDeepIngestSource,
-  runAiWebSearchStream,
+  runWorkspaceIntent,
   scheduleInterview,
+  sendChatMessage,
   sendWorkspaceMessage,
   setAppStatus,
   setAutomationSessionProvider,
@@ -27,6 +32,134 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("durable resume extraction", () => {
+  it("returns the completed operation with a server-saved seed", async () => {
+    const operation = { id: "resume-extraction-1", status: "completed" };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: { profileSeed: { candidate: { full_name: "Jordan Rivera" } } },
+            operation,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await extractResumeAi({ name: "resume.pdf" });
+
+    expect(result).toEqual({
+      profileSeed: { candidate: { full_name: "Jordan Rivera" } },
+      operation,
+      seedSaved: true,
+    });
+  });
+
+  it("reloads one exact extraction operation by id or upload digest", async () => {
+    const operation = {
+      id: "resume-extraction-1",
+      uploadDigest: "a".repeat(64),
+      status: "running",
+    };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, operation }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getResumeExtraction({ id: operation.id })).resolves.toEqual(operation);
+    await expect(getResumeExtraction({ digest: operation.uploadDigest })).resolves.toEqual(
+      operation
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/onboard/resume-ai/operation?id=resume-extraction-1",
+      expect.any(Object)
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/onboard/resume-ai/operation?digest=${"a".repeat(64)}`,
+      expect.any(Object)
+    );
+  });
+});
+
+describe("durable company discovery", () => {
+  it("starts, follows, retries, and loads one exact proposal batch", async () => {
+    const api = await import("./api.js");
+    const operation = {
+      id: "app-operation-company-1",
+      kind: "company.discovery",
+      status: "running",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, operation }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, operation }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, operation: { ...operation, attempt: 2 } }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, data: { batch: { batchId: "cpb_exact" } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      api.createCompanyProposals({ manualSeeds: [{ name: "Acme" }] })
+    ).resolves.toMatchObject({ operation });
+    await expect(api.getAppOperation(operation.id)).resolves.toEqual(operation);
+    await expect(api.retryAppOperation(operation.id)).resolves.toMatchObject({
+      operation: { attempt: 2 },
+    });
+    await expect(api.getCompanyProposalBatch("cpb_exact")).resolves.toEqual({
+      batchId: "cpb_exact",
+    });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/api/discovery/company-proposals",
+      "/api/app-operations/operation?id=app-operation-company-1",
+      "/api/app-operations/retry",
+      "/api/discovery/company-proposals?id=cpb_exact",
+    ]);
+  });
+
+  it("loads the exact durable workspace thread used to find a child operation", async () => {
+    const api = await import("./api.js");
+    const thread = { id: "workspace-main", messages: [{ id: "workspace-message-exact" }] };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: thread }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getWorkspaceThread()).resolves.toEqual(thread);
+    expect(fetchMock).toHaveBeenCalledWith("/api/workspace/thread", {
+      headers: { "content-type": "application/json" },
+    });
+  });
 });
 
 describe("finishOnboarding", () => {
@@ -242,7 +375,7 @@ describe("retryDeepIngestSource", () => {
 });
 
 describe("sendWorkspaceMessage", () => {
-  it("carries the selected job context into the durable agent turn", async () => {
+  it("carries selected context and a choice reference into the durable agent turn", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ ok: true, data: { messages: [] } }), {
@@ -252,12 +385,74 @@ describe("sendWorkspaceMessage", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const context = { pathname: "/jobs", jobId: "app-temporal" };
+    const choice = { promptId: "choice-1", version: 1, optionIds: ["yes"] };
 
-    await sendWorkspaceMessage("Change the résumé for this role.", context);
+    await sendWorkspaceMessage("Yes", context, choice, {
+      requestId: "workspace-message-test-1",
+    });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/workspace/message", {
       method: "POST",
-      body: JSON.stringify({ text: "Change the résumé for this role.", context }),
+      body: JSON.stringify({
+        requestId: "workspace-message-test-1",
+        text: "Yes",
+        context,
+        choice,
+      }),
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  it("gives direct typed intents an exact durable request identity", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, operation: { id: "app-operation-intent-1" } }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runWorkspaceIntent(
+      "settings.explain",
+      { type: "workspace", id: "workspace-main" },
+      {},
+      { requestId: "workspace-intent-test-1" }
+    );
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      requestId: "workspace-intent-test-1",
+      intent: {
+        type: "settings.explain",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: {},
+      },
+    });
+  });
+});
+
+describe("sendChatMessage", () => {
+  it("sends the same durable choice reference used by the transcript button", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ accepted: true }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const choice = { promptId: "choice-1", version: 1, optionIds: ["no"] };
+
+    await sendChatMessage("chat-1", "No", choice, { requestId: "chat-request-choice-0001" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/chat/message", {
+      method: "POST",
+      body: JSON.stringify({
+        chatId: "chat-1",
+        text: "No",
+        choice,
+        requestId: "chat-request-choice-0001",
+      }),
       headers: { "content-type": "application/json" },
     });
   });
@@ -315,49 +510,7 @@ describe("completeDiscovery", () => {
   });
 });
 
-describe("runAiWebSearchStream", () => {
-  it("uses the shared split-frame/comment parser for AI lane events", async () => {
-    const encoder = new TextEncoder();
-    const body = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(": ping\n\nda"));
-        controller.enqueue(
-          encoder.encode(
-            'ta: {"type":"activity","message":"Searching"}\n\n' +
-              'data: {"type":"done","data":{"searched":1,"found":1,"new":1,"duplicates":0,"errors":[]}}'
-          )
-        );
-        controller.close();
-      },
-    });
-    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const events = [];
-
-    await runAiWebSearchStream({
-      onEvent: (event) => events.push(event),
-      promptIds: ["p2"],
-      searchExecutionId: "search-execution-shared",
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith("/api/search/ai-web-search/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        promptIds: ["p2"],
-        searchExecutionId: "search-execution-shared",
-      }),
-      signal: undefined,
-    });
-    expect(events).toEqual([
-      { type: "activity", message: "Searching" },
-      {
-        type: "done",
-        data: { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] },
-      },
-    ]);
-  });
-
+describe("durable sourcing reads", () => {
   it("requests an exact durable run when an id is supplied", async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -372,6 +525,25 @@ describe("runAiWebSearchStream", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sourcing/runs/latest?purpose=manual-search&id=manual-running",
+      expect.any(Object)
+    );
+  });
+
+  it("requests one durable unified search execution by exact id", async () => {
+    const execution = { id: "search-execution-1", status: "running" };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, execution }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getSearchExecution({ searchExecutionId: execution.id });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sourcing/execution?id=search-execution-1",
       expect.any(Object)
     );
   });
@@ -547,6 +719,27 @@ describe("apiFetch capability-cookie retry", () => {
 });
 
 describe("chat-first workflow actions", () => {
+  it("gives packet exports a durable request identity", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true, data: { applicationId: "app-1" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await exportPacketDocuments({ applicationId: "app-1", formats: ["pdf"] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({
+      applicationId: "app-1",
+      formats: ["pdf"],
+      requestId: expect.stringMatching(/^workspace-/),
+    });
+  });
+
   it("submits visible job actions as typed intents to workspace-main", async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -570,7 +763,23 @@ describe("chat-first workflow actions", () => {
     await applyOnSite({ id: "app-3" });
     await markCommSent({ id: "comm-1", at: "2026-08-09T17:30:00.000Z" });
 
-    const bodies = fetchMock.mock.calls.map(([path, options]) => [path, JSON.parse(options.body)]);
+    const parsedBodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body));
+    expect(parsedBodies.map((body) => body.requestId)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+        expect.stringMatching(/^workspace-/),
+      ])
+    );
+    expect(new Set(parsedBodies.map((body) => body.requestId)).size).toBe(7);
+    const bodies = fetchMock.mock.calls.map(([path, options]) => {
+      const { requestId: _requestId, ...body } = JSON.parse(options.body);
+      return [path, body];
+    });
     expect(bodies).toEqual([
       [
         "/api/workspace/intent",

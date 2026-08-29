@@ -1,10 +1,13 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync, realpathSync } from "node:fs";
 import { win32 } from "node:path";
 
 const WINDOWS_BATCH_EXTENSION = /\.(?:bat|cmd)$/i;
 const WINDOWS_NPM_SHIM = /(?:^|[\\/])(?:node_modules[\\/]\.bin|npm)[\\/][^\\/]+\.(?:bat|cmd)$/i;
 const WINDOWS_COMMAND_META = /([()\][%!^"`<>&|;, *?])/g;
 const WINDOWS_LINE_BREAK = /[\r\n]/;
+const WINDOWS_NODE_PAYLOAD = /((?:%~dp0|%dp0%)[\\/][^"'\r\n]*?\.(?:cjs|mjs|js))/gi;
+const MAX_WINDOWS_SHIM_BYTES = 64 * 1024;
 
 const RUNTIME_TERMINATION_GRACE_MS = 250;
 
@@ -46,6 +49,216 @@ export function runtimeProcessInvocation(
     args: ["/d", "/s", "/v:off", "/c", `"${shellCommand}"`],
     options: { windowsVerbatimArguments: true },
   };
+}
+
+function windowsEnvValue(env, name) {
+  const expected = String(name).toLowerCase();
+  const entry = Object.entries(env || {}).find(([key]) => key.toLowerCase() === expected);
+  return String(entry?.[1] || "").trim();
+}
+
+function canonicalPath(path, realpathImpl) {
+  try {
+    return realpathImpl(path);
+  } catch {
+    return null;
+  }
+}
+
+function resolveWindowsExecutable(command, { env, realpathImpl, includeSystemCmd = false }) {
+  const value = String(command || "").trim();
+  if (!value || WINDOWS_LINE_BREAK.test(value)) return null;
+  if (win32.isAbsolute(value) || /[\\/]/.test(value)) {
+    return canonicalPath(value, realpathImpl);
+  }
+
+  const candidates = [];
+  if (includeSystemCmd && /^cmd(?:\.exe)?$/i.test(value)) {
+    const systemRoot = windowsEnvValue(env, "SystemRoot") || windowsEnvValue(env, "WINDIR");
+    if (systemRoot) candidates.push(win32.join(systemRoot, "System32", "cmd.exe"));
+  }
+  const pathValue = windowsEnvValue(env, "PATH");
+  const extensions = win32.extname(value)
+    ? [""]
+    : (windowsEnvValue(env, "PATHEXT") || ".EXE;.CMD;.BAT")
+        .split(";")
+        .map((extension) => extension.trim())
+        .filter(Boolean);
+  for (const directory of pathValue
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter(Boolean)) {
+    for (const extension of extensions)
+      candidates.push(win32.join(directory, `${value}${extension}`));
+  }
+  for (const candidate of candidates) {
+    const resolved = canonicalPath(candidate, realpathImpl);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveShimPayload(reference, wrapperDirectory, realpathImpl) {
+  const relativePayload = String(reference).replace(/^(?:%~dp0|%dp0%)[\\/]?/i, "");
+  if (!relativePayload || win32.isAbsolute(relativePayload)) return null;
+  const candidate = win32.resolve(wrapperDirectory, relativePayload);
+  const allowedRoot =
+    win32.basename(wrapperDirectory).toLowerCase() === ".bin" &&
+    win32.basename(win32.dirname(wrapperDirectory)).toLowerCase() === "node_modules"
+      ? win32.dirname(wrapperDirectory)
+      : wrapperDirectory;
+  const remainder = win32.relative(allowedRoot, candidate);
+  if (remainder === ".." || remainder.startsWith(`..${win32.sep}`) || win32.isAbsolute(remainder)) {
+    return null;
+  }
+  return canonicalPath(candidate, realpathImpl);
+}
+
+function resolveShimInterpreter({ shim, invocationPrefix, wrapperDirectory, env, realpathImpl }) {
+  const localNode = canonicalPath(win32.join(wrapperDirectory, "node.exe"), realpathImpl);
+  if (/"%_prog%"\s*$/i.test(invocationPrefix)) {
+    const assignments = [...shim.matchAll(/^\s*set\s+"?_prog=([^"\r\n]+)"?\s*$/gim)].map((match) =>
+      match[1].trim()
+    );
+    if (
+      assignments.length === 0 ||
+      assignments.some(
+        (value) => !/^(?:(?:%~dp0|%dp0%)[\\/]node\.exe|node(?:\.exe)?)$/i.test(value)
+      )
+    ) {
+      return null;
+    }
+    if (localNode) return localNode;
+    if (!assignments.some((value) => /^node(?:\.exe)?$/i.test(value))) return null;
+    const interpreter = resolveWindowsExecutable("node", { env, realpathImpl });
+    return /\.exe$/i.test(String(interpreter || "")) ? interpreter : null;
+  }
+  if (/"?(?:%~dp0|%dp0%)[\\/]node\.exe"?\s*$/i.test(invocationPrefix)) return localNode;
+  if (/\bnode(?:\.exe)?\s*$/i.test(invocationPrefix)) {
+    return resolveWindowsExecutable("node", { env, realpathImpl });
+  }
+  return null;
+}
+
+function hasRecognizedNpmShimShape(shim, invocationLine, payloadReference) {
+  const requiredLines = [
+    /^goto start$/i,
+    /^:find_dp0$/i,
+    /^set dp0=%~dp0$/i,
+    /^:start$/i,
+    /^call :find_dp0$/i,
+  ];
+  const lines = shim
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (
+    lines.at(-1) !== invocationLine.trim() ||
+    requiredLines.some((pattern) => !lines.some((line) => pattern.test(line))) ||
+    lines.filter((line) => /%\*/.test(line)).length !== 1
+  ) {
+    return false;
+  }
+
+  const payloadIndex = invocationLine.toLowerCase().indexOf(payloadReference.toLowerCase());
+  const prefix = invocationLine.slice(0, payloadIndex);
+  const suffix = invocationLine.slice(payloadIndex + payloadReference.length);
+  if (
+    !/^endlocal & goto #_undefined_# 2>nul \|\| title %comspec% & (?:set pathext=%pathext:;\.js;=;% & )?"%_prog%"\s+"$/i.test(
+      prefix
+    ) ||
+    !/^"\s+%\*\s*$/i.test(suffix)
+  ) {
+    return false;
+  }
+
+  return lines.every(
+    (line) =>
+      /^@?echo off$/i.test(line) ||
+      /^goto start$/i.test(line) ||
+      /^:find_dp0$/i.test(line) ||
+      /^set dp0=%~dp0$/i.test(line) ||
+      /^exit \/b$/i.test(line) ||
+      /^:start$/i.test(line) ||
+      /^setlocal$/i.test(line) ||
+      /^call :find_dp0$/i.test(line) ||
+      /^if exist "(?:%~dp0|%dp0%)[\\/]node\.exe" \($/i.test(line) ||
+      /^\) else \($/i.test(line) ||
+      /^\)$/i.test(line) ||
+      /^set\s+(?:"[^"\r\n]+"|[^&|<>\r\n]+)$/i.test(line) ||
+      line === invocationLine.trim()
+  );
+}
+
+export function runtimeProcessIdentityFiles(
+  command,
+  {
+    env = process.env,
+    platform = process.platform,
+    readFileImpl = readFileSync,
+    realpathImpl = realpathSync,
+  } = {}
+) {
+  const commandText = String(command || "").trim();
+  const wrapper = canonicalPath(commandText, realpathImpl);
+  if (!wrapper) return null;
+  if (platform !== "win32" || !WINDOWS_BATCH_EXTENSION.test(commandText)) {
+    return [{ role: "executable", path: wrapper }];
+  }
+  if (!WINDOWS_NPM_SHIM.test(commandText)) return null;
+
+  const launcherCommand = windowsEnvValue(env, "COMSPEC") || "cmd.exe";
+  const launcher = resolveWindowsExecutable(launcherCommand, {
+    env,
+    realpathImpl,
+    includeSystemCmd: true,
+  });
+  if (!launcher || !/\.exe$/i.test(launcher)) return null;
+
+  let shim;
+  try {
+    const bytes = readFileImpl(wrapper);
+    if (bytes.length > MAX_WINDOWS_SHIM_BYTES || String(bytes).includes("\0")) return null;
+    shim = String(bytes);
+  } catch {
+    return null;
+  }
+
+  const payloadReferences = [...shim.matchAll(WINDOWS_NODE_PAYLOAD)].map((match) => match[1]);
+  const uniquePayloads = [
+    ...new Map(payloadReferences.map((value) => [value.toLowerCase(), value])).values(),
+  ];
+  if (uniquePayloads.length !== 1) return null;
+  const payloadReference = uniquePayloads[0];
+  const invocationLine = shim
+    .split(/\r?\n/)
+    .find(
+      (line) => line.toLowerCase().includes(payloadReference.toLowerCase()) && /%\*/.test(line)
+    );
+  if (!invocationLine) return null;
+  if (!hasRecognizedNpmShimShape(shim, invocationLine, payloadReference)) return null;
+  const payloadIndex = invocationLine.toLowerCase().indexOf(payloadReference.toLowerCase());
+  const invocationPrefix = invocationLine
+    .slice(0, payloadIndex)
+    .replace(/["']\s*$/, "")
+    .trimEnd();
+  const wrapperDirectory = win32.dirname(wrapper);
+  const interpreter = resolveShimInterpreter({
+    shim,
+    invocationPrefix,
+    wrapperDirectory,
+    env,
+    realpathImpl,
+  });
+  const payload = resolveShimPayload(payloadReference, wrapperDirectory, realpathImpl);
+  if (!interpreter || !payload) return null;
+
+  return [
+    { role: "launcher", path: launcher },
+    { role: "wrapper", path: wrapper },
+    { role: "interpreter", path: interpreter },
+    { role: "payload", path: payload },
+  ];
 }
 
 function terminateWindowsProcessTree(child, { env = process.env, spawnSyncImpl = spawnSync } = {}) {

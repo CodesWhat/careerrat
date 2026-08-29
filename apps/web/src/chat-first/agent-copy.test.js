@@ -49,4 +49,12 @@ describe("cleanAgentCopy", () => {
       )
     ).toBe("Are there kinds of companies whose values or size you especially like?");
   });
+
+  it("drops saved answer-mode control fences while keeping the question", () => {
+    expect(
+      cleanAgentCopy(
+        'Should I keep this company in your search?\n```careerrat:answer\n{"mode":"yes-no"}\n```'
+      )
+    ).toBe("Should I keep this company in your search?");
+  });
 });

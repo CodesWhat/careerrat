@@ -348,6 +348,44 @@ test("generatePacket never passes empty cover-letter prose blocks into the scaff
   assert.match(result.sources.answers, /customer-facing AI workflows/);
 });
 
+test("generatePacket threads one abort signal through every model-backed packet lane", async () => {
+  const { generatePacket } = await loadGenerateModule();
+  const controller = new AbortController();
+  const seen = [];
+
+  await generatePacket({
+    context: PACKET_CONTEXT,
+    questionCapture: CAPTURED_QUESTIONS,
+    signal: controller.signal,
+    draftResumeProposal: async (input) => {
+      seen.push(input.signal);
+      return RESUME_DRAFT();
+    },
+    draftCoverLetterBlocks: async (input) => {
+      seen.push(input.signal);
+      return {
+        blocks: [{ text: "Evidence-backed cover letter block.", evidenceIds: ["ev-ai-001"] }],
+      };
+    },
+    draftPacketAnswers: async (input) => {
+      seen.push(input.signal);
+      return {
+        answers: [
+          {
+            questionId: "q1",
+            answer: "I have shipped production AI workflows.",
+            evidenceIds: ["ev-ai-001"],
+          },
+        ],
+        gaps: [],
+      };
+    },
+    exportPacketArtifacts: async () => ({ formats: ["pdf"], outputs: {} }),
+  });
+
+  assert.deepEqual(seen, [controller.signal, controller.signal, controller.signal]);
+});
+
 test("standalone tailoring never enters application-answer drafting", async () => {
   const { generatePacket } = await loadGenerateModule();
 

@@ -41,7 +41,9 @@ import {
   addProviderSource,
   addSearchFromQuery,
   addSearchFromUrl,
+  canonicalSearchSourceUrl,
   listSearches,
+  requireBrowserSourceIdentity,
   validateConfig,
 } from "../core/providers/search-sources.mjs";
 import {
@@ -105,7 +107,10 @@ function readIndex(body, length) {
 }
 
 function searchLegitimacy(search) {
-  if (search?.auth === true) return "consent-required";
+  if (search?.auth === true) {
+    if (search?.login_skipped === true) return "supported";
+    return search?.enabled === false ? "login-needed" : "supported";
+  }
   if (search?.source_type === "rss" || search?.rssUrl) return "supported";
   if (["ats", "board"].includes(search?.source_type) && isBoardProviderSupported(search.provider)) {
     return "supported";
@@ -132,6 +137,7 @@ function maintenanceView(pathCtx) {
       }),
       auth: search.auth === true,
       platform: search.platform || null,
+      ...(search.login_skipped === true ? { loginSkipped: true } : {}),
     })),
     companies: (companyConfig.tracked_companies || []).map((company, index) => ({
       index,
@@ -285,19 +291,40 @@ function sourceSelectorTiers(source) {
   return tiers;
 }
 
-export function setSearchSourceEnabled({ repoRoot, env = process.env, selector, enabled } = {}) {
+export function setSearchSourceEnabled({
+  repoRoot,
+  env = process.env,
+  selector,
+  sourceUrl,
+  enabled,
+  loginDecision,
+} = {}) {
   const pathCtx = { repoRoot, env };
   const normalizedSelector = sourceSelectorKey(selector);
   if (!normalizedSelector) badRequest("source selector is required");
   if (typeof enabled !== "boolean") badRequest("source enabled state must be boolean");
+  if (loginDecision != null && !new Set(["yes", "no"]).has(loginDecision)) {
+    badRequest("source login decision must be yes or no");
+  }
   const current = readDbSearchSources(pathCtx);
   const model = maintenanceView(pathCtx);
   let matches = [];
-  for (let tier = 0; tier < 4; tier += 1) {
-    matches = model.searches.filter((source) =>
-      sourceSelectorTiers(source)[tier].has(normalizedSelector)
+  const canonicalUrl = sourceUrl == null ? "" : canonicalSearchSourceUrl(sourceUrl);
+  if (sourceUrl != null) {
+    if (!canonicalUrl) badRequest("source URL is invalid");
+    matches = model.searches.filter(
+      (source) => canonicalSearchSourceUrl(source.target) === canonicalUrl
     );
-    if (matches.length) break;
+    if (!matches.length) {
+      badRequest("That saved search source no longer matches the login question.");
+    }
+  } else {
+    for (let tier = 0; tier < 4; tier += 1) {
+      matches = model.searches.filter((source) =>
+        sourceSelectorTiers(source)[tier].has(normalizedSelector)
+      );
+      if (matches.length) break;
+    }
   }
   if (!matches.length) badRequest(`No search source matches "${selector}"`);
   if (matches.length > 1) {
@@ -311,8 +338,20 @@ export function setSearchSourceEnabled({ repoRoot, env = process.env, selector, 
   const searches = Array.isArray(current.searches) ? current.searches.slice() : [];
   const existing = searches[match.index];
   const { enabled_reason: _generatedEnabledReason, ...userOwned } = existing;
-  const changed = existing.enabled !== enabled || existing.enabled_reason != null;
-  searches[match.index] = { ...userOwned, enabled };
+  const identity =
+    existing.source_type === "browser"
+      ? requireBrowserSourceIdentity(existing, existing.url)
+      : null;
+  const normalized = identity ? { ...userOwned, platform: identity.platform } : userOwned;
+  const loginSource = existing.source_type === "browser" && existing.auth === true;
+  if (!loginSource || enabled || loginDecision === "yes") delete normalized.login_skipped;
+  if (loginSource && loginDecision === "no") normalized.login_skipped = true;
+  const changed =
+    existing.enabled !== enabled ||
+    existing.enabled_reason != null ||
+    existing.login_skipped !== normalized.login_skipped ||
+    (identity && existing.platform !== identity.platform);
+  searches[match.index] = { ...normalized, enabled };
   const nextModel = changed
     ? validateAndWriteSearchConfig(pathCtx, { ...current, searches })
     : model;
@@ -462,11 +501,21 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       // the user's toggle. Transfer ownership to the user on every explicit
       // save by removing the generator marker before persisting.
       const { enabled_reason: _generatedEnabledReason, ...userOwnedExisting } = existing;
-      const updated = { ...userOwnedExisting, label, enabled: body?.enabled !== false };
+      const requestedEnabled = body?.enabled !== false;
+      const enabled =
+        existing.source_type === "browser" && existing.auth === true && existing.enabled !== true
+          ? false
+          : requestedEnabled;
+      const updated = { ...userOwnedExisting, label, enabled };
       if (existing.source_type === "ats") updated.name = label;
       if (existing.rssUrl != null) updated.rssUrl = target;
       else if (existing.query != null) updated.query = target;
       else updated.url = target;
+      if (updated.source_type === "browser") {
+        const identity = requireBrowserSourceIdentity(updated, updated.url);
+        updated.url = identity.url;
+        updated.platform = identity.platform;
+      }
       searches[index] = updated;
       sendJson(res, 200, {
         ok: true,

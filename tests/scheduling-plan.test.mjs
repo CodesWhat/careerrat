@@ -66,6 +66,10 @@ test("scheduling plan asks for missing availability before calling AI or writing
 
 test("scheduling plan gives bounded AI only scheduling-safe context", async () => {
   const calls = [];
+  const executionPlan = {
+    operation: "communication.drafting",
+    runtimeId: "codex",
+  };
   const result = await planSchedulingReply({
     communication: {
       ...communication,
@@ -98,6 +102,7 @@ test("scheduling plan gives bounded AI only scheduling-safe context", async () =
       },
     ],
     instruction: "Offer two afternoon times next week.",
+    executionPlan,
     now: new Date("2030-08-10T12:00:00.000Z"),
     runBoundedAI: async (input) => {
       calls.push(input);
@@ -140,6 +145,7 @@ test("scheduling plan gives bounded AI only scheduling-safe context", async () =
   assert.doesNotMatch(result.plan.body, /—/);
   assert.match(result.plan.body, /America\/New_York/);
   assert.equal(calls[0].structuredMode, "native-preferred");
+  assert.deepEqual(calls[0].executionPlan, executionPlan);
   assert.deepEqual(calls[0].schema, schedulingPlanOutputSchema);
   const prompt = JSON.stringify(calls[0].messages);
   assert.doesNotMatch(

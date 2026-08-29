@@ -237,6 +237,34 @@ describe("chat-first onboarding controller", () => {
     });
   });
 
+  it("preserves the runtime completion probe message and retry label for first-run UI", async () => {
+    const controller = await import("./first-run-controller.js");
+    const [choice] = controller.firstRunRuntimeChoices({
+      runtimes: [
+        {
+          id: "codex",
+          name: "Codex",
+          supported: true,
+          available: true,
+          ready: false,
+          selectable: false,
+          status: "completion_probe_failed",
+          action: "retry",
+          actionLabel: "Try again",
+          probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+        },
+      ],
+    });
+
+    expect(choice).toMatchObject({
+      action: "retry",
+      actionLabel: "Try again",
+      probeMessage: "Codex is signed in, but it didn't return a usable test reply.",
+      presentationState: "check_failed",
+      presentationLabel: "Needs a retry",
+    });
+  });
+
   it("normalizes current and graded provider inventory into honest capability states", async () => {
     const controller = await import("./first-run-controller.js");
 
@@ -393,12 +421,6 @@ describe("chat-first onboarding controller", () => {
   });
 
   it.each([
-    [
-      "consent_capability",
-      { capability: "authenticated_search", platform: "linkedin" },
-      "Allow",
-      "Not now",
-    ],
     ["consent_mode", "basic", "Use this setup", "Keep current"],
     ["company_add", { name: "Acme" }, "Add company", "Not now"],
     ["companies_suggest", {}, "Show suggestions", "Not now"],
@@ -415,6 +437,24 @@ describe("chat-first onboarding controller", () => {
       expect(message.blocks[0].kind).toBe(kind);
     }
   );
+
+  it("keeps an explicit company confirmation from also becoming a yes-no question", () => {
+    const message = firstRunAssistantMessage(
+      [
+        "```careerrat:confirm",
+        '{"kind":"company_add","summary":"Acme","payload":{"name":"Acme"}}',
+        "```",
+        "Should I add it?",
+        "```careerrat:answer",
+        '{"mode":"yes-no"}',
+        "```",
+      ].join("\n"),
+      "assistant-company-add"
+    );
+
+    expect(message.options.map((option) => option.label)).toEqual(["Add company", "Not now"]);
+    expect(message).not.toHaveProperty("answerMode");
+  });
 
   it("fills canonical knowledge sections from persisted partial facts before a section is done", () => {
     const state = {
@@ -528,6 +568,88 @@ describe("chat-first onboarding controller", () => {
     });
   });
 
+  it("builds a plain quick-facts compensation branch for total annual cash earnings", () => {
+    const knowledge = buildFirstRunKnowledge(
+      {
+        setupProgress: {
+          completedCount: 0,
+          total: 8,
+          items: [{ key: "quickFacts", done: false }],
+        },
+        data: {
+          profile: {
+            compensation: { minimum_annual_earnings: 90000 },
+          },
+        },
+      },
+      { name: "Claude Code" }
+    );
+    const fields = knowledge.items.find((item) => item.id === "quickFacts").editor.fields;
+
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "compensationFloorType",
+          type: "select",
+          value: "annual-cash",
+          label: "How should CareerRat screen pay?",
+        }),
+        expect.objectContaining({
+          id: "compensationFloor",
+          value: "90000",
+          label: "Minimum yearly amount",
+        }),
+      ])
+    );
+  });
+
+  it("shows both compensation floors when both are already saved", () => {
+    const knowledge = buildFirstRunKnowledge(
+      {
+        setupProgress: {
+          completedCount: 0,
+          total: 8,
+          items: [{ key: "quickFacts", done: false }],
+        },
+        data: {
+          profile: {
+            compensation: {
+              minimum_base: 50000,
+              minimum_annual_earnings: 85000,
+            },
+          },
+        },
+      },
+      { name: "Claude Code" }
+    );
+    const fields = knowledge.items.find((item) => item.id === "quickFacts").editor.fields;
+
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "compensationFloorType",
+          type: "select",
+          value: "both",
+          options: expect.arrayContaining([
+            { value: "both", label: "Keep both floors" },
+            { value: "guaranteed-base", label: "Guaranteed base pay only" },
+            { value: "annual-cash", label: "Annual cash earnings only" },
+          ]),
+        }),
+        expect.objectContaining({
+          id: "minimumBase",
+          value: "50000",
+          label: "Minimum guaranteed base pay",
+        }),
+        expect.objectContaining({
+          id: "minimumAnnualEarnings",
+          value: "85000",
+          label: "Minimum annual cash earnings",
+        }),
+      ])
+    );
+  });
+
   it("adds the deterministic first-question suggestion without replacing typed answers", () => {
     const message = firstRunAssistantMessage(
       "One question at a time. First: what kind of role are you actually after?",
@@ -580,6 +702,23 @@ describe("chat-first onboarding controller", () => {
     expect(api.saveEvidenceSeed).toHaveBeenCalledWith([
       { claim: "Led a migration", evidence: "Shipped across three teams" },
     ]);
+  });
+
+  it("starts a durable company operation and hands its exact id to the UI follower", async () => {
+    const operation = { id: "app-operation-company-1", status: "running" };
+    const api = {
+      createCompanyProposals: vi.fn().mockResolvedValue({ ok: true, operation }),
+    };
+    const onCompanyOperation = vi.fn();
+
+    const receipt = await applyFirstRunConfirmation(
+      { kind: "companies_suggest", payload: {} },
+      { api, state: {}, onCompanyOperation }
+    );
+
+    expect(api.createCompanyProposals).toHaveBeenCalledWith({});
+    expect(onCompanyOperation).toHaveBeenCalledWith(operation);
+    expect(receipt).toBe("Finding company suggestions in the background");
   });
 
   it("refuses a direct agent confirmation that targets voluntary self-identification", async () => {

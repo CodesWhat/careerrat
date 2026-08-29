@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api.js";
 
 const hooks = vi.hoisted(() => ({
   cursor: 0,
   effectDeps: [],
   pendingEffects: [],
+  rendering: false,
+  stateUpdatesDuringRender: 0,
   states: [],
   resetRender() {
     this.cursor = 0;
@@ -14,11 +16,16 @@ const hooks = vi.hoisted(() => ({
     this.cursor = 0;
     this.effectDeps = [];
     this.pendingEffects = [];
+    this.rendering = false;
+    this.stateUpdatesDuringRender = 0;
     this.states = [];
   },
 }));
 
 const navigate = vi.hoisted(() => vi.fn());
+const router = vi.hoisted(() => ({
+  location: { pathname: "/settings", search: "", state: null },
+}));
 
 function dependenciesChanged(previous, next) {
   return (
@@ -46,10 +53,16 @@ vi.mock("react", async (importOriginal) => {
         hooks.states[index] = typeof initialValue === "function" ? initialValue() : initialValue;
       }
       const setValue = (nextValue) => {
+        if (hooks.rendering) hooks.stateUpdatesDuringRender += 1;
         hooks.states[index] =
           typeof nextValue === "function" ? nextValue(hooks.states[index]) : nextValue;
       };
       return [hooks.states[index], setValue];
+    },
+    useRef(initialValue) {
+      const index = hooks.cursor++;
+      if (!(index in hooks.states)) hooks.states[index] = { current: initialValue };
+      return hooks.states[index];
     },
     useSyncExternalStore(_subscribe, getSnapshot) {
       return getSnapshot();
@@ -58,7 +71,11 @@ vi.mock("react", async (importOriginal) => {
 });
 
 vi.mock("react-router-dom", () => ({
-  useLocation: () => ({ state: { activeTab: "settings" } }),
+  useBlocker: (predicate) => {
+    router.shouldBlock = predicate;
+    return router.blocker;
+  },
+  useLocation: () => router.location,
   useNavigate: () => navigate,
 }));
 
@@ -67,7 +84,14 @@ vi.mock("./ProfileSettings.jsx", () => ({ ProfileSettings: () => null }));
 function createApi() {
   let enabled = true;
   return {
-    addBoard: vi.fn(),
+    addBoardSource: vi.fn().mockResolvedValue({ ok: true }),
+    runWorkspaceIntent: vi.fn().mockResolvedValue({ status: "completed" }),
+    getAiPreferences: vi.fn().mockResolvedValue({
+      quality: "automatic",
+      reasoning: "automatic",
+      source: "default",
+      updatedAt: null,
+    }),
     getAutomationSettings: vi.fn().mockResolvedValue({ capabilities: [] }),
     getInstalledAiRuntimes: vi.fn().mockResolvedValue({ runtimes: [] }),
     getOnboardState: vi.fn(async () => ({
@@ -76,11 +100,40 @@ function createApi() {
     })),
     getSourceMaintenance: vi.fn().mockResolvedValue({ searches: [], companies: [] }),
     saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }),
+    upsertDeepIngestConfirmedItem: vi.fn().mockResolvedValue({ ok: true }),
+    saveAiPreferences: vi.fn(async ({ quality, reasoning }) => ({
+      quality,
+      reasoning,
+      source: "saved",
+      updatedAt: "2026-08-27T16:00:00.000Z",
+    })),
     setAutomationSessionProvider: vi.fn().mockResolvedValue({ ok: true }),
     setPublicSyncPreference: vi.fn(async (nextEnabled) => {
       enabled = nextEnabled;
       return { ok: true };
     }),
+  };
+}
+
+function onboardState({
+  workspaceId = "workspace-a",
+  candidateId = "candidate-a",
+  version = 1,
+  lastUpdatedAt = "2026-08-28T12:00:00.000Z",
+  revision,
+  title = "Staff Engineer",
+} = {}) {
+  return {
+    draftContext: {
+      owner: { workspaceId, candidateId },
+      base: revision ? { revision } : { version, lastUpdatedAt },
+    },
+    data: {
+      targeting: {
+        role_buckets: [{ name: "Primary targets", priority: "primary", titles: [title] }],
+      },
+    },
+    publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
   };
 }
 
@@ -91,7 +144,12 @@ async function flushEffects() {
 
 function renderController(module, api) {
   hooks.resetRender();
-  return module.ProfileSettingsController({ api });
+  hooks.rendering = true;
+  try {
+    return module.ProfileSettingsController({ api });
+  } finally {
+    hooks.rendering = false;
+  }
 }
 
 function settingsProps(view) {
@@ -107,6 +165,656 @@ function controllerAlertText(view) {
 beforeEach(() => {
   hooks.clear();
   vi.clearAllMocks();
+  router.location = { pathname: "/settings", search: "", state: null };
+  router.shouldBlock = null;
+  router.blocker = {
+    state: "unblocked",
+    location: null,
+    proceed: vi.fn(() => {
+      if (router.blocker.location) router.location = router.blocker.location;
+      router.blocker.state = "unblocked";
+      router.blocker.location = null;
+    }),
+    reset: vi.fn(() => {
+      router.blocker.state = "unblocked";
+      router.blocker.location = null;
+    }),
+  };
+  navigate.mockImplementation((to, options = {}) => {
+    if (typeof to === "number") return;
+    const next = typeof to === "string" ? new URL(to, "http://careerrat.local") : null;
+    const nextLocation = {
+      pathname: next?.pathname || to?.pathname || router.location.pathname,
+      search: next?.search || to?.search || "",
+      state: options.state ?? null,
+    };
+    if (
+      router.shouldBlock?.({
+        currentLocation: router.location,
+        nextLocation,
+        historyAction: options.replace ? "REPLACE" : "PUSH",
+      })
+    ) {
+      router.blocker.state = "blocked";
+      router.blocker.location = nextLocation;
+      return;
+    }
+    router.location = nextLocation;
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("ProfileSettingsController foreground", () => {
+  it("keeps a source draft transient until its real owner loads, then migrates it", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const entries = new Map();
+    let resolveOnboard;
+    api.getOnboardState.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOnboard = resolve;
+      })
+    );
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => entries.get(key) ?? null),
+      setItem: vi.fn((key, value) => entries.set(key, value)),
+      removeItem: vi.fn((key) => entries.delete(key)),
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?tab=settings&panel=source",
+      state: null,
+    };
+    const sourceUrl = "https://jobs.example.test/search?q=platform";
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onSourceDraftChange(sourceUrl);
+    props = settingsProps(renderController(module, api));
+
+    expect.soft(props.sourceDraft).toBe(sourceUrl);
+    expect.soft(globalThis.localStorage.setItem).not.toHaveBeenCalled();
+    expect.soft(entries.size).toBe(0);
+
+    resolveOnboard(onboardState());
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.sourceDraft).toBe(sourceUrl);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+
+    expect.soft(props.sourceDraft).toBe(sourceUrl);
+    expect.soft([...entries.keys()]).toEqual(["careerrat:source-draft:workspace-a:candidate-a"]);
+    expect.soft(JSON.parse([...entries.values()][0]).value).toBe(sourceUrl);
+  });
+
+  it("owns editor drafts by workspace and candidate, invalidates stale bases, and preserves the last recoverable snapshot", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const entries = new Map();
+    let persistenceFails = false;
+    let canonical = onboardState();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => entries.get(key) ?? null),
+      setItem: vi.fn((key, value) => {
+        if (persistenceFails) throw new Error("quota exceeded");
+        entries.set(key, value);
+      }),
+      removeItem: vi.fn((key) => entries.delete(key)),
+    });
+    api.getOnboardState.mockImplementation(async () => canonical);
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+    expect(entries.size).toBe(1);
+
+    canonical = onboardState({ workspaceId: "workspace-b", candidateId: "candidate-b" });
+    hooks.clear();
+    renderController(module, api);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.editorValues.titles).toBe("Staff Engineer");
+
+    canonical = onboardState({
+      version: 2,
+      lastUpdatedAt: "2026-08-28T13:00:00.000Z",
+      title: "Staff Platform Engineer",
+    });
+    hooks.clear();
+    renderController(module, api);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.editorValues.titles).toBe("Staff Platform Engineer");
+
+    props.onEditorChange("titles", "Principal Engineer");
+    const lastBoundedSnapshot = [...entries.values()][0];
+    props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "x".repeat(20_000));
+    let view = renderController(module, api);
+    expect.soft(entries.size).toBe(1);
+    expect.soft([...entries.values()][0]).toBe(lastBoundedSnapshot);
+    expect
+      .soft(controllerAlertText(view))
+      .toBe("That draft is too large to save for recovery. Shorten it before leaving this page.");
+
+    props = settingsProps(view);
+    props.onEditorChange("titles", "Principal Engineer");
+    expect(entries.size).toBe(1);
+    const beforeStorageFailure = [...entries.values()][0];
+    persistenceFails = true;
+    props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Distinguished Engineer");
+    view = renderController(module, api);
+    expect.soft(entries.size).toBe(1);
+    expect.soft([...entries.values()][0]).toBe(beforeStorageFailure);
+    expect
+      .soft(controllerAlertText(view))
+      .toBe(
+        "CareerRat couldn't save that draft for recovery. Keep this page open, then try again."
+      );
+  });
+
+  it("reconciles a pending client navigation and blocked browser POP with one Keep editing choice", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue(onboardState());
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+    props = settingsProps(renderController(module, api));
+    props.onTabChange("settings");
+
+    router.blocker.state = "blocked";
+    router.blocker.location = {
+      pathname: "/",
+      search: "",
+      state: null,
+    };
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.discardEditorOpen).toBe(true);
+    props.onKeepEditing();
+    props = settingsProps(renderController(module, api));
+
+    expect.soft(router.blocker.reset).toHaveBeenCalledOnce();
+    expect.soft(props.discardEditorOpen).toBe(false);
+    expect.soft(props.profileEditor?.id).toBe("targets");
+  });
+
+  it("sends the captured base revision and reloads a conflicting editor for review", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const entries = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => entries.get(key) ?? null),
+      setItem: vi.fn((key, value) => entries.set(key, value)),
+      removeItem: vi.fn((key) => entries.delete(key)),
+    });
+    let canonical = onboardState({ revision: "revision-a", title: "Staff Engineer" });
+    api.getOnboardState.mockImplementation(async () => canonical);
+    api.saveCandidateFile.mockRejectedValueOnce(
+      new ApiError(409, {
+        code: "SETTINGS_BASE_CHANGED",
+        error: "Settings changed since this editor opened.",
+      })
+    );
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    let props = settingsProps(view);
+    props.onEditorChange("titles", "Principal Engineer");
+    canonical = onboardState({ revision: "revision-b", title: "Platform Engineer" });
+    props = settingsProps(renderController(module, api));
+    await props.onSaveEditor();
+    view = renderController(module, api);
+    props = settingsProps(view);
+
+    expect.soft(api.saveCandidateFile).toHaveBeenNthCalledWith(1, "targeting", expect.any(Object), {
+      expectedBaseRevision: "revision-a",
+    });
+    expect
+      .soft(controllerAlertText(view))
+      .toBe(
+        "Your profile changed while you were editing. CareerRat reloaded the latest version and kept your draft open. Review it, then save again."
+      );
+    expect.soft(props.profileEditor?.id).toBe("targets");
+    expect.soft(props.editorValues.titles).toBe("Principal Engineer");
+
+    hooks.clear();
+    renderController(module, api);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.editorValues.titles).toBe("Principal Engineer");
+
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    await props.onSaveEditor();
+    expect.soft(api.saveCandidateFile).toHaveBeenNthCalledWith(2, "targeting", expect.any(Object), {
+      expectedBaseRevision: "revision-b",
+    });
+  });
+
+  it("blocks browser history while an editor is dirty and reuses the Keep or Discard decision", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const entries = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => entries.get(key) ?? null),
+      setItem: vi.fn((key, value) => entries.set(key, value)),
+      removeItem: vi.fn((key) => entries.delete(key)),
+    });
+    api.getOnboardState.mockResolvedValue(onboardState());
+    const editorLocation = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+    const destination = {
+      pathname: "/settings",
+      search: "?tab=settings&panel=source",
+      state: null,
+    };
+    router.location = editorLocation;
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=location-policy",
+      state: null,
+    };
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.discardEditorOpen).toBe(true);
+    expect.soft(props.profileEditor?.id).toBe("targets");
+    props.onKeepEditing();
+
+    router.location = destination;
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.discardEditorOpen).toBe(true);
+    expect.soft(props.activeTab).toBe("profile");
+    expect.soft(props.profileEditor?.id).toBe("targets");
+    expect.soft(props.sourceDialogOpen).toBe(false);
+
+    props.onKeepEditing();
+    props = settingsProps(renderController(module, api));
+    expect.soft(router.location.search).toBe(editorLocation.search);
+    expect.soft(props.editorValues.titles).toBe("Principal Engineer");
+
+    router.location = destination;
+    props = settingsProps(renderController(module, api));
+    props.onDiscardEditor();
+    expect.soft(router.location.search).toBe(destination.search);
+    expect.soft(entries.size).toBe(0);
+  });
+
+  it("allows a confirmed client navigation through the data-router blocker exactly once", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue(onboardState());
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+    props = settingsProps(renderController(module, api));
+    props.onTabChange("settings");
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.discardEditorOpen).toBe(true);
+
+    props.onDiscardEditor();
+
+    expect.soft(router.blocker.state).toBe("unblocked");
+    expect.soft(router.location.search).toBe("?tab=settings");
+    expect.soft(router.shouldBlock({ nextLocation: { pathname: "/", search: "" } })).toBe(true);
+  });
+
+  it("canonicalizes a changed URL without updating state during render", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    router.location = {
+      pathname: "/settings",
+      search: "?tab=settings&panel=source",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    renderController(module, api);
+    hooks.stateUpdatesDuringRender = 0;
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=engine&tab=profile&unused=yes",
+      state: null,
+    };
+
+    renderController(module, api);
+
+    expect(hooks.stateUpdatesDuringRender).toBe(0);
+  });
+
+  it("persists bounded owner-scoped source drafts and protects dirty source navigation and reload", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const entries = new Map();
+    const addEventListener = vi.fn();
+    vi.stubGlobal("addEventListener", addEventListener);
+    vi.stubGlobal("removeEventListener", vi.fn());
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => entries.get(key) ?? null),
+      setItem: vi.fn((key, value) => entries.set(key, value)),
+      removeItem: vi.fn((key) => entries.delete(key)),
+    });
+    let canonical = onboardState();
+    api.getOnboardState.mockImplementation(async () => canonical);
+    router.location = {
+      pathname: "/settings",
+      search: "?tab=settings&panel=source",
+      state: null,
+    };
+    const sourceUrl = "https://jobs.example.test/search?q=platform";
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onSourceDraftChange(sourceUrl);
+    renderController(module, api);
+    await flushEffects();
+    expect.soft(addEventListener).toHaveBeenCalledWith("beforeunload", expect.any(Function));
+
+    hooks.clear();
+    renderController(module, api);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.sourceDraft).toBe(sourceUrl);
+
+    canonical = onboardState({ workspaceId: "workspace-b", candidateId: "candidate-b" });
+    hooks.clear();
+    renderController(module, api);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.sourceDraft).toBe("");
+
+    canonical = onboardState();
+    hooks.clear();
+    renderController(module, api);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.sourceDraft).toBe(sourceUrl);
+    props.onSourceDraftChange(`https://jobs.example.test/${"x".repeat(20_000)}`);
+    expect.soft(entries.size).toBe(1);
+
+    props = settingsProps(renderController(module, api));
+    props.onSourceDraftChange(sourceUrl);
+    props = settingsProps(renderController(module, api));
+    props.onTabChange("profile");
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.discardEditorOpen).toBe(true);
+    expect.soft(navigate).not.toHaveBeenCalledWith("/settings", expect.anything());
+  });
+
+  it("opens a deep-linked Settings panel from the URL", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    router.location = {
+      pathname: "/settings",
+      search: "?tab=settings&panel=engine",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    const props = settingsProps(renderController(module, api));
+
+    expect(props.activeTab).toBe("settings");
+    expect(props.enginePickerOpen).toBe(true);
+  });
+
+  it("restores the active tab, dialog, and editor when browser history changes", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        targeting: {
+          role_buckets: [
+            { name: "Primary targets", priority: "primary", titles: ["Staff Engineer"] },
+          ],
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?tab=settings&panel=source",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    expect(props.activeTab).toBe("settings");
+    expect(props.sourceDialogOpen).toBe(true);
+
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+    props = settingsProps(renderController(module, api));
+    expect(props.activeTab).toBe("profile");
+    expect(props.sourceDialogOpen).toBe(false);
+    expect(props.profileEditor?.id).toBe("targets");
+    expect(props.editorValues.titles).toBe("Staff Engineer");
+  });
+
+  it("keeps a dirty editor open until the candidate confirms navigation", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        targeting: {
+          role_buckets: [
+            { name: "Primary targets", priority: "primary", titles: ["Staff Engineer"] },
+          ],
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+    props = settingsProps(renderController(module, api));
+    expect(props.editorValues.titles).toBe("Principal Engineer");
+
+    props.onTabChange("settings");
+    props = settingsProps(renderController(module, api));
+    expect(props.discardEditorOpen).toBe(true);
+    expect(props.profileEditor?.id).toBe("targets");
+    expect(props.editorValues.titles).toBe("Principal Engineer");
+    expect(navigate).not.toHaveBeenCalled();
+
+    props.onKeepEditing();
+    props = settingsProps(renderController(module, api));
+    expect(props.discardEditorOpen).toBe(false);
+    expect(props.profileEditor?.id).toBe("targets");
+    expect(props.editorValues.titles).toBe("Principal Engineer");
+  });
+
+  it("protects a dirty editor from a reload until it is saved or discarded", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    vi.stubGlobal("addEventListener", addEventListener);
+    vi.stubGlobal("removeEventListener", removeEventListener);
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        targeting: {
+          role_buckets: [
+            { name: "Primary targets", priority: "primary", titles: ["Staff Engineer"] },
+          ],
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    const props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+    renderController(module, api);
+    await flushEffects();
+
+    expect(addEventListener).toHaveBeenCalledWith("beforeunload", expect.any(Function));
+    const protectDraft = addEventListener.mock.calls.find(([name]) => name === "beforeunload")[1];
+    const event = { preventDefault: vi.fn(), returnValue: null };
+    protectDraft(event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.returnValue).toBe("");
+  });
+
+  it("keeps an editor draft scoped to its accepted section across browser history", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue({
+      data: {
+        profile: { compensation: { minimum_base: 150000 } },
+        targeting: {
+          role_buckets: [
+            { name: "Primary targets", priority: "primary", titles: ["Staff Engineer"] },
+          ],
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=compensation",
+      state: null,
+    };
+    props = settingsProps(renderController(module, api));
+    expect(props.discardEditorOpen).toBe(true);
+    expect(props.profileEditor?.id).toBe("targets");
+    expect(props.editorValues).not.toHaveProperty("minimumBase");
+    props.onKeepEditing();
+    props = settingsProps(renderController(module, api));
+    expect(router.location.search).toBe("?panel=editor&section=targets");
+    expect(props.editorValues.titles).toBe("Principal Engineer");
+  });
+
+  it("restores an unsaved editor draft after the Settings route remounts", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    const storageEntries = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key) => storageEntries.get(key) ?? null),
+      setItem: vi.fn((key, value) => storageEntries.set(key, value)),
+      removeItem: vi.fn((key) => storageEntries.delete(key)),
+    });
+    api.getOnboardState.mockResolvedValue({
+      draftContext: onboardState().draftContext,
+      data: {
+        targeting: {
+          role_buckets: [
+            { name: "Primary targets", priority: "primary", titles: ["Staff Engineer"] },
+          ],
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=targets",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    props.onEditorChange("titles", "Principal Engineer");
+
+    hooks.clear();
+    renderController(module, api);
+    await flushEffects();
+    props = settingsProps(renderController(module, api));
+
+    expect(props.editorValues.titles).toBe("Principal Engineer");
+  });
+
+  it("never renders a panel on the contradictory Settings tab", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue(onboardState());
+
+    router.location = { pathname: "/settings", search: "?panel=engine", state: null };
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    expect.soft(props.activeTab).toBe("settings");
+    expect.soft(props.enginePickerOpen).toBe(true);
+
+    router.location = {
+      pathname: "/settings",
+      search: "?tab=settings&panel=editor&section=targets",
+      state: null,
+    };
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.activeTab).toBe("profile");
+    expect.soft(props.profileEditor?.id).toBe("targets");
+    expect.soft(props.enginePickerOpen).toBe(false);
+  });
 });
 
 describe("ProfileSettingsController error copy", () => {
@@ -154,6 +862,7 @@ describe("ProfileSettingsController error copy", () => {
     const api = createApi();
     const raw = "SQLITE_BUSY: database is locked at /Users/person/private/careerrat.db";
     api.getOnboardState.mockResolvedValue({
+      draftContext: onboardState().draftContext,
       data: {
         targeting: {
           role_buckets: [
@@ -226,6 +935,66 @@ describe("ProfileSettingsController public metadata preference", () => {
   });
 });
 
+describe("ProfileSettingsController AI preferences", () => {
+  it("loads local preferences and saves a merged provider-neutral choice", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAiPreferences.mockResolvedValue({
+      quality: "balanced",
+      reasoning: "medium",
+      source: "saved",
+      updatedAt: "2026-08-27T15:00:00.000Z",
+    });
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "balanced",
+      reasoning: "medium",
+      source: "saved",
+    });
+
+    await settingsProps(view).onAiPreferenceChange("reasoning", "high");
+
+    expect(api.saveAiPreferences).toHaveBeenCalledWith({
+      quality: "balanced",
+      reasoning: "high",
+    });
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "balanced",
+      reasoning: "high",
+      source: "saved",
+    });
+    expect(settingsProps(view).aiPreferencesBusy).toBe(false);
+    expect(settingsProps(view).aiPreferencesStatus).toBe("Saved on this computer");
+  });
+
+  it("surfaces a people-shaped save error without losing the last saved choice", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.saveAiPreferences.mockRejectedValue(
+      new ApiError(400, {
+        code: "AI_PREFERENCES_INVALID",
+        error: "Paul quality must be Automatic, Faster, Balanced, or Best.",
+      })
+    );
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    await settingsProps(view).onAiPreferenceChange("quality", "broken");
+    view = renderController(module, api);
+
+    expect(controllerAlertText(view)).toBe(
+      "CareerRat couldn't save that AI setting. Choose one of the options and try again."
+    );
+    expect(settingsProps(view).aiPreferences.quality).toBe("automatic");
+  });
+});
+
 describe("ProfileSettingsController browser automation provider", () => {
   it("writes the dedicated provider endpoint and reloads canonical automation state", async () => {
     const module = await import("./ProfileSettingsController.jsx");
@@ -243,13 +1012,39 @@ describe("ProfileSettingsController browser automation provider", () => {
   });
 });
 
+describe("ProfileSettingsController source setup", () => {
+  it("saves a source in Settings without starting a login or conversation gate", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+
+    renderController(module, api);
+    await flushEffects();
+    let view = renderController(module, api);
+    settingsProps(view).onAddSource();
+    view = renderController(module, api);
+    settingsProps(view).onSourceDraftChange("https://www.linkedin.com/jobs/search/?keywords=ops");
+    view = renderController(module, api);
+    await settingsProps(view).onSubmitSource();
+
+    expect(api.addBoardSource).toHaveBeenCalledWith(
+      "https://www.linkedin.com/jobs/search/?keywords=ops"
+    );
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenNthCalledWith(1, "/settings?tab=settings&panel=source", {
+      replace: false,
+    });
+    expect(navigate).toHaveBeenNthCalledWith(2, "/settings?tab=settings", { replace: true });
+    expect(api.getSourceMaintenance).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("ProfileSettingsController permission consent", () => {
-  it("does not revoke LinkedIn consent while another enabled permission still uses it", async () => {
+  it("does not expose a job-source login Settings write path", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     api.getAutomationSettings.mockResolvedValue({
       capabilities: [
-        { capability: "authenticated_search", enabled: true },
+        { capability: "source_login", enabled: true },
         { capability: "authenticated_apply_preparation", enabled: true },
         { capability: "mail_access", enabled: false },
       ],
@@ -258,18 +1053,29 @@ describe("ProfileSettingsController permission consent", () => {
     renderController(module, api);
     await flushEffects();
     const view = renderController(module, api);
-    await settingsProps(view).onPermissionChange("authenticated_search", false);
+    await settingsProps(view).onPermissionChange("source_login", false);
+
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+  });
+
+  it("does not preserve consent for a hidden job-source permission", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAutomationSettings.mockResolvedValue({
+      capabilities: [
+        { capability: "source_login", enabled: true },
+        { capability: "authenticated_apply_preparation", enabled: true },
+      ],
+    });
+
+    renderController(module, api);
+    await flushEffects();
+    const view = renderController(module, api);
+    await settingsProps(view).onPermissionChange("authenticated_apply_preparation", false);
 
     expect(api.saveCandidateFile).toHaveBeenCalledWith(
       "automation",
-      expect.objectContaining({
-        consent: {
-          linkedin: true,
-          indeed: false,
-          wellfound: false,
-          glassdoor: false,
-        },
-      })
+      expect.objectContaining({ consent: expect.objectContaining({ linkedin: false }) })
     );
   });
 });
@@ -279,6 +1085,7 @@ describe("ProfileSettingsController local application defaults", () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     api.getOnboardState.mockResolvedValue({
+      draftContext: onboardState().draftContext,
       data: {
         "form-defaults": {
           voluntary_self_identification: {
@@ -312,22 +1119,26 @@ describe("ProfileSettingsController local application defaults", () => {
     view = renderController(module, api);
     await settingsProps(view).onSaveEditor();
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
-      voluntary_self_identification: {
-        enabled: true,
-        default_action: "decline_when_available",
-        confirmed_at: expect.any(String),
-        answers: {
-          disability: {
-            value: "Saved private answer",
-            confirmed_at: "2026-08-19T12:00:00.000Z",
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "form-defaults",
+      {
+        voluntary_self_identification: {
+          enabled: true,
+          default_action: "decline_when_available",
+          confirmed_at: expect.any(String),
+          answers: {
+            disability: {
+              value: "Saved private answer",
+              confirmed_at: "2026-08-19T12:00:00.000Z",
+            },
           },
         },
       },
-    });
+      { expectedBaseRevision: "1:2026-08-28T12:00:00.000Z" }
+    );
     const saved = api.saveCandidateFile.mock.calls[0][1].voluntary_self_identification;
     expect(Number.isNaN(Date.parse(saved.confirmed_at))).toBe(false);
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenLastCalledWith("/settings", { replace: true });
   });
 });
 

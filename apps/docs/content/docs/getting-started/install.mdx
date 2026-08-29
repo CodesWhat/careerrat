@@ -24,7 +24,8 @@ brew install --cask codeswhat/tap/careerrat
 ```
 
 CareerRat needs one supported local AI tool. If neither is installed, the Mac app
-walks a first-time user through the Claude path itself:
+shows Claude Code and OpenAI Codex as the two supported choices. It can complete
+the Claude Code install inside CareerRat:
 
 1. Get a paid Claude plan. Pro is enough; Max provides more usage. You can use
    [Scott's disclosed referral](https://claude.ai/referral/rOLHwxlsfA).
@@ -33,7 +34,7 @@ walks a first-time user through the Claude path itself:
 3. Click **Sign in**, finish Claude sign-in in the browser, and return to
    CareerRat. The app checks automatically and also provides **Check setup**.
 
-Already use Codex? Expand **I already use another AI tool** and follow its
+To use Codex, expand **Set up OpenAI Codex instead** and follow its
 [official install guide](https://developers.openai.com/codex/cli/).
 
 Claude Code and OpenAI Codex are the two supported product choices. Both run the
@@ -49,16 +50,17 @@ the first search in the background. Finishing setup opens Search with a clear
 running, matches-found, retry, or start state, so you never have to ask whether
 the job search has begun.
 
-v0.16.5 is the current public release. Its signed, notarized, and stapled Mac
-DMG, updater ZIP, update feed, and SBOM are on GitHub; `careerrat@latest` is
-0.16.5 on npm; the Homebrew cask is 0.16.5; and the installed app reports
-version 0.16.5, passes Gatekeeper, launches cleanly, and reports that it is up to
-date. The release also passed a real signed 0.16.4-to-0.16.5 in-app update.
+Claude Code and Codex run the same complete CareerRat workflow with no fallback
+or silent provider switch. Long searches, application missions, drafts, choices,
+and selected views survive navigation and restart. Built-in job boards run
+alongside AI open-web discovery, and AI leads stay clearly unverified until
+Evaluate reads the posting.
 
-v0.16.5 preserves plain-English recovery, remote and office-day limits,
-validated application entry points, and signed in-app Mac updates from v0.16.4.
-It also closes the remaining raw-error paths in guided installation, expanded
-diagnostics, browser-workflow cards, Search status, and browser setup.
+Application questions stay with the exact job thread. CareerRat can fill reviewed
+fields and advance safe form steps, but CAPTCHA, sensitive attestations,
+uncertainty, and the final Submit control always stay with you. The signed Mac app
+checks for updates, downloads them in CareerRat, and waits for you to choose
+**Restart and install**.
 
 Open the app and it scaffolds your workspace, boots the local app at
 `http://localhost:7777`, and launches your agent with a starter message, the

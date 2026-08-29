@@ -33,6 +33,12 @@ function storedPostingKeys(db) {
   return keys;
 }
 
+const ACTIVE_SOURCED_STATUSES = new Set(["sourced", "prospect", "saved", "gated"]);
+
+function isActiveSourcedStatus(value) {
+  return ACTIVE_SOURCED_STATUSES.has(String(value || "sourced").toLowerCase());
+}
+
 // sourcedUpsertBatch({rows}) — one sweep's worth of sourced rows, upserted in
 // ONE transaction with ONE activity event summarizing the batch (matching
 // search-jobs' own "one sweep, one write" shape rather than one event per
@@ -51,6 +57,14 @@ export function sourcedUpsertBatch({
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error("sourcedUpsertBatch: rows must be a non-empty array");
   }
+  const preparedRows = rows.map((row) => {
+    if (!row?.id) throw new Error("sourcedUpsertBatch: every row needs an id");
+    const acceptedRow = typeof prepareAcceptedRow === "function" ? prepareAcceptedRow(row) : row;
+    if (!acceptedRow?.id || String(acceptedRow.id) !== String(row.id)) {
+      throw new Error("sourcedUpsertBatch: prepared rows must preserve their id");
+    }
+    return { row, acceptedRow };
+  });
   return runVerb({ repoRoot, env }, (db) => {
     if (typeof guard === "function") guard(db);
     let created = 0;
@@ -58,17 +72,12 @@ export function sourcedUpsertBatch({
     let duplicates = 0;
     const acceptedIds = [];
     const seenPostingKeys = dedupeCanonical ? storedPostingKeys(db) : null;
-    for (const row of rows) {
-      if (!row?.id) throw new Error("sourcedUpsertBatch: every row needs an id");
+    for (const { row, acceptedRow } of preparedRows) {
       if (seenPostingKeys && postingIdentityIsSeen(row, seenPostingKeys)) {
         duplicates++;
         continue;
       }
       if (seenPostingKeys) addPostingIdentity(seenPostingKeys, row);
-      const acceptedRow = typeof prepareAcceptedRow === "function" ? prepareAcceptedRow(row) : row;
-      if (!acceptedRow?.id || String(acceptedRow.id) !== String(row.id)) {
-        throw new Error("sourcedUpsertBatch: prepared rows must preserve their id");
-      }
       const existed = Boolean(getRow(db, "sourced", acceptedRow.id));
       putRow(db, "sourced", acceptedRow.id, acceptedRow);
       if (existed) updated++;
@@ -134,6 +143,69 @@ export function sourcedSetStatus({ repoRoot, env, id, to, note } = {}) {
     });
     const analytics = refreshAnalytics(db);
     return { id, from, to, meta, event, analytics };
+  });
+}
+
+// sourcedReconcilePolicyBatch({decisions}) — atomically hide every still-active
+// sourced row that a fresh search found incompatible with the candidate's
+// CURRENT hard search policy. Decisions carry the row version observed while
+// its safely-confined JD artifact was read. A concurrent review/status change
+// therefore wins instead of being overwritten by this background maintenance.
+export function sourcedReconcilePolicyBatch({ repoRoot, env, decisions, guard } = {}) {
+  if (!Array.isArray(decisions) || decisions.length === 0) {
+    throw new Error("sourcedReconcilePolicyBatch: decisions must be a non-empty array");
+  }
+  return runVerb({ repoRoot, env }, (db) => {
+    if (typeof guard === "function") guard(db);
+    const hiddenIds = [];
+    const hiddenAt = new Date().toISOString();
+
+    for (const decision of decisions) {
+      if (!decision?.id || !decision?.reason || !decision?.bucket) {
+        throw new Error("sourcedReconcilePolicyBatch: every decision needs id, bucket, and reason");
+      }
+      const current = getRow(db, "sourced", decision.id);
+      if (!current || !isActiveSourcedStatus(current.status)) continue;
+      if (
+        String(current.status || "sourced") !== String(decision.expectedStatus || "sourced") ||
+        String(current.updatedAt || "") !== String(decision.expectedUpdatedAt || "") ||
+        JSON.stringify(current.artifacts?.jd || "") !==
+          JSON.stringify(decision.expectedJobArtifact || "")
+      ) {
+        continue;
+      }
+
+      putRow(db, "sourced", decision.id, {
+        ...current,
+        status: "cut",
+        gate: "likely-cut",
+        updatedAt: hiddenAt,
+        policyRevalidation: {
+          status: "hidden",
+          bucket: decision.bucket,
+          reason: decision.reason,
+          at: hiddenAt,
+        },
+      });
+      hiddenIds.push(String(decision.id));
+    }
+
+    if (!hiddenIds.length) {
+      return { hidden: 0, hiddenIds, meta: null, event: null, analytics: null };
+    }
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "status_change",
+      title: `Search policy hid ${hiddenIds.length} stale role${hiddenIds.length === 1 ? "" : "s"}`,
+      summary: "Rechecked saved job descriptions against the current search settings.",
+      tags: [
+        `count:${hiddenIds.length}`,
+        "skill:search-jobs",
+        "operation:sourced:policy-revalidate",
+      ],
+    });
+    const analytics = refreshAnalytics(db);
+    return { hidden: hiddenIds.length, hiddenIds, meta, event, analytics };
   });
 }
 

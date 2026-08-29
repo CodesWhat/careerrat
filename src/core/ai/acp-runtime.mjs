@@ -213,6 +213,7 @@ async function executeAcpRuntime({
   probeOnly = false,
   mcpServers = [],
   platform = process.platform,
+  beforeSpawn,
 } = {}) {
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No ACP runtime is selected.", "RUNTIME_NOT_SELECTED");
@@ -227,6 +228,7 @@ async function executeAcpRuntime({
     env,
     platform,
   });
+  beforeSpawn?.();
   let child;
   try {
     child = spawnImpl(invocation.command, invocation.args, {

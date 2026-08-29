@@ -139,22 +139,26 @@ export function loadModes({ root = DEFAULT_ROOT } = {}) {
   };
 }
 
-export function computeAllows(operation, modes = {}) {
+export function computeAllows(operation, modes = {}, { explicit = false } = {}) {
   const normalized = normalizeModes(modes);
   const usageMode = normalized.data.usage_mode;
   const policy = USAGE_OPERATIONS[operation];
-  const decision = policy ? policy[usageMode] || "run" : "run";
+  const configuredDecision = policy ? policy[usageMode] || "run" : "run";
+  const decision = explicit && configuredDecision === "skip" ? "run" : configuredDecision;
   return {
     operation,
     usage_mode: usageMode,
+    explicit,
     decision,
     allowed: decision !== "skip",
     reason:
-      decision === "run"
-        ? `${operation} runs in ${usageMode} mode`
-        : decision === "downshift"
-          ? `${operation} should use its lighter path in ${usageMode} mode`
-          : `${operation} is discretionary and skipped in ${usageMode} mode`,
+      explicit && configuredDecision === "skip"
+        ? `${operation}: explicit request authorizes this run without changing ${usageMode} mode`
+        : decision === "run"
+          ? `${operation} runs in ${usageMode} mode`
+          : decision === "downshift"
+            ? `${operation} should use its lighter path in ${usageMode} mode`
+            : `${operation} is discretionary and skipped in ${usageMode} mode`,
   };
 }
 

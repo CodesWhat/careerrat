@@ -27,6 +27,26 @@ The agent routes to `configure`, which:
 `configure` never becomes a separate mutation path — it routes through the same
 validated tools that the skills use.
 
+## Paul quality and thinking depth
+
+The app stores AI preferences locally in **Profile**. They use the same choices
+with Claude Code and OpenAI Codex, so selecting a provider never means accepting
+a weaker CareerRat workflow.
+
+- **Paul quality:** **Automatic**, **Faster**, **Balanced**, or **Best**. Automatic
+  chooses by task: Paul and high-stakes judgment stay strong, while web search,
+  extraction, and small helpers use the efficient level suited to their work.
+  The other choices set one overall quality preference.
+
+- **Thinking depth:** **Automatic**, **Low**, **Medium**, or **High**. Automatic
+  chooses by task. The other choices set how much time the selected runtime
+  spends reasoning.
+
+The controls are provider-neutral product settings, not raw model selectors.
+They affect new replies and tasks only. Work already running keeps the frozen
+plan it started with, so changing Settings cannot move a search or application
+task to another runtime halfway through.
+
 ## Gate files and the gate helper
 
 When you state a new constraint mid-flow ("never that company", "below $190K is a
@@ -41,7 +61,8 @@ careerrat gate cut-signal "requires >25% travel" --write
 ```
 
 Gate types: `exclude-company`, `cut-signal`, `keep-signal`, `comp-floor`,
-`comp-target`, `comp-expected`, `do-not-claim`, `do-not-fabricate`.
+`comp-annual-floor`, `comp-target`, `comp-expected`, `do-not-claim`,
+`do-not-fabricate`.
 
 ## Mode switches
 

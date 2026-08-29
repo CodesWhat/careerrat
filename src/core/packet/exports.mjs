@@ -1,9 +1,17 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, join, normalize, relative, sep } from "node:path";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { appRegisterPacketArtifacts as registerPacketArtifacts } from "../db/verbs.mjs";
+import { validDocumentArtifact } from "../documents/artifact-validation.mjs";
 import { exportArtifact as documentExportArtifact } from "../documents/export.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 
@@ -237,6 +245,7 @@ export async function exportPacketArtifacts({
   const artifacts = {};
   const userFacing = { resume: [], coverLetter: [], answers: [] };
   const downloadsErrors = [];
+  const exportGaps = [];
   const generatedAt = now().toISOString();
 
   for (const [sourceKey, storedPath] of sourceEntries(sources)) {
@@ -266,7 +275,15 @@ export async function exportPacketArtifacts({
     artifacts[`${kind}GeneratedAt`] = generatedAt;
     for (const format of ["pdf", "docx"]) {
       const absPath = result[format];
-      if (!absPath) continue;
+      if (!selectedFormats.includes(format)) continue;
+      if (!absPath || !validDocumentArtifact(absPath)) {
+        exportGaps.push({
+          kind,
+          code: "ARTIFACT_EXPORT_FAILED",
+          message: `${titleFor(app, kind)} did not produce a valid ${format.toUpperCase()} file.`,
+        });
+        continue;
+      }
       const key = outputKey(kind, format);
       artifacts[key] = workspaceDisplayPath(workspaceDir, absPath);
       const entry = { format, path: artifacts[key], name: basename(absPath) };
@@ -282,7 +299,27 @@ export async function exportPacketArtifacts({
   if (sources.packetManifest) artifacts.packetManifest = sources.packetManifest;
 
   const priorGaps = Array.isArray(priorManifestForDb.gaps) ? priorManifestForDb.gaps : [];
-  const uploadReady = priorManifestForDb.uploadReady === true;
+  const priorExportFailed = priorGaps.some((gap) => gap?.code === "ARTIFACT_EXPORT_FAILED");
+  const contentGaps = priorGaps.filter((gap) => gap?.code !== "ARTIFACT_EXPORT_FAILED");
+  const generationReady =
+    priorManifestForDb.uploadReady === true || (priorExportFailed && contentGaps.length === 0);
+  const gaps = [...contentGaps, ...exportGaps];
+  const uploadReady = generationReady && exportGaps.length === 0;
+
+  const nextManifest = {
+    ...priorManifestForDb,
+    applicationId: id,
+    generatedAt: priorManifestForDb.generatedAt || generatedAt,
+    exportedAt: generatedAt,
+    uploadReady,
+    status: uploadReady ? "upload-ready" : "reviewable",
+    gapCount: gaps.length,
+    gaps,
+    artifacts: { ...(priorManifestForDb.artifacts || {}), ...artifacts },
+  };
+  const manifestPath = resolveWorkspacePath(workspaceDir, sources.packetManifest);
+  if (manifestPath)
+    writeFileSync(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`, "utf8");
 
   const registered = await appRegisterPacketArtifacts({
     repoRoot,
@@ -290,19 +327,7 @@ export async function exportPacketArtifacts({
     appId: id,
     artifacts,
     now,
-    manifest: {
-      ...priorManifestForDb,
-      applicationId: id,
-      generatedAt: priorManifestForDb.generatedAt || generatedAt,
-      exportedAt: generatedAt,
-      uploadReady,
-      status: priorManifestForDb.status || (uploadReady ? "upload-ready" : "reviewable"),
-      gapCount: Number.isInteger(priorManifestForDb.gapCount)
-        ? priorManifestForDb.gapCount
-        : priorGaps.length,
-      gaps: priorGaps,
-      artifacts: { ...(priorManifestForDb.artifacts || {}), ...artifacts },
-    },
+    manifest: nextManifest,
   });
 
   return {

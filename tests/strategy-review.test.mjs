@@ -265,6 +265,42 @@ test("draftStrategyReview force:true bypasses the freshness gate and calls the A
   assert.equal(draft.headline, "Forced review.");
 });
 
+test("draftStrategyReview sends the frozen coach plan and abort signal to bounded AI", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-1", status: "applied" });
+  const controller = new AbortController();
+  const executionPlan = Object.freeze({
+    version: 1,
+    runtimeId: "codex",
+    operation: "coach.deep",
+    resolved: Object.freeze({ model: "gpt-5.4", effort: "high" }),
+  });
+  let seenOptions;
+
+  const draft = await draftStrategyReview({
+    repoRoot,
+    env: {},
+    force: true,
+    executionPlan,
+    signal: controller.signal,
+    now: new Date("2026-08-15T12:00:00.000Z"),
+    runAI: async (options) => {
+      seenOptions = options;
+      return {
+        body: {
+          ok: true,
+          ai: { used: true },
+          data: { headline: "Frozen review.", findings: [], recommendations: [] },
+        },
+      };
+    },
+  });
+
+  assert.equal(draft.state, "drafted");
+  assert.equal(seenOptions.executionPlan, executionPlan);
+  assert.equal(seenOptions.signal, controller.signal);
+});
+
 test("draftStrategyReview drafts once enough new outcomes have accrued since the last stamp", async () => {
   const repoRoot = tempRepo();
   for (let i = 0; i < 5; i++) {

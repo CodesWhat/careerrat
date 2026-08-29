@@ -7,8 +7,11 @@ import { after, test } from "node:test";
 
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { appUpsert, commUpsert, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
+import { createAppOperationManager } from "../src/core/runtime/app-operation-manager.mjs";
+import { verifiedInstalledExecutionPlan } from "./helpers/installed-runtime-fixture.mjs";
 
 const cleanupRoots = [];
+const testExecutionPlan = (operation) => verifiedInstalledExecutionPlan(operation);
 
 function tempRepo({ db = true } = {}) {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-chat-first-route-"));
@@ -32,6 +35,7 @@ async function boot(repoRoot, options = {}) {
     },
     repoRoot,
     env: {},
+    resolveMissionExecutionPlan: ({ operation }) => testExecutionPlan(operation),
     ...options,
   });
   return routes;
@@ -108,9 +112,9 @@ test("chat-first route module mounts the complete durable write surface", async 
     "POST /api/chat-first/dossier/pdf",
     "POST /api/chat-first/missions",
     "POST /api/chat-first/missions/status",
-    "POST /api/chat-first/missions/step",
     "POST /api/chat-first/missions/run",
     "POST /api/chat-first/missions/resume",
+    "POST /api/chat-first/choice/resolve",
     "POST /api/chat-first/mock/start",
     "POST /api/chat-first/mock/message",
     "POST /api/chat-first/mock/turn",
@@ -123,6 +127,339 @@ test("chat-first route module mounts the complete durable write surface", async 
   ]) {
     assert.equal(routes.has(key), true, key);
   }
+  assert.equal(routes.has("POST /api/chat-first/missions/step"), false);
+});
+
+test("mission control choices persist one action, replay idempotently, and restore the next prompt", async () => {
+  const repoRoot = tempRepo();
+  const api = await import("../src/core/db/verbs.mjs");
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-choice-control",
+      company: "Choice Control Corp",
+      role: "Platform Engineer",
+      status: "applied",
+      evaluation: { gate: "keep" },
+    },
+  });
+  const created = api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-choice-control",
+    title: "Prepare one application",
+    jobs: [{ type: "application", id: "app-choice-control" }],
+    mode: "draft",
+  });
+  const pausePrompt = created.mission.choicePrompt;
+  assert.ok(pausePrompt, "running mission must expose its durable Pause choice");
+  assert.equal(pausePrompt.state, "pending");
+  assert.deepEqual(
+    pausePrompt.options.map((option) => option.actionRef),
+    [
+      {
+        type: "mission.pause",
+        entity: { type: "mission", id: "mission-choice-control" },
+      },
+    ]
+  );
+
+  const calls = [];
+  const routes = await boot(repoRoot, {
+    workspaceAgentRuntime: {
+      executeIntent: async ({ intent }) => {
+        calls.push(intent.type);
+        return { operationResult: { ok: true } };
+      },
+    },
+  });
+  let db = openDb({ repoRoot });
+  const beforeVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEvents = db.prepare("SELECT count(*) AS count FROM activity_events").get().count;
+  const clickedPayload = {
+    entityType: "mission",
+    entityId: "mission-choice-control",
+    choice: {
+      promptId: pausePrompt.id,
+      version: pausePrompt.version,
+      optionIds: [pausePrompt.options[0].id],
+    },
+  };
+  const clicked = await invoke(routes, "POST", "/api/chat-first/choice/resolve", clickedPayload);
+
+  assert.equal(clicked.status, 200);
+  assert.equal(clicked.body.data.handled, true);
+  assert.equal(clicked.body.data.result.mission.status, "paused");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeVersion + 1
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    beforeEvents + 1
+  );
+
+  const replay = await invoke(routes, "POST", "/api/chat-first/choice/resolve", clickedPayload);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.data.result.mission.status, "paused");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeVersion + 1
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    beforeEvents + 1
+  );
+
+  closeAll();
+  const paused = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((mission) => mission.id === "mission-choice-control");
+  db = openDb({ repoRoot });
+  assert.equal(paused.choicePrompt.state, "pending");
+  assert.equal(paused.choicePrompt.options[0].actionRef.type, "mission.resume");
+
+  const resumed = await invoke(routes, "POST", "/api/chat-first/choice/resolve", {
+    entityType: "mission",
+    entityId: "mission-choice-control",
+    text: "resume mission",
+  });
+  assert.equal(resumed.status, 200);
+  assert.equal(resumed.body.data.result.mission.status, "completed");
+  assert.deepEqual(calls, ["job.generate-documents"]);
+  const afterResumeVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const afterResumeEvents = db.prepare("SELECT count(*) AS count FROM activity_events").get().count;
+
+  const resumeReplay = await invoke(routes, "POST", "/api/chat-first/choice/resolve", {
+    entityType: "mission",
+    entityId: "mission-choice-control",
+    text: "resume mission",
+  });
+  assert.equal(resumeReplay.status, 200);
+  assert.equal(resumeReplay.body.data.reused, true);
+  assert.equal(resumeReplay.body.data.result.mission.status, "completed");
+  assert.deepEqual(calls, ["job.generate-documents"]);
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    afterResumeVersion
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    afterResumeEvents
+  );
+
+  closeAll();
+  const completed = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((mission) => mission.id === "mission-choice-control");
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.choicePrompt, undefined);
+});
+
+test("mission Resume choice recovers a live leased step after server restart without stranding the mission", async () => {
+  const repoRoot = tempRepo();
+  const api = await import("../src/core/db/verbs.mjs");
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-choice-restart",
+      company: "Restart Corp",
+      role: "Platform Engineer",
+      status: "applied",
+      evaluation: { gate: "keep" },
+    },
+  });
+  const created = api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-choice-restart",
+    jobs: [{ type: "application", id: "app-choice-restart" }],
+    mode: "draft",
+  });
+  const runningStep = {
+    ...created.mission.steps[0],
+    status: "running",
+    currentAttempt: {
+      id: "attempt-before-restart",
+      number: 1,
+      fence: 1,
+      status: "running",
+      startedAt: created.mission.createdAt,
+      leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+      idempotency: {
+        key: `mission-choice-restart:${created.mission.steps[0].id}`,
+        classification: "receipt-required",
+      },
+    },
+  };
+  const db = openDb({ repoRoot });
+  db.prepare("UPDATE mission_steps SET data = ? WHERE mission_id = ? AND id = ?").run(
+    JSON.stringify(runningStep),
+    created.mission.id,
+    runningStep.id
+  );
+  api.missionSetStatus({ repoRoot, id: created.mission.id, status: "paused" });
+  const paused = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((mission) => mission.id === created.mission.id);
+  const resumePrompt = paused.choicePrompt;
+  const payload = {
+    entityType: "mission",
+    entityId: created.mission.id,
+    choice: {
+      promptId: resumePrompt.id,
+      version: resumePrompt.version,
+      optionIds: [resumePrompt.options[0].id],
+    },
+  };
+  const calls = [];
+  const routes = await boot(repoRoot, {
+    workspaceAgentRuntime: {
+      executeIntent: async ({ intent }) => {
+        calls.push(intent.type);
+        return { operationResult: { ok: true } };
+      },
+    },
+  });
+
+  const resumed = await invoke(routes, "POST", "/api/chat-first/choice/resolve", payload);
+
+  assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+  assert.equal(resumed.body.data.handled, true);
+  assert.equal(resumed.body.data.result.mission.status, "paused");
+  assert.equal(
+    resumed.body.data.result.mission.choicePrompt.options[0].actionRef.type,
+    "mission.resume"
+  );
+  assert.equal(resumed.body.data.result.mission.steps[0].status, "blocked");
+  assert.equal(resumed.body.data.result.mission.steps[0].result.requiresReconciliation, true);
+  assert.deepEqual(calls, []);
+
+  const beforeReplayVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const replay = await invoke(routes, "POST", "/api/chat-first/choice/resolve", payload);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.data.reused, true);
+  assert.equal(replay.body.data.result.mission.status, "paused");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeReplayVersion
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("mock End is durable and idempotent while ordinary free text remains an answer", async () => {
+  const repoRoot = tempRepo();
+  const api = await import("../src/core/db/verbs.mjs");
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-mock-choice-control",
+      company: "Choice Interview Corp",
+      role: "Platform Engineer",
+      status: "interview",
+    },
+  });
+  const started = api.mockInterviewStart({
+    repoRoot,
+    id: "mock-choice-control",
+    applicationId: "app-mock-choice-control",
+    title: "Platform mock interview",
+    questionTotal: 2,
+  });
+  api.mockInterviewMessageAppend({
+    repoRoot,
+    sessionId: started.session.id,
+    role: "assistant",
+    kind: "question",
+    questionNumber: 1,
+    text: "Tell me about an incident you led.",
+  });
+  const prompt = api
+    .chatFirstStateGet({ repoRoot })
+    .mockSessions.find((session) => session.id === started.session.id).choicePrompt;
+  assert.ok(prompt, "active mock interview must expose its durable End choice");
+  assert.equal(prompt.state, "pending");
+  assert.equal(prompt.options[0].actionRef.type, "mock-interview.end");
+
+  const routes = await boot(repoRoot);
+  const db = openDb({ repoRoot });
+  const beforeAnswerVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const ordinary = await invoke(routes, "POST", "/api/chat-first/choice/resolve", {
+    entityType: "mock-interview",
+    entityId: started.session.id,
+    text: "I ended the incident by rolling back and writing the follow-up.",
+  });
+  assert.equal(ordinary.status, 200);
+  assert.equal(ordinary.body.data.handled, false);
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeAnswerVersion
+  );
+
+  const answerText = "I ended the incident by rolling back and writing the follow-up.";
+  const turn = await api.mockInterviewTurn({
+    repoRoot,
+    sessionId: started.session.id,
+    text: answerText,
+    runAI: async () => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          worked: "Clear ownership.",
+          tighten: "Add the measurable result.",
+          nextQuestion: "How did you prevent recurrence?",
+        },
+        ai: { used: true },
+      },
+    }),
+  });
+  assert.equal(turn.answer.text, answerText);
+  assert.equal(turn.session.status, "active");
+
+  const current = api
+    .chatFirstStateGet({ repoRoot })
+    .mockSessions.find((session) => session.id === started.session.id);
+  const endPrompt = current.choicePrompt;
+  const beforeEndVersion = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEndEvents = db.prepare("SELECT count(*) AS count FROM activity_events").get().count;
+  const endPayload = {
+    entityType: "mock-interview",
+    entityId: started.session.id,
+    choice: {
+      promptId: endPrompt.id,
+      version: endPrompt.version,
+      optionIds: [endPrompt.options[0].id],
+    },
+  };
+  const ended = await invoke(routes, "POST", "/api/chat-first/choice/resolve", endPayload);
+  assert.equal(ended.status, 200);
+  assert.equal(ended.body.data.result.session.status, "ended");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeEndVersion + 1
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    beforeEndEvents + 1
+  );
+
+  const replay = await invoke(routes, "POST", "/api/chat-first/choice/resolve", endPayload);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.data.result.session.status, "ended");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeEndVersion + 1
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS count FROM activity_events").get().count,
+    beforeEndEvents + 1
+  );
+
+  closeAll();
+  const reloaded = api
+    .chatFirstStateGet({ repoRoot })
+    .mockSessions.find((session) => session.id === started.session.id);
+  assert.equal(reloaded.choicePrompt.state, "resolved");
+  assert.deepEqual(reloaded.choicePrompt.selectedOptionIds, [endPrompt.options[0].id]);
 });
 
 test("deep ingest prompt dismiss route returns the durable updated aggregate", async () => {
@@ -492,11 +829,193 @@ test("job-thread turn persists both sides and grounds bounded AI in canonical ap
   );
   assert.equal(calls.length, 1);
   assert.equal(calls[0].outputName, "chat_first_job_thread_reply");
+  assert.equal(calls[0].useExecutionPlanRoute, true);
+  assert.deepEqual(calls[0].executionPlan, testExecutionPlan("paul.conversation"));
+  assert.deepEqual(
+    turn.body.data.userMessage.metadata.executionPlan,
+    testExecutionPlan("paul.conversation")
+  );
+  assert.deepEqual(turn.body.data.executionPlan, testExecutionPlan("paul.conversation"));
   const prompt = JSON.stringify(calls[0].messages);
   assert.match(prompt, /Massive Dynamic/);
   assert.match(prompt, /Staff Platform Engineer/);
   assert.match(prompt, /How should I frame my migration story/);
   assert.doesNotMatch(prompt, /987654|current_base/);
+});
+
+test("job-thread route reuses one in-flight durable operation for a lost-response retry", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-inflight-turn",
+      company: "One Call Corp",
+      role: "Operations Lead",
+      status: "applied",
+    },
+  });
+  const routeModule = await import("../src/cli/chat-first-route.mjs");
+  let calls = 0;
+  let releaseCall;
+  const callGate = new Promise((resolve) => {
+    releaseCall = resolve;
+  });
+  const callAIImpl = async () => {
+    calls += 1;
+    await callGate;
+    return aiReply({ reply: "Lead with the operating result.", answerMode: null });
+  };
+  const appOperations = createAppOperationManager({
+    repoRoot,
+    env: {},
+    kinds: routeModule.createChatFirstOperationKinds({
+      repoRoot,
+      env: {},
+      resolveExecutionPlan: ({ operation }) => testExecutionPlan(operation),
+      callAIImpl,
+    }),
+  });
+  const routes = await boot(repoRoot, { appOperations, callAIImpl });
+  const payload = {
+    applicationId: "app-inflight-turn",
+    text: "What should I emphasize?",
+    requestId: "job-thread-request-inflight-0001",
+  };
+
+  try {
+    const first = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", payload);
+    const retried = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", payload);
+    for (let attempt = 0; calls < 1 && attempt < 100; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+
+    assert.equal(first.status, 202);
+    assert.equal(retried.status, 202);
+    assert.equal(retried.body.data.reused, true);
+    assert.equal(retried.body.data.operation.id, first.body.data.operation.id);
+    assert.equal(calls, 1);
+
+    releaseCall();
+    const completed = await appOperations.wait(first.body.data.operation.id);
+    assert.equal(completed.status, "completed");
+    const state = (await import("../src/core/db/verbs.mjs")).chatFirstStateGet({ repoRoot });
+    const thread = state.jobThreads.find(
+      (candidate) => candidate.applicationId === "app-inflight-turn"
+    );
+    assert.equal(thread.messages.filter((message) => message.role === "user").length, 1);
+    assert.equal(thread.messages.filter((message) => message.role === "assistant").length, 1);
+  } finally {
+    releaseCall();
+    await appOperations.shutdown();
+  }
+});
+
+test("an interrupted job-thread turn resumes under the next app owner without duplicating messages", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-restarted-turn",
+      company: "Resume Corp",
+      role: "Operations Lead",
+      status: "applied",
+    },
+  });
+  const routeModule = await import("../src/cli/chat-first-route.mjs");
+  let resolveOldReply;
+  const oldReply = new Promise((resolve) => {
+    resolveOldReply = resolve;
+  });
+  let oldCalls = 0;
+  const old = createAppOperationManager({
+    repoRoot,
+    env: {},
+    ownerId: "job-turn-old-owner",
+    kinds: routeModule.createChatFirstOperationKinds({
+      repoRoot,
+      env: {},
+      resolveExecutionPlan: ({ operation }) => testExecutionPlan(operation),
+      async callAIImpl() {
+        oldCalls += 1;
+        return oldReply;
+      },
+    }),
+  });
+  const oldRoutes = await boot(repoRoot, { appOperations: old });
+  const payload = {
+    applicationId: "app-restarted-turn",
+    text: "What should I emphasize?",
+    requestId: "job-thread-request-restart-0001",
+  };
+  const started = await invoke(oldRoutes, "POST", "/api/chat-first/job-thread/turn", payload);
+  while (oldCalls < 1) await new Promise((resolve) => setImmediate(resolve));
+
+  const fresh = createAppOperationManager({
+    repoRoot,
+    env: {},
+    ownerId: "job-turn-new-owner",
+    kinds: routeModule.createChatFirstOperationKinds({
+      repoRoot,
+      env: {},
+      resolveExecutionPlan: ({ operation }) => testExecutionPlan(operation),
+      async callAIImpl() {
+        return aiReply({ reply: "Lead with the operating result.", answerMode: null });
+      },
+    }),
+  });
+  const recovered = fresh.recoverOrphans();
+  assert.equal(recovered.length, 1);
+  assert.equal(recovered[0].id, started.body.data.operation.id);
+  const completed = await fresh.wait(started.body.data.operation.id);
+  assert.equal(completed.status, "completed", JSON.stringify(completed.error));
+
+  resolveOldReply(aiReply({ reply: "This stale answer must not land.", answerMode: null }));
+  await old.wait(started.body.data.operation.id);
+  const state = (await import("../src/core/db/verbs.mjs")).chatFirstStateGet({ repoRoot });
+  const thread = state.jobThreads.find(
+    (candidate) => candidate.applicationId === "app-restarted-turn"
+  );
+  assert.equal(thread.messages.filter((message) => message.role === "user").length, 1);
+  assert.equal(thread.messages.filter((message) => message.role === "assistant").length, 1);
+  assert.equal(thread.messages.at(-1).text, "Lead with the operating result.");
+  await Promise.all([old.shutdown(), fresh.shutdown()]);
+});
+
+test("job-thread choice clicks enforce the durable prompt version before appending", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-choice-version",
+      company: "Version Labs",
+      role: "Operations Lead",
+      status: "applied",
+    },
+  });
+  const routes = await boot(repoRoot, {
+    callAIImpl: async () =>
+      aiReply({ reply: "Should I draft the reply now?", answerMode: "yes-no" }),
+  });
+  const first = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", {
+    applicationId: "app-choice-version",
+    text: "Check with me first.",
+  });
+  const prompt = first.body.data.assistantMessage.metadata.choicePrompt;
+
+  const stale = await invoke(routes, "POST", "/api/chat-first/job-thread/turn", {
+    applicationId: "app-choice-version",
+    text: "Yes",
+    choice: { promptId: prompt.id, version: prompt.version + 1, optionIds: ["yes"] },
+  });
+
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.code, "STALE_CHOICE_PROMPT");
+  const state = (await import("../src/core/db/verbs.mjs")).chatFirstStateGet({ repoRoot });
+  const thread = state.jobThreads.find(
+    (candidate) => candidate.applicationId === "app-choice-version"
+  );
+  assert.equal(thread.messages.length, 2);
+  assert.equal(thread.messages[1].metadata.choicePrompt.state, "pending");
 });
 
 test("job-thread turn unwraps a nested JSON reply before it reaches the chat bubble", async () => {
@@ -613,9 +1132,17 @@ test("invalid structured mock feedback retains one durable answer and can be ret
   });
   let callCount = 0;
   let feedbackValid = false;
+  let selectedPlan = testExecutionPlan("coach.deep");
+  const calls = [];
+  let planResolutions = 0;
   const routes = await boot(repoRoot, {
+    resolveMissionExecutionPlan: () => {
+      planResolutions += 1;
+      return selectedPlan;
+    },
     callAIImpl: async (options) => {
       callCount += 1;
+      calls.push(options);
       if (options.outputName === "chat_first_mock_question") {
         return aiReply({ question: "Tell me about a difficult decision." });
       }
@@ -634,6 +1161,9 @@ test("invalid structured mock feedback retains one durable answer and can be ret
     applicationId: "app-mock-invalid",
     questionCount: 2,
   });
+  const initialPlan = selectedPlan;
+  const initialState = (await import("../src/core/db/verbs.mjs")).chatFirstStateGet({ repoRoot });
+  assert.deepEqual(initialState.mockSessions[0].executionPlan, initialPlan);
   const failed = await invoke(routes, "POST", "/api/chat-first/mock/turn", {
     sessionId: "mock-invalid",
     text: "I chose the safer rollout.",
@@ -648,6 +1178,14 @@ test("invalid structured mock feedback retains one durable answer and can be ret
   assert.equal(session.feedback.length, 0);
   assert.equal(callCount, 3);
 
+  selectedPlan = {
+    ...testExecutionPlan("coach.deep"),
+    resolved: {
+      ...testExecutionPlan("coach.deep").resolved,
+      model: "gpt-5.6-luna",
+      effort: "low",
+    },
+  };
   feedbackValid = true;
   const retried = await invoke(routes, "POST", "/api/chat-first/mock/turn", {
     sessionId: "mock-invalid",
@@ -664,4 +1202,14 @@ test("invalid structured mock feedback retains one durable answer and can be ret
     2
   );
   assert.equal(retried.body.data.session.feedback.length, 1);
+  assert.deepEqual(retried.body.data.session.executionPlan, initialPlan);
+  assert.deepEqual(
+    calls.map((options) => options.executionPlan),
+    calls.map(() => initialPlan)
+  );
+  assert.equal(
+    calls.every((options) => options.useExecutionPlanRoute === true),
+    true
+  );
+  assert.equal(planResolutions, 1, "a saved mock plan must bypass current provider selection");
 });

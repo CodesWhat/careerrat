@@ -265,7 +265,7 @@ function bootServer(repoRoot, opts = {}) {
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
   }
-  mountIntakeRoutes({
+  const intakeRuntime = mountIntakeRoutes({
     addRoute,
     repoRoot,
     env: opts.env ?? PROXY_ENV,
@@ -274,7 +274,9 @@ function bootServer(repoRoot, opts = {}) {
     runSkillStream: opts.runSkillStream,
     chatRuntime: opts.chatRuntime,
     workspaceAgentRuntime: opts.workspaceAgentRuntime,
+    appOperations: opts.appOperations,
     captureTextImpl: opts.captureTextImpl,
+    heartbeatMs: opts.heartbeatMs,
   });
 
   const server = createServer((req, res) => {
@@ -286,6 +288,7 @@ function bootServer(repoRoot, opts = {}) {
     }
     dispatchHttpRoute(route, req, res);
   });
+  server.intakeRuntime = intakeRuntime;
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));
   });
@@ -1531,6 +1534,85 @@ test("POST /api/intake/confirm: a JD evaluates through workspace-main and return
   }
 });
 
+test("POST /api/intake/confirm gives confirmed workspace dispatches one durable owner", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({
+    repoRoot,
+    rawInput: "Acme\nSRE\nKeep production reliable.",
+    inputKind: "text",
+  });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture({
+        entities: { company: "Acme", role: "SRE" },
+      }),
+      dispatch: {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "job.evaluate-request" },
+      },
+    },
+  });
+  const evaluation = { gate: "keep", fitScore: 91, fitReasons: ["Strong reliability evidence"] };
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    appOperations: {
+      async start(input) {
+        calls.push(input);
+        return {
+          reused: false,
+          operation: {
+            id: "app-operation-intake-confirm",
+            status: "completed",
+            resultRef: {
+              threadId: "workspace-main",
+              message: {
+                text: "Evaluated Acme — SRE: Keep (91/100 fit).",
+                artifacts: [{ kind: "job_evaluation", evaluation }],
+                metadata: { applicationId: "app-acme", state: "keep", nextActions: [] },
+              },
+            },
+          },
+        };
+      },
+      async wait() {
+        throw new Error("a completed operation should not need to wait");
+      },
+    },
+    workspaceAgentRuntime: {
+      async executeIntent() {
+        throw new Error("confirmed intake must not bypass its durable operation owner");
+      },
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(status, 200);
+    assert.equal(body.item.status, "done");
+    assert.equal(body.item.result.summary, "Evaluated Acme — SRE: Keep (91/100 fit).");
+    assert.deepEqual(calls, [
+      {
+        kind: "workspace.intent",
+        input: {
+          requestId: `intake-confirm:${id}`,
+          intent: {
+            type: "job.evaluate-request",
+            entity: { type: "intake", id },
+          },
+        },
+      },
+    ]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/intake/confirm returns a prepared packet and supervised handoff for direct apply intake", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -1709,6 +1791,109 @@ test("POST /api/intake/confirm: Lane B fires runSkillStream in the background �
   }
 });
 
+test("POST /api/intake/confirm: Lane B freezes and reuses its AI execution plan across retry", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture(),
+      trackerMatch: null,
+      dispatch: { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } },
+    },
+  });
+
+  const env = { ...PROXY_ENV };
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    env,
+    runSkillStream: async (args) => {
+      calls.push(args);
+      return { ok: false, error: "temporary failure" };
+    },
+  });
+  try {
+    const first = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.item.status, "running");
+    assert.equal(first.body.item.operation.executionPlan.runtimeId, "managed-anthropic");
+    assert.equal(first.body.item.operation.executionPlan.operation, "application.judgment");
+    await waitForPredicate(() => intakeOne({ repoRoot, id }).status === "error");
+    const frozenPlan = intakeOne({ repoRoot, id }).operation.executionPlan;
+    assert.deepEqual(calls[0].executionPlan, frozenPlan);
+    assert.equal(calls[0].useExecutionPlanRoute, true);
+
+    env.CAREERRAT_AI_PROXY_URL = "http://127.0.0.1:9999";
+    intakeUpdate({ repoRoot, id, patch: { status: "proposed" } });
+    const retried = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(retried.status, 200);
+    assert.equal(retried.body.item.operation.retryOf, first.body.item.operation.id);
+    assert.deepEqual(retried.body.item.operation.executionPlan, frozenPlan);
+    await waitForPredicate(() => calls.length === 2);
+    assert.deepEqual(calls[1].executionPlan, frozenPlan);
+    assert.equal(calls[1].useExecutionPlanRoute, true);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/intake/confirm: Lane B rejects a saved plan for another operation", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture(),
+      trackerMatch: null,
+      dispatch: { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } },
+      operation: {
+        id: "prior-operation",
+        status: "error",
+        executionPlan: {
+          policyVersion: 1,
+          operation: "coach.deep",
+          runtimeId: "managed-anthropic",
+          adapterVersion: 1,
+          requested: { quality: "automatic", reasoning: "automatic" },
+          resolved: {
+            quality: "best",
+            reasoning: "high",
+            model: "opus",
+            modelSource: "alias",
+            effort: "high",
+            speedTier: null,
+          },
+          fallback: null,
+        },
+      },
+    },
+  });
+
+  let dispatched = false;
+  const server = await bootServer(repoRoot, {
+    runSkillStream: async () => {
+      dispatched = true;
+      return { ok: true };
+    },
+  });
+  try {
+    const result = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /coach\.deep.*application\.judgment/i);
+    assert.equal(dispatched, false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/intake/confirm: Lane B settles to 'error' when the background run rejects", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -1737,6 +1922,79 @@ test("POST /api/intake/confirm: Lane B settles to 'error' when the background ru
     await waitForPredicate(() => intakeOne({ repoRoot, id }).status === "error");
     const settled = intakeOne({ repoRoot, id });
     assert.match(settled.error, /skill run blew up/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("Lane B heartbeats while quiet and settles to a retryable error during server shutdown", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture(),
+      trackerMatch: null,
+      dispatch: { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } },
+    },
+  });
+
+  const server = await bootServer(repoRoot, {
+    heartbeatMs: 5,
+    runSkillStream: async ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  });
+  try {
+    const { body } = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(body.item.status, "running");
+    assert.equal(server.intakeRuntime.ownsLaneB(id), true);
+    const startedAt = body.item.operation.heartbeatAt;
+    await waitForPredicate(() => intakeOne({ repoRoot, id }).operation.heartbeatAt !== startedAt);
+
+    await server.intakeRuntime.shutdownLaneB();
+    const settled = intakeOne({ repoRoot, id });
+    assert.equal(server.intakeRuntime.ownsLaneB(id), false);
+    assert.equal(settled.status, "error");
+    assert.equal(settled.operation.error.code, "INTAKE_SERVER_STOPPED");
+    assert.match(settled.error, /app closed/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("the intake owner explicitly recovers an orphaned Lane B run after startup", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({ repoRoot, rawInput: "a JD", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "running",
+      operation: {
+        id: `${id}:attempt-old`,
+        status: "running",
+        skill: "evaluate-job",
+        startedAt: "2026-08-27T12:00:00.000Z",
+        heartbeatAt: "2026-08-27T12:00:30.000Z",
+      },
+    },
+  });
+
+  const server = await bootServer(repoRoot);
+  try {
+    assert.equal(intakeOne({ repoRoot, id }).status, "running");
+    server.intakeRuntime.recoverOrphans();
+    const settled = intakeOne({ repoRoot, id });
+    assert.equal(settled.status, "error");
+    assert.equal(settled.operation.error.code, "INTAKE_SERVER_RESTARTED");
+    assert.match(settled.error, /restarted/i);
   } finally {
     await closeServer(server);
   }

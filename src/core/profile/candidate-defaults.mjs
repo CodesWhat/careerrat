@@ -38,6 +38,7 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
       current_base: null,
       target_base: null,
       minimum_base: null,
+      minimum_annual_earnings: null,
       target_total_comp: null,
       cash_over_equity: true,
       expected_base: null,

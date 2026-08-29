@@ -291,10 +291,129 @@ test("partial-offer hydration uses a bounded worker pool and preserves output or
   }
 });
 
-test("the presentation limit is applied before expensive partial-offer hydration", async () => {
+test("source acquisition uses a bounded worker pool instead of fetching boards serially", async () => {
+  const repoRoot = tempRepo();
+  const release = deferred();
+  const fourStarted = deferred();
+  try {
+    const companies = Array.from({ length: 9 }, (_, index) => ({
+      name: `Company ${index}`,
+      careers_url: `https://jobs.lever.co/company-${index}`,
+    }));
+    const configPath = writeSourcedScanConfig(repoRoot, { tracked_companies: companies });
+    let active = 0;
+    let maxActive = 0;
+    let started = 0;
+    const scan = runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      fetchImpl: async (url) => {
+        const slug = new URL(String(url)).pathname.split("/").filter(Boolean).at(-1);
+        started += 1;
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        if (started === 4) fourStarted.resolve();
+        await release.promise;
+        active -= 1;
+        return new Response(
+          JSON.stringify([
+            {
+              text: `Platform Engineer ${slug}`,
+              hostedUrl: `https://jobs.lever.co/${slug}/role-1`,
+              categories: { location: "Remote - US" },
+              descriptionPlain: "Build reliable platform infrastructure and developer tooling.",
+            },
+          ]),
+          { status: 200 }
+        );
+      },
+    });
+
+    const ranConcurrently = await Promise.race([
+      fourStarted.promise.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 75)),
+    ]);
+    release.resolve();
+    const summary = await scan;
+
+    assert.equal(ranConcurrently, true);
+    assert.ok(maxActive > 1);
+    assert.ok(maxActive <= 4);
+    assert.equal(summary.scanned, companies.length);
+  } finally {
+    release.resolve();
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("offer liveness verification uses bounded concurrency", async () => {
+  const repoRoot = tempRepo();
+  const release = deferred();
+  const fourStarted = deferred();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot);
+    let active = 0;
+    let maxActive = 0;
+    let started = 0;
+    const scan = runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      verify: true,
+      fetchImpl: async (url) => {
+        if (String(url).includes("api.lever.co")) {
+          return new Response(
+            JSON.stringify(
+              Array.from({ length: 9 }, (_, index) => ({
+                text: `Platform Engineer ${index}`,
+                hostedUrl: `https://jobs.lever.co/acme/role-${index}`,
+                categories: { location: "Remote - US" },
+                descriptionPlain: "Build reliable platform infrastructure and developer tooling.",
+              }))
+            ),
+            { status: 200 }
+          );
+        }
+        started += 1;
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        if (started === 4) fourStarted.resolve();
+        await release.promise;
+        active -= 1;
+        return new Response("live", { status: 200 });
+      },
+    });
+
+    const ranConcurrently = await Promise.race([
+      fourStarted.promise.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 75)),
+    ]);
+    release.resolve();
+    const summary = await scan;
+
+    assert.equal(ranConcurrently, true);
+    assert.ok(maxActive > 1);
+    assert.ok(maxActive <= 6);
+    assert.equal(summary.expired, 0);
+    assert.equal(summary.new, 5);
+  } finally {
+    release.resolve();
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("the presentation limit is applied after hydration so rejected candidates backfill", async () => {
   const repoRoot = tempRepo();
   try {
     candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_base: 180000 } },
+    });
     const companies = Array.from({ length: 8 }, (_, index) => `Limited ${index}`);
     sourceConfigPut({
       repoRoot,
@@ -309,7 +428,9 @@ test("the presentation limit is applied before expensive partial-offer hydration
         })),
       },
     });
+    let active = 0;
     let hydrated = 0;
+    let maxActive = 0;
     const summary = await runSourcedScan({
       repoRoot,
       write: false,
@@ -324,14 +445,91 @@ test("the presentation limit is applied before expensive partial-offer hydration
       },
       resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       hydrateOfferImpl: async (offer) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        active -= 1;
         hydrated += 1;
-        return { ...offer, bodyText: "Full role body", bodyPartial: false };
+        const index = Number(String(offer.url).match(/limited-role-(\d+)/)?.[1]);
+        return {
+          ...offer,
+          bodyText:
+            index < 3
+              ? "Salary Range: $100,000 - $120,000 annually."
+              : "Salary Range: $200,000 - $240,000 annually.",
+          bodyPartial: false,
+        };
       },
     });
 
     assert.equal(summary.new, 3);
-    assert.equal(summary.overflow, 5);
-    assert.equal(hydrated, 3);
+    assert.equal(summary.qualified, 5);
+    assert.equal(summary.filteredSalary, 3);
+    assert.equal(summary.overflow, 2);
+    assert.equal(hydrated, 8);
+    assert.ok(maxActive <= 4, `expected at most four hydrations, saw ${maxActive}`);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("the per-company cap is applied after hydration so rejected roles do not consume it", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_base: 180000 } },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: { search_preferences: { presentation_cap_per_company: 2 } },
+    });
+    const sources = Array.from({ length: 4 }, (_, index) => ({
+      provider: "Remote Vibe Coding Jobs",
+      source_type: "rss",
+      label: `FloodCo feed ${index}`,
+      rssUrl: `https://example.test/flood-${index}.xml`,
+      enabled: true,
+    }));
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: { searches: sources },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: false,
+      fetchImpl: async (url) => {
+        const index = Number(String(url).match(/flood-(\d+)\.xml/)?.[1]);
+        return rssResponse({
+          company: "FloodCo",
+          title: `Staff Platform Engineer ${index}`,
+          url: `https://jobs.example.test/flood-role-${index}`,
+        });
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      hydrateOfferImpl: async (offer) => {
+        const index = Number(String(offer.url).match(/flood-role-(\d+)/)?.[1]);
+        return {
+          ...offer,
+          bodyText:
+            index < 2
+              ? "Salary Range: $100,000 - $120,000 annually."
+              : "Salary Range: $200,000 - $240,000 annually.",
+          bodyPartial: false,
+        };
+      },
+    });
+
+    assert.equal(summary.new, 2);
+    assert.equal(summary.qualified, 2);
+    assert.equal(summary.filteredSalary, 2);
+    assert.equal(summary.overflow, 0);
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -1066,6 +1264,189 @@ test("DB RSS scan replaces a feed preview with the canonical ATS job body before
   }
 });
 
+test("DB RSS scan requalifies canonical job facts before capture", async () => {
+  const repoRoot = tempRepo();
+  const feedUrl = "https://remotevibecodingjobs.com/feed.xml";
+  const roles = [
+    {
+      company: "Stealth Startup",
+      title: "Founding Software Engineer",
+      slug: "stealth",
+      location: "San Francisco, CA (Remote)",
+      bodyText: "Location: San Francisco Bay Area, CA (in-person).",
+    },
+    {
+      company: "David",
+      title: "Software Engineer, AI & Internal Tools",
+      slug: "david",
+      location: "New York, NY (Remote)",
+      bodyText: "We work in the office 5 days per week in New York City.",
+    },
+    {
+      company: "Credence",
+      title: "AI Software Engineer",
+      slug: "credence",
+      location: "Tysons Corner, VA (Remote)",
+      bodyText: "Salary Range: $120,000 - $150,000 annually.",
+    },
+  ];
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        compensation: { minimum_base: 180000 },
+        location: {
+          home: "Brooklyn, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: false,
+          max_commute_days_per_week: 2,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: { role_buckets: [{ name: "Primary", titles: ["Software Engineer"] }] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "RemoteVibeCodingJobs",
+            source_type: "rss",
+            label: "Remote Vibe Coding Jobs",
+            rssUrl: feedUrl,
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const feed = `<?xml version="1.0"?><rss version="2.0"><channel>${roles
+      .map(
+        (role) =>
+          `<item><title>${role.company} — ${role.title} (Remote)</title><link>https://remotevibecodingjobs.com/jobs/${role.slug}</link><description>Location: ${role.location.replace(" (Remote)", "")}</description><guid>${role.slug}</guid></item>`
+      )
+      .join("")}</channel></rss>`;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      fetchImpl: async (url) => {
+        assert.equal(String(url), feedUrl);
+        return new Response(feed, { status: 200 });
+      },
+      hydrateOfferImpl: async (offer) => {
+        const canonical = roles.find((role) => role.company === offer.company);
+        return {
+          ...offer,
+          location: canonical.location,
+          bodyText: canonical.bodyText,
+          bodyPartial: false,
+        };
+      },
+    });
+
+    assert.equal(summary.new, 0);
+    assert.equal(summary.filteredLocation, 2);
+    assert.equal(summary.filteredSalary, 1);
+    assert.deepEqual(summary.rejectionSamples.location.map((row) => row.reason).sort(), [
+      "office-days-exceed-preference",
+      "onsite-not-allowed",
+    ]);
+    assert.equal(summary.rejectionSamples.salary[0]?.reason, "comp-below-floor");
+    assert.equal(
+      openDb({ repoRoot }).prepare("SELECT COUNT(*) AS count FROM sourced").get().count,
+      0
+    );
+    assert.equal(existsSync(userPath({ repoRoot }, "workspace/jobs")), false);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("partial preview policy waits for canonical location and compensation before rejection", async () => {
+  const repoRoot = tempRepo();
+  const feedUrl = "https://remotevibecodingjobs.com/misleading-preview.xml";
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        compensation: { minimum_base: 180000 },
+        location: {
+          home: "Brooklyn, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: false,
+          max_commute_days_per_week: 2,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: { role_buckets: [{ name: "Primary", titles: ["Software Engineer"] }] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "RemoteVibeCodingJobs",
+            source_type: "rss",
+            label: "Remote Vibe Coding Jobs",
+            rssUrl: feedUrl,
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const feed = `<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>Preview Location Co — Software Engineer (Remote)</title><link>https://jobs.example.test/preview-location</link><description>Location: San Francisco Bay Area, CA (in-person)</description><guid>preview-location</guid></item>
+      <item><title>Preview Comp Co — Software Engineer (Remote)</title><link>https://jobs.example.test/preview-comp</link><description>Salary Range: $100,000 - $120,000 annually.</description><guid>preview-comp</guid></item>
+    </channel></rss>`;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: false,
+      fetchImpl: async (url) => {
+        assert.equal(String(url), feedUrl);
+        return new Response(feed, { status: 200 });
+      },
+      hydrateOfferImpl: async (offer) => ({
+        ...offer,
+        location: "Remote - United States",
+        bodyText: "Salary Range: $200,000 - $240,000 annually. This is a fully remote role.",
+        bodyPartial: false,
+      }),
+    });
+
+    assert.equal(summary.new, 2);
+    assert.equal(summary.qualified, 2);
+    assert.equal(summary.filteredLocation, 0);
+    assert.equal(summary.filteredSalary, 0);
+    assert.deepEqual(summary.offers.map((offer) => offer.company).sort(), [
+      "Preview Comp Co",
+      "Preview Location Co",
+    ]);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("search-source watermarks wait until the full scan is durably persisted", async () => {
   const repoRoot = tempRepo();
   const secondResponse = deferred();
@@ -1147,6 +1528,127 @@ test("search-source watermarks wait until the full scan is durably persisted", a
     assert.match(completed.searches[1].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
   } finally {
     secondResponse.resolve(new Response("", { status: 200 }));
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("an in-flight scan never stamps a replacement source URL it did not fetch", async () => {
+  const repoRoot = tempRepo();
+  const response = deferred();
+  const requested = deferred();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            id: "venue-feed",
+            label: "Venue jobs",
+            source_type: "rss",
+            rssUrl: "https://example.test/old.xml",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+
+    const scan = runSourcedScan({
+      repoRoot,
+      write: true,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImpl: async (url) => {
+        assert.equal(String(url), "https://example.test/old.xml");
+        requested.resolve();
+        return response.promise;
+      },
+    });
+    await requested.promise;
+
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            id: "venue-feed",
+            label: "Venue jobs",
+            source_type: "rss",
+            rssUrl: "https://example.test/new.xml",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+    response.resolve(
+      rssResponse({
+        company: "Venue Co",
+        title: "Event Operations Manager",
+        url: "https://example.test/jobs/event-ops",
+      })
+    );
+    await scan;
+
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0];
+    assert.equal(stored.rssUrl, "https://example.test/new.xml");
+    assert.equal(stored.recency.lastRunAt, undefined);
+  } finally {
+    response.resolve(new Response("", { status: 200 }));
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("an in-flight company scan never stamps a replacement careers URL it did not fetch", async () => {
+  const repoRoot = tempRepo();
+  const response = deferred();
+  const requested = deferred();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/oldco" },
+    });
+
+    const scan = runSourcedScan({
+      repoRoot,
+      write: true,
+      fetchImpl: async (url) => {
+        assert.match(String(url), /api\.lever\.co\/v0\/postings\/oldco/);
+        requested.resolve();
+        return response.promise;
+      },
+    });
+    await requested.promise;
+
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/newco" },
+    });
+    response.resolve(
+      new Response(
+        JSON.stringify([
+          {
+            text: "Platform Engineer",
+            hostedUrl: "https://jobs.lever.co/oldco/role-1",
+            categories: { location: "Remote" },
+            descriptionPlain: "Build reliable infrastructure and developer tooling.",
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    await scan;
+
+    const stored = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies[0];
+    assert.equal(stored.careers_url, "https://jobs.lever.co/newco");
+    assert.equal(stored.lastRunAt, undefined);
+  } finally {
+    response.resolve(new Response("[]", { status: 200 }));
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -1245,6 +1747,304 @@ test("a successful no-op source advances while a failed sibling remains retryabl
   }
 });
 
+test("a writable DB search hides stale sourced rows that fail the current compensation floor", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        compensation: { minimum_base: 180000 },
+        authorization: { work_authorized: false, requires_sponsorship: true },
+        location: {
+          home: "Brooklyn, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: false,
+          max_commute_days_per_week: 2,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [
+          {
+            name: "Platform engineering",
+            titles: ["Staff Platform Engineer", "Senior Software Engineer"],
+          },
+        ],
+        search_preferences: { posting_age: { mode: "fixed-days", days: 30 } },
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: { searches: [] } });
+
+    const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+    mkdirSync(jobsDir, { recursive: true });
+    const saved = [
+      {
+        id: "sourced-below-floor",
+        company: "Credence Example",
+        role: "Senior Software Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/credence",
+        loc: "Tysons Corner, VA (Remote)",
+        artifact: "workspace/jobs/credence-example.md",
+        body: "Salary Range: $120,000 - $150,000 annually.",
+      },
+      {
+        id: "sourced-clears-floor",
+        company: "Eligible Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/eligible",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/eligible-example.md",
+        body: "The base salary range is $190,000 - $240,000 annually.",
+      },
+      {
+        id: "sourced-comp-unknown",
+        company: "Unknown Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/unknown",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/unknown-example.md",
+        body: "Compensation depends on experience.",
+      },
+      {
+        id: "sourced-reviewed-hold",
+        company: "Reviewed Example",
+        role: "Senior Software Engineer",
+        status: "reviewed-hold",
+        link: "https://jobs.example.test/reviewed",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/reviewed-example.md",
+        body: "Salary Range: $100,000 - $140,000 annually.",
+      },
+      {
+        id: "sourced-below-seniority",
+        company: "Junior Example",
+        role: "Junior Software Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/junior",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/junior-example.md",
+        body: "The base salary range is $190,000 - $220,000 annually.",
+      },
+      {
+        id: "sourced-foreign-remote",
+        company: "Europe Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/europe",
+        loc: "Europe (Remote)",
+        artifact: "workspace/jobs/europe-example.md",
+        body: "The base salary range is $190,000 - $220,000 annually.",
+      },
+      {
+        id: "sourced-too-many-office-days",
+        company: "Hybrid Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/hybrid",
+        loc: "New York, NY (Hybrid)",
+        artifact: "workspace/jobs/hybrid-example.md",
+        body: "This role requires working in the office 3 days per week. Base salary: $190,000 - $220,000.",
+      },
+      {
+        id: "sourced-too-old",
+        company: "Old Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/old",
+        loc: "USA (Remote)",
+        postedAt: "2026-06-01T00:00:00.000Z",
+        artifact: "workspace/jobs/old-example.md",
+        body: "The base salary range is $190,000 - $220,000 annually.",
+      },
+      {
+        id: "sourced-no-sponsorship",
+        company: "Authorization Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/no-sponsorship",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/authorization-example.md",
+        body: "The base salary range is $190,000 - $220,000 annually. We do not offer visa sponsorship.",
+      },
+      {
+        id: "sourced-unsafe-artifact",
+        company: "Unknown Capture Example",
+        role: "Staff Platform Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/unsafe-artifact",
+        loc: "USA (Remote)",
+        artifact: "workspace/jobs/../outside.md",
+        body: "Salary range: $100,000 - $120,000 annually.",
+      },
+    ];
+    for (const row of saved) {
+      writeFileSync(
+        userPath({ repoRoot }, row.artifact),
+        `---\ncompany: ${row.company}\nrole: ${row.role}\npartial: true\n---\n\n${row.body}\n`
+      );
+    }
+    sourcedUpsertBatch({
+      repoRoot,
+      rows: saved.map(({ artifact, body: _body, ...row }) => ({
+        ...row,
+        source: "fixture",
+        channel: "board",
+        base: "verify",
+        fitScore: 80,
+        fitBucket: "med",
+        fitBasis: "triage",
+        gate: "review",
+        sourcedAt: "2026-08-27T12:00:00.000Z",
+        updatedAt: "2026-08-27T12:00:00.000Z",
+        artifacts: { jd: artifact },
+        scanner: { bodyPartial: true },
+      })),
+    });
+
+    const db = openDb({ repoRoot });
+    const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+    const beforeEvents = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+    let guardCalls = 0;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      writeGuard: () => {
+        guardCalls += 1;
+      },
+    });
+
+    const rows = new Map(
+      db
+        .prepare("SELECT id, data FROM sourced ORDER BY id")
+        .all()
+        .map((row) => [row.id, JSON.parse(row.data)])
+    );
+    assert.equal(summary.revalidatedExisting.examined, 9);
+    assert.equal(summary.revalidatedExisting.readable, 8);
+    assert.equal(summary.revalidatedExisting.unreadable, 1);
+    assert.deepEqual(
+      new Set(summary.revalidatedExisting.hiddenIds),
+      new Set([
+        "sourced-below-floor",
+        "sourced-below-seniority",
+        "sourced-foreign-remote",
+        "sourced-too-many-office-days",
+        "sourced-too-old",
+        "sourced-no-sponsorship",
+      ])
+    );
+    assert.equal(summary.revalidatedExisting.hidden, 6);
+    assert.equal(rows.get("sourced-below-floor").status, "cut");
+    assert.equal(rows.get("sourced-below-floor").policyRevalidation.reason, "comp-below-floor");
+    assert.equal(rows.get("sourced-clears-floor").status, "sourced");
+    assert.equal(rows.get("sourced-comp-unknown").status, "sourced");
+    assert.equal(rows.get("sourced-reviewed-hold").status, "reviewed-hold");
+    assert.equal(rows.get("sourced-below-seniority").status, "cut");
+    assert.equal(rows.get("sourced-foreign-remote").status, "cut");
+    assert.equal(rows.get("sourced-too-many-office-days").status, "cut");
+    assert.equal(rows.get("sourced-too-old").status, "cut");
+    assert.equal(rows.get("sourced-no-sponsorship").status, "cut");
+    assert.equal(rows.get("sourced-unsafe-artifact").status, "sourced");
+    assert.equal(db.prepare("SELECT version FROM meta WHERE id = 1").get().version, beforeMeta + 1);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count,
+      beforeEvents + 1
+    );
+    assert.equal(guardCalls, 1);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("writable searches skip unchanged saved-job policy revalidation", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_base: 100000 } },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: { searches: [] } });
+    const artifact = "workspace/jobs/policy-cache-example.md";
+    mkdirSync(userPath({ repoRoot }, "workspace/jobs"), { recursive: true });
+    writeFileSync(
+      userPath({ repoRoot }, artifact),
+      "---\ncompany: Policy Cache Co\nrole: Platform Engineer\npartial: false\n---\n\nBase salary range: $140,000 - $170,000 annually.\n"
+    );
+    sourcedUpsertBatch({
+      repoRoot,
+      rows: [
+        {
+          id: "sourced-policy-cache",
+          company: "Policy Cache Co",
+          role: "Platform Engineer",
+          status: "sourced",
+          link: "https://jobs.example.test/policy-cache",
+          loc: "USA (Remote)",
+          base: "$140,000 - $170,000",
+          fitScore: 80,
+          fitBucket: "high",
+          fitBasis: "triage",
+          gate: "review",
+          sourcedAt: "2026-08-27T12:00:00.000Z",
+          updatedAt: "2026-08-27T12:00:00.000Z",
+          artifacts: { jd: artifact },
+          scanner: { bodyPartial: false },
+        },
+      ],
+    });
+
+    const first = await runSourcedScan({ repoRoot, write: true });
+    assert.equal(first.revalidatedExisting.skipped, false);
+    assert.equal(first.revalidatedExisting.examined, 1);
+    assert.match(
+      sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.policyRevalidation.digest,
+      /^[a-f0-9]{64}$/
+    );
+
+    const second = await runSourcedScan({ repoRoot, write: true });
+    assert.equal(second.revalidatedExisting.skipped, true);
+    assert.equal(second.revalidatedExisting.examined, 0);
+
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { compensation: { minimum_base: 200000 } },
+    });
+    const changedPolicy = await runSourcedScan({ repoRoot, write: true });
+    assert.equal(changedPolicy.revalidatedExisting.skipped, false);
+    assert.equal(changedPolicy.revalidatedExisting.examined, 1);
+    assert.equal(changedPolicy.revalidatedExisting.hidden, 1);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("DB mode merges board offers, filters their titles, and stamps board watermarks", async () => {
   const repoRoot = tempRepo();
   try {
@@ -1326,6 +2126,401 @@ test("DB mode merges board offers, filters their titles, and stamps board waterm
 
     const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
     assert.match(stored.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSourcedScan materializes generated query-only HiringCafe sources", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        location: {
+          home: "New York, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: true,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+        fit_bands: { fit_floor: 0 },
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: ["Bar Manager"], negative: [] },
+        location_filter: null,
+        tracked_companies: [],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "HiringCafe",
+            source_type: "url-query",
+            label: "Bar Manager",
+            query: "Bar Manager",
+            enabled: true,
+            recency: { mode: "since-last-run", safetyMinutes: 30 },
+            searchState: { sortBy: "date" },
+          },
+        ],
+      },
+    });
+    const captured = [];
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async (source) => {
+        captured.push(source);
+        return {
+          offers: [
+            {
+              company: "Example Hospitality",
+              title: "Bar Manager",
+              url: "https://www.linkedin.com/jobs/view/bar-manager-1234567890",
+              location: "New York, NY",
+              bodyText: "Unverified browser result for a Bar Manager role in New York City.",
+              bodyPartial: true,
+              source: "hiringcafe-browser",
+              sourceProvider: "hiringcafe",
+            },
+          ],
+          errors: [],
+          needsLogin: null,
+        };
+      },
+      hydrateOfferImpl: async (offer) => offer,
+    });
+
+    assert.equal(captured.length, 1);
+    assert.match(captured[0].url, /^https:\/\/hiring\.cafe\/\?searchState=/);
+    assert.equal(new URL(captured[0].url).searchParams.has("searchState"), true);
+    assert.equal(summary.scanned, 1);
+    assert.equal(summary.new, 1);
+    assert.deepEqual(summary.loginRequests, []);
+    assert.equal(summary.offers[0].title, "Bar Manager");
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.match(stored.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSourcedScan preserves a login-backed session JD without public rehydration", async () => {
+  const repoRoot = tempRepo();
+  const fullBody =
+    "Lead the beverage program, coach the team, manage inventory, and deliver polished service for a New York City venue. ".repeat(
+      12
+    );
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        location: {
+          home: "New York, NY",
+          remote: true,
+          remote_scope: "home-country",
+          hybrid: true,
+          onsite: true,
+          relocation: [],
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "Bar leadership", titles: ["Bar Manager"] }],
+        fit_bands: { fit_floor: 0 },
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: ["Bar Manager"], negative: [] },
+        location_filter: null,
+        tracked_companies: [],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "linkedin",
+            platform: "linkedin",
+            source_type: "browser",
+            auth: true,
+            label: "LinkedIn NYC",
+            url: "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    let publicHydrationCalls = 0;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => ({
+        offers: [
+          {
+            company: "Example Hospitality",
+            title: "Bar Manager",
+            url: "https://www.linkedin.com/jobs/view/bar-manager-1234567890",
+            location: "New York, NY",
+            bodyText: fullBody,
+            bodyPartial: false,
+            bodyCapture: "session-browser",
+            source: "linkedin-browser",
+            sourceProvider: "linkedin",
+            capturedUrl: "https://www.linkedin.com/jobs/view/bar-manager-1234567890",
+          },
+          {
+            company: "Example Hotel",
+            title: "Bar Manager",
+            url: "https://www.linkedin.com/jobs/view/bar-manager-9876543210",
+            location: "New York, NY",
+            bodyText: "",
+            bodyPartial: true,
+            bodyCapture: "session-browser",
+            source: "linkedin-browser",
+            sourceProvider: "linkedin",
+            capturedUrl: "https://www.linkedin.com/jobs/view/bar-manager-9876543210",
+          },
+        ],
+        errors: [
+          {
+            company: "Example Hotel",
+            error: "CareerRat could not read the full job description.",
+          },
+        ],
+        needsLogin: null,
+      }),
+      hydrateOfferImpl: async () => {
+        publicHydrationCalls += 1;
+        throw new Error("login-backed JDs must not be rehydrated over public HTTP");
+      },
+    });
+
+    assert.equal(publicHydrationCalls, 0);
+    assert.equal(summary.new, 2);
+    const complete = summary.offers.find((offer) => offer.company === "Example Hospitality");
+    const partial = summary.offers.find((offer) => offer.company === "Example Hotel");
+    assert.equal(complete.bodyPartial, false);
+    assert.equal(complete.bodyChars, fullBody.trim().length);
+    assert.equal(partial.bodyPartial, true);
+    assert.equal(partial.bodyChars, 0);
+    const jdText = readFileSync(userPath({ repoRoot }, complete.artifacts.jd), "utf8");
+    assert.match(jdText, /partial: false/);
+    assert.match(jdText, /Lead the beverage program/);
+    assert.equal(jdText.includes(fullBody.trim()), true);
+    const partialJdText = readFileSync(userPath({ repoRoot }, partial.artifacts.jd), "utf8");
+    assert.match(partialJdText, /partial: true/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSourcedScan returns a contextual login request without failing the rest of search", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "linkedin",
+            platform: "linkedin",
+            source_type: "browser",
+            auth: true,
+            label: "LinkedIn NYC",
+            url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+            enabled: true,
+          },
+        ],
+      },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => ({
+        offers: [],
+        errors: [],
+        needsLogin: {
+          platform: "linkedin",
+          label: "LinkedIn",
+          sourceLabel: "LinkedIn NYC",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          prompt: "Do you want to log into LinkedIn so I can use it?",
+        },
+      }),
+    });
+
+    assert.equal(summary.scanned, 0);
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.loginRequests, [
+      {
+        platform: "linkedin",
+        label: "LinkedIn",
+        sourceLabel: "LinkedIn NYC",
+        url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+        prompt: "Do you want to log into LinkedIn so I can use it?",
+      },
+    ]);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSourcedScan preflights the exact disabled authenticated source instead of returning a false empty search", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "linkedin.com",
+            source_type: "browser",
+            auth: true,
+            platform: "linkedin",
+            label: "LinkedIn NYC operations",
+            url: "https://www.linkedin.com/jobs/search/?keywords=operations&location=New%20York",
+            enabled: false,
+          },
+        ],
+      },
+    });
+    let captures = 0;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => {
+        captures += 1;
+        throw new Error("a disabled source must not open before Yes");
+      },
+    });
+
+    assert.equal(captures, 0);
+    assert.equal(summary.scanned, 0);
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.loginRequests, [
+      {
+        platform: "linkedin",
+        label: "LinkedIn",
+        sourceLabel: "LinkedIn NYC operations",
+        url: "https://www.linkedin.com/jobs/search/?keywords=operations&location=New%20York",
+        prompt: "Do you want to log into LinkedIn so I can use it?",
+      },
+    ]);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSourcedScan asks about each disabled login source while continuing enabled sources", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "Example RSS",
+            source_type: "rss",
+            label: "Public jobs",
+            rssUrl: "https://example.test/jobs.xml",
+            enabled: true,
+          },
+          {
+            provider: "indeed.com",
+            source_type: "browser",
+            auth: true,
+            platform: "indeed",
+            label: "Indeed NYC operations",
+            url: "https://www.indeed.com/jobs?q=operations&l=New%20York%2C%20NY",
+            enabled: false,
+          },
+        ],
+      },
+    });
+    let captures = 0;
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      fetchImpl: async () =>
+        new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      captureBrowserSourceImpl: async () => {
+        captures += 1;
+        throw new Error("a disabled source must not open before Yes");
+      },
+    });
+
+    assert.equal(captures, 0);
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.loginRequests, [
+      {
+        platform: "indeed",
+        label: "Indeed",
+        sourceLabel: "Indeed NYC operations",
+        url: "https://www.indeed.com/jobs?q=operations&l=New%20York%2C%20NY",
+        prompt: "Do you want to log into Indeed so I can use it?",
+      },
+    ]);
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });

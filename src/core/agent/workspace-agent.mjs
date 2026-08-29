@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
 
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
@@ -24,12 +25,13 @@ import { PROVIDERS } from "../automation/session.mjs";
 import { statusTransition, toTrackOutcomeStatus } from "../automation/status-map.mjs";
 import { buildCoachingPlan } from "../coaching/plan.mjs";
 import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
-import { requireDb } from "../db/connection.mjs";
+import { dbExists, requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { activityAppend } from "../db/verbs/activity.mjs";
 import {
   appApproveReview,
   appCaptureInterviewIntake,
+  appRecordOutcome,
   appScheduleInterview,
   appSetFields,
   appSetStatus,
@@ -58,7 +60,14 @@ import {
   linkedinProposalDecide,
 } from "../db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../db/verbs/relationship.mjs";
+import {
+  searchExecutionEnsure,
+  searchExecutionGet,
+  searchExecutionListRecoverable,
+  searchExecutionSetLane,
+} from "../db/verbs/search-executions.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import { sourcingRunGet, sourcingRunLatest } from "../db/verbs/sourcing-runs.mjs";
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
@@ -72,6 +81,7 @@ import {
   startFirstSearchRun,
   startManualSearchRun,
 } from "../onboarding/first-search-run.mjs";
+import { buildPacketContext } from "../packet/context.mjs";
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import {
@@ -84,13 +94,18 @@ import {
   matchSuppliedScreeningAnswers,
   saveOneOffScreeningAnswer,
 } from "../packet/one-off-answer.mjs";
+import { packetProvenanceForContext, packetProvenanceMatches } from "../packet/provenance.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { computeEvidenceWrite, loadEvidence } from "../profile/evidence-writer.mjs";
 import { applyGateWrite, GATE_APPLY_SUMMARIES } from "../profile/gate-apply.mjs";
 import { GATE_ROUTES } from "../profile/gate-writer.mjs";
-import { platformForHost } from "../providers/search-sources.mjs";
+import {
+  canonicalSearchSourceUrl,
+  platformForHost,
+  resolveBrowserSourceIdentity,
+} from "../providers/search-sources.mjs";
 import {
   isStale,
   listResearch,
@@ -107,6 +122,16 @@ import {
   sourcedRowsFromScanOffers,
 } from "../scoring/sourced-persistence.mjs";
 import { inferProvider } from "../scoring/sourced-scanner.mjs";
+import {
+  adjacentRoleChoiceQuestion,
+  adjacentRoleCoachingTrigger,
+  buildAdjacentRoleChoicePrompt,
+  buildAdjacentRoleConfirmationPrompt,
+  generateAdjacentRoleProposal,
+  mergeAdjacentRoleTargets,
+} from "../search/adjacent-role-coach.mjs";
+import { createSourcingWorkerManager } from "../search/sourcing-worker-manager.mjs";
+import { createSearchExecutionId, runUnifiedJobSearch } from "../search/unified-job-search.mjs";
 import {
   applyStrategyRecommendation,
   draftStrategyReview,
@@ -150,6 +175,7 @@ export const EXECUTABLE_INTENTS = new Set([
   "application.record-external",
   "application.record-external-request",
   "source.add",
+  "source.auth-decision",
   "source.query-add",
   "source.set-enabled",
   "source.discover",
@@ -233,6 +259,7 @@ function compactCandidateSnapshot({ repoRoot, env }) {
       currency: compensation.currency || "USD",
       target_base: compensation.target_base ?? null,
       minimum_base: compensation.minimum_base ?? null,
+      minimum_annual_earnings: compensation.minimum_annual_earnings ?? null,
       target_total_comp: compensation.target_total_comp ?? null,
     },
     authorization: profile.authorization || {},
@@ -293,8 +320,19 @@ function messageForModel(message) {
       ? `\n[Exported packet state: ${JSON.stringify(packetExport).slice(0, 8_000)}]`
       : "";
     const search = message.artifacts?.find((artifact) => artifact.kind === "search_run");
-    const searchContext = search
-      ? `\n[Job search state: ${JSON.stringify(search).slice(0, 8_000)}]`
+    if (search) content = searchResultText(search);
+    const searchForModel = search
+      ? {
+          kind: search.kind,
+          title: search.title,
+          purpose: search.purpose,
+          status: search.status,
+          summary: search.summary,
+          ...(search.status === "failed" ? { error: { message: searchResultText(search) } } : {}),
+        }
+      : null;
+    const searchContext = searchForModel
+      ? `\n[Job search state: ${JSON.stringify(searchForModel).slice(0, 8_000)}]`
       : "";
     const companies = message.artifacts?.find((artifact) => artifact.kind === "company_proposals");
     const companyContext = companies
@@ -537,8 +575,16 @@ export function messagesSyncSources({ repoRoot, env, tracker }) {
   });
 }
 
-async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fetchImpl, now }) {
-  const resolved = await resolveJobUrlImpl(jobUrl, { fetchImpl });
+async function captureJobRequest({
+  repoRoot,
+  env,
+  jobUrl,
+  resolveJobUrlImpl,
+  fetchImpl,
+  signal,
+  now,
+}) {
+  const resolved = await resolveJobUrlImpl(jobUrl, { fetchImpl, signal });
   const bodyText = String(resolved?.bodyText || "").trim();
   if (resolved?.bodyFetchStatus !== "resolved" || !bodyText) {
     throw actionError(
@@ -651,6 +697,7 @@ async function captureIntakeJobRequest({
   intakeId,
   resolveJobUrlImpl,
   fetchImpl,
+  signal,
   now,
 }) {
   const item = intakeOne({ repoRoot, env, id: intakeId });
@@ -671,6 +718,7 @@ async function captureIntakeJobRequest({
         jobUrl,
         resolveJobUrlImpl,
         fetchImpl,
+        signal,
         now,
       })),
       sourceIntakeId: item.id,
@@ -873,6 +921,13 @@ function jobIdentityMatchStrength(row, referenceTokens) {
   }).length;
 }
 
+const AMBIGUITY_CHOICE_CANDIDATES = Symbol("ambiguity choice candidates");
+
+function attachAmbiguityCandidates(error, candidates) {
+  error[AMBIGUITY_CHOICE_CANDIDATES] = candidates.slice(0, 5);
+  return error;
+}
+
 function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
   const tokens = jobReferenceTokens(jobReference);
   if (!tokens.length) {
@@ -927,9 +982,19 @@ function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
       role: String(row.role || "this role").slice(0, 160),
     }));
     const choices = safeMatches.map((row) => `${row.company}, ${row.role}`).join("; ");
-    const error = actionError(
-      `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
-      "JOB_REFERENCE_AMBIGUOUS"
+    const error = attachAmbiguityCandidates(
+      actionError(
+        `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
+        "JOB_REFERENCE_AMBIGUOUS"
+      ),
+      matches.map((row) => ({
+        kind: "job",
+        id: row.id,
+        recordType: row.recordType,
+        company: row.company,
+        role: row.role,
+        location: row.location,
+      }))
     );
     error.details = { matches: safeMatches };
     throw error;
@@ -972,9 +1037,18 @@ function resolveReferencedApplication({ repoRoot, env, jobReference, interviewOn
       role: String(application.role || "this role").slice(0, 160),
     }));
     const choices = safeMatches.map((row) => `${row.company}, ${row.role}`).join("; ");
-    const error = actionError(
-      `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
-      "JOB_REFERENCE_AMBIGUOUS"
+    const error = attachAmbiguityCandidates(
+      actionError(
+        `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
+        "JOB_REFERENCE_AMBIGUOUS"
+      ),
+      matches.map((application) => ({
+        kind: "application",
+        id: application.id,
+        company: application.company,
+        role: application.role,
+        location: application.location,
+      }))
     );
     error.details = { matches: safeMatches };
     throw error;
@@ -1121,9 +1195,18 @@ function resolveReferencedCommunication({ repoRoot, env, communicationReference 
     const choices = safeMatches
       .map((row) => `${row.company}, ${row.role}, ${row.subject}`)
       .join("; ");
-    const error = actionError(
-      `That matches more than one recruiter thread: ${choices}. Name the company, role, or subject more specifically.`,
-      "COMMUNICATION_REFERENCE_AMBIGUOUS"
+    const error = attachAmbiguityCandidates(
+      actionError(
+        `That matches more than one recruiter thread: ${choices}. Name the company, role, or subject more specifically.`,
+        "COMMUNICATION_REFERENCE_AMBIGUOUS"
+      ),
+      matches.map((communication) => ({
+        kind: "communication",
+        id: communication.id,
+        company: communication.company,
+        role: communication.role,
+        subject: communication.subject,
+      }))
     );
     error.details = { matches: safeMatches };
     throw error;
@@ -1299,13 +1382,23 @@ function resolveReferencedCompany({
     byCompany.get(key).push(row);
   }
   if (byCompany.size > 1) {
-    const safeMatches = [...byCompany.values()].slice(0, 5).map((companyRows) => ({
-      company: String(companyRows[0].company || "this company").slice(0, 120),
-    }));
+    const companyCandidates = [...byCompany.values()].slice(0, 5).map((companyRows) => {
+      const selected = primaryCompanyRow(companyRows);
+      return {
+        kind: "company",
+        id: selected.id,
+        recordType: selected.recordType,
+        company: String(selected.company || "this company").slice(0, 120),
+      };
+    });
+    const safeMatches = companyCandidates.map(({ company }) => ({ company }));
     const choices = safeMatches.map((row) => row.company).join("; ");
-    const error = actionError(
-      `That matches more than one tracked company: ${choices}. Name the company more specifically.`,
-      "COMPANY_AMBIGUOUS"
+    const error = attachAmbiguityCandidates(
+      actionError(
+        `That matches more than one tracked company: ${choices}. Name the company more specifically.`,
+        "COMPANY_AMBIGUOUS"
+      ),
+      companyCandidates
     );
     error.details = { matches: safeMatches };
     throw error;
@@ -1552,19 +1645,119 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
   return intent;
 }
 
+const APPLICATION_AMBIGUITY_INTENTS = Object.freeze({
+  "outcome.record-request": "outcome.record",
+  "status.record-portal-request": "status.record-portal",
+  "status.connect-portal-request": "status.connect-portal",
+  "application.record-external-request": "application.record-external",
+  "interview.prepare-request": "interview.prepare",
+});
+
+const COMMUNICATION_AMBIGUITY_INTENTS = Object.freeze({
+  "communication.draft-request": "communication.draft",
+  "scheduling.prepare-request": "scheduling.prepare",
+  "communication.handoff-request": "communication.handoff",
+  "communication.record-external-request": "communication.record-external",
+  "communication.note-request": "communication.add-note",
+});
+
+function ambiguityLabel(candidate) {
+  const parts =
+    candidate.kind === "communication"
+      ? [candidate.company, candidate.subject, candidate.role]
+      : candidate.kind === "company"
+        ? [candidate.company]
+        : [candidate.company, candidate.role, candidate.location];
+  return parts
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" · ")
+    .slice(0, 320);
+}
+
+function ambiguityChoiceIntents(error, intent) {
+  const candidates = Array.isArray(error?.[AMBIGUITY_CHOICE_CANDIDATES])
+    ? error[AMBIGUITY_CHOICE_CANDIDATES].slice(0, 5)
+    : [];
+  if (!candidates.length) return [];
+  const baseLabels = candidates.map(ambiguityLabel);
+  const labelCounts = new Map();
+  for (const label of baseLabels) labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+  const labelIndexes = new Map();
+
+  return candidates.flatMap((candidate, index) => {
+    let selectedIntent = null;
+    if (
+      candidate.kind === "job" &&
+      new Set(["job.evaluate-request", "job.prepare-request", "job.tailor-request"]).has(
+        intent.type
+      )
+    ) {
+      selectedIntent = {
+        ...intent,
+        input: { ...(intent.input || {}), jobId: candidate.id },
+      };
+    } else if (candidate.kind === "application" && APPLICATION_AMBIGUITY_INTENTS[intent.type]) {
+      selectedIntent = {
+        ...intent,
+        type: APPLICATION_AMBIGUITY_INTENTS[intent.type],
+        entity: { type: "application", id: candidate.id },
+      };
+    } else if (candidate.kind === "communication" && COMMUNICATION_AMBIGUITY_INTENTS[intent.type]) {
+      selectedIntent = {
+        ...intent,
+        type: COMMUNICATION_AMBIGUITY_INTENTS[intent.type],
+        entity: { type: "communication", id: candidate.id },
+      };
+    } else if (
+      candidate.kind === "company" &&
+      new Set(["research.company-request", "company.health-request"]).has(intent.type)
+    ) {
+      selectedIntent = {
+        ...intent,
+        input: { ...(intent.input || {}), jobId: candidate.id },
+      };
+    } else if (
+      candidate.kind === "company" &&
+      new Set(["relationship.record-lead", "relationship.source-request"]).has(intent.type)
+    ) {
+      selectedIntent = {
+        ...intent,
+        input: { ...(intent.input || {}), company: candidate.company },
+      };
+    }
+    if (!selectedIntent) return [];
+
+    const baseLabel = baseLabels[index] || "Choose this match";
+    const nextIndex = (labelIndexes.get(baseLabel) || 0) + 1;
+    labelIndexes.set(baseLabel, nextIndex);
+    const label =
+      labelCounts.get(baseLabel) > 1 ? `${baseLabel} (saved item ${nextIndex})` : baseLabel;
+    return [{ label, primary: false, intent: selectedIntent }];
+  });
+}
+
 async function evaluateApplicationRequest({
   repoRoot,
   env,
   applicationId,
   jobBody,
   jobUrl,
+  executionPlan,
+  signal,
   evaluateJobImpl,
 }) {
   const application = applicationForIntent({ repoRoot, env, id: applicationId });
   const body = { applicationId };
   if (jobBody) body.jobBody = String(jobBody);
   if (jobUrl) body.jobUrl = String(jobUrl);
-  const operation = await evaluateJobImpl({ repoRoot, env, body });
+  const operation = await evaluateJobImpl({
+    repoRoot,
+    env,
+    body,
+    ...(executionPlan ? { executionPlan } : {}),
+    ...(signal ? { signal } : {}),
+  });
   const evaluation = operation?.body?.data;
   if (operation?.status !== 200 || !operation?.body?.ok || !evaluation) {
     throw actionError(
@@ -1715,13 +1908,16 @@ function blockingPacketGaps(gaps) {
 // come straight off the application row — no AI call, no doc regeneration —
 // so resumeSession still skips the REDUNDANT re-evaluate/re-generate work,
 // just never the safety checks themselves.
-function applicationApplySafetyBlockReason(application) {
+function applicationApplySafetyBlockReason({ repoRoot, env, application }) {
   if (!applicationPacketGatePasses(application)) {
     return "This application does not have a passing gate verdict on record.";
   }
   const manifest = application?.packetManifest;
   if (!manifest) {
     return "This application's packet has not been generated yet.";
+  }
+  if (packetProvenanceIsStale({ repoRoot, env, application })) {
+    return "This application's packet was generated from older job or evaluation details.";
   }
   const gaps = Array.isArray(manifest.gaps) ? manifest.gaps : null;
   const packetComplete = gaps
@@ -1731,6 +1927,75 @@ function applicationApplySafetyBlockReason(application) {
     return "This application's packet still has open items to resolve.";
   }
   return null;
+}
+
+function applicationIdForMissionStep(db, missionId, step) {
+  if (step?.jobRef?.type === "application") return String(step.jobRef.id || "").trim() || null;
+  if (step?.jobRef?.type !== "sourced") return null;
+  const rows = db
+    .prepare("SELECT data FROM mission_steps WHERE mission_id = ? ORDER BY sequence ASC")
+    .all(missionId)
+    .map((row) => JSON.parse(row.data));
+  const promoted = rows.find(
+    (candidate) =>
+      candidate.action === "promote" &&
+      candidate.jobRef?.type === "sourced" &&
+      candidate.jobRef?.id === step.jobRef.id &&
+      candidate.status === "completed"
+  );
+  return String(promoted?.result?.applicationId || promoted?.result?.id || "").trim() || null;
+}
+
+function corroborateApplicationMissionAttempt({ repoRoot, env, intent, now }) {
+  const supplied = intent.input?.missionAttempt;
+  if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) {
+    throw actionError(
+      "Start or resume this application from its CareerRat mission.",
+      "APPLICATION_MISSION_ATTEMPT_REQUIRED"
+    );
+  }
+  const missionId = String(supplied.missionId || "").trim();
+  const stepId = String(supplied.stepId || "").trim();
+  const attemptId = String(supplied.attemptId || "").trim();
+  const fence = Number(supplied.fence);
+  const db = requireDb({ repoRoot, env });
+  const missionRow = missionId
+    ? db.prepare("SELECT data FROM missions WHERE id = ?").get(missionId)
+    : null;
+  const stepRow =
+    missionId && stepId
+      ? db
+          .prepare("SELECT data FROM mission_steps WHERE mission_id = ? AND id = ?")
+          .get(missionId, stepId)
+      : null;
+  const mission = missionRow ? JSON.parse(missionRow.data) : null;
+  const step = stepRow ? JSON.parse(stepRow.data) : null;
+  const current = step?.currentAttempt;
+  const expiresAt = Date.parse(current?.leaseExpiresAt || "");
+  const expectedApplicationId = step ? applicationIdForMissionStep(db, missionId, step) : null;
+  const valid =
+    mission?.status === "running" &&
+    step?.status === "running" &&
+    step?.action === "prepare-submit" &&
+    attemptId &&
+    current?.id === attemptId &&
+    Number.isInteger(fence) &&
+    current?.fence === fence &&
+    current?.idempotency?.key === supplied.idempotencyKey &&
+    current?.idempotency?.classification === supplied.idempotencyClassification &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > requestDate(now).getTime() &&
+    expectedApplicationId === intent.entity.id &&
+    current?.executionPlan &&
+    typeof current.executionPlan === "object" &&
+    current.executionPlan.operation === "application.drafting";
+  if (!valid) {
+    throw actionError(
+      "That application mission run is no longer current. Resume it from CareerRat.",
+      "APPLICATION_MISSION_ATTEMPT_STALE"
+    );
+  }
+  return current.executionPlan;
 }
 
 function questionCaptureFromApplication(application) {
@@ -1764,11 +2029,15 @@ function packetQuestionLineageIsStale(application) {
       .filter(Boolean)
   );
   const lineage = manifest.answerLineage;
+  const openGapIds = idsFrom(manifest.gaps)
+    .map((gap) => String(gap?.questionId || "").trim())
+    .filter(Boolean);
   const lineageIds = new Set(
     [
       ...idsFrom(lineage?.answeredQuestionIds),
       ...idsFrom(lineage?.skippedQuestionIds),
       ...idsFrom(lineage?.excludedQuestionIds),
+      ...openGapIds,
     ]
       .map((id) => String(id || "").trim())
       .filter(Boolean)
@@ -1781,6 +2050,20 @@ function packetQuestionLineageIsStale(application) {
   const capturedCount =
     (Number(summary.answerableCount) || 0) + (Number(summary.excludedCount) || 0);
   return capturedCount > 0 && capturedCount !== lineageIds.size;
+}
+
+function packetProvenanceIsStale({ repoRoot, env, application }) {
+  try {
+    const context = buildPacketContext({
+      repoRoot,
+      env,
+      applicationId: application?.id,
+    });
+    const current = packetProvenanceForContext(context);
+    return !packetProvenanceMatches(application?.packetManifest?.provenance, current);
+  } catch {
+    return true;
+  }
 }
 
 function siteRequiredQuestionCapture(extra = {}) {
@@ -1801,6 +2084,7 @@ async function prepareApplicationQuestions({
   applicationId,
   captureQuestionsImpl,
   fetchImpl,
+  signal,
 }) {
   const saved = questionCaptureFromApplication(application);
   if (saved) return saved;
@@ -1817,6 +2101,7 @@ async function prepareApplicationQuestions({
       source: "url",
       url,
       fetchImpl,
+      signal,
     });
     const questions = Array.isArray(capture?.questions) ? capture.questions : [];
     const excluded = Array.isArray(capture?.excluded) ? capture.excluded : [];
@@ -1835,6 +2120,7 @@ async function prepareApplicationQuestions({
       excludedIds: excluded.map((question) => String(question.id)),
     };
   } catch (error) {
+    if (signal?.aborted || error?.name === "AbortError") throw error;
     return siteRequiredQuestionCapture({
       attempted: true,
       reason: String(error?.message || "Automatic question capture failed.").slice(0, 500),
@@ -1999,12 +2285,16 @@ async function generateDocumentsWithQuestionFallback({
   formats,
   applyIntent,
   force = false,
+  executionPlan,
+  signal,
   generateDocumentsImpl,
 }) {
   const invoke = (nextApplyIntent) =>
     generateDocumentsImpl({
       repoRoot,
       env,
+      ...(executionPlan ? { executionPlan } : {}),
+      ...(signal ? { signal } : {}),
       body: {
         applicationId,
         applyIntent: nextApplyIntent,
@@ -2092,6 +2382,8 @@ function compactSearchSummary(summary) {
   if (!summary || typeof summary !== "object") return null;
   const numericKeys = [
     "attemptedSources",
+    "searched",
+    "found",
     "scanned",
     "new",
     "qualified",
@@ -2147,6 +2439,64 @@ function compactSearchSummary(summary) {
   return compact;
 }
 
+function compactSearchExecutionReceipt(summary) {
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return null;
+  const numericKeys = [
+    "attemptedSources",
+    "searched",
+    "found",
+    "scanned",
+    "new",
+    "qualified",
+    "presented",
+    "filtered",
+    "reconciled",
+    "duplicates",
+    "invalid",
+    "partial",
+    "unreadable",
+    "disqualified",
+    "errorCount",
+    "offerCount",
+    "sourceCount",
+    "queryCount",
+    "failedPromptCount",
+    "warningCount",
+    "captureFailureCount",
+  ];
+  const receipt = {};
+  for (const key of numericKeys) {
+    const value = Number(summary[key]);
+    if (Number.isFinite(value)) receipt[key] = value;
+  }
+  const arrayCounts = {
+    offers: "offerCount",
+    sources: "sourceCount",
+    queryResults: "queryCount",
+    failedPromptIds: "failedPromptCount",
+    warnings: "warningCount",
+    errors: "errorCount",
+    captureFailures: "captureFailureCount",
+  };
+  for (const [key, countKey] of Object.entries(arrayCounts)) {
+    if (receipt[countKey] == null && Array.isArray(summary[key])) {
+      receipt[countKey] = summary[key].length;
+    }
+  }
+  if (summary.reasonCounts && typeof summary.reasonCounts === "object") {
+    receipt.reasonCounts = Object.fromEntries(
+      Object.entries(summary.reasonCounts)
+        .slice(0, 20)
+        .flatMap(([reason, count]) => {
+          const value = Number(count);
+          return Number.isFinite(value) ? [[String(reason).slice(0, 80), value]] : [];
+        })
+    );
+  }
+  if (typeof summary.zeroResults === "boolean") receipt.zeroResults = summary.zeroResults;
+  return receipt;
+}
+
 function searchStatusLabel(run) {
   if (run?.label) return String(run.label);
   if (run?.status === "completed") return "Complete";
@@ -2191,7 +2541,12 @@ function compactSearchError(error) {
 
 function searchRunArtifact({ run, sources = null, reused = false, parked = false } = {}) {
   const purpose = String(run?.purpose || "manual-search");
-  const titlePrefix = purpose === "first-search" ? "First job search" : "Job search";
+  const titlePrefix =
+    purpose === "first-search"
+      ? "First job search"
+      : purpose === "ai-web-search"
+        ? "AI web search"
+        : "Job search";
   return {
     kind: "search_run",
     title: `${titlePrefix}: ${searchStatusLabel(run)}`,
@@ -2202,7 +2557,10 @@ function searchRunArtifact({ run, sources = null, reused = false, parked = false
     parked: Boolean(parked),
     sources: sources && typeof sources === "object" ? JSON.parse(JSON.stringify(sources)) : null,
     summary: compactSearchSummary(run?.summary),
-    error: compactSearchError(run?.error),
+    error:
+      purpose === "ai-web-search" && run?.status === "failed"
+        ? { message: searchResultText({ ...run, purpose }) }
+        : compactSearchError(run?.error),
   };
 }
 
@@ -2252,13 +2610,94 @@ async function startExpandedSourceSearch({
   }
 }
 
+function authSourceSiteLabel(platform, source = {}) {
+  const identity = resolveBrowserSourceIdentity(
+    { ...source, platform },
+    source.target || source.url
+  );
+  return identity.ok ? identity.label : "this site";
+}
+
+function sourceAuthDecisionAction({ label, selector, sourceUrl, decision, primary }) {
+  return {
+    label,
+    ...(primary === false ? { primary: false } : {}),
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector, sourceUrl, decision },
+    },
+  };
+}
+
+function sourceLoginQuestionMetadata({ selector, platform, url, searchRunId } = {}) {
+  return {
+    state: "login-needed",
+    answerMode: "yes-no",
+    sourceLogin: {
+      selector: String(selector || "").trim(),
+      platform: String(platform || "").trim(),
+      url: String(url || "").trim(),
+      ...(searchRunId ? { searchRunId: String(searchRunId) } : {}),
+    },
+  };
+}
+
+function sourceLoginRequest(summary, runId) {
+  const requests = Array.isArray(summary?.loginRequests) ? summary.loginRequests : [];
+  for (const request of requests) {
+    const selector = String(request?.sourceLabel || request?.label || request?.platform).trim();
+    const url = String(request?.url || "").trim();
+    if (!selector || !url) continue;
+    const identity = resolveBrowserSourceIdentity(request, url);
+    if (!identity.ok) continue;
+    return {
+      selector,
+      platform: identity.platform,
+      url: identity.url,
+      searchRunId: runId,
+      question: `Do you want to log into ${identity.label} so I can use it?`,
+    };
+  }
+  return null;
+}
+
+function sourceLoginQuestionMessageId(request) {
+  return `source-login-${createHash("sha256")
+    .update(`${request.searchRunId}\0${request.selector}\0${request.url}`)
+    .digest("hex")
+    .slice(0, 24)}`;
+}
+
+function appendSourceLoginQuestion({ repoRoot, env, run, now } = {}) {
+  const request = sourceLoginRequest(run?.summary, run?.id);
+  if (!request) return null;
+  return workspaceMessageAppend({
+    repoRoot,
+    env,
+    id: sourceLoginQuestionMessageId(request),
+    role: "assistant",
+    kind: "text",
+    text: request.question,
+    metadata: sourceLoginQuestionMetadata(request),
+    now,
+  }).message;
+}
+
 function searchResultText(run) {
   if (run?.status === "failed") {
-    return `The job search stopped: ${run.error?.message || "the search could not be completed."}`;
+    return run?.purpose === "ai-web-search"
+      ? "AI search stopped before it finished. Try it again."
+      : "The job search stopped before it finished. Try it again.";
   }
   if (run?.status === "completed") {
     const summary = compactSearchSummary(run.summary) || {};
     const presented = summary.presented ?? summary.new ?? 0;
+    const loginRequest = sourceLoginRequest(run.summary, run.id);
+    if (presented === 0 && loginRequest) {
+      const site = authSourceSiteLabel(loginRequest.platform, { url: loginRequest.url });
+      return `This search is waiting for your answer before it can use ${site}.`;
+    }
     const filtered = summary.filtered ?? Math.max(0, (summary.scanned || 0) - presented);
     return `Job search complete: ${presented} qualified role${presented === 1 ? "" : "s"} presented, ${filtered} filtered out, ${summary.reconciled ?? summary.scanned ?? 0} reconciled.`;
   }
@@ -2528,26 +2967,496 @@ export function recordWorkspaceSearchCompletion({ repoRoot, env = process.env, r
       message.metadata?.searchTerminal === true &&
       message.metadata?.searchRunId === runId
   );
-  if (duplicate) return current;
+  if (!duplicate) {
+    const artifact = searchRunArtifact({ run });
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      role: "assistant",
+      kind: "action_result",
+      text: searchResultText(run),
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      artifacts: [artifact],
+      metadata: {
+        state: status,
+        purpose: artifact.purpose,
+        searchRunId: runId,
+        searchTerminal: true,
+      },
+      now,
+    });
+  }
+  appendSourceLoginQuestion({ repoRoot, env, run, now });
+  return workspaceThreadRead({ repoRoot, env });
+}
 
-  const artifact = searchRunArtifact({ run });
+function careerCoachMessageId(kind, seed) {
+  const digest = createHash("sha256")
+    .update(String(seed || kind))
+    .digest("hex")
+    .slice(0, 24);
+  return `career-coach-${kind}-${digest}`;
+}
+
+function careerCoachMessageForRun(messages, runId) {
+  return (Array.isArray(messages) ? messages : []).find(
+    (message) =>
+      message?.role === "assistant" &&
+      message?.metadata?.careerCoach?.searchRunId === runId &&
+      new Set(["role-selection", "evidence-needed", "proposal-error"]).has(
+        message.metadata.careerCoach.stage
+      )
+  );
+}
+
+function searchRunFromReceipt(message) {
+  const artifact = (Array.isArray(message?.artifacts) ? message.artifacts : []).find(
+    (item) => item?.kind === "search_run"
+  );
+  if (!artifact?.runId || message?.metadata?.searchTerminal !== true) return null;
+  return {
+    id: artifact.runId,
+    purpose: artifact.purpose || message.metadata?.purpose || "manual-search",
+    status: artifact.status || message.metadata?.state,
+    summary: artifact.summary || null,
+    error: artifact.error || null,
+  };
+}
+
+async function recordWorkspaceAdjacentRoleCoaching({
+  repoRoot,
+  env = process.env,
+  run,
+  callAIImpl = callAI,
+  useAI = true,
+  now,
+  signal,
+} = {}) {
+  if (!adjacentRoleCoachingTrigger(run)) return workspaceThreadRead({ repoRoot, env });
+  const current = workspaceThreadRead({ repoRoot, env });
+  const runId = String(run?.id || "");
+  if (careerCoachMessageForRun(current.messages, runId)) return current;
+
+  try {
+    const proposal = await generateAdjacentRoleProposal({
+      repoRoot,
+      env,
+      run,
+      config: candidateConfigGet({ repoRoot, env }),
+      call: callAIImpl,
+      ...(useAI
+        ? {}
+        : {
+            runAI: async () => ({
+              status: 501,
+              body: { ok: false, code: "NO_AI_ROUTE", ai: { used: false } },
+            }),
+          }),
+      signal,
+    });
+    const messageId = careerCoachMessageId("roles", runId);
+    const text = adjacentRoleChoiceQuestion(proposal);
+    const choicePrompt = buildAdjacentRoleChoicePrompt({
+      proposal,
+      threadId: WORKSPACE_THREAD_ID,
+      messageId,
+    });
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: messageId,
+      role: "assistant",
+      kind: "text",
+      text,
+      metadata: {
+        source: "career-coach",
+        careerCoach: {
+          stage: "role-selection",
+          searchRunId: runId,
+          proposal,
+        },
+        choicePrompt,
+      },
+      now,
+    });
+  } catch (error) {
+    const evidenceNeeded = error?.code === "ADJACENT_ROLE_EVIDENCE_TOO_THIN";
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: careerCoachMessageId(evidenceNeeded ? "evidence" : "error", runId),
+      role: "assistant",
+      kind: evidenceNeeded ? "text" : "agent_error",
+      text: evidenceNeeded
+        ? error.message
+        : "I could not build useful role suggestions from that search. I left your targets alone. Tell me about work you have done well, and I can help broaden it.",
+      ...(evidenceNeeded
+        ? {}
+        : {
+            error: {
+              code: "ADJACENT_ROLE_COACHING_FAILED",
+              message: "Career coaching could not build role suggestions.",
+            },
+          }),
+      metadata: {
+        source: "career-coach",
+        careerCoach: {
+          stage: evidenceNeeded ? "evidence-needed" : "proposal-error",
+          searchRunId: runId,
+        },
+      },
+      now,
+    });
+  }
+  return workspaceThreadRead({ repoRoot, env });
+}
+
+function careerCoachPromptForResolution(messages, resolution) {
+  const promptId = String(resolution?.promptId || "");
+  if (!promptId) return null;
+  return (Array.isArray(messages) ? messages : []).find(
+    (message) => message?.metadata?.choicePrompt?.id === promptId
+  );
+}
+
+function sourceLoginPromptForResolution(messages, resolution) {
+  const promptId = String(resolution?.promptId || "");
+  if (!promptId) return null;
+  return (Array.isArray(messages) ? messages : []).find(
+    (message) => message?.metadata?.sourceLogin && message?.metadata?.choicePrompt?.id === promptId
+  );
+}
+
+async function handleSourceLoginChoice({
+  repoRoot,
+  env,
+  userMessage,
+  choiceResolution,
+  setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  resultMessageId,
+  operationAttempt,
+  now,
+} = {}) {
+  if (!choiceResolution?.promptId) return null;
+  const current = workspaceThreadRead({ repoRoot, env });
+  const promptMessage = sourceLoginPromptForResolution(current.messages, choiceResolution);
+  const sourceLogin = promptMessage?.metadata?.sourceLogin;
+  if (!sourceLogin) return null;
+  const decision = choiceResolution.optionIds?.find((value) => value === "yes" || value === "no");
+  if (!decision) return null;
+  const normalized = normalizeWorkspaceIntent({
+    type: "source.auth-decision",
+    entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+    input: { selector: sourceLogin.selector, sourceUrl: sourceLogin.url, decision },
+  });
+  return executeSourceAuthDecision({
+    repoRoot,
+    env,
+    normalized,
+    intentMessage: {
+      message: userMessage,
+      resultMessageId,
+      operationAttempt,
+    },
+    setSearchSourceEnabledImpl,
+    openAuthenticatedSourceImpl,
+    startManualSearchImpl,
+    onSearchStarted,
+    searchFetchImpl,
+    now,
+  });
+}
+
+function selectedProposalRoles(proposal, selectedRoleIds) {
+  const selected = new Set((Array.isArray(selectedRoleIds) ? selectedRoleIds : []).map(String));
+  return (Array.isArray(proposal?.roles) ? proposal.roles : []).filter((role) =>
+    selected.has(String(role?.id))
+  );
+}
+
+function careerCoachOutcomeExists(messages, confirmationPromptId) {
+  return (Array.isArray(messages) ? messages : []).some(
+    (message) =>
+      message?.metadata?.careerCoach?.confirmationPromptId === confirmationPromptId &&
+      new Set(["expansion-applied", "expansion-declined"]).has(message.metadata.careerCoach.stage)
+  );
+}
+
+function joinedRoleTitles(roles) {
+  const labels = roles.map((role) => String(role?.title || "").trim()).filter(Boolean);
+  if (labels.length < 2) return labels[0] || "those directions";
+  return `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+}
+
+async function applyConfirmedAdjacentRoles({
+  repoRoot,
+  env,
+  promptMessage,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  resultMessageId,
+  operationAttempt,
+  now,
+} = {}) {
+  const confirmationPrompt = promptMessage?.metadata?.choicePrompt;
+  const confirmationPromptId = confirmationPrompt?.id;
+  const current = workspaceThreadRead({ repoRoot, env });
+  if (!confirmationPromptId || careerCoachOutcomeExists(current.messages, confirmationPromptId)) {
+    return current;
+  }
+  const coach = promptMessage.metadata?.careerCoach || {};
+  const proposal = coach.proposal;
+  const roles = selectedProposalRoles(proposal, coach.selectedRoleIds);
+  if (!roles.length) {
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: resultMessageId || careerCoachMessageId("bad-selection", confirmationPromptId),
+      role: "assistant",
+      kind: "agent_error",
+      text: "I could not match that answer to the role directions. Your targets have not changed.",
+      error: {
+        code: "ADJACENT_ROLE_SELECTION_INVALID",
+        message: "The selected role directions were no longer available.",
+      },
+      metadata: {
+        source: "career-coach",
+        careerCoach: { stage: "proposal-error", confirmationPromptId },
+      },
+      operationAttempt,
+      now,
+    });
+    return workspaceThreadRead({ repoRoot, env });
+  }
+
+  const config = candidateConfigGet({ repoRoot, env });
+  const merged = mergeAdjacentRoleTargets({ targeting: config.targeting, roles });
+  if (merged.added.length) {
+    candidateConfigPatch({
+      repoRoot,
+      env,
+      name: "targeting",
+      patch: { role_buckets: merged.roleBuckets },
+    });
+  }
+
+  let operation = null;
+  let run = null;
+  let startError = null;
+  try {
+    operation = await startManualSearchImpl({
+      repoRoot,
+      env,
+      fetchImpl: searchFetchImpl,
+      searchExecutionId: `career-coach-${confirmationPromptId}`,
+    });
+    run = operation?.run || null;
+    if (run) onSearchStarted?.({ operation, run: { ...run, purpose: "manual-search" } });
+  } catch (error) {
+    startError = error;
+  }
+
+  const started = run && new Set(["running", "completed"]).has(run.status);
+  const labels = joinedRoleTitles(roles);
+  const addedText = merged.added.length
+    ? `Added ${joinedRoleTitles(roles.filter((role) => merged.added.includes(role.title)))} as stretch targets.`
+    : "Those directions were already in your targets.";
+  const text = started
+    ? `${addedText} I started a new search with the broader role mix.`
+    : `${addedText} The new search could not start. Open Search and try it again.`;
   workspaceMessageAppend({
     repoRoot,
     env,
+    id: resultMessageId || careerCoachMessageId("applied", confirmationPromptId),
     role: "assistant",
-    kind: "action_result",
-    text: searchResultText(run),
-    entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-    artifacts: [artifact],
+    kind: started ? "action_result" : "action_error",
+    text,
+    ...(started
+      ? {}
+      : {
+          error: {
+            code: startError?.code || "ADJACENT_ROLE_SEARCH_NOT_STARTED",
+            message: "The broader search could not start.",
+          },
+        }),
+    artifacts: [
+      {
+        kind: "adjacent_role_expansion",
+        title: `Career exploration: ${labels}`,
+        proposalId: proposal?.id || null,
+        roles: roles.map(({ id, title, why, evidenceRefs }) => ({
+          id,
+          title,
+          why,
+          evidenceRefs,
+        })),
+        added: merged.added,
+      },
+      ...(run ? [searchRunArtifact({ run: { ...run, purpose: "manual-search" } })] : []),
+    ],
     metadata: {
-      state: status,
-      purpose: artifact.purpose,
-      searchRunId: runId,
-      searchTerminal: true,
+      source: "career-coach",
+      careerCoach: {
+        stage: "expansion-applied",
+        confirmationPromptId,
+        proposalId: proposal?.id || null,
+        selectedRoleIds: roles.map((role) => role.id),
+        searchRunId: run?.id || null,
+        searchState: run?.status || "failed",
+      },
     },
+    operationAttempt,
     now,
   });
   return workspaceThreadRead({ repoRoot, env });
+}
+
+async function handleAdjacentRoleChoice({
+  repoRoot,
+  env,
+  choiceResolution,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  resultMessageId,
+  operationAttempt,
+  now,
+} = {}) {
+  if (!choiceResolution?.promptId) return null;
+  const current = workspaceThreadRead({ repoRoot, env });
+  const promptMessage = careerCoachPromptForResolution(current.messages, choiceResolution);
+  const coach = promptMessage?.metadata?.careerCoach;
+  if (!coach) return null;
+
+  if (coach.stage === "role-selection") {
+    const existing = current.messages.find(
+      (message) =>
+        message?.metadata?.careerCoach?.stage === "confirm-expansion" &&
+        message.metadata.careerCoach.selectionPromptId === choiceResolution.promptId
+    );
+    if (existing) return current;
+    const messageId = resultMessageId || careerCoachMessageId("confirm", choiceResolution.promptId);
+    const selectedRoleIds = choiceResolution.optionIds || [];
+    const choicePrompt = buildAdjacentRoleConfirmationPrompt({
+      proposal: coach.proposal,
+      selectedRoleIds,
+      threadId: WORKSPACE_THREAD_ID,
+      messageId,
+    });
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: messageId,
+      role: "assistant",
+      kind: "text",
+      text: choicePrompt.question,
+      metadata: {
+        source: "career-coach",
+        careerCoach: {
+          stage: "confirm-expansion",
+          searchRunId: coach.searchRunId,
+          proposal: coach.proposal,
+          selectionPromptId: choiceResolution.promptId,
+          selectedRoleIds,
+        },
+        choicePrompt,
+      },
+      operationAttempt,
+      now,
+    });
+    return workspaceThreadRead({ repoRoot, env });
+  }
+
+  if (coach.stage !== "confirm-expansion") return null;
+  if (choiceResolution.optionIds?.includes("no")) {
+    if (!careerCoachOutcomeExists(current.messages, choiceResolution.promptId)) {
+      workspaceMessageAppend({
+        repoRoot,
+        env,
+        id: resultMessageId || careerCoachMessageId("declined", choiceResolution.promptId),
+        role: "assistant",
+        kind: "text",
+        text: "Got it. I left your targets and search alone.",
+        metadata: {
+          source: "career-coach",
+          careerCoach: {
+            stage: "expansion-declined",
+            confirmationPromptId: choiceResolution.promptId,
+            proposalId: coach.proposal?.id || null,
+          },
+        },
+        operationAttempt,
+        now,
+      });
+    }
+    return workspaceThreadRead({ repoRoot, env });
+  }
+  if (choiceResolution.optionIds?.includes("yes")) {
+    return applyConfirmedAdjacentRoles({
+      repoRoot,
+      env,
+      promptMessage,
+      startManualSearchImpl,
+      onSearchStarted,
+      searchFetchImpl,
+      resultMessageId,
+      operationAttempt,
+      now,
+    });
+  }
+  return null;
+}
+
+async function recoverWorkspaceAdjacentRoleCoaching({
+  repoRoot,
+  env,
+  callAIImpl,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  now,
+} = {}) {
+  if (!dbExists({ repoRoot, env })) return null;
+  let current = workspaceThreadRead({ repoRoot, env });
+  for (const message of current.messages) {
+    const coach = message?.metadata?.careerCoach;
+    const prompt = message?.metadata?.choicePrompt;
+    if (coach?.stage !== "confirm-expansion" || prompt?.state !== "resolved") continue;
+    if (careerCoachOutcomeExists(current.messages, prompt.id)) continue;
+    await handleAdjacentRoleChoice({
+      repoRoot,
+      env,
+      choiceResolution: { promptId: prompt.id, optionIds: prompt.selectedOptionIds || [] },
+      startManualSearchImpl,
+      onSearchStarted,
+      searchFetchImpl,
+      now,
+    });
+    current = workspaceThreadRead({ repoRoot, env });
+  }
+
+  const receipts = current.messages
+    .map((message) => ({ message, run: searchRunFromReceipt(message) }))
+    .filter(({ run }) => run && adjacentRoleCoachingTrigger(run))
+    .reverse();
+  for (const { run } of receipts) {
+    if (careerCoachMessageForRun(current.messages, String(run.id))) continue;
+    await recordWorkspaceAdjacentRoleCoaching({
+      repoRoot,
+      env,
+      run,
+      callAIImpl,
+      useAI: false,
+      now,
+    });
+    current = workspaceThreadRead({ repoRoot, env });
+  }
+  return current;
 }
 
 function recordWorkspaceSearchStart({
@@ -2640,8 +3549,23 @@ function appendActionResult({
     artifacts,
     metadata: { intentMessageId: intentMessage.message.id, ...metadata },
     now,
+    id: intentMessage.resultMessageId,
+    operationAttempt: intentMessage.operationAttempt,
   });
   return { ...workspaceThreadRead({ repoRoot, env }), operationResult };
+}
+
+function operationExecutionPlan(plan, operation) {
+  if (!plan || typeof plan !== "object") return null;
+  if (plan.operation === operation) return plan;
+  return plan.operations?.[operation] || null;
+}
+
+function workspaceResultExists({ repoRoot, env, resultMessageId }) {
+  if (!resultMessageId) return false;
+  return workspaceThreadRead({ repoRoot, env }).messages.some(
+    (message) => message?.id === resultMessageId
+  );
 }
 
 function workflowActionMetadata(normalized, execution, retryLabel, extra = {}) {
@@ -2665,6 +3589,328 @@ function workflowActionMetadata(normalized, execution, retryLabel, extra = {}) {
   };
 }
 
+const CONTEXTUAL_PERMISSIONS = Object.freeze({
+  "application-preparation": {
+    capability: "authenticated_apply_preparation",
+    label: "Application form preparation",
+    allowLabel: "Allow form preparation",
+    typedCommand: "Allow form preparation",
+    request:
+      "CareerRat needs permission to open and fill application forms on Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and other job sites. You still press Submit.",
+  },
+  "relationship-sourcing": {
+    capability: "relationship_sourcing",
+    label: "Relationship sourcing",
+    allowLabel: "Allow relationship sourcing",
+    typedCommand: "Allow relationship sourcing",
+    request:
+      "CareerRat needs permission to use LinkedIn and Wellfound to find recruiters and hiring-team contacts for your review.",
+  },
+  "status-checks": {
+    capability: "status_polling",
+    label: "Application status checks",
+    allowLabel: "Allow status checks",
+    typedCommand: "Allow status checks",
+    request:
+      "CareerRat needs permission to read your saved application status pages on Greenhouse, Workday, Ashby, and Lever.",
+  },
+  "mail-checks": {
+    capability: "mail_access",
+    platforms: ["gmail", "outlook"],
+    label: "Recruiting email checks",
+    allowLabel: "Allow email checks",
+    typedCommand: "Allow email checks",
+    request:
+      "CareerRat needs permission to check Gmail and Outlook for recruiting email and bring the results back here.",
+  },
+  "message-checks": {
+    capability: "messaging",
+    label: "Recruiting message checks",
+    allowLabel: "Allow message checks",
+    typedCommand: "Allow message checks",
+    request:
+      "CareerRat needs permission to check LinkedIn and Wellfound for recruiting messages and bring the results back here.",
+  },
+  "linkedin-profile-review": {
+    capability: "profile_optimize",
+    label: "LinkedIn profile review",
+    allowLabel: "Allow LinkedIn review",
+    typedCommand: "Allow LinkedIn review",
+    request:
+      "CareerRat needs permission to read your LinkedIn profile and draft evidence-backed suggestions. It will not edit your profile.",
+  },
+  "apple-calendar-write": {
+    capability: "calendar_sync",
+    platforms: ["apple_calendar"],
+    label: "Apple Calendar access",
+    allowLabel: "Allow Apple Calendar",
+    typedCommand: "Allow Apple Calendar",
+    request: "CareerRat needs permission to add this event to Apple Calendar.",
+  },
+  "google-calendar-write": {
+    capability: "calendar_sync",
+    platforms: ["google_calendar"],
+    label: "Google Calendar access",
+    allowLabel: "Allow Google Calendar",
+    typedCommand: "Allow Google Calendar",
+    request: "CareerRat needs permission to add this event to Google Calendar.",
+  },
+  "outlook-calendar-write": {
+    capability: "calendar_sync",
+    platforms: ["outlook_calendar"],
+    label: "Outlook Calendar access",
+    allowLabel: "Allow Outlook Calendar",
+    typedCommand: "Allow Outlook Calendar",
+    request: "CareerRat needs permission to add this event to Outlook Calendar.",
+  },
+  "automation-tools-calendar-write": {
+    capability: "calendar_sync",
+    platforms: ["automation_tools"],
+    label: "Calendar automation access",
+    allowLabel: "Allow calendar automation",
+    typedCommand: "Allow calendar automation",
+    request: "CareerRat needs permission to add this event through your calendar automation.",
+  },
+});
+
+function contextualPermissionDefinition(permission) {
+  const key = String(permission || "").trim();
+  return Object.hasOwn(CONTEXTUAL_PERMISSIONS, key)
+    ? { key, ...CONTEXTUAL_PERMISSIONS[key] }
+    : null;
+}
+
+function contextualPermissionChange(permission) {
+  return {
+    kind: "automation",
+    op: "contextual-permission",
+    permission,
+  };
+}
+
+function appendContextualPermissionRequest({
+  repoRoot,
+  env,
+  normalized,
+  intentMessage,
+  permission,
+  artifacts,
+  now,
+}) {
+  const definition = contextualPermissionDefinition(permission);
+  if (!definition) {
+    throw actionError("That permission request is unavailable.", "SETTINGS_CHANGE_INVALID");
+  }
+  return appendActionResult({
+    repoRoot,
+    env,
+    normalized,
+    intentMessage,
+    text: `${definition.request} Choose ${definition.allowLabel}, or type “${definition.typedCommand}”.`,
+    artifacts,
+    metadata: {
+      state: "permission-needed",
+      nextActions: [
+        {
+          label: definition.allowLabel,
+          intent: {
+            type: "settings.apply",
+            entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+            input: { change: contextualPermissionChange(definition.key) },
+          },
+        },
+      ],
+    },
+    now,
+  });
+}
+
+async function executeSourceAuthDecision({
+  repoRoot,
+  env,
+  normalized,
+  intentMessage,
+  setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
+  startManualSearchImpl,
+  onSearchStarted,
+  searchFetchImpl,
+  now,
+} = {}) {
+  if (typeof setSearchSourceEnabledImpl !== "function") {
+    const error = actionError(
+      "Search-source controls are not connected in this runtime.",
+      "SOURCE_SETUP_UNAVAILABLE"
+    );
+    error.status = 501;
+    throw error;
+  }
+  const input = normalized.input || {};
+  const selector = String(input.selector || "").trim();
+  if (!selector) throw actionError("Name the search source to change.", "SOURCE_REQUIRED");
+  const sourceUrl = canonicalSearchSourceUrl(input.sourceUrl);
+  if (!sourceUrl) {
+    throw actionError(
+      "That login question is missing its saved source. Start the search again.",
+      "SOURCE_LOGIN_STALE"
+    );
+  }
+  const decision = String(input.decision || "")
+    .trim()
+    .toLowerCase();
+  if (!new Set(["yes", "no"]).has(decision)) {
+    throw actionError("Choose Yes or No.", "SOURCE_AUTH_DECISION_REQUIRED");
+  }
+  const allow = decision === "yes";
+  const operation = await setSearchSourceEnabledImpl({
+    repoRoot,
+    env,
+    selector,
+    sourceUrl,
+    enabled: allow,
+    ...(allow ? {} : { loginDecision: "no" }),
+  });
+  const source = operation?.source || {};
+  const sourceTarget = String(source.target || source.url || "").trim();
+  const identity = resolveBrowserSourceIdentity(source, sourceTarget);
+  if (
+    !identity.ok ||
+    identity.canonicalUrl !== sourceUrl ||
+    String(source.sourceType || source.source_type || "").trim() !== "browser"
+  ) {
+    if (allow) {
+      try {
+        await setSearchSourceEnabledImpl({ repoRoot, env, selector, sourceUrl, enabled: false });
+      } catch {
+        // The source remains unusable because no browser handoff follows.
+      }
+    }
+    throw actionError(
+      "That saved source no longer needs a CareerRat login.",
+      "SOURCE_AUTH_UNAVAILABLE"
+    );
+  }
+  const platform = identity.platform;
+  const url = identity.url;
+  const site = identity.label;
+  if (!allow) {
+    const expandedSearch = await startExpandedSourceSearch({
+      repoRoot,
+      env,
+      searchFetchImpl,
+      startManualSearchImpl,
+      onSearchStarted,
+    });
+    return appendActionResult({
+      repoRoot,
+      env,
+      normalized,
+      intentMessage,
+      text: expandedSearch?.started
+        ? `Skipped ${site}. I’m continuing with your other sources.`
+        : `Skipped ${site}. There aren’t any other enabled sources to search.`,
+      artifacts: [
+        {
+          kind: "search_source",
+          title: `${source.label || site}: Skipped`,
+          index: source.index ?? null,
+          provider: source.provider || null,
+          label: source.label || site,
+          target: url,
+          sourceType: source.sourceType || source.source_type || null,
+          enabled: false,
+          auth: true,
+          platform,
+        },
+        expandedSearch?.artifact,
+      ].filter(Boolean),
+      metadata: {
+        state: expandedSearch?.started ? "running" : "skipped",
+        nextActions: [
+          expandedSearch?.started
+            ? navigationAction("Search jobs", { surface: "search" })
+            : navigationAction("Manage sources", { surface: "settings", section: "sources" }),
+        ],
+      },
+      operationResult: { source: operation, search: expandedSearch?.operation || null },
+      now,
+    });
+  }
+
+  if (typeof openAuthenticatedSourceImpl !== "function") {
+    await setSearchSourceEnabledImpl({ repoRoot, env, selector, sourceUrl, enabled: false });
+    const error = actionError(
+      `CareerRat couldn't open ${site} for sign-in. Try again.`,
+      "SOURCE_SETUP_UNAVAILABLE"
+    );
+    error.status = 501;
+    throw error;
+  }
+  const handoff = await openAuthenticatedSourceImpl({ platform, url, source });
+  const handoffState = String(handoff?.state || "needs-user");
+  const expandedSearch =
+    handoffState === "ready"
+      ? await startExpandedSourceSearch({
+          repoRoot,
+          env,
+          searchFetchImpl,
+          startManualSearchImpl,
+          onSearchStarted,
+        })
+      : null;
+  const handoffText =
+    String(handoff?.summary || "").trim() ||
+    `${site} is open. Finish signing in there, then come back here.`;
+  return appendActionResult({
+    repoRoot,
+    env,
+    normalized,
+    intentMessage,
+    text:
+      handoffState === "ready" && expandedSearch?.started
+        ? `${handoffText} I’m continuing the search now.`
+        : handoffState === "ready"
+          ? `${handoffText} The search could not restart. Open Search and try again.`
+          : handoffText,
+    artifacts: [
+      {
+        kind: "search_source",
+        title: `${source.label || site}: Login`,
+        index: source.index ?? null,
+        provider: source.provider || null,
+        label: source.label || site,
+        target: url,
+        sourceType: source.sourceType || source.source_type || null,
+        enabled: true,
+        auth: true,
+        platform,
+      },
+      expandedSearch?.artifact,
+    ].filter(Boolean),
+    metadata: {
+      state: expandedSearch?.started ? "running" : handoffState,
+      ...(handoffState === "needs-user"
+        ? {
+            nextActions: [
+              sourceAuthDecisionAction({
+                label: "Check again",
+                selector: source.label || selector,
+                sourceUrl: url,
+                decision: "yes",
+              }),
+            ],
+          }
+        : { nextActions: [navigationAction("Search jobs", { surface: "search" })] }),
+    },
+    operationResult: {
+      source: operation,
+      handoff,
+      search: expandedSearch?.operation || null,
+    },
+    now,
+  });
+}
+
 export async function executeWorkspaceIntent({
   repoRoot,
   env = process.env,
@@ -2678,13 +3924,16 @@ export async function executeWorkspaceIntent({
   packetExportArtifact,
   startFirstSearchImpl = startFirstSearchRun,
   startManualSearchImpl = startManualSearchRun,
+  createSearchExecutionIdImpl,
   createCompanyProposalsImpl = createCompanyProposalBatch,
+  startCompanyDiscoveryOperationImpl,
   decideCompanyProposalImpl = applyCompanyProposalDecision,
   getCompanyProposalBatchImpl = companyProposalBatchGet,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
   addBoardSourceImpl,
   addSearchSourceQueryImpl,
   setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
   startBoardDiscoveryImpl,
   startCompanyResearchImpl,
   startCompResearchImpl,
@@ -2709,15 +3958,50 @@ export async function executeWorkspaceIntent({
   stampStrategyReviewImpl = stampStrategyReview,
   callAIImpl = callAI,
   sendCommunicationImpl,
+  executionPlan,
+  signal,
+  intentMessageId,
+  resultMessageId,
+  operationAttempt,
   now = () => new Date(),
 } = {}) {
   let normalized = normalizeWorkspaceIntent(intent);
   if (!EXECUTABLE_INTENTS.has(normalized.type)) throw unsupported(normalized.type);
 
-  const intentMessage = workspaceIntentAppend({ repoRoot, env, intent: normalized, now });
+  const intentMessage = workspaceIntentAppend({
+    repoRoot,
+    env,
+    intent: normalized,
+    now,
+    id: intentMessageId,
+    operationAttempt,
+  });
+  intentMessage.operationAttempt = operationAttempt;
+  intentMessage.resultMessageId = resultMessageId;
+  if (workspaceResultExists({ repoRoot, env, resultMessageId })) {
+    return workspaceThreadRead({ repoRoot, env });
+  }
   try {
     normalized = resolveNaturalWorkspaceRequest({ repoRoot, env, intent: normalized });
+    if (new Set(["job.prepare-submit", "job.apply"]).has(normalized.type)) {
+      applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      const executionPlan = corroborateApplicationMissionAttempt({
+        repoRoot,
+        env,
+        intent: normalized,
+        now,
+      });
+      normalized = {
+        ...normalized,
+        input: {
+          ...(normalized.input || {}),
+          prepareOnly: true,
+          executionPlan,
+        },
+      };
+    }
     const input = normalized.input || {};
+    const selectedExecutionPlan = executionPlan || input.executionPlan;
     if (normalized.type === "screening.answer") {
       const questionText = String(input.questionText || "").trim();
       if (!questionText) {
@@ -2728,6 +4012,8 @@ export async function executeWorkspaceIntent({
         env,
         questionText,
         applicationId: normalized.entity.type === "application" ? normalized.entity.id : undefined,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
       });
       const reusableAnswers = (operation.answers || []).filter(
         (answer) => answer.durable && answer.uploadReady
@@ -3163,6 +4449,7 @@ export async function executeWorkspaceIntent({
             intakeId,
             resolveJobUrlImpl,
             fetchImpl: searchFetchImpl,
+            signal,
             now,
           })
         : jobUrl
@@ -3172,6 +4459,7 @@ export async function executeWorkspaceIntent({
               jobUrl,
               resolveJobUrlImpl,
               fetchImpl: searchFetchImpl,
+              signal,
               now,
             })
           : jobId
@@ -3183,6 +4471,8 @@ export async function executeWorkspaceIntent({
         applicationId: captured.applicationId,
         jobBody: captured.bodyText,
         jobUrl: captured.jobUrl,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.judgment"),
+        signal,
         evaluateJobImpl,
       });
       const evaluationMetadata = {
@@ -3224,6 +4514,7 @@ export async function executeWorkspaceIntent({
             applicationId: captured.applicationId,
             captureQuestionsImpl,
             fetchImpl: searchFetchImpl,
+            signal,
           })
         : null;
       const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
@@ -3232,6 +4523,8 @@ export async function executeWorkspaceIntent({
         applicationId: captured.applicationId,
         applyIntent,
         formats: ["pdf"],
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, evaluated.application, applyIntent);
@@ -3302,6 +4595,8 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         jobBody: input.jobBody,
         jobUrl: input.jobUrl,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.judgment"),
+        signal,
         evaluateJobImpl,
       });
       return appendActionResult({
@@ -3343,6 +4638,7 @@ export async function executeWorkspaceIntent({
             applicationId: normalized.entity.id,
             captureQuestionsImpl,
             fetchImpl: searchFetchImpl,
+            signal,
           })
         : null;
       const { packet: operation, questionCaptureDeferred } =
@@ -3352,6 +4648,8 @@ export async function executeWorkspaceIntent({
           applicationId: normalized.entity.id,
           applyIntent,
           formats: formats.length ? formats : ["pdf"],
+          executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+          signal,
           generateDocumentsImpl,
         });
       const gaps = packetGapsForApplication(operation.gaps, application, applyIntent);
@@ -3454,6 +4752,21 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "source.auth-decision") {
+      return executeSourceAuthDecision({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        setSearchSourceEnabledImpl,
+        openAuthenticatedSourceImpl,
+        startManualSearchImpl,
+        onSearchStarted,
+        searchFetchImpl,
+        now,
+      });
+    }
+
     if (normalized.type === "source.add") {
       if (typeof addBoardSourceImpl !== "function") {
         const error = actionError(
@@ -3471,6 +4784,15 @@ export async function executeWorkspaceIntent({
       const added = operation?.added !== false;
       const enabled = source.enabled !== false;
       const authPending = source.auth === true && !enabled;
+      const authIdentity = authPending
+        ? resolveBrowserSourceIdentity(source, source.target || source.url || url)
+        : null;
+      if (authIdentity && !authIdentity.ok) {
+        throw actionError(authIdentity.reason, "SOURCE_AUTH_UNAVAILABLE");
+      }
+      const authPlatform = authIdentity?.platform || "";
+      const authSite = authIdentity?.label || "this site";
+      const sourceSelector = label;
       const expandedSearch =
         added && enabled && source.auth !== true
           ? await startExpandedSourceSearch({
@@ -3486,15 +4808,15 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: added
-          ? `Added ${label} to your search sources.${
-              authPending
-                ? " It stays off until you enable browser access for this provider."
-                : expandedSearch?.started
+        text: authPending
+          ? `Do you want to log into ${authSite} so I can use it?`
+          : added
+            ? `Added ${label} to your search sources.${
+                expandedSearch?.started
                   ? " It is enabled, and CareerRat is searching it now."
                   : " It is enabled for future searches."
-            }`
-          : `${label} is already in your search sources. Nothing changed.`,
+              }`
+            : `${label} is already in your search sources. Nothing changed.`,
         artifacts: [
           {
             kind: "search_source",
@@ -3507,16 +4829,23 @@ export async function executeWorkspaceIntent({
             sourceType: source.sourceType || source.source_type || null,
             enabled,
             auth: source.auth === true,
+            ...(source.auth === true ? { platform: authPlatform || null } : {}),
           },
           expandedSearch?.artifact,
         ].filter(Boolean),
-        metadata: {
-          state: expandedSearch?.started ? "running" : added ? "added" : "existing",
-          nextActions: [
-            navigationAction("Search jobs", { surface: "search" }),
-            navigationAction("Manage sources", { surface: "settings", section: "sources" }),
-          ],
-        },
+        metadata: authPending
+          ? sourceLoginQuestionMetadata({
+              selector: sourceSelector,
+              platform: authPlatform,
+              url: source.target || url,
+            })
+          : {
+              state: expandedSearch?.started ? "running" : added ? "added" : "existing",
+              nextActions: [
+                navigationAction("Search jobs", { surface: "search" }),
+                navigationAction("Manage sources", { surface: "settings", section: "sources" }),
+              ],
+            },
         operationResult: operation,
         now,
       });
@@ -3599,17 +4928,56 @@ export async function executeWorkspaceIntent({
       const label = String(source.label || source.provider || selector);
       const changed = operation?.changed !== false;
       const stateLabel = input.enabled ? "Enabled" : "Disabled";
+      if (input.enabled && source.auth === true) {
+        const rollback = await setSearchSourceEnabledImpl({
+          repoRoot,
+          env,
+          selector,
+          enabled: false,
+        });
+        const authIdentity = resolveBrowserSourceIdentity(source, source.target || source.url);
+        if (!authIdentity.ok) {
+          throw actionError(authIdentity.reason, "SOURCE_AUTH_UNAVAILABLE");
+        }
+        const platform = authIdentity.platform;
+        const site = authIdentity.label;
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `Do you want to log into ${site} so I can use it?`,
+          artifacts: [
+            {
+              kind: "search_source",
+              title: `${label}: Login needed`,
+              changed,
+              index: source.index ?? null,
+              provider: source.provider || null,
+              label,
+              target: source.target || null,
+              sourceType: source.sourceType || source.source_type || null,
+              enabled: false,
+              auth: true,
+              ...(platform ? { platform } : {}),
+            },
+          ],
+          metadata: sourceLoginQuestionMetadata({
+            selector: label,
+            platform,
+            url: source.target || source.url,
+          }),
+          operationResult: { requested: operation, rollback },
+          now,
+        });
+      }
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
         text: changed
-          ? `${stateLabel} ${label} for future searches.${
-              input.enabled && source.auth === true
-                ? " Browser access still needs separate consent before CareerRat can use it."
-                : ""
-            }`
+          ? `${stateLabel} ${label} for future searches.`
           : `${label} is already ${input.enabled ? "enabled" : "disabled"}. Nothing changed.`,
         artifacts: [
           {
@@ -3715,6 +5083,47 @@ export async function executeWorkspaceIntent({
           ? { request: String(input.request).trim().slice(0, 500) }
           : {}),
       };
+      if (typeof startCompanyDiscoveryOperationImpl === "function") {
+        const started = await startCompanyDiscoveryOperationImpl(body);
+        const operation = started?.operation;
+        const operationId = String(operation?.id || "").trim();
+        const batchId = String(started?.batchId || operation?.resultRef?.id || "").trim();
+        const status = String(operation?.status || "").trim();
+        if (!operationId || !batchId || !status) {
+          throw actionError(
+            "CareerRat couldn't start company discovery. Try it again.",
+            "COMPANY_DISCOVERY_FAILED"
+          );
+        }
+        const artifact = {
+          kind: "company_discovery_operation",
+          title:
+            status === "completed" ? "Company discovery is ready" : "Company discovery is running",
+          operationId,
+          batchId,
+          status,
+          retryOf: operation.retryOf || null,
+          attempt: Number(operation.attempt || 1),
+        };
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text:
+            status === "completed"
+              ? "Company discovery finished. Review the exact saved batch before tracking any boards."
+              : "Company discovery is running in the background. CareerRat will keep the exact result for review.",
+          artifacts: [artifact],
+          metadata: {
+            state: status,
+            operationId,
+            batchId,
+          },
+          operationResult: { operation: artifact },
+          now,
+        });
+      }
       const operation = await createCompanyProposalsImpl({
         repoRoot,
         env,
@@ -4173,6 +5582,8 @@ export async function executeWorkspaceIntent({
         repoRoot,
         env,
         applicationId: normalized.entity.id,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "coach.deep"),
+        signal,
       });
       const plan = operation?.body?.data;
       if (operation?.status !== 200 || !operation?.body?.ok || !plan) {
@@ -4315,7 +5726,14 @@ export async function executeWorkspaceIntent({
     // the freshness gate) — never a per-recommendation entry.
     if (normalized.type === "strategy.review") {
       const force = Boolean(input.force);
-      const draft = await draftStrategyReviewImpl({ repoRoot, env, force, now: now() });
+      const draft = await draftStrategyReviewImpl({
+        repoRoot,
+        env,
+        force,
+        now: now(),
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "coach.deep"),
+        signal,
+      });
       const artifact = {
         kind: "strategy_review",
         state: draft.state,
@@ -4477,6 +5895,7 @@ export async function executeWorkspaceIntent({
         domain === "all" || domain === "gates"
           ? {
               comp_floor: compensation.minimum_base ?? null,
+              minimum_annual_earnings: compensation.minimum_annual_earnings ?? null,
               comp_target: compensation.target_base ?? null,
               comp_expected: compensation.expected_base ?? null,
               excluded_companies: Array.isArray(targeting.excluded_companies)
@@ -4609,7 +6028,7 @@ export async function executeWorkspaceIntent({
             error.details = { options: CAPABILITY_KEYS };
             throw error;
           }
-          if (!new Set(["status_polling", "authenticated_search"]).has(capability)) {
+          if (capability !== "status_polling") {
             const error = actionError(
               `Turning on ${CAPABILITIES[capability].label} happens in Settings, where the permissions are explained.`,
               "SETTINGS_CHANGE_UNSUPPORTED"
@@ -4619,9 +6038,48 @@ export async function executeWorkspaceIntent({
           }
         }
 
-        const automationDoc = mergeAutomationDefaults(loadAutomation({ root: repoRoot }).data);
+        const automationDoc = mergeAutomationDefaults(loadAutomation({ root: repoRoot, env }).data);
         let patch;
-        if (op === "setup_mode") {
+        if (op === "contextual-permission") {
+          const definition = contextualPermissionDefinition(change.permission);
+          if (!definition) {
+            const error = actionError(
+              "That permission request is no longer available.",
+              "SETTINGS_CHANGE_INVALID"
+            );
+            error.details = { reason: "permission-context" };
+            throw error;
+          }
+          const platforms = definition.platforms || CAPABILITIES[definition.capability].platforms;
+          const alreadyAllowed = platforms.every(
+            (platform) =>
+              mayRun({
+                capability: definition.capability,
+                platform,
+                data: automationDoc,
+              }).allowed
+          );
+          patch = {
+            consent: Object.fromEntries(platforms.map((platform) => [platform, true])),
+            capabilities: {
+              [definition.capability]: {
+                enabled: true,
+                platforms: Object.fromEntries(platforms.map((platform) => [platform, true])),
+                scoped_grants: Object.fromEntries(platforms.map((platform) => [platform, true])),
+              },
+            },
+          };
+          result = {
+            label: definition.label,
+            field: `capabilities.${definition.capability}`,
+            from: alreadyAllowed,
+            to: true,
+            changed: !alreadyAllowed,
+            summary: alreadyAllowed
+              ? `${definition.label} is already allowed.`
+              : `${definition.label} is allowed now.`,
+          };
+        } else if (op === "setup_mode") {
           const value = String(change.value || "");
           if (value !== "basic" && value !== "advanced") {
             throw actionError(
@@ -5148,6 +6606,15 @@ export async function executeWorkspaceIntent({
 
     if (normalized.type === "search.run") {
       const purpose = input.purpose === "first-search" ? "first-search" : "manual-search";
+      const searchExecutionId =
+        purpose === "manual-search"
+          ? createSearchExecutionId({
+              searchExecutionId: input.searchExecutionId,
+              ...(createSearchExecutionIdImpl
+                ? { createExecutionId: createSearchExecutionIdImpl }
+                : {}),
+            })
+          : null;
       const operation =
         purpose === "first-search"
           ? await startFirstSearchImpl({
@@ -5160,9 +6627,7 @@ export async function executeWorkspaceIntent({
               repoRoot,
               env,
               fetchImpl: searchFetchImpl,
-              ...(input.searchExecutionId
-                ? { searchExecutionId: String(input.searchExecutionId) }
-                : {}),
+              searchExecutionId,
             });
       const run = operation?.run || {
         purpose,
@@ -5366,10 +6831,21 @@ export async function executeWorkspaceIntent({
           env,
         });
         if (!verdict.allowed) {
-          throw actionError(
-            "Automated calendar sync isn't enabled for that provider. Turn it on in Settings first.",
-            "CALENDAR_WRITE_NOT_ALLOWED"
-          );
+          const providerPermission =
+            {
+              apple_calendar: "apple-calendar-write",
+              google_calendar: "google-calendar-write",
+              outlook_calendar: "outlook-calendar-write",
+              automation_tools: "automation-tools-calendar-write",
+            }[provider] || null;
+          return appendContextualPermissionRequest({
+            repoRoot,
+            env,
+            normalized,
+            intentMessage,
+            permission: providerPermission,
+            now,
+          });
         }
       }
 
@@ -5570,10 +7046,14 @@ export async function executeWorkspaceIntent({
           .allowed,
       }));
       if (platforms.every((entry) => !entry.allowed)) {
-        throw actionError(
-          "Relationship sourcing isn't turned on yet. Turn it on in Settings first.",
-          "RELATIONSHIP_SOURCING_NOT_ALLOWED"
-        );
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "relationship-sourcing",
+          now,
+        });
       }
 
       // A durable CTA only gets written when the linked application has no
@@ -5649,10 +7129,14 @@ export async function executeWorkspaceIntent({
         allowed: mayRun({ capability: "status_polling", platform, root: repoRoot, env }).allowed,
       }));
       if (platforms.every((entry) => !entry.allowed)) {
-        throw actionError(
-          "Portal status polling isn't turned on yet. Turn it on in Settings first.",
-          "STATUS_SYNC_NOT_ALLOWED"
-        );
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "status-checks",
+          now,
+        });
       }
 
       const applications = assembleTrackerObject(requireDb({ repoRoot, env })).applications || [];
@@ -5707,10 +7191,14 @@ export async function executeWorkspaceIntent({
         tracker,
       });
       if (sources.every((source) => !source.allowed)) {
-        throw actionError(
-          "Mail sync isn't available on this device yet. Turn on mail access for Gmail or Outlook in Settings first.",
-          "MAIL_SYNC_NOT_ALLOWED"
-        );
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "mail-checks",
+          now,
+        });
       }
 
       // Count only — never surface thread rows, subjects, participants, or
@@ -5786,10 +7274,14 @@ export async function executeWorkspaceIntent({
       const tracker = assembleTrackerObject(requireDb({ repoRoot, env }));
       const sources = messagesSyncSources({ repoRoot, env, tracker });
       if (sources.every((source) => !source.allowed)) {
-        throw actionError(
-          "Message sync isn't turned on yet. Turn on in-platform messaging for LinkedIn or Wellfound in Settings first.",
-          "MESSAGES_SYNC_NOT_ALLOWED"
-        );
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "message-checks",
+          now,
+        });
       }
 
       // Count only — never surface thread rows, subjects, participants, or
@@ -5855,9 +7347,24 @@ export async function executeWorkspaceIntent({
         },
       ];
       const batch = linkedinProposalBatchLatest({ repoRoot, env });
+      if (!capabilities[0].allowed) {
+        return appendContextualPermissionRequest({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          permission: "linkedin-profile-review",
+          artifacts: [linkedinOptimizeHandoffArtifact({ capabilities, batch, now })],
+          now,
+        });
+      }
+      const linkedinExecutionPlan = operationExecutionPlan(selectedExecutionPlan, "research.web");
       const execution =
-        capabilities[0].allowed && typeof runLinkedinOptimizeImpl === "function"
-          ? await runLinkedinOptimizeImpl({ profileUrl: null })
+        typeof runLinkedinOptimizeImpl === "function"
+          ? await runLinkedinOptimizeImpl({
+              profileUrl: null,
+              executionPlan: linkedinExecutionPlan,
+            })
           : null;
 
       return appendActionResult({
@@ -5865,11 +7372,9 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: execution
-          ? execution.summary
-          : capabilities[0].allowed
-            ? "LinkedIn profile review is ready in CareerRat. Suggestions come back here for your approval."
-            : "Turn on LinkedIn profile review in Settings to read your profile and draft suggestions here.",
+        text:
+          execution?.summary ||
+          "LinkedIn profile review is ready in CareerRat. Suggestions come back here for your approval.",
         artifacts: [
           linkedinOptimizeHandoffArtifact({ capabilities, batch, now }),
           ...(batch ? [linkedinProfileProposalsArtifact(batch)] : []),
@@ -5949,6 +7454,8 @@ export async function executeWorkspaceIntent({
         profile,
         calendarBusy: tracker.calendarBusy || [],
         instruction: String(input.instruction || "").trim(),
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "communication.drafting"),
+        signal,
         now,
       });
       const artifact = {
@@ -6055,6 +7562,16 @@ export async function executeWorkspaceIntent({
         skill: "email-comms",
         action: "draft",
         operation: "communication:draft",
+        ...(operationExecutionPlan(selectedExecutionPlan, "communication.drafting")
+          ? {
+              executionPlan: operationExecutionPlan(
+                selectedExecutionPlan,
+                "communication.drafting"
+              ),
+              useExecutionPlanRoute: true,
+            }
+          : { aiOperation: "communication.drafting" }),
+        signal,
       });
       const body = responseText(response);
       if (!body)
@@ -6110,6 +7627,7 @@ export async function executeWorkspaceIntent({
           draftedAt,
           engine: response?.engine || null,
           elapsedMs: response?.elapsedMs ?? null,
+          ...(response?.executionPlan ? { executionPlan: response.executionPlan } : {}),
         },
         now,
       });
@@ -6378,12 +7896,13 @@ export async function executeWorkspaceIntent({
         );
       }
       const note = String(input.note || "").trim();
-      appSetStatus({
+      appRecordOutcome({
         repoRoot,
         env,
         id: normalized.entity.id,
         to,
         note: note || undefined,
+        at: resolvedDate(undefined, now),
       });
       return appendActionResult({
         repoRoot,
@@ -6401,13 +7920,13 @@ export async function executeWorkspaceIntent({
     }
     if (normalized.type === "application.record-external") {
       const appliedAt = resolvedDate(input.appliedAt, now);
-      appSetStatus({
+      appRecordOutcome({
         repoRoot,
         env,
         id: normalized.entity.id,
         to: "applied",
         note: "Applied outside CareerRat. Reported by user.",
-        appliedAt,
+        at: appliedAt,
       });
       return appendActionResult({
         repoRoot,
@@ -6708,6 +8227,8 @@ export async function executeWorkspaceIntent({
           repoRoot,
           env,
           applicationId: normalized.entity.id,
+          executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.judgment"),
+          signal,
           evaluateJobImpl,
         });
       }
@@ -6743,6 +8264,7 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         captureQuestionsImpl,
         fetchImpl: searchFetchImpl,
+        signal,
       });
 
       const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
@@ -6751,6 +8273,8 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         applyIntent: true,
         formats: ["pdf"],
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -6840,10 +8364,16 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         captureQuestionsImpl,
         fetchImpl: searchFetchImpl,
+        signal,
       });
+      application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
     }
 
-    if (resumeApplicationSession && packetQuestionLineageIsStale(application)) {
+    const staleQuestionLineage = packetQuestionLineageIsStale(application);
+    const stalePacketProvenance =
+      Boolean(application?.packetManifest) &&
+      packetProvenanceIsStale({ repoRoot, env, application });
+    if (resumeApplicationSession && (staleQuestionLineage || stalePacketProvenance)) {
       const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
         repoRoot,
         env,
@@ -6851,6 +8381,8 @@ export async function executeWorkspaceIntent({
         applyIntent: true,
         formats: ["pdf"],
         force: true,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -6861,7 +8393,11 @@ export async function executeWorkspaceIntent({
           env,
           normalized,
           intentMessage,
-          text: `The captured application questions changed, so CareerRat rebuilt the packet. ${packetGapText(
+          text: `${
+            staleQuestionLineage
+              ? "The captured application questions changed"
+              : "The packet inputs changed"
+          }, so CareerRat rebuilt the packet. ${packetGapText(
             gaps,
             questionCaptureDeferred
           )} The application was not marked Applied.`,
@@ -6891,17 +8427,6 @@ export async function executeWorkspaceIntent({
                 entityType: "application",
                 entityId: normalized.entity.id,
               }),
-              {
-                label: "Resume supervised preparation",
-                intent: {
-                  type: "job.prepare-submit",
-                  entity: { type: "application", id: normalized.entity.id },
-                  input: {
-                    resumeSession: true,
-                    ...carriedReviewApproval(input),
-                  },
-                },
-              },
             ],
           },
           operationResult: { ...packet, gaps },
@@ -6913,7 +8438,7 @@ export async function executeWorkspaceIntent({
     }
 
     const applySafetyBlockReason = resumeApplicationSession
-      ? applicationApplySafetyBlockReason(application)
+      ? applicationApplySafetyBlockReason({ repoRoot, env, application })
       : null;
     if (typeof applyJobImpl !== "function" && (!prepareSubmit || !applySafetyBlockReason)) {
       return appendActionResult({
@@ -6991,6 +8516,7 @@ export async function executeWorkspaceIntent({
       questionCapture,
       input: executorInput,
       prepareOnly: true,
+      signal,
       ...(input.focusSession === true ? { focusSession: true } : {}),
     });
     if (execution?.state === "questions-captured" && execution?.questionCaptureUpdated === true) {
@@ -7003,6 +8529,8 @@ export async function executeWorkspaceIntent({
         applyIntent: true,
         formats: ["pdf"],
         force: true,
+        executionPlan: operationExecutionPlan(selectedExecutionPlan, "application.drafting"),
+        signal,
         generateDocumentsImpl,
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
@@ -7054,17 +8582,6 @@ export async function executeWorkspaceIntent({
                 entityType: "application",
                 entityId: normalized.entity.id,
               }),
-              {
-                label: "Resume supervised preparation",
-                intent: {
-                  type: "job.prepare-submit",
-                  entity: { type: "application", id: normalized.entity.id },
-                  input: {
-                    resumeSession: true,
-                    ...carriedReviewApproval(input),
-                  },
-                },
-              },
             ],
           },
           operationResult: { ...packet, gaps },
@@ -7086,6 +8603,7 @@ export async function executeWorkspaceIntent({
           prepareOnly: true,
         },
         prepareOnly: true,
+        signal,
         ...(input.focusSession === true ? { focusSession: true } : {}),
       });
     }
@@ -7133,6 +8651,10 @@ export async function executeWorkspaceIntent({
       const sessionUrl = safeExternalHttpUrl(
         execution.currentUrl || application.link || application.url || application.sourceUrl
       );
+      const permissionRequired = execution?.code === "APPLICATION_PREPARATION_PERMISSION_REQUIRED";
+      const permission = permissionRequired
+        ? contextualPermissionDefinition("application-preparation")
+        : null;
       const sessionState =
         prepareSubmit && execution.state === "questions-captured" ? "blocked" : execution.state;
       return appendActionResult({
@@ -7140,7 +8662,9 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: applicationSessionText(execution),
+        text: permission
+          ? `${permission.request} Choose ${permission.allowLabel}, or type “${permission.typedCommand}”.`
+          : applicationSessionText(execution),
         artifacts: [
           {
             kind: "application_handoff",
@@ -7159,15 +8683,21 @@ export async function executeWorkspaceIntent({
           submissionVerified: false,
           nextActions: [
             {
-              label: "Return to supervised application",
+              label: permissionRequired
+                ? permission.allowLabel
+                : "Return to supervised application",
               intent: {
-                type: "job.prepare-submit",
-                entity: { type: "application", id: normalized.entity.id },
-                input: {
-                  resumeSession: true,
-                  focusSession: true,
-                  ...carriedReviewApproval(input),
-                },
+                type: permissionRequired ? "settings.apply" : "job.prepare-submit",
+                entity: permissionRequired
+                  ? { type: "workspace", id: WORKSPACE_THREAD_ID }
+                  : { type: "application", id: normalized.entity.id },
+                input: permissionRequired
+                  ? { change: contextualPermissionChange("application-preparation") }
+                  : {
+                      resumeSession: true,
+                      focusSession: true,
+                      ...carriedReviewApproval(input),
+                    },
               },
             },
             {
@@ -7183,36 +8713,39 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    if (execution?.verified === true || execution?.state === "submitted") {
+    if (execution?.verified === true) {
+      const appliedAt = resolvedDate(execution.submittedAt, now);
+      appRecordOutcome({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        to: "applied",
+        note: "Submission verified in the supervised browser.",
+        at: appliedAt,
+      });
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `The supervised browser already shows a submission confirmation for ${applicationLabel(application)}. This application was not marked Applied; record it only after you confirm the submission.`,
+        text: `Verified the submission confirmation for ${applicationLabel(application)} and recorded it as Applied.`,
         artifacts: [
+          ...(Array.isArray(execution.artifacts) ? execution.artifacts : []),
           {
-            kind: "application_handoff",
-            title: `${applicationLabel(application)}: Submission confirmation needs review`,
+            kind: "application_status_receipt",
+            title: `${applicationLabel(application)}: Applied`,
             applicationId: normalized.entity.id,
-            submissionVerified: false,
-            executorAvailable: true,
-            session: execution.session || { provider: "session-browser" },
+            status: "applied",
+            appliedAt,
+            submissionVerified: true,
+            confirmation: execution.confirmation || null,
           },
         ],
         metadata: {
-          state: "manual-handoff",
+          state: "applied",
           applicationId: normalized.entity.id,
-          submissionVerified: false,
-          nextActions: [
-            {
-              label: "I applied",
-              intent: {
-                type: "application.record-external",
-                entity: { type: "application", id: normalized.entity.id },
-              },
-            },
-          ],
+          submissionVerified: true,
+          appliedAt,
         },
         operationResult: execution,
         now,
@@ -7240,6 +8773,11 @@ export async function executeWorkspaceIntent({
       "APPLICATION_PREPARATION_FAILED"
     );
   } catch (error) {
+    const nextActions = ambiguityChoiceIntents(error, normalized);
+    if (operationAttempt && !nextActions.length) {
+      error.workspaceThreadId = WORKSPACE_THREAD_ID;
+      throw error;
+    }
     const visibleError = visibleActionError(error, normalized.entity);
     workspaceMessageAppend({
       repoRoot,
@@ -7252,8 +8790,13 @@ export async function executeWorkspaceIntent({
         code: error?.code || "ACTION_FAILED",
         message: visibleError,
       },
-      metadata: { intentMessageId: intentMessage.message.id },
+      metadata: {
+        intentMessageId: intentMessage.message.id,
+        ...(nextActions.length ? { state: "needs-choice", nextActions } : {}),
+      },
       now,
+      id: resultMessageId,
+      operationAttempt,
     });
     error.workspaceThreadId = WORKSPACE_THREAD_ID;
     throw error;
@@ -7793,23 +9336,25 @@ function parseSettingsCompAmount(text) {
   return match[2] ? n * 1000 : n;
 }
 
-// "set/change/raise/lower my comp floor|minimum|comp target|target comp|
+// "set/change/raise/lower my comp floor|minimum|annual earnings floor|comp target|target comp|
 // expected comp|expected base to <amount>" → one GATE_ROUTES comp type, with
 // the raw (unparsed) value text so the caller can still detect a comp-leak
 // phrase ("to match my current salary") before treating it as a number.
 function settingsCompGateFromText(text) {
   const value = String(text || "").trim();
   const match = value.match(
-    /^(?:please\s+)?(?:set|change|raise|lower)\s+my\s+(comp\s+floor|minimum|comp\s+target|target\s+comp|expected\s+comp|expected\s+base)\s+to\s+(.+?)\s*[.?!]*$/i
+    /^(?:please\s+)?(?:set|change|raise|lower)\s+my\s+(comp\s+floor|minimum|minimum\s+annual(?:\s+cash)?\s+earnings|annual(?:\s+cash)?\s+earnings\s+floor|total\s+earnings\s+floor|comp\s+target|target\s+comp|expected\s+comp|expected\s+base)\s+to\s+(.+?)\s*[.?!]*$/i
   );
   if (!match) return null;
   const noun = match[1].toLowerCase();
   const rawValue = match[2].trim();
-  const type = /floor|minimum/.test(noun)
-    ? "comp-floor"
-    : /target/.test(noun)
-      ? "comp-target"
-      : "comp-expected";
+  const type = /annual|total\s+earnings/.test(noun)
+    ? "comp-annual-floor"
+    : /floor|minimum/.test(noun)
+      ? "comp-floor"
+      : /target/.test(noun)
+        ? "comp-target"
+        : "comp-expected";
   return { type, rawValue };
 }
 
@@ -7936,8 +9481,6 @@ function settingsProfileFromText(text) {
 const AUTOMATION_CAPABILITY_PHRASES = {
   "status polling": "status_polling",
   "portal status polling": "status_polling",
-  "authenticated search": "authenticated_search",
-  "authenticated search scanning": "authenticated_search",
   messaging: "messaging",
   "in-platform messaging": "messaging",
   "authenticated apply preparation": "authenticated_apply_preparation",
@@ -7969,8 +9512,8 @@ function matchAutomationPlatformPhrase(text) {
 }
 
 // "turn off <capability> [on <platform>]" (any capability — disabling is
-// always allowed), "turn on status polling / authenticated search [on
-// <platform>]" (the ONLY capabilities allowed to enable from Ask — see the
+// always allowed), "turn on status polling [on <platform>]" (the ONLY
+// capability allowed to enable from Ask — see the
 // settings.apply handler's own capability-tier restriction, enforced there
 // too since REST can call the intent directly), "set setup mode to
 // advanced/basic", "use <provider> for browser sessions".
@@ -7996,12 +9539,25 @@ function settingsAutomationFromText(text) {
   match = value.match(/^(?:please\s+)?turn\s+on\s+(.+?)(?:\s+on\s+(.+?))?\s*[.?!]*$/i);
   if (match) {
     const capability = matchAutomationCapabilityPhrase(match[1]);
-    if (!capability || !new Set(["status_polling", "authenticated_search"]).has(capability))
-      return null;
+    if (!capability || capability !== "status_polling") return null;
     return automationToggleChange(capability, match[2], true);
   }
 
   return null;
+}
+
+function settingsContextualPermissionFromText(text) {
+  const raw = String(text || "").trim();
+  if (raw.endsWith("?")) return null;
+  const value = raw
+    .replace(/^(?:please\s+)/i, "")
+    .replace(/[.!]+$/g, "")
+    .trim()
+    .toLowerCase();
+  const match = Object.entries(CONTEXTUAL_PERMISSIONS).find(
+    ([, definition]) => definition.typedCommand.toLowerCase() === value
+  );
+  return match ? contextualPermissionChange(match[0]) : null;
 }
 
 // Named a platform? It must be one this capability actually runs on (each
@@ -8042,6 +9598,9 @@ function settingsApplyFromText(text) {
   const profile = settingsProfileFromText(value);
   if (profile) return { kind: "profile", ...profile };
 
+  const contextualPermission = settingsContextualPermissionFromText(value);
+  if (contextualPermission) return contextualPermission;
+
   const automation = settingsAutomationFromText(value);
   if (automation) return { kind: "automation", ...automation };
 
@@ -8060,6 +9619,8 @@ function settingsApplyPreviewLabel(change) {
   if (change.kind === "gate") {
     if (change.compReference) return "Update this comp setting";
     if (change.type === "comp-floor") return `Set comp floor to ${formatSettingsUsd(change.value)}`;
+    if (change.type === "comp-annual-floor")
+      return `Set minimum annual cash earnings to ${formatSettingsUsd(change.value)}`;
     if (change.type === "comp-target")
       return `Set comp target to ${formatSettingsUsd(change.value)}`;
     if (change.type === "comp-expected")
@@ -8072,6 +9633,11 @@ function settingsApplyPreviewLabel(change) {
     return `Set ${label} to ${change.value}`;
   }
   if (change.kind === "automation") {
+    if (change.op === "contextual-permission") {
+      return (
+        contextualPermissionDefinition(change.permission)?.allowLabel || "Allow this permission"
+      );
+    }
     if (change.op === "setup_mode") return `Set automation setup mode to ${change.value}`;
     if (change.op === "session") return `Use ${change.value} for browser sessions`;
     const capabilityLabel = CAPABILITIES[change.capability]?.label || change.capability;
@@ -8957,6 +10523,111 @@ function previewAnswerLabel(text) {
   return `Answer: “${preview}”`;
 }
 
+function isSearchStatusQuestion(text) {
+  const value = String(text || "").trim();
+  return (
+    /^how(?:['’]?s|\s+is)\s+(?:(?:this|the|my|our)\s+)?(?:job\s+)?search\s+(?:going|doing|progressing)\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^(?:is|are)\s+(?:(?:this|the|my|our)\s+)?(?:job\s+)?search\s+still\s+(?:going|running|searching)\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^did\s+(?:(?:this|the|my|our)\s+)?(?:job\s+)?search\s+find\s+anything\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^what(?:['’]?s|\s+is)\s+(?:happening|going\s+on)\s+with\s+(?:(?:this|the|my|our)\s+)?(?:job\s+)?search\s*[.?!]*$/i.test(
+      value
+    )
+  );
+}
+
+function sourcingRunTime(state) {
+  const run = state?.run || {};
+  for (const value of [
+    run.updatedAt,
+    run.updated_at,
+    run.startedAt,
+    run.started_at,
+    run.completedAt,
+    run.completed_at,
+  ]) {
+    const parsed = Date.parse(value || "");
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function latestDeterministicSearch({ repoRoot, env }) {
+  const states = ["manual-search", "first-search"]
+    .map((purpose) => sourcingRunLatest({ repoRoot, env, purpose }))
+    .filter((state) => state?.run && state.run.status !== "not_started");
+  const running = states.filter((state) => state.run.status === "running");
+  return (running.length ? running : states).sort(
+    (left, right) => sourcingRunTime(right) - sourcingRunTime(left)
+  )[0];
+}
+
+function correlatedAiSearch(deterministic, ai) {
+  if (!ai?.run || !deterministic?.run) return ai;
+  const deterministicExecutionId = String(
+    deterministic.run.metadata?.searchExecutionId || ""
+  ).trim();
+  const aiExecutionId = String(ai.run.metadata?.searchExecutionId || "").trim();
+  return deterministicExecutionId && aiExecutionId && deterministicExecutionId === aiExecutionId
+    ? ai
+    : null;
+}
+
+function countLabel(count, singular) {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function matchCountLabel(count, adjective = "") {
+  const prefix = adjective ? `${adjective} ` : "";
+  if (count === 0) return `no ${prefix}matches`;
+  return `${count} ${prefix}${count === 1 ? "match" : "matches"}`;
+}
+
+function deterministicSearchStatusText(state) {
+  const run = state?.run;
+  if (!run) return "";
+  if (run.status === "running") return "CareerRat is still searching your saved job sites.";
+  if (run.status === "failed") {
+    return "Your saved job-site search couldn't finish, so it needs another try.";
+  }
+  if (run.status !== "completed") return "";
+  const summary = run.summary || {};
+  const scanned = Number(summary.scanned);
+  const matches = Number(summary.qualified ?? summary.presented ?? summary.new ?? 0);
+  if (!Number.isFinite(scanned)) {
+    return `Your saved job sites finished and found ${matchCountLabel(matches)}.`;
+  }
+  return `Your saved job sites finished. They scanned ${countLabel(scanned, "job")} and found ${matchCountLabel(matches)}.`;
+}
+
+function aiSearchStatusText(state) {
+  const run = state?.run;
+  if (!run) return "";
+  if (run.status === "running") return "The AI search is still running.";
+  if (run.status === "failed") return "The AI search couldn't finish, so it needs another try.";
+  if (run.status !== "completed") return "";
+  const summary = run.summary || {};
+  const matches = Number(summary.presented ?? summary.new ?? summary.found ?? 0);
+  return `The AI search finished and found ${matchCountLabel(matches, "new")}.`;
+}
+
+function currentSearchStatusText({ repoRoot, env }) {
+  const deterministic = latestDeterministicSearch({ repoRoot, env });
+  const ai = correlatedAiSearch(
+    deterministic,
+    sourcingRunLatest({ repoRoot, env, purpose: "ai-web-search" })
+  );
+  const parts = [deterministicSearchStatusText(deterministic), aiSearchStatusText(ai)].filter(
+    Boolean
+  );
+  return parts.join(" ") || "No job search has run yet.";
+}
+
 // `text` is never persisted or sent anywhere here — this is pure
 // classification against ACTION_PREVIEW_RULES above. `engineAvailable` lets
 // the ask bar render the NO ENGINE receipt state up front (before a turn
@@ -8999,20 +10670,96 @@ export async function runWorkspaceAgentTurn({
   env = process.env,
   text,
   context,
+  choice,
   callAIImpl = callAI,
+  startManualSearchImpl = startManualSearchRun,
+  setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
+  onSearchStarted,
+  searchFetchImpl = fetch,
+  executionPlan,
   signal,
+  userMessageId,
+  resultMessageId,
+  operationAttempt,
   now = () => new Date(),
 } = {}) {
   const jobContext = canonicalJobContext({ repoRoot, env, context });
-  workspaceMessageAppend({
+  const appended = workspaceMessageAppend({
     repoRoot,
     env,
     role: "user",
     kind: "text",
     text,
+    choice,
     ...(jobContext ? { metadata: { jobContext } } : {}),
     now,
+    id: userMessageId,
+    operationAttempt,
   });
+  if (workspaceResultExists({ repoRoot, env, resultMessageId })) {
+    return workspaceThreadRead({ repoRoot, env });
+  }
+  const sourceChoiceResolution = appended.message.metadata?.choiceResolution;
+  const handledSourceLogin = sourceChoiceResolution?.promptId
+    ? await handleSourceLoginChoice({
+        repoRoot,
+        env,
+        userMessage: appended.message,
+        choiceResolution: sourceChoiceResolution,
+        setSearchSourceEnabledImpl,
+        openAuthenticatedSourceImpl,
+        startManualSearchImpl,
+        onSearchStarted,
+        searchFetchImpl,
+        resultMessageId,
+        operationAttempt,
+        now,
+      })
+    : null;
+  if (handledSourceLogin) return handledSourceLogin;
+  const handledChoice = await handleAdjacentRoleChoice({
+    repoRoot,
+    env,
+    choiceResolution: appended.message.metadata?.choiceResolution,
+    startManualSearchImpl,
+    onSearchStarted,
+    searchFetchImpl,
+    resultMessageId,
+    operationAttempt,
+    now,
+  });
+  if (handledChoice) {
+    if (!resultMessageId || workspaceResultExists({ repoRoot, env, resultMessageId })) {
+      return handledChoice;
+    }
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: resultMessageId,
+      role: "assistant",
+      kind: "text",
+      text: "That choice is already saved.",
+      metadata: { source: "career-coach" },
+      operationAttempt,
+      now,
+    });
+    return workspaceThreadRead({ repoRoot, env });
+  }
+  if (isSearchStatusQuestion(text)) {
+    workspaceMessageAppend({
+      repoRoot,
+      env,
+      id: resultMessageId,
+      role: "assistant",
+      kind: "text",
+      text: currentSearchStatusText({ repoRoot, env }),
+      metadata: { source: "search-status" },
+      operationAttempt,
+      now,
+    });
+    return workspaceThreadRead({ repoRoot, env });
+  }
   const history = workspaceThreadRead({ repoRoot, env });
 
   try {
@@ -9027,6 +10774,9 @@ export async function runWorkspaceAgentTurn({
       skill: "workspace-agent",
       action: "message",
       operation: "workspace:chat-turn",
+      ...(executionPlan
+        ? { executionPlan, useExecutionPlanRoute: true }
+        : { aiOperation: "paul.conversation" }),
       signal,
     });
     const parsedReply = parseChatAnswerMode(responseText(response));
@@ -9048,13 +10798,20 @@ export async function runWorkspaceAgentTurn({
         usage: response?.usage || null,
         engine: response?.engine || null,
         elapsedMs: response?.elapsedMs ?? null,
+        ...(response?.executionPlan ? { executionPlan: response.executionPlan } : {}),
       },
       now,
+      id: resultMessageId,
+      operationAttempt,
     });
     return workspaceThreadRead({ repoRoot, env });
   } catch (error) {
     if (!error.code && /^no AI route configured:/i.test(String(error.message || ""))) {
       error.code = "NO_AI_ROUTE";
+    }
+    if (operationAttempt) {
+      error.workspaceThreadId = WORKSPACE_THREAD_ID;
+      throw error;
     }
     workspaceMessageAppend({
       repoRoot,
@@ -9085,13 +10842,17 @@ export function createWorkspaceAgentRuntime({
   packetExportArtifact,
   startFirstSearchImpl = startFirstSearchRun,
   startManualSearchImpl = startManualSearchRun,
+  createSearchExecutionIdImpl,
+  runUnifiedSearchImpl = runUnifiedJobSearch,
   createCompanyProposalsImpl = createCompanyProposalBatch,
+  startCompanyDiscoveryOperationImpl,
   decideCompanyProposalImpl = applyCompanyProposalDecision,
   getCompanyProposalBatchImpl = companyProposalBatchGet,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
   addBoardSourceImpl,
   addSearchSourceQueryImpl,
   setSearchSourceEnabledImpl,
+  openAuthenticatedSourceImpl,
   startBoardDiscoveryImpl,
   startCompanyResearchImpl,
   startCompResearchImpl,
@@ -9103,6 +10864,7 @@ export function createWorkspaceAgentRuntime({
   runLinkedinOptimizeImpl,
   runStatusSyncImpl,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
+  captureBrowserSourceImpl,
   searchFetchImpl = fetch,
   applyJobImpl,
   captureQuestionsImpl = capturePacketQuestions,
@@ -9116,6 +10878,28 @@ export function createWorkspaceAgentRuntime({
 } = {}) {
   let tail = Promise.resolve();
   let runtime;
+  let aiWebSearchStarter = null;
+  const unifiedSearches = new Map();
+  const sourcingWorkers = createSourcingWorkerManager({
+    repoRoot,
+    env,
+    onTerminal: (input) => runtime.recordSearchCompletion(input),
+  });
+  for (const purpose of ["first-search", "manual-search"]) {
+    sourcingWorkers.register({
+      purpose,
+      execute: ({ run, signal }) =>
+        runSearchInBackgroundImpl({
+          repoRoot,
+          env,
+          fetchImpl: searchFetchImpl,
+          captureBrowserSourceImpl,
+          runId: run.id,
+          signal,
+          settle: false,
+        }),
+    });
+  }
 
   function enqueue(operation) {
     const current = tail.then(operation, operation);
@@ -9126,25 +10910,346 @@ export function createWorkspaceAgentRuntime({
     return current;
   }
 
-  function startSearchInBackground({ operation, run }) {
-    if (operation?.reused === true || run?.status !== "running" || !run?.id) return;
-    void Promise.resolve()
-      .then(() =>
-        runSearchInBackgroundImpl({
+  function workerLaneResult(outcome) {
+    if (outcome?.resumable) {
+      return { ok: false, resumable: true, run: outcome?.run || null };
+    }
+    if (outcome?.run?.status === "failed") {
+      return {
+        ok: false,
+        run: outcome.run,
+        error: outcome.run.error || { message: "The search failed before it finished." },
+      };
+    }
+    return { ok: true, run: outcome?.run || null, value: outcome?.value ?? null };
+  }
+
+  function readSearchExecution(id) {
+    try {
+      return searchExecutionGet({ repoRoot, env, id }).execution;
+    } catch (error) {
+      if (error?.code === "NOT_FOUND") return null;
+      throw error;
+    }
+  }
+
+  function laneStatus(result) {
+    if (result?.aborted === true) return "cancelled";
+    return result?.ok === false ? "failed" : "completed";
+  }
+
+  function persistLane(searchExecutionId, lane, result, fallbackRunId) {
+    if (result?.resumable === true) return readSearchExecution(searchExecutionId);
+    const status = laneStatus(result);
+    return searchExecutionSetLane({
+      repoRoot,
+      env,
+      id: searchExecutionId,
+      lane,
+      status,
+      runId: result?.run?.id || fallbackRunId,
+      summary: compactSearchExecutionReceipt(result?.run?.summary ?? result?.value),
+      error: status === "failed" ? result?.error || result?.run?.error : null,
+    }).execution;
+  }
+
+  function persistUnifiedOutcome(searchExecutionId, lane, outcome) {
+    if (outcome?.status === "resumable") return readSearchExecution(searchExecutionId);
+    const status =
+      outcome?.status === "succeeded"
+        ? "completed"
+        : new Set(["failed", "cancelled", "skipped"]).has(outcome?.status)
+          ? outcome.status
+          : "failed";
+    const current = readSearchExecution(searchExecutionId);
+    if (
+      !current ||
+      new Set(["completed", "failed", "cancelled", "skipped"]).has(current.lanes[lane].status)
+    ) {
+      return current;
+    }
+    return searchExecutionSetLane({
+      repoRoot,
+      env,
+      id: searchExecutionId,
+      lane,
+      status,
+      runId: outcome?.result?.run?.id,
+      summary: compactSearchExecutionReceipt(
+        outcome?.result?.run?.summary ?? outcome?.result?.value
+      ),
+      error: outcome?.error || outcome?.result?.error || outcome?.result?.run?.error,
+      reason: outcome?.reason,
+    }).execution;
+  }
+
+  async function startCoordinatedManualSearch(input = {}) {
+    const requestedId = String(input.searchExecutionId || "").trim();
+    if (requestedId) {
+      const existing = readSearchExecution(requestedId);
+      if (existing) {
+        const child = sourcingRunGet({
           repoRoot,
           env,
-          fetchImpl: searchFetchImpl,
-          runId: run.id,
-        })
-      )
-      .then((terminalRun) => runtime.recordSearchCompletion({ run: terminalRun }))
-      .catch(() => {});
+          id: existing.lanes.deterministic.runId,
+          purpose: "manual-search",
+        }).run;
+        return {
+          ok: true,
+          reused: true,
+          run: child,
+          searchExecutionId: existing.id,
+          execution: existing,
+        };
+      }
+    }
+
+    const operation = await startManualSearchImpl(input);
+    const run = operation?.run;
+    if (!run?.id) return operation;
+    const actualId = createSearchExecutionId({
+      searchExecutionId: run.metadata?.searchExecutionId || requestedId,
+      ...(createSearchExecutionIdImpl ? { createExecutionId: createSearchExecutionIdImpl } : {}),
+    });
+    let execution = searchExecutionEnsure({
+      repoRoot,
+      env,
+      id: actualId,
+      deterministicRunId: run.id,
+    }).execution;
+    if (
+      ["completed", "failed"].includes(run.status) &&
+      execution.lanes.deterministic.status === "running"
+    ) {
+      execution = searchExecutionSetLane({
+        repoRoot,
+        env,
+        id: actualId,
+        lane: "deterministic",
+        status: run.status,
+        runId: run.id,
+        summary: run.summary,
+        error: run.error,
+      }).execution;
+    }
+    return { ...operation, searchExecutionId: actualId, execution };
+  }
+
+  function coordinateManualSearch(run, worker) {
+    const searchExecutionId = String(run.metadata?.searchExecutionId || "").trim();
+    if (run.purpose !== "manual-search" || !searchExecutionId || !worker) return worker;
+    if (unifiedSearches.has(searchExecutionId)) return worker;
+    searchExecutionEnsure({
+      repoRoot,
+      env,
+      id: searchExecutionId,
+      deterministicRunId: run.id,
+    });
+
+    const coordination = runUnifiedSearchImpl({
+      searchExecutionId,
+      runDeterministic: async () => {
+        const result = workerLaneResult(await worker.promise);
+        persistLane(searchExecutionId, "deterministic", result, run.id);
+        return result;
+      },
+      runAiWeb: aiWebSearchStarter?.start
+        ? async ({ deterministic, signal }) => {
+            let aiRunId = null;
+            const result = await aiWebSearchStarter.start({
+              searchExecutionId,
+              deterministic,
+              signal,
+              onStarted(startedRun) {
+                aiRunId = startedRun?.id || null;
+                searchExecutionSetLane({
+                  repoRoot,
+                  env,
+                  id: searchExecutionId,
+                  lane: "aiWeb",
+                  status: "running",
+                  runId: aiRunId,
+                });
+              },
+            });
+            persistLane(searchExecutionId, "aiWeb", result, aiRunId);
+            return result;
+          }
+        : undefined,
+      aiAvailable: async () => (await aiWebSearchStarter?.isAvailable?.()) === true,
+    }).then((result) => {
+      persistUnifiedOutcome(searchExecutionId, "deterministic", result.lanes.deterministic);
+      persistUnifiedOutcome(searchExecutionId, "aiWeb", result.lanes.aiWeb);
+      return searchExecutionGet({ repoRoot, env, id: searchExecutionId }).execution;
+    });
+    const tracked = coordination.finally(() => {
+      if (unifiedSearches.get(searchExecutionId) === tracked) {
+        unifiedSearches.delete(searchExecutionId);
+      }
+    });
+    unifiedSearches.set(searchExecutionId, tracked);
+    return worker;
+  }
+
+  function coordinateRecoveredAiSearch(execution, worker) {
+    const searchExecutionId = String(execution?.id || "").trim();
+    const aiRunId = String(execution?.lanes?.aiWeb?.runId || "").trim();
+    if (!searchExecutionId || !aiRunId || !worker) return worker;
+    if (unifiedSearches.has(searchExecutionId)) return worker;
+
+    const coordination = Promise.resolve(worker.promise)
+      .then((outcome) => {
+        persistLane(searchExecutionId, "aiWeb", workerLaneResult(outcome), aiRunId);
+        return readSearchExecution(searchExecutionId);
+      })
+      .catch((error) => {
+        persistLane(
+          searchExecutionId,
+          "aiWeb",
+          { ok: false, error: { code: error?.code, message: error?.message || String(error) } },
+          aiRunId
+        );
+        return readSearchExecution(searchExecutionId);
+      });
+    const tracked = coordination.finally(() => {
+      if (unifiedSearches.get(searchExecutionId) === tracked) {
+        unifiedSearches.delete(searchExecutionId);
+      }
+    });
+    unifiedSearches.set(searchExecutionId, tracked);
+    return worker;
+  }
+
+  function startSearchInBackground({ operation, run }) {
+    if (operation?.reused === true || run?.status !== "running" || !run?.id) return;
+    return coordinateManualSearch(run, sourcingWorkers.start({ run }));
+  }
+
+  function reconcileOrphanedSourcingRuns() {
+    const recovered = sourcingWorkers.recover();
+    for (const run of recovered) {
+      coordinateManualSearch(run, sourcingWorkers.worker(run.id));
+    }
+    let recoverableExecutions = [];
+    try {
+      recoverableExecutions = searchExecutionListRecoverable({ repoRoot, env }).executions;
+    } catch (error) {
+      if (error?.code !== "NO_DATABASE") throw error;
+    }
+    for (const execution of recoverableExecutions) {
+      if (unifiedSearches.has(execution.id)) continue;
+      if (execution.lanes.aiWeb.status === "running") {
+        try {
+          const run = sourcingRunGet({
+            repoRoot,
+            env,
+            id: execution.lanes.aiWeb.runId,
+            purpose: "ai-web-search",
+          }).run;
+          const worker =
+            run.status === "running"
+              ? sourcingWorkers.worker(run.id)
+              : { promise: Promise.resolve({ run, value: run.summary }) };
+          if (worker) coordinateRecoveredAiSearch(execution, worker);
+        } catch {
+          // The exact child stays attached to the durable parent. A later
+          // recovery pass may restore it, but an unrelated AI run never can.
+        }
+        continue;
+      }
+      if (execution.lanes.deterministic.status === "cancelled") {
+        searchExecutionSetLane({
+          repoRoot,
+          env,
+          id: execution.id,
+          lane: "aiWeb",
+          status: "skipped",
+          reason: "cancelled",
+        });
+        continue;
+      }
+      try {
+        const run = sourcingRunGet({
+          repoRoot,
+          env,
+          id: execution.lanes.deterministic.runId,
+          purpose: "manual-search",
+        }).run;
+        if (run.status === "running") {
+          const worker = sourcingWorkers.worker(run.id);
+          if (worker) coordinateManualSearch(run, worker);
+          continue;
+        }
+        coordinateManualSearch(run, { promise: Promise.resolve({ run, value: run.summary }) });
+      } catch {
+        // A missing deterministic child remains queryable as incomplete instead
+        // of starting unrelated work under the execution id.
+      }
+    }
+    return recovered;
   }
 
   runtime = {
     startsSearchInBackground: true,
+    ownsSourcingRun(runId) {
+      return sourcingWorkers.owns(runId);
+    },
+    registerSourcingWorker(definition) {
+      sourcingWorkers.register(definition);
+    },
+    registerAiWebSearchStarter(definition) {
+      if (!definition || typeof definition.start !== "function") {
+        throw new TypeError("AI web-search starter requires a start function");
+      }
+      aiWebSearchStarter = {
+        isAvailable:
+          typeof definition.isAvailable === "function"
+            ? definition.isAvailable
+            : () => definition.available === true,
+        start: definition.start,
+      };
+    },
+    waitForUnifiedSearch(searchExecutionId) {
+      const id = String(searchExecutionId || "").trim();
+      if (!id) return Promise.resolve(null);
+      return unifiedSearches.get(id) || Promise.resolve(readSearchExecution(id));
+    },
+    startSourcingWorker(input) {
+      return sourcingWorkers.start(input);
+    },
+    async shutdownSourcingWorkers() {
+      await sourcingWorkers.shutdown();
+    },
+    async shutdownSourcingWorkerPurpose(purpose) {
+      await sourcingWorkers.shutdown(purpose);
+    },
+    recoverOrphanedSourcingRuns: reconcileOrphanedSourcingRuns,
+    recoverAdjacentRoleCoaching() {
+      return enqueue(() =>
+        recoverWorkspaceAdjacentRoleCoaching({
+          repoRoot,
+          env,
+          callAIImpl,
+          startManualSearchImpl: startCoordinatedManualSearch,
+          onSearchStarted: startSearchInBackground,
+          searchFetchImpl,
+        })
+      );
+    },
     runTurn(input = {}) {
-      return enqueue(() => runWorkspaceAgentTurn({ repoRoot, env, callAIImpl, ...input }));
+      return enqueue(() =>
+        runWorkspaceAgentTurn({
+          repoRoot,
+          env,
+          callAIImpl,
+          startManualSearchImpl: startCoordinatedManualSearch,
+          setSearchSourceEnabledImpl,
+          openAuthenticatedSourceImpl,
+          onSearchStarted: startSearchInBackground,
+          searchFetchImpl,
+          ...input,
+        })
+      );
     },
     executeIntent(input = {}) {
       return enqueue(() =>
@@ -9158,14 +11263,17 @@ export function createWorkspaceAgentRuntime({
           exportDocumentsImpl,
           packetExportArtifact,
           startFirstSearchImpl,
-          startManualSearchImpl,
+          startManualSearchImpl: startCoordinatedManualSearch,
+          createSearchExecutionIdImpl,
           createCompanyProposalsImpl,
+          startCompanyDiscoveryOperationImpl,
           decideCompanyProposalImpl,
           getCompanyProposalBatchImpl,
           companyDiscoveryCadenceImpl,
           addBoardSourceImpl,
           addSearchSourceQueryImpl,
           setSearchSourceEnabledImpl,
+          openAuthenticatedSourceImpl,
           startBoardDiscoveryImpl,
           startCompanyResearchImpl,
           startCompResearchImpl,
@@ -9192,7 +11300,18 @@ export function createWorkspaceAgentRuntime({
       );
     },
     recordSearchCompletion(input = {}) {
-      return enqueue(() => recordWorkspaceSearchCompletion({ repoRoot, env, ...input }));
+      return enqueue(async () => {
+        const result = recordWorkspaceSearchCompletion({ repoRoot, env, ...input });
+        if (!adjacentRoleCoachingTrigger(input.run)) return result;
+        return recordWorkspaceAdjacentRoleCoaching({
+          repoRoot,
+          env,
+          callAIImpl,
+          run: input.run,
+          now: input.now,
+          signal: input.signal,
+        });
+      });
     },
     recordSearchStart(input = {}) {
       return enqueue(() => recordWorkspaceSearchStart({ repoRoot, env, ...input }));

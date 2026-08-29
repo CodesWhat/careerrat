@@ -68,6 +68,14 @@ export const GATE_ROUTES = {
     friction: "confirm",
     label: "comp floor (minimum_base)",
   },
+  "comp-annual-floor": {
+    file: "profile",
+    path: "compensation.minimum_annual_earnings",
+    op: "set",
+    coerce: "number",
+    friction: "confirm",
+    label: "annual cash earnings floor (minimum_annual_earnings)",
+  },
   "comp-target": {
     file: "profile",
     path: "compensation.target_base",

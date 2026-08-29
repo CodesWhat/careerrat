@@ -667,7 +667,7 @@ describe("quickFactsDetailLine", () => {
           data: { profile: { location: { remote: true, onsite: true } } },
         },
       })
-    ).toBe("Remote · On-site · Add minimum base");
+    ).toBe("Remote · On-site · Add pay floor");
     expect(
       quickFactsDetailLine({
         state: {
@@ -692,6 +692,22 @@ describe("quickFactsDetailLine", () => {
         },
       })
     ).toBe("Remote $175K floor · Hybrid $190K floor");
+  });
+
+  it("shows a saved annual cash earnings floor without calling it guaranteed base", () => {
+    const state = {
+      data: {
+        profile: {
+          location: { remote: true },
+          compensation: { minimum_annual_earnings: 90000 },
+        },
+      },
+    };
+
+    expect(quickFactsDetailLine({ state })).toBe("Remote · $90K annual cash floor");
+    expect(setupDisclosureRows({ state }).find((row) => row.key === "quickFacts")?.value).toContain(
+      "$90,000 minimum annual cash earnings"
+    );
   });
 
   it("labels worldwide remote eligibility without changing hybrid or on-site locality", () => {

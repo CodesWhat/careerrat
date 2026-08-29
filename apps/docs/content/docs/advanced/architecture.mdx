@@ -69,6 +69,32 @@ stable URLs from config before the browser opens them. ATS sources use public
 endpoints where possible. Browser-rendered sources preserve the generated URL,
 raw capture, and recency cutoff.
 
+Search also uses broad AI open-web discovery. Built-in public job-board sources
+are selected from saved targeting, and discovery adds specialist boards and
+employer pages. Every source runs through the same scanner boundary. A credible
+AI result that lacks a readable full posting remains visibly unverified until
+Evaluate verifies liveness and captures the full description.
+
+### CareerRat-owned private-account browser workflows
+
+The in-app private-account browser workflows read permitted Apple Mail, Gmail,
+Outlook, LinkedIn, Wellfound, Greenhouse, Workday, Ashby, and Lever surfaces
+without delegating the product action to the selected agent CLI. Their contextual
+permissions remain off by default and are checked per capability and platform.
+Saved job-source login is separate: when a source is added or first used and login
+is needed, CareerRat asks one site-specific Yes/No question instead of using the
+permission matrix. Login walls, captchas, 2FA, and other challenges return visible
+retry state without advancing the workflow watermark.
+
+Mail and message reads capture relevant communications locally. Relationship
+sourcing writes review-only leads. LinkedIn optimization writes proposal batches;
+approvals remain local until a separate `profile_apply` permission and per-field
+confirmation authorize a live edit. Status sync applies only `autoApplicable`
+results atomically, including stale portal-CTA cleanup, activity, and analytics.
+Regressions and low-confidence labels remain review-only. `track-outcomes` still
+owns candidate-reported outcome follow-up, coaching, learning capture, and
+strategy checks; the native portal poll does not invent that context.
+
 ### User layer
 
 Candidate facts, generated artifacts, and tracker state stay local:
@@ -83,10 +109,12 @@ the package.
 
 ## Intent router
 
-`AGENTS.md` in the repo root is the canonical intent router. It maps user intent to all 28 skills.
-The agent reads it first, then routes every paste or instruction
-through it. See [Agent Contract](/advanced/agent-contract) for the full routing
-table.
+`AGENTS.md` in the repo root is the canonical intent router. It maps user intent
+to 26 user-facing skills. `intake-extract` and `resume-extract` are backend-only
+helpers invoked by the Universal Intake and onboarding upload routes, not
+user-intent destinations. The agent reads the router first, then routes every
+paste or instruction through it. See
+[Agent Contract](/advanced/agent-contract) for the full routing table.
 
 `CLAUDE.md` points terminal Claude Code at the same rules, while
 AGENTS.md-aware terminal agents read the canonical router directly. In the app,
@@ -94,3 +122,14 @@ the direct adapters and shared ACP adapter execute requests assembled from the
 same `.agents/skills/` tree. CareerRat keeps durable threads, context, and
 workflow write-back provider-neutral; adapters own fixed invocation,
 capability checks, normalized activity, cancellation, and errors.
+
+Before a call starts, a provider-neutral policy resolves **Automatic**,
+**Faster**, **Balanced**, or **Best** quality and an **Automatic**, **Low**,
+**Medium**, or **High** thinking depth. Automatic keeps Paul and high-stakes
+judgment strong while routing web research and smaller bounded tasks to the
+right efficient level. The chosen plan is frozen for the operation and its
+retries, then mapped to the selected Claude Code or OpenAI Codex adapter.
+
+Search and intake workers belong to the workspace runtime rather than the
+mounted page. Navigation does not cancel them, reload restores their durable
+status, and a process interruption surfaces a retry instead of a false success.

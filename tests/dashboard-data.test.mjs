@@ -25,6 +25,110 @@ test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
   assert.ok(vm.jobs.sankey.nodes.length > 0);
 });
 
+test("Dashboard labels annual cash separately while legacy total compensation stays TC", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        {
+          id: "evaluated-annual-cash",
+          company: "Annual Cash Co",
+          role: "Bartender",
+          status: "reviewed-hold",
+          base: "$23,608 - $23,608",
+          tc: "$95,000 - $120,000",
+          evaluation: {
+            compensation: {
+              basis: "annual-earnings",
+              minAnnualEarnings: 95000,
+              maxAnnualEarnings: 120000,
+            },
+          },
+        },
+      ],
+      sourced: [
+        {
+          id: "sourced-annual-cash",
+          company: "Tips Co",
+          role: "Bartender",
+          status: "sourced",
+          base: "$11.35 per hour",
+          tc: "$85,000 - $110,000",
+          compBasis: "annual-earnings",
+        },
+        {
+          id: "legacy-total-comp",
+          company: "Legacy Co",
+          role: "Engineer",
+          status: "sourced",
+          base: "$180,000 - $220,000",
+          tc: "$240,000 - $300,000",
+        },
+      ],
+      sources: [],
+      communications: [],
+    },
+    {
+      now: new Date("2026-08-28T12:00:00.000Z"),
+      settings: {
+        profile: {
+          minimumBaseK: 50,
+          minimumAnnualEarningsK: 85,
+          targetBaseK: 120,
+        },
+      },
+    }
+  );
+  const rows = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+
+  assert.equal(
+    rows.get("evaluated-annual-cash")?.compSummary,
+    "$23,608 - $23,608 base · $95,000 - $120,000 Annual cash"
+  );
+  assert.equal(
+    rows.get("sourced-annual-cash")?.compSummary,
+    "$11.35 per hour base · $85,000 - $110,000 Annual cash"
+  );
+  assert.equal(
+    rows.get("legacy-total-comp")?.compSummary,
+    "$180,000 - $220,000 base · $240,000 - $300,000 TC"
+  );
+  assert.equal(rows.get("sourced-annual-cash")?.compCompact, "$98K");
+  assert.equal(rows.get("sourced-annual-cash")?.compMidpointK, 97.5);
+  assert.equal(rows.get("sourced-annual-cash")?.drawer?.floor, 85);
+  assert.equal(rows.get("sourced-annual-cash")?.drawer?.ask, null);
+  assert.equal(rows.get("sourced-annual-cash")?.drawer?.marketLo, 85);
+  assert.equal(rows.get("sourced-annual-cash")?.drawer?.marketP50, 98);
+  assert.equal(rows.get("evaluated-annual-cash")?.compCompact, "$108K");
+  assert.equal(rows.get("evaluated-annual-cash")?.compMidpointK, 107.5);
+  assert.equal(rows.get("evaluated-annual-cash")?.drawer?.floor, 85);
+  assert.equal(rows.get("legacy-total-comp")?.compCompact, "$200K");
+  assert.equal(rows.get("legacy-total-comp")?.compMidpointK, 200);
+  assert.equal(rows.get("legacy-total-comp")?.drawer?.floor, 50);
+});
+
+test("Dashboard adapter limits Activity to the 12 most recent events without pruning history", () => {
+  const activityEvents = Array.from({ length: 15 }, (_, index) => ({
+    id: `event-${index + 1}`,
+    at: new Date(Date.UTC(2026, 7, 27, 12, index)).toISOString(),
+    title: `Activity ${index + 1}`,
+  }));
+
+  const vm = buildDashboardViewModel(
+    { applications: [], sourced: [], sources: [], communications: [] },
+    { now: new Date("2026-08-27T13:00:00.000Z"), activityEvents }
+  );
+
+  assert.equal(activityEvents.length, 15);
+  assert.equal(vm.activity.length, 12);
+  assert.deepEqual(
+    vm.activity.map((event) => event.id),
+    activityEvents
+      .slice(-12)
+      .reverse()
+      .map((event) => event.id)
+  );
+});
+
 test("Jobs Sankey uses canonical semantic stages and never numbered rounds", () => {
   const vm = buildDashboardViewModel(
     {
@@ -1024,6 +1128,26 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
   assert.equal(missing.drawer.nextAction.label, "Comp");
 });
 
+test("Applied jobs never surface a stale follow-up draft as ready to send", () => {
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "applied-with-stale-draft",
+        company: "Example Co",
+        role: "Operations Manager",
+        status: "applied",
+        appliedAt: "2026-08-27T14:00:00.000Z",
+        followUp: { draft: { body: "I submitted the application." } },
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  });
+
+  assert.deepEqual(vm.jobs.rows[0].drawer.drafts, []);
+});
+
 test("Jobs never attaches a communication with another application id to a same-company role", () => {
   const tracker = {
     applications: [
@@ -1870,7 +1994,7 @@ test("Dashboard adapter exposes safe read-only settings without current compensa
       },
       automation: {
         sessionProvider: "Browser extension",
-        enabledCapabilities: ["Status polling", "Authenticated search"],
+        enabledCapabilities: ["Status polling", "Messaging"],
       },
       files: ["candidate/profile.yml", "candidate/targeting.yml"],
     },
@@ -1881,10 +2005,7 @@ test("Dashboard adapter exposes safe read-only settings without current compensa
   assert.equal(vm.settings.profile.targetBase, "$240K");
   assert.equal(vm.settings.profile.remoteScope, "worldwide");
   assert.equal(vm.settings.automation.sessionProvider, "Browser extension");
-  assert.deepEqual(vm.settings.automation.enabledCapabilities, [
-    "Status polling",
-    "Authenticated search",
-  ]);
+  assert.deepEqual(vm.settings.automation.enabledCapabilities, ["Status polling", "Messaging"]);
   assert.equal(vm.settings.profile.currentBase, undefined);
   assert.doesNotMatch(JSON.stringify(vm.settings), /123K|currentBase|current_base/);
 });
@@ -1947,6 +2068,141 @@ test("Dashboard adapter keeps an explicit sourced status in the pre-application 
   assert.equal(vm.jobs.funnel[1].id, "sourced");
 });
 
+test("Dashboard active sourced list excludes terminal and reviewed-hold rows", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [],
+      sourced: [
+        { id: "fresh", company: "Fresh Co", role: "Staff Engineer", status: "sourced" },
+        { id: "cut", company: "Cut Co", role: "Staff Engineer", status: "cut" },
+        {
+          id: "reviewed",
+          company: "Reviewed Co",
+          role: "Staff Engineer",
+          status: "reviewed-hold",
+        },
+      ],
+      sources: [],
+      communications: [],
+    },
+    { now: new Date("2026-08-27T12:00:00.000Z") }
+  );
+
+  assert.deepEqual(
+    vm.sourcedRoles.map((role) => role.id),
+    ["fresh"]
+  );
+  assert.deepEqual(
+    vm.reviewHoldRoles.map((role) => role.detailId),
+    ["reviewed"]
+  );
+});
+
+test("Dashboard applies the saved fit floor to active sourced candidates only", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        { id: "applied-low", company: "Applied Co", role: "Bar Manager", fitScore: 52 },
+      ],
+      sourced: [
+        {
+          id: "candidate-high",
+          company: "High Fit Co",
+          role: "Venue Operations Manager",
+          status: "sourced",
+          fitScore: 65,
+        },
+        {
+          id: "candidate-low",
+          company: "Low Fit Co",
+          role: "Events Manager",
+          status: "sourced",
+          fitScore: 58,
+        },
+        {
+          id: "archived-low",
+          company: "Archived Co",
+          role: "Events Manager",
+          status: "cut",
+          fitScore: 40,
+        },
+      ],
+      sources: [],
+      communications: [],
+    },
+    {
+      now: new Date("2026-08-27T12:00:00.000Z"),
+      settings: { targeting: { fitFloor: 65 } },
+    }
+  );
+
+  assert.deepEqual(
+    vm.sourcedRoles.map((role) => role.id),
+    ["candidate-high"]
+  );
+  assert.deepEqual(
+    vm.latestRoles.map((role) => role.detailId),
+    ["candidate-high"]
+  );
+  assert.ok(vm.jobs.rows.some((row) => row.id === "applied-low"));
+  assert.ok(vm.jobs.rows.some((row) => row.id === "candidate-high"));
+  assert.ok(vm.jobs.rows.some((row) => row.id === "archived-low"));
+  assert.ok(!vm.jobs.rows.some((row) => row.id === "candidate-low"));
+});
+
+test("Dashboard adapter warns sourced roles when the same company has an active application", () => {
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "hightouch-reviewed",
+        company: "Hightouch",
+        role: "Distributed Systems Engineer",
+        status: "reviewed-hold",
+      },
+      {
+        id: "closed-application",
+        company: "Closed Co",
+        role: "Platform Engineer",
+        status: "rejected",
+      },
+    ],
+    sourced: [
+      {
+        id: "hightouch-sibling",
+        company: "HIGHTOUCH!",
+        role: "Control Plane Engineer",
+        status: "sourced",
+        warn: "Compensation needs review.",
+      },
+      {
+        id: "closed-sibling",
+        company: "Closed Co",
+        role: "Backend Engineer",
+        status: "sourced",
+      },
+      {
+        id: "unrelated",
+        company: "Other Co",
+        role: "Staff Engineer",
+        status: "sourced",
+      },
+    ],
+    sources: [],
+    communications: [],
+  });
+
+  const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+  const sibling = byId.get("hightouch-sibling");
+  assert.equal(
+    sibling.warn,
+    "Compensation needs review. You already have an active application at Hightouch. Review it before applying to another role."
+  );
+  assert.equal(sibling.drawer.warn, sibling.warn);
+  assert.deepEqual(sibling.drawer.gaps, [sibling.warn]);
+  assert.equal(byId.get("closed-sibling").warn, "");
+  assert.equal(byId.get("unrelated").warn, "");
+});
+
 test("Dashboard adapter projects partial job-description capture status onto its sourced row", () => {
   const vm = buildDashboardViewModel({
     applications: [],
@@ -1964,6 +2220,28 @@ test("Dashboard adapter projects partial job-description capture status onto its
     communications: [],
   });
 
+  assert.equal(vm.jobs.rows[0].descriptionPartial, true);
+});
+
+test("Dashboard adapter identifies open-web AI leads as unverified until evaluation", () => {
+  const vm = buildDashboardViewModel({
+    applications: [],
+    sourced: [
+      {
+        id: "ai-open-web-lead",
+        company: "Dante NYC",
+        role: "Bartender",
+        status: "sourced",
+        source: "ai-web-search",
+        scanner: { bodyPartial: true },
+      },
+    ],
+    sources: [],
+    communications: [],
+  });
+
+  assert.equal(vm.jobs.rows[0].aiDiscovered, true);
+  assert.equal(vm.jobs.rows[0].sourceLabel, "Open web");
   assert.equal(vm.jobs.rows[0].descriptionPartial, true);
 });
 

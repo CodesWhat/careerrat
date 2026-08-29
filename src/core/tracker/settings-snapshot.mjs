@@ -24,7 +24,6 @@ const CONFIG_FILES = [
 
 const CAPABILITY_LABELS = {
   status_polling: "Status polling",
-  authenticated_search: "Authenticated search",
   messaging: "Messaging",
   authenticated_apply_preparation: "Authenticated apply preparation",
   mail_access: "Mail access",
@@ -79,8 +78,8 @@ function workAuthorization(auth = {}) {
 function enabledCapabilities(automation = {}) {
   const caps = automation.capabilities || {};
   return Object.entries(caps)
-    .filter(([, value]) => value?.enabled)
-    .map(([key]) => CAPABILITY_LABELS[key] || key.replace(/_/g, " "))
+    .filter(([key, value]) => value?.enabled && Object.hasOwn(CAPABILITY_LABELS, key))
+    .map(([key]) => CAPABILITY_LABELS[key])
     .sort((a, b) => a.localeCompare(b));
 }
 
@@ -99,6 +98,10 @@ export function buildSettingsSnapshot({
   // Optional logo.dev publishable token (PRIVATE candidate config; never committed).
   // Absent → dashboard avatars stay initials chips. No hardcoded default.
   const logoToken = automation?.integrations?.logo_dev_token || automation?.logo_dev_token || "";
+  const rawFitFloor = targeting?.fit_bands?.fit_floor;
+  const configuredFitFloor =
+    rawFitFloor == null || rawFitFloor === "" ? Number.NaN : Number(rawFitFloor);
+  const fitFloor = Number.isFinite(configuredFitFloor) ? configuredFitFloor : 70;
 
   return {
     logoToken,
@@ -113,14 +116,17 @@ export function buildSettingsSnapshot({
             : "home-country"
           : null,
       minimumBase: formatBase(compensation.minimum_base),
+      minimumAnnualEarnings: formatBase(compensation.minimum_annual_earnings),
       targetBase: formatBase(compensation.target_base),
       expectedBase: formatBase(compensation.expected_base),
       minimumBaseK: baseK(compensation.minimum_base),
+      minimumAnnualEarningsK: baseK(compensation.minimum_annual_earnings),
       targetBaseK: baseK(compensation.target_base),
       expectedBaseK: baseK(compensation.expected_base),
       workAuthorization: workAuthorization(authorization),
     },
     targeting: {
+      fitFloor,
       primaryRoles: (targeting.role_buckets || [])
         .filter((bucket) => bucket && (!bucket.priority || bucket.priority === "primary"))
         .flatMap((bucket) => bucket.titles || [])

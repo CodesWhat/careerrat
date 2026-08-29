@@ -21,11 +21,19 @@ import { copyFileSync, existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { listSnapshots } from "../core/tracker/tracker-snapshot.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
-const pathCtx = { repoRoot: root };
+const pathCtx = { repoRoot: root, env: process.env };
+
+if (dbExists(pathCtx)) {
+  console.error(
+    "CareerRat's database is canonical for this workspace. JSON tracker snapshots cannot safely restore it, so nothing was changed."
+  );
+  process.exit(1);
+}
 
 const [selector] = process.argv.slice(2);
 

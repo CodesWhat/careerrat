@@ -26,6 +26,7 @@ export async function scanDeepIngestSource({
   fetchImpl = fetch,
   resolveHost,
   limits = {},
+  signal,
 } = {}) {
   const normalized = normalizeDeepIngestSource(input);
   const normalizedLimits = normalizeLimits(limits);
@@ -51,6 +52,7 @@ export async function scanDeepIngestSource({
           fetchImpl,
           resolveHost,
           limits: normalizedLimits,
+          signal,
         });
       case "repo":
         return scanRepoSource({ input: normalized, limits: normalizedLimits });
@@ -74,7 +76,7 @@ export async function scanDeepIngestSource({
   }
 }
 
-async function scanUrlSource({ input, fetchImpl, resolveHost, limits }) {
+async function scanUrlSource({ input, fetchImpl, resolveHost, limits, signal }) {
   let fetched;
   try {
     fetched = await fetchDeepIngestUrl(input.url, {
@@ -82,6 +84,7 @@ async function scanUrlSource({ input, fetchImpl, resolveHost, limits }) {
       resolveHost,
       timeoutMs: limits.fetchTimeoutMs,
       maxBytes: limits.maxFetchBytes,
+      signal,
     });
   } catch (err) {
     return buildOutcome({ input, status: "failed", reason: err?.message || String(err) });

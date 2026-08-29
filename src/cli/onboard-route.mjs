@@ -46,7 +46,7 @@
 // interview) owns it exclusively. The non-AI wizard seeds/validates candidate
 // files but never claims to have run the interview.
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import {
@@ -54,8 +54,14 @@ import {
   workspaceOnboardingHandoff,
 } from "../core/agent/workspace-thread.mjs";
 import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
+import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { makeBoundedAIEnvelope, runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForOperation,
+  resolveAIExecutionPlan,
+} from "../core/ai/operation-policy.mjs";
 import { validateAiProviderKey } from "../core/ai/provider-validation.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { readUsageEvents, summarizeUsageEvents } from "../core/ai/usage-log.mjs";
@@ -71,6 +77,12 @@ import {
   candidateSetupInitialize,
   publicSyncPreferenceGet,
   publicSyncPreferenceSet,
+  resumeExtractionComplete,
+  resumeExtractionFail,
+  resumeExtractionGet,
+  resumeExtractionProgress,
+  resumeExtractionRecoverOrphans,
+  resumeExtractionStart,
   skillChatThreadRead,
   sourceConfigGet,
   sourceConfigPut,
@@ -94,7 +106,7 @@ import {
   collapseUnansweredOnboardingPrompts,
   onboardingMessageIsInternal,
 } from "../core/onboarding/transcript-cleanup.mjs";
-import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { displayPath, privateDataRoot, userPath } from "../core/paths/workspace.mjs";
 import {
   cloneCandidateDefault,
   isCandidateDefault,
@@ -117,6 +129,7 @@ import {
 import { validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../core/profile/yaml.mjs";
 import {
+  buildSearchPromptContext,
   generateSearchPrompts,
   getSearchPrompts,
   saveSearchPrompts,
@@ -133,6 +146,7 @@ const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap skill-run-route.mjs uses
 const RESUME_MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — resume text can be long.
 const ONBOARDING_DRAFT_PATH = ".internal/onboarding-draft.json";
 const ONBOARDING_DRAFT_MAX_STEP = 7;
+export const ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND = "onboarding.search-prompts";
 
 // POST /api/onboard/resume-ai's binary-upload cap (frozen M8 contract: 5MB)
 // and the extensions it accepts. Uploaded text résumés use the same structured
@@ -225,11 +239,108 @@ const SETTINGS_DATA_FILES = [
   // the DB-backed response shape.
   "automation",
 ];
+const SETTINGS_DRAFT_REVISION_KEYS = [...SETTINGS_DATA_FILES, "deepIngest"];
 const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
   enabled: true,
   source: "default",
   updatedAt: null,
 });
+
+function canonicalDraftValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalDraftValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => [key, canonicalDraftValue(value[key])])
+  );
+}
+
+function draftDigest(label, value) {
+  return createHash("sha256")
+    .update(`careerrat:${label}:v1\0`)
+    .update(typeof value === "string" ? value : JSON.stringify(canonicalDraftValue(value)))
+    .digest("hex");
+}
+
+export function onboardDraftContext(pathCtx, data) {
+  const workspaceId = draftDigest("workspace", privateDataRoot(pathCtx));
+  const candidateData = Object.fromEntries(
+    SETTINGS_DRAFT_REVISION_KEYS.map((name) => [name, data?.[name] ?? null])
+  );
+  return {
+    owner: {
+      workspaceId,
+      candidateId: draftDigest("candidate", `${workspaceId}:primary`),
+    },
+    base: {
+      revision: draftDigest("candidate-content", candidateData),
+    },
+  };
+}
+
+function currentSettingsDraftData(pathCtx) {
+  if (dbExists(pathCtx)) {
+    const config = candidateConfigGet(pathCtx);
+    const automation = config.automation || {};
+    return {
+      profile: config.profile,
+      targeting: config.targeting,
+      evidence: config.evidence,
+      "form-defaults": config["form-defaults"],
+      automation: {
+        setup_mode: automation.setup_mode,
+        capabilities: automation.capabilities,
+        consent: automation.consent,
+      },
+      modes: config.modes,
+      honesty: config.honesty,
+      setup: config.setup,
+      deepIngest: buildDeepIngestViewModel(pathCtx),
+    };
+  }
+
+  const data = {};
+  for (const name of SETTINGS_DATA_FILES) {
+    const entry = CANDIDATE_ROUTE_ENTRIES.find((candidate) => candidate.name === name);
+    if (!entry) continue;
+    try {
+      data[name] = readBaseDoc(entry, userPath(pathCtx, entry.candidatePath));
+    } catch {
+      data[name] = {};
+    }
+  }
+  if (data.automation) {
+    data.automation = {
+      setup_mode: data.automation.setup_mode,
+      capabilities: data.automation.capabilities,
+      consent: data.automation.consent,
+    };
+  }
+  return data;
+}
+
+export function currentOnboardDraftContext({ repoRoot, env = process.env } = {}) {
+  const pathCtx = { repoRoot, env };
+  return onboardDraftContext(pathCtx, currentSettingsDraftData(pathCtx));
+}
+
+export function assertSettingsBaseRevision({
+  repoRoot,
+  env = process.env,
+  expectedBaseRevision,
+} = {}) {
+  if (expectedBaseRevision === undefined) return null;
+  const expected = String(expectedBaseRevision || "").trim();
+  const current = currentOnboardDraftContext({ repoRoot, env });
+  if (expected && expected === current.base.revision) return current;
+  const error = new Error("Settings changed since this editor opened.");
+  error.code = "SETTINGS_BASE_CHANGED";
+  error.status = 409;
+  error.draftContext = current;
+  throw error;
+}
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -475,9 +586,18 @@ function normalizeOnboardingTranscript(value) {
         normalized.eventId = cursor.eventId;
       }
     }
-    if (message?.answerMode === "yes-no" || message?.metadata?.answerMode === "yes-no") {
+    const binaryChoice =
+      message?.metadata?.choicePrompt?.mode === "binary" &&
+      message.metadata.choicePrompt.state === "pending";
+    if (
+      message?.answerMode === "yes-no" ||
+      message?.metadata?.answerMode === "yes-no" ||
+      binaryChoice
+    ) {
       normalized.answerMode = "yes-no";
-      normalized.metadata = { answerMode: "yes-no" };
+      normalized.metadata = binaryChoice
+        ? { choicePrompt: cloneJsonValue(message.metadata.choicePrompt, null) }
+        : { answerMode: "yes-no" };
     }
     if (message.role === "assistant" && Array.isArray(message.blocks)) {
       normalized.blocks = message.blocks.slice(0, 20).flatMap((block) => {
@@ -989,10 +1109,12 @@ function prepareDbSearchSources(pathCtx, config) {
 }
 
 function sendCandidateError(res, err) {
-  sendJson(res, err?.code === "NO_DATABASE" ? 409 : 400, {
+  sendJson(res, err?.status || (err?.code === "NO_DATABASE" ? 409 : 400), {
     ok: false,
+    code: err?.code || undefined,
     error: err?.message || String(err),
     errors: err?.errors || undefined,
+    draftContext: err?.draftContext || undefined,
   });
 }
 
@@ -1023,17 +1145,6 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
   }
 
   const setup = config.setup || {};
-  if (setup.readiness?.search_ready !== true) {
-    return {
-      status: 409,
-      body: {
-        ok: false,
-        error: "Candidate setup is not search-ready",
-        readiness: setup.readiness || {},
-        missing: setup.missing || {},
-      },
-    };
-  }
 
   const check = validateDbProfileAndTargeting(repoRoot, config);
   if (!check.valid) {
@@ -1068,12 +1179,178 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
   };
 }
 
+function resolveOnboardingSearchPromptExecutionPlan({ repoRoot, env }) {
+  const route = resolveAIRoute(env, { repoRoot });
+  const runtimeId = aiRuntimeIdForRoute(route);
+  if (!runtimeId) {
+    const error = new Error(route.error || "Select a ready AI provider before generating prompts.");
+    error.code = "NO_AI_ROUTE";
+    throw error;
+  }
+  return resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId,
+    preferences: loadAIPreferences({ repoRoot, env }),
+    ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
+  });
+}
+
+function searchPromptOperationResultRef({ request, executionPlan, state = "saved" }) {
+  return {
+    type: "search-prompts",
+    id: request.inputFingerprint,
+    state,
+    executionPlan,
+  };
+}
+
+export function createOnboardingSearchPromptOperationKind({
+  repoRoot,
+  env = process.env,
+  buildContext = () => buildSearchPromptContext({ repoRoot, env }),
+  resolveExecutionPlan = () => resolveOnboardingSearchPromptExecutionPlan({ repoRoot, env }),
+  generateSearchPromptsImpl = generateSearchPrompts,
+  getSearchPromptsImpl = getSearchPrompts,
+  saveSearchPromptsImpl = saveSearchPrompts,
+} = {}) {
+  return {
+    resumeOnRestart: true,
+    parseRequest(input = {}) {
+      if (
+        !input ||
+        typeof input !== "object" ||
+        Array.isArray(input) ||
+        Object.keys(input).length
+      ) {
+        const error = new Error("onboarding search-prompt input must be empty");
+        error.code = "BAD_REQUEST";
+        throw error;
+      }
+      const context = buildContext();
+      if (!context || typeof context !== "object" || Array.isArray(context)) {
+        const error = new Error("onboarding search-prompt context is unavailable");
+        error.code = "SEARCH_PROMPTS_NO_TARGETING";
+        throw error;
+      }
+      return {
+        context,
+        inputFingerprint: createHash("sha256").update(JSON.stringify(context)).digest("hex"),
+      };
+    },
+    resolveExecutionPlan() {
+      return assertAIExecutionPlanForOperation(resolveExecutionPlan(), "research.web");
+    },
+    isCompletedResultReusable({ request }) {
+      const current = getSearchPromptsImpl({ repoRoot, env });
+      return (
+        current.prompts?.length > 0 && current.savedInputFingerprint === request.inputFingerprint
+      );
+    },
+    normalizeError(error) {
+      return {
+        code: String(error?.code || "SEARCH_PROMPTS_GENERATION_FAILED"),
+        message: "CareerRat couldn't generate the initial search prompts. Try again.",
+        retryable: error?.retryable !== false,
+      };
+    },
+    async execute({ request, executionPlan, signal, reportProgress }) {
+      const frozenPlan = assertAIExecutionPlanForOperation(executionPlan, "research.web");
+      const existing = getSearchPromptsImpl({ repoRoot, env });
+      if (existing.prompts?.length) {
+        return {
+          resultRef: searchPromptOperationResultRef({
+            request,
+            executionPlan: frozenPlan,
+            state: "preserved",
+          }),
+        };
+      }
+      await reportProgress?.({
+        phase: "generating",
+        message: "CareerRat is preparing search prompts from your targeting.",
+      });
+      const outcome = await generateSearchPromptsImpl({
+        repoRoot,
+        env,
+        context: request.context,
+        executionPlan: frozenPlan,
+        signal,
+      });
+      if (!outcome?.body?.ok) {
+        const error = new Error(
+          outcome?.body?.error?.message || "CareerRat couldn't generate search prompts."
+        );
+        error.code = outcome?.body?.code || "SEARCH_PROMPTS_GENERATION_FAILED";
+        throw error;
+      }
+      if (!getSearchPromptsImpl({ repoRoot, env }).prompts?.length) {
+        saveSearchPromptsImpl({
+          repoRoot,
+          env,
+          prompts: outcome.body.data.prompts,
+          defaultSource: "generated",
+        });
+      }
+      return {
+        resultRef: searchPromptOperationResultRef({ request, executionPlan: frozenPlan }),
+      };
+    },
+  };
+}
+
+export async function recoverOnboardingSearchPromptOperations({
+  appOperations,
+  recovered = [],
+} = {}) {
+  if (!appOperations?.retry) return [];
+  const restarted = [];
+  for (const operation of recovered) {
+    if (
+      operation?.kind !== ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND ||
+      operation?.status !== "failed" ||
+      operation?.error?.retryable !== true
+    ) {
+      continue;
+    }
+    try {
+      restarted.push(await appOperations.retry({ id: operation.id }));
+    } catch {
+      // Another process may already own the linked retry.
+    }
+  }
+  return restarted;
+}
+
+function visibleAppOperation(operation) {
+  if (!operation) return null;
+  return Object.fromEntries(
+    [
+      "id",
+      "kind",
+      "status",
+      "executionPlan",
+      "progress",
+      "resultRef",
+      "error",
+      "retryOf",
+      "attempt",
+      "createdAt",
+      "startedAt",
+      "completedAt",
+      "updatedAt",
+    ]
+      .filter((key) => operation[key] !== undefined)
+      .map((key) => [key, operation[key]])
+  );
+}
+
 export async function prepareQuickStartFirstSearch({
   repoRoot,
   env = process.env,
   fetchImpl = fetch,
   retry = false,
   workspaceAgentRuntime,
+  appOperations,
   startFirstSearchImpl = startFirstSearchRun,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
 } = {}) {
@@ -1103,17 +1380,6 @@ export async function prepareQuickStartFirstSearch({
   }
 
   const setup = config.setup || {};
-  if (setup.readiness?.search_ready !== true) {
-    return {
-      status: 409,
-      body: {
-        ok: false,
-        error: "Candidate setup is not search-ready",
-        readiness: setup.readiness || {},
-        missing: setup.missing || {},
-      },
-    };
-  }
 
   const check = validateDbProfileAndTargeting(repoRoot, config);
   if (!check.valid) {
@@ -1165,29 +1431,17 @@ export async function prepareQuickStartFirstSearch({
         .catch(() => {});
     }
 
-    // Best-effort: seed AI search prompts from the now-ready targeting/profile
-    // alongside the first-search kickoff, but only when nothing is stored yet
-    // (repeat quick-start calls must never clobber a user's own edits). Fully
-    // fire-and-forget — a prompt-generation failure (no AI route, model
-    // error) never blocks or fails the quick-start response; the user can
-    // still generate/edit prompts later from the Jobs page.
+    let searchPromptsOperation = null;
     try {
-      if (!getSearchPrompts({ repoRoot, env }).prompts.length) {
-        void generateSearchPrompts({ repoRoot, env })
-          .then((outcome) => {
-            if (outcome.body?.ok) {
-              saveSearchPrompts({
-                repoRoot,
-                env,
-                prompts: outcome.body.data.prompts,
-                defaultSource: "generated",
-              });
-            }
-          })
-          .catch(() => {});
+      if (!getSearchPrompts({ repoRoot, env }).prompts.length && appOperations?.start) {
+        const started = await appOperations.start({
+          kind: ONBOARDING_SEARCH_PROMPTS_OPERATION_KIND,
+          input: {},
+        });
+        searchPromptsOperation = visibleAppOperation(started.operation);
       }
     } catch {
-      // best-effort only — never fails quick-start
+      // Prompt generation stays optional and never blocks the deterministic first search.
     }
 
     return {
@@ -1198,6 +1452,7 @@ export async function prepareQuickStartFirstSearch({
           gateReady: setup.readiness?.gate_ready === true,
           applyReady: setup.readiness?.apply_ready === true,
         },
+        ...(searchPromptsOperation ? { searchPromptsOperation } : {}),
       },
     };
   } catch (err) {
@@ -1232,11 +1487,16 @@ export function mountOnboardRoutes({
   extractDocxResumeMarkdown = defaultExtractDocxResumeMarkdown,
   fetchImpl = fetch,
   workspaceAgentRuntime,
+  appOperations,
   startFirstSearchImpl = startFirstSearchRun,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
   finishOnboardingImpl = finishOnboarding,
+  resumeWorkerOwnerId = `resume-worker-${process.pid}-${randomUUID()}`,
+  setIntervalImpl = setInterval,
+  clearIntervalImpl = clearInterval,
 }) {
   const pathCtx = { repoRoot, env };
+  const activeResumeExtractions = new Map();
 
   // -------------------------------------------------------------------------
   // GET /api/onboard/state — report-only; never runs ensureCandidateFiles.
@@ -1259,6 +1519,7 @@ export function mountOnboardRoutes({
           dbSourceResumePresent(pathCtx) ||
           existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md"));
         const dbKeyConfigured = resolveAIRoute(env, { repoRoot }).type !== "none";
+        const resumeExtraction = resumeExtractionGet(pathCtx).operation;
         const stateData = {
           profile: config.profile,
           targeting: config.targeting,
@@ -1285,11 +1546,13 @@ export function mountOnboardRoutes({
         };
         sendJson(res, 200, {
           ok: true,
+          draftContext: onboardDraftContext(pathCtx, stateData),
           files: dbCandidateFiles(repoRoot, pathCtx, config),
           data: stateData,
           deepIngest,
           sourcing: { firstSearchRun },
           deterministicSources,
+          resumeExtraction,
           sourceResumePresent: dbSourceResumePresentValue,
           keyConfigured: dbKeyConfigured,
           searchSourcesPresent: dbSearchSourcesPresent(pathCtx, config),
@@ -1369,6 +1632,7 @@ export function mountOnboardRoutes({
 
     sendJson(res, 200, {
       ok: true,
+      draftContext: onboardDraftContext(pathCtx, data),
       files,
       data,
       sourceResumePresent: fallbackSourceResumePresent,
@@ -1656,6 +1920,43 @@ export function mountOnboardRoutes({
       return;
     }
 
+    const parsed = parseResume(text);
+    const localProfileSeed = deriveProfileSeed(parsed);
+    const localEvidenceSeed = deriveEvidenceSeed(parsed);
+    const rawTargetingSeed = deriveTargetingSeed(parsed);
+    const localTargetingSeed = rawTargetingSeed ? normalizeTargetingSeed(rawTargetingSeed) : null;
+    const resumeDocument = buildResumeDocumentFromParsed(parsed);
+    const localSections = {
+      experience: parsed.sections.experience.length,
+      education: parsed.sections.education.length,
+      skills: parsed.sections.skills.length,
+      projects: parsed.sections.projects.length,
+      other: parsed.sections.other.length,
+    };
+    const localData = {
+      fullText: text,
+      profileSeed: localProfileSeed,
+      evidenceSeed: localEvidenceSeed,
+      sections: localSections,
+      resumeDocument,
+      source: "docx",
+      extraction: "local",
+      savedPath: savedRelPath,
+      reused,
+      ...(localTargetingSeed?.role_buckets?.length ? { targetingSeed: localTargetingSeed } : {}),
+    };
+    const docxResponseData = (data) => ({
+      profileSeed: data.profileSeed,
+      evidenceSeed: data.evidenceSeed,
+      sections: data.sections,
+      ...(data.resumeDocument ? { resumeDocument: data.resumeDocument } : {}),
+      source: "docx",
+      extraction: data.extraction,
+      savedPath: data.savedPath,
+      reused: data.reused,
+      ...(data.targetingSeed?.role_buckets?.length ? { targetingSeed: data.targetingSeed } : {}),
+    });
+
     // AI upgrade — resolveAIRoute() never throws, it reports {type: "none"}
     // when neither ANTHROPIC_API_KEY nor CAREERRAT_AI_PROXY_URL is set (same
     // check GET /api/onboard/state already uses for keyConfigured), so this
@@ -1667,10 +1968,55 @@ export function mountOnboardRoutes({
       try {
         const markdown = await extractDocxResumeMarkdown(bytes);
         const markdownRelPath = `${savedRelPath}.md`;
-        atomicWriteFile(userPath(pathCtx, markdownRelPath), markdown);
+        const markdownPath = userPath(pathCtx, markdownRelPath);
+        atomicWriteFile(markdownPath, markdown);
+
+        if (dbExists(pathCtx)) {
+          let closed = false;
+          res.on?.("close", () => {
+            closed = true;
+          });
+          const upload = {
+            savedRelPath,
+            savedPath,
+            reused,
+            uploadDigest: createHash("sha256").update(bytes).digest("hex"),
+          };
+          const { started, execution } = startDurableResumeExtraction(upload, name, {
+            inputPath: markdownPath,
+            resultSource: "docx",
+            resultExtraction: "ai",
+            artifactSource: "docx",
+            artifactExtraction: "ai",
+            fallbackData: localData,
+          });
+          const response = execution
+            ? await execution.promise
+            : {
+                status: 200,
+                body: {
+                  ok: true,
+                  data: started.operation.result,
+                  operation: started.operation,
+                },
+              };
+          if (!closed) {
+            if (response.body.ok) {
+              sendJson(res, 200, {
+                ok: true,
+                ...docxResponseData(response.body.data),
+                operation: response.body.operation,
+                seedSaved: true,
+              });
+            } else {
+              sendJson(res, response.status, response.body);
+            }
+          }
+          return;
+        }
 
         const outcome = await runResumeExtractBounded({
-          savedPath: userPath(pathCtx, markdownRelPath),
+          savedPath: markdownPath,
         });
 
         if (outcome.body.ok) {
@@ -1688,26 +2034,10 @@ export function mountOnboardRoutes({
           }));
           const aiTargetingSeed = normalizeTargetingSeed(extracted.targeting_suggestions);
 
-          if (dbExists(pathCtx)) {
-            candidateArtifactPut({
-              ...pathCtx,
-              id: "source-resume",
-              kind: "source-resume",
-              data: {
-                path: savedRelPath,
-                filename: sanitizeUploadFilename(name),
-                savedAt: new Date().toISOString(),
-                source: "docx",
-                extraction: "ai",
-                text: fullText,
-              },
-            });
-          } else {
-            const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
-            const dest = userPath(pathCtx, entry.candidatePath);
-            mkdirSync(dirname(dest), { recursive: true });
-            atomicWriteFile(dest, fullText);
-          }
+          const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
+          const dest = userPath(pathCtx, entry.candidatePath);
+          mkdirSync(dirname(dest), { recursive: true });
+          atomicWriteFile(dest, fullText);
 
           sendJson(res, 200, {
             ok: true,
@@ -1727,20 +2057,6 @@ export function mountOnboardRoutes({
         // fails a DOCX upload the deterministic parser already handled.
       }
     }
-
-    const parsed = parseResume(text);
-    const profileSeed = deriveProfileSeed(parsed);
-    const evidenceSeed = deriveEvidenceSeed(parsed);
-    const rawTargetingSeed = deriveTargetingSeed(parsed);
-    const targetingSeed = rawTargetingSeed ? normalizeTargetingSeed(rawTargetingSeed) : null;
-    const resumeDocument = buildResumeDocumentFromParsed(parsed);
-    const sections = {
-      experience: parsed.sections.experience.length,
-      education: parsed.sections.education.length,
-      skills: parsed.sections.skills.length,
-      projects: parsed.sections.projects.length,
-      other: parsed.sections.other.length,
-    };
 
     if (dbExists(pathCtx)) {
       candidateArtifactPut({
@@ -1765,15 +2081,7 @@ export function mountOnboardRoutes({
 
     sendJson(res, 200, {
       ok: true,
-      profileSeed,
-      evidenceSeed,
-      sections,
-      resumeDocument,
-      source: "docx",
-      extraction: "local",
-      savedPath: savedRelPath,
-      reused,
-      ...(targetingSeed?.role_buckets?.length ? { targetingSeed } : {}),
+      ...docxResponseData(localData),
     });
   });
 
@@ -1822,8 +2130,275 @@ export function mountOnboardRoutes({
     // and would corrupt binary data.
     if (!reused) writeFileSync(savedPath, bytes);
 
-    return { ok: true, savedRelPath, savedPath, reused };
+    return {
+      ok: true,
+      savedRelPath,
+      savedPath,
+      reused,
+      uploadDigest: createHash("sha256").update(bytes).digest("hex"),
+    };
   }
+
+  function resolvedResumeExecutionPlan() {
+    const route = resolveAIRoute(env, { repoRoot });
+    const runtimeId = aiRuntimeIdForRoute(route);
+    if (!runtimeId) return null;
+    return resolveAIExecutionPlan({
+      operation: "structured.extraction",
+      runtimeId,
+      preferences: loadAIPreferences({ repoRoot, env }),
+      ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
+    });
+  }
+
+  function resumeExtractionData({ extracted, savedRelPath, reused, source = "ai", extraction }) {
+    const fullText = normalizeDocxResumeText(extracted.full_text || "");
+    const claims = (extracted.claims || []).map((claim, index) => ({
+      id: `resume-${String(index + 1).padStart(3, "0")}`,
+      claim: String(claim?.claim ?? ""),
+      evidence: String(claim?.evidence ?? ""),
+    }));
+    return {
+      fullText,
+      profileSeed: { candidate: extracted.candidate || {} },
+      evidenceSeed: { claims },
+      sections: extracted.sections || {},
+      targetingSeed: normalizeTargetingSeed(extracted.targeting_suggestions),
+      source,
+      ...(extraction ? { extraction } : {}),
+      savedPath: savedRelPath,
+      reused,
+    };
+  }
+
+  function startResumeExtractionWorker({
+    operation,
+    savedPath,
+    savedRelPath,
+    name,
+    reused,
+    inputPath = savedPath,
+    resultSource = "ai",
+    resultExtraction,
+    artifactSource = "resume-ai",
+    artifactExtraction,
+    fallbackData,
+  }) {
+    const existing = activeResumeExtractions.get(operation.id);
+    if (existing) return existing;
+
+    const controller = new AbortController();
+    const listeners = new Set();
+    const execution = { controller, listeners, shutdownRequested: false, promise: null };
+    activeResumeExtractions.set(operation.id, execution);
+
+    const complete = (data, outcome) => {
+      const completed = resumeExtractionComplete({
+        ...pathCtx,
+        id: operation.id,
+        ownerId: resumeWorkerOwnerId,
+        artifact: {
+          path: savedRelPath,
+          filename: sanitizeUploadFilename(name),
+          savedAt: new Date().toISOString(),
+          source: artifactSource,
+          ...(data.extraction || artifactExtraction
+            ? { extraction: data.extraction || artifactExtraction }
+            : {}),
+          text: data.fullText,
+          ...(data.resumeDocument ? { resumeDocument: data.resumeDocument } : {}),
+        },
+        result: data,
+        ai: outcome?.body?.ai,
+        manual: outcome?.body?.manual,
+      }).operation;
+      notify({ type: "done", data, operation: completed });
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data,
+          ai: outcome?.body?.ai,
+          manual: outcome?.body?.manual || RESUME_AI_MANUAL,
+          operation: completed,
+        },
+      };
+    };
+
+    const notify = (event) => {
+      for (const listener of listeners) listener(event);
+      if (event?.type === "activity" && event.message) {
+        try {
+          resumeExtractionProgress({
+            ...pathCtx,
+            id: operation.id,
+            ownerId: resumeWorkerOwnerId,
+            progress: { phase: "reading", message: String(event.message) },
+          });
+        } catch {
+          // A shutdown or terminal write may win this progress-only race.
+        }
+      }
+    };
+
+    execution.promise = Promise.resolve().then(async () => {
+      const heartbeat = setIntervalImpl(() => {
+        try {
+          resumeExtractionProgress({
+            ...pathCtx,
+            id: operation.id,
+            ownerId: resumeWorkerOwnerId,
+            progress: { phase: "reading" },
+          });
+        } catch {
+          // A shutdown or terminal write may win this progress-only race.
+        }
+      }, 30000);
+      try {
+        resumeExtractionProgress({
+          ...pathCtx,
+          id: operation.id,
+          ownerId: resumeWorkerOwnerId,
+          progress: { phase: "reading", message: `Reading ${sanitizeUploadFilename(name)}…` },
+        });
+        const outcome = await runResumeExtractBounded({
+          savedPath: inputPath,
+          originalName: name,
+          onProgress: notify,
+          signal: controller.signal,
+          executionPlan: operation.executionPlan,
+        });
+        if (controller.signal.aborted) {
+          const error =
+            controller.signal.reason instanceof Error
+              ? controller.signal.reason
+              : new Error("CareerRat stopped reading this resume. Try it again.");
+          error.code ||= "RESUME_EXTRACTION_SERVER_STOPPED";
+          throw error;
+        }
+        if (!outcome.body.ok) {
+          if (fallbackData) {
+            const data = typeof fallbackData === "function" ? fallbackData() : fallbackData;
+            return complete(data, outcome);
+          }
+          const failed = resumeExtractionFail({
+            ...pathCtx,
+            id: operation.id,
+            ownerId: resumeWorkerOwnerId,
+            error: {
+              code: outcome.body.code || "RESUME_EXTRACTION_FAILED",
+              message:
+                outcome.body.error?.message || "CareerRat couldn't read that resume. Try again.",
+            },
+          }).operation;
+          notify({
+            type: "error",
+            message:
+              outcome.body.error?.message || "CareerRat couldn't read that resume. Try again.",
+            status: outcome.status,
+            operation: failed,
+          });
+          return { status: outcome.status, body: { ...outcome.body, operation: failed } };
+        }
+
+        const data = resumeExtractionData({
+          extracted: outcome.body.data || {},
+          savedRelPath,
+          reused,
+          source: resultSource,
+          extraction: resultExtraction,
+        });
+        return complete(data, outcome);
+      } catch (error) {
+        const stopped = execution.shutdownRequested || controller.signal.aborted;
+        if (!stopped && fallbackData) {
+          const current = resumeExtractionGet({ ...pathCtx, id: operation.id }).operation;
+          if (["queued", "running"].includes(current?.status)) {
+            try {
+              const data = typeof fallbackData === "function" ? fallbackData() : fallbackData;
+              return complete(data);
+            } catch {
+              // Persist the terminal failure below when deterministic fallback cannot commit.
+            }
+          }
+        }
+        const safeError = {
+          code: stopped
+            ? "RESUME_EXTRACTION_SERVER_STOPPED"
+            : error?.code || "RESUME_EXTRACTION_FAILED",
+          message: stopped
+            ? "CareerRat stopped before it finished reading this resume. Try it again."
+            : "CareerRat couldn't read that resume. Try again.",
+        };
+        let failed = null;
+        try {
+          failed = resumeExtractionFail({
+            ...pathCtx,
+            id: operation.id,
+            ownerId: resumeWorkerOwnerId,
+            error: safeError,
+          }).operation;
+        } catch {
+          failed = resumeExtractionGet({ ...pathCtx, id: operation.id }).operation;
+        }
+        const body = {
+          ok: false,
+          code: safeError.code,
+          error: { message: safeError.message },
+          manual: RESUME_AI_MANUAL,
+          operation: failed,
+        };
+        notify({ type: "error", message: safeError.message, status: 500, operation: failed });
+        return { status: 500, body };
+      } finally {
+        clearIntervalImpl(heartbeat);
+        activeResumeExtractions.delete(operation.id);
+      }
+    });
+    return execution;
+  }
+
+  function startDurableResumeExtraction(upload, name, workerOptions = {}) {
+    const started = resumeExtractionStart({
+      ...pathCtx,
+      uploadDigest: upload.uploadDigest,
+      uploadPath: upload.savedRelPath,
+      filename: sanitizeUploadFilename(name),
+      executionPlan: resolvedResumeExecutionPlan(),
+      ownerId: resumeWorkerOwnerId,
+    });
+    if (started.operation.status === "completed") {
+      return { started, execution: null };
+    }
+    return {
+      started,
+      execution: startResumeExtractionWorker({
+        operation: started.operation,
+        savedPath: upload.savedPath,
+        savedRelPath: upload.savedRelPath,
+        name,
+        reused: upload.reused,
+        ...workerOptions,
+      }),
+    };
+  }
+
+  addRoute("GET", "/api/onboard/resume-ai/operation", (req, res) => {
+    try {
+      const requestUrl = new URL(req.url, "http://127.0.0.1");
+      const operation = resumeExtractionGet({
+        ...pathCtx,
+        id: requestUrl.searchParams.get("id") || undefined,
+        uploadDigest: requestUrl.searchParams.get("digest") || undefined,
+      }).operation;
+      sendJson(res, 200, { ok: true, operation });
+    } catch (error) {
+      sendJson(res, error?.code === "NOT_FOUND" ? 404 : 500, {
+        ok: false,
+        error: { message: error?.message || "Resume extraction could not be loaded." },
+      });
+    }
+  });
 
   // -------------------------------------------------------------------------
   // POST /api/onboard/resume-ai?name=<filename> — raw PDF/image bytes.
@@ -1855,6 +2430,30 @@ export function mountOnboardRoutes({
       return;
     }
     const { savedRelPath, savedPath, reused } = upload;
+
+    if (dbExists(pathCtx)) {
+      let closed = false;
+      res.on?.("close", () => {
+        closed = true;
+      });
+      const { started, execution } = startDurableResumeExtraction(upload, name);
+      if (!execution) {
+        if (!closed) {
+          const operation = started.operation;
+          sendJson(res, 200, {
+            ok: true,
+            data: operation.result,
+            ai: operation.ai,
+            manual: operation.manual || RESUME_AI_MANUAL,
+            operation,
+          });
+        }
+        return;
+      }
+      const response = await execution.promise;
+      if (!closed) sendJson(res, response.status, response.body);
+      return;
+    }
 
     const outcome = await runResumeExtractBounded({ savedPath });
 
@@ -1955,6 +2554,44 @@ export function mountOnboardRoutes({
       return;
     }
     const { savedRelPath, savedPath, reused } = upload;
+
+    if (dbExists(pathCtx)) {
+      let closed = false;
+      res.on("close", () => {
+        closed = true;
+      });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store",
+        Connection: "keep-alive",
+      });
+      res.flushHeaders?.();
+      const emit = (payload) => {
+        if (closed) return;
+        try {
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch {
+          closed = true;
+        }
+      };
+      emit({
+        type: "saved",
+        savedPath: savedRelPath,
+        reused,
+        uploadDigest: upload.uploadDigest,
+      });
+      const { started, execution } = startDurableResumeExtraction(upload, name);
+      emit({ type: "started", operation: started.operation });
+      if (!execution) {
+        emit({ type: "done", data: started.operation.result, operation: started.operation });
+      } else {
+        execution.listeners.add(emit);
+        await execution.promise;
+        execution.listeners.delete(emit);
+      }
+      if (!closed) res.end();
+      return;
+    }
 
     // Client-disconnect guard: `res.on("close")`, not `req.on("close")` —
     // see skill-run-route.mjs's own comment on this exact choice (req's own
@@ -2084,7 +2721,13 @@ export function mountOnboardRoutes({
   // bounded-AI fallback helper. `originalName`/`onProgress` are optional —
   // the two buffered callers omit them (byte-identical to before this
   // change), while the SSE route above passes both to narrate the run.
-  async function runResumeExtractBounded({ savedPath, originalName, onProgress } = {}) {
+  async function runResumeExtractBounded({
+    savedPath,
+    originalName,
+    onProgress,
+    signal,
+    executionPlan,
+  } = {}) {
     const schema = JSON.parse(readFileSync(join(repoRoot, RESUME_EXTRACT_SCHEMA_PATH), "utf8"));
 
     // Speed: résumé extraction is a well-bounded transcription+classification
@@ -2131,6 +2774,9 @@ export function mountOnboardRoutes({
         tools: ["Read"],
         approvedReadPaths: [savedPath],
         outputSchema: schema,
+        signal,
+        executionPlan: executionPlan || undefined,
+        useExecutionPlanRoute: Boolean(executionPlan),
         onEvent: (evt) => {
           if (onProgress) {
             if (evt.type === "system") {
@@ -2230,6 +2876,16 @@ export function mountOnboardRoutes({
           ok: false,
           errors: [{ path: "", message: "body.data must be an object" }],
         });
+        return;
+      }
+
+      try {
+        assertSettingsBaseRevision({
+          ...pathCtx,
+          expectedBaseRevision: body?.expectedBaseRevision,
+        });
+      } catch (err) {
+        sendCandidateError(res, err);
         return;
       }
 
@@ -2430,6 +3086,7 @@ export function mountOnboardRoutes({
       fetchImpl,
       retry: body?.retry === true,
       workspaceAgentRuntime,
+      appOperations,
       startFirstSearchImpl,
       runSearchInBackgroundImpl,
     });
@@ -2557,4 +3214,30 @@ export function mountOnboardRoutes({
       summary: summarizeUsageEvents(readUsageEvents({ root: repoRoot })),
     });
   });
+
+  async function shutdownResumeExtractions() {
+    const active = [...activeResumeExtractions.values()];
+    for (const execution of active) {
+      execution.shutdownRequested = true;
+      const error = new Error(
+        "CareerRat stopped before it finished reading this resume. Try it again."
+      );
+      error.code = "RESUME_EXTRACTION_SERVER_STOPPED";
+      execution.controller.abort(error);
+    }
+    await Promise.all(active.map((execution) => execution.promise));
+  }
+
+  function recoverResumeExtractions() {
+    if (!dbExists(pathCtx)) return { ok: true, recovered: [] };
+    return resumeExtractionRecoverOrphans({
+      ...pathCtx,
+      ownerId: resumeWorkerOwnerId,
+    });
+  }
+
+  return {
+    shutdownResumeExtractions,
+    recoverResumeExtractions,
+  };
 }

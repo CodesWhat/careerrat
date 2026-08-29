@@ -281,7 +281,7 @@ function hasAnyTitle(targeting) {
   );
 }
 
-export function hasSearchLocation(profile) {
+function hasSearchLocation(profile) {
   const location = profile.location || {};
   const candidate = profile.candidate || {};
   return !!(
@@ -629,6 +629,106 @@ export function candidateSetupInitialize({ repoRoot, env } = {}) {
 export function candidateConfigGet({ repoRoot, env } = {}) {
   const db = requireDb({ repoRoot, env });
   return { ...readCandidateConfigFromDb(db), setup: computeCandidateSetup(db) };
+}
+
+export function applyCandidateResumeSeedInDb(
+  db,
+  { profileSeed, evidenceSeed, targetingSeed } = {}
+) {
+  const candidatePatch = Object.fromEntries(
+    Object.entries(profileSeed?.candidate || {}).filter(([, value]) => value !== null)
+  );
+  if (Object.keys(candidatePatch).length) {
+    const current = readSingleton(db, "candidate_profile", DEFAULTS.profile);
+    const patch = { candidate: candidatePatch };
+    const extractedLocation = String(candidatePatch.location || "").trim();
+    if (extractedLocation && !String(current?.location?.home || "").trim()) {
+      patch.location = { home: extractedLocation };
+    }
+    const merged = normalizeCandidateProfile(
+      deepMerge(current, normalizeCandidateProfilePatch(patch))
+    );
+    assertValid("profile", merged);
+    putSingleton(db, "candidate_profile", merged);
+  }
+
+  const claims = Array.isArray(evidenceSeed?.claims)
+    ? evidenceSeed.claims
+        .map((claim) => ({
+          ...claim,
+          claim: String(claim?.claim || "").trim(),
+          evidence: String(claim?.evidence || "Candidate-provided resume").trim(),
+        }))
+        .filter((claim) => claim.claim)
+    : [];
+  assertCleanEvidenceClaims(claims);
+  const existingEvidence = readEvidence(db).claims;
+  const seenClaims = new Set(
+    existingEvidence.map((claim) => String(claim?.claim || "").trim()).filter(Boolean)
+  );
+  const usedIds = new Set(existingEvidence.map((claim) => String(claim?.id || "")));
+  const insertEvidence = db.prepare(
+    `INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
+  );
+  let evidenceAdded = 0;
+  for (const claim of claims) {
+    if (seenClaims.has(claim.claim)) continue;
+    let id = String(claim.id || "").trim();
+    if (!id || usedIds.has(id)) id = nextClaimId(usedIds);
+    const data = { ...claim, id };
+    insertEvidence.run(id, JSON.stringify(data), new Date().toISOString());
+    usedIds.add(id);
+    seenClaims.add(claim.claim);
+    evidenceAdded += 1;
+  }
+  const evidence = readEvidence(db);
+  assertValid("evidence", evidence);
+
+  const currentTargeting = readTargeting(db);
+  const targetingPatch = {};
+  if (
+    Array.isArray(targetingSeed?.role_buckets) &&
+    targetingSeed.role_buckets.length &&
+    currentTargeting.role_buckets.length === 0
+  ) {
+    targetingPatch.role_buckets = targetingSeed.role_buckets;
+  }
+  if (
+    Array.isArray(targetingSeed?.keep_signals) &&
+    targetingSeed.keep_signals.length &&
+    (!Array.isArray(currentTargeting.keep_signals) || currentTargeting.keep_signals.length === 0)
+  ) {
+    targetingPatch.keep_signals = targetingSeed.keep_signals;
+  }
+  if (Object.keys(targetingPatch).length) {
+    const merged = deepMerge(currentTargeting, targetingPatch);
+    merged.role_buckets = normalizeSearchTracks(merged.role_buckets);
+    merged.tracked_companies = compactStrings(merged.tracked_companies);
+    merged.excluded_companies = compactStrings(merged.excluded_companies);
+    assertValid("targeting", merged);
+    const { role_buckets, tracked_companies, excluded_companies, ...base } = merged;
+    putSingleton(db, "candidate_targeting", base);
+    putSearchTracks(db, role_buckets);
+    putCompanies(db, "target", tracked_companies);
+    putCompanies(db, "excluded", excluded_companies);
+  }
+
+  const meta = bumpMeta(db);
+  const event = logActivityEvent(db, {
+    type: "system",
+    title: "Resume added",
+    summary: `${evidenceAdded} resume evidence ${evidenceAdded === 1 ? "claim" : "claims"} saved to the candidate profile.`,
+    tags: ["operation:candidate:resume-ingest"],
+  });
+  return {
+    profile: normalizeCandidateProfile(readSingleton(db, "candidate_profile", DEFAULTS.profile)),
+    targeting: readTargeting(db),
+    evidence,
+    setup: refreshCandidateSetup(db),
+    meta,
+    event,
+  };
 }
 
 export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivity = true } = {}) {

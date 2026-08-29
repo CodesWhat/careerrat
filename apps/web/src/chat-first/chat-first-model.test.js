@@ -5,13 +5,27 @@ import {
   artifactEmoji,
   buildChatFirstView,
   chatFirstReducer,
+  clearWorkspaceOperation,
   createChatFirstState,
   filterPipelineJobs,
+  foregroundDraftKey,
   highFitSearchIds,
+  parseChatFirstForeground,
+  readForegroundDraft,
+  readWorkspaceOperationId,
+  reconcileChatFirstForeground,
+  rememberWorkspaceOperation,
+  replaceForegroundOperation,
+  resolveForegroundStorage,
+  serializeChatFirstForeground,
+  writeForegroundDraft,
 } from "./chat-first-model.js";
 
 const dashboard = {
-  settings: { profile: { candidate: "Riley", location: "Remote / hybrid / on-site - NYC" } },
+  settings: {
+    profile: { candidate: "Riley", location: "Remote / hybrid / on-site - NYC" },
+    targeting: { fitFloor: 65 },
+  },
   sourcedRoles: [{ id: "sourced-1", company: "Tyrell", role: "Staff Engineer", fit: 88 }],
   reviewHoldRoles: [{ detailId: "hold-1", company: "Aperture", role: "Platform Lead", fit: 84 }],
   allNextSteps: [
@@ -546,6 +560,30 @@ describe("buildChatFirstView", () => {
     expect(view.threads[0].needsAction).toBe(false);
   });
 
+  it("keeps question capture visible as a durable job-thread action", () => {
+    const view = buildChatFirstView(
+      { ...dashboard, allNextSteps: [] },
+      {
+        ...runtime,
+        jobThreads: [
+          {
+            id: "thread-question-capture",
+            applicationId: "app-1",
+            company: "E Corp",
+            packetReview: {
+              gaps: [],
+              questionCaptureRequired: true,
+            },
+          },
+        ],
+        missions: [],
+        touchDue: [],
+      }
+    );
+
+    expect(view.threads[0].needsAction).toBe(true);
+  });
+
   it("degrades empty snapshots without inventing demo product state", () => {
     const view = buildChatFirstView(null, null);
 
@@ -755,15 +793,19 @@ describe("buildChatFirstView", () => {
 });
 
 describe("chatFirstReducer", () => {
-  it("seeds high-fit search jobs once and preserves later user changes", () => {
+  it("seeds jobs at the saved fit floor once and preserves later user changes", () => {
     expect(
-      highFitSearchIds([
-        { id: "fit-field", fit: 88 },
-        { id: "score-field", fitScore: 91 },
-        { id: "below", fitScore: 79 },
-        { id: "pending", fitScore: null },
-      ])
-    ).toEqual(["fit-field", "score-field"]);
+      highFitSearchIds(
+        [
+          { id: "fit-field", fit: 88 },
+          { id: "score-field", fitScore: 91 },
+          { id: "saved-floor", fitScore: 65 },
+          { id: "below", fitScore: 64 },
+          { id: "pending", fitScore: null },
+        ],
+        65
+      )
+    ).toEqual(["fit-field", "score-field", "saved-floor"]);
 
     let state = createChatFirstState();
     state = chatFirstReducer(state, {
@@ -771,10 +813,12 @@ describe("chatFirstReducer", () => {
       rows: [
         { id: "fit-field", fit: 88 },
         { id: "score-field", fitScore: 91 },
-        { id: "below", fitScore: 79 },
+        { id: "saved-floor", fitScore: 65 },
+        { id: "below", fitScore: 64 },
       ],
+      minimumFit: 65,
     });
-    expect(state.selection).toEqual(["fit-field", "score-field"]);
+    expect(state.selection).toEqual(["fit-field", "score-field", "saved-floor"]);
     expect(state.searchSelectionSeeded).toBe(true);
 
     state = chatFirstReducer(state, { type: "selection.toggle", id: "fit-field" });
@@ -785,7 +829,7 @@ describe("chatFirstReducer", () => {
       rows: [{ id: "later-refresh", fitScore: 99 }],
     });
 
-    expect(state.selection).toEqual(["score-field"]);
+    expect(state.selection).toEqual(["score-field", "saved-floor"]);
   });
 
   it("replaces the browser selection for a grouped Needs You review", () => {
@@ -842,6 +886,356 @@ describe("chatFirstReducer", () => {
     state = chatFirstReducer(state, { type: "mock.close" });
     expect(state.gateId).toBeNull();
     expect(state.activeThread).toBe("app-1");
+  });
+
+  it("hydrates foreground navigation without resetting unrelated shell state", () => {
+    const current = {
+      ...createChatFirstState(),
+      activityOpen: true,
+      archiveOpen: true,
+    };
+    const state = chatFirstReducer(current, {
+      type: "foreground.hydrate",
+      foreground: {
+        activeThread: "job:app-1",
+        activeApplicationId: "app-1",
+        browse: "pipeline",
+        pipeView: "list",
+        selection: ["sourced-1"],
+        composerChips: ["app-1"],
+        gateId: "submit-app-1",
+      },
+    });
+
+    expect(state).toMatchObject({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "pipeline",
+      pipeView: "list",
+      selection: ["sourced-1"],
+      composerChips: ["app-1"],
+      gateId: "submit-app-1",
+      activityOpen: true,
+      archiveOpen: true,
+    });
+  });
+});
+
+describe("chat-first foreground location", () => {
+  it("round-trips stable foreground state through the URL", () => {
+    const search = serializeChatFirstForeground({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "search",
+      pipeView: "list",
+      selection: ["job-2", "job-1", "job-2"],
+      searchSelectionSeeded: true,
+      composerChips: ["job-1"],
+      gateId: "submit-app-1",
+      reviewKind: "company",
+      reviewId: "batch-1",
+      packetGapId: "gap-1",
+      deepEditId: "proposal-1",
+      deepInputMode: "paste",
+      operationId: "app-operation-workspace-1",
+      query: "staff platform",
+      pipelineStage: "technical",
+      filters: {
+        fit80: true,
+        comp: true,
+        remote: false,
+        stage: "offer",
+        source: "greenhouse",
+        posted: "7d",
+        files: "resume",
+        people: "needs-touch",
+      },
+    });
+
+    expect(parseChatFirstForeground(search)).toEqual({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "search",
+      pipeView: "list",
+      selection: ["job-2", "job-1"],
+      searchSelectionSeeded: true,
+      composerChips: ["job-1"],
+      gateId: "submit-app-1",
+      reviewKind: "company",
+      reviewId: "batch-1",
+      packetGapId: "gap-1",
+      deepEditId: "proposal-1",
+      deepInputMode: "paste",
+      operationId: "app-operation-workspace-1",
+      query: "staff platform",
+      pipelineStage: "technical",
+      filters: {
+        fit80: true,
+        comp: true,
+        remote: false,
+        stage: "offer",
+        source: "greenhouse",
+        posted: "7d",
+        files: "resume",
+        people: "needs-touch",
+      },
+    });
+  });
+
+  it("preserves the saved-fit-floor filter override and an explicit show-all choice", () => {
+    expect(parseChatFirstForeground("").filters.fit80).toBe(true);
+    expect(parseChatFirstForeground("").filters.files).toBe("All");
+    expect(serializeChatFirstForeground({ filters: { fit80: true, files: "All" } })).toBe("");
+    const search = serializeChatFirstForeground({ filters: { fit80: false } });
+    expect(search).toBe("?fit=all");
+    expect(parseChatFirstForeground(search).filters.fit80).toBe(false);
+  });
+
+  it("keeps durable workspace work private in the URL without changing the active screen", () => {
+    const search = serializeChatFirstForeground({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "pipeline",
+      query: "platform",
+      operationId: "app-operation-workspace-1",
+    });
+
+    const foreground = parseChatFirstForeground(search);
+    expect(foreground).toMatchObject({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "pipeline",
+      query: "platform",
+      operationId: "app-operation-workspace-1",
+    });
+    expect(foregroundDraftKey(foreground)).toBe("careerrat:draft:browser:pipeline");
+
+    const cleared = replaceForegroundOperation(search, null, {
+      expectedId: "app-operation-workspace-1",
+    });
+    expect(parseChatFirstForeground(cleared)).toMatchObject({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: "pipeline",
+      query: "platform",
+      operationId: null,
+    });
+    expect(replaceForegroundOperation(search, null, { expectedId: "app-operation-newer" })).toBe(
+      search
+    );
+    expect(replaceForegroundOperation(search, "app-operation-late", { expectedId: null })).toBe(
+      search
+    );
+  });
+
+  it("ignores malformed saved review targets", () => {
+    expect(parseChatFirstForeground("?review=unknown%3Abatch-1")).toMatchObject({
+      reviewKind: null,
+      reviewId: null,
+    });
+    expect(parseChatFirstForeground("?review=company")).toMatchObject({
+      reviewKind: null,
+      reviewId: null,
+    });
+  });
+
+  it("round-trips an intentionally empty search selection across reload", () => {
+    const search = serializeChatFirstForeground({
+      browse: "search",
+      selection: [],
+      searchSelectionSeeded: true,
+    });
+
+    expect(search).toBe("?browse=search&selection=cleared");
+    const foreground = parseChatFirstForeground(search);
+    expect(foreground.selection).toEqual([]);
+    expect(foreground.searchSelectionSeeded).toBe(true);
+
+    const hydrated = chatFirstReducer(createChatFirstState(), {
+      type: "foreground.hydrate",
+      foreground,
+    });
+    expect(
+      chatFirstReducer(hydrated, {
+        type: "selection.seed-search",
+        rows: [{ id: "high-fit", fitScore: 99 }],
+      })
+    ).toMatchObject({ selection: [], searchSelectionSeeded: true });
+  });
+
+  it("rehydrates the exact prior surface for browser back and forward", () => {
+    const threadLocation = parseChatFirstForeground("?thread=job%3Aapp-1&application=app-1");
+    const browserLocation = parseChatFirstForeground("?browse=people&people=needs-touch");
+    let state = chatFirstReducer(createChatFirstState(), {
+      type: "foreground.hydrate",
+      foreground: browserLocation,
+    });
+    state = chatFirstReducer(state, {
+      type: "foreground.hydrate",
+      foreground: threadLocation,
+    });
+
+    expect(state).toMatchObject({
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: false,
+    });
+
+    state = chatFirstReducer(state, {
+      type: "foreground.hydrate",
+      foreground: browserLocation,
+    });
+    expect(state).toMatchObject({ activeThread: "today", browse: "people" });
+    expect(browserLocation.filters.people).toBe("needs-touch");
+  });
+
+  it("keeps a cleared selection cleared through browser back and forward", () => {
+    const selectedLocation = parseChatFirstForeground(
+      "?browse=search&selection=seeded&selected=job-1"
+    );
+    const clearedLocation = parseChatFirstForeground("?browse=search&selection=cleared");
+    let state = chatFirstReducer(createChatFirstState(), {
+      type: "foreground.hydrate",
+      foreground: selectedLocation,
+    });
+    expect(state.selection).toEqual(["job-1"]);
+
+    state = chatFirstReducer(state, {
+      type: "foreground.hydrate",
+      foreground: clearedLocation,
+    });
+    state = chatFirstReducer(state, {
+      type: "selection.seed-search",
+      rows: [{ id: "high-fit", fitScore: 99 }],
+    });
+    expect(state).toMatchObject({ selection: [], searchSelectionSeeded: true });
+
+    state = chatFirstReducer(state, {
+      type: "foreground.hydrate",
+      foreground: selectedLocation,
+    });
+    expect(state).toMatchObject({ selection: ["job-1"], searchSelectionSeeded: true });
+  });
+
+  it("falls back clearly when a URL references entities that disappeared", () => {
+    const result = reconcileChatFirstForeground(
+      {
+        ...createChatFirstState(),
+        activeThread: "job:gone",
+        activeApplicationId: "gone",
+        selection: ["live", "gone"],
+        composerChips: ["gone"],
+        gateId: "gate-gone",
+      },
+      {
+        threads: [{ id: "job:live", applicationId: "live" }],
+        archivedThreads: [],
+        skillChats: [],
+        browser: { search: [{ id: "live" }] },
+        missions: [],
+      }
+    );
+
+    expect(result.state).toMatchObject({
+      activeThread: "today",
+      activeApplicationId: null,
+      selection: ["live"],
+      composerChips: [],
+      gateId: null,
+    });
+    expect(result.notice).toBe("That saved workspace item no longer exists. You're back in Today.");
+  });
+
+  it("does not let newly completed background work hijack the foreground", () => {
+    const foreground = {
+      ...createChatFirstState(),
+      activeThread: "job:app-1",
+      activeApplicationId: "app-1",
+      browse: false,
+      selection: ["kept"],
+    };
+    const view = {
+      threads: [{ id: "job:app-1", applicationId: "app-1" }],
+      archivedThreads: [],
+      skillChats: [],
+      needsYou: [],
+      browser: { search: [{ id: "kept" }, { id: "background-result" }] },
+    };
+
+    expect(reconcileChatFirstForeground(foreground, view)).toEqual({
+      state: foreground,
+      notice: null,
+    });
+  });
+
+  it("keys private drafts to the stable foreground surface", () => {
+    expect(foregroundDraftKey({ activeThread: "job:app-1", packetGapId: "gap-2" })).toBe(
+      "careerrat:draft:job%3Aapp-1:gap-2"
+    );
+    expect(foregroundDraftKey({ activeThread: "today", browse: "people" })).toBe(
+      "careerrat:draft:browser:people"
+    );
+  });
+
+  it("restores bounded local drafts and removes empty ones", () => {
+    const values = new Map();
+    const storage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    };
+    const key = "careerrat:draft:today";
+
+    writeForegroundDraft(storage, key, "A useful unsent reply");
+    expect(readForegroundDraft(storage, key)).toBe("A useful unsent reply");
+    writeForegroundDraft(storage, key, "");
+    expect(readForegroundDraft(storage, key)).toBe("");
+    expect(values.has(key)).toBe(false);
+  });
+
+  it("degrades safely when a managed browser blocks local storage access", () => {
+    const scope = {};
+    Object.defineProperty(scope, "localStorage", {
+      get() {
+        throw new Error("blocked");
+      },
+    });
+
+    expect(resolveForegroundStorage(scope)).toBeNull();
+  });
+
+  it("restores durable workspace work after navigation drops its private URL state", () => {
+    const values = new Map();
+    const storage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    };
+
+    expect(rememberWorkspaceOperation(storage, "app-operation-workspace-1")).toBe(
+      "app-operation-workspace-1"
+    );
+    expect(readWorkspaceOperationId(storage)).toBe("app-operation-workspace-1");
+    expect(clearWorkspaceOperation(storage, "app-operation-newer")).toBe(false);
+    expect(readWorkspaceOperationId(storage)).toBe("app-operation-workspace-1");
+    expect(clearWorkspaceOperation(storage, "app-operation-workspace-1")).toBe(true);
+    expect(readWorkspaceOperationId(storage)).toBeNull();
+  });
+
+  it("never restores malformed workspace operation ids", () => {
+    const storage = {
+      getItem: () => "job:app-1",
+      setItem() {
+        throw new Error("blocked");
+      },
+      removeItem() {
+        throw new Error("blocked");
+      },
+    };
+
+    expect(readWorkspaceOperationId(storage)).toBeNull();
+    expect(rememberWorkspaceOperation(storage, "job:app-1")).toBeNull();
+    expect(clearWorkspaceOperation(storage)).toBe(false);
   });
 });
 

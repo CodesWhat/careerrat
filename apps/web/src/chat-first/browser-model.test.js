@@ -85,10 +85,19 @@ describe("chat-first browser model", () => {
     ];
 
     expect(
-      filterSearchJobs(jobs, { query: "remote", fit80: true, comp: true, remote: true }).map(
-        (job) => job.id
-      )
+      filterSearchJobs(jobs, {
+        query: "remote",
+        fit80: true,
+        fitFloor: 65,
+        comp: true,
+        remote: true,
+      }).map((job) => job.id)
     ).toEqual(["a"]);
+    expect(filterSearchJobs(jobs, { fit80: true, fitFloor: 65 }).map((job) => job.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(filterSearchJobs(jobs, { fit80: true }).map((job) => job.id)).toEqual(["a", "b"]);
     expect(
       filterSearchJobs(
         jobs,

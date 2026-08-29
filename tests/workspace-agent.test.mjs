@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
 
-import { mountWorkspaceAgentRoutes } from "../src/cli/workspace-agent-route.mjs";
+import {
+  createWorkspaceOperationKinds,
+  mountWorkspaceAgentRoutes,
+} from "../src/cli/workspace-agent-route.mjs";
 import {
   captureWorkspaceIntake,
   createWorkspaceAgentRuntime,
   EXECUTABLE_INTENTS,
-  executeWorkspaceIntent,
+  executeWorkspaceIntent as executeWorkspaceIntentCore,
   mailSyncSources,
   messagesSyncSources,
   previewWorkspaceIntent,
@@ -26,7 +30,7 @@ import {
   workspaceThreadOpen,
   workspaceThreadRead,
 } from "../src/core/agent/workspace-thread.mjs";
-import { CAPABILITY_KEYS } from "../src/core/automation/consent.mjs";
+import { CAPABILITY_KEYS, mayRun } from "../src/core/automation/consent.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import {
@@ -40,6 +44,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
 } from "../src/core/db/verbs/candidate.mjs";
+import { missionCreate } from "../src/core/db/verbs/chat-first.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { companyProposalBatchPut } from "../src/core/db/verbs/company-discovery.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
@@ -50,6 +55,11 @@ import {
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
+import {
+  sourcingRunComplete,
+  sourcingRunLatest,
+  sourcingRunStart,
+} from "../src/core/db/verbs/sourcing-runs.mjs";
 import { buildCompanySeedContext } from "../src/core/discovery/company-context.mjs";
 import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
 import { draftOneOffScreeningAnswers } from "../src/core/packet/one-off-answer.mjs";
@@ -59,8 +69,11 @@ import {
   researchRelPath,
   writeResearch,
 } from "../src/core/research/research-store.mjs";
+import { createAppOperationManager } from "../src/core/runtime/app-operation-manager.mjs";
 
 const cleanupRoots = [];
+let missionFixtureSequence = 0;
+let workspaceRequestSequence = 0;
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-"));
@@ -80,6 +93,60 @@ function seedApplication(repoRoot, overrides = {}) {
   };
   appUpsert({ repoRoot, env: {}, row });
   return row;
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stableValue(value[key])])
+  );
+}
+
+function preparedPacketOverrides(
+  repoRoot,
+  { evaluation = {}, artifacts = {}, packetManifest = {} } = {}
+) {
+  const currentEvaluation = {
+    ...evaluation,
+    evaluatedAt: evaluation.evaluatedAt || "2026-08-24T11:00:00.000Z",
+  };
+  const body = "Build durable AI infrastructure and customer-facing production workflows.";
+  const jdPath = "workspace/jobs/temporal-applied-ai-engineer.md";
+  mkdirSync(join(repoRoot, "workspace", "jobs"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, jdPath),
+    [
+      "---",
+      'company: "Temporal Labs"',
+      'role: "Applied AI Engineer"',
+      "---",
+      "",
+      "# Job Description",
+      "",
+      body,
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+  return {
+    evaluation: currentEvaluation,
+    artifacts: { ...artifacts, jd: jdPath },
+    packetManifest: {
+      ...packetManifest,
+      provenance: {
+        jd: { path: jdPath, sha256: createHash("sha256").update(body).digest("hex") },
+        evaluation: {
+          evaluatedAt: currentEvaluation.evaluatedAt,
+          sha256: createHash("sha256")
+            .update(JSON.stringify(stableValue(currentEvaluation)))
+            .digest("hex"),
+        },
+      },
+    },
+  };
 }
 
 function readApplication(repoRoot, id) {
@@ -120,6 +187,86 @@ function preparedApplyDeps(overrides = {}) {
     }),
     ...overrides,
   };
+}
+
+function currentApplicationMissionAttempt(repoRoot, intent) {
+  if (!new Set(["job.prepare-submit", "job.apply"]).has(intent?.type)) return null;
+  const applicationId = String(intent.entity?.id || "").trim();
+  const missionId = `mission-workspace-fixture-${++missionFixtureSequence}`;
+  const stepId = "prepare";
+  missionCreate({
+    repoRoot,
+    env: {},
+    id: missionId,
+    title: "Prepare application fixture",
+    mode: "prepare-to-submit",
+    steps: [
+      {
+        id: stepId,
+        label: "Prepare form",
+        action: "prepare-submit",
+        jobRef: { type: "application", id: applicationId },
+      },
+    ],
+  });
+  const db = openDb({ repoRoot, env: {} });
+  const row = db
+    .prepare("SELECT data FROM mission_steps WHERE mission_id = ? AND id = ?")
+    .get(missionId, stepId);
+  const step = JSON.parse(row.data);
+  step.status = "running";
+  step.currentAttempt = {
+    id: `attempt-workspace-fixture-${missionFixtureSequence}`,
+    fence: 1,
+    status: "running",
+    startedAt: "2026-08-27T14:00:00.000Z",
+    leaseExpiresAt: "2099-08-27T14:10:00.000Z",
+    idempotency: { key: `${missionId}:${stepId}`, classification: "receipt-required" },
+    executionPlan: {
+      policyVersion: 1,
+      operation: "application.drafting",
+      runtimeId: "codex",
+      adapterVersion: 1,
+      requested: { quality: "best", reasoning: "medium" },
+      resolved: {
+        quality: "best",
+        reasoning: "medium",
+        model: "gpt-5.6-sol",
+        modelSource: "alias",
+        effort: "medium",
+        speedTier: null,
+      },
+      fallback: null,
+    },
+  };
+  db.prepare("UPDATE mission_steps SET data = ? WHERE mission_id = ? AND id = ?").run(
+    JSON.stringify(step),
+    missionId,
+    stepId
+  );
+  return {
+    missionId,
+    stepId,
+    attemptId: step.currentAttempt.id,
+    fence: step.currentAttempt.fence,
+    idempotencyKey: step.currentAttempt.idempotency.key,
+    idempotencyClassification: step.currentAttempt.idempotency.classification,
+  };
+}
+
+function executeWorkspaceIntent(options) {
+  const missionAttempt = currentApplicationMissionAttempt(options.repoRoot, options.intent);
+  return executeWorkspaceIntentCore({
+    ...options,
+    ...(missionAttempt
+      ? {
+          intent: {
+            ...options.intent,
+            input: { ...(options.intent.input || {}), missionAttempt },
+          },
+        }
+      : {}),
+  });
 }
 
 function seedCommunication(repoRoot, overrides = {}) {
@@ -179,6 +326,12 @@ function readSourced(repoRoot, id) {
     .prepare("SELECT data FROM sourced WHERE id = ?")
     .get(id);
   return row ? JSON.parse(row.data) : null;
+}
+
+function seedSourcingRun(repoRoot, run) {
+  openDb({ repoRoot, env: {} })
+    .prepare("INSERT INTO sourcing_runs (id, data) VALUES (?, ?)")
+    .run(run.id, JSON.stringify(run));
 }
 
 after(() => {
@@ -385,7 +538,9 @@ test("onboarding handoff strips UI control fences and restores clear binary answ
   const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
   assert.equal(messages[0].text, "What company values matter most to you?");
   assert.doesNotMatch(messages[0].text, /careerrat:confirm|candidate_patch/);
-  assert.equal(messages[1].metadata.answerMode, "yes-no");
+  assert.equal(messages[1].metadata.answerMode, undefined);
+  assert.equal(messages[1].metadata.choicePrompt.mode, "binary");
+  assert.equal(messages[1].metadata.choicePrompt.state, "pending");
 });
 
 test("onboarding handoff preserves explicit binary metadata when text alone cannot infer it", () => {
@@ -408,7 +563,8 @@ test("onboarding handoff preserves explicit binary metadata when text alone cann
 
   const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
   assert.equal(messages[0].text, "I need to confirm sponsorship. Reply yes or no.");
-  assert.equal(messages[0].metadata.answerMode, "yes-no");
+  assert.equal(messages[0].metadata.answerMode, undefined);
+  assert.equal(messages[0].metadata.choicePrompt.mode, "binary");
 });
 
 test("onboarding handoff excludes internal system instructions from workspace history", () => {
@@ -1110,6 +1266,15 @@ test("resolveReferencedCompany caps ambiguous matches at 5 and never guesses one
       return true;
     }
   );
+  const actions = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1).metadata.nextActions;
+  assert.equal(actions.length, 5);
+  for (const action of actions) {
+    assert.equal(action.primary, false);
+    assert.equal(action.intent.type, "research.company-request");
+    assert.deepEqual(action.intent.entity, { type: "workspace", id: WORKSPACE_THREAD_ID });
+    assert.match(action.intent.input.jobId, /^sourced-regional-/);
+    assert.doesNotMatch(action.label, /sourced-regional-/);
+  }
 });
 
 test("company.health-request throws COMPANY_NOT_TRACKED for a company with no saved job", async () => {
@@ -1447,6 +1612,42 @@ test("coaching.plan persists a plan onto the application row and returns a coach
 
   const persisted = readApplication(repoRoot, "app-coach");
   assert.deepEqual(persisted.coachingPlan, plan);
+});
+
+test("coaching.plan preserves its frozen plan and cancellation signal at the coaching boundary", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-coach-plan",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: { gate: "review", fitRisks: ["No direct Kubernetes experience"] },
+  });
+  const controller = new AbortController();
+  const executionPlan = {
+    version: 1,
+    runtimeId: "codex",
+    operation: "coach.deep",
+    resolved: { model: "gpt-5.4", effort: "high" },
+  };
+  let coachingInput;
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.plan",
+      entity: { type: "application", id: "app-coach-plan" },
+    },
+    executionPlan,
+    signal: controller.signal,
+    buildCoachingPlanImpl: async (input) => {
+      coachingInput = input;
+      return { status: 200, body: { ok: true, data: coachingPlanPayload() } };
+    },
+  });
+
+  assert.equal(coachingInput.executionPlan, executionPlan);
+  assert.equal(coachingInput.signal, controller.signal);
 });
 
 test("coaching.plan surfaces a failed plan build as a real error, not a silent artifact", async () => {
@@ -1844,6 +2045,45 @@ test("strategy.review returns a strategy_review artifact and only a 'Run it anyw
   ]);
 });
 
+test("strategy.review preserves its frozen plan and cancellation signal at the review boundary", async () => {
+  const repoRoot = tempRepo();
+  const controller = new AbortController();
+  const executionPlan = {
+    version: 1,
+    runtimeId: "claude",
+    operation: "coach.deep",
+    resolved: { model: "opus", effort: "high" },
+  };
+  let reviewInput;
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "strategy.review",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { force: true },
+    },
+    executionPlan,
+    signal: controller.signal,
+    draftStrategyReviewImpl: async (input) => {
+      reviewInput = input;
+      return {
+        state: "drafted",
+        generatedAt: "2026-08-15T12:00:00.000Z",
+        reviewSignal: { reviewed: true, outcomes: 5, newOutcomes: 5, daysSince: 1 },
+        reevaluation: null,
+        headline: "Review ready.",
+        findings: [],
+        recommendations: [],
+      };
+    },
+  });
+
+  assert.equal(reviewInput.executionPlan, executionPlan);
+  assert.equal(reviewInput.signal, controller.signal);
+});
+
 test("strategy.review returns only a 'Finish review' nextAction once drafted, and passes force through to the impl", async () => {
   const repoRoot = tempRepo();
   const calls = [];
@@ -2180,6 +2420,628 @@ test("a confirmed Ask action adds one board URL and keeps the receipt in workspa
       },
     },
   ]);
+});
+
+test("adding an authenticated source asks a durable site-specific Yes or No question", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: sourceUrl },
+    },
+    addBoardSourceImpl: () => ({
+      added: true,
+      source: {
+        index: 3,
+        provider: "linkedin.com",
+        label: "LinkedIn search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled: false,
+        auth: true,
+        platform: "linkedin",
+      },
+    }),
+  });
+
+  const message = result.messages.at(-1);
+  assert.equal(message.text, "Do you want to log into LinkedIn so I can use it?");
+  assert.equal(message.metadata.state, "login-needed");
+  assert.equal(message.metadata.nextActions, undefined);
+  assert.equal(message.metadata.choicePrompt.mode, "binary");
+  assert.equal(message.metadata.choicePrompt.state, "pending");
+  assert.deepEqual(
+    message.metadata.choicePrompt.options.map(({ id, label }) => ({ id, label })),
+    [
+      { id: "yes", label: "Yes" },
+      { id: "no", label: "No" },
+    ]
+  );
+  assert.deepEqual(message.metadata.sourceLogin, {
+    selector: "LinkedIn search",
+    platform: "linkedin",
+    url: sourceUrl,
+  });
+  assert.deepEqual(
+    workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1).metadata.choicePrompt,
+    message.metadata.choicePrompt
+  );
+});
+
+test("typing Yes answers a pending source-login question without calling the model", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: sourceUrl },
+    },
+    addBoardSourceImpl: () => ({
+      added: true,
+      source: {
+        label: "LinkedIn search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled: false,
+        auth: true,
+        platform: "linkedin",
+      },
+    }),
+  });
+  closeAll();
+  const enabled = [];
+  const opened = [];
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "Yes",
+    setSearchSourceEnabledImpl: (input) => {
+      enabled.push(input);
+      return {
+        changed: true,
+        source: {
+          label: "LinkedIn search",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: input.enabled,
+          auth: true,
+          platform: "linkedin",
+        },
+      };
+    },
+    openAuthenticatedSourceImpl: async (input) => {
+      opened.push(input);
+      return { state: "needs-user", summary: "LinkedIn is open for sign-in." };
+    },
+    callAIImpl: async () => {
+      throw new Error("a source-login answer must not call the model");
+    },
+  });
+
+  assert.deepEqual(enabled, [
+    {
+      repoRoot,
+      env: {},
+      selector: "LinkedIn search",
+      sourceUrl: "https://www.linkedin.com/jobs/search?keywords=platform",
+      enabled: true,
+    },
+  ]);
+  assert.equal(opened[0].url, sourceUrl);
+  assert.equal(result.messages.at(-1).text, "LinkedIn is open for sign-in.");
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions[0], {
+    label: "Check again",
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn search", sourceUrl, decision: "yes" },
+    },
+  });
+  const question = result.messages.find((message) => message.metadata?.sourceLogin);
+  assert.equal(question.metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(question.metadata.choicePrompt.selectedOptionIds, ["yes"]);
+});
+
+test("typing No answers a pending source-login question and continues other sources", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.indeed.com/jobs?q=operations";
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: sourceUrl },
+    },
+    addBoardSourceImpl: () => ({
+      added: true,
+      source: {
+        label: "Indeed search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled: false,
+        auth: true,
+        platform: "indeed",
+      },
+    }),
+  });
+  const searches = [];
+  const sourceChanges = [];
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "No",
+    setSearchSourceEnabledImpl: (input) => {
+      sourceChanges.push(input);
+      return {
+        changed: true,
+        source: {
+          label: "Indeed search",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: input.enabled,
+          auth: true,
+          platform: "indeed",
+        },
+      };
+    },
+    startManualSearchImpl: async (input) => {
+      searches.push(input);
+      return { run: { id: "search-after-typed-no", status: "running" } };
+    },
+    callAIImpl: async () => {
+      throw new Error("a source-login answer must not call the model");
+    },
+  });
+
+  assert.deepEqual(sourceChanges, [
+    {
+      repoRoot,
+      env: {},
+      selector: "Indeed search",
+      sourceUrl: "https://www.indeed.com/jobs?q=operations",
+      enabled: false,
+      loginDecision: "no",
+    },
+  ]);
+  assert.equal(searches.length, 1);
+  assert.equal(searches[0].repoRoot, repoRoot);
+  assert.deepEqual(searches[0].env, {});
+  assert.equal(typeof searches[0].fetchImpl, "function");
+  assert.equal(
+    result.messages.at(-1).text,
+    "Skipped Indeed. I’m continuing with your other sources."
+  );
+  const question = result.messages.find((message) => message.metadata?.sourceLogin);
+  assert.equal(question.metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(question.metadata.choicePrompt.selectedOptionIds, ["no"]);
+});
+
+test("Yes enables the resolved login source and opens its exact saved URL without a global permission grant", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform&location=New%20York";
+  const enabled = [];
+  const opened = [];
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn search", sourceUrl, decision: "yes" },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      enabled.push(input);
+      return {
+        changed: true,
+        source: {
+          index: 1,
+          provider: "linkedin.com",
+          label: "LinkedIn search",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: true,
+          auth: true,
+          platform: "linkedin",
+        },
+      };
+    },
+    openAuthenticatedSourceImpl: async (input) => {
+      opened.push(input);
+      return { state: "needs-user", summary: "LinkedIn is open for sign-in." };
+    },
+  });
+
+  assert.deepEqual(enabled, [
+    {
+      repoRoot,
+      env: {},
+      selector: "LinkedIn search",
+      sourceUrl: "https://www.linkedin.com/jobs/search?keywords=platform&location=New+York",
+      enabled: true,
+    },
+  ]);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].platform, "linkedin");
+  assert.equal(opened[0].url, sourceUrl);
+  assert.equal(opened[0].source.label, "LinkedIn search");
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.equal(result.messages.at(-1).text, "LinkedIn is open for sign-in.");
+  assert.equal(result.messages.at(-1).metadata.state, "needs-user");
+});
+
+test("Yes opens any configured login source without a hardcoded job-site allowlist", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://jobs.example.com/account/login?return_to=%2Fsearch";
+  const opened = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "Example Jobs", sourceUrl, decision: "yes" },
+    },
+    setSearchSourceEnabledImpl: ({ enabled }) => ({
+      changed: true,
+      source: {
+        label: "Example Jobs",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled,
+        auth: true,
+        platform: "example-jobs",
+      },
+    }),
+    openAuthenticatedSourceImpl: async (input) => {
+      opened.push(input);
+      return { state: "ready", summary: "Example Jobs is open and ready." };
+    },
+    startManualSearchImpl: async () => ({
+      run: { id: "search-after-example-login", status: "running" },
+    }),
+  });
+
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].platform, "jobs.example.com");
+  assert.equal(opened[0].url, sourceUrl);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.equal(
+    result.messages.at(-1).text,
+    "Example Jobs is open and ready. I’m continuing the search now."
+  );
+});
+
+test("source login handoff rejects a known platform on another hostname", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://jobs.example.com/search";
+  const enabled = [];
+  let opened = false;
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "source.auth-decision",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { selector: "LinkedIn saved search", sourceUrl, decision: "yes" },
+      },
+      setSearchSourceEnabledImpl: (input) => {
+        enabled.push(input.enabled);
+        return {
+          changed: true,
+          source: {
+            label: "LinkedIn saved search",
+            target: sourceUrl,
+            sourceType: "browser",
+            enabled: input.enabled,
+            auth: true,
+            platform: "linkedin",
+          },
+        };
+      },
+      openAuthenticatedSourceImpl: async () => {
+        opened = true;
+      },
+    }),
+    (error) => error.code === "SOURCE_AUTH_UNAVAILABLE"
+  );
+
+  assert.deepEqual(enabled, [true, false]);
+  assert.equal(opened, false);
+});
+
+test("Yes opens a login-detected browser source without legacy auth metadata", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://wellfound.com/jobs";
+  const enabled = [];
+  const opened = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "Wellfound import", sourceUrl, decision: "yes" },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      enabled.push(input);
+      return {
+        changed: true,
+        source: {
+          index: 4,
+          provider: "Wellfound",
+          label: "Wellfound import",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: input.enabled,
+          auth: false,
+          platform: null,
+        },
+      };
+    },
+    openAuthenticatedSourceImpl: async (input) => {
+      opened.push(input);
+      return { state: "needs-user", summary: "Wellfound is open for sign-in." };
+    },
+  });
+
+  assert.deepEqual(enabled, [
+    { repoRoot, env: {}, selector: "Wellfound import", sourceUrl, enabled: true },
+  ]);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].platform, "wellfound");
+  assert.equal(opened[0].url, sourceUrl);
+  assert.equal(result.messages.at(-1).text, "Wellfound is open for sign-in.");
+});
+
+test("a successful login check resumes the saved-source search", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  const searches = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn search", sourceUrl, decision: "yes" },
+    },
+    setSearchSourceEnabledImpl: ({ enabled }) => ({
+      changed: true,
+      source: {
+        label: "LinkedIn search",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled,
+        auth: true,
+        platform: "linkedin",
+      },
+    }),
+    openAuthenticatedSourceImpl: async () => ({
+      state: "ready",
+      summary: "LinkedIn is open and ready.",
+    }),
+    startManualSearchImpl: async (input) => {
+      searches.push(input);
+      return { run: { id: "search-after-login", status: "running" } };
+    },
+  });
+
+  assert.deepEqual(searches, [{ repoRoot, env: {}, fetchImpl: undefined }]);
+  assert.equal(
+    result.messages.at(-1).text,
+    "LinkedIn is open and ready. I’m continuing the search now."
+  );
+  assert.equal(result.messages.at(-1).metadata.state, "running");
+  assert.equal(result.messages.at(-1).artifacts.at(-1).runId, "search-after-login");
+});
+
+test("Yes fails closed when the browser-session handoff is unavailable", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  const enabled = [];
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "source.auth-decision",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { selector: "LinkedIn search", sourceUrl, decision: "yes" },
+      },
+      setSearchSourceEnabledImpl: (input) => {
+        enabled.push(input.enabled);
+        return {
+          changed: true,
+          source: {
+            label: "LinkedIn search",
+            target: sourceUrl,
+            sourceType: "browser",
+            enabled: input.enabled,
+            auth: true,
+            platform: "linkedin",
+          },
+        };
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SOURCE_SETUP_UNAVAILABLE");
+      return true;
+    }
+  );
+
+  assert.deepEqual(enabled, [true, false]);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+});
+
+test("No keeps the authenticated source disabled and continues the rest of the search", async () => {
+  const repoRoot = tempRepo();
+  const enabled = [];
+  const searchCalls = [];
+  let browserCalls = 0;
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        selector: "Indeed search",
+        sourceUrl: "https://www.indeed.com/jobs?q=operations",
+        decision: "no",
+      },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      enabled.push(input);
+      return {
+        changed: false,
+        source: {
+          index: 2,
+          provider: "indeed.com",
+          label: "Indeed search",
+          target: "https://www.indeed.com/jobs?q=operations",
+          sourceType: "browser",
+          enabled: false,
+          auth: true,
+          platform: "indeed",
+        },
+      };
+    },
+    openAuthenticatedSourceImpl: async () => {
+      browserCalls += 1;
+    },
+    startManualSearchImpl: async (input) => {
+      searchCalls.push(input);
+      return { run: { id: "search-after-skip", purpose: "manual-search", status: "running" } };
+    },
+  });
+
+  assert.deepEqual(enabled, [
+    {
+      repoRoot,
+      env: {},
+      selector: "Indeed search",
+      sourceUrl: "https://www.indeed.com/jobs?q=operations",
+      enabled: false,
+      loginDecision: "no",
+    },
+  ]);
+  assert.equal(browserCalls, 0);
+  assert.deepEqual(searchCalls, [{ repoRoot, env: {}, fetchImpl: undefined }]);
+  assert.equal(
+    result.messages.at(-1).text,
+    "Skipped Indeed. I’m continuing with your other sources."
+  );
+  assert.equal(result.messages.at(-1).metadata.state, "running");
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+});
+
+test("No settles honestly when the login source was the only source available", async () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=operations";
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.auth-decision",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        selector: "LinkedIn operations",
+        sourceUrl,
+        decision: "no",
+      },
+    },
+    setSearchSourceEnabledImpl: () => ({
+      changed: false,
+      source: {
+        index: 0,
+        provider: "linkedin.com",
+        label: "LinkedIn operations",
+        target: sourceUrl,
+        sourceType: "browser",
+        enabled: false,
+        auth: true,
+        platform: "linkedin",
+      },
+    }),
+    startManualSearchImpl: async () => ({
+      run: {
+        id: "manual-search-after-only-source-skip",
+        purpose: "manual-search",
+        status: "failed",
+        error: {
+          code: "NO_DETERMINISTIC_SOURCES",
+          message: "No enabled job sources are ready yet.",
+        },
+      },
+    }),
+  });
+
+  const message = result.messages.at(-1);
+  assert.equal(message.text, "Skipped LinkedIn. There aren’t any other enabled sources to search.");
+  assert.equal(message.metadata.state, "skipped");
+  assert.equal(message.artifacts.at(-1).status, "failed");
+});
+
+test("enabling an authenticated source asks at point of use and leaves it disabled", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.set-enabled",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn search", enabled: true },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      calls.push(input);
+      return {
+        changed: true,
+        source: {
+          index: 1,
+          provider: "linkedin.com",
+          label: "LinkedIn search",
+          target: sourceUrl,
+          sourceType: "browser",
+          enabled: input.enabled,
+          auth: true,
+          platform: "linkedin",
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { repoRoot, env: {}, selector: "LinkedIn search", enabled: true },
+    { repoRoot, env: {}, selector: "LinkedIn search", enabled: false },
+  ]);
+  const message = result.messages.at(-1);
+  assert.equal(message.text, "Do you want to log into LinkedIn so I can use it?");
+  assert.equal(message.metadata.state, "login-needed");
+  assert.equal(message.metadata.nextActions, undefined);
+  assert.equal(message.metadata.choicePrompt.mode, "binary");
+  assert.deepEqual(message.metadata.sourceLogin, {
+    selector: "LinkedIn search",
+    platform: "linkedin",
+    url: sourceUrl,
+  });
 });
 
 test("a confirmed Ask action adds one keyword search through source setup", async () => {
@@ -2812,6 +3674,35 @@ test("job.evaluate-request rejects ambiguous named saved jobs instead of choosin
   const last = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
   assert.equal(last.kind, "action_error");
   assert.equal(last.error.code, "JOB_REFERENCE_AMBIGUOUS");
+  assert.deepEqual(
+    last.metadata.nextActions.map((action) => ({
+      label: action.label,
+      primary: action.primary,
+      intent: action.intent,
+    })),
+    [
+      {
+        label: "Acme · Senior AI Engineer",
+        primary: false,
+        intent: {
+          type: "job.evaluate-request",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { jobReference: "Rate the Acme role", jobId: "app-acme-ai" },
+        },
+      },
+      {
+        label: "Acme · Staff Platform Engineer",
+        primary: false,
+        intent: {
+          type: "job.evaluate-request",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { jobReference: "Rate the Acme role", jobId: "app-acme-platform" },
+        },
+      },
+    ]
+  );
+  assert.doesNotMatch(last.text, /app-acme/);
+  assert.ok(last.metadata.nextActions.every((action) => !action.label.includes("app-acme")));
 });
 
 test("job.evaluate-request prefers a combined company and role match over company-only matches", async () => {
@@ -4096,6 +4987,7 @@ test("the workspace runtime starts the job sweep before recurring company discov
   const backgroundStarted = new Promise((resolve) => {
     markBackgroundStarted = resolve;
   });
+  const captureBrowserSourceImpl = async () => ({ offers: [], errors: [] });
   const runtime = createWorkspaceAgentRuntime({
     repoRoot,
     env: {},
@@ -4116,7 +5008,9 @@ test("the workspace runtime starts the job sweep before recurring company discov
         meta: { version: 1, seedSource: "ai" },
       };
     },
-    runSearchInBackgroundImpl: async ({ runId }) => {
+    captureBrowserSourceImpl,
+    runSearchInBackgroundImpl: async ({ runId, captureBrowserSourceImpl: captureImpl }) => {
+      assert.equal(captureImpl, captureBrowserSourceImpl);
       markBackgroundStarted(runId);
       return {
         id: runId,
@@ -4138,6 +5032,91 @@ test("the workspace runtime starts the job sweep before recurring company discov
   assert.equal(await backgroundStarted, "manual-search-concurrent");
   releaseCompanyDiscovery();
   await turn;
+});
+
+test("the workspace runtime leaves an interrupted search resumable during shutdown", async () => {
+  const repoRoot = tempRepo();
+  let started;
+  let startedWorker;
+  const workerStarted = new Promise((resolve) => {
+    startedWorker = resolve;
+  });
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startManualSearchImpl: async () => {
+      started = sourcingRunStart({ repoRoot, purpose: "manual-search" });
+      return { ok: true, reused: false, run: started.run };
+    },
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
+    runSearchInBackgroundImpl: async ({ signal }) => {
+      startedWorker();
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    },
+  });
+
+  await runtime.executeIntent({
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose: "manual-search" },
+    },
+  });
+  await workerStarted;
+  assert.equal(runtime.ownsSourcingRun(started.run.id), true);
+
+  await runtime.shutdownSourcingWorkers();
+  assert.equal(runtime.ownsSourcingRun(started.run.id), false);
+  const resumable = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(resumable.status, "running");
+  assert.equal(resumable.id, started.run.id);
+  const thread = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(thread.messages.at(-1).metadata.searchTerminal, false);
+});
+
+test("the workspace owner resumes an orphaned sourcing run after startup", async () => {
+  const repoRoot = tempRepo();
+  const orphan = sourcingRunStart({ repoRoot, purpose: "first-search" }).run;
+  const db = openDb({ repoRoot, env: {} });
+  const stale = {
+    ...orphan,
+    updated_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+  };
+  db.prepare("UPDATE sourcing_runs SET data = ? WHERE id = ?").run(
+    JSON.stringify(stale),
+    orphan.id
+  );
+  let recoveredRunId;
+  const recovered = new Promise((resolve) => {
+    recoveredRunId = resolve;
+  });
+
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    runSearchInBackgroundImpl: async ({ runId }) => {
+      recoveredRunId(runId);
+      return sourcingRunComplete({
+        repoRoot,
+        env: {},
+        id: runId,
+        summary: { scanned: 1, new: 1, presented: 1 },
+      }).run;
+    },
+  });
+
+  assert.equal(runtime.ownsSourcingRun(orphan.id), false);
+  runtime.recoverOrphanedSourcingRuns();
+  assert.equal(await recovered, orphan.id);
+  while (runtime.ownsSourcingRun(orphan.id)) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const completed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.id, orphan.id);
+  assert.equal(completed.metadata.recoveryCount, 1);
 });
 
 test("a manual search reopens pending company proposals instead of creating a duplicate batch", async () => {
@@ -4305,6 +5284,57 @@ test("company discovery returns reviewable proposals in workspace-main without w
   });
   assert.doesNotMatch(JSON.stringify(result.messages.at(-1)), /FULL JD BODY/);
   assert.match(result.messages.at(-1).text, /beyond your focus examples/i);
+});
+
+test("production company discovery starts its durable owner and returns the exact operation and batch", async () => {
+  const repoRoot = tempRepo();
+  const starts = [];
+  let directCreates = 0;
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { requestedCount: 8, request: "find more operations employers" },
+    },
+    companyDiscoveryCadenceImpl: () => ({ status: "due", due: true }),
+    startCompanyDiscoveryOperationImpl: async (input) => {
+      starts.push(input);
+      return {
+        reused: false,
+        batchId: "cpb_exact_batch",
+        operation: {
+          id: "app-operation-company-exact",
+          kind: "company.discovery",
+          status: "running",
+          retryOf: null,
+          attempt: 1,
+          resultRef: null,
+        },
+      };
+    },
+    createCompanyProposalsImpl: async () => {
+      directCreates += 1;
+      throw new Error("the workspace agent must not create a second company pipeline");
+    },
+  });
+
+  assert.deepEqual(starts, [{ requestedCount: 8, request: "find more operations employers" }]);
+  assert.equal(directCreates, 0);
+  const message = result.messages.at(-1);
+  assert.equal(message.kind, "action_result");
+  assert.deepEqual(message.artifacts[0], {
+    kind: "company_discovery_operation",
+    title: "Company discovery is running",
+    operationId: "app-operation-company-exact",
+    batchId: "cpb_exact_batch",
+    status: "running",
+    retryOf: null,
+    attempt: 1,
+  });
+  assert.equal(message.metadata.operationId, "app-operation-company-exact");
+  assert.equal(message.metadata.batchId, "cpb_exact_batch");
 });
 
 test("company.discover reopens a pending batch instead of creating a duplicate when asked twice", async () => {
@@ -4579,6 +5609,75 @@ test("a confirmed company decision stays in the workspace thread and hands off t
   assert.deepEqual(searches, [{ repoRoot, env: {}, fetchImpl: undefined }]);
 });
 
+test("a completed scan turns its first login request into a durable Yes or No question", () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=operations";
+  const result = recordWorkspaceSearchCompletion({
+    repoRoot,
+    env: {},
+    run: {
+      id: "manual-search-login-needed",
+      purpose: "manual-search",
+      status: "completed",
+      summary: {
+        scanned: 0,
+        qualified: 0,
+        presented: 0,
+        loginRequests: [
+          {
+            platform: "linkedin",
+            label: "LinkedIn",
+            sourceLabel: "LinkedIn NYC",
+            url: sourceUrl,
+            prompt: "Do you want to log into LinkedIn so I can use it?",
+          },
+        ],
+      },
+    },
+  });
+
+  const prompt = result.messages.at(-1);
+  assert.equal(
+    result.messages.at(-2).text,
+    "This search is waiting for your answer before it can use LinkedIn."
+  );
+  assert.equal(prompt.text, "Do you want to log into LinkedIn so I can use it?");
+  assert.equal(prompt.kind, "text");
+  assert.equal(prompt.metadata.state, "login-needed");
+  assert.deepEqual(prompt.metadata.sourceLogin, {
+    selector: "LinkedIn NYC",
+    platform: "linkedin",
+    url: sourceUrl,
+    searchRunId: "manual-search-login-needed",
+  });
+  assert.equal(prompt.metadata.choicePrompt.mode, "binary");
+  assert.equal(prompt.metadata.choicePrompt.state, "pending");
+
+  const replay = recordWorkspaceSearchCompletion({
+    repoRoot,
+    env: {},
+    run: {
+      id: "manual-search-login-needed",
+      purpose: "manual-search",
+      status: "completed",
+      summary: {
+        scanned: 0,
+        qualified: 0,
+        presented: 0,
+        loginRequests: [
+          {
+            platform: "linkedin",
+            sourceLabel: "LinkedIn NYC",
+            url: sourceUrl,
+            prompt: "Do you want to log into LinkedIn so I can use it?",
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(replay.messages.filter((message) => message.metadata?.sourceLogin).length, 1);
+});
+
 test("completed search results return to the same agent without replaying fetched job bodies", async () => {
   const repoRoot = tempRepo();
   await executeWorkspaceIntent({
@@ -4773,6 +5872,7 @@ test("free-form turns call the selected AI seam with the complete durable conver
   assert.match(calls[0].system, /short, direct sentences/i);
   assert.match(calls[0].system, /robotic headings/i);
   assert.match(calls[0].system, /tool narration/i);
+  assert.equal(calls[0].aiOperation, "paul.conversation");
   assert.deepEqual(calls[0].messages, [
     { role: "user", content: "Remember that I prefer hybrid roles." },
   ]);
@@ -4792,7 +5892,265 @@ test("free-form turns call the selected AI seam with the complete durable conver
   );
 });
 
-test("free-form turns persist the model-declared yes-no answer mode without its control fence", async () => {
+test("AI search failures stay plain English in workspace history and later agent context", async () => {
+  const repoRoot = tempRepo();
+  const failed = recordWorkspaceSearchCompletion({
+    repoRoot,
+    env: {},
+    run: {
+      id: "ai-web-search-failed",
+      purpose: "ai-web-search",
+      status: "failed",
+      error: {
+        code: "AI_WEB_SEARCH_QUERIES_FAILED",
+        message: "Model output did not match the route schema.",
+        errors: ["Model output did not match the route schema."],
+      },
+    },
+  });
+
+  const receipt = failed.messages.at(-1);
+  assert.equal(receipt.artifacts[0].title, "AI web search: Needs attention");
+  assert.equal(receipt.text, "AI search stopped before it finished. Try it again.");
+  assert.deepEqual(receipt.artifacts[0].error, {
+    message: "AI search stopped before it finished. Try it again.",
+  });
+  assert.doesNotMatch(
+    JSON.stringify(receipt.artifacts[0]),
+    /schema|AI_WEB_SEARCH_QUERIES_FAILED|route/i
+  );
+
+  const calls = [];
+  await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "What happened with that search?",
+    callAIImpl: async (input) => {
+      calls.push(input);
+      return { content: [{ type: "text", text: "The AI search needs another try." }] };
+    },
+  });
+
+  const modelHistory = JSON.stringify(calls[0].messages);
+  assert.match(modelHistory, /AI search stopped before it finished/);
+  assert.doesNotMatch(modelHistory, /schema|AI_WEB_SEARCH_QUERIES_FAILED|route/i);
+});
+
+test("search status questions answer from current completed and failed runs without the model", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "manual-search-current",
+    purpose: "manual-search",
+    status: "completed",
+    started_at: "2026-08-27T13:00:00.000Z",
+    completed_at: "2026-08-27T13:00:04.000Z",
+    updated_at: "2026-08-27T13:00:04.000Z",
+    metadata: { searchExecutionId: "search-current" },
+    summary: { scanned: 100, qualified: 0, presented: 0, filtered: 100 },
+    error: null,
+  });
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-current",
+    purpose: "ai-web-search",
+    status: "failed",
+    started_at: "2026-08-27T13:00:01.000Z",
+    completed_at: "2026-08-27T13:00:05.000Z",
+    updated_at: "2026-08-27T13:00:05.000Z",
+    metadata: { searchExecutionId: "search-current" },
+    summary: null,
+    error: {
+      code: "AI_WEB_SEARCH_QUERIES_FAILED",
+      message: "Model output did not match the route schema.",
+    },
+  });
+
+  let modelCalls = 0;
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "hows this search going?",
+    callAIImpl: async () => {
+      modelCalls += 1;
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Turn on browser access for Indeed and LinkedIn in a hidden settings page.",
+          },
+        ],
+      };
+    },
+  });
+
+  assert.equal(modelCalls, 0);
+  assert.equal(
+    result.messages.at(-1).text,
+    "Your saved job sites finished. They scanned 100 jobs and found no matches. The AI search couldn't finish, so it needs another try."
+  );
+  assert.doesNotMatch(
+    result.messages.at(-1).text,
+    /running|hcareers|hospitalityonline|oysterlink|ihirehospitality|majc|indeed|linkedin|browser|settings|docs|role.focus|pending/i
+  );
+});
+
+test("search status questions report a current running lane without calling the model", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "manual-search-running-pair",
+    purpose: "manual-search",
+    status: "completed",
+    started_at: "2026-08-27T13:10:00.000Z",
+    completed_at: "2026-08-27T13:10:04.000Z",
+    updated_at: "2026-08-27T13:10:04.000Z",
+    metadata: { searchExecutionId: "search-running-pair" },
+    summary: { scanned: 100, qualified: 0, presented: 0, filtered: 100 },
+    error: null,
+  });
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-running-pair",
+    purpose: "ai-web-search",
+    status: "running",
+    started_at: "2026-08-27T13:10:05.000Z",
+    completed_at: null,
+    updated_at: new Date().toISOString(),
+    metadata: { searchExecutionId: "search-running-pair" },
+    summary: null,
+    error: null,
+  });
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "How's the job search going?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+
+  assert.equal(
+    result.messages.at(-1).text,
+    "Your saved job sites finished. They scanned 100 jobs and found no matches. The AI search is still running."
+  );
+
+  const smartApostrophe = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "How’s my search doing?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+  assert.equal(smartApostrophe.messages.at(-1).text, result.messages.at(-1).text);
+});
+
+test("search status reports matches visible at the saved fit floor instead of raw persisted leads", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-fit-floor",
+    purpose: "ai-web-search",
+    status: "completed",
+    started_at: "2026-08-27T13:15:00.000Z",
+    completed_at: "2026-08-27T13:15:05.000Z",
+    updated_at: "2026-08-27T13:15:05.000Z",
+    metadata: {},
+    summary: { searched: 3, found: 12, new: 4, presented: 0, fitFloor: 65, errors: [] },
+    error: null,
+  });
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "How's the job search going?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+
+  assert.equal(result.messages.at(-1).text, "The AI search finished and found no new matches.");
+});
+
+test("search status questions ignore an AI run from a different search execution", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "manual-search-new-execution",
+    purpose: "manual-search",
+    status: "completed",
+    started_at: "2026-08-27T13:20:00.000Z",
+    completed_at: "2026-08-27T13:20:04.000Z",
+    updated_at: "2026-08-27T13:20:04.000Z",
+    metadata: { searchExecutionId: "search-new" },
+    summary: { scanned: 42, qualified: 2, presented: 2, filtered: 40 },
+    error: null,
+  });
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-old-execution",
+    purpose: "ai-web-search",
+    status: "failed",
+    started_at: "2026-08-27T13:19:00.000Z",
+    completed_at: "2026-08-27T13:19:04.000Z",
+    updated_at: "2026-08-27T13:19:04.000Z",
+    metadata: { searchExecutionId: "search-old" },
+    summary: null,
+    error: { code: "AI_WEB_SEARCH_FAILED", message: "Old search failed." },
+  });
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "Did this search find anything?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+
+  assert.equal(
+    result.messages.at(-1).text,
+    "Your saved job sites finished. They scanned 42 jobs and found 2 matches."
+  );
+  assert.doesNotMatch(result.messages.at(-1).text, /AI|failed|retry|running/i);
+});
+
+test("search status never attaches a current AI run to a legacy deterministic run", async () => {
+  const repoRoot = tempRepo();
+  seedSourcingRun(repoRoot, {
+    id: "manual-search-legacy",
+    purpose: "manual-search",
+    status: "completed",
+    started_at: "2026-08-27T13:30:00.000Z",
+    completed_at: "2026-08-27T13:30:04.000Z",
+    updated_at: "2026-08-27T13:30:04.000Z",
+    metadata: {},
+    summary: { scanned: 12, qualified: 1, presented: 1, filtered: 11 },
+    error: null,
+  });
+  seedSourcingRun(repoRoot, {
+    id: "ai-web-search-current-id",
+    purpose: "ai-web-search",
+    status: "failed",
+    started_at: "2026-08-27T13:30:05.000Z",
+    completed_at: "2026-08-27T13:30:09.000Z",
+    updated_at: "2026-08-27T13:30:09.000Z",
+    metadata: { searchExecutionId: "search-current-id" },
+    summary: null,
+    error: { code: "AI_WEB_SEARCH_FAILED", message: "Current search failed." },
+  });
+
+  const result = await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "How's the job search going?",
+    callAIImpl: async () => {
+      throw new Error("search status must not call the model");
+    },
+  });
+
+  assert.equal(
+    result.messages.at(-1).text,
+    "Your saved job sites finished. They scanned 12 jobs and found 1 match."
+  );
+});
+
+test("free-form turns persist and resolve a durable binary choice across reload", async () => {
   const repoRoot = tempRepo();
   const result = await runWorkspaceAgentTurn({
     repoRoot,
@@ -4815,8 +6173,31 @@ test("free-form turns persist the model-declared yes-no answer mode without its 
 
   const message = result.messages.at(-1);
   assert.equal(message.text, "Should I use your signed-in browser for this?");
-  assert.equal(message.metadata.answerMode, "yes-no");
+  assert.equal(message.metadata.answerMode, undefined);
+  assert.match(message.metadata.choicePrompt.id, /^choice-[a-f0-9]{24}$/);
+  assert.equal(message.metadata.choicePrompt.threadId, WORKSPACE_THREAD_ID);
+  assert.equal(message.metadata.choicePrompt.messageId, message.id);
+  assert.equal(message.metadata.choicePrompt.state, "pending");
   assert.doesNotMatch(message.text, /careerrat:answer/);
+
+  await runWorkspaceAgentTurn({
+    repoRoot,
+    env: {},
+    text: "Yep",
+    callAIImpl: async () => ({ content: [{ type: "text", text: "I’ll use it for this task." }] }),
+  });
+  closeAll();
+  const reloaded = workspaceThreadRead({ repoRoot, env: {} });
+  const resolvedQuestion = reloaded.messages.find((item) => item.id === message.id);
+  const answer = reloaded.messages.find(
+    (item) =>
+      item.role === "user" &&
+      item.metadata?.choiceResolution?.promptId === message.metadata.choicePrompt.id
+  );
+  assert.equal(resolvedQuestion.metadata.choicePrompt.state, "resolved");
+  assert.deepEqual(resolvedQuestion.metadata.choicePrompt.selectedOptionIds, ["yes"]);
+  assert.equal(answer.text, "Yep");
+  assert.deepEqual(answer.metadata.choiceResolution.optionIds, ["yes"]);
 });
 
 test("free-form turns persist and replay only canonical selected-job context", async () => {
@@ -5118,7 +6499,17 @@ test("confirmed interview intake is captured on the matched application through 
 
 test("I applied elsewhere records only the user-reported outcome in the same thread", async () => {
   const repoRoot = tempRepo();
-  seedApplication(repoRoot);
+  seedApplication(repoRoot, {
+    nextAction: "Submit the application",
+    nextActionDue: "2026-08-10",
+    followUp: { draft: { body: "I submitted the application." } },
+  });
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    nextAction: "Confirm submission",
+    nextActionDue: "2026-08-10",
+    draft: { body: "I submitted the application." },
+  });
 
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -5135,6 +6526,12 @@ test("I applied elsewhere records only the user-reported outcome in the same thr
   assert.equal(app.status, "applied");
   assert.equal(app.appliedAt, "2026-08-08T19:30:00.000Z");
   assert.match(app.statusNote, /outside CareerRat/i);
+  assert.equal(app.followUp.draft, null);
+  const communication = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(communication.status, "waiting");
+  assert.equal(communication.nextAction, null);
+  assert.equal(communication.nextActionDue, null);
+  assert.equal(communication.draft, null);
   assert.deepEqual(
     result.messages.map(({ role, kind }) => ({ role, kind })),
     [
@@ -5198,6 +6595,65 @@ test("chat-first outcome buttons update the application and remain visible in wo
   assert.match(result.messages[1].text, /recorded.*rejected/i);
 });
 
+test("outcome.record settles every linked communication without touching unrelated threads", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    status: "interview",
+    followUp: { draft: "Checking in on the interview outcome." },
+  });
+  seedApplication(repoRoot, { id: "app-other", company: "Other Co" });
+  seedCommunication(repoRoot, {
+    id: "comm-temporal-recruiter",
+    nextAction: "Reply to the recruiter",
+    nextActionDue: "2026-08-10",
+    draft: { body: "Thanks for the update." },
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-temporal-portal",
+    channel: "portal",
+    nextAction: "Check the portal",
+    nextActionDue: "2026-08-11",
+    draft: { body: "Portal follow-up." },
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-other",
+    applicationId: "app-other",
+    company: "Other Co",
+    nextAction: "Reply to Other Co",
+    nextActionDue: "2026-08-12",
+    draft: { body: "Unrelated draft." },
+  });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "outcome.record",
+      entity: { type: "application", id: "app-temporal" },
+      input: { to: "rejected", note: "Role was filled internally." },
+    },
+    now: () => new Date("2026-08-09T14:03:00.000Z"),
+  });
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "rejected");
+  assert.equal(app.followUp.draft, null);
+  for (const id of ["comm-temporal-recruiter", "comm-temporal-portal"]) {
+    const comm = readCommunication(repoRoot, id);
+    assert.equal(comm.status, "closed", id);
+    assert.equal(comm.nextAction, null, id);
+    assert.equal(comm.nextActionDue, null, id);
+    assert.equal(comm.draft, null, id);
+    assert.equal(comm.messages.at(-1).direction, "note", id);
+    assert.match(comm.messages.at(-1).summary, /rejected/i, id);
+  }
+  const unrelated = readCommunication(repoRoot, "comm-other");
+  assert.equal(unrelated.status, "needs-reply");
+  assert.equal(unrelated.nextAction, "Reply to Other Co");
+  assert.equal(unrelated.nextActionDue, "2026-08-12");
+  assert.deepEqual(unrelated.draft, { body: "Unrelated draft." });
+});
+
 test("natural outcome requests resolve one application and persist the typed transition", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { status: "interview" });
@@ -5251,6 +6707,18 @@ test("natural outcome requests refuse an ambiguous application instead of guessi
   const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
   assert.equal(messages.at(-1).kind, "action_error");
   assert.match(messages.at(-1).text, /more than one saved job/i);
+  assert.deepEqual(
+    messages.at(-1).metadata.nextActions.map((action) => action.intent),
+    ["app-temporal-ai", "app-temporal-platform"].map((id) => ({
+      type: "outcome.record",
+      entity: { type: "application", id },
+      input: {
+        jobReference: "I got rejected by Temporal Labs.",
+        to: "rejected",
+        note: "I got rejected by Temporal Labs.",
+      },
+    }))
+  );
 });
 
 test("natural interview prep resolves one application and returns the dossier in Ask", async () => {
@@ -6032,6 +7500,19 @@ test("natural recruiter requests refuse ambiguous threads without drafting", asy
 
   assert.equal(readCommunication(repoRoot, "comm-temporal-one").draft, undefined);
   assert.equal(readCommunication(repoRoot, "comm-temporal-two").draft, undefined);
+  const actions = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1).metadata.nextActions;
+  assert.deepEqual(
+    actions.map((action) => action.intent),
+    ["comm-temporal-one", "comm-temporal-two"].map((id) => ({
+      type: "communication.draft",
+      entity: { type: "communication", id },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Tuesday works.",
+      },
+    }))
+  );
+  assert.ok(actions.every((action) => action.primary === false));
 });
 
 test("one-off screening questions draft inside Ask and offer confirmed durable reuse", async () => {
@@ -6626,26 +8107,29 @@ test("confirming a job-specific screening answer clears its packet gap and unblo
   const answerPath = "workspace/tailored/temporal-answers.md";
   mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
   writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
-  seedApplication(repoRoot, {
-    evaluation: { gate: "keep", fitScore: 92 },
-    artifacts: { answersSource: answerPath },
-    packetManifest: {
-      applicationId: "app-temporal",
-      generatedAt: "2026-08-24T12:00:00.000Z",
-      uploadReady: false,
-      status: "reviewable",
-      gapCount: 1,
-      gaps: [
-        {
-          kind: "answers",
-          code: "ANSWER_CONFIRMATION_REQUIRED",
-          questionId: "q-motivation",
-          message: "Answer “Why do you want to work at Temporal Labs?”.",
-        },
-      ],
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: { gate: "keep", fitScore: 92 },
       artifacts: { answersSource: answerPath },
-    },
-  });
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-24T12:00:00.000Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-motivation",
+            message: "Answer “Why do you want to work at Temporal Labs?”.",
+          },
+        ],
+        artifacts: { answersSource: answerPath },
+      },
+    })
+  );
 
   let confirmed;
   await assert.doesNotReject(async () => {
@@ -6689,9 +8173,9 @@ test("confirming a job-specific screening answer clears its packet gap and unblo
   });
 
   assert.equal(applyCalls, 1);
-  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
-  assert.equal(resumed.messages.at(-1).metadata.submissionVerified, false);
-  assert.notEqual(resumed.messages.at(-1).metadata.state, "blocked");
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "applied");
+  assert.equal(resumed.messages.at(-1).metadata.submissionVerified, true);
+  assert.equal(resumed.messages.at(-1).metadata.state, "applied");
 });
 
 test("Apply on site returns a manual handoff without changing status when no executor is connected", async () => {
@@ -7037,7 +8521,7 @@ test("Apply on site rebuilds the packet after the live browser discovers rendere
   assert.equal(result.messages.at(-1).artifacts[0].questionCapture.answerableCount, 2);
 });
 
-test("Apply on site never writes Applied when its executor claims verified confirmation", async () => {
+test("Apply on site records Applied only after the supervised browser verifies confirmation", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
 
@@ -7079,11 +8563,13 @@ test("Apply on site never writes Applied when its executor claims verified confi
   assert.equal(calls[0].prepareOnly, true);
   assert.equal(calls[0].input.prepareOnly, true);
   const app = readApplication(repoRoot, "app-temporal");
-  assert.equal(app.status, "reviewed-hold");
-  assert.equal(app.appliedAt, undefined);
+  assert.equal(app.status, "applied");
+  assert.equal(app.appliedAt, "2026-08-09T15:45:00.000Z");
   assert.equal(result.messages.at(-1).kind, "action_result");
-  assert.equal(result.messages.at(-1).metadata.submissionVerified, false);
-  assert.match(result.messages.at(-1).text, /not marked Applied/i);
+  assert.equal(result.messages.at(-1).metadata.submissionVerified, true);
+  assert.equal(result.messages.at(-1).metadata.state, "applied");
+  assert.equal(result.messages.at(-1).metadata.nextActions, undefined);
+  assert.match(result.messages.at(-1).text, /verified.*recorded.*Applied/i);
 });
 
 test("Apply on site keeps an active supervised browser session without treating it as failure", async () => {
@@ -7126,6 +8612,62 @@ test("Apply on site keeps an active supervised browser session without treating 
   assert.match(last.text, /filled 5 fields/i);
   assert.match(last.text, /attached 2 files/i);
   assert.match(last.text, /not marked Applied/i);
+});
+
+test("permission-blocked preparation offers a fresh retry instead of a missing session return", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: { gate: "keep", fitScore: 92 },
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-27T12:00:00.000Z",
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [
+          {
+            kind: "answers",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "internal packet diagnostic",
+          },
+        ],
+        artifacts: {},
+      },
+    })
+  );
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-submit",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "blocked",
+      code: "APPLICATION_PREPARATION_PERMISSION_REQUIRED",
+      reason:
+        "Application preparation for LinkedIn is off. Turn it on in Settings before CareerRat opens the form.",
+      session: { provider: "orca", blockers: ["permission required"] },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(last.metadata.nextActions[0].label, "Allow form preparation");
+  assert.equal(last.metadata.nextActions[0].intent.type, "settings.apply");
+  assert.deepEqual(last.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "application-preparation",
+  });
+  assert.match(last.text, /You still press Submit/i);
+  assert.match(last.text, /type “Allow form preparation”/i);
+  assert.doesNotMatch(last.text, /settings/i);
+  assert.doesNotMatch(last.text, /prepared browser session/i);
 });
 
 test("job.apply refuses a resumeSession request when the application has no passing gate verdict on record", async () => {
@@ -7185,20 +8727,23 @@ test("job.apply refuses a resumeSession request when the persisted packet still 
 
 test("job.apply resumeSession accepts a persisted REVIEW only with explicit approval", async () => {
   const repoRoot = tempRepo();
-  seedApplication(repoRoot, {
-    evaluation: {
-      gate: "review",
-      fitScore: 76,
-      evaluatedAt: "2026-08-25T12:00:00.000Z",
-    },
-    packetManifest: {
-      applicationId: "app-temporal",
-      generatedAt: "2026-08-09T00:00:00.000Z",
-      uploadReady: true,
-      gaps: [],
-      artifacts: {},
-    },
-  });
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: {
+        gate: "review",
+        fitScore: 76,
+        evaluatedAt: "2026-08-25T12:00:00.000Z",
+      },
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-09T00:00:00.000Z",
+        uploadReady: true,
+        gaps: [],
+        artifacts: {},
+      },
+    })
+  );
   let applyCalls = 0;
 
   const result = await executeWorkspaceIntent({
@@ -7231,14 +8776,25 @@ test("job.apply resumeSession accepts a persisted REVIEW only with explicit appr
 test("job.apply's resumeSession proceeds straight to the executor once the persisted gate and packet both corroborate", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {
-    evaluation: { gate: "keep", fitScore: 92 },
-    packetManifest: {
-      applicationId: "app-temporal",
-      generatedAt: "2026-08-09T00:00:00.000Z",
-      uploadReady: true,
-      gaps: [],
-      artifacts: {},
-    },
+    ...preparedPacketOverrides(repoRoot, {
+      evaluation: { gate: "keep", fitScore: 92 },
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-09T00:00:00.000Z",
+        uploadReady: true,
+        gaps: [],
+        artifacts: {},
+      },
+    }),
+    nextAction: "Submit the application",
+    nextActionDue: "2026-08-10",
+    followUp: { draft: { body: "I submitted the application." } },
+  });
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    nextAction: "Confirm submission",
+    nextActionDue: "2026-08-10",
+    draft: { body: "I submitted the application." },
   });
   let applyCalls = 0;
 
@@ -7258,9 +8814,17 @@ test("job.apply's resumeSession proceeds straight to the executor once the persi
   });
 
   assert.equal(applyCalls, 1, "a corroborated resumeSession must still reach the executor");
-  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
-  assert.equal(result.messages.at(-1).metadata.submissionVerified, false);
-  assert.notEqual(result.messages.at(-1).metadata.state, "blocked");
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "applied");
+  assert.equal(result.messages.at(-1).metadata.submissionVerified, true);
+  assert.equal(result.messages.at(-1).metadata.state, "applied");
+  assert.equal(result.messages.at(-1).metadata.nextActions, undefined);
+  const application = readApplication(repoRoot, "app-temporal");
+  const communication = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(application.followUp.draft, null);
+  assert.equal(communication.status, "waiting");
+  assert.equal(communication.nextAction, null);
+  assert.equal(communication.nextActionDue, null);
+  assert.equal(communication.draft, null);
 });
 
 test("Draft reply uses the same agent context and persists a reviewable communication draft", async () => {
@@ -7287,12 +8851,18 @@ test("Draft reply uses the same agent context and persists a reviewable communic
           },
         ],
         model: "installed:claude",
+        executionPlan: {
+          operation: "communication.drafting",
+          runtimeId: "claude",
+          resolved: { model: "opus", effort: "medium" },
+        },
       };
     },
     now: () => new Date("2026-08-09T17:00:00.000Z"),
   });
 
   assert.equal(calls.length, 1);
+  assert.equal(calls[0].aiOperation, "communication.drafting");
   assert.match(calls[0].system, /Interview availability/);
   assert.match(calls[0].system, /Tuesday or Wednesday afternoon/);
   const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
@@ -7303,6 +8873,45 @@ test("Draft reply uses the same agent context and persists a reviewable communic
   assert.equal(result.messages.at(-1).artifacts[0].kind, "communication_draft");
   assert.equal(result.messages.at(-1).metadata.sent, false);
   assert.equal(result.messages.at(-1).metadata.requiresReview, true);
+  assert.deepEqual(result.messages.at(-1).metadata.executionPlan, {
+    operation: "communication.drafting",
+    runtimeId: "claude",
+    resolved: { model: "opus", effort: "medium" },
+  });
+});
+
+test("communication.draft executes its durable frozen provider plan after settings change", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot);
+  const calls = [];
+  const frozenPlan = {
+    operation: "communication.drafting",
+    runtimeId: "codex",
+    resolved: { model: "gpt-5.6-sol", effort: "high" },
+  };
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.draft",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+    },
+    executionPlan: frozenPlan,
+    callAIImpl: async (input) => {
+      calls.push(input);
+      return {
+        content: [{ type: "text", text: "Thanks. Tuesday afternoon works for me." }],
+        executionPlan: frozenPlan,
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].executionPlan, frozenPlan);
+  assert.equal(calls[0].useExecutionPlanRoute, true);
+  assert.equal(calls[0].aiOperation, undefined);
 });
 
 test("communication.draft refuses and does not persist an AI draft that leaks a comp phrase", async () => {
@@ -7498,6 +9107,7 @@ test("settings.explain never leaks current_base and surfaces the other comp fiel
       compensation: {
         current_base: 987654,
         minimum_base: 150000,
+        minimum_annual_earnings: 180000,
         target_base: 170000,
         expected_base: 160000,
       },
@@ -7517,6 +9127,7 @@ test("settings.explain never leaks current_base and surfaces the other comp fiel
   assert.ok(!serialized.includes("987654"), "artifact must never carry the private comp value");
   assert.ok(serialized.includes("150000"), "artifact should still surface minimum_base");
   assert.equal(artifact.gates.comp_floor, 150000);
+  assert.equal(artifact.gates.minimum_annual_earnings, 180000);
   assert.equal(artifact.gates.comp_target, 170000);
   assert.equal(artifact.gates.comp_expected, 160000);
 });
@@ -7737,6 +9348,30 @@ test("settings.apply gate happy path: comp-floor writes minimum_base, repeats no
   assert.ok(targeting.cut_signals.includes("on-call rotation"));
 });
 
+test("settings.apply writes a minimum annual cash earnings gate without replacing base", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "profile",
+    patch: { compensation: { minimum_base: 60000 } },
+  });
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "gate", type: "comp-annual-floor", value: 90000 } },
+    },
+  });
+  const compensation = candidateConfigGet({ repoRoot, env: {} }).profile.compensation;
+
+  assert.equal(settingsArtifact(result).field, "compensation.minimum_annual_earnings");
+  assert.equal(compensation.minimum_annual_earnings, 90000);
+  assert.equal(compensation.minimum_base, 60000);
+});
+
 test("settings.apply mode happy path persists usage_mode and surfaces VALIDATION_FAILED for an invalid value", async () => {
   const repoRoot = tempRepo();
 
@@ -7929,9 +9564,9 @@ test("settings.apply automation: a narrow platform patch preserves every other c
     name: "automation",
     patch: {
       capabilities: {
-        authenticated_search: {
+        messaging: {
           enabled: true,
-          platforms: { linkedin: true, indeed: true },
+          platforms: { linkedin: true, wellfound: true },
         },
         status_polling: {
           enabled: true,
@@ -7951,7 +9586,7 @@ test("settings.apply automation: a narrow platform patch preserves every other c
         change: {
           kind: "automation",
           op: "platform",
-          capability: "authenticated_search",
+          capability: "messaging",
           platform: "linkedin",
           enabled: false,
         },
@@ -7960,13 +9595,43 @@ test("settings.apply automation: a narrow platform patch preserves every other c
   });
 
   const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
-  assert.equal(automation.capabilities.authenticated_search.platforms.linkedin, false);
+  assert.equal(automation.capabilities.messaging.platforms.linkedin, false);
   // Every other sibling must be untouched by the narrow patch.
-  assert.equal(automation.capabilities.authenticated_search.platforms.indeed, true);
-  assert.equal(automation.capabilities.authenticated_search.enabled, true);
+  assert.equal(automation.capabilities.messaging.platforms.wellfound, true);
+  assert.equal(automation.capabilities.messaging.enabled, true);
   assert.equal(automation.capabilities.status_polling.enabled, true);
   assert.equal(automation.capabilities.status_polling.platforms.greenhouse, true);
   assert.equal(automation.capabilities.status_polling.platforms.workday, true);
+});
+
+test("settings.apply cannot grant a source login as a global automation capability", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: {
+            kind: "automation",
+            op: "platform",
+            capability: "source_login",
+            platform: "linkedin",
+            enabled: true,
+          },
+        },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_INVALID");
+      assert.equal(error.message, 'Unknown capability "source_login".');
+      return true;
+    }
+  );
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
 });
 
 test("settings.apply automation: capability disable is allowed even for a high-tier capability", async () => {
@@ -7996,7 +9661,7 @@ test("settings.apply automation: capability disable is allowed even for a high-t
   );
 });
 
-test("settings.apply automation: consent changes are unsupported from Ask", async () => {
+test("settings.apply automation: raw consent changes are unsupported from Ask", async () => {
   const repoRoot = tempRepo();
   await assert.rejects(
     executeWorkspaceIntent({
@@ -8014,6 +9679,179 @@ test("settings.apply automation: consent changes are unsupported from Ask", asyn
       return true;
     }
   );
+});
+
+test("settings.apply automation: contextual application permission writes the reviewed site set and is replay-safe", async () => {
+  const repoRoot = tempRepo();
+  const intent = {
+    type: "settings.apply",
+    entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+    input: {
+      change: {
+        kind: "automation",
+        op: "contextual-permission",
+        permission: "application-preparation",
+      },
+    },
+  };
+
+  const first = await executeWorkspaceIntent({ repoRoot, env: {}, intent });
+  const replay = await executeWorkspaceIntent({ repoRoot, env: {}, intent });
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+
+  assert.notEqual(automation.setup_mode, "advanced");
+  assert.equal(automation.capabilities.authenticated_apply_preparation.enabled, true);
+  for (const platform of [
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "smartrecruiters",
+    "linkedin",
+    "external_ats",
+  ]) {
+    assert.equal(automation.consent[platform], true, platform);
+    assert.equal(
+      automation.capabilities.authenticated_apply_preparation.platforms[platform],
+      true,
+      platform
+    );
+  }
+  assert.notEqual(settingsArtifact(first).changed, false);
+  assert.equal(settingsArtifact(replay).changed, false);
+  assert.match(replay.messages.at(-1).text, /already allowed/i);
+});
+
+test("a narrow contextual calendar grant cannot activate a dormant relationship capability", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "basic",
+      consent: { linkedin: true },
+      capabilities: {
+        relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
+      },
+    },
+  });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "apple-calendar-write",
+        },
+      },
+    },
+  });
+
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+  assert.equal(automation.setup_mode, "basic");
+  assert.equal(automation.capabilities.relationship_sourcing.enabled, true);
+  assert.equal(automation.capabilities.relationship_sourcing.platforms.linkedin, true);
+  assert.equal(
+    mayRun({
+      capability: "relationship_sourcing",
+      platform: "linkedin",
+      data: automation,
+    }).allowed,
+    false
+  );
+  assert.equal(
+    mayRun({ capability: "calendar_sync", platform: "apple_calendar", data: automation }).allowed,
+    true
+  );
+});
+
+test("the email-check contextual grant stores Gmail and Outlook only", async () => {
+  const repoRoot = tempRepo();
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "mail-checks",
+        },
+      },
+    },
+  });
+
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+  assert.deepEqual(
+    Object.fromEntries(
+      ["gmail", "outlook", "webmail"].map((platform) => [
+        platform,
+        mayRun({ capability: "mail_access", platform, data: automation }).allowed,
+      ])
+    ),
+    { gmail: true, outlook: true, webmail: false }
+  );
+  assert.notEqual(automation.consent.webmail, true);
+  assert.notEqual(automation.capabilities.mail_access.platforms.webmail, true);
+});
+
+test("settings.apply automation: an unknown contextual permission fails closed", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: {
+            kind: "automation",
+            op: "contextual-permission",
+            permission: "everything-everywhere",
+          },
+        },
+      },
+    }),
+    (error) => error.code === "SETTINGS_CHANGE_INVALID"
+  );
+});
+
+test("permission text only mutates on a direct allow command and leaves questions for Paul", () => {
+  const repoRoot = tempRepo();
+  for (const [text, permission] of [
+    ["Allow form preparation", "application-preparation"],
+    ["Allow relationship sourcing", "relationship-sourcing"],
+    ["Allow status checks", "status-checks"],
+    ["Allow email checks", "mail-checks"],
+    ["Allow message checks", "message-checks"],
+    ["Allow LinkedIn review", "linkedin-profile-review"],
+    ["Allow Google Calendar", "google-calendar-write"],
+  ]) {
+    const action = previewWorkspaceIntent({ repoRoot, env: {}, text }).action;
+    assert.equal(action.intent.type, "settings.apply", text);
+    assert.deepEqual(action.intent.input.change, {
+      kind: "automation",
+      op: "contextual-permission",
+      permission,
+    });
+  }
+
+  for (const text of [
+    "Why does CareerRat need permission to prepare the form?",
+    "Allow form preparation?",
+    "What can CareerRat do on LinkedIn?",
+  ]) {
+    assert.equal(previewWorkspaceIntent({ repoRoot, env: {}, text }).action, null, text);
+  }
 });
 
 test("settings.apply automation: enabling a high-tier capability is unsupported from Ask", async () => {
@@ -8196,26 +10034,31 @@ test("calendar.record-write rejects a missing or unknown provider with CALENDAR_
   );
 });
 
-test("calendar.record-write gates automated provenance on real calendar_sync consent and never appends a row when denied", async () => {
+test("calendar.record-write offers provider-specific permission in place and never appends a row when denied", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { nextInterviewAt: "2030-09-02T18:00:00.000Z" });
 
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "calendar.record-write",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {
-          provider: "google_calendar",
-          provenance: "automated",
-          event: { applicationId: "app-temporal" },
-        },
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "calendar.record-write",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        provider: "google_calendar",
+        provenance: "automated",
+        event: { applicationId: "app-temporal" },
       },
-    }),
-    (error) => error.code === "CALENDAR_WRITE_NOT_ALLOWED"
-  );
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /add this event to Google Calendar/i);
+  assert.doesNotMatch(message.text, /settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "google-calendar-write",
+  });
 
   const db = openDb({ repoRoot, env: {} });
   const stored = db.prepare("SELECT data FROM kv WHERE key = ?").get("calendarWrites");
@@ -8611,20 +10454,27 @@ test("relationship.record-lead: an unrecognized type falls back to Contact and a
   assert.equal(artifact.platform, "linkedin");
 });
 
-test("relationship.source-request: zero relationship_sourcing consent throws RELATIONSHIP_SOURCING_NOT_ALLOWED", async () => {
+test("relationship.source-request: zero consent offers LinkedIn and Wellfound permission in place", async () => {
   const repoRoot = tempRepo();
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "relationship.source-request",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: { company: "Acme" },
-      },
-    }),
-    (error) => error.code === "RELATIONSHIP_SOURCING_NOT_ALLOWED"
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "relationship.source-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { company: "Acme" },
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /LinkedIn and Wellfound/i);
+  assert.match(message.text, /find recruiters and hiring-team contacts/i);
+  assert.equal(message.metadata.nextActions[0].label, "Allow relationship sourcing");
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "relationship-sourcing",
+  });
+  assert.doesNotMatch(message.text, /settings/i);
 });
 
 test("relationship.source-request: partial platform consent produces a per-platform receipt and records the sourcing CTA exactly once", async () => {
@@ -8795,6 +10645,19 @@ test("relationship.source-request: an empty company throws RELATIONSHIP_SOURCING
 
 function mountDirect(repoRoot, executeIntentImpl, runTurnImpl, captureIntakeImpl) {
   const routes = new Map();
+  const appOperations = createAppOperationManager({
+    repoRoot,
+    env: {},
+    ownerId: `workspace-route-test-${++workspaceRequestSequence}`,
+    heartbeatMs: 60_000,
+    kinds: createWorkspaceOperationKinds({
+      repoRoot,
+      env: {},
+      ...(executeIntentImpl ? { executeIntentImpl } : {}),
+      ...(runTurnImpl ? { runTurnImpl } : {}),
+      resolveExecutionPlanImpl: () => null,
+    }),
+  });
   mountWorkspaceAgentRoutes({
     addRoute(method, path, handler) {
       routes.set(`${method} ${path}`, handler);
@@ -8804,19 +10667,30 @@ function mountDirect(repoRoot, executeIntentImpl, runTurnImpl, captureIntakeImpl
     executeIntentImpl,
     runTurnImpl,
     captureIntakeImpl,
+    appOperations,
   });
+  routes.appOperations = appOperations;
   return routes;
 }
 
 async function callDirect(routes, method, path, payload) {
   const handler = routes.get(`${method} ${path}`);
   assert.ok(handler, `expected mounted route for ${method} ${path}`);
+  const operationPayload =
+    payload &&
+    method === "POST" &&
+    new Set(["/api/workspace/message", "/api/workspace/intent"]).has(path)
+      ? {
+          ...payload,
+          requestId: payload.requestId || `workspace-route-request-${++workspaceRequestSequence}`,
+        }
+      : payload;
   const req = Readable.from(
-    payload === undefined ? [] : [Buffer.from(JSON.stringify(payload), "utf8")]
+    operationPayload === undefined ? [] : [Buffer.from(JSON.stringify(operationPayload), "utf8")]
   );
   req.method = method;
   req.url = path;
-  req.headers = payload === undefined ? {} : { "content-type": "application/json" };
+  req.headers = operationPayload === undefined ? {} : { "content-type": "application/json" };
   let status = 200;
   let responseBody = "";
   const res = {
@@ -8830,6 +10704,10 @@ async function callDirect(routes, method, path, payload) {
   };
   await handler(req, res);
   return { status, body: responseBody ? JSON.parse(responseBody) : {} };
+}
+
+function waitDirectOperation(routes, response) {
+  return routes.appOperations.wait(response.body.operation.id);
 }
 
 test("workspace agent routes expose the one thread and route button intents through it", async () => {
@@ -8858,13 +10736,38 @@ test("workspace agent routes expose the one thread and route button intents thro
       entity: { type: "application", id: "app-temporal" },
     },
   });
-  assert.equal(acted.status, 200);
+  assert.equal(acted.status, 202);
+  const operation = await waitDirectOperation(routes, acted);
+  assert.equal(operation.status, "completed", JSON.stringify(operation.error));
   assert.equal(seen.length, 1);
-  assert.equal(acted.body.data.thread.id, WORKSPACE_THREAD_ID);
-  assert.equal(acted.body.data.messages.length, 2);
+  const thread = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(thread.thread.id, WORKSPACE_THREAD_ID);
+  assert.equal(thread.messages.length, 2);
 });
 
-test("workspace action errors return actionable client statuses instead of server errors", async () => {
+test("POST /api/workspace/intent cannot bypass the durable application mission owner", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: { gate: "keep", fitScore: 92 },
+    packetManifest: { uploadReady: true, gaps: [], artifacts: {} },
+  });
+  const routes = mountDirect(repoRoot);
+
+  const response = await callDirect(routes, "POST", "/api/workspace/intent", {
+    intent: {
+      type: "job.prepare-submit",
+      entity: { type: "application", id: "app-temporal" },
+      input: { resumeSession: true },
+    },
+  });
+
+  assert.equal(response.status, 202);
+  const operation = await waitDirectOperation(routes, response);
+  assert.equal(operation.status, "failed");
+  assert.equal(operation.error.code, "APPLICATION_MISSION_ATTEMPT_REQUIRED");
+});
+
+test("workspace action errors persist on the exact operation instead of failing its start", async () => {
   const repoRoot = tempRepo();
   const cases = [
     ["JOB_URL_REQUIRED", 400],
@@ -8896,7 +10799,7 @@ test("workspace action errors return actionable client statuses instead of serve
     ["CALENDAR_WRITE_NOT_ALLOWED", 400],
   ];
 
-  for (const [code, expectedStatus] of cases) {
+  for (const [code] of cases) {
     const routes = mountDirect(repoRoot, async () => {
       const error = new Error(`job request failed: ${code}`);
       error.code = code;
@@ -8909,8 +10812,10 @@ test("workspace action errors return actionable client statuses instead of serve
         input: { jobUrl: "https://jobs.example.test/acme/role" },
       },
     });
-    assert.equal(response.status, expectedStatus, code);
-    assert.equal(response.body.code, code);
+    assert.equal(response.status, 202, code);
+    const operation = await waitDirectOperation(routes, response);
+    assert.equal(operation.status, "failed", code);
+    assert.equal(operation.error.code, code);
   }
 });
 
@@ -8922,7 +10827,7 @@ test("runtime transcript actions never point at retired page routes", () => {
   assert.doesNotMatch(source, /href:\s*[`'"]\/jobs\?/);
 });
 
-test("workspace ambiguity errors expose only structured candidate-safe match labels", async () => {
+test("workspace ambiguity failures return candidate-safe guidance without internal match records", async () => {
   const repoRoot = tempRepo();
   const routes = mountDirect(repoRoot, async () => {
     const error = new Error("internal ambiguity detail");
@@ -8943,14 +10848,63 @@ test("workspace ambiguity errors expose only structured candidate-safe match lab
     },
   });
 
-  assert.equal(response.status, 409);
-  assert.deepEqual(response.body.details.matches, [
-    { company: "Acme", role: "Senior AI Engineer" },
-    { company: "Acme", role: "Staff Platform Engineer" },
-  ]);
+  assert.equal(response.status, 202);
+  const operation = await waitDirectOperation(routes, response);
+  assert.equal(operation.status, "failed");
+  assert.equal(operation.error.code, "JOB_REFERENCE_AMBIGUOUS");
+  assert.match(operation.error.message, /more than one matching job/i);
+  assert.doesNotMatch(operation.error.message, /internal|Private|Hidden/i);
+  assert.equal("details" in operation.error, false);
 });
 
-test("workspace message route waits for the same agent turn and returns its durable reply", async () => {
+test("durable ambiguity failures persist one fenced result with neutral exact choices", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-acme-ai",
+    company: "Acme",
+    role: "Senior AI Engineer",
+  });
+  seedApplication(repoRoot, {
+    id: "app-acme-platform",
+    company: "Acme",
+    role: "Staff Platform Engineer",
+    link: "https://jobs.example.test/acme/staff-platform",
+  });
+  const routes = mountDirect(repoRoot);
+  const payload = {
+    requestId: "workspace-durable-ambiguity",
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: "Rate the Acme role" },
+    },
+  };
+
+  const response = await callDirect(routes, "POST", "/api/workspace/intent", payload);
+  const operation = await waitDirectOperation(routes, response);
+  assert.equal(operation.status, "failed");
+  assert.equal(operation.error.code, "JOB_REFERENCE_AMBIGUOUS");
+  assert.equal("details" in operation.error, false);
+
+  const firstRead = workspaceThreadRead({ repoRoot, env: {} });
+  const result = firstRead.messages.at(-1);
+  assert.match(result.id, /^workspace-operation-result-/);
+  assert.equal(result.kind, "action_error");
+  assert.equal(result.metadata.state, "needs-choice");
+  assert.equal(result.metadata.nextActions.length, 2);
+  assert.ok(result.metadata.nextActions.every((action) => action.primary === false));
+  assert.doesNotMatch(result.text, /app-acme/);
+  assert.ok(result.metadata.nextActions.every((action) => !action.label.includes("app-acme")));
+
+  const repeated = await callDirect(routes, "POST", "/api/workspace/intent", payload);
+  const repeatedOperation = await waitDirectOperation(routes, repeated);
+  assert.equal(repeatedOperation.id, operation.id);
+  const reloaded = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(reloaded.messages.filter((message) => message.id === result.id).length, 1);
+  assert.deepEqual(reloaded.messages.at(-1).metadata.nextActions, result.metadata.nextActions);
+});
+
+test("workspace message route returns before the same durable agent turn finishes", async () => {
   const repoRoot = tempRepo();
   const seen = [];
   const routes = mountDirect(repoRoot, undefined, async (input) => {
@@ -8961,14 +10915,23 @@ test("workspace message route waits for the same agent turn and returns its dura
   });
 
   const response = await callDirect(routes, "POST", "/api/workspace/message", {
-    text: "Keep the context from setup.",
+    text: "Yes",
     context: { pathname: "/jobs", jobId: "app-temporal" },
+    choice: { promptId: "choice-1", version: 1, optionIds: ["yes"] },
   });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 202);
+  const operation = await waitDirectOperation(routes, response);
+  assert.equal(operation.status, "completed", JSON.stringify(operation.error));
   assert.equal(seen.length, 1);
   assert.deepEqual(seen[0].context, { pathname: "/jobs", jobId: "app-temporal" });
-  assert.equal(response.body.data.thread.id, WORKSPACE_THREAD_ID);
-  assert.equal(response.body.data.messages.at(-1).text, "Same thread reply.");
+  assert.deepEqual(seen[0].choice, {
+    promptId: "choice-1",
+    version: 1,
+    optionIds: ["yes"],
+  });
+  const thread = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(thread.thread.id, WORKSPACE_THREAD_ID);
+  assert.equal(thread.messages.at(-1).text, "Same thread reply.");
 });
 
 test("workspace intake route sends paste and link captures through the same serialized agent", async () => {
@@ -9196,7 +11159,7 @@ test("issue.record-filed accepts canonical CodesWhat/careerrat issue URLs and re
   }
 });
 
-test("workspace action errors map issue-report failure codes to 400", async () => {
+test("workspace action errors persist issue-report failure codes", async () => {
   const repoRoot = tempRepo();
   for (const code of ["ISSUE_REPORT_COMP_LEAK", "ISSUE_URL_INVALID"]) {
     const routes = mountDirect(repoRoot, async () => {
@@ -9211,8 +11174,10 @@ test("workspace action errors map issue-report failure codes to 400", async () =
         input: { description: "" },
       },
     });
-    assert.equal(response.status, 400, code);
-    assert.equal(response.body.code, code);
+    assert.equal(response.status, 202, code);
+    const operation = await waitDirectOperation(routes, response);
+    assert.equal(operation.status, "failed", code);
+    assert.equal(operation.error.code, code);
   }
 });
 
@@ -9245,20 +11210,26 @@ function grantStatusPolling(repoRoot, platforms) {
   });
 }
 
-test("status.sync-request: zero status_polling consent throws STATUS_SYNC_NOT_ALLOWED", async () => {
+test("status.sync-request: zero consent offers ATS status permission in place", async () => {
   const repoRoot = tempRepo();
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "status.sync-request",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {},
-      },
-    }),
-    (error) => error.code === "STATUS_SYNC_NOT_ALLOWED"
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /Greenhouse, Workday, Ashby, and Lever/i);
+  assert.match(message.text, /application status/i);
+  assert.doesNotMatch(message.text, /LinkedIn|Indeed|settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "status-checks",
+  });
 });
 
 test("status portal connection is a typed in-app action that saves the dashboard URL on one application", async () => {
@@ -9889,25 +11860,27 @@ test("mail.sync-request: zero mail_access grant on darwin still returns the card
   assert.equal(byId["outlook-webmail"].allowed, false);
 });
 
-test("mail.sync-request: zero mail_access grant off darwin refuses with MAIL_SYNC_NOT_ALLOWED (no apple-mail source to keep it alive)", async () => {
+test("mail.sync-request: zero webmail grant offers Gmail and Outlook permission in place", async () => {
   const repoRoot = tempRepo();
-
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      hostPlatform: "linux",
-      intent: {
-        type: "mail.sync-request",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {},
-      },
-    }),
-    (error) => {
-      assert.equal(error.code, "MAIL_SYNC_NOT_ALLOWED");
-      return true;
-    }
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    hostPlatform: "linux",
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /Gmail and Outlook/i);
+  assert.match(message.text, /recruiting email/i);
+  assert.doesNotMatch(message.text, /settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "mail-checks",
+  });
 });
 
 test("mail.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {
@@ -10077,25 +12050,26 @@ test("messages.sync-request: linkedin grant returns a messages_sync_handoff arti
   assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 
-test("messages.sync-request: zero messaging grant rejects with MESSAGES_SYNC_NOT_ALLOWED", async () => {
+test("messages.sync-request: zero consent offers LinkedIn and Wellfound message permission", async () => {
   const repoRoot = tempRepo();
-
-  await assert.rejects(
-    () =>
-      executeWorkspaceIntent({
-        repoRoot,
-        env: {},
-        intent: {
-          type: "messages.sync-request",
-          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-          input: {},
-        },
-      }),
-    (error) => {
-      assert.equal(error.code, "MESSAGES_SYNC_NOT_ALLOWED");
-      return true;
-    }
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "messages.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /LinkedIn and Wellfound/i);
+  assert.match(message.text, /recruiting messages/i);
+  assert.doesNotMatch(message.text, /settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "message-checks",
+  });
 });
 
 test("messages.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {
@@ -10173,6 +12147,22 @@ function seedLinkedinBatch(repoRoot, overrides = {}) {
 
 test("linkedin.optimize-request: profile_optimize granted returns handoff capabilities (optimize allowed, apply not) and batch null with no pending batch", async () => {
   const repoRoot = tempRepo();
+  const executionPlan = {
+    policyVersion: 1,
+    operation: "research.web",
+    runtimeId: "anthropic-api",
+    adapterVersion: 1,
+    requested: { quality: "balanced", reasoning: "medium" },
+    resolved: {
+      quality: "balanced",
+      reasoning: "medium",
+      model: "sonnet",
+      modelSource: "alias",
+      effort: "medium",
+      speedTier: null,
+    },
+    fallback: null,
+  };
   grantLinkedinOptimize(repoRoot, {
     profile_optimize: { enabled: true, platforms: { linkedin: true } },
   });
@@ -10190,6 +12180,7 @@ test("linkedin.optimize-request: profile_optimize granted returns handoff capabi
         summary: "2 profile suggestions ready for review. No profile edits were applied.",
       };
     },
+    executionPlan,
     intent: {
       type: "linkedin.optimize-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -10203,7 +12194,7 @@ test("linkedin.optimize-request: profile_optimize granted returns handoff capabi
   assert.equal(byKey.profile_optimize.allowed, true);
   assert.equal(byKey.profile_apply.allowed, false);
   assert.equal(artifact.batch, null);
-  assert.deepEqual(executions, [{ profileUrl: null }]);
+  assert.deepEqual(executions, [{ profileUrl: null, executionPlan }]);
   assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 
@@ -10263,6 +12254,14 @@ test("linkedin.optimize-request: zero consent still succeeds, never refuses, bot
   assert.equal(byKey.profile_optimize.allowed, false);
   assert.equal(byKey.profile_apply.allowed, false);
   assert.equal(artifact.batch, null);
+  const message = result.messages.at(-1);
+  assert.match(message.text, /read your LinkedIn profile/i);
+  assert.doesNotMatch(message.text, /settings/i);
+  assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "contextual-permission",
+    permission: "linkedin-profile-review",
+  });
 });
 
 test("linkedin.optimize-request: pure read — application and communication rows are byte-for-byte unchanged", async () => {

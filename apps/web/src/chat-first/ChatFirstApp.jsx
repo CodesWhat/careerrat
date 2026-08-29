@@ -3,10 +3,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ArtifactViewerModal } from "../jobs/ArtifactViewerModal.jsx";
 import {
   classifyDurableSearchRun,
-  jobSearchCapabilities,
-  runAiWebSearchLane,
-  runCoordinatedJobSearch,
-  runJobsPageSearch,
+  followSearchExecution,
+  runUnifiedJobSearch,
+  searchExecutionPresentation,
 } from "../jobs/jobsSearch.js";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
@@ -14,12 +13,16 @@ import { useEventSource } from "../lib/sse.js";
 import { chatFirstApi } from "./api.js";
 import { filterFiles, filterPeople, filterSearchJobs } from "./browser-model.js";
 import {
+  applicationPreparationPermission,
   calendarAction,
   commitComposerTurn,
   commitJobThreadComposer,
+  confirmPacketGapAnswer,
   createMissionAndStart,
+  createWorkspaceRequestId,
   downloadBinaryArtifact,
   downloadTextArtifact,
+  enableApplicationPreparation,
   engineUnavailable,
   findGate,
   focusApplicationHandoff,
@@ -36,24 +39,55 @@ import {
   resolveNeedDecision,
   resolvePersonAction,
   resumeHydratedMission,
+  resumePacketPreparation,
   scheduleApplicationId,
   selectedSourcedDismissal,
   selectMockSession,
   sourceSweepPresentation,
   sourceSweepWithAvailableMatches,
   startMockFromJobThread,
+  workspaceOperationFailure,
+  workspaceOperationFromResponse,
+  workspaceOperationIsActive,
+  workspaceOperationIsOwned,
 } from "./chat-first-app-controller.js";
 import {
   artifactEmoji,
   buildChatFirstView,
   chatFirstReducer,
+  clearWorkspaceOperation,
   createChatFirstState,
   filterPipelineJobs,
+  foregroundDraftKey,
+  parseChatFirstForeground,
+  readForegroundDraft,
+  readWorkspaceOperationId,
+  reconcileChatFirstForeground,
+  rememberWorkspaceOperation,
+  replaceForegroundOperation,
+  resolveForegroundStorage,
+  serializeChatFirstForeground,
+  writeForegroundDraft,
 } from "./chat-first-model.js";
+import {
+  clearCompanyDiscoveryOperation,
+  companyDiscoveryChildFromWorkspaceResult,
+  companyOperationFailure,
+  companyOperationMayOpenReview,
+  companyProposalArtifact,
+  companyProposalBatchIsResolved,
+  followCompanyDiscoveryOperation,
+  readCompanyDiscoveryOperationId,
+  rememberCompanyDiscoveryOperation,
+  resolveCompanyOperationStorage,
+  retryCompanyDiscoveryOperation,
+} from "./company-operation-controller.js";
 import {
   CompanyProposalReview,
   companyProposalReviewForArtifact,
   companyProposalReviewFromResult,
+  companyProposalTextSelection,
+  submitCompanyProposalBatch,
 } from "./company-proposal-review.jsx";
 import {
   CanonicalJobConversation,
@@ -74,9 +108,15 @@ import {
   buildDeepIngestReview,
   buildProposalsAndRefresh,
   captureSourceAndRefresh,
+  createDeepIngestOperationController,
   decideProposalAndRefresh,
+  deepIngestOperationFailure,
+  readDeepIngestOperation,
   removeSourceAndRefresh,
+  resolveDeepIngestOperationStorage,
+  resolveDeepIngestTextDecision,
   retrySourceAndRefresh,
+  uploadDeepIngestFilesAndRefresh,
 } from "./deep-ingest-controller.js";
 import {
   GithubStarPrompt,
@@ -84,6 +124,7 @@ import {
   markGithubStarPromptHandled,
   shouldOfferGithubStarPrompt,
 } from "./GithubStarPrompt.jsx";
+import { profileSettingsRoute } from "./profile-settings-controller.js";
 import {
   commitSkillChatCompletion,
   commitSkillChatDecision,
@@ -95,7 +136,13 @@ import {
   skillChatStreamUrl,
   skillChatSubmitBlocked,
 } from "./skill-chat-model.js";
-import { SourceReview } from "./source-review.jsx";
+import {
+  SourceReview,
+  sourceReviewForArtifact,
+  sourceReviewFromMessages,
+  sourceReviewTextSelection,
+  submitSourceReviewBatch,
+} from "./source-review.jsx";
 import { WorkspaceBrowser } from "./WorkspaceBrowser.jsx";
 import {
   ChatFirstWorkspace,
@@ -106,8 +153,76 @@ import {
 } from "./workspace-shell.jsx";
 
 const EMPTY_LIST = [];
+
+export async function submitConversationalReviewText({
+  text,
+  sourceReview,
+  companyProposalReview,
+  onSourceDecision,
+  onSourceComplete,
+  onCompanyIntent,
+} = {}) {
+  const sourceSelection = sourceReviewTextSelection(sourceReview, text);
+  if (sourceSelection) {
+    const completed = await submitSourceReviewBatch({
+      artifact: sourceReview,
+      selectedOptionIds: sourceSelection,
+      onDecision: onSourceDecision,
+      onComplete: onSourceComplete,
+    });
+    return { handled: true, completed };
+  }
+  const companySelection = companyProposalTextSelection(companyProposalReview, text);
+  if (companySelection) {
+    const completed = await submitCompanyProposalBatch({
+      artifact: companyProposalReview,
+      selectedOptionIds: companySelection,
+      onIntent: onCompanyIntent,
+    });
+    return { handled: true, completed };
+  }
+  return { handled: false, completed: false };
+}
+
+export async function commitCompanyProposalDecision({
+  intent,
+  execute,
+  setCompanyProposalReview,
+  openReview = true,
+} = {}) {
+  if (intent?.type !== "company.proposal-decide" || typeof execute !== "function") return false;
+  const response = await execute(intent);
+  if (!response) return false;
+  if (openReview) {
+    const refreshed = companyProposalReviewFromResult(response);
+    setCompanyProposalReview?.(refreshed?.proposals.length ? refreshed : null);
+  }
+  return true;
+}
+
+export function foregroundReviewArtifact({ reviewKind, reviewId, messages } = {}) {
+  const id = String(reviewId || "").trim();
+  if (!id) return null;
+  const transcript = Array.isArray(messages) ? messages : [];
+  for (let messageIndex = transcript.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const artifacts = Array.isArray(transcript[messageIndex]?.artifacts)
+      ? transcript[messageIndex].artifacts
+      : [];
+    for (let artifactIndex = artifacts.length - 1; artifactIndex >= 0; artifactIndex -= 1) {
+      if (reviewKind === "source") {
+        const review = sourceReviewForArtifact(artifacts[artifactIndex]);
+        if (review?.id === id) return review;
+      } else if (reviewKind === "company") {
+        const review = companyProposalReviewForArtifact(artifacts[artifactIndex]);
+        if (review?.batchId === id && review.proposals.length) return review;
+      }
+    }
+  }
+  return null;
+}
 const DEFAULT_BROWSER_FILTERS = Object.freeze({
   fit80: true,
+  fitFloor: null,
   comp: false,
   remote: false,
   stage: "all",
@@ -167,6 +282,54 @@ export async function loadVisibleSearchRuns({ getSourcingRun, signal } = {}) {
   };
 }
 
+function newestVisibleDeterministicRun(values) {
+  const deterministicRuns = values.filter(
+    (value) => value?.run && value.run.status !== "not_started"
+  );
+  const running = deterministicRuns.filter((value) => value.run.status === "running");
+  const candidates = running.length ? running : deterministicRuns;
+  const timestamp = (value) => {
+    const run = value?.run || {};
+    for (const candidate of [
+      run.updatedAt,
+      run.updated_at,
+      run.startedAt,
+      run.started_at,
+      run.completedAt,
+      run.completed_at,
+    ]) {
+      const parsed = Date.parse(candidate || "");
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  };
+  return candidates.sort((left, right) => timestamp(right) - timestamp(left))[0] || values[0];
+}
+
+export async function loadVisibleSearchState({ getSourcingRun, getSearchExecution, signal } = {}) {
+  const request = (purpose) => getSourcingRun({ purpose, ...(signal ? { signal } : {}) });
+  const [manualSearch, firstSearch] = await Promise.all([
+    request("manual-search"),
+    request("first-search"),
+  ]);
+  const deterministic = newestVisibleDeterministicRun([manualSearch, firstSearch]);
+  const searchExecutionId = durableSearchExecutionId(deterministic);
+  let execution = null;
+  if (searchExecutionId && typeof getSearchExecution === "function") {
+    try {
+      const response = await getSearchExecution({
+        searchExecutionId,
+        ...(signal ? { signal } : {}),
+      });
+      if (response?.execution?.id === searchExecutionId) execution = response.execution;
+    } catch {
+      // Older workspaces can have child-run correlation metadata without the
+      // unified execution row. Keep their deterministic result visible.
+    }
+  }
+  return { deterministic, execution };
+}
+
 function durableSearchExecutionId(value) {
   const id = value?.run?.metadata?.searchExecutionId ?? value?.metadata?.searchExecutionId;
   return typeof id === "string" && id.trim() ? id.trim() : null;
@@ -176,7 +339,7 @@ function correlatedAiRun(deterministic, aiWeb) {
   if (!aiWeb?.run || !deterministic?.run) return aiWeb;
   const deterministicExecutionId = durableSearchExecutionId(deterministic);
   const aiExecutionId = durableSearchExecutionId(aiWeb);
-  if (deterministicExecutionId && deterministicExecutionId !== aiExecutionId) {
+  if (!deterministicExecutionId || !aiExecutionId || deterministicExecutionId !== aiExecutionId) {
     return { ...aiWeb, status: "not_started", run: null };
   }
   return aiWeb;
@@ -381,81 +544,21 @@ function createSearchExecutionId() {
 
 export async function runChatFirstJobSearch({
   api,
-  retry,
   refetch,
   setSearchState,
   signal,
-  runCoordinator = runCoordinatedJobSearch,
-  runDeterministicLane = runJobsPageSearch,
-  runAiLane = runAiWebSearchLane,
+  runUnifiedSearch = runUnifiedJobSearch,
   createSearchExecutionId: createSearchExecutionIdFn = createSearchExecutionId,
 } = {}) {
-  const [sourceStatusResult, runtimeConfigResult] = await Promise.allSettled([
-    typeof api?.getSearchSourceStatus === "function"
-      ? api.getSearchSourceStatus()
-      : Promise.reject(new Error("Search source status is unavailable")),
-    typeof api?.getRuntimeConfig === "function"
-      ? api.getRuntimeConfig()
-      : Promise.reject(new Error("AI runtime configuration is unavailable")),
-  ]);
-  const sourceStatus = sourceStatusResult.status === "fulfilled" ? sourceStatusResult.value : null;
-  const runtimeConfig =
-    runtimeConfigResult.status === "fulfilled" ? runtimeConfigResult.value : null;
-  const aiConfigured = runtimeConfig?.ai?.available === true;
-  const capabilities = jobSearchCapabilities({
-    sourceStatus,
-    ai: {
-      configured: aiConfigured,
-      executable: aiConfigured,
-      consented: aiConfigured,
-    },
-  });
-
-  const searchExecutionId = retry?.searchExecutionId || createSearchExecutionIdFn();
-  const result = await runCoordinator({
-    capabilities,
-    retry,
+  const searchExecutionId = createSearchExecutionIdFn();
+  return runUnifiedSearch({
+    startSearchRun: api.startSearchRun,
+    getSearchExecution: api.getSearchExecution,
+    searchExecutionId,
     refetch,
     setSearchState,
     signal,
-    runDeterministic: ({ signal: laneSignal, onLaneState }) =>
-      runDeterministicLane({
-        startSearchRun: api.startSearchRun,
-        getSourcingRun: api.getSourcingRun,
-        searchExecutionId,
-        setSearchRun: (run) => {
-          const presentation = sourceSweepPresentation(run);
-          onLaneState?.({
-            ...(presentation.detail || presentation.summary
-              ? { detail: presentation.detail || presentation.summary }
-              : {}),
-            ...(presentation.providers ? { providers: presentation.providers } : {}),
-          });
-        },
-        setSearchError: (error) => {
-          if (error) onLaneState?.({ error });
-        },
-        signal: laneSignal,
-      }),
-    runAiWeb: ({ signal: laneSignal, onLaneState, retryPromptIds }) =>
-      runAiLane({
-        ...(retryPromptIds?.length ? { promptIds: retryPromptIds } : {}),
-        searchExecutionId,
-        signal: laneSignal,
-        setStatus: () => undefined,
-        setActivity: (detail) => {
-          if (detail) onLaneState?.({ detail });
-        },
-        setCounts: (counts) => {
-          if (counts) onLaneState?.({ counts });
-        },
-        setError: (error) => {
-          if (error) onLaneState?.({ error });
-        },
-      }),
   });
-  if (!result?.retry) return result;
-  return { ...result, retry: { ...result.retry, searchExecutionId } };
 }
 const SKILL_CHAT_EVENT_TYPES = [
   "assistant",
@@ -469,6 +572,20 @@ const SKILL_CHAT_EVENT_TYPES = [
 
 function list(value) {
   return Array.isArray(value) ? value : EMPTY_LIST;
+}
+
+export function resolvePacketGapTextAnswer(packetReview, text) {
+  const answerable = list(packetReview?.gaps).filter((gap) => gap?.answerable === true);
+  if (answerable.length !== 1) return null;
+  const gap = answerable[0];
+  const normalized = String(text || "")
+    .trim()
+    .toLocaleLowerCase();
+  if (!normalized) return null;
+  const answer = list(gap.options).find(
+    (option) => typeof option === "string" && option.trim().toLocaleLowerCase() === normalized
+  );
+  return answer ? { gap, answer: answer.trim() } : null;
 }
 
 function titleCase(value, fallback = "In play") {
@@ -501,6 +618,10 @@ export function dispatchChatFirstMessageIntent(
   }
   if (surface === "settings") return openSettings?.(intent.input?.section) ?? null;
   return null;
+}
+
+export function settingsIntentNavigator(navigate) {
+  return (section) => navigate(profileSettingsRoute({ tab: "settings", section }));
 }
 
 export function revealSourcedTarget(id, { dispatch, setQuery, setBrowserFilters } = {}) {
@@ -557,7 +678,7 @@ function missionForView(view) {
   );
 }
 
-function missionPresentation(mission, { onPause, onResume } = {}) {
+function missionPresentation(mission) {
   if (!mission) return null;
   const marks = { completed: "✓", running: "◐", blocked: "•", failed: "!", pending: "○" };
   const hasRemainingWork = list(mission.steps).some((step) =>
@@ -570,8 +691,7 @@ function missionPresentation(mission, { onPause, onResume } = {}) {
         `${marks[step?.status] || "○"} ${step?.label || titleCase(step?.action, "Mission step")}`
     ),
     footnote: "Packets are built from the full posting. Every submit gates back here.",
-    onPause: mission.status === "running" ? onPause : null,
-    onResume: mission.status === "paused" && hasRemainingWork ? onResume : null,
+    choicePrompt: hasRemainingWork ? mission.choicePrompt || null : null,
   };
 }
 
@@ -843,6 +963,7 @@ export function localFileError(kind, { name = "This file", onRetry } = {}) {
 function ChatFirstControllerAlert({ error, onAction }) {
   const message = controllerErrorMessage(error);
   if (!message) return null;
+  const notice = error && typeof error === "object" && error.tone === "notice";
   const action = error && typeof error === "object" ? error.action : null;
   const detail = safeDisplayDetail(controllerErrorDetail(error));
   const canRunAction = Boolean(action?.onRetry || action?.onAction || (action?.to && onAction));
@@ -852,7 +973,11 @@ function ChatFirstControllerAlert({ error, onAction }) {
     return onAction?.(action);
   };
   return (
-    <div className="chat-first-controller-alert" role="alert">
+    <div
+      className={`chat-first-controller-alert${notice ? " chat-first-controller-alert--notice" : ""}`}
+      role={notice ? "status" : "alert"}
+      aria-live={notice ? "polite" : undefined}
+    >
       <div className="chat-first-controller-alert__message">{message}</div>
       {action?.label && canRunAction ? (
         <button type="button" onClick={runAction}>
@@ -1044,6 +1169,13 @@ function jobContext(view, thread, mockSession, actions) {
           : null
       }
       files={files}
+      packetReview={thread.packetReview}
+      activePacketGapId={actions.packetAnswerGap?.id || null}
+      packetBusy={actions.packetBusy}
+      onAnswerGap={actions.startPacketAnswer}
+      onResumePacket={() => actions.resumePacketPreparation?.(thread.applicationId)}
+      applicationPreparation={actions.applicationPreparation}
+      onEnableApplicationPreparation={actions.enableApplicationPreparation}
       note="Every run, draft, and round for this job lives here, not in the main chat."
       action={
         mockAction ||
@@ -1058,7 +1190,7 @@ function jobContext(view, thread, mockSession, actions) {
   );
 }
 
-function composerFor({ view, ui, composerValue, busy, activeSkillChat, actions }) {
+function composerFor({ view, ui, composerValue, busy, activeSkillChat, packetAnswerGap, actions }) {
   const chips = mapComposerChips(ui.composerChips, [
     ...view.browser.search,
     ...view.threads,
@@ -1068,6 +1200,7 @@ function composerFor({ view, ui, composerValue, busy, activeSkillChat, actions }
     <Composer
       agentName={view.agentName}
       value={composerValue}
+      placeholder={packetAnswerGap?.label ? `Answer ${packetAnswerGap.label}…` : undefined}
       disabled={busy || skillChatSubmitBlocked(activeSkillChat)}
       chips={chips}
       onChange={actions.setComposer}
@@ -1099,13 +1232,22 @@ export function ChatFirstAppView({
   busy = false,
   error = null,
   activeSkillChat = null,
+  packetAnswerGap = null,
   actions = {},
 }) {
   const activeJob = threadForUi(view, ui);
   const activeMission = missionForView(view);
   const railActive =
     ui.activeThread === "mock" && activeJob ? activeJob.id : activeJob?.id || ui.activeThread;
-  const composer = composerFor({ view, ui, composerValue, busy, activeSkillChat, actions });
+  const composer = composerFor({
+    view,
+    ui,
+    composerValue,
+    busy,
+    activeSkillChat,
+    packetAnswerGap,
+    actions,
+  });
   const topBar = (
     <TopBar
       agentName={view.agentName}
@@ -1312,7 +1454,10 @@ export function ChatFirstAppView({
         }
         loadedContext={mapped.loadedContext || "Job description and confirmed story bank"}
         status={mapped.status}
-        onEnd={actions.endMock}
+        choicePrompt={mapped.choicePrompt}
+        onAnswer={actions.submitComposer}
+        answerBusy={busy}
+        onEnd={mapped.status === "ended" ? actions.endMock : undefined}
       />
     );
   } else if (activeJob) {
@@ -1326,6 +1471,7 @@ export function ChatFirstAppView({
           eyebrow={`${activeJob.company || activeJob.title} · ${activeJob.role || "Role"} · ${titleCase(activeJob.stage)}`.toUpperCase()}
           agentName={view.agentName}
           communication={communication}
+          packetReview={activeJob.packetReview}
           threadMessages={activeJob.messages}
           onApproveAndCopy={actions.copyCommunicationDraft}
           onEditDraft={actions.editCommunicationDraft}
@@ -1357,10 +1503,7 @@ export function ChatFirstAppView({
           intentBusy={busy}
           onAnswer={actions.submitComposer}
           answerBusy={busy}
-          mission={missionPresentation(activeMission, {
-            onPause: () => actions.pauseMission?.(activeMission.id),
-            onResume: () => actions.resumeMission?.(activeMission.id),
-          })}
+          mission={missionPresentation(activeMission)}
         />
       </ConversationPanel>
     );
@@ -1415,11 +1558,44 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const dashboard = useDashboardSnapshot();
   const location = useLocation();
   const navigate = useNavigate();
-  const [ui, dispatch] = useReducer(chatFirstReducer, undefined, createChatFirstState);
-  const [composerValue, setComposerValue] = useState("");
-  const [query, setQuery] = useState("");
-  const [pipelineStage, setPipelineStage] = useState(null);
-  const [browserFilters, setBrowserFilters] = useState(() => ({ ...DEFAULT_BROWSER_FILTERS }));
+  const locationSearchRef = useRef(location.search);
+  locationSearchRef.current = location.search;
+  const draftStorage = resolveForegroundStorage();
+  const workspaceOperationStorage = useMemo(() => resolveForegroundStorage(), []);
+  const companyOperationStorage = useMemo(() => resolveCompanyOperationStorage(), []);
+  const deepOperationStorage = useMemo(() => resolveDeepIngestOperationStorage(), []);
+  const deepOperationController = useMemo(
+    () => createDeepIngestOperationController({ api, storage: deepOperationStorage }),
+    [api, deepOperationStorage]
+  );
+  const locationForeground = useMemo(
+    () => parseChatFirstForeground(location.search),
+    [location.search]
+  );
+  const [workspaceOperationId, setWorkspaceOperationId] = useState(
+    () => locationForeground.operationId || readWorkspaceOperationId(workspaceOperationStorage)
+  );
+  const workspaceOperationIdRef = useRef(workspaceOperationId);
+  workspaceOperationIdRef.current = workspaceOperationId;
+  const [ui, dispatch] = useReducer(chatFirstReducer, locationForeground, (foreground) => ({
+    ...createChatFirstState(),
+    activeThread: foreground.activeThread,
+    activeApplicationId: foreground.activeApplicationId,
+    browse: foreground.browse,
+    pipeView: foreground.pipeView,
+    selection: foreground.selection,
+    searchSelectionSeeded: foreground.searchSelectionSeeded,
+    composerChips: foreground.composerChips,
+    gateId: foreground.gateId,
+  }));
+  const [packetAnswerGap, setPacketAnswerGap] = useState(null);
+  const [applicationPreparation, setApplicationPreparation] = useState(null);
+  const [query, setQuery] = useState(locationForeground.query);
+  const [pipelineStage, setPipelineStage] = useState(locationForeground.pipelineStage);
+  const [browserFilters, setBrowserFilters] = useState(() => ({
+    ...DEFAULT_BROWSER_FILTERS,
+    ...locationForeground.filters,
+  }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [engineDown, setEngineDown] = useState(false);
@@ -1430,16 +1606,35 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   const [sweepComparison, setSweepComparison] = useState(0);
   const sweepBaselineRef = useRef(null);
   const sweepAbortRef = useRef(null);
-  const sweepRetryRef = useRef(null);
   const missionExecutionRef = useRef(new Set());
+  const workspaceSubmissionRef = useRef(null);
+  const companyOperationBatchRef = useRef(null);
+  const companyOperationLaunchContextRef = useRef(new Map());
+  const workspaceOperationLaunchContextRef = useRef(new Map());
   const [deepState, setDeepState] = useState(null);
-  const [deepInputMode, setDeepInputMode] = useState(null);
-  const [deepInputValue, setDeepInputValue] = useState("");
+  const [deepBusy, setDeepBusy] = useState(false);
+  const [deepInputMode, setDeepInputMode] = useState(locationForeground.deepInputMode);
+  const [deepInputValue, setDeepInputValue] = useState(() =>
+    locationForeground.deepInputMode
+      ? readForegroundDraft(
+          draftStorage,
+          foregroundDraftKey({
+            activeThread: `ingest-input:${locationForeground.deepInputMode}`,
+          })
+        )
+      : ""
+  );
   const [deepEditingId, setDeepEditingId] = useState(null);
   const [deepEditDraft, setDeepEditDraft] = useState({});
   const [deepReceipt, setDeepReceipt] = useState(null);
   const [artifactViewer, setArtifactViewer] = useState(null);
   const [companyProposalReview, setCompanyProposalReview] = useState(null);
+  const [companyOperationId, setCompanyOperationId] = useState(() =>
+    readCompanyDiscoveryOperationId(companyOperationStorage)
+  );
+  const companyForegroundContext = `${ui.activeThread || "today"}:${ui.activeApplicationId || ""}:${ui.browse || ""}`;
+  const companyForegroundContextRef = useRef(companyForegroundContext);
+  companyForegroundContextRef.current = companyForegroundContext;
   const [sourceReview, setSourceReview] = useState(null);
   const [gatePacket, setGatePacket] = useState(null);
   const [skillChatState, setSkillChatState] = useState(null);
@@ -1448,11 +1643,41 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   );
   const skillChatCursorsRef = useRef(new Map());
   const skillChatSessionResolutionRef = useRef(new Map());
+  const applyingLocationRef = useRef(false);
+  const draftKey = foregroundDraftKey({
+    activeThread: ui.activeThread,
+    browse: ui.browse,
+    packetGapId: packetAnswerGap?.id || locationForeground.packetGapId,
+  });
+  const [composerDrafts, setComposerDrafts] = useState({});
+  const composerValue = composerDrafts[draftKey] ?? readForegroundDraft(draftStorage, draftKey);
+  const setDraftValue = useCallback(
+    (key, nextValue) => {
+      setComposerDrafts((current) => {
+        const previous = current[key] ?? readForegroundDraft(draftStorage, key);
+        const next = typeof nextValue === "function" ? nextValue(previous) : nextValue;
+        const value = String(next || "");
+        writeForegroundDraft(draftStorage, key, value);
+        return { ...current, [key]: value };
+      });
+    },
+    [draftStorage]
+  );
+  const setComposerValue = useCallback(
+    (nextValue) => setDraftValue(draftKey, nextValue),
+    [draftKey, setDraftValue]
+  );
+  const setForegroundComposer = useCallback(
+    (foreground, value) => setDraftValue(foregroundDraftKey(foreground), value),
+    [setDraftValue]
+  );
 
   const baseView = useMemo(
     () => buildChatFirstView(dashboard.data || {}, dashboard.data?.chatFirst || {}),
     [dashboard.data]
   );
+  const baseViewRef = useRef(baseView);
+  baseViewRef.current = baseView;
   const view = useMemo(() => {
     if (!newSearchIds.length) return baseView;
     const ids = new Set(newSearchIds);
@@ -1465,6 +1690,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     };
   }, [baseView, newSearchIds]);
   const activeJob = threadForUi(view, ui);
+  const packetApplicationId = activeJob?.packetReview ? activeJob.applicationId : null;
   const persistedSkillChat = list(view.skillChats).find((thread) => thread.id === ui.activeThread);
   const activeSkillChat = persistedSkillChat
     ? skillChatState?.id === persistedSkillChat.id
@@ -1498,6 +1724,71 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     editDraft: deepEditDraft,
     receipt: deepReceipt,
   };
+  const applyDeepOperationResult = useCallback((result, receiptFor) => {
+    if (!result?.view) return false;
+    setDeepState(result.view);
+    const next = buildDeepIngestReview(result.view);
+    setDeepReceipt(typeof receiptFor === "function" ? receiptFor(next, result) : receiptFor);
+    return true;
+  }, []);
+  const runDeepOperation = useCallback(
+    async (operation, receiptFor) => {
+      setDeepBusy(true);
+      setError(null);
+      try {
+        const result = await operation();
+        applyDeepOperationResult(result, receiptFor);
+        await dashboard.refetch?.().catch(() => undefined);
+        setEngineDown(false);
+        return result;
+      } catch (cause) {
+        const saved = readDeepIngestOperation(deepOperationStorage);
+        if (saved?.operationId) {
+          setError(
+            deepIngestOperationFailure(cause, {
+              id: saved.operationId,
+              retry: (id) =>
+                runDeepOperation(() => deepOperationController.retry({ id }), receiptFor),
+            })
+          );
+        } else {
+          setError(mappedControllerError(cause, () => runDeepOperation(operation, receiptFor)));
+        }
+        if (isEngineFailure(cause)) setEngineDown(true);
+        return null;
+      } finally {
+        setDeepBusy(false);
+      }
+    },
+    [applyDeepOperationResult, dashboard.refetch, deepOperationController, deepOperationStorage]
+  );
+  const applyCompanyProposalBatch = useCallback(
+    (batch, { operationId, openReview = true } = {}) => {
+      const artifact = companyProposalArtifact(batch);
+      if (!artifact) return false;
+      const exactOperationId = String(operationId || "").trim() || null;
+      if (exactOperationId) {
+        companyOperationBatchRef.current = {
+          operationId: exactOperationId,
+          batchId: batch.batchId,
+        };
+      }
+      if (companyProposalBatchIsResolved(batch)) {
+        if (exactOperationId) {
+          clearCompanyDiscoveryOperation(companyOperationStorage, exactOperationId);
+          setCompanyOperationId((current) => (current === exactOperationId ? null : current));
+        }
+        setCompanyProposalReview((current) =>
+          current?.batchId === batch.batchId ? null : current
+        );
+        return true;
+      }
+      const review = companyProposalReviewForArtifact(artifact);
+      if (openReview && review?.proposals.length) setCompanyProposalReview(review);
+      return true;
+    },
+    [companyOperationStorage]
+  );
   const dismissGithubStarPrompt = useCallback(() => {
     markGithubStarPromptHandled();
     setGithubStarPromptHandled(true);
@@ -1514,10 +1805,276 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     onDismiss: dismissGithubStarPrompt,
   };
 
+  const foregroundSnapshot = useMemo(() => {
+    const reviewKind = companyProposalReview ? "company" : sourceReview ? "source" : null;
+    const reviewId = companyProposalReview?.batchId || sourceReview?.id || null;
+    return {
+      activeThread: ui.activeThread,
+      activeApplicationId: ui.activeApplicationId,
+      browse: ui.browse,
+      pipeView: ui.pipeView,
+      selection: ui.selection,
+      searchSelectionSeeded: ui.searchSelectionSeeded,
+      composerChips: ui.composerChips,
+      gateId: ui.gateId,
+      operationId: workspaceOperationId,
+      reviewKind,
+      reviewId,
+      packetGapId: packetAnswerGap?.id || null,
+      deepEditId: deepEditingId,
+      deepInputMode,
+      query,
+      pipelineStage,
+      filters: browserFilters,
+    };
+  }, [
+    browserFilters,
+    companyProposalReview,
+    deepEditingId,
+    deepInputMode,
+    packetAnswerGap?.id,
+    pipelineStage,
+    query,
+    sourceReview,
+    ui.activeApplicationId,
+    ui.activeThread,
+    ui.browse,
+    ui.composerChips,
+    ui.gateId,
+    ui.pipeView,
+    ui.searchSelectionSeeded,
+    ui.selection,
+    workspaceOperationId,
+  ]);
+
+  const replaceWorkspaceOperation = useCallback(
+    (nextId, expectedId) => {
+      const currentId = workspaceOperationIdRef.current;
+      if (expectedId && currentId !== expectedId) return false;
+      const exactId = nextId
+        ? parseChatFirstForeground(replaceForegroundOperation("", nextId)).operationId
+        : null;
+      if (nextId && !exactId) return false;
+      if (exactId) {
+        workspaceOperationLaunchContextRef.current.set(
+          exactId,
+          companyForegroundContextRef.current
+        );
+        rememberWorkspaceOperation(workspaceOperationStorage, exactId);
+      } else {
+        clearWorkspaceOperation(workspaceOperationStorage, expectedId);
+      }
+      workspaceOperationIdRef.current = exactId;
+      setWorkspaceOperationId(exactId);
+
+      if (location.pathname !== "/") return currentId !== exactId;
+      const currentSearch = locationSearchRef.current;
+      const search = replaceForegroundOperation(
+        currentSearch,
+        exactId,
+        exactId ? {} : { expectedId }
+      );
+      if (search === currentSearch) return currentId !== exactId;
+      locationSearchRef.current = search;
+      navigate({ pathname: "/", search }, { replace: true });
+      return true;
+    },
+    [location.pathname, navigate, workspaceOperationStorage]
+  );
+
+  useEffect(() => {
+    const id = locationForeground.operationId;
+    if (!id || workspaceOperationIdRef.current) return;
+    rememberWorkspaceOperation(workspaceOperationStorage, id);
+    workspaceOperationIdRef.current = id;
+    setWorkspaceOperationId(id);
+  }, [locationForeground.operationId, workspaceOperationStorage]);
+
+  const navigateForeground = useCallback(
+    (patch, { replace = false } = {}) => {
+      const next = {
+        ...foregroundSnapshot,
+        ...patch,
+        filters: patch.filters
+          ? { ...foregroundSnapshot.filters, ...patch.filters }
+          : foregroundSnapshot.filters,
+      };
+      navigate({ pathname: "/", search: serializeChatFirstForeground(next) }, { replace });
+    },
+    [foregroundSnapshot, navigate]
+  );
+
+  useEffect(() => {
+    if (location.pathname !== "/" || dashboard.loading) return;
+    const reviewKind = locationForeground.reviewKind;
+    const reviewId = locationForeground.reviewId;
+    if (!reviewKind || !reviewId) {
+      setCompanyProposalReview(null);
+      setSourceReview(null);
+      return;
+    }
+    const messages =
+      activeSkillChat?.messages || activeJob?.messages || view.mainThread?.messages || [];
+    const review = foregroundReviewArtifact({ reviewKind, reviewId, messages });
+    if (review) {
+      if (reviewKind === "company") {
+        setCompanyProposalReview((current) =>
+          current?.batchId === review.batchId ? current : review
+        );
+        setSourceReview(null);
+      } else {
+        setSourceReview((current) => (current?.id === review.id ? current : review));
+        setCompanyProposalReview(null);
+      }
+      return;
+    }
+    setCompanyProposalReview(null);
+    setSourceReview(null);
+    setError("That saved review is no longer available. The conversation is still here.");
+    navigate(
+      {
+        pathname: "/",
+        search: serializeChatFirstForeground({
+          ...locationForeground,
+          reviewKind: null,
+          reviewId: null,
+        }),
+      },
+      { replace: true }
+    );
+  }, [
+    activeJob?.messages,
+    activeSkillChat?.messages,
+    dashboard.loading,
+    location.pathname,
+    locationForeground,
+    navigate,
+    view.mainThread?.messages,
+  ]);
+
+  useEffect(() => {
+    if (location.pathname !== "/" || dashboard.loading) return;
+    applyingLocationRef.current = true;
+    const foreground = {
+      ...createChatFirstState(),
+      ...locationForeground,
+      searchSelectionSeeded: locationForeground.searchSelectionSeeded,
+    };
+    const currentView = baseViewRef.current;
+    const reconciled = reconcileChatFirstForeground(foreground, currentView);
+    dispatch({ type: "foreground.hydrate", foreground: reconciled.state });
+    setQuery(locationForeground.query);
+    setPipelineStage(locationForeground.pipelineStage);
+    setBrowserFilters({
+      ...DEFAULT_BROWSER_FILTERS,
+      ...locationForeground.filters,
+      fitFloor: baseViewRef.current.fitFloor,
+    });
+    setDeepInputMode(reconciled.state.deepInputMode);
+    setDeepInputValue(
+      reconciled.state.deepInputMode
+        ? readForegroundDraft(
+            draftStorage,
+            foregroundDraftKey({
+              activeThread: `ingest-input:${reconciled.state.deepInputMode}`,
+            })
+          )
+        : ""
+    );
+    if (!reconciled.state.deepEditId) {
+      setDeepEditingId(null);
+      setDeepEditDraft({});
+    }
+
+    const foregroundThread = [...currentView.threads, ...currentView.archivedThreads].find(
+      (thread) =>
+        thread.id === reconciled.state.activeThread ||
+        thread.applicationId === reconciled.state.activeApplicationId
+    );
+    const requestedGap = locationForeground.packetGapId
+      ? list(foregroundThread?.packetReview?.gaps).find(
+          (gap) => String(gap?.id || "") === locationForeground.packetGapId
+        )
+      : null;
+    setPacketAnswerGap(requestedGap || null);
+    if (reconciled.notice) setError(reconciled.notice);
+    else if (locationForeground.packetGapId && foregroundThread && !requestedGap) {
+      setError("That saved application question no longer exists. The rest of the packet is here.");
+    }
+
+    const canonicalSearch = serializeChatFirstForeground({
+      ...reconciled.state,
+      packetGapId: requestedGap?.id || null,
+      deepEditId: reconciled.state.deepEditId,
+      deepInputMode: reconciled.state.deepInputMode,
+      query: locationForeground.query,
+      pipelineStage: locationForeground.pipelineStage,
+      filters: locationForeground.filters,
+    });
+    if (canonicalSearch !== location.search) {
+      navigate({ pathname: "/", search: canonicalSearch }, { replace: true });
+    }
+  }, [
+    dashboard.loading,
+    draftStorage,
+    location.pathname,
+    location.search,
+    locationForeground,
+    navigate,
+  ]);
+
+  useEffect(() => {
+    if (location.pathname !== "/" || dashboard.loading) return;
+    if (applyingLocationRef.current) {
+      applyingLocationRef.current = false;
+      return;
+    }
+    const search = serializeChatFirstForeground(foregroundSnapshot);
+    if (search !== location.search) {
+      navigate({ pathname: "/", search }, { replace: true });
+    }
+  }, [dashboard.loading, foregroundSnapshot, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    if (!packetApplicationId) {
+      setApplicationPreparation(null);
+      return;
+    }
+    if (typeof api.getAutomationSettings !== "function") {
+      setApplicationPreparation({ status: "blocked", ready: false });
+      return;
+    }
+    let cancelled = false;
+    setApplicationPreparation({ status: "checking", ready: false });
+    void api
+      .getAutomationSettings()
+      .then((automation) => {
+        if (!cancelled) {
+          setApplicationPreparation(applicationPreparationPermission(automation));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setApplicationPreparation({ status: "blocked", ready: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, packetApplicationId]);
+
   useEffect(() => {
     if (dashboard.loading || ui.searchSelectionSeeded || !baseView.browser.search.length) return;
-    dispatch({ type: "selection.seed-search", rows: baseView.browser.search });
-  }, [baseView.browser.search, dashboard.loading, ui.searchSelectionSeeded]);
+    dispatch({
+      type: "selection.seed-search",
+      rows: baseView.browser.search,
+      minimumFit: baseView.fitFloor,
+    });
+  }, [baseView.browser.search, baseView.fitFloor, dashboard.loading, ui.searchSelectionSeeded]);
+
+  useEffect(() => {
+    setBrowserFilters((current) =>
+      current.fitFloor === baseView.fitFloor ? current : { ...current, fitFloor: baseView.fitFloor }
+    );
+  }, [baseView.fitFloor]);
 
   useEffect(
     () => () => {
@@ -1531,44 +2088,71 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (next.browse) dispatch({ type: "browser.open", tab: next.browse });
     if (next.onboardingComplete === true) setOnboardingHandoff(true);
     if (next.composerDraft) setComposerValue(String(next.composerDraft));
-    if (next.browse || next.composerDraft || next.onboardingComplete)
-      navigate(location.pathname, { replace: true, state: null });
-  }, [location.pathname, location.state, navigate]);
+    if (next.browse || next.composerDraft || next.onboardingComplete) {
+      const search = next.browse
+        ? serializeChatFirstForeground({ ...foregroundSnapshot, browse: next.browse })
+        : location.search;
+      navigate({ pathname: location.pathname, search }, { replace: true, state: null });
+    }
+  }, [
+    foregroundSnapshot,
+    location.pathname,
+    location.search,
+    location.state,
+    navigate,
+    setComposerValue,
+  ]);
 
   useEffect(() => {
     if (typeof api.getSourcingRun !== "function") return;
     const controller = new AbortController();
     void (async () => {
       try {
-        const loaded = await loadVisibleSearchRuns({
+        const loaded = await loadVisibleSearchState({
           getSourcingRun: api.getSourcingRun,
+          getSearchExecution: api.getSearchExecution,
           signal: controller.signal,
         });
         if (controller.signal.aborted) return;
-        const hydrated = hydrateVisibleSearchRuns(loaded);
-        setSourceSweep({ ...hydrated.sourceSweep, retry: hydrated.retry });
-        sweepRetryRef.current = hydrated.retry;
-        const hasRunning = [loaded.deterministic, loaded.aiWeb].some(
-          (value) => value?.run?.status === "running"
-        );
-        if (!hasRunning) return;
-        const followed = await followVisibleSearchRuns({
-          loaded,
+        if (loaded.execution) {
+          setSourceSweep(searchExecutionPresentation(loaded.execution));
+          if (["completed", "failed", "cancelled"].includes(loaded.execution.status)) return;
+          const followed = await followSearchExecution({
+            getSearchExecution: api.getSearchExecution,
+            searchExecutionId: loaded.execution.id,
+            initialExecution: loaded.execution,
+            refetch: dashboard.refetch,
+            setSearchState: setSourceSweep,
+            signal: controller.signal,
+          });
+          if (!controller.signal.aborted && followed.timedOut) {
+            setSourceSweep((current) => ({
+              ...current,
+              status: "running",
+              detail: "Search is still running in the background. Reload later to see results.",
+            }));
+          }
+          return;
+        }
+        const hydrated = hydrateVisibleSearchRuns({ deterministic: loaded.deterministic });
+        setSourceSweep(hydrated.sourceSweep);
+        const run = loaded.deterministic?.run;
+        if (run?.status !== "running" || !run.id || !run.purpose) return;
+        const followed = await followExactSearchRun({
           getSourcingRun: api.getSourcingRun,
+          id: run.id,
+          purpose: run.purpose,
           signal: controller.signal,
+          pollIntervalMs: 2500,
+          pollTimeoutMs: 10 * 60 * 1000,
         });
         if (controller.signal.aborted || followed.aborted) return;
-        const completed = hydrateVisibleSearchRuns(followed.runs);
-        if (followed.timedOut) {
-          completed.sourceSweep = {
-            ...completed.sourceSweep,
-            status: "running",
-            detail: "Search is still running in the background. Reload later to see results.",
-          };
+        if (followed.run) {
+          setSourceSweep(
+            hydrateVisibleSearchRuns({ deterministic: { run: followed.run } }).sourceSweep
+          );
+          await dashboard.refetch?.();
         }
-        setSourceSweep({ ...completed.sourceSweep, retry: completed.retry });
-        sweepRetryRef.current = completed.retry;
-        await dashboard.refetch?.();
       } catch (cause) {
         if (!controller.signal.aborted) {
           setSourceSweep({ status: "error", summary: errorCopy(cause) });
@@ -1619,6 +2203,152 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       cancelled = true;
     };
   }, [api, ui.activeThread]);
+
+  useEffect(() => {
+    if (ui.activeThread !== "ingest") return;
+    const saved = readDeepIngestOperation(deepOperationStorage);
+    if (!saved?.operationId) return;
+    const controller = new AbortController();
+    setDeepBusy(true);
+    void deepOperationController
+      .resume({ id: saved.operationId, signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted || !result) return;
+        applyDeepOperationResult(result, (next) =>
+          result.resultRef?.type === "deep-ingest-proposal-set"
+            ? `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+            : `Material saved locally. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+        );
+        void dashboard.refetch?.().catch(() => undefined);
+      })
+      .catch((cause) => {
+        if (controller.signal.aborted) return;
+        setError(
+          deepIngestOperationFailure(cause, {
+            id: saved.operationId,
+            retry: (id) =>
+              runDeepOperation(
+                () => deepOperationController.retry({ id }),
+                (next) =>
+                  `Deep Ingest finished. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+              ),
+          })
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setDeepBusy(false);
+      });
+    return () => {
+      controller.abort();
+      setDeepBusy(false);
+    };
+  }, [
+    applyDeepOperationResult,
+    dashboard.refetch,
+    deepOperationController,
+    deepOperationStorage,
+    runDeepOperation,
+    ui.activeThread,
+  ]);
+
+  useEffect(() => {
+    const id = companyOperationId || readCompanyDiscoveryOperationId(companyOperationStorage);
+    if (!id) return;
+    const controller = new AbortController();
+    const launchContext = companyOperationLaunchContextRef.current.get(id) || null;
+    const retry = async (failedId) => {
+      const operation = await retryCompanyDiscoveryOperation({
+        api,
+        id: failedId,
+        storage: companyOperationStorage,
+      });
+      companyOperationLaunchContextRef.current.set(
+        operation.id,
+        companyForegroundContextRef.current
+      );
+      setError(null);
+      setCompanyOperationId(operation.id);
+      return true;
+    };
+    void followCompanyDiscoveryOperation({
+      api,
+      id,
+      signal: controller.signal,
+    })
+      .then(({ batch }) => {
+        if (controller.signal.aborted) return;
+        const openReview = companyOperationMayOpenReview({
+          launchContext,
+          currentContext: companyForegroundContextRef.current,
+        });
+        applyCompanyProposalBatch(batch, { operationId: id, openReview });
+        companyOperationLaunchContextRef.current.delete(id);
+        if (!openReview && !companyProposalBatchIsResolved(batch)) {
+          const review = companyProposalReviewForArtifact(companyProposalArtifact(batch));
+          if (review?.proposals.length) {
+            setError(
+              (current) =>
+                current || {
+                  tone: "notice",
+                  message: "Your company suggestions are ready whenever you want to review them.",
+                  action: {
+                    label: "Review companies",
+                    onAction: () => {
+                      setError(null);
+                      setCompanyProposalReview(review);
+                    },
+                  },
+                  detail: null,
+                }
+            );
+          }
+        }
+      })
+      .catch((cause) => {
+        if (controller.signal.aborted) return;
+        setError(companyOperationFailure(cause, { id, retry }));
+      });
+    return () => controller.abort();
+  }, [api, applyCompanyProposalBatch, companyOperationId, companyOperationStorage]);
+
+  useEffect(() => {
+    const proposalId = locationForeground.deepEditId;
+    if (ui.activeThread !== "ingest" || !proposalId || !deepState) return;
+    const proposal = buildDeepIngestReview(deepState).proposals.find(
+      (candidate) => String(candidate?.id || "") === proposalId
+    );
+    if (!proposal) {
+      setDeepEditingId(null);
+      setDeepEditDraft({});
+      setError("That saved Deep Ingest edit no longer exists. The review queue is still here.");
+      navigateForeground({ deepEditId: null }, { replace: true });
+      return;
+    }
+    if (deepEditingId === proposal.id) return;
+    const saved = readForegroundDraft(
+      draftStorage,
+      foregroundDraftKey({ activeThread: `ingest-edit:${proposal.id}` })
+    );
+    let restored = null;
+    try {
+      restored = saved ? JSON.parse(saved) : null;
+    } catch {
+      restored = null;
+    }
+    setDeepEditingId(proposal.id);
+    setDeepEditDraft({
+      title: restored?.title ?? proposal.title ?? "",
+      summary: restored?.summary ?? proposal.summary ?? "",
+      supportingQuote: restored?.supportingQuote ?? proposal.supportingQuote ?? "",
+    });
+  }, [
+    deepEditingId,
+    deepState,
+    draftStorage,
+    locationForeground.deepEditId,
+    navigateForeground,
+    ui.activeThread,
+  ]);
 
   useEffect(() => {
     if (typeof api.getInstalledAiRuntimes !== "function") return;
@@ -1707,7 +2437,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         if (next !== current) skillChatCursorsRef.current.set(current.chatId, next.cursor);
         return next;
       });
-      if (skillChatEventNeedsHydration(type)) void dashboard.refetch();
+      if (skillChatEventNeedsHydration(type, raw)) void dashboard.refetch();
     },
     [dashboard.refetch]
   );
@@ -1735,6 +2465,65 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       });
   }, [api, dashboard.refetch, view]);
 
+  useEffect(() => {
+    const id = workspaceOperationId;
+    if (!id || typeof api.getAppOperation !== "function") return;
+    const launchContext = workspaceOperationLaunchContextRef.current.get(id) || null;
+    let cancelled = false;
+    let timer = null;
+
+    const retry = async (failedId) => {
+      if (typeof api.retryAppOperation !== "function") return false;
+      const response = await api.retryAppOperation(failedId);
+      const operation = workspaceOperationFromResponse(response);
+      if (!operation) return false;
+      setError(null);
+      replaceWorkspaceOperation(operation.id);
+      return true;
+    };
+    const follow = async () => {
+      try {
+        const operation = await api.getAppOperation(id);
+        if (cancelled) return;
+        if (!workspaceOperationIsOwned(operation)) return;
+        if (workspaceOperationIsActive(operation)) {
+          timer = setTimeout(follow, 750);
+          return;
+        }
+        await dashboard.refetch?.();
+        if (cancelled) return;
+        if (operation?.status === "completed" && typeof api.getWorkspaceThread === "function") {
+          const thread = await api.getWorkspaceThread();
+          if (cancelled) return;
+          const child = companyDiscoveryChildFromWorkspaceResult({ operation, thread });
+          if (child?.id) {
+            companyOperationLaunchContextRef.current.set(child.id, launchContext);
+            rememberCompanyDiscoveryOperation(companyOperationStorage, child);
+            setCompanyOperationId(child.id);
+          }
+        }
+        if (operation?.status === "failed") {
+          setError(workspaceOperationFailure(operation, retry));
+        }
+        workspaceOperationLaunchContextRef.current.delete(id);
+        replaceWorkspaceOperation(null, id);
+      } catch (cause) {
+        if (!cancelled) setError(mappedControllerError(cause, follow));
+      }
+    };
+    void follow();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [
+    api,
+    companyOperationStorage,
+    dashboard.refetch,
+    replaceWorkspaceOperation,
+    workspaceOperationId,
+  ]);
+
   async function run(operation) {
     return runChatFirstOperation(operation, {
       refetch: dashboard.refetch,
@@ -1745,13 +2534,90 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   function openThread(id) {
+    setPacketAnswerGap(null);
     dispatch({ type: "thread.open", id });
+    navigateForeground({
+      activeThread: id || "today",
+      activeApplicationId: null,
+      browse: false,
+      packetGapId: null,
+      deepEditId: null,
+    });
   }
 
-  async function submitComposer(text) {
+  function threadIdForApplication(applicationId) {
+    return (
+      [...view.threads, ...view.archivedThreads].find(
+        (thread) => thread.applicationId === applicationId
+      )?.id || `job:${applicationId}`
+    );
+  }
+
+  async function persistPacketGapAnswer(gap, answer, { clearComposer = false } = {}) {
+    if (!activeJob?.applicationId || !gap || workspaceSubmissionRef.current) return null;
+    const requestId = createWorkspaceRequestId();
+    workspaceSubmissionRef.current = requestId;
+    const result = await run(() =>
+      confirmPacketGapAnswer({
+        api,
+        applicationId: activeJob.applicationId,
+        gap,
+        answer,
+        requestId,
+      })
+    );
+    if (workspaceSubmissionRef.current === requestId) workspaceSubmissionRef.current = null;
+    if (!result) return null;
+    const operation = workspaceOperationFromResponse(result);
+    if (operation) replaceWorkspaceOperation(operation.id);
+    if (clearComposer) setComposerValue("");
+    setPacketAnswerGap((current) => (current?.id === gap.id ? null : current));
+    navigateForeground({ packetGapId: null }, { replace: true });
+    return result;
+  }
+
+  async function submitComposer(text, choice) {
     const clean = String(text || "").trim();
     if (!clean || busy) return;
     if (persistedSkillChat && skillChatSubmitBlocked(activeSkillChat)) return;
+    const activeMission = missionForView(view);
+    const controlEntity =
+      ui.activeThread === "today" &&
+      activeMission?.choicePrompt?.state === "pending" &&
+      (!choice || choice.promptId === activeMission.choicePrompt.id)
+        ? { type: "mission", id: activeMission.id }
+        : ui.activeThread === "mock" &&
+            rawMock?.choicePrompt?.state === "pending" &&
+            (!choice || choice.promptId === rawMock.choicePrompt.id)
+          ? { type: "mock-interview", id: rawMock.id }
+          : null;
+    if (controlEntity && typeof api.resolveChatFirstChoice === "function") {
+      const response = await run(() =>
+        api.resolveChatFirstChoice({
+          entityType: controlEntity.type,
+          entityId: controlEntity.id,
+          text: clean,
+          choice,
+        })
+      );
+      const handled = response?.data?.handled === true || response?.handled === true;
+      if (handled) {
+        setComposerValue("");
+        return;
+      }
+      if (!response || choice) return;
+    }
+    if (activeJob?.applicationId && packetAnswerGap) {
+      await persistPacketGapAnswer(packetAnswerGap, clean, { clearComposer: true });
+      return;
+    }
+    const packetChoice = activeJob?.applicationId
+      ? resolvePacketGapTextAnswer(activeJob.packetReview, clean)
+      : null;
+    if (packetChoice) {
+      await persistPacketGapAnswer(packetChoice.gap, packetChoice.answer, { clearComposer: true });
+      return;
+    }
     if (activeJob?.applicationId && isMockInterviewStartRequest(clean)) {
       if (rawMock?.applicationId === activeJob.applicationId) {
         setComposerValue("");
@@ -1774,43 +2640,98 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       }
       return;
     }
-    const result = await run(async () => {
-      if (activeSkillChat?.chatId) {
-        return api.sendChatMessage(activeSkillChat.chatId, clean);
-      }
-      if (ui.activeThread === "mock" && rawMock?.id && rawMock.status !== "ended") {
-        return api.sendMockInterviewTurn({ sessionId: rawMock.id, text: clean });
-      }
-      if (ui.activeThread === "ingest") {
-        return captureSourceAndRefresh({ api, kind: "paste", value: clean });
-      }
-      if (activeJob?.applicationId) {
-        return commitJobThreadComposer({
-          api,
-          applicationId: activeJob.applicationId,
-          text: clean,
-        });
-      }
-      const contextId = ui.composerChips[0];
-      const context = contextId ? { pathname: "/jobs", jobId: contextId } : undefined;
-      const preview = await api.previewWorkspaceQuery(clean, context);
-      return commitComposerTurn({
-        api,
-        text: clean,
-        preview: preview?.data || preview,
-        context,
-      });
+    const conversationMessages =
+      activeSkillChat?.messages || activeJob?.messages || view.mainThread?.messages || [];
+    const reviewResult = await submitConversationalReviewText({
+      text: clean,
+      sourceReview:
+        activeSkillChat && (sourceReview || sourceReviewFromMessages(conversationMessages)),
+      companyProposalReview:
+        companyProposalReview ||
+        companyProposalReviewFromResult({ messages: conversationMessages }),
+      onSourceDecision: decideSkillChatDiscovery,
+      onSourceComplete: completeSkillChatDiscovery,
+      onCompanyIntent: (intent) => decideCompanyProposal(intent, { openReview: false }),
     });
+    if (reviewResult.handled) {
+      if (reviewResult.completed) setComposerValue("");
+      return;
+    }
+    if (ui.activeThread === "ingest") {
+      const proposalDecision = resolveDeepIngestTextDecision({
+        text: clean,
+        proposals: deepIngest.proposals,
+      });
+      if (proposalDecision) {
+        const decisionResult = await decideDeepProposal(
+          proposalDecision.proposal,
+          proposalDecision.decision
+        );
+        if (decisionResult) setComposerValue("");
+        return;
+      }
+    }
+    if (workspaceSubmissionRef.current) return;
+    const requestId = createWorkspaceRequestId();
+    workspaceSubmissionRef.current = requestId;
+    const result =
+      ui.activeThread === "ingest"
+        ? await runDeepOperation(
+            () =>
+              captureSourceAndRefresh({
+                api,
+                kind: "paste",
+                value: clean,
+                controller: deepOperationController,
+                storage: deepOperationStorage,
+              }),
+            (next) =>
+              `Material saved locally. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+          )
+        : await run(async () => {
+            if (activeSkillChat?.chatId) {
+              return api.sendChatMessage(activeSkillChat.chatId, clean, choice, { requestId });
+            }
+            if (ui.activeThread === "mock" && rawMock?.id && rawMock.status !== "ended") {
+              return api.sendMockInterviewTurn({ sessionId: rawMock.id, text: clean });
+            }
+            if (activeJob?.applicationId) {
+              return commitJobThreadComposer({
+                api,
+                applicationId: activeJob.applicationId,
+                text: clean,
+                choice,
+                requestId,
+              });
+            }
+            const contextId = ui.composerChips[0];
+            const context = contextId ? { pathname: "/jobs", jobId: contextId } : undefined;
+            const preview = choice ? null : await api.previewWorkspaceQuery(clean, context);
+            return commitComposerTurn({
+              api,
+              text: clean,
+              preview: preview?.data || preview,
+              context,
+              choice,
+              requestId,
+            });
+          });
+    if (workspaceSubmissionRef.current === requestId) workspaceSubmissionRef.current = null;
+    const workspaceOperation = workspaceOperationFromResponse(result?.response || result);
+    if (workspaceOperation) replaceWorkspaceOperation(workspaceOperation.id);
     if (result) setComposerValue("");
+    if (
+      result?.intent?.input?.change?.op === "contextual-permission" &&
+      result.intent.input.change.permission === "application-preparation" &&
+      typeof api.getAutomationSettings === "function"
+    ) {
+      const automation = await run(() => api.getAutomationSettings());
+      if (automation) {
+        setApplicationPreparation(applicationPreparationPermission(automation));
+      }
+    }
     const launchedSkillChat = skillChatFromWorkspaceResult(result);
     if (launchedSkillChat) dispatch({ type: "thread.open", id: launchedSkillChat.id });
-    if (ui.activeThread === "ingest" && result?.view) {
-      setDeepState(result.view);
-      const next = buildDeepIngestReview(result.view);
-      setDeepReceipt(
-        `Material saved locally. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
-      );
-    }
   }
 
   async function runCartMission(ids, mode) {
@@ -1845,16 +2766,10 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     try {
       const result = await runChatFirstJobSearch({
         api,
-        retry: sweepRetryRef.current,
         refetch: dashboard.refetch,
         setSearchState: setSourceSweep,
         signal: controller.signal,
       });
-      if (!result?.aborted) {
-        const retry = result?.retry || null;
-        sweepRetryRef.current = retry;
-        setSourceSweep((current) => ({ ...current, retry }));
-      }
       if (result?.ok) setSweepComparison((current) => current + 1);
       else if (!result?.timedOut) sweepBaselineRef.current = null;
     } finally {
@@ -1894,75 +2809,110 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (result) dispatch({ type: "mock.open", applicationId });
   }
 
-  async function endMock() {
-    if (rawMock?.id && rawMock.status !== "ended") {
-      await run(() => api.endMockInterview({ sessionId: rawMock.id }));
-    }
+  function closeMock() {
     dispatch({ type: "mock.close" });
+    return true;
   }
 
   async function ingestFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    const result = await run(async () => {
-      for (const file of files) await api.uploadDeepIngestFile(file, { targetShape: "auto" });
-      return api.getDeepIngestState();
-    });
-    if (result) {
-      setDeepState(result);
-      const next = buildDeepIngestReview(result);
-      setDeepReceipt(
+    await runDeepOperation(
+      () =>
+        uploadDeepIngestFilesAndRefresh({
+          api,
+          files,
+          targetShape: "auto",
+          controller: deepOperationController,
+          storage: deepOperationStorage,
+        }),
+      (next) =>
         `${files.length} file${files.length === 1 ? "" : "s"} saved locally. ${next.counts.sources} source${next.counts.sources === 1 ? "" : "s"} total.`
-      );
-    }
+    );
   }
 
   function openDeepInput(kind) {
     setDeepInputMode(kind);
-    setDeepInputValue("");
+    setDeepInputValue(
+      readForegroundDraft(
+        draftStorage,
+        foregroundDraftKey({ activeThread: `ingest-input:${kind}` })
+      )
+    );
     setError(null);
+    navigateForeground({ deepInputMode: kind, deepEditId: null });
   }
 
   function cancelDeepInput() {
+    if (deepInputMode) {
+      writeForegroundDraft(
+        draftStorage,
+        foregroundDraftKey({ activeThread: `ingest-input:${deepInputMode}` }),
+        ""
+      );
+    }
     setDeepInputMode(null);
     setDeepInputValue("");
+    navigateForeground({ deepInputMode: null }, { replace: true });
+  }
+
+  function changeDeepInput(value) {
+    const next = String(value || "");
+    setDeepInputValue(next);
+    if (deepInputMode) {
+      writeForegroundDraft(
+        draftStorage,
+        foregroundDraftKey({ activeThread: `ingest-input:${deepInputMode}` }),
+        next
+      );
+    }
   }
 
   async function submitDeepInput() {
     if (!deepInputMode || !deepInputValue.trim()) return;
-    const result = await run(() =>
-      captureSourceAndRefresh({ api, kind: deepInputMode, value: deepInputValue })
+    const result = await runDeepOperation(
+      () =>
+        captureSourceAndRefresh({
+          api,
+          kind: deepInputMode,
+          value: deepInputValue,
+          controller: deepOperationController,
+          storage: deepOperationStorage,
+        }),
+      (next) =>
+        `Source saved locally. ${next.counts.sources} source${next.counts.sources === 1 ? "" : "s"} ready for deep ingest.`
     );
     if (!result?.view) return;
-    setDeepState(result.view);
-    const next = buildDeepIngestReview(result.view);
-    setDeepReceipt(
-      `Source saved locally. ${next.counts.sources} source${next.counts.sources === 1 ? "" : "s"} ready for deep ingest.`
-    );
     cancelDeepInput();
   }
 
   async function analyzeDeepSource(source) {
-    const result = await run(() =>
-      buildProposalsAndRefresh({ api, source: source?.raw || source })
-    );
-    if (!result?.view) return;
-    setDeepState(result.view);
-    const next = buildDeepIngestReview(result.view);
-    setDeepReceipt(
-      `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+    await runDeepOperation(
+      () =>
+        buildProposalsAndRefresh({
+          api,
+          source: source?.raw || source,
+          controller: deepOperationController,
+          storage: deepOperationStorage,
+        }),
+      (next) =>
+        `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
     );
   }
 
   async function retryDeepSource(source) {
-    const result = await run(() => retrySourceAndRefresh({ api, source: source?.raw || source }));
-    if (!result?.view) return;
-    setDeepState(result.view);
-    const next = buildDeepIngestReview(result.view);
-    setDeepReceipt(
-      next.counts.reviewQueue
-        ? `Source reread. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
-        : "Source reread. It is ready to analyze."
+    await runDeepOperation(
+      () =>
+        retrySourceAndRefresh({
+          api,
+          source: source?.raw || source,
+          controller: deepOperationController,
+          storage: deepOperationStorage,
+        }),
+      (next) =>
+        next.counts.reviewQueue
+          ? `Source reread. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+          : "Source reread. It is ready to analyze."
     );
   }
 
@@ -1979,16 +2929,33 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }
 
   function editDeepProposal(proposal) {
-    setDeepEditingId(proposal.id);
-    setDeepEditDraft({
+    const draft = {
       title: proposal.title || "",
       summary: proposal.summary || "",
       supportingQuote: proposal.supportingQuote || "",
-    });
+    };
+    setDeepEditingId(proposal.id);
+    setDeepEditDraft(draft);
+    writeForegroundDraft(
+      draftStorage,
+      foregroundDraftKey({ activeThread: `ingest-edit:${proposal.id}` }),
+      JSON.stringify(draft)
+    );
+    navigateForeground({ deepEditId: proposal.id });
   }
 
   function changeDeepProposalEdit(field, value) {
-    setDeepEditDraft((current) => ({ ...current, [field]: value }));
+    setDeepEditDraft((current) => {
+      const next = { ...current, [field]: value };
+      if (deepEditingId) {
+        writeForegroundDraft(
+          draftStorage,
+          foregroundDraftKey({ activeThread: `ingest-edit:${deepEditingId}` }),
+          JSON.stringify(next)
+        );
+      }
+      return next;
+    });
   }
 
   async function decideDeepProposal(proposal, decision) {
@@ -2014,9 +2981,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       `${labels[decision]} ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} still need review.`
     );
     if (decision !== "save_edits") {
+      writeForegroundDraft(
+        draftStorage,
+        foregroundDraftKey({ activeThread: `ingest-edit:${proposal.id}` }),
+        ""
+      );
       setDeepEditingId(null);
       setDeepEditDraft({});
+      navigateForeground({ deepEditId: null }, { replace: true });
     }
+    return result;
   }
 
   async function openFile(id) {
@@ -2088,6 +3062,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (!resolved) return;
     if (resolved.kind === "open-gate") {
       dispatch({ type: "gate.open", id: resolved.gateId });
+      navigateForeground({ gateId: resolved.gateId });
       return;
     }
     if (resolved.kind === "open-application") {
@@ -2099,9 +3074,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return;
     }
     if (resolved.kind === "draft-touch") {
-      setComposerValue(resolved.prompt);
-      if (resolved.applicationId) await openJob(resolved.applicationId);
-      else dispatch({ type: "thread.open", id: "today" });
+      if (resolved.applicationId) {
+        setForegroundComposer(
+          { activeThread: threadIdForApplication(resolved.applicationId) },
+          resolved.prompt
+        );
+        await openJob(resolved.applicationId);
+      } else {
+        setForegroundComposer({ activeThread: "today" }, resolved.prompt);
+        openThread("today");
+      }
       return;
     }
     if (resolved.kind === "sourced-decision") {
@@ -2164,17 +3146,50 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         return result;
       },
       openSourced: (id) => revealSourcedTarget(id, { dispatch, setQuery, setBrowserFilters }),
-      openSettings: (section) =>
-        navigate("/settings", {
-          state: { activeTab: "settings", ...(section ? { section } : {}) },
-        }),
-      runWorkspaceIntent: (typedIntent) =>
-        run(async () => {
+      openSettings: settingsIntentNavigator(navigate),
+      runWorkspaceIntent: (typedIntent) => {
+        if (
+          typedIntent?.type === "job.prepare-submit" &&
+          activeJob?.applicationId &&
+          typedIntent.entity?.id === activeJob.applicationId
+        ) {
+          if (applicationPreparation?.ready !== true) {
+            setError("Allow form preparation in the application review on the right first.");
+            return false;
+          }
+          return run(async () => {
+            const resumed = await resumePacketPreparation({
+              api,
+              missions: view.missions,
+              applicationId: activeJob.applicationId,
+            });
+            if (resumed === false) {
+              throw new Error("This application has no paused form-preparation run to resume.");
+            }
+            return resumed;
+          });
+        }
+        return run(async () => {
+          const requestId = createWorkspaceRequestId();
           const response = await api.runWorkspaceIntent(
             typedIntent.type,
             typedIntent.entity,
-            typedIntent.input || {}
+            typedIntent.input || {},
+            { requestId }
           );
+          const operation = workspaceOperationFromResponse(response);
+          if (operation) {
+            replaceWorkspaceOperation(operation.id);
+            return response;
+          }
+          if (
+            typedIntent.input?.change?.op === "contextual-permission" &&
+            typedIntent.input.change.permission === "application-preparation" &&
+            typeof api.getAutomationSettings === "function"
+          ) {
+            const automation = await api.getAutomationSettings();
+            setApplicationPreparation(applicationPreparationPermission(automation));
+          }
           if (
             activeJob?.applicationId &&
             typedIntent.entity?.type === "application" &&
@@ -2188,22 +3203,37 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             });
           }
           return response;
-        }),
+        });
+      },
     });
     const launchedSkillChat = skillChatFromWorkspaceResult(result);
     if (launchedSkillChat) dispatch({ type: "thread.open", id: launchedSkillChat.id });
     return result;
   }
 
-  async function decideCompanyProposal(intent) {
-    if (intent?.type !== "company.proposal-decide") return;
-    const response = await run(() =>
-      api.runWorkspaceIntent(intent.type, intent.entity, intent.input || {})
+  async function decideCompanyProposal(intent, { openReview = true } = {}) {
+    if (intent?.type !== "company.proposal-decide") return false;
+    const batchId = String(intent.input?.batchId || "").trim();
+    const proposalId = String(intent.entity?.id || "").trim();
+    if (!batchId || !proposalId) return false;
+    const decided = await run(() =>
+      api.decideCompanyProposal({
+        batchId,
+        proposalId,
+        action: intent.input.action,
+        expectedVersion: intent.input.expectedVersion,
+        userConfirmed: true,
+      })
     );
-    if (!response) return;
-    const refreshed = companyProposalReviewFromResult(response);
-    if (refreshed?.proposals.length) setCompanyProposalReview(refreshed);
-    else setCompanyProposalReview(null);
+    if (!decided) return false;
+    const batch = await run(() => api.getCompanyProposalBatch(batchId));
+    if (!batch || String(batch.batchId || "") !== batchId) return false;
+    const owner = companyOperationBatchRef.current;
+    applyCompanyProposalBatch(batch, {
+      operationId: owner?.batchId === batchId ? owner.operationId : null,
+      openReview: openReview || companyProposalReview?.batchId === batchId,
+    });
+    return true;
   }
 
   async function decideSkillChatDiscovery(item, action) {
@@ -2223,7 +3253,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
 
   async function completeSkillChatDiscovery(item) {
     if (!activeSkillChat?.skill || !item?.id) return;
-    return runDiscoveryCompletionWithRetry({
+    const completed = await runDiscoveryCompletionWithRetry({
       api,
       activeSkillChat,
       item,
@@ -2232,6 +3262,34 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       setSourceReview,
       refetch: dashboard.refetch,
     });
+    if (completed) {
+      navigateForeground({ reviewKind: null, reviewId: null }, { replace: true });
+    }
+    return completed;
+  }
+
+  function openSourceReview(artifact) {
+    const review = sourceReviewForArtifact(artifact);
+    if (!review) return;
+    setSourceReview(review);
+    navigateForeground({ reviewKind: "source", reviewId: review.id });
+  }
+
+  function closeSourceReview() {
+    setSourceReview(null);
+    navigateForeground({ reviewKind: null, reviewId: null }, { replace: true });
+  }
+
+  function openCompanyProposalReview(artifact) {
+    const review = companyProposalReviewForArtifact(artifact);
+    if (!review) return;
+    setCompanyProposalReview(review);
+    navigateForeground({ reviewKind: "company", reviewId: review.batchId });
+  }
+
+  function closeCompanyProposalReview() {
+    setCompanyProposalReview(null);
+    navigateForeground({ reviewKind: null, reviewId: null }, { replace: true });
   }
 
   const actions = {
@@ -2248,8 +3306,14 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     },
     toggleArchive: () => dispatch({ type: "archive.toggle" }),
     openThread,
-    openBrowser: (tab) => dispatch({ type: "browser.open", tab }),
-    closeBrowser: () => dispatch({ type: "browser.close" }),
+    openBrowser: (tab) => {
+      dispatch({ type: "browser.open", tab });
+      navigateForeground({ browse: tab || "search" });
+    },
+    closeBrowser: () => {
+      dispatch({ type: "browser.close" });
+      navigateForeground({ browse: false });
+    },
     changePipelineView: (viewName) => dispatch({ type: "browser.pipeline-view", view: viewName }),
     toggleSelection: (id) => dispatch({ type: "selection.toggle", id }),
     clearSelection: () => dispatch({ type: "selection.clear" }),
@@ -2257,14 +3321,43 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     chatAboutSelection: () => dispatch({ type: "selection.chat" }),
     runCartMission,
     runMessageIntent,
+    packetAnswerGap,
+    packetBusy: busy,
+    applicationPreparation: packetApplicationId
+      ? applicationPreparation || { status: "checking", ready: false }
+      : null,
+    startPacketAnswer: (gap, answer) => {
+      if (String(answer || "").trim()) {
+        void persistPacketGapAnswer(gap, answer);
+        return;
+      }
+      setPacketAnswerGap(gap);
+      navigateForeground({ packetGapId: gap?.id || null });
+    },
+    resumePacketPreparation: async (applicationId) => {
+      if (applicationPreparation?.ready !== true) {
+        setError("Allow form preparation in the application review on the right first.");
+        return false;
+      }
+      const resumed = await run(() =>
+        resumePacketPreparation({ api, missions: view.missions, applicationId })
+      );
+      if (resumed === false) setError("The supervised application mission is not available yet.");
+      return resumed;
+    },
+    enableApplicationPreparation: async () => {
+      const updated = await run(() => enableApplicationPreparation({ api }));
+      if (updated) setApplicationPreparation(updated);
+      return updated;
+    },
     decideSkillChatDiscovery,
     completeSkillChatDiscovery,
-    openSourceReview: (artifact) => setSourceReview(artifact),
-    closeSourceReview: () => setSourceReview(null),
+    openSourceReview,
+    closeSourceReview,
     runSweep,
     setQuery,
     clearSearchFilters: () => resetBrowserSearchFilters({ setQuery, setBrowserFilters }),
-    openSourceHealth: () => navigate("/settings", { state: { activeTab: "settings" } }),
+    openSourceHealth: () => navigate(profileSettingsRoute({ tab: "settings" })),
     filterBrowser: (filter, value) => {
       if (ui.browse === "files") {
         setBrowserFilters((current) => ({ ...current, files: filter }));
@@ -2311,7 +3404,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     openThreadArtifact: async (thread, artifact) => {
       const proposalReview = companyProposalReviewForArtifact(artifact);
       if (proposalReview) {
-        setCompanyProposalReview(proposalReview);
+        openCompanyProposalReview(proposalReview);
         return;
       }
       if (artifact?.html || artifact?.binary || artifact?.text || artifact?.markdown) {
@@ -2332,16 +3425,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       }
       const kind = String(artifact?.kind || "").toLowerCase();
       if (kind.includes("search")) {
-        dispatch({ type: "browser.open", tab: "search" });
+        actions.openBrowser?.("search");
         return;
       }
       if (["research_chat", "board_discovery_chat"].includes(artifact?.kind)) {
         const launched = skillChatFromWorkspaceResult({ messages: [{ artifacts: [artifact] }] });
-        if (launched) dispatch({ type: "thread.open", id: launched.id });
+        if (launched) openThread(launched.id);
         return;
       }
       if (kind.includes("evidence") || kind.includes("story")) {
-        dispatch({ type: "browser.open", tab: "files" });
+        actions.openBrowser?.("files");
         return;
       }
       const applicationId = thread?.applicationId || artifact?.applicationId;
@@ -2381,20 +3474,24 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         void openJob(person.applicationId);
         return;
       }
-      setComposerValue(
+      setForegroundComposer(
+        { activeThread: "today" },
         `Help me with ${person.name || "this contact"}${person.company ? ` at ${person.company}` : ""}.`
       );
-      dispatch({ type: "browser.close" });
-      dispatch({ type: "thread.open", id: "today" });
+      openThread("today");
     },
     draftNudge: (id) => {
       const person = view.browser.people.find((candidate) => candidate.id === id);
       const decision = resolvePersonAction(person);
-      setComposerValue(decision.prompt);
-      if (decision.applicationId) void openJob(decision.applicationId);
-      else {
-        dispatch({ type: "browser.close" });
-        dispatch({ type: "thread.open", id: "today" });
+      if (decision.applicationId) {
+        setForegroundComposer(
+          { activeThread: threadIdForApplication(decision.applicationId) },
+          decision.prompt
+        );
+        void openJob(decision.applicationId);
+      } else {
+        setForegroundComposer({ activeThread: "today" }, decision.prompt);
+        openThread("today");
       }
     },
     openScheduleItem: (id) => {
@@ -2407,13 +3504,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         return;
       }
       if (!item) return;
-      setComposerValue(
+      setForegroundComposer(
+        { activeThread: "today" },
         item.actionLabel === "Get script"
           ? `Draft the script for ${item.title || "this follow-up"}.`
           : `Help me with ${item.title || "this scheduled item"}.`
       );
-      dispatch({ type: "browser.close" });
-      dispatch({ type: "thread.open", id: "today" });
+      openThread("today");
     },
     calendarAction: (label) => {
       if (!calendarAction(label, view.browser.schedule)) {
@@ -2423,17 +3520,17 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     openIngest: async () => {
       if (typeof api.openDeepIngestThread !== "function") return;
       const result = await run(() => api.openDeepIngestThread());
-      if (result) dispatch({ type: "ingest.open" });
+      if (result) openThread("ingest");
     },
     dismissIngestPrompt: async () => {
       if (typeof api.dismissDeepIngestPrompt !== "function") return;
       await run(() => api.dismissDeepIngestPrompt());
     },
-    closeIngest: () => dispatch({ type: "ingest.close" }),
+    closeIngest: () => openThread("today"),
     ingestFiles,
     ingestPaste: () => openDeepInput("paste"),
     ingestLink: () => openDeepInput("repo"),
-    setDeepInput: setDeepInputValue,
+    setDeepInput: changeDeepInput,
     submitDeepInput,
     cancelDeepInput,
     analyzeDeepSource,
@@ -2446,28 +3543,42 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     deferDeepProposal: (proposal) => decideDeepProposal(proposal, "defer"),
     rejectDeepProposal: (proposal) => decideDeepProposal(proposal, "reject"),
     startMock,
-    openMock: (applicationId) => dispatch({ type: "mock.open", applicationId }),
-    endMock,
-    pauseMission: (id) => run(() => api.setChatFirstMissionStatus({ id, status: "paused" })),
-    resumeMission: (id) => run(() => api.resumeChatFirstMission(id)),
+    openMock: (applicationId) => {
+      dispatch({ type: "mock.open", applicationId });
+      navigateForeground({
+        activeThread: "mock",
+        activeApplicationId: applicationId,
+        browse: false,
+      });
+    },
+    endMock: closeMock,
     decideNeed,
-    closeGate: () => dispatch({ type: "gate.close" }),
+    closeGate: () => {
+      dispatch({ type: "gate.close" });
+      navigateForeground({ gateId: null }, { replace: true });
+    },
     viewGateArtifact,
     requestGateChanges: () => {
-      setComposerValue(`Change the application packet for ${activeGate?.company || "this job"}.`);
+      setForegroundComposer(
+        { activeThread: "today" },
+        `Change the application packet for ${activeGate?.company || "this job"}.`
+      );
       dispatch({ type: "gate.close" });
       dispatch({ type: "thread.open", id: "today" });
       dispatch({
         type: "composer.set-context",
         ids: activeGate?.applicationId ? [activeGate.applicationId] : [],
       });
+      navigateForeground({
+        activeThread: "today",
+        activeApplicationId: null,
+        browse: false,
+        gateId: null,
+        composerChips: activeGate?.applicationId ? [activeGate.applicationId] : [],
+      });
     },
     openGateHandoff: async () => {
-      const focused = await run(() =>
-        focusApplicationHandoff(activeGate, (type, entity, input) =>
-          api.runWorkspaceIntent(type, entity, input)
-        )
-      );
+      const focused = await run(() => focusApplicationHandoff(activeGate, api));
       if (focused === false) {
         setError("The prepared application session is not available yet.");
       }
@@ -2494,7 +3605,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     },
     closeArtifact: () => setArtifactViewer(null),
     decideCompanyProposal,
-    closeCompanyProposalReview: () => setCompanyProposalReview(null),
+    closeCompanyProposalReview,
     retryEngine: async () => {
       const [runtimeState] = await Promise.all([
         typeof api.getInstalledAiRuntimes === "function"
@@ -2505,7 +3616,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       setEngineDown(runtimeState ? engineUnavailable(runtimeState) : false);
       setTechnicalOpen(false);
     },
-    openSettings: () => navigate("/settings"),
+    openSettings: settingsIntentNavigator(navigate),
     showTechnical: () => setTechnicalOpen((current) => !current),
   };
 
@@ -2535,9 +3646,10 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             "The selected local AI runtime did not return a usable response."
           : null
       }
-      busy={busy || dashboard.loading}
+      busy={busy || (ui.activeThread === "ingest" && deepBusy) || dashboard.loading}
       error={controllerError}
       activeSkillChat={activeSkillChat}
+      packetAnswerGap={packetAnswerGap}
       actions={actions}
     />
   );

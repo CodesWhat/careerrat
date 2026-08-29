@@ -6,7 +6,7 @@ layer they use and link here, so the agent always knows which capability to
 reach for.
 
 > This is the lightweight **substrate map**. The opt-in, consent-gated,
-> authenticated automation model (status polling, authenticated search, in-platform
+> authenticated automation model (status polling, in-platform
 > messaging, supervised apply preparation, profile optimization, webmail access) is specified by the
 > **Browser Automation Contract** in
 > `AGENTS.md` and configured by `candidate/automation.yml` (see *Opt-in authenticated
@@ -51,8 +51,8 @@ tracked path. See the **Browser Automation Contract** (Local-only + safety) in `
 
 **Write skill prose tool-agnostically** — say "use the session browser," not a
 specific vendor tool or MCP namespace. `auto` is the default: it uses Orca's visible,
-supervised browser inside an Orca workspace, bundled Playwright in the packaged desktop
-app, and the compatible extension session otherwise. If the selected provider cannot
+supervised browser inside an Orca workspace and CareerRat's app-owned Playwright browser
+otherwise. If the selected provider cannot
 execute the concrete workflow, CareerRat exposes a supervised/manual handoff instead of
 claiming the browser ran.
 
@@ -81,14 +81,13 @@ Capabilities the agent uses at this layer (each maps to whichever provider is ac
 ## Opt-in authenticated automation
 
 Reading public posting bodies (above) needs no permission. But **logged-in** Layer-3
-uses — polling your ATS dashboards for application status, scraping authenticated
-search results, reading in-platform DMs, supervised apply preparation, profile optimization, and
+uses — polling your ATS dashboards for application status, reading in-platform DMs,
+supervised apply preparation, profile optimization, and
 webmail access — are gated. They are
 **opt-in and default OFF**: with no `candidate/automation.yml`, none of them run.
 
 The authenticated capabilities are live behind the switchboard: `status_polling`
-(**`sync-status`** skill), `authenticated_search` (wired into `search-jobs` /
-`setup-searches`), `messaging` (**`ingest-messages`** skill), and
+(**`sync-status`** skill), `messaging` (**`ingest-messages`** skill), and
 `authenticated_apply_preparation` (**supervised LinkedIn Easy Apply preparation**,
 which always stops at the user-submit gate),
 `profile_optimize` / `profile_apply` (**`optimize-linkedin`**), and `mail_access`
@@ -101,6 +100,11 @@ capability runs on a platform **only if all three are true** — the capability'
 switch, that platform's per-capability switch, and that platform's one-time ToS
 consent. Query it with `mayRun()` in `src/core/automation/consent.mjs`; never hardcode
 the policy in skill prose.
+
+Job sources use a simpler point-of-use flow instead of this switchboard. When a
+source is added or first used and login is needed, CareerRat asks one
+site-specific Yes/No question. Yes opens the exact source URL in the visible
+CareerRat browser. No skips that source and continues with the rest.
 
 Toggle it through the CLI (dry-run by default, `--write` to commit;
 comment-preserving and schema-validated):
@@ -137,8 +141,8 @@ mail login wall, mail 2FA prompt, captcha, or unexpected interstitial.
 Which provider drives the live session is itself a setting. `auto` is the
 **recommended default** and selects a browser CareerRat can detect without asking the
 candidate to understand their CLI or extension setup. It selects Orca inside an Orca
-workspace, bundled Playwright in the packaged desktop app, and the compatible extension
-otherwise. Explicit overrides are `extension`, `orca` (a supervised embedded browser
+workspace and CareerRat's app-owned Playwright browser otherwise. Explicit overrides are
+`extension`, `orca` (a supervised embedded browser
 available inside Orca workspaces), or `playwright` (a supervised browser with persistent
 local storage created on demand). Public application forms need no setup. If a particular
 site requires an account, the candidate signs in when that site asks and CareerRat reuses

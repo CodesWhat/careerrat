@@ -42,7 +42,7 @@ import { assembleActivityEvents, assembleTrackerObject } from "../core/db/export
 import { candidateConfigGet, chatFirstStateFromDb } from "../core/db/verbs.mjs";
 import { hydrateJobDescriptionCompleteness } from "../core/jobs/job-description.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
-import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
+import { loadAgentGuidanceSnapshotAsync } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../core/tracker/dashboard-data.js";
 import { loadLibrarySnapshot } from "../core/tracker/library-snapshot.mjs";
 import { loadSettingsSnapshot } from "../core/tracker/settings-snapshot.mjs";
@@ -51,6 +51,27 @@ import { sendJson } from "./skill-run-route.mjs";
 function readMeta(db) {
   const row = db.prepare("SELECT version, last_updated_at FROM meta WHERE id = 1").get();
   return { version: row?.version ?? null, lastUpdatedAt: row?.last_updated_at ?? null };
+}
+
+function readDashboardDbSnapshot(db, { requestedAt }) {
+  db.exec("BEGIN DEFERRED");
+  try {
+    const snapshot = {
+      trackerData: assembleTrackerObject(db),
+      activityEvents: assembleActivityEvents(db),
+      chatFirst: chatFirstStateFromDb(db, { now: requestedAt }),
+      meta: readMeta(db),
+    };
+    db.exec("COMMIT");
+    return snapshot;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Preserve the original read failure.
+    }
+    throw error;
+  }
 }
 
 function statusForError(err) {
@@ -107,8 +128,9 @@ export function mountDashboardRoutes({
   now = () => new Date(),
   candidateConfigGet: candidateConfigGetForRoute = candidateConfigGet,
   automationStatus: automationStatusForRoute = automationStatus,
+  loadAgentGuidance: loadAgentGuidanceForRoute = loadAgentGuidanceSnapshotAsync,
 }) {
-  addRoute("GET", "/api/data/dashboard", (_req, res) => {
+  addRoute("GET", "/api/data/dashboard", async (_req, res) => {
     let db;
     try {
       db = requireDb({ repoRoot, env });
@@ -118,37 +140,37 @@ export function mountDashboardRoutes({
     }
 
     try {
+      const requestedAt = now();
+      const dbSnapshot = readDashboardDbSnapshot(db, { requestedAt });
       const trackerData = hydrateJobDescriptionCompleteness({
-        trackerData: assembleTrackerObject(db),
+        trackerData: dbSnapshot.trackerData,
         repoRoot,
         env,
       });
-      const activityEvents = assembleActivityEvents(db);
       const modes = loadModes({ root: repoRoot });
       const settings = loadSettingsSnapshot({ root: repoRoot });
       const library = loadLibrarySnapshot({ root: repoRoot });
-      const agentGuidance = loadAgentGuidanceSnapshot({ root: repoRoot, env });
+      const agentGuidance = await loadAgentGuidanceForRoute({ root: repoRoot, env });
       const calendarProviderStatus = readCalendarProviderStatus({
         repoRoot,
         env,
         automationStatusForRoute,
       });
 
-      const requestedAt = now();
       const viewModel = buildDashboardViewModel(trackerData, {
         now: requestedAt,
-        activityEvents,
+        activityEvents: dbSnapshot.activityEvents,
         modes,
         settings,
         library,
         agentGuidance,
         calendarProviderStatus,
       });
-      viewModel.chatFirst = chatFirstStateFromDb(db, { now: requestedAt });
+      viewModel.chatFirst = dbSnapshot.chatFirst;
 
       const setup = readSetup({ repoRoot, env, candidateConfigGetForRoute });
 
-      sendJson(res, 200, { ok: true, meta: readMeta(db), data: viewModel, setup });
+      sendJson(res, 200, { ok: true, meta: dbSnapshot.meta, data: viewModel, setup });
     } catch (err) {
       respondError(res, err);
     }

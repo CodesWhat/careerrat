@@ -238,11 +238,25 @@ export function buildCapExceededBody() {
   };
 }
 
+export function buildUnpricedModelBody() {
+  return {
+    type: "error",
+    error: {
+      type: "cap_exceeded",
+      message: "This model is unavailable while this beta account has a usage cap.",
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Which requests get metered
 // ---------------------------------------------------------------------------
 
 export function shouldMeterRequest(path, method) {
+  return isAllowedProxyRequest(path, method);
+}
+
+export function isAllowedProxyRequest(path, method) {
   return path === "/v1/messages" && method === "POST";
 }
 

@@ -7,6 +7,7 @@ export const DEFAULT_STATE = Object.freeze({
   enabled: true,
   lastCheckedAt: null,
   skippedVersion: null,
+  operation: null,
 });
 
 const IDLE_RUNTIME = Object.freeze({
@@ -85,6 +86,14 @@ function safePercent(progress) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function savedOperation(value) {
+  if (!value || typeof value !== "object") return null;
+  const phase = String(value.phase || "");
+  if (!new Set(["checking", "downloading", "ready"]).has(phase)) return null;
+  const version = typeof value.version === "string" ? value.version.trim() : "";
+  return { phase, ...(version ? { version } : {}) };
+}
+
 export function createDesktopUpdateController({
   updater,
   platform,
@@ -102,8 +111,28 @@ export function createDesktopUpdateController({
 
   const supported = Boolean(selfUpdateSupported);
   let saved = { ...DEFAULT_STATE, ...persisted };
+  const recoveredOperation = savedOperation(saved.operation);
+  let startupCheckPending = supported && recoveredOperation?.phase === "ready";
+  const interrupted =
+    supported &&
+    (recoveredOperation?.phase === "checking" || recoveredOperation?.phase === "downloading");
   let runtime = supported
-    ? { ...IDLE_RUNTIME }
+    ? startupCheckPending
+      ? {
+          ...IDLE_RUNTIME,
+          phase: "checking",
+          version: recoveredOperation.version || null,
+          message: "Checking the downloaded update…",
+        }
+      : interrupted
+        ? {
+            ...IDLE_RUNTIME,
+            phase: "error",
+            version: recoveredOperation.version || null,
+            errorKind: "interrupted",
+            message: "The update stopped when CareerRat closed. Try again when you're ready.",
+          }
+        : { ...IDLE_RUNTIME }
     : {
         ...IDLE_RUNTIME,
         phase: "unsupported",
@@ -113,6 +142,11 @@ export function createDesktopUpdateController({
             : "In-app updates are available in the installed CareerRat app.",
         downloadUrl: platform === "win32" ? WINDOWS_STATUS_URL : null,
       };
+
+  if (interrupted) {
+    saved = { ...saved, operation: null };
+    persist(saved);
+  }
 
   updater.autoDownload = true;
   updater.autoInstallOnAppQuit = false;
@@ -153,6 +187,11 @@ export function createDesktopUpdateController({
 
   function setRuntime(next) {
     runtime = { ...runtime, ...next };
+    const nextOperation = savedOperation(runtime);
+    if (JSON.stringify(nextOperation) !== JSON.stringify(saved.operation)) {
+      saved = { ...saved, operation: nextOperation };
+      persist(saved);
+    }
     return emit();
   }
 
@@ -221,9 +260,9 @@ export function createDesktopUpdateController({
   for (const [event, handler] of Object.entries(handlers))
     updater.on(event, handler);
 
-  async function checkNow({ manual = false } = {}) {
+  async function checkNow({ manual = false, force = false } = {}) {
     if (!supported) return setRuntime({ manual: Boolean(manual) });
-    if (!manual && !saved.enabled) return getState();
+    if (!manual && !force && !saved.enabled) return getState();
 
     saved = { ...saved, lastCheckedAt: now() };
     persist(saved);
@@ -240,6 +279,16 @@ export function createDesktopUpdateController({
       fail(error);
     }
     return getState();
+  }
+
+  function needsStartupCheck() {
+    return startupCheckPending;
+  }
+
+  async function reconcileStartup() {
+    if (!startupCheckPending) return getState();
+    startupCheckPending = false;
+    return checkNow({ force: true });
   }
 
   function setEnabled(enabled) {
@@ -269,6 +318,8 @@ export function createDesktopUpdateController({
     destroy,
     getState,
     install,
+    needsStartupCheck,
+    reconcileStartup,
     setEnabled,
     skipVersion,
   };

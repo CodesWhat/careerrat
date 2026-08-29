@@ -144,6 +144,31 @@ test("company discovery becomes due immediately when targeting context changes",
   assert.equal(state.reason, "targeting-changed");
 });
 
+test("company discovery becomes due when the annual earnings floor changes", () => {
+  const repoRoot = setupRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "profile",
+    patch: { compensation: { minimum_annual_earnings: 85_000 } },
+  });
+  putBatch(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "profile",
+    patch: { compensation: { minimum_annual_earnings: 95_000 } },
+  });
+
+  const state = companyDiscoveryCadenceState({
+    repoRoot,
+    env: {},
+    now: new Date("2026-08-12T12:00:00.000Z"),
+  });
+  assert.equal(state.due, true);
+  assert.equal(state.reason, "targeting-changed");
+});
+
 test("company discovery becomes due after seven days without targeting changes", () => {
   const repoRoot = setupRepo();
   putBatch(repoRoot);

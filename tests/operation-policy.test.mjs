@@ -1,0 +1,303 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  AI_OPERATION_DEFAULTS,
+  assertAIExecutionPlanForRuntime,
+  resolveAIExecutionPlan as resolveAIExecutionPlanImpl,
+} from "../src/core/ai/operation-policy.mjs";
+
+const VERIFIED_INSTALLED_CAPABILITIES = Object.freeze({
+  completion: true,
+  structuredOutput: true,
+  appWorkflows: true,
+  exactRead: true,
+  publicWeb: true,
+  liveActivity: true,
+  resumable: true,
+});
+
+const VERIFIED_INSTALLED_IDENTITY = Object.freeze({
+  path: "/safe/codex",
+  realPath: "/opt/careerrat/codex",
+  version: "0.149.1",
+  binaryFingerprint: "a".repeat(64),
+});
+
+function resolveAIExecutionPlan(input = {}) {
+  const runtimeId = String(input.runtimeId || "");
+  if (["claude", "codex"].includes(runtimeId) && input.installedRuntime == null) {
+    return resolveAIExecutionPlanImpl({
+      ...input,
+      installedRuntime: {
+        ...VERIFIED_INSTALLED_IDENTITY,
+        path: `/safe/${runtimeId}`,
+        realPath: `/safe/${runtimeId}`,
+        capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+      },
+    });
+  }
+  return resolveAIExecutionPlanImpl(input);
+}
+
+test("automatic policy keeps Paul strong and routes web research to the balanced model", () => {
+  const paul = resolveAIExecutionPlan({
+    operation: "paul.conversation",
+    runtimeId: "claude",
+  });
+  const search = resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId: "claude",
+  });
+
+  assert.deepEqual(AI_OPERATION_DEFAULTS["paul.conversation"], {
+    quality: "best",
+    reasoning: "medium",
+  });
+  assert.equal(paul.requested.quality, "automatic");
+  assert.equal(paul.resolved.quality, "best");
+  assert.equal(paul.resolved.model, "opus");
+  assert.equal(paul.resolved.effort, "medium");
+  assert.equal(search.resolved.quality, "balanced");
+  assert.equal(search.resolved.model, "sonnet");
+  assert.equal(search.resolved.effort, "medium");
+});
+
+test("saved product preferences override operation defaults for a new plan", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId: "codex",
+    preferences: { quality: "best", reasoning: "high" },
+  });
+
+  assert.equal(plan.requested.quality, "best");
+  assert.equal(plan.requested.reasoning, "high");
+  assert.equal(plan.resolved.quality, "best");
+  assert.equal(plan.resolved.reasoning, "high");
+  assert.equal(plan.resolved.model, "gpt-5.6-sol");
+  assert.equal(plan.resolved.effort, "high");
+});
+
+test("an explicit operation request wins over saved product preferences", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId: "claude",
+    quality: "balanced",
+    reasoning: "low",
+    preferences: { quality: "best", reasoning: "high" },
+  });
+
+  assert.equal(plan.requested.quality, "balanced");
+  assert.equal(plan.requested.reasoning, "low");
+  assert.equal(plan.resolved.model, "sonnet");
+  assert.equal(plan.resolved.effort, "low");
+});
+
+test("quality and reasoning preferences use provider-neutral product values", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "paul.conversation",
+    runtimeId: "codex",
+    quality: "faster",
+    reasoning: "high",
+  });
+
+  assert.equal(plan.requested.quality, "faster");
+  assert.equal(plan.requested.reasoning, "high");
+  assert.equal(plan.resolved.quality, "faster");
+  assert.equal(plan.resolved.model, "gpt-5.6-luna");
+  assert.equal(plan.resolved.effort, "high");
+  assert.equal(plan.runtimeId, "codex");
+  assert.equal(plan.fallback, null);
+});
+
+test("operation defaults protect consequential judgment and coaching from low effort", () => {
+  for (const operation of ["coach.deep", "application.judgment"]) {
+    const plan = resolveAIExecutionPlan({ operation, runtimeId: "codex" });
+    assert.equal(plan.resolved.quality, "best");
+    assert.equal(plan.resolved.effort, "high");
+  }
+  const drafting = resolveAIExecutionPlan({
+    operation: "application.drafting",
+    runtimeId: "claude",
+  });
+  assert.equal(drafting.resolved.model, "opus");
+  assert.equal(drafting.resolved.effort, "medium");
+  const communicationDrafting = resolveAIExecutionPlan({
+    operation: "communication.drafting",
+    runtimeId: "claude",
+  });
+  assert.equal(communicationDrafting.resolved.model, "opus");
+  assert.equal(communicationDrafting.resolved.effort, "medium");
+});
+
+test("provider mappings never cross Claude and Codex model families", () => {
+  const qualities = ["faster", "balanced", "best"];
+  const claude = qualities.map(
+    (quality) =>
+      resolveAIExecutionPlan({
+        operation: "paul.conversation",
+        runtimeId: "claude",
+        quality,
+      }).resolved.model
+  );
+  const codex = qualities.map(
+    (quality) =>
+      resolveAIExecutionPlan({
+        operation: "paul.conversation",
+        runtimeId: "codex",
+        quality,
+      }).resolved.model
+  );
+
+  assert.deepEqual(claude, ["haiku", "sonnet", "opus"]);
+  assert.deepEqual(codex, ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]);
+  assert.ok(claude.every((model) => !model.startsWith("gpt-")));
+  assert.ok(codex.every((model) => !model.startsWith("claude-")));
+});
+
+test("an unavailable mapped model falls back within the selected provider and records it", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "paul.conversation",
+    runtimeId: "codex",
+    quality: "best",
+    reasoning: "high",
+    capabilities: {
+      models: ["gpt-5.6-terra", "gpt-5.6-luna"],
+      effortLevels: ["low", "medium"],
+    },
+  });
+
+  assert.equal(plan.runtimeId, "codex");
+  assert.equal(plan.resolved.model, null);
+  assert.equal(plan.resolved.modelSource, "provider-default");
+  assert.equal(plan.resolved.effort, "medium");
+  assert.match(plan.fallback.reason, /model.*unavailable/i);
+  assert.match(plan.fallback.reason, /effort.*unsupported/i);
+  assert.equal(plan.fallback.fromModel, "gpt-5.6-sol");
+  assert.equal(plan.fallback.toModel, null);
+  assert.equal(plan.fallback.fromEffort, "high");
+  assert.equal(plan.fallback.toEffort, "medium");
+});
+
+test("Anthropic API routes use the Claude quality mapping while applying operation effort", () => {
+  for (const runtimeId of ["anthropic-api", "managed-anthropic"]) {
+    const plan = resolveAIExecutionPlan({
+      operation: "bounded.classification",
+      runtimeId,
+    });
+    assert.equal(plan.runtimeId, runtimeId);
+    assert.equal(plan.resolved.model, "haiku");
+    assert.equal(plan.resolved.modelSource, "alias");
+    assert.equal(plan.resolved.effort, "low");
+  }
+});
+
+test("execution plans are immutable receipts", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId: "claude",
+  });
+  assert.equal(Object.isFrozen(plan), true);
+  assert.equal(Object.isFrozen(plan.requested), true);
+  assert.equal(Object.isFrozen(plan.resolved), true);
+  assert.throws(() => {
+    plan.resolved.model = "haiku";
+  }, TypeError);
+});
+
+test("installed-runtime plans persist only bounded executable and capability evidence", () => {
+  const plan = resolveAIExecutionPlan({
+    operation: "research.web",
+    runtimeId: "codex",
+    installedRuntime: {
+      id: "codex",
+      name: "Codex",
+      ...VERIFIED_INSTALLED_IDENTITY,
+      available: true,
+      warning: "not durable",
+      capabilities: {
+        ...VERIFIED_INSTALLED_CAPABILITIES,
+        taskTools: true,
+        research: true,
+        invented: true,
+      },
+    },
+  });
+
+  assert.deepEqual(plan.installedRuntime, {
+    ...VERIFIED_INSTALLED_IDENTITY,
+    capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+  });
+  assert.equal(Object.isFrozen(plan.installedRuntime), true);
+  assert.equal(Object.isFrozen(plan.installedRuntime.capabilities), true);
+});
+
+test("installed-runtime evidence is rejected when its executable or runtime provenance is invalid", () => {
+  assert.throws(
+    () =>
+      resolveAIExecutionPlan({
+        operation: "research.web",
+        runtimeId: "codex",
+        installedRuntime: {
+          id: "claude",
+          ...VERIFIED_INSTALLED_IDENTITY,
+          capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+        },
+      }),
+    { code: "AI_POLICY_INVALID" }
+  );
+  assert.throws(
+    () =>
+      assertAIExecutionPlanForRuntime(
+        {
+          operation: "research.web",
+          runtimeId: "codex",
+          installedRuntime: {
+            ...VERIFIED_INSTALLED_IDENTITY,
+            capabilities: VERIFIED_INSTALLED_CAPABILITIES,
+            injected: true,
+          },
+        },
+        "codex"
+      ),
+    { code: "AI_POLICY_INVALID" }
+  );
+});
+
+test("installed-runtime execution plans fail closed when frozen executable evidence is missing", () => {
+  assert.throws(
+    () =>
+      assertAIExecutionPlanForRuntime(
+        {
+          operation: "research.web",
+          runtimeId: "codex",
+          resolved: { model: "gpt-5.6-terra", effort: "medium" },
+        },
+        "codex"
+      ),
+    (error) =>
+      error?.code === "AI_POLICY_INVALID" &&
+      /installed-runtime evidence is required/i.test(error.message)
+  );
+  assert.throws(
+    () => resolveAIExecutionPlanImpl({ operation: "research.web", runtimeId: "codex" }),
+    (error) =>
+      error?.code === "AI_POLICY_INVALID" &&
+      /installed-runtime evidence is required/i.test(error.message)
+  );
+});
+
+test("invalid policy values fail before a provider is invoked", () => {
+  assert.throws(
+    () =>
+      resolveAIExecutionPlan({
+        operation: "research.web",
+        runtimeId: "codex",
+        quality: "cheap",
+      }),
+    { code: "AI_POLICY_INVALID" }
+  );
+  assert.throws(() => resolveAIExecutionPlan({ operation: "unknown", runtimeId: "claude" }), {
+    code: "AI_POLICY_INVALID",
+  });
+});

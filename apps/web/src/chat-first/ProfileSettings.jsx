@@ -3,6 +3,54 @@ import { ArrowLeftIcon } from "./chat-first-icons.jsx";
 import { runtimeIsSupported, runtimePresentation } from "./first-run-controller.js";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
 
+const SETTINGS_DIALOG_FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const SETTINGS_DIALOG_RETURN_FOCUS = Symbol("settings-dialog-return-focus");
+
+export function restoreSettingsDialogFocus(element, elementId = element?.id) {
+  const document = globalThis.document;
+  const target =
+    element?.isConnected === true
+      ? element
+      : elementId
+        ? document?.getElementById?.(elementId)
+        : null;
+  const openDialog = document?.querySelector?.('[role="dialog"]');
+  if (openDialog && !openDialog.contains?.(target)) return;
+  target?.focus?.();
+}
+
+export function handleSettingsDialogKeyDown({
+  event,
+  dialog,
+  activeElement = globalThis.document?.activeElement,
+  onClose,
+}) {
+  if (event?.key === "Escape") {
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+    onClose?.();
+    return;
+  }
+  if (event?.key !== "Tab" || !dialog) return;
+  const focusable = Array.from(dialog.querySelectorAll?.(SETTINGS_DIALOG_FOCUSABLE) || []);
+  if (!focusable.length) {
+    event.preventDefault?.();
+    dialog.focus?.();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && (!dialog.contains(activeElement) || activeElement === first)) {
+    event.preventDefault?.();
+    last.focus?.();
+  } else if (!event.shiftKey && (!dialog.contains(activeElement) || activeElement === last)) {
+    event.preventDefault?.();
+    first.focus?.();
+  }
+}
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -57,7 +105,14 @@ function ProfileGrid({ agentName, profile = {}, onEditSection, onOpenFiles }) {
         <div className="cf-profile__comp">
           <div>
             <strong>{valueOrFallback(compensation?.floor, "Not set")}</strong>
-            <span>floor · roles under this never reach you</span>
+            <span>guaranteed base floor</span>
+          </div>
+          <div>
+            <strong>{valueOrFallback(compensation?.annualEarningsFloor, "Not set")}</strong>
+            <span>
+              yearly cash earnings · includes tips, commission, and cash bonuses; excludes equity
+              and benefits
+            </span>
           </div>
           <div>
             <strong>{valueOrFallback(compensation?.target, "Not set")}</strong>
@@ -153,18 +208,21 @@ function SettingsView({
   agentName,
   desktopUpdate = null,
   engine = {},
+  aiPreferences = { quality: "automatic", reasoning: "automatic" },
+  aiPreferencesBusy = false,
+  aiPreferencesStatus = "",
   permissions = [],
   sources = {},
   publicSyncPreference = { enabled: true, source: "default", updatedAt: null },
   publicSyncBusy = false,
   onPermissionChange,
+  onAiPreferenceChange,
   onPublicSyncChange,
   onChangeEngine,
   onShowTechnicalDetails,
   onAddSource,
   onExportData,
 }) {
-  const blockedCount = Number(sources?.blockedCount) || 0;
   return (
     <section className="cf-settings" aria-label="App settings">
       <article className="cf-settings__card">
@@ -194,6 +252,13 @@ function SettingsView({
           </button>
         </div>
       </article>
+      <AIPreferencesCard
+        agentName={agentName}
+        preferences={aiPreferences}
+        busy={aiPreferencesBusy}
+        status={aiPreferencesStatus}
+        onChange={onAiPreferenceChange}
+      />
       <article className="cf-settings__card">
         <div className="cf-settings__eyebrow">WHAT {agentName.toUpperCase()} MAY DO ON HIS OWN</div>
         {safeArray(permissions).map((permission) => (
@@ -230,26 +295,16 @@ function SettingsView({
       <article className="cf-settings__card">
         <SectionHeading
           label="JOB SOURCES"
-          actionLabel="Add a niche board"
+          actionLabel="Add a job source"
           onAction={() => onAddSource?.()}
         />
         <div className="cf-settings__source-copy">
-          <strong>
-            Every board {agentName} can read stays on. You never curate, so you never miss a job.
-          </strong>
+          <strong>Saved sources run when you search.</strong>
           <span>
-            {Number(sources?.scannedCount) || 0} scanned automatically ·{" "}
+            {Number(sources?.scannedCount) || 0} searched recently ·{" "}
             {Number(sources?.pinnedCount) || 0} pinned for your targets
             {sources?.lastSweep ? ` · last sweep ${sources.lastSweep}` : ""}
           </span>
-          {blockedCount > 0 ? (
-            <span>
-              ⚠ {blockedCount} {blockedCount === 1 ? "board" : "boards"} blocked by a bot wall.
-              Retrying, {agentName} will tell you if it stays dead.
-            </span>
-          ) : (
-            <span>All readable boards are healthy.</span>
-          )}
         </div>
       </article>
       <article className="cf-settings__card cf-settings__public-sync">
@@ -361,13 +416,158 @@ function SettingsView({
   );
 }
 
+const QUALITY_OPTIONS = Object.freeze([
+  {
+    value: "automatic",
+    label: "Automatic (recommended)",
+    description:
+      "Uses the best fit for each task. Paul stays strong; searches and small helpers stay efficient.",
+  },
+  { value: "faster", label: "Faster", description: "Quicker replies with a lighter model." },
+  {
+    value: "balanced",
+    label: "Balanced",
+    description: "A middle ground for speed and depth.",
+  },
+  {
+    value: "best",
+    label: "Best",
+    description: "Uses the strongest available model for Paul.",
+  },
+]);
+
+const REASONING_OPTIONS = Object.freeze([
+  {
+    value: "automatic",
+    label: "Automatic (recommended)",
+    description: "CareerRat chooses by task.",
+  },
+  { value: "low", label: "Low", description: "Spends less time reasoning before replying." },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Takes a little more time to reason through the response.",
+  },
+  {
+    value: "high",
+    label: "High",
+    description: "Spends more time reasoning before replying.",
+  },
+]);
+
+function AIPreferenceGroup({ id, legend, field, value, options, busy, onChange }) {
+  return (
+    <fieldset className="cf-settings__ai-group" aria-labelledby={`${id}-legend`}>
+      <legend id={`${id}-legend`}>{legend}</legend>
+      <div className="cf-settings__ai-options">
+        {options.map((option) => {
+          const inputId = `${id}-${option.value}`;
+          const descriptionId = `${inputId}-description`;
+          return (
+            <label className="cf-settings__ai-option" htmlFor={inputId} key={option.value}>
+              <input
+                id={inputId}
+                name={id}
+                type="radio"
+                value={option.value}
+                checked={value === option.value}
+                disabled={busy}
+                aria-describedby={descriptionId}
+                onChange={(event) => onChange?.(field, event.target.value)}
+              />
+              <span>
+                <strong>{option.label}</strong>
+                <small id={descriptionId}>{option.description}</small>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+function AIPreferencesCard({ agentName, preferences, busy, status, onChange }) {
+  const savedStatus = status || (preferences?.source === "saved" ? "Saved on this computer" : "");
+  return (
+    <article className="cf-settings__card cf-settings__ai-card">
+      <div className="cf-settings__ai-heading">
+        <span className="cf-settings__eyebrow">HOW {agentName.toUpperCase()} THINKS</span>
+        {savedStatus ? (
+          <span className="cf-settings__ai-status" role="status" aria-live="polite">
+            {savedStatus}
+          </span>
+        ) : null}
+      </div>
+      <p className="cf-settings__note">
+        Changes apply to new replies and tasks. Work already running keeps the setup it started
+        with.
+      </p>
+      <AIPreferenceGroup
+        id="paul-quality"
+        legend={`${agentName} quality`}
+        field="quality"
+        value={preferences?.quality || "automatic"}
+        options={QUALITY_OPTIONS}
+        busy={busy}
+        onChange={onChange}
+      />
+      <AIPreferenceGroup
+        id="thinking-depth"
+        legend="Thinking depth"
+        field="reasoning"
+        value={preferences?.reasoning || "automatic"}
+        options={REASONING_OPTIONS}
+        busy={busy}
+        onChange={onChange}
+      />
+    </article>
+  );
+}
+
 function SettingsDialog({ title, children, onClose }) {
+  const focusBeforeRender = globalThis.document?.activeElement || null;
+  let dialogNode = null;
+  const close = () => onClose?.();
   return (
     <div className="cf-settings-dialog__cover">
-      <section className="cf-settings-dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <section
+        className="cf-settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        ref={(node) => {
+          if (node) {
+            dialogNode = node;
+            if (!node[SETTINGS_DIALOG_RETURN_FOCUS]) {
+              node[SETTINGS_DIALOG_RETURN_FOCUS] = {
+                element: focusBeforeRender,
+                id: focusBeforeRender?.id || null,
+              };
+              globalThis.queueMicrotask?.(() => {
+                if (!node.isConnected) return;
+                if (node.contains(globalThis.document?.activeElement)) return;
+                const initial = node.querySelector?.(SETTINGS_DIALOG_FOCUSABLE);
+                (initial || node).focus?.();
+              });
+            }
+            return;
+          }
+          const closedDialog = dialogNode;
+          globalThis.queueMicrotask?.(() => {
+            if (closedDialog?.isConnected) return;
+            const previous = closedDialog?.[SETTINGS_DIALOG_RETURN_FOCUS];
+            restoreSettingsDialogFocus(previous?.element, previous?.id);
+          });
+        }}
+        onKeyDown={(event) =>
+          handleSettingsDialogKeyDown({ event, dialog: event.currentTarget, onClose: close })
+        }
+      >
         <header>
           <strong>{title}</strong>
-          <button type="button" aria-label={`Close ${title}`} onClick={onClose}>
+          <button type="button" aria-label={`Close ${title}`} onClick={close}>
             ×
           </button>
         </header>
@@ -413,7 +613,9 @@ function EnginePicker({
                 <div>
                   <strong>{choice.name || "AI engine"}</strong>
                   <span>{runtimeStatus(choice)}</span>
-                  {choice.capabilityReason ? <span>{choice.capabilityReason}</span> : null}
+                  {choice.probeMessage || choice.capabilityReason ? (
+                    <span>{choice.probeMessage || choice.capabilityReason}</span>
+                  ) : null}
                   {signingIn ? (
                     <span role="status">Finish sign-in in your browser, then check again.</span>
                   ) : null}
@@ -432,6 +634,10 @@ function EnginePicker({
               ) : choice.action === "start_sign_in" ? (
                 <button type="button" disabled={busy} onClick={() => onConnect?.(choice.id)}>
                   Sign in
+                </button>
+              ) : choice.action === "retry" ? (
+                <button type="button" disabled={busy} onClick={() => onRetry?.(choice.id)}>
+                  {choice.actionLabel || "Try again"}
                 </button>
               ) : choice.selectable === false ? null : (
                 <button type="button" disabled={busy} onClick={() => onRetry?.(choice.id)}>
@@ -456,7 +662,7 @@ function EnginePicker({
 
 function SourceDialog({ value, busy, onChange, onSubmit, onClose }) {
   return (
-    <SettingsDialog title="Add a niche board" onClose={onClose}>
+    <SettingsDialog title="Add a job source" onClose={onClose}>
       <form
         className="cf-settings-dialog__form"
         onSubmit={(event) => {
@@ -464,9 +670,9 @@ function SourceDialog({ value, busy, onChange, onSubmit, onClose }) {
           onSubmit?.();
         }}
       >
-        <label htmlFor="cf-niche-board-url">Board URL</label>
+        <label htmlFor="cf-job-source-url">Board or saved-search URL</label>
         <input
-          id="cf-niche-board-url"
+          id="cf-job-source-url"
           type="url"
           required
           value={value}
@@ -478,7 +684,7 @@ function SourceDialog({ value, busy, onChange, onSubmit, onClose }) {
             Cancel
           </button>
           <button type="submit" disabled={busy || !String(value || "").trim()}>
-            Add board
+            Add source
           </button>
         </div>
       </form>
@@ -705,6 +911,7 @@ function ProfileSectionEditor({
                   onChange={(event) => onChange?.(field.id, event.target.value)}
                 />
               )}
+              {field.help ? <small>{field.help}</small> : null}
             </label>
           );
         })}
@@ -731,6 +938,9 @@ export function ProfileSettings({
   activeTab = "profile",
   profile = {},
   engine = {},
+  aiPreferences = { quality: "automatic", reasoning: "automatic" },
+  aiPreferencesBusy = false,
+  aiPreferencesStatus = "",
   browser = {},
   permissions = [],
   sources = {},
@@ -742,6 +952,7 @@ export function ProfileSettings({
   onEditSection,
   onOpenFiles,
   onPermissionChange,
+  onAiPreferenceChange,
   onPublicSyncChange,
   onChangeEngine,
   onShowTechnicalDetails,
@@ -768,12 +979,36 @@ export function ProfileSettings({
   profileEditor = null,
   editorValues = {},
   editorBusy = false,
+  discardEditorOpen = false,
   onEditorChange,
   onSaveEditor,
   onAskAgent,
   onCloseEditor,
+  onKeepEditing,
+  onDiscardEditor,
 }) {
   const settingsActive = activeTab === "settings" || activeTab === "app";
+  const selectedTab = settingsActive ? "settings" : "profile";
+
+  function handleTabKeyDown(event) {
+    const tabs = ["profile", "settings"];
+    const currentIndex = tabs.indexOf(selectedTab);
+    let nextTab = null;
+    if (["ArrowLeft", "ArrowUp"].includes(event.key)) {
+      nextTab = tabs[(currentIndex - 1 + tabs.length) % tabs.length];
+    }
+    if (["ArrowRight", "ArrowDown"].includes(event.key)) {
+      nextTab = tabs[(currentIndex + 1) % tabs.length];
+    }
+    if (event.key === "Home") nextTab = tabs[0];
+    if (event.key === "End") nextTab = tabs.at(-1);
+    if (!nextTab) return;
+    event.preventDefault();
+    if (nextTab === selectedTab) return;
+    onTabChange?.(nextTab);
+    globalThis.document?.getElementById?.(`profile-settings-tab-${nextTab}`)?.focus?.();
+  }
+
   return (
     <div className="cf-profile">
       <header className="cf-profile__header">
@@ -781,43 +1016,68 @@ export function ProfileSettings({
           <ArrowLeftIcon /> Back
         </button>
         <strong className="cf-profile__brand">CareerRat</strong>
-        <nav className="cf-profile__tabs" aria-label="Profile and settings">
+        <div
+          className="cf-profile__tabs"
+          aria-label="Profile and settings"
+          role="tablist"
+          aria-orientation="horizontal"
+        >
           <button
+            id="profile-settings-tab-profile"
             type="button"
-            aria-current={!settingsActive ? "page" : undefined}
+            role="tab"
+            aria-selected={!settingsActive}
+            aria-controls="profile-settings-panel-profile"
+            tabIndex={!settingsActive ? 0 : -1}
             onClick={() => onTabChange?.("profile")}
+            onKeyDown={handleTabKeyDown}
           >
             What {agentName} knows
           </button>
           <button
+            id="profile-settings-tab-settings"
             type="button"
-            aria-current={settingsActive ? "page" : undefined}
+            role="tab"
+            aria-selected={settingsActive}
+            aria-controls="profile-settings-panel-settings"
+            tabIndex={settingsActive ? 0 : -1}
             onClick={() => onTabChange?.("settings")}
+            onKeyDown={handleTabKeyDown}
           >
             App settings
           </button>
-        </nav>
+        </div>
         <span className="cf-profile__hint">
           edit anything here. Or just tell {agentName} what changed
         </span>
       </header>
-      {settingsActive
-        ? SettingsView({
-            agentName,
-            desktopUpdate,
-            engine,
-            permissions,
-            sources,
-            publicSyncPreference,
-            publicSyncBusy,
-            onPermissionChange,
-            onPublicSyncChange,
-            onChangeEngine,
-            onShowTechnicalDetails,
-            onAddSource,
-            onExportData,
-          })
-        : ProfileGrid({ agentName, profile, onEditSection, onOpenFiles })}
+      <div
+        id={`profile-settings-panel-${selectedTab}`}
+        role="tabpanel"
+        aria-labelledby={`profile-settings-tab-${selectedTab}`}
+      >
+        {settingsActive
+          ? SettingsView({
+              agentName,
+              desktopUpdate,
+              engine,
+              aiPreferences,
+              aiPreferencesBusy,
+              aiPreferencesStatus,
+              permissions,
+              sources,
+              publicSyncPreference,
+              publicSyncBusy,
+              onPermissionChange,
+              onAiPreferenceChange,
+              onPublicSyncChange,
+              onChangeEngine,
+              onShowTechnicalDetails,
+              onAddSource,
+              onExportData,
+            })
+          : ProfileGrid({ agentName, profile, onEditSection, onOpenFiles })}
+      </div>
       {enginePickerOpen ? (
         <EnginePicker
           engine={engine}
@@ -849,7 +1109,7 @@ export function ProfileSettings({
           onClose={onCloseTechnicalDetails}
         />
       ) : null}
-      {profileEditor ? (
+      {profileEditor && !discardEditorOpen ? (
         <ProfileSectionEditor
           agentName={agentName}
           editor={profileEditor}
@@ -860,6 +1120,21 @@ export function ProfileSettings({
           onAskAgent={onAskAgent}
           onClose={onCloseEditor}
         />
+      ) : null}
+      {discardEditorOpen ? (
+        <SettingsDialog title="Discard unsaved changes?" onClose={onKeepEditing}>
+          <p className="cf-settings-dialog__intro">
+            Your edits haven't been saved yet. Keep editing, or discard them and continue.
+          </p>
+          <div className="cf-settings-dialog__actions">
+            <button type="button" onClick={onKeepEditing}>
+              Keep editing
+            </button>
+            <button type="button" onClick={onDiscardEditor}>
+              Discard changes
+            </button>
+          </div>
+        </SettingsDialog>
       ) : null}
     </div>
   );

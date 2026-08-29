@@ -35,7 +35,17 @@ export const packetGateAiVerdictSchema = {
     compensation: {
       type: "object",
       additionalProperties: false,
-      required: ["status", "currency", "minBase", "maxBase", "source", "summary"],
+      required: [
+        "status",
+        "currency",
+        "minBase",
+        "maxBase",
+        "minAnnualEarnings",
+        "maxAnnualEarnings",
+        "basis",
+        "source",
+        "summary",
+      ],
       properties: {
         status: {
           type: "string",
@@ -44,6 +54,12 @@ export const packetGateAiVerdictSchema = {
         currency: stringOrNull,
         minBase: { type: ["number", "null"], minimum: 0 },
         maxBase: { type: ["number", "null"], minimum: 0 },
+        minAnnualEarnings: { type: ["number", "null"], minimum: 0 },
+        maxAnnualEarnings: { type: ["number", "null"], minimum: 0 },
+        basis: {
+          type: ["string", "null"],
+          enum: ["base", "annual-earnings", null],
+        },
         source: {
           type: "string",
           enum: ["job-description", "market", "unknown"],
@@ -121,6 +137,31 @@ export const packetManifestSchema = {
     uploadReady: { type: "boolean" },
     status: { type: "string" },
     gapCount: { type: "integer", minimum: 0 },
+    provenance: {
+      type: "object",
+      additionalProperties: false,
+      required: ["jd", "evaluation"],
+      properties: {
+        jd: {
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "sha256"],
+          properties: {
+            path: workspacePath,
+            sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+          },
+        },
+        evaluation: {
+          type: "object",
+          additionalProperties: false,
+          required: ["evaluatedAt", "sha256"],
+          properties: {
+            evaluatedAt: { type: "string" },
+            sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+          },
+        },
+      },
+    },
     artifacts: {
       type: "object",
       additionalProperties: false,
@@ -158,6 +199,7 @@ export const packetManifestSchema = {
         answerableIds: { type: "array", items: { type: "string" } },
         excludedIds: { type: "array", items: { type: "string" } },
         demographicSectionPresent: { type: "boolean" },
+        answerable: { type: "array", items: packetQuestionSchema },
       },
     },
     answerLineage: {

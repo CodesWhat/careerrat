@@ -14,6 +14,11 @@ first.
 The agent is the runtime; the skills are the how-to. When in doubt about *how* to
 do something, open the owning skill and follow it — don't improvise the procedure.
 
+`intake-extract` and `resume-extract` are backend-only helpers invoked by the
+Universal Intake and onboarding upload routes. They are shipped skills, but they
+are not user-intent destinations; route the user's goal to the owning intake or
+onboarding flow instead of asking them to invoke an extraction helper.
+
 Teach as you go. When a skill, feature, or tracker concept first becomes relevant,
 explain it in a line or two so the user learns the system by using it — progressive
 disclosure, not a front-loaded manual.
@@ -105,6 +110,9 @@ task, and `workspace/tracker.json`, then recommend and run the owning skill.
   company ATS boards are missing, run `discover-companies` before the sweep.
 - If a sourced role is high-fit or needs a body read, run `evaluate-job`, then
   `apply-job` only after a KEEP verdict.
+- If an evaluated job is at REVIEW with named fit gaps and the user wants to
+  close them, run `coach-gaps`. It must stay evidence-grounded and may conclude
+  that there is no honest close path yet.
 - If an interview is scheduled or an invite arrives, run `interview-prep`; if the
   scheduling thread itself needs times or confirmation, run `schedule-meeting`.
 - If a recruiter thread needs a reply, follow-up, thank-you, or negotiation
@@ -978,8 +986,9 @@ The Command Center's marquee panel is the **Activity Pulse** — a reverse-chron
 "what the agent did + what happened" timeline. It renders from an append-only feed at
 `workspace/activity.jsonl` (gitignored runtime data), so it must reflect real work, not
 the demo data it shipped with. **Every skill that makes a tracker-visible change logs one
-event at the end of that action** — the same "the writer records it" discipline that makes
-`track-outcomes` the only writer of status transitions.
+event at the end of that action**. `track-outcomes` owns candidate-reported outcome
+transitions; CareerRat's native status sync uses its canonical atomic DB verb for verified
+portal advances and logs the matching event in that transaction.
 
 - **Mechanism — use the `activity` helper, don't hand-write JSONL.** Skills call
   `careerrat activity append --type <type> --title "…"` rather than editing the feed in
@@ -1002,7 +1011,8 @@ event at the end of that action** — the same "the writer records it" disciplin
   | `apply-job` | `applied` | agent | after STEP 9 writes the application row and confirms the live refresh |
   | `email-comms` | `drafted` (awaiting send) / `message` (sent) | agent | after the message is persisted to `communications[].messages[]` |
   | `schedule-meeting` | `drafted` (needs-user) | agent | after the scheduling reply is drafted + scheduling state written (a booked meeting's stage change is handed to `track-outcomes` / `interview-prep`, which log it) |
-  | `track-outcomes` | `status_change` / `interview` / `offer` / `failure` | world | after the outcome is recorded (it is the only writer of status transitions, including those handed up by `sync-status`) |
+  | `track-outcomes` | `status_change` / `interview` / `offer` / `failure` | world | after a candidate-reported or terminal/external-agent outcome is recorded, including its learning and follow-up work |
+  | `sync-status` | `status_change` | world | after the native in-app portal check atomically applies a verified `autoApplicable` transition; terminal/external-agent runs hand confirmed transitions to `track-outcomes` instead |
   | `ingest-mail` / `ingest-messages` | `message` | world | one event per inbound thread captured into `communications[]` |
   | `research-company` / `research-comp` / `research-boards` | `research` | agent | after `careerrat research record --write` |
   | `discover-companies` | `research` | agent | after companies are added to tracked-company source config through `careerrat companies` — one summary event ("N companies added to track") |
@@ -1013,8 +1023,11 @@ event at the end of that action** — the same "the writer records it" disciplin
   | `relationship-sourcing` | `system` | agent | after review leads are appended to `relationshipLeads[]`; set `--needs-user` because candidate review is required |
   | `calendar-sync` | `system` | agent | after a confirmed provider write is appended to `calendarWrites[]` |
 
-  `sync-status` writes no tracker state itself — it hands transitions to `track-outcomes`,
-  which logs them, so it does **not** log separately.
+  A terminal or external-agent `sync-status` run writes no tracker state itself; it hands
+  confirmed transitions to `track-outcomes`, which logs them. The native in-app workflow
+  uses the status-sync DB verb, which updates the application, clears matching portal CTAs
+  and drafts, logs activity, and refreshes analytics atomically. It does not replace
+  `track-outcomes` for candidate-reported context, learning, or follow-up coaching.
 - **Actor semantics.** `agent` = CareerRat did it (sourced, evaluated, tailored, applied,
   drafted, researched). `world` = something arrived or happened (a reply, a rejection, an
   interview invite, an offer). `--needs-user` is an audit annotation on the history record
@@ -1181,12 +1194,13 @@ asking the user to re-provide conversation history.
 
 ## Browser Automation Contract
 
-Authenticated, logged-in browser automation (status polling, authenticated search,
-in-platform messaging, supervised application preparation, LinkedIn profile optimize/apply,
-session webmail access, relationship sourcing, and calendar provider sync) is
+Authenticated, logged-in browser automation (status polling, in-platform messaging,
+supervised application preparation, LinkedIn profile optimize/apply, session webmail
+access, relationship sourcing, and calendar provider sync) is
 **opt-in and defaults OFF**. No
-`candidate/automation.yml` means **nothing is automated** — that is the safe,
-intended state. The three-layer substrate (static `WebFetch` → headless capture →
+`candidate/automation.yml` means **none of those private-account actions run**.
+Saved job-source login follows the separate point-of-use flow below. The
+three-layer substrate (static `WebFetch` → headless capture →
 the live "session browser") is mapped in `docs/BROWSER.md`; this contract governs
 the authenticated, agent-driven uses of Layer 3.
 
@@ -1279,15 +1293,22 @@ a guess at unsupported years/metrics/dates/tool depth, a security clearance or l
 claim not in evidence, private current compensation, a contradiction of `honesty.yml`,
 or a materially new disclosure not captured during onboarding.
 
-**Phased rollout.** Each capability becomes usable when its skill ships (M12 Phase 1–4):
+**Job-source login is point-of-use, not an automation permission.** A pasted
+LinkedIn, Indeed, Glassdoor, or other login-backed search URL becomes a disabled
+browser source. When a sweep reaches it, ask one plain question in chat: “Do you
+want to log into <site> so I can use it?” Yes enables only that source and opens its
+exact saved URL in the visible CareerRat browser. No leaves it disabled and continues
+with every other source. Accept Yes or No as buttons or typed text. Preserve the
+pending choice and sweep state across navigation. Never send the user to Settings or
+require setup-mode, capability, platform, consent, or terms-of-service switches for
+job search. CAPTCHA and 2FA remain visible user stops.
+
+**Phased rollout.** Each gated capability becomes usable when its skill ships (M12 Phase 1–4):
 `status_polling` (read-only status) — **shipped as the `sync-status` skill**, which polls
 ATS dashboards and hands transitions to `track-outcomes` (the owner of canonical
 tracker status transitions; DB mode writes via `careerrat data`, legacy mode writes tracker JSON);
-`authenticated_search` — **wired into `search-jobs` / `setup-searches`**: a pasted
-LinkedIn/Indeed/Glassdoor search URL becomes a `source_type:"browser"`, `auth:true`,
-`enabled:false` source bound to its `platform`, and `search-jobs` runs it only when both the
-source is enabled and `authenticated_search` is `allowed` for that platform; `messaging` — **shipped as the
-`ingest-messages` skill** (the browser analog of `ingest-mail`: reads LinkedIn/Wellfound DMs
+`messaging` — **shipped as the `ingest-messages` skill** (the browser analog of
+`ingest-mail`: reads LinkedIn/Wellfound DMs
 into `communications[]` under the strongest consent gate, with reply drafts going to
 `email-comms`); and `authenticated_apply_preparation` — **shipped as supervised LinkedIn Easy Apply
 preparation in `apply-job` STEP 7b** (fill and advance the modal, always stop before the final

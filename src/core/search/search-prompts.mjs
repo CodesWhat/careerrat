@@ -253,9 +253,16 @@ export function buildSearchPromptContext({
     compensation.minimum_base > 0
       ? compensation.minimum_base
       : null;
-  if (minimumBase) {
+  const minimumAnnualEarnings =
+    typeof compensation.minimum_annual_earnings === "number" &&
+    Number.isFinite(compensation.minimum_annual_earnings) &&
+    compensation.minimum_annual_earnings > 0
+      ? compensation.minimum_annual_earnings
+      : null;
+  if (minimumBase || minimumAnnualEarnings) {
     context.compensation_floor = {
-      minimum_base: minimumBase,
+      ...(minimumBase ? { minimum_base: minimumBase } : {}),
+      ...(minimumAnnualEarnings ? { minimum_annual_earnings: minimumAnnualEarnings } : {}),
       currency: trimString(compensation.currency) || "USD",
     };
   }
@@ -297,6 +304,8 @@ function promptInstructions({ context, minPrompts, maxPrompts }) {
     "Derive every detail in the prompts — role titles, seniority, location posture, compensation floor, work authorization — ONLY from the candidate data provided below. Never invent or assume a role, location, salary, or company that isn't present in that data.",
     "Each prompt must be self-contained (useful on its own if pasted alone), written as natural plain-English sentences (no JSON, no bullet lists, no field labels inside the prompt text), and cover a complementary angle on the candidate's targeting — for example one prompt per distinct role lane, a seniority-adjacent variant, or a location/remote-constrained variant, as the underlying data actually supports.",
     "If the candidate data doesn't support a particular angle (e.g. no location noted, no comp floor set), skip that angle rather than fabricating one.",
+    "When candidate.compensation_floor.minimum_base is present, minimum_base is a hard annual base-salary floor. Every generated prompt must describe it only as annual base salary. Reject a posted base-salary range only when its maximum is below minimum_base. When a posted range overlaps minimum_base, keep it for review. Tips, commissions, bonuses, equity, OTE, or total compensation do not count toward this base-salary floor. If compensation is not posted, keep it unverified rather than treating variable compensation as proof.",
+    "When candidate.compensation_floor.minimum_annual_earnings is present, it means expected annual cash earnings. It includes wages, tips, commissions, and recurring cash bonuses; it does not include equity or benefits. Guaranteed base pay can clear this floor, and an explicit annual-earnings or total-cash range can clear it. Reject only when an explicit comparable range has a maximum below the floor. An overlapping range stays in review, and unknown or unposted earnings stay unverified.",
     "Location scope is exact: remote_scope worldwide applies only to fully remote roles. home-country limits remote roles to the candidate's home country. Hybrid and on-site roles always stay limited to the saved home and relocation markets, even when remote_scope is worldwide. When max_office_days_per_week is present, do not return a role that explicitly requires more office days.",
     "Do not mention CareerRat, JSON, or these instructions inside the prompt text itself.",
     JSON.stringify({ candidate: context }, null, 2),
@@ -314,8 +323,16 @@ function normalizePromptTexts(prompts) {
 // and the onboarding best-effort hook) pass the result to saveSearchPrompts.
 // ---------------------------------------------------------------------------
 
-export async function generateSearchPrompts({ repoRoot, env = process.env, call, config } = {}) {
-  const context = buildSearchPromptContext({ repoRoot, env, config });
+export async function generateSearchPrompts({
+  repoRoot,
+  env = process.env,
+  call,
+  config,
+  context: frozenContext,
+  executionPlan,
+  signal,
+} = {}) {
+  const context = frozenContext || buildSearchPromptContext({ repoRoot, env, config });
   if (!Object.keys(context).length) {
     return makeBoundedAIEnvelope({
       ok: false,
@@ -342,6 +359,8 @@ export async function generateSearchPrompts({ repoRoot, env = process.env, call,
     root: repoRoot,
     env,
     call,
+    executionPlan,
+    signal,
     system:
       "You generate AI job-search prompt JSON for CareerRat's search-jobs route. Return only JSON matching the supplied schema — no prose outside the JSON.",
     messages: [

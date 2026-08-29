@@ -30,6 +30,7 @@ export function cleanAgentCopy(value) {
   if (!text) return "";
   text = unwrapStructuredCopy(text).text;
   text = stripChatConfirmationBlocks(text);
+  text = text.replace(/```careerrat:answer[ \t]*\r?\n[\s\S]*?\r?\n```/gi, "");
   text = text.replace(/```json\s*\n[\s\S]*?\n```/gi, "");
   text = text
     .replace(/\r\n?/g, "\n")

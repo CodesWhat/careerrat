@@ -8,8 +8,8 @@
 // driving stays agent-side (snapshot/read each step, zero hardcoded selectors).
 //
 // Provider preference (see AGENTS.md → Browser Automation Contract):
-//   1. auto       — use Orca in an Orca workspace, bundled Playwright in the
-//                   packaged desktop app, otherwise the compatible extension.
+//   1. auto       — use Orca in an Orca workspace, otherwise use CareerRat's
+//                   app-owned Playwright browser.
 //   2. extension  — Chrome extension (Claude-in-Chrome / Codex), which holds the
 //                   user's logins + password store.
 //   3. orca       — Orca's supervised embedded browser.
@@ -18,8 +18,9 @@
 
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { join } from "node:path";
+
+import { privateDataRoot } from "../paths/workspace.mjs";
 
 const requireFromSession = createRequire(import.meta.url);
 
@@ -76,10 +77,10 @@ export function detectPlaywrightTooling(dependencies = {}) {
 
 // `automatedApply` marks whether `apply-job`'s scripted/headless apply path
 // (createConfiguredApplyExecutor, src/core/apply/apply-executor-factory.mjs) can
-// drive this provider. `extension` is agent-driven, turn-by-turn only — it still
-// works for interactive, in-the-loop browsing (skills reading pages, agent-driven
-// apply while an agent is live) but has no callable surface for a headless script,
-// so automatic apply on this provider is not available yet.
+// drive this provider. `extension` is agent-driven, turn-by-turn only and has no
+// callable surface for a headless script. Orca is callable, but its browser CLI
+// cannot intercept and pin each request before it leaves the browser. Both remain
+// available for supervised browsing while automatic apply stays unavailable.
 export const PROVIDERS = {
   auto: {
     id: "auto",
@@ -103,7 +104,7 @@ export const PROVIDERS = {
     preferred: false,
     needs: "CareerRat running inside an Orca workspace with its browser available",
     storesCreds: false,
-    automatedApply: true,
+    automatedApply: false,
   },
   playwright: {
     id: "playwright",
@@ -115,35 +116,34 @@ export const PROVIDERS = {
   },
 };
 
-// The persistent-profile root must match scripts/capture-board-snapshot.mjs so the
-// session browser and the headless capture path share one set of logged-in profiles.
-export function defaultProfileRoot() {
-  return join(homedir(), ".careerrat", "board-profiles");
+// The persistent-profile root must match the capture scripts so every browser
+// path for one CareerRat workspace reuses its login state without sharing that
+// authenticated state with another workspace on the same OS account.
+export function defaultProfileRoot({ repoRoot, env = process.env } = {}) {
+  return join(privateDataRoot({ repoRoot, env }), "board-profiles");
 }
 
-// Per-provider/per-platform profile dir, e.g. ~/.careerrat/board-profiles/linkedin.
-export function profilePath(platform, { profileRoot } = {}) {
-  return join(profileRoot || defaultProfileRoot(), String(platform || "default"));
+// Per-provider/per-platform profile dir under the active private data root.
+export function profilePath(platform, { profileRoot, repoRoot, env = process.env } = {}) {
+  return join(profileRoot || defaultProfileRoot({ repoRoot, env }), String(platform || "default"));
 }
 
 // resolveAutoTarget — the one piece of resolveSession()'s logic that decides what
 // the "auto" meta-provider actually becomes right now: Orca inside an Orca
-// workspace, bundled Playwright in the packaged desktop app, and the extension
-// otherwise. Shared so describeProviders() can report the SAME resolved provider
+// workspace and the app-owned Playwright browser everywhere else. Shared so
+// describeProviders() can report the SAME resolved provider
 // resolveSession() would pick, instead of each re-deriving it (and risking drift).
 function resolveAutoTarget(env) {
   if (env?.ORCA_WORKTREE_ID) return "orca";
-  if (env?.CAREERRAT_PACKAGED_DESKTOP === "1") return "playwright";
-  return "extension";
+  return "playwright";
 }
 
 // describeProviders — the provider list for display (Settings, `automation
 // status`). "auto" is a meta-choice, not a concrete provider, so its advertised
 // `automatedApply` is resolved against what it actually becomes right now (Orca /
-// packaged desktop state) rather than the descriptor's own optimistic `true`.
-// Outside Orca and the packaged desktop app, "auto" resolves to the extension
-// executor, which genuinely can't drive automatic apply. The same resolved-provider
-// truth backs both the option list here and the session JSON.
+// current environment) rather than the descriptor's own optimistic `true`.
+// The same resolved-provider truth backs both the option list here and the
+// session JSON.
 export function describeProviders({ env = process.env } = {}) {
   return PROVIDER_PREFERENCE.map((id) => {
     const descriptor = PROVIDERS[id];
@@ -182,11 +182,11 @@ export function automaticApplyGap(provider) {
 // Resolve the configured session for display. `data` is a loaded automation config
 // (or its absence => defaults). Returns the provider, its descriptor, and the
 // effective Playwright profile root (only meaningful when provider === playwright).
-export function resolveSession({ data, env = process.env } = {}) {
+export function resolveSession({ data, repoRoot, env = process.env } = {}) {
   const configuredProvider = data?.session?.provider || "auto";
   const configured = PROVIDERS[configuredProvider] ? configuredProvider : "auto";
   const provider = configured === "auto" ? resolveAutoTarget(env) : configured;
-  const profileRoot = data?.session?.profile_root || defaultProfileRoot();
+  const profileRoot = data?.session?.profile_root || defaultProfileRoot({ repoRoot, env });
   return {
     provider,
     configuredProvider: configured,
@@ -248,8 +248,13 @@ function detectChromeFamily() {
 //   missing    — nothing launchable was detected.
 //   unknown    — the probe itself failed (informational only; never fatal).
 // This NEVER drives a browser and NEVER throws — doctor must not fail on it.
-export function detectSession({ data, env = process.env, playwrightToolingDependencies } = {}) {
-  const base = resolveSession({ data, env });
+export function detectSession({
+  data,
+  repoRoot,
+  env = process.env,
+  playwrightToolingDependencies,
+} = {}) {
+  const base = resolveSession({ data, repoRoot, env });
   let presence;
   try {
     if (base.provider === "playwright") {

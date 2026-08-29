@@ -45,12 +45,6 @@ export const CAPABILITIES = {
     summary: "read application status from ATS dashboards (read-only)",
     platforms: ["greenhouse", "workday", "ashby", "lever"],
   },
-  authenticated_search: {
-    phase: 2,
-    label: "Authenticated search scanning",
-    summary: "logged-in saved-search scraping",
-    platforms: ["linkedin", "indeed", "wellfound", "glassdoor"],
-  },
   messaging: {
     phase: 3,
     label: "In-platform messaging",
@@ -278,6 +272,7 @@ export function mayRun({
   const cfg = data || loadAutomation({ root, env }).data;
   const advancedMode = effectiveAutomationMode(cfg) === "advanced";
   const cap = cfg.capabilities?.[capability] || {};
+  const scopedGrant = cap.scoped_grants?.[platform] === true;
   const globalOn = cap.enabled === true;
   const platformOn = !!(cap.platforms && cap.platforms[platform] === true);
   const consentOn = !!(cfg.consent && cfg.consent[platform] === true);
@@ -295,9 +290,11 @@ export function mayRun({
       `ToS consent for "${platform}" not recorded (record: \`careerrat automation consent ${platform} --write\`)`
     );
 
-  if (!advancedMode) reasons.push("Basic mode keeps every external capability disabled");
+  if (!advancedMode && !scopedGrant) {
+    reasons.push("Basic mode keeps capabilities disabled until they are allowed in context");
+  }
 
-  const allowed = advancedMode && globalOn && platformOn && consentOn;
+  const allowed = (advancedMode || scopedGrant) && globalOn && platformOn && consentOn;
   return {
     allowed,
     reasons,
@@ -342,7 +339,7 @@ export function automationStatus({
   });
 
   const liveCount = capabilities.reduce((n, c) => n + c.liveCount, 0);
-  const detectedSession = detectSession({ data: cfg, env });
+  const detectedSession = detectSession({ data: cfg, repoRoot: root, env });
   const session = {
     provider: detectedSession.configuredProvider,
     effectiveProvider: detectedSession.provider,

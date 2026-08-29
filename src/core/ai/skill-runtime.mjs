@@ -36,9 +36,15 @@ import { join } from "node:path";
 import { loadAgentCandidateConfig } from "../profile/config-store.mjs";
 import { PLAIN_ENGLISH_AGENT_VOICE } from "./agent-voice.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
-import { resolveAIRoute } from "./call-ai.mjs";
+import { loadAIPreferences } from "./ai-preferences.mjs";
+import { resolveAIRoute, resolveAIRouteForExecutionPlan } from "./call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE } from "./chat-answer-mode.mjs";
-import { runInstalledRuntime } from "./installed-runtimes.mjs";
+import { runInstalledRuntime, runInstalledRuntimeStream } from "./installed-runtimes.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForRuntime,
+  resolveAIExecutionPlan,
+} from "./operation-policy.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import {
   APP_SAFE_RUNTIME_TOOLS,
@@ -47,6 +53,13 @@ import {
   resolveRuntimeTools,
 } from "./runtime-tools.mjs";
 import { appendUsageEvent, computeCost, deriveUsageFeature } from "./usage-log.mjs";
+
+const INSTALLED_PUBLIC_FETCH_TOOL = "mcp__careerrat_scoped_tools__fetch";
+
+function normalizeInstalledRuntimeEvent(event) {
+  if (event?.type !== "tool_use" || event.data?.name !== INSTALLED_PUBLIC_FETCH_TOOL) return event;
+  return { ...event, data: { ...event.data, name: "WebFetch" } };
+}
 
 // ---------------------------------------------------------------------------
 // Skill allowlist
@@ -414,7 +427,8 @@ const ONESHOT_POSTURE =
   "best defensible call yourself and state what you assumed rather than asking.";
 const CONVERSATIONAL_POSTURE =
   "This is a conversational, multi-turn session — a real user will answer turn by turn. Ask ONE " +
-  "question at a time exactly as the skill's steps specify, wait for the reply, never invent an " +
+  "question about one decision at a time exactly as the skill's steps specify. Do not combine two " +
+  "decisions with 'and' or 'or' just to use one question mark. Wait for the reply, never invent an " +
   "answer on the user's behalf. Confirm what you already know before asking again (skill's own " +
   "STEP 0 guidance).";
 
@@ -448,7 +462,9 @@ const CONFIRM_BLOCK_GUIDANCE =
   "```\n" +
   "Do not ask the user to choose Basic or Advanced mode. Offer a consent_capability only when that " +
   "specific capability is needed for the task they are doing; confirming it enables the internal " +
-  "automation mode and that one platform together. For candidate_patch, follow the stored schemas " +
+  "automation mode and that one platform together. Never use consent_capability for saved job-source " +
+  "search. That flow uses the site's plain, site-specific Yes/No login question and keeps searching " +
+  "other sources after No. For candidate_patch, follow the stored schemas " +
   "exactly: profile.candidate.location is a string, while profile.location is an object whose home " +
   "field is a string. profile.location.relocation is always an array of market names; for no " +
   "relocation, save an empty array (`[]`), never `false`. Save a hybrid office-day " +
@@ -539,8 +555,18 @@ export async function runSkillStream({
   toolProfile,
   approvedReadPaths,
   outputSchema,
+  timeoutMs,
+  model,
+  effort,
+  aiOperation,
+  quality = null,
+  reasoning = null,
+  aiCapabilities = null,
+  executionPlan = null,
+  useExecutionPlanRoute = false,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
+  runInstalledRuntimeStreamImpl = runInstalledRuntimeStream,
 } = {}) {
   if (typeof onEvent !== "function") {
     throw new TypeError("runSkillStream: onEvent callback is required");
@@ -560,19 +586,47 @@ export async function runSkillStream({
     throw err;
   }
 
-  const route = resolveAIRoute(env, { repoRoot, runtimeInventory });
+  const route =
+    executionPlan && useExecutionPlanRoute
+      ? resolveAIRouteForExecutionPlan(executionPlan, env, { runtimeInventory })
+      : resolveAIRoute(env, { repoRoot, runtimeInventory });
   if (route.type === "none") {
     const err = new Error(route.error);
     err.code = "NO_AI_ROUTE";
     throw err;
   }
 
+  const routeRuntimeId = aiRuntimeIdForRoute(route);
+  const resolvedExecutionPlan = executionPlan
+    ? assertAIExecutionPlanForRuntime(executionPlan, routeRuntimeId)
+    : aiOperation
+      ? resolveAIExecutionPlan({
+          operation: aiOperation,
+          runtimeId: routeRuntimeId,
+          quality,
+          reasoning,
+          preferences: loadAIPreferences({ repoRoot, env }),
+          capabilities: aiCapabilities,
+          ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
+          modelOverride: model,
+          effortOverride: effort,
+        })
+      : null;
+  const requestModel = resolvedExecutionPlan?.resolved?.model ?? model;
+  const requestEffort = resolvedExecutionPlan?.resolved?.effort ?? effort;
+
   const runtimeTools = resolveRuntimeTools({ tools, toolProfile });
   const candidateNote = agentApplicationDefaultsNote({ repoRoot, env, skill });
 
   if (route.type === "installed") {
-    const installedRuntimeTools = resolveInstalledSkillRuntimeTools({ skill });
+    const requestedRuntimeTools = new Set(runtimeTools);
+    const installedRuntimeTools = resolveInstalledSkillRuntimeTools({ skill }).filter(
+      (tool) => tool === "Skill" || requestedRuntimeTools.has(tool)
+    );
     const installedPosture = installedSkillRuntimePosture({ skill });
+    const streamPublicWebActivity = installedRuntimeTools.some(
+      (tool) => tool === "WebSearch" || tool === "WebFetch"
+    );
     const prompt = [
       buildPrompt({ skill, input }),
       candidateNote,
@@ -589,7 +643,7 @@ export async function runSkillStream({
       },
     });
     try {
-      const result = await runInstalledRuntimeImpl({
+      const runtimeInput = {
         runtime: route.runtime,
         prompt,
         cwd: repoRoot,
@@ -604,20 +658,38 @@ export async function runSkillStream({
         // cross-provider; the Anthropic override is Claude-only.
         model:
           String(
-            env.CAREERRAT_INSTALLED_AI_MODEL ||
+            requestModel ||
+              env.CAREERRAT_INSTALLED_AI_MODEL ||
               (route.runtime.id === "claude" ? env.ANTHROPIC_MODEL : "") ||
               ""
           ).trim() || undefined,
+        effort: requestEffort || undefined,
         tools: installedRuntimeTools,
         approvedReadPaths,
         outputSchema,
-      });
+        timeoutMs,
+      };
+      const result = streamPublicWebActivity
+        ? await runInstalledRuntimeStreamImpl({
+            ...runtimeInput,
+            onMessage(message) {
+              for (const rawEvent of mapSdkMessage(message, { env })) {
+                const event = normalizeInstalledRuntimeEvent(rawEvent);
+                if (event.type === "tool_use" || event.type === "tool_result") onEvent(event);
+              }
+            },
+          })
+        : await runInstalledRuntimeImpl(runtimeInput);
       if (signal?.aborted) return { ok: false, aborted: true };
       onEvent({
         type: "assistant",
         data: { message: { content: [{ type: "text", text: result.text }] } },
       });
-      const resultData = { ok: true, aborted: false };
+      const resultData = {
+        ok: true,
+        aborted: false,
+        ...(resolvedExecutionPlan ? { executionPlan: resolvedExecutionPlan } : {}),
+      };
       onEvent({ type: "result", data: resultData });
       if (result.usage) {
         appendUsageEvent(
@@ -664,20 +736,16 @@ export async function runSkillStream({
   });
 
   const controller = new AbortController();
-  let externallyAborted = false;
+  let abortCause = null;
+  const abortFromExternalSignal = () => {
+    abortCause ||= "external";
+    controller.abort();
+  };
   if (signal) {
     if (signal.aborted) {
-      externallyAborted = true;
-      controller.abort();
+      abortFromExternalSignal();
     } else {
-      signal.addEventListener(
-        "abort",
-        () => {
-          externallyAborted = true;
-          controller.abort();
-        },
-        { once: true }
-      );
+      signal.addEventListener("abort", abortFromExternalSignal, { once: true });
     }
   }
 
@@ -695,6 +763,8 @@ export async function runSkillStream({
     options: {
       cwd: repoRoot,
       env: childEnv,
+      ...(requestModel ? { model: requestModel } : {}),
+      ...(requestEffort ? { effort: requestEffort } : {}),
       abortController: controller,
       settingSources: ["project"],
       skills: [skill],
@@ -707,6 +777,16 @@ export async function runSkillStream({
       hooks: toolPolicy.hooks,
     },
   });
+  const runtimeTimeout = Number.isFinite(timeoutMs)
+    ? setTimeout(
+        () => {
+          abortCause ||= "timeout";
+          controller.abort();
+        },
+        Math.max(1, timeoutMs)
+      )
+    : null;
+  runtimeTimeout?.unref?.();
 
   let resultData = null;
   try {
@@ -723,7 +803,15 @@ export async function runSkillStream({
       }
     }
   } catch (err) {
-    if (externallyAborted || controller.signal.aborted) {
+    if (abortCause === "timeout") {
+      resultData = {
+        ok: false,
+        error: "AI request timed out.",
+        code: "RUNTIME_TIMEOUT",
+      };
+      onEvent({ type: "error", data: { message: resultData.error, code: resultData.code } });
+      onEvent({ type: "result", data: resultData });
+    } else if (abortCause === "external" || controller.signal.aborted) {
       resultData = { ok: false, aborted: true };
     } else {
       onEvent({ type: "error", data: { message: err.message } });
@@ -731,6 +819,8 @@ export async function runSkillStream({
       onEvent({ type: "result", data: resultData });
     }
   } finally {
+    if (runtimeTimeout) clearTimeout(runtimeTimeout);
+    signal?.removeEventListener?.("abort", abortFromExternalSignal);
     try {
       await q.return?.();
     } catch {
@@ -738,7 +828,9 @@ export async function runSkillStream({
     }
   }
 
-  return resultData;
+  return resolvedExecutionPlan && resultData
+    ? { ...resultData, executionPlan: resolvedExecutionPlan }
+    : resultData;
 }
 
 // The proxy meters its own traffic server-side (ai-proxy.mjs's

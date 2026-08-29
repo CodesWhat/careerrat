@@ -210,16 +210,23 @@ export function setupDisclosureRows({ state, runtime } = {}) {
       ].filter(Boolean)
     : [];
   const minimumBase = Number(profile.compensation?.minimum_base);
+  const minimumAnnualEarnings = Number(profile.compensation?.minimum_annual_earnings);
   const arrangementFloors = arrangementFloorDetails(profile.compensation);
+  const compensationFloors = [
+    Number.isFinite(minimumBase) && minimumBase > 0
+      ? `$${minimumBase.toLocaleString("en-US")} minimum base`
+      : null,
+    Number.isFinite(minimumAnnualEarnings) && minimumAnnualEarnings > 0
+      ? `$${minimumAnnualEarnings.toLocaleString("en-US")} minimum annual cash earnings`
+      : null,
+  ].filter(Boolean);
   const quickFacts = [
     candidate.full_name,
     candidate.email,
     candidate.phone,
     location,
     ...modes,
-    Number.isFinite(minimumBase) && minimumBase > 0
-      ? `$${minimumBase.toLocaleString("en-US")} minimum base`
-      : arrangementFloors.join(" · ") || null,
+    ...(compensationFloors.length ? compensationFloors : [arrangementFloors.join(" · ") || null]),
   ].filter(Boolean);
   const authorization = profile.authorization ?? {};
 
@@ -381,6 +388,7 @@ export function quickFactsDetailLine({ state } = {}) {
   if (!fileWritten(state, "profile")) return null;
   const compensation = state?.data?.profile?.compensation ?? {};
   const minimumBase = Number(compensation.minimum_base);
+  const minimumAnnualEarnings = Number(compensation.minimum_annual_earnings);
   const location = state?.data?.profile?.location ?? {};
   const modes = locationModePreferencesConfirmed(state)
     ? [
@@ -394,14 +402,22 @@ export function quickFactsDetailLine({ state } = {}) {
       ].filter(Boolean)
     : [];
   const hasMinimumBase = Number.isFinite(minimumBase) && minimumBase > 0;
+  const hasMinimumAnnualEarnings =
+    Number.isFinite(minimumAnnualEarnings) && minimumAnnualEarnings > 0;
   const arrangementFloors = arrangementFloorDetails(compensation);
-  if (!modes.length && !hasMinimumBase && !arrangementFloors.length) return null;
-  if (!hasMinimumBase && arrangementFloors.length) return arrangementFloors.join(" · ");
+  if (!modes.length && !hasMinimumBase && !hasMinimumAnnualEarnings && !arrangementFloors.length)
+    return null;
+  if (!hasMinimumBase && !hasMinimumAnnualEarnings && arrangementFloors.length)
+    return arrangementFloors.join(" · ");
   const details = [
     ...modes,
-    hasMinimumBase ? `$${Math.round(minimumBase / 1000)}K floor` : "Add minimum base",
+    hasMinimumBase ? `$${Math.round(minimumBase / 1000)}K floor` : null,
+    hasMinimumAnnualEarnings
+      ? `$${Math.round(minimumAnnualEarnings / 1000)}K annual cash floor`
+      : null,
+    !hasMinimumBase && !hasMinimumAnnualEarnings ? "Add pay floor" : null,
   ];
-  return details.join(" · ");
+  return details.filter(Boolean).join(" · ");
 }
 
 export function authorizationDetailLine({ state } = {}) {

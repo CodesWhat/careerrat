@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { mountSourcingRoutes } from "../src/cli/sourcing-route.mjs";
+import { createWorkspaceAgentRuntime } from "../src/core/agent/workspace-agent.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
+import {
+  searchExecutionEnsure,
+  searchExecutionSetLane,
+} from "../src/core/db/verbs/search-executions.mjs";
 import {
   sourcingRunComplete,
   sourcingRunFail,
@@ -109,10 +114,13 @@ function seedNoDeterministicSources(repoRoot) {
       location_filter: null,
       searches: [
         {
-          label: "Browser-only board",
+          provider: "linkedin.com",
+          label: "LinkedIn operations",
           source_type: "browser",
-          url: "https://example.test/search?q=ai",
-          enabled: true,
+          auth: true,
+          platform: "linkedin",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: false,
         },
         {
           provider: "arbeitnow",
@@ -127,6 +135,48 @@ function seedNoDeterministicSources(repoRoot) {
     },
   });
 }
+
+test("GET /api/sourcing/execution returns exact unified status after a later AI run exists", async () => {
+  const repoRoot = tempRepo();
+  searchExecutionEnsure({
+    repoRoot,
+    env: {},
+    id: "search-exact-status",
+    deterministicRunId: "manual-exact",
+  });
+  searchExecutionSetLane({
+    repoRoot,
+    env: {},
+    id: "search-exact-status",
+    lane: "deterministic",
+    status: "completed",
+    runId: "manual-exact",
+  });
+  searchExecutionSetLane({
+    repoRoot,
+    env: {},
+    id: "search-exact-status",
+    lane: "aiWeb",
+    status: "completed",
+    runId: "ai-exact",
+  });
+  sourcingRunStart({
+    repoRoot,
+    env: {},
+    purpose: "ai-web-search",
+    id: "ai-unrelated-latest",
+    inputFingerprint: "later-unrelated",
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const response = await getJson(server, "/api/sourcing/execution?id=search-exact-status");
+    assert.equal(response.status, 200);
+    assert.equal(response.body.execution.id, "search-exact-status");
+    assert.equal(response.body.execution.lanes.aiWeb.runId, "ai-exact");
+  } finally {
+    await closeServer(server);
+  }
+});
 
 function bootServer(repoRoot, opts = {}) {
   const routes = new Map();
@@ -319,33 +369,34 @@ test("POST /api/sourcing/first-run/start reuses running and completed first-sear
   }
 });
 
-test("POST /api/sourcing/first-run/start returns 409 when candidate setup is not search_ready", async () => {
+test("POST /api/sourcing/first-run/start honors an explicit search before onboarding is complete", async () => {
   const repoRoot = tempRepo();
   seedDeterministicSources(repoRoot);
   const server = await bootServer(repoRoot, { fetchImpl: publicFetchStub() });
   try {
     const { status, body } = await postJson(server, "/api/sourcing/first-run/start", {});
-    assert.equal(status, 409);
-    assert.equal(body.ok, false);
-    assert.match(body.error, /search-ready/i);
-    assert.deepEqual(body.readiness?.search_ready, false);
+    assert.equal(status, 202);
+    assert.equal(body.ok, true);
+    assert.equal(body.run.status, "running");
+    assert.equal(body.readiness?.search_ready, false);
     assertNoRuntimeHandoff(body);
+    const latest = await waitForLatestStatus(server, "completed");
+    assert.equal(latest.body.run.status, "completed");
   } finally {
     await closeServer(server);
   }
 });
 
-test("first run with every deterministic source disabled records an actionable setup error", async () => {
+test("first run with only a pending login source completes and keeps the login choice actionable", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
-  // Use non-tech titles so only the domain-neutral baseline is generated.
-  // seedNoDeterministicSources stores that source as explicitly disabled,
-  // preserving the test's no-runnable-source premise.
+  // Remove target titles so no role query can be generated. The only saved
+  // source remains disabled until its point-of-use login choice.
   candidateConfigPatch({
     repoRoot,
     name: "targeting",
     patch: {
-      role_buckets: [{ name: "Care", titles: ["Registered Nurse", "Nurse Practitioner"] }],
+      role_buckets: [],
     },
   });
   seedNoDeterministicSources(repoRoot);
@@ -353,13 +404,16 @@ test("first run with every deterministic source disabled records an actionable s
   try {
     const start = await postJson(server, "/api/sourcing/first-run/start", {});
     assert.equal(start.status, 202);
+    assert.equal(start.body.sources.deterministicSources.attempted, 0);
+    assert.equal(start.body.sources.deterministicSources.pendingLogins, 1);
     assertNoRuntimeHandoff(start.body);
 
-    const latest = await waitForLatestStatus(server, "failed");
+    const latest = await waitForLatestStatus(server, "completed");
     assert.equal(latest.status, 200);
-    assert.equal(latest.body.run.status, "failed");
-    assert.equal(latest.body.run.error.code, "NO_DETERMINISTIC_SOURCES");
-    assert.match(latest.body.run.error.message, /RSS source|supported public ATS/i);
+    assert.equal(latest.body.run.status, "completed");
+    assert.equal(latest.body.run.error, null);
+    assert.equal(latest.body.run.summary.zeroResults, true);
+    assert.equal(latest.body.run.summary.deterministicSources.pendingLogins, 1);
     assertNoRuntimeHandoff(latest.body);
   } finally {
     await closeServer(server);
@@ -410,6 +464,52 @@ test("POST /api/sourcing/search/start creates a manual-search run without using 
     assert.equal(body.run.metadata.searchExecutionId, "search-execution-direct");
     assertNoRuntimeHandoff(body);
   } finally {
+    await closeServer(server);
+  }
+});
+
+test("the Jobs button route starts the same deterministic-first unified search with one id", async () => {
+  const repoRoot = tempRepo();
+  const events = [];
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    createSearchExecutionIdImpl: () => "search-jobs-button",
+    startManualSearchImpl: async ({ searchExecutionId }) => {
+      const started = sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "manual-search",
+        inputFingerprint: "jobs-button",
+        metadata: { searchExecutionId },
+      });
+      return { ok: true, reused: false, run: started.run };
+    },
+    runSearchInBackgroundImpl: async ({ runId }) => {
+      events.push(`deterministic:${runId}`);
+      return { id: runId, purpose: "manual-search", status: "completed", summary: {} };
+    },
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
+  });
+  runtime.registerAiWebSearchStarter({
+    available: true,
+    start: async ({ searchExecutionId, deterministic }) => {
+      events.push(`ai:${searchExecutionId}:${deterministic.status}`);
+      return { ok: true, run: { status: "completed" } };
+    },
+  });
+  const server = await bootServer(repoRoot, { workspaceAgentRuntime: runtime });
+  try {
+    const { status, body } = await postJson(server, "/api/sourcing/search/start", {});
+    await runtime.waitForUnifiedSearch("search-jobs-button");
+
+    assert.equal(status, 202);
+    assert.equal(body.searchExecutionId, "search-jobs-button");
+    assert.equal(body.execution.id, "search-jobs-button");
+    assert.equal(body.run.metadata.searchExecutionId, "search-jobs-button");
+    assert.deepEqual(events, [`deterministic:${body.run.id}`, "ai:search-jobs-button:succeeded"]);
+  } finally {
+    await runtime.shutdownSourcingWorkers();
     await closeServer(server);
   }
 });

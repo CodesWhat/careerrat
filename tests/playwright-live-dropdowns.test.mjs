@@ -34,6 +34,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createPlaywrightOps } from "../src/core/apply/playwright-ops.mjs";
+import { resolveLocalFixtureTarget } from "./helpers/fixture-server.mjs";
 
 const LIVE = process.env.CAREERRAT_LIVE_BROWSER === "1";
 
@@ -45,7 +46,11 @@ const FIXTURE_URL = new URL("./fixtures/apply-form/index.html", import.meta.url)
 // call below runs against real DOM/actionability/timing semantics.
 async function withLiveOps(fn) {
   const profileDir = mktempProfileDir();
-  const ops = createPlaywrightOps({ profileDir, headless: true });
+  const ops = createPlaywrightOps({
+    profileDir,
+    headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
+  });
   try {
     await fn(ops);
   } finally {

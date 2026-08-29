@@ -1,4 +1,5 @@
 import { errorState } from "../lib/errorCopy.js";
+import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import {
   buildCartView,
   fitBarWidth,
@@ -18,12 +19,58 @@ const TAB_LABELS = {
   schedule: "Schedule",
 };
 
+export function nextBrowserTab(activeTab, key) {
+  if (key === "Home") return TAB_ORDER[0];
+  if (key === "End") return TAB_ORDER.at(-1);
+  if (!["ArrowLeft", "ArrowRight"].includes(key)) return null;
+  const current = Math.max(0, TAB_ORDER.indexOf(activeTab));
+  const offset = key === "ArrowRight" ? 1 : -1;
+  return TAB_ORDER[(current + offset + TAB_ORDER.length) % TAB_ORDER.length];
+}
+
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
 function buttonLabel(label, count) {
   return Number.isFinite(Number(count)) ? `${label} · ${Number(count)}` : label;
+}
+
+const MISSING_COMPENSATION = /^(?:comp not listed|n\/a|none|null|pending|tbd|unknown|verify)$/i;
+
+function compactDollarAmount(amount, suffix) {
+  if (suffix) return `$${amount}${suffix.toLowerCase()}`;
+
+  const dollars = Number(amount.replaceAll(",", ""));
+  if (dollars < 1_000) return `$${amount}`;
+
+  const divisor = dollars >= 1_000_000 ? 1_000_000 : 1_000;
+  const unit = dollars >= 1_000_000 ? "m" : "k";
+  return `$${Number((dollars / divisor).toFixed(2))}${unit}`;
+}
+
+function searchCompensationLabel(job) {
+  const candidates =
+    job?.compBasis === "annual-earnings"
+      ? [job?.compCompact, job?.tc]
+      : [job?.compCompact, job?.comp, job?.base];
+  const value = candidates.find(
+    (candidate) =>
+      typeof candidate === "string" &&
+      candidate.trim() &&
+      !MISSING_COMPENSATION.test(candidate.trim())
+  );
+  if (!value) return "Comp not listed";
+
+  const compact = value
+    .trim()
+    .replace(/\$([\d,]+(?:\.\d+)?)([kKmM]?)/g, (_, amount, suffix) =>
+      compactDollarAmount(amount, suffix)
+    )
+    .replace(/(\$\d+(?:\.\d+)?[km]?)\s*[-–—]\s*(?=\$?\d)/gi, "$1–");
+  return job?.compBasis === "annual-earnings" && !/annual cash/i.test(compact)
+    ? `${compact} annual cash`
+    : compact;
 }
 
 function EmptyPanel({ children }) {
@@ -93,7 +140,6 @@ function laneStatusCopy(lane) {
     const status = {
       cancelled: "stopped",
       "not-configured": "not set up",
-      "not-consented": "permission needed",
       unavailable: "not available",
     }[lane.reason];
     return status ? `${label}: ${status}` : null;
@@ -155,17 +201,35 @@ export function BrowserTabs({
   onTabChange,
   onPipelineViewChange,
 }) {
+  function moveTab(event, tab) {
+    const next = nextBrowserTab(tab, event.key);
+    if (!next) return;
+    event.preventDefault();
+    onTabChange?.(next);
+    event.currentTarget.parentElement?.querySelector(`[data-workspace-tab="${next}"]`)?.focus();
+  }
+
   return (
     <div className="cf-browser__tabs-wrap">
-      <div className="cf-browser__tabs" role="tablist" aria-label="Browse workspace">
+      <div
+        className="cf-browser__tabs"
+        role="tablist"
+        aria-label="Browse workspace"
+        aria-orientation="horizontal"
+      >
         {TAB_ORDER.map((tab) => (
           <button
             key={tab}
+            id={`workspace-tab-${tab}`}
             type="button"
             role="tab"
             aria-selected={activeTab === tab}
+            aria-controls={`workspace-panel-${tab}`}
+            tabIndex={activeTab === tab ? 0 : -1}
+            data-workspace-tab={tab}
             className="cf-browser__tab"
             onClick={() => onTabChange?.(tab)}
+            onKeyDown={(event) => moveTab(event, tab)}
           >
             {buttonLabel(TAB_LABELS[tab], counts?.[tab])}
           </button>
@@ -286,7 +350,7 @@ function FilterBar({ jobs = [], eyebrow, query = "", filters = {}, onQueryChange
         aria-pressed={filters.fit80 === true}
         onClick={() => onFilter?.("fit80")}
       >
-        Fit 80+
+        {Number.isFinite(Number(filters.fitFloor)) ? `Fit ${Number(filters.fitFloor)}+` : "Fit"}
       </button>
       <FilterSelect
         label="Stage"
@@ -344,6 +408,8 @@ function LocationScope({ policy = {} }) {
 export function SearchJobRow({ job, selected, onToggleSelection }) {
   const width = fitBarWidth(job?.fit);
   const label = `Select ${job?.company || "job"}, ${job?.role || "role not provided"}`;
+  const link = safeExternalHttpUrl(job?.link);
+  const role = job?.role || "Role not provided";
   return (
     <label className={`cf-job-row${selected ? " cf-job-row--selected" : ""}`}>
       <input
@@ -356,7 +422,14 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
       <div className="cf-job-row__identity">
         <div className="cf-job-row__company">
           {job?.isNew ? <span className="cf-new-badge">NEW</span> : null}
-          {job?.descriptionPartial ? (
+          {job?.aiDiscovered ? (
+            <span
+              className="cf-capture-badge"
+              title="Found by AI on the open web. Evaluate it to verify the posting and capture the full job description."
+            >
+              AI · unverified
+            </span>
+          ) : job?.descriptionPartial ? (
             <span
               className="cf-capture-badge"
               title="CareerRat only captured part of this job description."
@@ -366,7 +439,13 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
           ) : null}
           {job?.company || "Unknown company"}
         </div>
-        <div className="cf-job-row__role">{job?.role || "Role not provided"}</div>
+        {link ? (
+          <a className="cf-job-row__role" href={link} target="_blank" rel="noopener noreferrer">
+            {role}
+          </a>
+        ) : (
+          <div className="cf-job-row__role">{role}</div>
+        )}
       </div>
       <div className="cf-job-row__meta">
         {job?.stage && job.stage !== job?.location ? (
@@ -374,9 +453,10 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
         ) : null}
         <strong>{job?.modeLabel || job?.mode || "Location"}</strong>
         <span>{job?.location || "Location not provided"}</span>
+        <span>{searchCompensationLabel(job)}</span>
       </div>
       <div className="cf-job-row__fit">
-        <strong>{Number(job?.fit) || 0}</strong>
+        <strong>Fit {Number(job?.fit) || 0}</strong>
         <span className="cf-job-row__fit-track">
           <span className="cf-job-row__fit-fill" style={{ "--cf-fit-width": `${width}%` }} />
         </span>
@@ -460,7 +540,12 @@ export function SearchPanel({
             ? "You're all set. The first search finished without a match. Use Search for jobs to try again."
             : "You're all set. Start your first job search with Search for jobs above.";
   return (
-    <section className="cf-browser__panel" role="tabpanel" aria-label="Search">
+    <section
+      id="workspace-panel-search"
+      className="cf-browser__panel"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-search"
+    >
       <SearchToolbar
         sourceSweep={sourceSweep}
         onRunSweep={onRunSweep}
@@ -639,7 +724,12 @@ function PipelineList({ jobs = [], onOpenJob }) {
 
 export function PipelinePanel({ pipeline = {}, view = "funnel", onStageSelect, onOpenJob }) {
   return (
-    <section className="cf-browser__panel cf-pipeline" role="tabpanel" aria-label="Pipeline">
+    <section
+      id="workspace-panel-pipeline"
+      className="cf-browser__panel cf-pipeline"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-pipeline"
+    >
       {view === "list" ? (
         <PipelineList jobs={pipeline?.jobs} onOpenJob={onOpenJob} />
       ) : (
@@ -659,7 +749,12 @@ export function FilesPanel({
 }) {
   const rows = safeArray(files);
   return (
-    <section className="cf-browser__panel cf-resource" role="tabpanel" aria-label="Files">
+    <section
+      id="workspace-panel-files"
+      className="cf-browser__panel cf-resource"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-files"
+    >
       <div className="cf-resource__filters">
         {["All", "Resumes", "Cover letters", "Stories", "Evidence", "Job ▾"].map((label) => (
           <button
@@ -731,7 +826,12 @@ export function PeoplePanel({
   const rows = safeArray(people);
   const dueCount = rows.filter((person) => person?.needsTouch).length;
   return (
-    <section className="cf-browser__panel cf-resource" role="tabpanel" aria-label="People">
+    <section
+      id="workspace-panel-people"
+      className="cf-browser__panel cf-resource"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-people"
+    >
       <div className="cf-resource__filters">
         <button
           type="button"
@@ -796,7 +896,12 @@ export function SchedulePanel({ groups = [], onAction, onCalendarAction }) {
     safeArray(group?.items).some((item) => item?.export)
   );
   return (
-    <section className="cf-browser__panel cf-schedule" role="tabpanel" aria-label="Schedule">
+    <section
+      id="workspace-panel-schedule"
+      className="cf-browser__panel cf-schedule"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-schedule"
+    >
       <div className="cf-schedule__days">
         {days.length > 0 ? (
           days.map((group) => (

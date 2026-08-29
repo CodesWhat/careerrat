@@ -27,6 +27,7 @@ export const GATE_APPLY_SUMMARIES = {
   "exclude-company": (value) => `Added "${value}" to your excluded companies.`,
   "comp-target": (value) => `Target base is now ${value}.`,
   "comp-floor": (value) => `Minimum base is now ${value}.`,
+  "comp-annual-floor": (value) => `Minimum annual cash earnings are now ${value}.`,
   "comp-expected": (value) => `Expected base is now ${value}.`,
   "do-not-claim": (value) => `Added "${value}" to your do-not-claim list.`,
   "do-not-fabricate": (value) => `Added "${value}" to your do-not-fabricate list.`,

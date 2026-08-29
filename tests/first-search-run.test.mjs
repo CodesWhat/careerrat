@@ -21,6 +21,7 @@ import {
   prepareFirstSearchSources,
   runFirstSearchInBackground,
   startFirstSearchRun,
+  startManualSearchRun,
 } from "../src/core/onboarding/first-search-run.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { buildWellfoundUrl } from "../src/core/providers/wellfound.mjs";
@@ -154,7 +155,7 @@ function seedNoDeterministicSources(repoRoot) {
           label: "Browser-only board",
           source_type: "browser",
           url: "https://example.test/search?q=ai",
-          enabled: true,
+          enabled: false,
         },
         {
           provider: "arbeitnow",
@@ -244,7 +245,7 @@ test("prepareFirstSearchSources replaces stale country blocks when remote scope 
   assert.deepEqual(worldwide.sourcedScan.location_filter.block, []);
 });
 
-test("first search parks with an actionable location error before creating a live run", async () => {
+test("first search can start before location preferences are filled in", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
   candidateConfigPatch({
@@ -265,11 +266,36 @@ test("first search parks with an actionable location error before creating a liv
   const result = await startFirstSearchRun({ repoRoot, env: {} });
 
   assert.equal(result.ok, true);
-  assert.equal(result.parked, true);
-  assert.equal(result.run.status, "not_started");
-  assert.equal(result.run.error.code, "SEARCH_LOCATION_REQUIRED");
-  assert.match(result.run.error.message, /add your location|remote/i);
-  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run, null);
+  assert.equal(result.parked, undefined);
+  assert.equal(result.run.status, "running");
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.id, result.run.id);
+});
+
+test("an explicit manual search can start before the onboarding readiness gate", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          label: "Public roles",
+          source_type: "browser",
+          url: "https://example.test/jobs",
+          enabled: true,
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  const result = await startManualSearchRun({ repoRoot, env: {} });
+
+  assert.equal(result.run.status, "running");
+  assert.equal(result.sources.deterministicSources.browser, 1);
 });
 
 test("prepareFirstSearchSources only re-syncs stored entries owned by the domain gate", async () => {
@@ -576,7 +602,7 @@ test("prepareFirstSearchSources caps the AI rescue prompt at 20 bare company nam
   assert.equal(promptInput.companies.includes("Candidate Company 21"), false);
 });
 
-test("countDeterministicSources counts RSS, supported boards, and ATS while skipping other enabled searches", () => {
+test("countDeterministicSources counts every runnable public and browser source", () => {
   const counts = countDeterministicSources({
     searchSources: {
       searches: [
@@ -604,7 +630,12 @@ test("countDeterministicSources counts RSS, supported boards, and ATS while skip
           enabled: true,
         },
         { source_type: "board", provider: "remotive", enabled: false },
-        { source_type: "board", provider: "unknown", enabled: true },
+        {
+          source_type: "board",
+          provider: "unknown",
+          url: "https://example.test/custom-board",
+          enabled: true,
+        },
         {
           source_type: "rss",
           rssUrl: "https://example.test/off.xml",
@@ -626,11 +657,12 @@ test("countDeterministicSources counts RSS, supported boards, and ATS while skip
   });
 
   assert.deepEqual(counts, {
-    attempted: 5,
+    attempted: 9,
     rss: 1,
     boards: 2,
+    browser: 4,
     supportedAtsCompanies: 2,
-    skipped: 4,
+    skipped: 0,
   });
 });
 
@@ -652,49 +684,54 @@ test("countDeterministicSources accepts sources as the search list key", () => {
     attempted: 2,
     rss: 1,
     boards: 1,
+    browser: 0,
     supportedAtsCompanies: 0,
     skipped: 0,
   });
 });
 
-test("failed first-search can retry as fresh work after deterministic source setup is fixed", async () => {
-  const repoRoot = tempRepo();
-  markSearchReady(repoRoot, { domain: "operations" });
-  seedNoDeterministicSources(repoRoot);
-
-  const failed = await startFirstSearchRun({ repoRoot, env: {} });
-  assert.equal(failed.reused, false);
-  assert.equal(failed.run.status, "failed");
-  assert.equal(failed.run.error.code, "NO_DETERMINISTIC_SOURCES");
-
-  sourceConfigPut({
-    repoRoot,
-    name: "search-sources",
-    data: {
-      title_filter: {},
-      location_filter: null,
+test("countDeterministicSources counts generated query-only HiringCafe searches", () => {
+  const counts = countDeterministicSources({
+    searchSources: {
       searches: [
         {
-          label: "Fixed RSS",
-          source_type: "rss",
-          rssUrl: "https://example.test/jobs.xml",
+          provider: "HiringCafe",
+          source_type: "url-query",
+          label: "Bar Manager",
+          query: "Bar Manager",
           enabled: true,
+          recency: { mode: "since-last-run", safetyMinutes: 30 },
+          searchState: { sortBy: "date" },
         },
       ],
-      tracked_companies: [],
-      source_catalog: {},
     },
   });
 
-  const retry = await startFirstSearchRun({
-    repoRoot,
-    env: {},
-    retryFailed: true,
+  assert.deepEqual(counts, {
+    attempted: 1,
+    rss: 0,
+    boards: 0,
+    browser: 1,
+    supportedAtsCompanies: 0,
+    skipped: 0,
   });
-  assert.equal(retry.reused, false);
-  assert.equal(retry.run.status, "running");
-  assert.notEqual(retry.run.id, failed.run.id);
-  assert.equal(retry.run.metadata.retryOf, failed.run.id);
+});
+
+test("first-search starts honestly when source healing still leaves no deterministic sources", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "operations" });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { role_buckets: [] },
+  });
+  seedNoDeterministicSources(repoRoot);
+
+  const started = await startFirstSearchRun({ repoRoot, env: {} });
+  assert.equal(started.reused, false);
+  assert.equal(started.run.status, "running");
+  assert.equal(started.run.error, null);
+  assert.equal(started.sources.deterministicSources.attempted, 0);
 });
 
 test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {
@@ -839,9 +876,9 @@ test("zero-result scans with attempted deterministic sources complete with zero-
       location_filter: null,
       searches: [
         {
-          label: "Empty RSS",
-          source_type: "rss",
-          rssUrl: "https://example.test/empty.xml",
+          label: "Empty browser source",
+          source_type: "browser",
+          url: "https://example.test/jobs",
           enabled: true,
         },
       ],
@@ -872,7 +909,146 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.status, "completed");
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
-  assert.equal(latest.run.summary.deterministicSources.attempted, 2);
+  assert.equal(latest.run.summary.deterministicSources.attempted, 3);
+});
+
+test("the shared worker can own deterministic terminal settlement", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "operations" });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          label: "Empty RSS",
+          source_type: "rss",
+          rssUrl: "https://example.test/empty.xml",
+          enabled: true,
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+  const started = await startFirstSearchRun({ repoRoot, env: {} });
+
+  const result = await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    settle: false,
+    captureBrowserSourceImpl: async () => ({ offers: [], errors: [], needsLogin: null }),
+    fetchImpl: async () =>
+      new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
+  });
+
+  assert.equal(result.settlement.status, "completed");
+  assert.equal(result.settlement.summary.zeroResults, true);
+  assert.ok(
+    result.settlement.summary.sourceCoverage.some(
+      (source) => source.kind === "configured" && source.status === "zero" && source.found === 0
+    ),
+    JSON.stringify(result.settlement.summary.sourceCoverage)
+  );
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
+});
+
+test("background search runs browser sources and preserves point-of-use login requests", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: { title_filter: {}, location_filter: null, tracked_companies: [] },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          provider: "LinkedIn",
+          platform: "linkedin",
+          label: "LinkedIn roles",
+          source_type: "auth",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: true,
+        },
+      ],
+    },
+  });
+  const started = sourcingRunStart({ repoRoot, purpose: "manual-search" });
+  const seen = [];
+
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    captureBrowserSourceImpl: async (source) => {
+      seen.push(source.url);
+      return {
+        offers: [],
+        errors: [],
+        needsLogin: {
+          platform: "linkedin",
+          label: "LinkedIn",
+          sourceLabel: source.label,
+          url: source.url,
+          prompt: "Do you want to log into LinkedIn so I can use it?",
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(seen, ["https://www.linkedin.com/jobs/search/?keywords=operations"]);
+  const completed = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(completed.status, "completed");
+  assert.deepEqual(completed.summary.loginRequests, [
+    {
+      platform: "linkedin",
+      label: "LinkedIn",
+      sourceLabel: "LinkedIn roles",
+      url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+      prompt: "Do you want to log into LinkedIn so I can use it?",
+    },
+  ]);
+});
+
+test("a manual search with only a disabled login source starts so the login preflight can settle", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: { title_filter: { positive: [], negative: [] }, tracked_companies: [] },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      searches: [
+        {
+          provider: "linkedin.com",
+          source_type: "browser",
+          auth: true,
+          platform: "linkedin",
+          label: "LinkedIn NYC operations",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  const operation = await startManualSearchRun({ repoRoot, env: {} });
+
+  assert.equal(operation.run.status, "running");
+  assert.equal(operation.sources.deterministicSources.attempted, 0);
+  assert.equal(operation.sources.deterministicSources.pendingLogins, 1);
 });
 
 test("completed search runs preserve bounded rejection evidence", async () => {
@@ -971,11 +1147,16 @@ test("background first search publishes a growing found count before completion"
     });
 
     await betaRequested.promise;
-
-    const running = latestSourcingRunForUi({
-      repoRoot,
-      purpose: "first-search",
-    }).run;
+    const deadline = Date.now() + 1000;
+    let running;
+    do {
+      running = latestSourcingRunForUi({
+        repoRoot,
+        purpose: "first-search",
+      }).run;
+      if (running.progress?.foundCount === 1) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    } while (Date.now() < deadline);
     assert.equal(running.status, "running");
     assert.equal(running.progress.foundCount, 1);
     assert.equal(running.progress.offerCount, 1);
@@ -1003,6 +1184,56 @@ test("background first search publishes a growing found count before completion"
     betaResponse.resolve(new Response("[]", { status: 200 }));
     await background?.catch(() => {});
   }
+});
+
+test("background sourcing heartbeats while quiet and stays resumable when the app shuts down", async () => {
+  const repoRoot = tempRepo();
+  const requested = deferred();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: { title_filter: {}, location_filter: null, searches: [] },
+  });
+  const started = sourcingRunStart({ repoRoot, purpose: "manual-search" });
+  const controller = new AbortController();
+  const stopped = new Error("CareerRat stopped this search because the app closed.");
+  stopped.code = "SOURCING_RUN_SERVER_STOPPED";
+
+  const background = runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    signal: controller.signal,
+    heartbeatMs: 5,
+    fetchImpl: async (_url, init = {}) => {
+      requested.resolve();
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+      });
+    },
+  });
+
+  await requested.promise;
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const heartbeat = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(heartbeat.status, "running");
+  assert.equal(heartbeat.progress.completedSources, 0);
+  assert.equal(heartbeat.progress.totalSources, 1);
+
+  controller.abort(stopped);
+  await assert.rejects(background, (error) => error?.code === "SOURCING_RUN_SERVER_STOPPED");
+  const resumable = sourcingRunLatest({ repoRoot, purpose: "manual-search" }).run;
+  assert.equal(resumable.status, "running");
+  assert.equal(resumable.id, started.run.id);
 });
 
 test("a superseded background search cannot write stale watermarks, offers, or completion", async () => {

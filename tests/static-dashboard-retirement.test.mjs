@@ -89,13 +89,6 @@ test("operational docs do not advertise the retired static tracker dashboard", (
     assert.doesNotMatch(source, /scan:sourced[^\n]*--(?:intake|timestamped)/i, path);
   }
 
-  const roadmap = read("docs/ROADMAP.md");
-  assert.doesNotMatch(roadmap, /classic dashboard remains reachable/i);
-  assert.doesNotMatch(roadmap, /classic dashboard retirement[^\n]*left/i);
-  assert.doesNotMatch(roadmap, /dependency-free static dashboard/i);
-  assert.doesNotMatch(roadmap, /same server-derived view model as the classic dashboard/i);
-  assert.doesNotMatch(roadmap, /classic dashboard parity/i);
-
   const skillRoot = join(ROOT, ".agents", "skills");
   for (const entry of readdirSync(skillRoot, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;

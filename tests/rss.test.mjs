@@ -182,7 +182,7 @@ test("Null/empty input does not throw", () => {
 // feedItemsToOffers tests
 // ---------------------------------------------------------------------------
 
-test("feedItemsToOffers: maps title, url, postedAt from items", () => {
+test("feedItemsToOffers: maps the parsed role, url, and postedAt from items", () => {
   const items = [
     {
       title: "Senior Engineer at Acme",
@@ -196,7 +196,7 @@ test("feedItemsToOffers: maps title, url, postedAt from items", () => {
   const offers = feedItemsToOffers(items, {
     source: { provider: "RemoteVibeCodingJobs", label: "Remote Vibe Coding Jobs" },
   });
-  assert.equal(offers[0].title, "Senior Engineer at Acme");
+  assert.equal(offers[0].title, "Senior Engineer");
   assert.equal(offers[0].url, "https://example.com/job/1");
   assert.equal(offers[0].postedAt, "2026-06-09T12:00:00.000Z");
   assert.equal(

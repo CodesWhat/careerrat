@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 
+import * as sourcedScanner from "../src/core/scoring/sourced-scanner.mjs";
 import {
   buildLocationFilter,
   buildTitleFilter,
@@ -33,6 +34,126 @@ const JANE_TECH_CONFIG = {
     location: { home: "new york", relocation: [] },
   },
 };
+
+test("compensation parsing separates base pay from annual cash earnings", () => {
+  const bands = sourcedScanner.extractCompensationBands(
+    "Base pay: $11.35 per hour. Estimated annual earnings including tips: $95,000 - $120,000."
+  );
+
+  assert.deepEqual(bands.base, { min: 23_608, max: 23_608 });
+  assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000 });
+});
+
+test("annual cash earnings parsing ignores adjacent non-cash benefits", () => {
+  const bands = sourcedScanner.extractCompensationBands(
+    "Estimated annual earnings including tips: $95,000 - $120,000, plus benefits."
+  );
+
+  assert.equal(bands.base, null);
+  assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000 });
+});
+
+test("hourly base annualization honors the posting's explicit weekly hours", () => {
+  const bands = sourcedScanner.extractCompensationBands(
+    "Base pay: $40 per hour, 30 hours per week."
+  );
+
+  assert.deepEqual(bands.base, { min: 62_400, max: 62_400 });
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands("Base pay: $40 per hour, full-time.").base,
+    { min: 83_200, max: 83_200 }
+  );
+});
+
+test("unquantified tips never turn hourly base pay into annual cash earnings", () => {
+  const bands = sourcedScanner.extractCompensationBands(
+    "Base pay: $11.35 per hour including tips."
+  );
+
+  assert.deepEqual(bands.base, { min: 23_608, max: 23_608 });
+  assert.equal(bands.annualEarnings, null);
+});
+
+test("compensation parsing rejects calendar years and unitless shorthand", () => {
+  assert.equal(extractCompBand("Salary review cycle: 2025-2026."), null);
+  assert.equal(extractCompBand("Salary range: 90-110."), null);
+  assert.deepEqual(extractCompBand("Salary range: 90k-110k."), {
+    min: 90_000,
+    max: 110_000,
+  });
+});
+
+test("unlabeled compensation stays unclassified instead of becoming guaranteed base", () => {
+  assert.deepEqual(sourcedScanner.extractCompensationBands("$95k-$120k"), {
+    base: null,
+    annualEarnings: null,
+  });
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Base salary: $95k-$120k per year"), {
+    base: { min: 95_000, max: 120_000 },
+    annualEarnings: null,
+  });
+  assert.deepEqual(sourcedScanner.resolveCompensationEvidence({ comp: "$95k-$120k" }), {
+    baseComp: "",
+    annualEarningsComp: "",
+    unclassifiedComp: "$95k-$120k",
+  });
+});
+
+test("explicit base compensation labels classify a guaranteed-base band", () => {
+  const expected = { base: { min: 95_000, max: 120_000 }, annualEarnings: null };
+
+  assert.deepEqual(
+    [
+      "Base compensation: $95k-$120k",
+      "Base comp: $95k-$120k",
+      "Base: $95k-$120k",
+      "$95k-$120k base",
+    ].map((text) => sourcedScanner.extractCompensationBands(text)),
+    [expected, expected, expected, expected]
+  );
+});
+
+test("trailing bare base labels remain explicit before compensation prose", () => {
+  const expected = { base: { min: 95_000, max: 120_000 }, annualEarnings: null };
+
+  assert.deepEqual(
+    ["$95k-$120k base, depending on experience", "$95k-$120k base, plus bonus and equity"].map(
+      (text) => sourcedScanner.extractCompensationBands(text)
+    ),
+    [expected, expected]
+  );
+});
+
+test("compensation parsing does not treat a base case forecast as a base-pay label", () => {
+  assert.deepEqual(sourcedScanner.extractCompensationBands("$95k-$120k base case forecast"), {
+    base: null,
+    annualEarnings: null,
+  });
+});
+
+test("compensation parsing does not treat customer base as a base-pay label", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Compensation is $95k-$120k depending on experience while helping expand our customer base"
+    ),
+    {
+      base: null,
+      annualEarnings: null,
+    }
+  );
+});
+
+test("compensation parsing does not treat customer base before pay as a base-pay label", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Compensation for helping expand our customer base: $95k-$120k"
+    ),
+    {
+      base: null,
+      annualEarnings: null,
+    }
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Filter + infrastructure tests (unchanged)
@@ -121,6 +242,36 @@ test("coarse scoring does not promote a GTM engineer from backend and platform e
   assert.equal(result.gate, "review");
   assert.ok(result.score < 65, `expected a sub-medium score, got ${result.score}`);
   assert.ok(result.ruleFlags.includes("title-target-mismatch"));
+});
+
+test("coarse scoring recognizes reordered non-engineering target titles", () => {
+  const result = scoreSourcedOffer(
+    {
+      company: "Hospitality Corp",
+      title: "Food and Beverage Operations Manager",
+      location: "New York, NY",
+      bodyText:
+        "Lead beverage service, venue operations, training, and day-to-day hospitality workflows.",
+    },
+    {
+      targeting: {
+        role_buckets: [
+          { name: "Hospitality operations", titles: ["Operations Manager, Food & Beverage"] },
+        ],
+        fit_bands: { high_min: 85, med_min: 65, fit_floor: 65 },
+      },
+      profile: {
+        compensation: { minimum_base: 85000 },
+        location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+      },
+    }
+  );
+
+  assert.ok(
+    result.score >= 65,
+    `expected the reordered target to clear fit 65, got ${result.score}`
+  );
+  assert.match(result.ratingReason, /matches target title/i);
 });
 
 test("coarse scoring does not treat a generic staff engineer as a platform title match", () => {
@@ -421,6 +572,86 @@ test("same-run canonical dedupe selects the richer copy independent of source or
     assert.equal(result.duplicates.length, 1);
     assert.equal(result.duplicates[0].duplicateReason, "req_id_batch");
   }
+});
+
+test("same Hireology requisition dedupes to the richer Hcareers capture independent of source order", () => {
+  const weak = {
+    company: "Arlo Williamsburg",
+    title: "Bar Manager & Floor Manager",
+    url: "https://careers.hireology.com/arlo-williamsburg/2838889/description?source=hcareers",
+    capturedUrl: "https://www.hcareers.com/jobs/4360243-bar-manager-floor-manager",
+    location: "Brooklyn, NY",
+    bodyText: "Short preview.",
+    bodyPartial: true,
+    provider: "hcareers",
+  };
+  const rich = {
+    ...weak,
+    url: "https://careers.hireology.com/arlo-williamsburg/2838889/description?source=hcareers&utm_source=hcareers",
+    capturedUrl: "https://www.hcareers.com/jobs/4360403-bar-manager-floor-manager",
+    bodyText: "Lead the bar program and dining room operations. ".repeat(20),
+    bodyPartial: false,
+    comp: "$75,000 to $85,000 per year",
+  };
+  const run = (offers) =>
+    filterAndDedupeOffers(offers, {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+    });
+
+  for (const offers of [
+    [weak, rich],
+    [rich, weak],
+  ]) {
+    const result = run(offers);
+    assert.equal(result.kept.length, 1);
+    assert.equal(result.kept[0].url, rich.url);
+    assert.equal(result.kept[0].capturedUrl, rich.capturedUrl);
+    assert.equal(result.kept[0].bodyText, rich.bodyText);
+    assert.equal(result.kept[0].provider, "hcareers");
+    assert.equal(result.duplicates.length, 1);
+    assert.equal(result.duplicates[0].duplicateReason, "req_id_batch");
+  }
+});
+
+test("distinct Hireology requisitions survive even when their job facts match", () => {
+  const shared = {
+    company: "Arlo Williamsburg",
+    title: "Bar Manager & Floor Manager",
+    location: "Brooklyn, NY",
+    bodyText: "Lead the bar program and dining room operations. ".repeat(20),
+    bodyPartial: false,
+    provider: "hcareers",
+  };
+  const offers = [
+    {
+      ...shared,
+      url: "https://careers.hireology.com/arlo-williamsburg/2838889/description",
+      capturedUrl: "https://www.hcareers.com/jobs/4360403-bar-manager-floor-manager",
+    },
+    {
+      ...shared,
+      url: "https://careers.hireology.com/arlo-williamsburg/2850254/description",
+      capturedUrl: "https://www.hcareers.com/jobs/4363300-events-outlets-operations-manager",
+    },
+  ];
+
+  const result = filterAndDedupeOffers(offers, {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    titleFilter: () => true,
+    locationFilter: () => true,
+  });
+
+  assert.deepEqual(
+    result.kept.map((offer) => offer.url),
+    offers.map((offer) => offer.url)
+  );
+  assert.equal(result.duplicates.length, 0);
 });
 
 test("adjacent engineering titles need strong candidate evidence while blockers stay blocked", () => {
@@ -964,7 +1195,44 @@ test("extracts canonical req ids from common ATS URLs", () => {
     extractReqId("https://www.linkedin.com/jobs/view/444555666/").id,
     "linkedin:444555666"
   );
+  assert.deepEqual(
+    extractReqId(
+      "https://careers.hireology.com/arlo-williamsburg/2838889/description?source=hcareers"
+    ),
+    { provider: "hireology", value: "2838889", id: "hireology:2838889" }
+  );
+  assert.equal(
+    extractReqId("https://careers.hireology.com/arlo-williamsburg/not-numeric/description").id,
+    null
+  );
+  for (const requisition of ["JR12269", "JR13123-1", "R100123149", "HB344468-3"]) {
+    assert.deepEqual(
+      extractReqId(
+        `https://shakeshack.wd5.myworkdayjobs.com/en-US/External/job/New-York-NY/Assistant-General-Manager_${requisition}`
+      ),
+      {
+        provider: "workday",
+        value: requisition,
+        id: `workday:shakeshack:${requisition.toLowerCase()}`,
+      }
+    );
+  }
+  assert.equal(
+    extractReqId("https://careers.example.com/jobs/Assistant-General-Manager_JR12269").id,
+    null
+  );
   assert.equal(extractReqId("https://careers.example.com/jobs/123456").id, null);
+});
+
+test("scopes Workday requisition identity to its tenant", () => {
+  const shakeShack = extractReqId(
+    "https://shakeshack.wd5.myworkdayjobs.com/External/job/Manager_JR12269"
+  );
+  const acme = extractReqId("https://acme.wd3.myworkdayjobs.com/Careers/job/Manager_JR12269");
+
+  assert.equal(shakeShack.id, "workday:shakeshack:jr12269");
+  assert.equal(acme.id, "workday:acme:jr12269");
+  assert.notEqual(shakeShack.id, acme.id);
 });
 
 // ---------------------------------------------------------------------------
@@ -978,7 +1246,7 @@ test("FDE title with JANE config scores in keep territory (high or med fit, like
       company: "Acme",
       title: "Forward Deployed Engineer",
       location: "New York City",
-      comp: "USD 205000-265000",
+      comp: "Base salary: USD 205000-265000",
       bodyText:
         "Build working prototypes with customers using LLM APIs, RAG, agents, MCP connectors, and production integrations. Drive adoption with enterprise teams.",
     },
@@ -1037,7 +1305,7 @@ test("comp posted below $200K floor with JANE config gets comp-below-floor flag 
       company: "Acme",
       title: "Applied AI Engineer",
       location: "Remote - US",
-      comp: "$130,000 - $170,000",
+      comp: "Base salary: $130,000 - $170,000",
       bodyText: "Build AI-powered solutions for enterprise customers using LLM APIs and agents.",
     },
     JANE_TECH_CONFIG
@@ -1284,6 +1552,12 @@ test("extracts compensation ranges and strips ATS HTML bodies", () => {
     ),
     { min: 258000, max: 348000 }
   );
+  assert.deepEqual(
+    extractCompBand(
+      "Bar Manager\nFull Time • Salary ($70k)\nRole details\nOther jobs you might be interested in\nBar Director\nSalary ($120k - $140k)"
+    ),
+    { min: 70000, max: 70000 }
+  );
 });
 
 test("dedupe attaches fit ratings to kept offers", () => {
@@ -1413,6 +1687,43 @@ test("qualification gate enforces remote eligibility and a configured commute ra
   assert.equal(result.kept[2].qualificationUnknowns.includes("location"), true);
 });
 
+test("qualification gate recognizes NYC inside a detailed neighborhood label", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Midtown Hospitality",
+        title: "General Manager",
+        url: "https://jobs.example.com/midtown-general-manager",
+        location: "New York, NY (Midtown/Koreatown NYC)",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: {
+          role_buckets: [{ name: "Hospitality", titles: ["General Manager"] }],
+        },
+        profile: {
+          location: {
+            home: "New York, NY",
+            remote: true,
+            hybrid: true,
+            onsite: true,
+            relocation: [],
+          },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredLocation.length, 0);
+});
+
 test("qualification gate filters stale, below-floor, and explicit sponsorship-conflict roles", () => {
   const now = Date.parse("2026-08-09T12:00:00Z");
   const result = filterAndDedupeOffers(
@@ -1430,7 +1741,7 @@ test("qualification gate filters stale, below-floor, and explicit sponsorship-co
         url: "https://jobs.example.com/cheap",
         location: "Remote - US",
         postedAt: "2026-08-08T00:00:00Z",
-        comp: "$140,000 - $180,000 base",
+        comp: "Base pay: $140,000 - $180,000",
       },
       {
         company: "NoVisaCo",
@@ -1479,6 +1790,63 @@ test("qualification gate filters stale, below-floor, and explicit sponsorship-co
   ]);
 });
 
+test("partial offers enforce location, compensation, and content policy by default", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Partial Location Corp",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/partial-location",
+        location: "Remote - United States",
+        bodyText: "Location: San Francisco Bay Area, CA (in-person).",
+        bodyPartial: true,
+      },
+      {
+        company: "Partial Comp Corp",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/partial-comp",
+        location: "Remote - United States",
+        bodyText: "Salary Range: $100,000 - $120,000 annually.",
+        bodyPartial: true,
+      },
+      {
+        company: "Partial Eligibility Corp",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/partial-eligibility",
+        location: "Remote - United States",
+        bodyText: "Visa sponsorship is not available for this position.",
+        bodyPartial: true,
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Staff Backend Engineer"] }] },
+        profile: {
+          compensation: { minimum_base: 180000 },
+          authorization: { requires_sponsorship: true },
+          location: {
+            home: "Brooklyn, NY",
+            remote: true,
+            remote_scope: "home-country",
+            hybrid: true,
+            onsite: false,
+          },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredLocation.length, 1);
+  assert.equal(result.filteredSalary.length, 1);
+  assert.equal(result.filteredEligibility.length, 1);
+});
+
 test("qualification gate caps one company and reconciles every fetched offer", () => {
   const offers = Array.from({ length: 4 }, (_, index) => ({
     company: "FloodCo",
@@ -1520,8 +1888,481 @@ test("qualification gate caps one company and reconciles every fetched offer", (
 
 test("maps score bands to tracker fit buckets", () => {
   assert.equal(fitFromScore(90), "high");
+  assert.equal(fitFromScore(84), "med");
   assert.equal(fitFromScore(70), "med");
   assert.equal(fitFromScore(55), "stretch");
+});
+
+test("maps score bands through the candidate's saved thresholds", () => {
+  assert.equal(fitFromScore(84, { high_min: 85, med_min: 65 }), "med");
+  assert.equal(fitFromScore(64, { high_min: 85, med_min: 65 }), "stretch");
+  assert.equal(fitFromScore(84, { high_min: "not-a-number", med_min: 70 }), "med");
+  assert.equal(fitFromScore(84, { high_min: null, med_min: null }), "med");
+});
+
+test("qualification recognizes an annual salary sentence below the saved floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Credence",
+        title: "AI Software Engineer",
+        url: "https://jobs.example.test/credence-ai-software-engineer",
+        location: "Tysons Corner, VA (Remote)",
+        bodyText: "Salary Range: $120,000 - $150,000 annually.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Software Engineer"] }] },
+        profile: {
+          compensation: { minimum_base: 180000 },
+          location: { home: "Brooklyn, NY", remote: true, hybrid: true, onsite: false },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+});
+
+test("qualification keeps a posted range that overlaps the hard floor for review", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Bazaar Meat",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/bazaar-meat-bar-manager",
+        location: "New York, NY",
+        bodyText: "Base salary: $75,000 - $85,000 per year, plus bonus and benefits.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.ok(result.kept[0].ruleFlags.includes("top-of-band-only"));
+});
+
+test("qualification recognizes a single annual salary below the saved floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Single Salary Hospitality",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/single-salary-hospitality",
+        location: "New York, NY",
+        bodyText: "Salary: $60,000 per year. Lead a high-volume beverage program in Manhattan.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 60000, max: 60000 });
+});
+
+test("qualification trusts the role compensation before unrelated recommendation salaries", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Hospitality Group",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/bar-manager-with-recommendations",
+        location: "New York, NY",
+        comp: "Full Time • Salary ($70k)",
+        bodyText:
+          "Bar Manager\nFull Time • Salary ($70k)\nLead this beverage program.\nSimilar jobs\nRestaurant Manager\nSalary ($75k - $120k)",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 70000, max: 70000 });
+});
+
+test("qualification uses base salary instead of variable and total compensation ranges", () => {
+  const nonBaseRanges = [
+    ["OTE Corp", "On-target earnings (OTE): $180,000 - $220,000 per year."],
+    ["Bonus Corp", "Annual bonus opportunity: $100,000 - $120,000."],
+    ["Equity Corp", "Annual equity value: $150,000 - $250,000."],
+    ["Commission Corp", "Annual commission: $120,000 - $180,000."],
+    ["Total Comp Corp", "Total compensation: $190,000 - $230,000 per year."],
+  ];
+  const result = filterAndDedupeOffers(
+    nonBaseRanges.map(([company, variableComp], index) => ({
+      company,
+      title: "Bar Manager",
+      url: `https://jobs.example.test/base-pay-${index}`,
+      location: "New York, NY",
+      bodyText: `${variableComp} Annual base salary: $70,000 - $80,000.`,
+    })),
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.deepEqual(
+    result.filteredSalary.map((offer) => offer.compBand),
+    Array.from({ length: nonBaseRanges.length }, () => ({ min: 70000, max: 80000 }))
+  );
+});
+
+test("qualification selects same-sentence base salary instead of total compensation", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Same Sentence Comp Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/same-sentence-base-pay",
+        location: "New York, NY",
+        bodyText:
+          "Total compensation: $190k-$230k including base salary $70k-$80k plus bonus and equity.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 70000, max: 80000 });
+});
+
+test("qualification treats variable and total compensation without base pay as unknown", () => {
+  const nonBaseRanges = [
+    ["OTE Only Corp", "On-target earnings (OTE): $180,000 - $220,000 per year."],
+    ["Bonus Only Corp", "Annual bonus opportunity: $100,000 - $120,000."],
+    ["Equity Only Corp", "Annual equity value: $150,000 - $200,000."],
+    ["Commission Only Corp", "Annual commission: $120,000 - $180,000."],
+    ["Total Comp Only Corp", "Total compensation: $190,000 - $230,000 per year."],
+  ];
+  const result = filterAndDedupeOffers(
+    nonBaseRanges.map(([company, variableComp], index) => ({
+      company,
+      title: "Bar Manager",
+      url: `https://jobs.example.test/non-base-pay-${index}`,
+      location: "New York, NY",
+      bodyText: variableComp,
+    })),
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 250000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.filteredSalary.length, 0);
+  assert.deepEqual(
+    result.kept.map((offer) => offer.company),
+    nonBaseRanges.map(([company]) => company)
+  );
+  assert.ok(result.kept.every((offer) => offer.qualificationUnknowns.includes("compensation")));
+});
+
+test("qualification keeps an annualized hourly base range that overlaps the floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Hourly Base Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/hourly-base-pay",
+        location: "New York, NY",
+        bodyText: "Base pay: $40.00 - $45.00 per hour.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.ok(result.kept[0].ruleFlags.includes("top-of-band-only"));
+});
+
+test("qualification annualizes a single explicit hourly base-pay amount", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Single Hourly Base Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/single-hourly-base-pay",
+        location: "New York, NY",
+        bodyText: "Base pay: $40 per hour.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 83200, max: 83200 });
+});
+
+test("annual earnings floor keeps low tipped base pay unverified", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Tipped Bar",
+        title: "Lead Bartender",
+        url: "https://jobs.example.test/tipped-bar",
+        location: "New York, NY",
+        bodyText: "Base pay: $11.35 per hour plus tips.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Lead Bartender"] }] },
+        profile: {
+          compensation: { minimum_annual_earnings: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.ok(result.kept[0].qualificationUnknowns.includes("compensation"));
+  assert.ok(result.kept[0].ruleFlags.includes("annual-earnings-unverified"));
+  assert.equal(result.kept[0].gate, "review");
+});
+
+test("annual earnings floor compares explicit tipped earnings without treating them as base", () => {
+  const offers = [
+    ["Clear Bar", "$95,000 - $120,000", "annual-earnings-clear"],
+    ["Overlap Bar", "$80,000 - $95,000", "annual-earnings-overlap"],
+    ["Below Bar", "$60,000 - $75,000", "annual-earnings-below-floor"],
+  ].map(([company, range]) => ({
+    company,
+    title: "Lead Bartender",
+    url: `https://jobs.example.test/${company.toLowerCase().replaceAll(" ", "-")}`,
+    location: "New York, NY",
+    bodyText: `Estimated annual earnings including tips: ${range}.`,
+  }));
+  const result = filterAndDedupeOffers(offers, {
+    titleFilter: () => true,
+    locationFilter: () => true,
+    config: {
+      targeting: { role_buckets: [{ titles: ["Lead Bartender"] }] },
+      profile: {
+        compensation: { minimum_annual_earnings: 85000 },
+        location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+      },
+    },
+  });
+
+  assert.deepEqual(
+    result.kept.map((offer) => [offer.company, offer.ruleFlags]),
+    [
+      ["Clear Bar", []],
+      ["Overlap Bar", ["annual-earnings-overlap"]],
+    ]
+  );
+  assert.equal(result.filteredSalary[0]?.company, "Below Bar");
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "annual-earnings-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.annualEarningsBand, { min: 60000, max: 75000 });
+  assert.equal(result.kept.find((offer) => offer.company === "Overlap Bar")?.gate, "review");
+});
+
+test("basis-specific offer fields participate in scanner hard gates", () => {
+  const baseResult = filterAndDedupeOffers(
+    [
+      {
+        company: "Structured Base Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/structured-base",
+        location: "New York, NY",
+        baseComp: "$40 per hour",
+        bodyText: "Manage the venue team and daily service operations.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85_000 },
+          location: { home: "New York, NY", onsite: true },
+        },
+      },
+    }
+  );
+  const annualResult = filterAndDedupeOffers(
+    [
+      {
+        company: "Structured Tips Corp",
+        title: "Lead Bartender",
+        url: "https://jobs.example.test/structured-tips",
+        location: "New York, NY",
+        annualEarningsComp: "$60,000 - $75,000",
+        bodyText: "Lead a polished cocktail service team.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Lead Bartender"] }] },
+        profile: {
+          compensation: { minimum_annual_earnings: 85_000 },
+          location: { home: "New York, NY", onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(baseResult.filteredSalary[0]?.qualificationReason, "comp-below-floor");
+  assert.deepEqual(baseResult.filteredSalary[0]?.compBand, { min: 83_200, max: 83_200 });
+  assert.equal(annualResult.filteredSalary[0]?.qualificationReason, "annual-earnings-below-floor");
+  assert.deepEqual(annualResult.filteredSalary[0]?.annualEarningsBand, {
+    min: 60_000,
+    max: 75_000,
+  });
+});
+
+test("scanner keeps an unlabeled pay range reviewable above a guaranteed-base floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Unknown Basis Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/unknown-basis",
+        location: "New York, NY",
+        comp: "$95k-$120k",
+        bodyText: "Manage the venue team and daily service operations.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 130_000 },
+          location: { home: "New York, NY", onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.filteredSalary.length, 0);
+  assert.equal(result.kept.length, 1);
+  assert.ok(result.kept[0].qualificationUnknowns.includes("compensation"));
+  assert.ok(result.kept[0].ruleFlags.includes("comp-uncertain"));
+  assert.equal(result.kept[0].gate, "review");
+});
+
+test("guaranteed base pay can clear an annual earnings floor", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Guaranteed Bar",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/guaranteed-bar",
+        location: "New York, NY",
+        bodyText: "Base pay: $50 per hour.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_annual_earnings: 85000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.equal(result.kept[0].qualificationUnknowns.includes("compensation"), false);
+  assert.equal(result.kept[0].ruleFlags.includes("annual-earnings-unverified"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -1606,7 +2447,7 @@ test("config-driven scorer: offer with posted comp below floor gets comp-below-f
       company: "SmallClinic",
       title: "Registered Nurse",
       location: "Columbus, OH",
-      comp: "$60,000 - $80,000",
+      comp: "Base salary: $60,000 - $80,000",
       bodyText:
         "RN position providing bedside registered nurse care in outpatient clinic setting. Full time nursing role.",
     },

@@ -68,9 +68,13 @@ function compensationFloorsFromProfile(profile = {}) {
   const output = {};
   const currency = trimString(compensation.currency);
   const minimumBase = finiteNumber(compensation.minimum_base);
+  const minimumAnnualEarnings = finiteNumber(compensation.minimum_annual_earnings);
   const oeMinBase = finiteNumber(compensation.oe_min_base);
   if (currency) output.currency = currency;
   if (minimumBase !== null) output.minimum_base = minimumBase;
+  if (minimumAnnualEarnings !== null) {
+    output.minimum_annual_earnings = minimumAnnualEarnings;
+  }
   if (oeMinBase !== null) output.oe_min_base = oeMinBase;
   return output;
 }

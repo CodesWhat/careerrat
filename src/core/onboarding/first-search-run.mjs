@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { runSourcedScan } from "../../../scripts/scan-sourced.mjs";
-import { candidateConfigGet, hasSearchLocation } from "../db/verbs/candidate.mjs";
+import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import { companyBoardResolutionGet } from "../db/verbs/company-discovery.mjs";
 import { companyAtsUpsert, sourceConfigGet, sourceConfigPut } from "../db/verbs/source-config.mjs";
 import {
@@ -15,11 +15,14 @@ import {
 import { normalizeCompanyKey, resolveCompanyBoard } from "../discovery/company-board-resolver.mjs";
 import { fillManualDomainHints } from "../discovery/company-seeds.mjs";
 import { buildSearchSources } from "../profile/generate-search-sources.mjs";
+import { buildSourceUrl } from "../providers/source-url.mjs";
 import {
   inferProvider,
   isBoardProviderSupported,
   isCompanyProviderSupported,
 } from "../scoring/sourced-scanner.mjs";
+import { pendingSourceLoginRequests } from "../search/source-login-preflight.mjs";
+import { createSearchExecutionId } from "../search/unified-job-search.mjs";
 
 // Bounded backfill for automatic company-board resolution ahead of the first
 // search: on a fresh install, targeting.tracked_companies is just a list of
@@ -44,19 +47,6 @@ const COMPANY_BOARD_BACKFILL_TIMEOUT_MS = 3000;
 // resolution budget to bound until the AI call returns one.
 const COMPANY_BOARD_AI_HINT_TIMEOUT_MS = 8000;
 const COMPANY_BOARD_AI_HINT_MAX_NAMES = 20;
-
-const NO_DETERMINISTIC_SOURCES = Object.freeze({
-  code: "NO_DETERMINISTIC_SOURCES",
-  message:
-    "No deterministic first-search sources are ready. Add an RSS source or supported public ATS company before starting local sourcing.",
-  action: "Add an RSS source or supported public ATS company, then retry first search.",
-});
-
-const SEARCH_LOCATION_REQUIRED = Object.freeze({
-  code: "SEARCH_LOCATION_REQUIRED",
-  message: "Add your location or turn on Remote to start searching.",
-  action: "Add a home location or enable Remote, then retry first search.",
-});
 
 const STATUS_LABELS = Object.freeze({
   not_started: "Not started",
@@ -125,13 +115,6 @@ function buildSourcingRunFingerprint({ purpose, mode, config, searchSources, sou
     sourcedScan: stableValue(sourcedScan || {}, { sourceConfig: true }),
   });
   return createHash("sha256").update(JSON.stringify(input)).digest("hex");
-}
-
-function makeError(message, code, extra = {}) {
-  const err = new Error(message);
-  err.code = code;
-  Object.assign(err, extra);
-  return err;
 }
 
 function asArray(value) {
@@ -359,20 +342,25 @@ function isFetchableBoard(entry = {}) {
   );
 }
 
+function isBrowserSearchSource(entry = {}) {
+  if (!isEnabled(entry) || isFetchableRss(entry) || isFetchableBoard(entry)) {
+    return false;
+  }
+  if (entry.url) return true;
+  if (!["url-query", "browser", "aggregator"].includes(entry.source_type)) return false;
+  try {
+    return Boolean(buildSourceUrl(entry).url);
+  } catch {
+    return false;
+  }
+}
+
 function supportedAtsCompanies(sourcedScan = {}) {
   return asArray(sourcedScan.tracked_companies).filter((entry) => {
     if (!entry || entry.enabled === false) return false;
     const provider = inferProvider(entry);
     return Boolean(provider && isCompanyProviderSupported(provider));
   });
-}
-
-function sourceSetupError() {
-  return { ...NO_DETERMINISTIC_SOURCES };
-}
-
-function searchLocationError() {
-  return { ...SEARCH_LOCATION_REQUIRED };
 }
 
 function trackedCompanyNames(candidateConfig) {
@@ -612,6 +600,7 @@ function currentSourceConfigs(pathCtx) {
 
 function normalizeRunSummary(summary = {}, deterministicSources) {
   const errors = Array.isArray(summary.errors) ? summary.errors : [];
+  const loginRequests = Array.isArray(summary.loginRequests) ? summary.loginRequests : [];
   return {
     attemptedSources: deterministicSources.attempted,
     scanned: Number(summary.scanned || 0),
@@ -627,21 +616,12 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     rejectionSamples: clone(summary.rejectionSamples || {}),
     errorCount: errors.length,
     errors: clone(errors),
+    loginRequests: clone(loginRequests),
+    sourceCoverage: clone(Array.isArray(summary.sourceCoverage) ? summary.sourceCoverage : []),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
     zeroResults: Number(summary.new || 0) === 0,
     deterministicSources: clone(deterministicSources),
   };
-}
-
-function ensureSearchReady(pathCtx, config = candidateConfigGet(pathCtx)) {
-  const setup = config.setup || {};
-  if (setup.readiness?.search_ready !== true) {
-    throw makeError("Candidate setup is not search-ready", "NOT_SEARCH_READY", {
-      readiness: setup.readiness || {},
-      missing: setup.missing || {},
-    });
-  }
-  return config;
 }
 
 async function startSearchRun({
@@ -656,34 +636,6 @@ async function startSearchRun({
 } = {}) {
   const pathCtx = { repoRoot, env };
   const config = candidateConfigGet(pathCtx);
-  if (!hasSearchLocation(config.profile)) {
-    return {
-      ok: true,
-      parked: true,
-      reused: false,
-      run: {
-        status: "not_started",
-        label: STATUS_LABELS.not_started,
-        error: searchLocationError(),
-      },
-      sources: {
-        searches: 0,
-        enabledSearches: 0,
-        trackedCompanies: 0,
-        enabledTrackedCompanies: 0,
-        deterministicSources: {
-          attempted: 0,
-          rss: 0,
-          boards: 0,
-          supportedAtsCompanies: 0,
-          skipped: 0,
-        },
-      },
-      readiness: config.setup?.readiness || {},
-      missing: config.setup?.missing || {},
-    };
-  }
-  ensureSearchReady(pathCtx, config);
   const prepared = await prepareFirstSearchSources({
     repoRoot,
     env,
@@ -711,19 +663,10 @@ async function startSearchRun({
     },
   });
 
-  let run = start.run;
-  if (start.reused !== true && deterministicSources.attempted < 1) {
-    run = sourcingRunFail({
-      ...pathCtx,
-      id: start.run.id,
-      error: sourceSetupError(),
-    }).run;
-  }
-
   return {
     ok: true,
     reused: start.reused === true,
-    run: mapSourcingRunForUi(run),
+    run: mapSourcingRunForUi(start.run),
     sources: {
       searches: Array.isArray(prepared.searchSources?.searches)
         ? prepared.searchSources.searches.length
@@ -744,13 +687,17 @@ export function countDeterministicSources({ searchSources, sourcedScan } = {}) {
   const enabledSearches = searchList(searchSources).filter(isEnabled);
   const rss = enabledSearches.filter(isFetchableRss).length;
   const boards = enabledSearches.filter(isFetchableBoard).length;
+  const browser = enabledSearches.filter(isBrowserSearchSource).length;
   const supportedAts = supportedAtsCompanies(sourcedScan).length;
-  const skipped = enabledSearches.length - rss - boards;
+  const skipped = enabledSearches.length - rss - boards - browser;
+  const pendingLogins = pendingSourceLoginRequests(searchSources).length;
   return {
-    attempted: rss + boards + supportedAts,
+    attempted: rss + boards + browser + supportedAts,
     rss,
     boards,
+    browser,
     supportedAtsCompanies: supportedAts,
+    ...(pendingLogins > 0 ? { pendingLogins } : {}),
     skipped,
   };
 }
@@ -914,7 +861,7 @@ export async function startManualSearchRun({
     mode: "manual",
     retryFailed: false,
     trigger: "manual-search",
-    searchExecutionId,
+    searchExecutionId: createSearchExecutionId({ searchExecutionId }),
   });
 }
 
@@ -923,22 +870,20 @@ export async function runFirstSearchInBackground({
   env = process.env,
   fetchImpl = fetch,
   runId,
+  signal,
+  heartbeatMs = 30_000,
+  settle = true,
+  captureBrowserSourceImpl,
 } = {}) {
   const pathCtx = { repoRoot, env };
+  let heartbeat = null;
   try {
+    signal?.throwIfAborted();
     const { searchSources, sourcedScan } = currentSourceConfigs(pathCtx);
     const deterministicSources = countDeterministicSources({
       searchSources,
       sourcedScan,
     });
-    if (deterministicSources.attempted < 1) {
-      return sourcingRunFail({
-        ...pathCtx,
-        id: runId,
-        error: sourceSetupError(),
-      }).run;
-    }
-
     // Progress is best-effort telemetry. A failed progress write (e.g. the run
     // was concurrently failed or retried, flipping it out of RUNNING) must never
     // abort the scan or block completion — partial results are already persisted
@@ -952,14 +897,28 @@ export async function runFirstSearchInBackground({
     };
 
     let lastProgress = null;
+    const heartbeatProgress = () =>
+      recordProgress({
+        foundCount: 0,
+        offerCount: 0,
+        scannedCount: 0,
+        completedSources: 0,
+        totalSources: deterministicSources.attempted,
+        ...(lastProgress || {}),
+      });
+    heartbeatProgress();
+    heartbeat = setInterval(heartbeatProgress, Math.max(1, Number(heartbeatMs) || 30_000));
+    heartbeat.unref?.();
     const summary = await runSourcedScan({
       repoRoot,
       env,
       fetchImpl,
+      captureBrowserSourceImpl,
       write: true,
       verify: true,
       assertActive: () => sourcingRunAssertActive({ ...pathCtx, id: runId }),
       writeGuard: (db) => assertSourcingRunActiveInDb(db, runId),
+      signal,
       onProgress: ({ batch: _batch, ...progress }) => {
         lastProgress = progress;
         recordProgress(progress);
@@ -974,24 +933,47 @@ export async function runFirstSearchInBackground({
       scannedCount: Number(summary.scanned || 0),
       errorCount: Array.isArray(summary.errors) ? summary.errors.length : 0,
     });
+    const normalizedSummary = normalizeRunSummary(summary, deterministicSources);
+    if (!settle) {
+      return {
+        settlement: { status: "completed", summary: normalizedSummary },
+        value: summary,
+      };
+    }
     return sourcingRunComplete({
       ...pathCtx,
       id: runId,
-      summary: normalizeRunSummary(summary, deterministicSources),
+      summary: normalizedSummary,
     }).run;
   } catch (error) {
+    const failure = signal?.aborted && signal.reason ? signal.reason : error;
+    if (failure?.code === "SOURCING_RUN_SERVER_STOPPED") throw failure;
+    if (!settle) {
+      return {
+        settlement: {
+          status: "failed",
+          error: {
+            code: failure?.code || "SOURCING_SCAN_FAILED",
+            message: failure?.message || "Sourcing scan failed.",
+          },
+        },
+        value: null,
+      };
+    }
     try {
       return sourcingRunFail({
         ...pathCtx,
         id: runId,
         error: {
-          code: error?.code || "SOURCING_SCAN_FAILED",
-          message: error?.message || "Sourcing scan failed.",
+          code: failure?.code || "SOURCING_SCAN_FAILED",
+          message: failure?.message || "Sourcing scan failed.",
         },
       }).run;
     } catch {
       throw error;
     }
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
   }
 }
 

@@ -23,12 +23,20 @@
 // read raw Anthropic SSE agree on framing.
 
 import { resolveModelConfig } from "./ai-config.mjs";
+import { loadAIPreferences } from "./ai-preferences.mjs";
 import {
   detectInstalledRuntimes,
-  hasCompleteCareerRatCapabilities,
+  hasInstalledRuntimeCompletion,
   installedRuntimeCapabilities,
+  installedRuntimeExecutionIdentity,
   runInstalledRuntime,
 } from "./installed-runtimes.mjs";
+import {
+  aiRuntimeIdForRoute,
+  assertAIExecutionPlanForRuntime,
+  assertInstalledRuntimeExecutionEvidence,
+  resolveAIExecutionPlan,
+} from "./operation-policy.mjs";
 import { loadInstalledRuntimeSelection } from "./runtime-selection.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
 
@@ -47,7 +55,11 @@ function hostOf(url) {
 
 export function resolveAIRoute(
   env = process.env,
-  { repoRoot = null, runtimeInventory = null } = {}
+  {
+    repoRoot = null,
+    runtimeInventory = null,
+    runtimeIdentityImpl = installedRuntimeExecutionIdentity,
+  } = {}
 ) {
   const desktopCliOnly = env.CAREERRAT_DESKTOP_CLI_ONLY === "1";
   if (repoRoot) {
@@ -70,23 +82,33 @@ export function resolveAIRoute(
         ? inventory.find(({ id, available }) => id === selection.runtimeId && available)
         : inventory.find(({ available }) => available);
       if (runtime) {
-        const persistedEvidence =
-          selection.verification?.path === runtime.path
-            ? selection.verification.capabilities
-            : null;
+        const currentIdentity = runtimeIdentityImpl(runtime, { env });
+        if (!currentIdentity) {
+          return {
+            type: "none",
+            error:
+              `selected installed AI runtime "${runtime.id}" could not be verified; ` +
+              "re-check it in Settings",
+          };
+        }
+        const verificationMatches =
+          selection.verification?.path === currentIdentity.path &&
+          selection.verification?.realPath === currentIdentity.realPath &&
+          selection.verification?.version === currentIdentity.version &&
+          selection.verification?.binaryFingerprint === currentIdentity.binaryFingerprint;
+        const persistedEvidence = verificationMatches ? selection.verification.capabilities : null;
         const capabilityEvidence =
-          runtime.capabilitiesVerified === false
-            ? persistedEvidence
-            : runtime.capabilities || persistedEvidence;
+          runtime.capabilitiesVerified === true ? runtime.capabilities : persistedEvidence;
         const capabilityState = installedRuntimeCapabilities(runtime.id, {
           available: runtime.available === true,
           capabilityEvidence,
         });
-        if (hasCompleteCareerRatCapabilities(capabilityState.capabilities, runtime.id)) {
+        if (hasInstalledRuntimeCompletion(capabilityState.capabilities, runtime.id)) {
           return {
             type: "installed",
             runtime: {
               ...runtime,
+              ...currentIdentity,
               capabilities: capabilityState.capabilities,
               capabilitiesVerified: true,
               capabilityTier: capabilityState.capabilityTier,
@@ -96,7 +118,7 @@ export function resolveAIRoute(
         return {
           type: "none",
           error:
-            `selected installed AI runtime "${runtime.id}" has no current capability ` +
+            `selected installed AI runtime "${runtime.id}" has no current completion capability ` +
             "verification; re-check it in Settings",
         };
       }
@@ -146,6 +168,77 @@ export function resolveAIRoute(
       "no AI route configured: install and sign in to a supported AI CLI, or use the " +
       "Advanced provider fallback with ANTHROPIC_API_KEY / CAREERRAT_AI_PROXY_URL",
   };
+}
+
+export function resolveAIRouteForExecutionPlan(
+  executionPlan,
+  env = process.env,
+  { runtimeInventory = null, runtimeIdentityImpl = installedRuntimeExecutionIdentity } = {}
+) {
+  const runtimeId = String(executionPlan?.runtimeId || "").trim();
+  if (runtimeId === "claude" || runtimeId === "codex") {
+    const installedRuntime = assertInstalledRuntimeExecutionEvidence(executionPlan);
+    const inventory = runtimeInventory || detectInstalledRuntimes({ env });
+    const runtime = inventory.find(
+      (candidate) => candidate?.id === runtimeId && candidate?.available === true
+    );
+    if (!runtime) {
+      return {
+        type: "none",
+        error: `the ${runtimeId} runtime selected for this work is no longer available`,
+      };
+    }
+    const currentIdentity = runtimeIdentityImpl(runtime, { env });
+    if (
+      !currentIdentity ||
+      currentIdentity.path !== installedRuntime.path ||
+      currentIdentity.realPath !== installedRuntime.realPath ||
+      currentIdentity.version !== installedRuntime.version ||
+      currentIdentity.binaryFingerprint !== installedRuntime.binaryFingerprint
+    ) {
+      return {
+        type: "none",
+        error: `the ${runtimeId} executable selected for this work has changed; start the work again`,
+      };
+    }
+    const capabilityState = installedRuntimeCapabilities(runtimeId, {
+      available: true,
+      capabilityEvidence: installedRuntime.capabilities,
+    });
+    return {
+      type: "installed",
+      runtime: {
+        ...runtime,
+        ...currentIdentity,
+        capabilities: capabilityState.capabilities,
+        capabilitiesVerified: true,
+        capabilityTier: capabilityState.capabilityTier,
+      },
+    };
+  }
+  if (runtimeId === "anthropic-api") {
+    const apiKey = String(env.ANTHROPIC_API_KEY || "").trim();
+    return apiKey
+      ? {
+          type: "byok",
+          baseUrl: (
+            String(env.CAREERRAT_ANTHROPIC_BASE_URL || "").trim() || "https://api.anthropic.com"
+          ).replace(/\/+$/, ""),
+          apiKey,
+        }
+      : { type: "none", error: "the Anthropic API credential for this work is unavailable" };
+  }
+  if (runtimeId === "managed-anthropic") {
+    const baseUrl = String(env.CAREERRAT_AI_PROXY_URL || "").trim();
+    return baseUrl
+      ? {
+          type: "proxy",
+          baseUrl: baseUrl.replace(/\/+$/, ""),
+          token: String(env.CAREERRAT_AI_PROXY_TOKEN || "").trim(),
+        }
+      : { type: "none", error: "the managed AI route for this work is unavailable" };
+  }
+  return { type: "none", error: "the AI route saved for this work is invalid" };
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +521,7 @@ async function runInstalledAI({
   operation,
   model,
   tier,
+  effort,
   runInstalledRuntimeImpl,
 }) {
   const startedAt = performance.now();
@@ -436,6 +530,7 @@ async function runInstalledAI({
     prompt: buildInstalledRuntimePrompt({ system, messages }),
     outputSchema,
     model: resolveInstalledModel({ model, tier, root, env, runtimeId: route.runtime.id }),
+    effort: effort || undefined,
     cwd: root,
     env,
     signal,
@@ -551,11 +646,38 @@ export async function callAI({
   outputName,
   outputMode = null,
   effort = null,
+  aiOperation = null,
+  quality = null,
+  reasoning = null,
+  aiCapabilities = null,
+  executionPlan = null,
+  useExecutionPlanRoute = false,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
-  const route = resolveAIRoute(env, { repoRoot: root, runtimeInventory });
+  const route =
+    executionPlan && useExecutionPlanRoute
+      ? resolveAIRouteForExecutionPlan(executionPlan, env, { runtimeInventory })
+      : resolveAIRoute(env, { repoRoot: root, runtimeInventory });
   if (route.type === "none") throw new Error(route.error);
+  const routeRuntimeId = aiRuntimeIdForRoute(route);
+  const resolvedExecutionPlan = executionPlan
+    ? assertAIExecutionPlanForRuntime(executionPlan, routeRuntimeId)
+    : aiOperation
+      ? resolveAIExecutionPlan({
+          operation: aiOperation,
+          runtimeId: routeRuntimeId,
+          quality,
+          reasoning,
+          preferences: loadAIPreferences({ repoRoot: root, env }),
+          capabilities: aiCapabilities,
+          ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
+          modelOverride: model,
+          effortOverride: effort,
+        })
+      : null;
+  const requestModel = resolvedExecutionPlan?.resolved?.model ?? model;
+  const requestEffort = resolvedExecutionPlan?.resolved?.effort ?? effort;
 
   if (route.type === "installed") {
     const options = {
@@ -570,8 +692,9 @@ export async function callAI({
       skill,
       action,
       operation,
-      model,
+      model: requestModel,
       tier,
+      effort: requestEffort,
       runInstalledRuntimeImpl,
     };
     if (stream) return streamInstalledAI(options);
@@ -583,6 +706,7 @@ export async function callAI({
       usage: result.usage,
       elapsedMs: result.elapsedMs,
       engine: result.engine,
+      ...(resolvedExecutionPlan ? { executionPlan: resolvedExecutionPlan } : {}),
     };
   }
 
@@ -594,7 +718,7 @@ export async function callAI({
   // falling back to the same default.
   const modelConfig = resolveModelConfig({ root, env });
   const resolvedModel =
-    model || (tier === "smallFast" ? modelConfig.smallFastModel : null) || modelConfig.model;
+    requestModel || (tier === "smallFast" ? modelConfig.smallFastModel : null) || modelConfig.model;
 
   const { url, headers, body } = buildRequest(route, {
     model: resolvedModel,
@@ -609,7 +733,7 @@ export async function callAI({
     outputSchema,
     outputName,
     outputMode,
-    effort,
+    effort: requestEffort,
   });
 
   const startedAt = performance.now();
@@ -673,5 +797,6 @@ export async function callAI({
     usage: data.usage,
     elapsedMs,
     engine: describeAIEngine(route),
+    ...(resolvedExecutionPlan ? { executionPlan: resolvedExecutionPlan } : {}),
   };
 }

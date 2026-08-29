@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
@@ -26,16 +27,17 @@ import {
   hasCompleteCareerRatCapabilities,
   INSTALLED_RUNTIME_DEFINITIONS,
   installedRuntimeCapabilities,
+  installedRuntimeExecutionIdentity,
   installedRuntimeSignInCommand,
   materializeIsolatedSkillCwd,
   ONE_SHOT_RUNTIME_TIMEOUT_MS,
   parseCustomCommandString,
   probeCustomRuntimeCommand,
-  probeInstalledRuntime,
+  probeInstalledRuntime as probeInstalledRuntimeCore,
   RUNTIME_TOOL_PROFILE_UNSUPPORTED,
   readInstalledRuntimeScopedFile,
-  runInstalledRuntime,
-  runInstalledRuntimeStream,
+  runInstalledRuntime as runInstalledRuntimeCore,
+  runInstalledRuntimeStream as runInstalledRuntimeStreamCore,
   runtimeSearchDirectories,
   startInstalledRuntimeGuidedSetup,
   startInstalledRuntimeSignIn,
@@ -43,6 +45,7 @@ import {
   supportsInstalledRuntimeStreaming,
 } from "../src/core/ai/installed-runtimes.mjs";
 import {
+  runtimeProcessIdentityFiles,
   runtimeProcessInvocation,
   scheduleRuntimeProcessKill,
 } from "../src/core/ai/runtime-process.mjs";
@@ -115,7 +118,36 @@ const VERIFIED_CAPABILITIES = Object.freeze({
 });
 
 function verifiedRuntime(runtime) {
-  return { ...runtime, capabilities: VERIFIED_CAPABILITIES };
+  return {
+    ...runtime,
+    realPath: runtime.realPath || runtime.path,
+    version: runtime.version || "fixture-version",
+    binaryFingerprint: runtime.binaryFingerprint || "f".repeat(64),
+    capabilities: VERIFIED_CAPABILITIES,
+  };
+}
+
+function fixtureRuntimeIdentity(runtime) {
+  return {
+    path: runtime.path,
+    realPath: runtime.realPath || runtime.path,
+    version: runtime.version || "fixture-version",
+    binaryFingerprint: runtime.binaryFingerprint || "f".repeat(64),
+  };
+}
+
+function runInstalledRuntime(options) {
+  return runInstalledRuntimeCore({
+    ...options,
+    runtimeIdentityImpl: options.runtimeIdentityImpl || fixtureRuntimeIdentity,
+  });
+}
+
+function runInstalledRuntimeStream(options) {
+  return runInstalledRuntimeStreamCore({
+    ...options,
+    runtimeIdentityImpl: options.runtimeIdentityImpl || fixtureRuntimeIdentity,
+  });
 }
 
 function executable(path) {
@@ -126,6 +158,20 @@ function executable(path) {
 
 function verifiedClaudeVersion() {
   return { status: 0, stdout: "2.1.241 (Claude Code)", stderr: "" };
+}
+
+function probeInstalledRuntime(runtime, options = {}) {
+  return probeInstalledRuntimeCore(runtime, {
+    completionProbeImpl: async () => ({
+      ok: true,
+      cached: false,
+      checkedAt: "2026-08-27T16:00:00.000Z",
+      probeMessage: "The AI CLI returned a test reply and is ready.",
+      action: null,
+      actionLabel: null,
+    }),
+    ...options,
+  });
 }
 
 test("runtime registry covers the supported installed CLI set", () => {
@@ -346,6 +392,7 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     status: "ready",
     ready: true,
     action: null,
+    version: "0.149.1",
     capabilities: {
       completion: true,
       structuredOutput: true,
@@ -360,13 +407,13 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     capabilityReason: null,
   });
   assert.equal(JSON.stringify(ready).includes("morgan@example.com"), false);
-  assert.equal(calls[1].executablePath, "/safe/codex");
+  assert.equal(calls[0].executablePath, "/safe/codex");
   assert.deepEqual(
     calls.map(({ args }) => args),
     [["--version"], ["login", "status"]]
   );
-  assert.equal(calls[1].options.shell, false);
-  assert.ok(calls[1].options.timeout > 0);
+  assert.equal(calls[0].options.shell, false);
+  assert.ok(calls[0].options.timeout > 0);
 
   const signedOut = await probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
@@ -384,6 +431,222 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     action: "start_sign_in",
   });
   assert.equal(JSON.stringify(signedOut).includes("secret"), false);
+});
+
+test("supported runtimes stay unready until the bounded completion smoke succeeds", async () => {
+  const result = await probeInstalledRuntimeCore(
+    { id: "codex", path: "/safe/codex", available: true },
+    {
+      spawnSyncImpl(_path, args) {
+        return args[0] === "--version"
+          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
+          : { status: 0, stdout: "Logged in", stderr: "" };
+      },
+      completionProbeImpl: async () => ({
+        ok: false,
+        cached: false,
+        checkedAt: "2026-08-27T16:00:00.000Z",
+        probeMessage: "Codex is installed and signed in, but it didn't return a usable test reply.",
+        action: "retry",
+        actionLabel: "Try again",
+      }),
+    }
+  );
+
+  assert.deepEqual(result, {
+    status: "completion_probe_failed",
+    ready: false,
+    action: "retry",
+    actionLabel: "Try again",
+    probeMessage: "Codex is installed and signed in, but it didn't return a usable test reply.",
+    capabilities: {
+      completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
+      taskTools: false,
+      research: false,
+    },
+    capabilityReason: "Codex is installed and signed in, but it didn't return a usable test reply.",
+  });
+});
+
+test("Codex production readiness passes its detected version into the completion smoke", async () => {
+  const invocations = [];
+  let completionInput;
+  const result = await probeInstalledRuntimeCore(
+    { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+    {
+      spawnSyncImpl(executablePath, args) {
+        invocations.push({ executablePath, args });
+        return args[0] === "--version"
+          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
+          : { status: 0, stdout: "Logged in", stderr: "" };
+      },
+      completionProbeImpl: async (input) => {
+        completionInput = input;
+        return {
+          ok: true,
+          cached: false,
+          checkedAt: "2026-08-27T16:00:00.000Z",
+          probeMessage: "Codex returned a test reply and is ready.",
+          action: null,
+          actionLabel: null,
+        };
+      },
+    }
+  );
+
+  assert.equal(result.status, "ready");
+  assert.equal(completionInput.version, "0.149.1");
+  assert.deepEqual(
+    invocations.map(({ args }) => args),
+    [["--version"], ["login", "status"]]
+  );
+});
+
+test("completion smoke uses the exact no-tool runtime boundary and caches only a bounded receipt", async () => {
+  const runtimeModule = await import("../src/core/ai/installed-runtimes.mjs");
+  assert.equal(typeof runtimeModule.probeInstalledRuntimeCompletion, "function");
+  const cache = new Map();
+  const calls = [];
+  const runtime = { id: "claude", name: "Claude Code", path: "/safe/claude", available: true };
+  const frozenIdentity = {
+    path: runtime.path,
+    realPath: runtime.path,
+    version: "2.1.241",
+    binaryFingerprint: "a".repeat(64),
+  };
+  const options = {
+    runtime,
+    version: "2.1.241",
+    cwd: "/safe/repo",
+    env: { HOME: "/safe/home" },
+    nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+    runtimeIdentityImpl: () => frozenIdentity,
+    loadCompletionSmokeCacheImpl: ({ runtimeId }) => cache.get(runtimeId) || null,
+    saveCompletionSmokeCacheImpl: ({ runtimeId, entry }) => cache.set(runtimeId, entry),
+    async runInstalledRuntimeImpl(args) {
+      calls.push(args);
+      return { text: '{"receipt":"CAREERRAT_COMPLETION_READY"}' };
+    },
+  };
+
+  const first = await runtimeModule.probeInstalledRuntimeCompletion(options);
+  const second = await runtimeModule.probeInstalledRuntimeCompletion(options);
+
+  assert.equal(first.ok, true);
+  assert.equal(first.cached, false);
+  assert.equal(second.ok, true);
+  assert.equal(second.cached, true);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].tools, []);
+  assert.equal(calls[0].skill, null);
+  assert.equal(calls[0].repoRoot, null);
+  assert.deepEqual(
+    {
+      path: calls[0].runtime.path,
+      realPath: calls[0].runtime.realPath,
+      version: calls[0].runtime.version,
+      binaryFingerprint: calls[0].runtime.binaryFingerprint,
+    },
+    frozenIdentity
+  );
+  assert.ok(calls[0].timeoutMs > 0 && calls[0].timeoutMs <= 30_000);
+  assert.deepEqual(calls[0].outputSchema.required, ["receipt"]);
+  assert.equal(JSON.stringify(calls[0]).includes("/safe/repo"), false);
+  assert.deepEqual(Object.keys(cache.get("claude")).sort(), [
+    "binaryFingerprint",
+    "checkedAt",
+    "ok",
+    "path",
+    "version",
+  ]);
+});
+
+test("completion smoke rejects a successful process without the exact parseable receipt", async () => {
+  const { probeInstalledRuntimeCompletion } = await import("../src/core/ai/installed-runtimes.mjs");
+  const result = await probeInstalledRuntimeCompletion({
+    runtime: { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+    version: "0.149.1",
+    nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+    runtimeIdentityImpl: fixtureRuntimeIdentity,
+    loadCompletionSmokeCacheImpl: () => null,
+    saveCompletionSmokeCacheImpl: () => {},
+    runInstalledRuntimeImpl: async () => ({ text: "CAREERRAT_COMPLETION_READY" }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.action, "retry");
+  assert.equal(result.actionLabel, "Try again");
+  assert.match(result.probeMessage, /didn't return a usable test reply/i);
+});
+
+test("completion smoke fails closed when the current executable identity cannot be read", async () => {
+  const { probeInstalledRuntimeCompletion } = await import("../src/core/ai/installed-runtimes.mjs");
+  let executed = false;
+  const result = await probeInstalledRuntimeCompletion({
+    runtime: { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+    version: "0.149.1",
+    nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+    runtimeIdentityImpl() {
+      throw new Error("unreadable executable");
+    },
+    runInstalledRuntimeImpl: async () => {
+      executed = true;
+      return { text: '{"receipt":"CAREERRAT_COMPLETION_READY"}' };
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(executed, false);
+});
+
+test("completion smoke rewrites its private cache with only supported bounded receipts", async () => {
+  const { probeInstalledRuntimeCompletion } = await import("../src/core/ai/installed-runtimes.mjs");
+  const careerratHome = mkdtempSync(join(tmpdir(), "careerrat-completion-cache-"));
+  const cacheDir = join(careerratHome, "internal");
+  const cachePath = join(cacheDir, "runtime-completion-smoke.json");
+  mkdirSync(cacheDir, { recursive: true });
+  writeFileSync(
+    cachePath,
+    JSON.stringify({
+      schemaVersion: 1,
+      runtimes: {
+        attacker: { arbitrary: "this must not survive a cache write" },
+        claude: { path: "/bad/claude", ok: "yes", extra: "also invalid" },
+      },
+    })
+  );
+
+  try {
+    await probeInstalledRuntimeCompletion({
+      runtime: { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+      version: "0.149.1",
+      cwd: careerratHome,
+      env: { CAREERRAT_HOME: careerratHome },
+      nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+      runtimeIdentityImpl: fixtureRuntimeIdentity,
+      runInstalledRuntimeImpl: async () => ({
+        text: '{"receipt":"CAREERRAT_COMPLETION_READY"}',
+      }),
+    });
+
+    const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+    assert.deepEqual(Object.keys(cache.runtimes), ["codex"]);
+    assert.deepEqual(Object.keys(cache.runtimes.codex).sort(), [
+      "binaryFingerprint",
+      "checkedAt",
+      "ok",
+      "path",
+      "version",
+    ]);
+  } finally {
+    rmSync(careerratHome, { recursive: true, force: true });
+  }
 });
 
 test("Windows readiness probes launch detected Claude and Codex npm shims through fixed cmd argv", async () => {
@@ -428,7 +691,7 @@ test("Windows readiness probes launch detected Claude and Codex npm shims throug
     );
 
     assert.equal(ready.ready, true);
-    assert.ok(calls.length >= 2);
+    assert.equal(calls.length, 2);
     for (const call of calls) {
       assert.equal(call.command, comspec);
       assert.deepEqual(call.args.slice(0, 4), ["/d", "/s", "/v:off", "/c"]);
@@ -620,6 +883,267 @@ test("Windows batch invocation distinguishes npm shims, plain batch files, and l
   );
 });
 
+test("Windows npm shim identity resolves the cmd launcher, Node interpreter, and payload", () => {
+  const wrapper = "C:\\Users\\Taylor\\AppData\\Roaming\\npm\\codex.cmd";
+  const command = "C:\\Windows\\System32\\cmd.exe";
+  const interpreter = "C:\\Program Files\\nodejs\\node.exe";
+  const payload =
+    "C:\\Users\\Taylor\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js";
+  const canonical = new Map([
+    [wrapper.toLowerCase(), wrapper],
+    [command.toLowerCase(), command],
+    [interpreter.toLowerCase(), interpreter],
+    [payload.toLowerCase(), payload],
+  ]);
+  const shim = [
+    "@ECHO off",
+    "GOTO start",
+    ":find_dp0",
+    "SET dp0=%~dp0",
+    "EXIT /b",
+    ":start",
+    "SETLOCAL",
+    "CALL :find_dp0",
+    'IF EXIST "%dp0%\\node.exe" (',
+    '  SET "_prog=%dp0%\\node.exe"',
+    ") ELSE (",
+    '  SET "_prog=node"',
+    ")",
+    'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%" "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*',
+  ].join("\r\n");
+
+  const files = runtimeProcessIdentityFiles(wrapper, {
+    platform: "win32",
+    env: { ComSpec: command, Path: "C:\\Program Files\\nodejs" },
+    readFileImpl(path) {
+      assert.equal(path, wrapper);
+      return shim;
+    },
+    realpathImpl(path) {
+      const resolved = canonical.get(String(path).toLowerCase());
+      if (!resolved) throw new Error(`missing ${path}`);
+      return resolved;
+    },
+  });
+
+  assert.deepEqual(files, [
+    { role: "launcher", path: command },
+    { role: "wrapper", path: wrapper },
+    { role: "interpreter", path: interpreter },
+    { role: "payload", path: payload },
+  ]);
+
+  const decoy = `${shim}\r\n"%dp0%\\untracked.exe" %*`;
+  assert.equal(
+    runtimeProcessIdentityFiles(wrapper, {
+      platform: "win32",
+      env: { ComSpec: command, Path: "C:\\Program Files\\nodejs" },
+      readFileImpl: () => decoy,
+      realpathImpl(path) {
+        const resolved = canonical.get(String(path).toLowerCase());
+        if (!resolved) throw new Error(`missing ${path}`);
+        return resolved;
+      },
+    }),
+    null
+  );
+});
+
+test("Windows verified runtime identity changes when an unchanged shim payload or interpreter changes", () => {
+  const root = tempRoot();
+  const wrapper = join(root, "codex.cmd");
+  const launcher = join(root, "cmd.exe");
+  const interpreter = join(root, "node.exe");
+  const payload = join(root, "codex.js");
+  writeFileSync(wrapper, "unchanged wrapper");
+  writeFileSync(launcher, "cmd implementation");
+  writeFileSync(interpreter, "node implementation v1");
+  writeFileSync(payload, "codex implementation v1");
+  const runtimeIdentityFilesImpl = () => [
+    { role: "launcher", path: launcher },
+    { role: "wrapper", path: wrapper },
+    { role: "interpreter", path: interpreter },
+    { role: "payload", path: payload },
+  ];
+
+  try {
+    const runtime = { path: wrapper, version: "codex-cli 0.149.1" };
+    const original = installedRuntimeExecutionIdentity(runtime, {
+      platform: "win32",
+      runtimeIdentityFilesImpl,
+    });
+    assert.ok(original);
+
+    writeFileSync(payload, "codex implementation v2");
+    const changedPayload = installedRuntimeExecutionIdentity(runtime, {
+      platform: "win32",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedPayload.binaryFingerprint, original.binaryFingerprint);
+
+    writeFileSync(payload, "codex implementation v1");
+    writeFileSync(interpreter, "node implementation v2");
+    const changedInterpreter = installedRuntimeExecutionIdentity(runtime, {
+      platform: "win32",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedInterpreter.binaryFingerprint, original.binaryFingerprint);
+
+    writeFileSync(interpreter, "node implementation v1");
+    writeFileSync(launcher, "cmd implementation v2");
+    const changedLauncher = installedRuntimeExecutionIdentity(runtime, {
+      platform: "win32",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedLauncher.binaryFingerprint, original.binaryFingerprint);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows verified runtime identity fails closed for an unresolved batch implementation", () => {
+  const root = tempRoot();
+  const wrapper = join(root, "codex.cmd");
+  writeFileSync(wrapper, "@echo off\r\ncodex-real.exe %*");
+  try {
+    assert.equal(
+      installedRuntimeExecutionIdentity(
+        {
+          path: wrapper,
+          version: "codex-cli 0.149.1",
+          binaryFingerprint: "a".repeat(64),
+        },
+        {
+          platform: "win32",
+          runtimeIdentityFilesImpl: () => null,
+        }
+      ),
+      null
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Unix direct executable identity keeps the existing raw-byte fingerprint", () => {
+  const root = tempRoot();
+  const executable = join(root, "codex");
+  const bytes = Buffer.from("direct executable bytes");
+  writeFileSync(executable, bytes);
+  try {
+    const identity = installedRuntimeExecutionIdentity(
+      { path: executable, version: "0.149.1" },
+      {
+        platform: "darwin",
+      }
+    );
+    assert.equal(identity.binaryFingerprint, createHash("sha256").update(bytes).digest("hex"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("one-shot execution rejects a same-path replacement before spawning it", async () => {
+  const root = tempRoot();
+  const executablePath = join(root, "claude");
+  writeFileSync(executablePath, "verified implementation", "utf8");
+  const frozenIdentity = installedRuntimeExecutionIdentity({
+    path: executablePath,
+    version: "2.1.241",
+  });
+  writeFileSync(executablePath, "replacement implementation", "utf8");
+  let spawned = false;
+
+  try {
+    await assert.rejects(
+      runInstalledRuntimeCore({
+        runtime: verifiedRuntime({ id: "claude", ...frozenIdentity }),
+        prompt: "hello",
+        spawnImpl() {
+          spawned = true;
+          return fakeInstalledChild({
+            stdout: JSON.stringify({ type: "result", subtype: "success", result: "unsafe" }),
+          });
+        },
+      }),
+      { code: "RUNTIME_EXECUTABLE_CHANGED" }
+    );
+    assert.equal(spawned, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("streaming execution rejects a same-path replacement before spawning it", async () => {
+  const root = tempRoot();
+  const executablePath = join(root, "claude");
+  writeFileSync(executablePath, "verified implementation", "utf8");
+  const frozenIdentity = installedRuntimeExecutionIdentity({
+    path: executablePath,
+    version: "2.1.241",
+  });
+  writeFileSync(executablePath, "replacement implementation", "utf8");
+  let spawned = false;
+
+  try {
+    await assert.rejects(
+      runInstalledRuntimeStreamCore({
+        runtime: verifiedRuntime({ id: "claude", ...frozenIdentity }),
+        prompt: "hello",
+        spawnImpl() {
+          spawned = true;
+          return fakeStreamingChild({ chunks: [] });
+        },
+      }),
+      { code: "RUNTIME_EXECUTABLE_CHANGED" }
+    );
+    assert.equal(spawned, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("tool execution keeps its frozen identity when the caller mutates the runtime object", async () => {
+  const repoRoot = tempRepoWithOneSkill("research-company");
+  const runtime = verifiedRuntime({ id: "claude", path: "/safe/claude" });
+  const replacementFingerprint = "b".repeat(64);
+  let identityChecks = 0;
+  let finalSpawned = false;
+
+  try {
+    await assert.rejects(
+      runInstalledRuntime({
+        runtime,
+        prompt: "research",
+        skill: "research-company",
+        repoRoot,
+        tools: ["WebSearch", "Skill"],
+        runtimeIdentityImpl(selected) {
+          identityChecks += 1;
+          const current = fixtureRuntimeIdentity(selected);
+          if (identityChecks === 1) {
+            runtime.binaryFingerprint = replacementFingerprint;
+            return current;
+          }
+          return { ...current, binaryFingerprint: replacementFingerprint };
+        },
+        spawnSyncImpl: verifiedClaudeVersion,
+        spawnImpl() {
+          finalSpawned = true;
+          return fakeInstalledChild({
+            stdout: JSON.stringify({ type: "result", subtype: "success", result: "unsafe" }),
+          });
+        },
+      }),
+      { code: "RUNTIME_EXECUTABLE_CHANGED" }
+    );
+    assert.equal(identityChecks, 2);
+    assert.equal(finalSpawned, false);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("Windows forced cleanup uses fixed taskkill argv for the entire runtime process tree", async () => {
   const childSignals = [];
   const treeCalls = [];
@@ -711,21 +1235,24 @@ test("an empty ACP handshake proves protocol readiness without workflow capabili
   assert.equal(ready.capabilities.research, false);
 });
 
-test("Claude readiness fails closed below the verified CLI boundary version", async () => {
+test("Claude readiness keeps completion available below the tool boundary version", async () => {
   const calls = [];
-  const unsupported = await probeInstalledRuntime(
+  const ready = await probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
     {
       spawnSyncImpl(_path, args) {
         calls.push(args);
-        return { status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" };
+        return args[0] === "--version"
+          ? { status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }
+          : { status: 0, stdout: "signed in", stderr: "" };
       },
     }
   );
-  assert.deepEqual(unsupported, {
-    status: "unsupported_capability",
-    ready: false,
+  assert.deepEqual(ready, {
+    status: "ready",
+    ready: true,
     action: null,
+    version: "2.1.200",
     capabilities: {
       completion: true,
       structuredOutput: true,
@@ -739,38 +1266,41 @@ test("Claude readiness fails closed below the verified CLI boundary version", as
     },
     capabilityReason: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
   });
-  assert.deepEqual(calls, [["--version"]]);
+  assert.deepEqual(calls, [["--version"], ["auth", "status"]]);
 });
 
-test("Codex readiness requires the CLI version that supports the completion capsule controls", async () => {
+test("Codex readiness depends on authentication rather than a complete-workflow version floor", async () => {
   const calls = [];
-  const unsupported = await probeInstalledRuntime(
+  const ready = await probeInstalledRuntime(
     { id: "codex", path: "/safe/codex", available: true },
     {
       spawnSyncImpl(_path, args) {
         calls.push(args);
-        return { status: 0, stdout: "codex-cli 0.148.0", stderr: "" };
+        return args[0] === "--version"
+          ? { status: 0, stdout: "codex-cli 0.149.1", stderr: "" }
+          : { status: 0, stdout: "logged in", stderr: "" };
       },
     }
   );
-  assert.deepEqual(unsupported, {
-    status: "unsupported_capability",
-    ready: false,
+  assert.deepEqual(ready, {
+    status: "ready",
+    ready: true,
     action: null,
+    version: "0.149.1",
     capabilities: {
-      completion: false,
-      structuredOutput: false,
-      appWorkflows: false,
-      exactRead: false,
-      publicWeb: false,
-      liveActivity: false,
-      resumable: false,
-      taskTools: false,
-      research: false,
+      completion: true,
+      structuredOutput: true,
+      appWorkflows: true,
+      exactRead: true,
+      publicWeb: true,
+      liveActivity: true,
+      resumable: true,
+      taskTools: true,
+      research: true,
     },
-    capabilityReason: "Update Codex to 0.149.1 or newer for the complete CareerRat workflow.",
+    capabilityReason: null,
   });
-  assert.deepEqual(calls, [["--version"]]);
+  assert.deepEqual(calls, [["--version"], ["login", "status"]]);
 });
 
 test("Skill-only Claude runs are completion-only and do not require the tool boundary version", async () => {
@@ -809,6 +1339,7 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
       maxProperties: 2,
     },
     model: "sonnet",
+    effort: "high",
     tools: [],
   });
   assert.equal(claude.command, "/safe/claude");
@@ -826,12 +1357,14 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
   assert.ok(claude.args.includes("--permission-mode"));
   assert.equal(claude.args[claude.args.indexOf("--tools") + 1], "");
   assert.equal(claude.args.includes("--allowedTools"), false);
+  assert.equal(claude.args[claude.args.indexOf("--effort") + 1], "high");
   assert.equal(claude.args.includes("PROMPT_SECRET"), false);
 
   const codex = buildInstalledRuntimeInvocation({
     runtimeId: "codex",
     executablePath: "/safe/codex",
     schemaPath: "/private/tmp/schema.json",
+    effort: "medium",
   });
   assert.equal(codex.command, "/safe/codex");
   assert.deepEqual(codex.args.slice(0, 2), ["exec", "--json"]);
@@ -861,6 +1394,7 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
     assert.ok(index >= 0, `Codex completion capsule must disable ${feature}`);
   }
   assert.ok(codex.args.includes("--output-schema"));
+  assert.ok(codex.args.includes('model_reasoning_effort="medium"'));
   assert.equal(codex.args.at(-1), "-");
   assert.equal(codex.options.shell, false);
 });
@@ -1922,6 +2456,37 @@ test("runInstalledRuntime surfaces a redacted Claude JSON failure from stdout on
   );
 });
 
+test("runInstalledRuntime classifies a provider usage cap without exposing raw CLI text", async () => {
+  await assert.rejects(
+    runInstalledRuntime({
+      runtime: verifiedRuntime({ id: "claude", path: "/safe/claude" }),
+      prompt: "hello",
+      timeoutMs: 2000,
+      spawnImpl: () =>
+        fakeInstalledChild({
+          status: 1,
+          stdout: JSON.stringify({
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+            result:
+              "You've hit your weekly limit · resets 4pm (America/New_York) · internal schema secret",
+          }),
+        }),
+    }),
+    (error) => {
+      assert.equal(error.code, "RUNTIME_USAGE_LIMIT");
+      assert.equal(
+        error.message,
+        "Claude Code has reached its usage limit. It resets at 4pm (America/New_York). Try again after the reset."
+      );
+      assert.equal(error.resetAt, "4pm (America/New_York)");
+      assert.doesNotMatch(error.message, /weekly|schema|secret|exited with status/i);
+      return true;
+    }
+  );
+});
+
 // P0 regression: runInstalledRuntime's `timeoutMs` has two named tiers (see
 // installed-runtimes.mjs's own comment above their definitions). Bounded
 // one-shot calls (evaluate-job, tailor-application, resume-extract, ...) must
@@ -2181,6 +2746,21 @@ test("buildInstalledRuntimeChildEnv retains only process/auth paths, locale, and
     ANTHROPIC_MODEL: "claude-sonnet",
     CLAUDE_CONFIG_DIR: "/Users/morgan/.config/claude",
   });
+});
+
+test("buildInstalledRuntimeChildEnv keeps Windows launcher path casing used by execution identity", () => {
+  assert.deepEqual(
+    buildInstalledRuntimeChildEnv({
+      env: {
+        Path: "C:\\Program Files\\nodejs",
+        ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      },
+    }),
+    {
+      Path: "C:\\Program Files\\nodejs",
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+    }
+  );
 });
 
 test("runInstalledRuntime scrubs server secrets from a completion-only Claude child", async () => {
@@ -2941,6 +3521,106 @@ test("runInstalledRuntimeStream normalizes Codex CareerRat fetch activity", asyn
   ]);
 });
 
+test("runInstalledRuntimeStream applies Claude structured output while preserving activity streaming", async () => {
+  const outputSchema = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    required: ["roles"],
+    additionalProperties: false,
+    properties: { roles: { type: "array", items: { type: "string" } } },
+  };
+  let invocationArgs = [];
+  const received = [];
+  const result = await runInstalledRuntimeStream({
+    runtime: verifiedRuntime({ id: "claude", path: "/safe/claude", name: "Claude Code" }),
+    prompt: "find roles",
+    tools: ["WebSearch", "WebFetch"],
+    outputSchema,
+    onMessage: (message) => received.push(message),
+    spawnSyncImpl: verifiedClaudeVersion,
+    spawnImpl(_command, args) {
+      invocationArgs = args;
+      return fakeStreamingChild({
+        chunks: [
+          ndjson([
+            {
+              type: "assistant",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "fetch-1",
+                    name: "WebFetch",
+                    input: { url: "https://example.com/jobs/1" },
+                  },
+                ],
+              },
+            },
+            {
+              type: "result",
+              subtype: "success",
+              structured_output: { roles: [] },
+            },
+          ]),
+        ],
+      });
+    },
+  });
+
+  const schemaIndex = invocationArgs.indexOf("--json-schema");
+  assert.ok(schemaIndex >= 0);
+  assert.deepEqual(JSON.parse(invocationArgs[schemaIndex + 1]), {
+    type: "object",
+    required: ["roles"],
+    additionalProperties: false,
+    properties: { roles: { type: "array", items: { type: "string" } } },
+  });
+  assert.equal(result.text, '{"roles":[]}');
+  assert.equal(
+    received.some((message) => message.type === "assistant"),
+    true
+  );
+});
+
+test("runInstalledRuntimeStream stages and removes the Codex output schema", async () => {
+  const outputSchema = {
+    type: "object",
+    required: ["roles"],
+    additionalProperties: false,
+    properties: { roles: { type: "array", items: { type: "string" } } },
+  };
+  let schemaPath = null;
+  let stagedSchema = null;
+  const result = await runInstalledRuntimeStream({
+    runtime: verifiedRuntime({ id: "codex", path: "/safe/codex", name: "Codex" }),
+    prompt: "find roles",
+    tools: ["WebSearch", "WebFetch"],
+    outputSchema,
+    spawnImpl(_command, args) {
+      const schemaIndex = args.indexOf("--output-schema");
+      assert.ok(schemaIndex >= 0);
+      schemaPath = args[schemaIndex + 1];
+      stagedSchema = JSON.parse(readFileSync(schemaPath, "utf8"));
+      return fakeStreamingChild({
+        chunks: [
+          ndjson([
+            { type: "thread.started", thread_id: "thread-schema" },
+            {
+              type: "item.completed",
+              item: { id: "message-1", type: "agent_message", text: '{"roles":[]}' },
+            },
+            { type: "turn.completed" },
+          ]),
+        ],
+      });
+    },
+  });
+
+  assert.deepEqual(stagedSchema, outputSchema);
+  assert.equal(result.text, '{"roles":[]}');
+  assert.equal(existsSync(schemaPath), false);
+});
+
 test("runInstalledRuntimeStream gives Codex only the selected CareerRat skill workspace", async () => {
   const repoRoot = tempRepoWithOneSkill("research-company", "Marker: CODEX_SKILL_SCOPE.\n");
   let spawnedCwd = null;
@@ -3061,6 +3741,36 @@ test("runInstalledRuntimeStream re-verifies Claude's boundary version before a c
   }
 });
 
+test("runInstalledRuntimeStream does not apply Claude's tool boundary to Skill-only work", async () => {
+  const repoRoot = tempRepoWithOneSkill("answer-question");
+  let spawned = false;
+  try {
+    const result = await runInstalledRuntimeStream({
+      runtime: verifiedRuntime({ id: "claude", name: "Claude Code", path: "/safe/claude" }),
+      prompt: "draft",
+      skill: "answer-question",
+      repoRoot,
+      tools: ["Skill"],
+      spawnSyncImpl: () => ({ status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }),
+      spawnImpl() {
+        spawned = true;
+        return fakeStreamingChild({
+          chunks: [
+            ndjson([
+              { type: "assistant", message: { content: [{ type: "text", text: "drafted" }] } },
+              { type: "result", subtype: "success", result: "drafted" },
+            ]),
+          ],
+        });
+      },
+    });
+    assert.equal(result.text, "drafted");
+    assert.equal(spawned, true);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("runInstalledRuntimeStream: a text-only turn calls onMessage once per NDJSON line, in order, and resolves the terminal result's text/usage/model/sessionId", async () => {
   const lines = [
     { type: "system", subtype: "init", session_id: "sess-1" },
@@ -3131,7 +3841,7 @@ test("runInstalledRuntimeStream scrubs server secrets while retaining HOME-based
         return fakeStreamingChild({ chunks: [ndjson([terminal])] });
       },
     });
-    assert.equal(seenEnvs.length, 2);
+    assert.equal(seenEnvs.length, 1);
     for (const childEnv of seenEnvs) {
       assert.equal(childEnv.HOME, "/Users/morgan");
       assert.equal(childEnv.PATH, "/usr/bin");

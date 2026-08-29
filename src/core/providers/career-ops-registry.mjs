@@ -33,6 +33,9 @@ export async function loadCareerOpsProviders(
       if (provider.detect != null && typeof provider.detect !== "function") {
         throw new Error(`Career Ops provider "${id}" has an invalid detect export`);
       }
+      if (provider.fetchDetail != null && typeof provider.fetchDetail !== "function") {
+        throw new Error(`Career Ops provider "${id}" has an invalid fetchDetail export`);
+      }
       return provider;
     })
   );
@@ -366,4 +369,21 @@ export async function fetchCareerOpsProvider(providerId, entry, options = {}) {
     throw new Error(`Career Ops provider "${normalizedId}" returned a non-array result`);
   }
   return jobs.map((job) => normalizeOffer(job, normalizedId));
+}
+
+export async function fetchCareerOpsPostingDetail(providerId, entry, job, options = {}) {
+  const normalizedId = normalizeProviderId(providerId);
+  const provider = PROVIDERS.get(normalizedId);
+  if (!provider) throw new Error(`unsupported Career Ops provider: ${normalizedId || providerId}`);
+  if (typeof provider.fetchDetail !== "function") return normalizeOffer(job, normalizedId);
+  const fetchImpl = options.fetchImpl || fetch;
+  const detailed = await provider.fetchDetail(
+    prepareProviderEntry(normalizedId, entry),
+    job,
+    createContext(fetchImpl, options)
+  );
+  if (!detailed || typeof detailed !== "object" || Array.isArray(detailed)) {
+    throw new Error(`Career Ops provider "${normalizedId}" returned an invalid posting detail`);
+  }
+  return normalizeOffer(detailed, normalizedId);
 }

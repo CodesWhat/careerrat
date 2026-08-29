@@ -1,4 +1,5 @@
 import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
+import { searchExecutionGet } from "../core/db/verbs/search-executions.mjs";
 import { sourcingRunFail, sourcingRunGet } from "../core/db/verbs/sourcing-runs.mjs";
 import {
   latestSourcingRunForUi,
@@ -133,6 +134,20 @@ export function mountSourcingRoutes({
         ? sourcingRunGet({ repoRoot, env, purpose, id })
         : latestSourcingRunForUi({ repoRoot, env, purpose });
       sendJson(res, 200, latest);
+    } catch (err) {
+      sendRouteError(res, err);
+    }
+  });
+
+  addRoute("GET", "/api/sourcing/execution", (req, res) => {
+    try {
+      const id = idFromUrl(req);
+      if (!id) {
+        const error = new Error("search execution id is required");
+        error.code = "BAD_REQUEST";
+        throw error;
+      }
+      sendJson(res, 200, searchExecutionGet({ repoRoot, env, id }));
     } catch (err) {
       sendRouteError(res, err);
     }

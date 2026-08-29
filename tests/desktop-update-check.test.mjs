@@ -143,6 +143,46 @@ describe("desktop updater controller", () => {
     assert.equal(controller.install(), true);
   });
 
+  it("rechecks a downloaded update after restart before offering installation", async () => {
+    const { controller, updater, writes } = makeController({
+      persisted: {
+        ...DEFAULT_STATE,
+        operation: { phase: "ready", version: "0.16.4" },
+      },
+    });
+
+    assert.equal(controller.getState().phase, "checking");
+    assert.equal(controller.getState().version, "0.16.4");
+    assert.equal(controller.install(), false);
+    assert.equal(controller.needsStartupCheck(), true);
+
+    await controller.reconcileStartup();
+    assert.equal(updater.checkCalls, 1);
+    assert.equal(controller.needsStartupCheck(), false);
+
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.install(), true);
+    assert.deepEqual(writes.at(-1).operation, { phase: "ready", version: "0.16.4" });
+  });
+
+  it("recovers an interrupted download as a clear retry instead of idle", () => {
+    const { controller, writes } = makeController({
+      persisted: {
+        ...DEFAULT_STATE,
+        operation: { phase: "downloading", version: "0.16.4" },
+      },
+    });
+
+    const state = controller.getState();
+    assert.equal(state.phase, "error");
+    assert.equal(state.errorKind, "interrupted");
+    assert.match(state.message, /stopped when CareerRat closed/i);
+    assert.match(state.message, /Try again/i);
+    assert.equal(controller.needsStartupCheck(), false);
+    assert.equal(writes.at(-1).operation, null);
+  });
+
   it("does not invoke the native updater and links to honest Windows release status", async () => {
     const { controller, updater } = makeController({ platform: "win32" });
 

@@ -11,6 +11,7 @@ import {
   selectPriorFeedAssets,
   selectPriorPublishedRelease,
   signAcceptanceRequest,
+  verifyNativeUpdateResult,
   writeSignedAcceptanceRequest,
 } from "../apps/desktop/scripts/verify-native-update.mjs";
 
@@ -126,13 +127,59 @@ test("prior feed requires one exact-version ZIP and latest-mac.yml", () => {
 
 test("acceptance hook inspection recognizes only the packaged helper path", () => {
   assert.equal(
-    hasNativeAcceptanceHook("/main.mjs\n/native-update-acceptance.mjs\n/package.json\n"),
+    hasNativeAcceptanceHook(
+      "/main.mjs\n/native-update-acceptance.mjs\n/native-update-data-contract-v2.json\n/package.json\n"
+    ),
     true
   );
+  assert.equal(hasNativeAcceptanceHook("/main.mjs\n/native-update-acceptance.mjs\n"), false);
   assert.equal(hasNativeAcceptanceHook("/docs/native-update-acceptance.mjs.txt\n"), false);
 });
 
-test("only public 0.16.3 may use the synthetic bootstrap fixture", () => {
+test("native update result requires the prior canonical row and exact migration ceiling", () => {
+  const valid = {
+    ok: true,
+    fromVersion: "0.16.5",
+    expectedVersion: "0.16.6",
+    observedVersion: "0.16.6",
+    sentinelPreserved: true,
+    durableRowPreserved: true,
+    observedMigrationVersion: 17,
+    expectedMigrationCeiling: 17,
+    migrationCeilingRespected: true,
+  };
+  assert.equal(
+    verifyNativeUpdateResult({
+      result: valid,
+      fromVersion: "0.16.5",
+      expectedVersion: "0.16.6",
+      expectedMigrationCeiling: 17,
+    }),
+    true
+  );
+  assert.throws(
+    () =>
+      verifyNativeUpdateResult({
+        result: { ...valid, durableRowPreserved: false },
+        fromVersion: "0.16.5",
+        expectedVersion: "0.16.6",
+        expectedMigrationCeiling: 17,
+      }),
+    /canonical candidate row/i
+  );
+  assert.throws(
+    () =>
+      verifyNativeUpdateResult({
+        result: { ...valid, observedMigrationVersion: 18 },
+        fromVersion: "0.16.5",
+        expectedVersion: "0.16.6",
+        expectedMigrationCeiling: 17,
+      }),
+    /migration ceiling/i
+  );
+});
+
+test("published apps without the v2 data contract use the synthetic prior package", () => {
   assert.equal(
     choosePriorAcceptanceKind({
       priorVersion: "0.16.3",
@@ -149,6 +196,14 @@ test("only public 0.16.3 may use the synthetic bootstrap fixture", () => {
     }),
     "published"
   );
+  assert.equal(
+    choosePriorAcceptanceKind({
+      priorVersion: "0.16.5",
+      publishedFeedAvailable: true,
+      acceptanceHookPresent: false,
+    }),
+    "bootstrap"
+  );
   assert.throws(
     () =>
       choosePriorAcceptanceKind({
@@ -157,15 +212,6 @@ test("only public 0.16.3 may use the synthetic bootstrap fixture", () => {
         acceptanceHookPresent: false,
       }),
     /prior published updater feed is missing/i
-  );
-  assert.throws(
-    () =>
-      choosePriorAcceptanceKind({
-        priorVersion: "0.16.4",
-        publishedFeedAvailable: true,
-        acceptanceHookPresent: false,
-      }),
-    /does not contain the native update acceptance hook/i
   );
 });
 

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { requireDb } from "../core/db/connection.mjs";
@@ -15,6 +15,12 @@ import {
   deepIngestSourceRemove,
   deepIngestStateGet,
 } from "../core/db/verbs.mjs";
+import {
+  DEEP_INGEST_PROPOSAL_BUILD_KIND,
+  DEEP_INGEST_SOURCE_SCAN_KIND,
+  prepareDeepIngestSourceScan,
+  rollbackPreparedDeepIngestSourceScan,
+} from "../core/deep-ingest/app-operations.mjs";
 import { proposeAutoFromSource } from "../core/deep-ingest/proposals/auto.mjs";
 import { proposeEvidenceFromSource } from "../core/deep-ingest/proposals/evidence.mjs";
 import { proposeGapsFromSource } from "../core/deep-ingest/proposals/gaps.mjs";
@@ -33,7 +39,7 @@ import {
 import { scanDeepIngestSource as defaultScanDeepIngestSource } from "../core/deep-ingest/source-scanner.mjs";
 import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
-import { sanitizeUploadFilename } from "./onboard-route.mjs";
+import { assertSettingsBaseRevision, sanitizeUploadFilename } from "./onboard-route.mjs";
 import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 export { DEEP_INGEST_JSON_BODY_MAX_BYTES, DEEP_INGEST_UPLOAD_MAX_BYTES };
@@ -103,6 +109,7 @@ function queryParam(req, name) {
 }
 
 function statusForError(err) {
+  if (err?.code === "SETTINGS_BASE_CHANGED") return 409;
   if (err?.code === "NO_DATABASE") return 409;
   if (
     err?.code === "VERSION_CONFLICT" ||
@@ -117,14 +124,45 @@ function statusForError(err) {
 function respondError(res, err) {
   sendJson(res, statusForError(err), {
     ok: false,
+    code: err?.code === "SETTINGS_BASE_CHANGED" ? err.code : undefined,
     error: err?.message || String(err),
     reasons: err?.reasons || undefined,
     validation: err?.validation || undefined,
+    draftContext: err?.code === "SETTINGS_BASE_CHANGED" ? err.draftContext : undefined,
   });
 }
 
 function ensureDb(repoRoot, env) {
   requireDb({ repoRoot, env });
+}
+
+function operationView(operation) {
+  const { request: _request, ownerId: _ownerId, fence: _fence, ...visible } = operation || {};
+  return visible;
+}
+
+function operationSubject(operation, fallback = {}) {
+  const request = { ...(operation?.request || {}), ...(fallback || {}) };
+  const sourceId = String(request.sourceId || fallback.sourceId || "").trim();
+  const sourceVersion = Number(request.sourceVersion || fallback.sourceVersion);
+  const targetShape = String(request.targetShape || fallback.targetShape || "").trim();
+  return {
+    ...(sourceId ? { sourceId } : {}),
+    ...(Number.isInteger(sourceVersion) && sourceVersion > 0 ? { sourceVersion } : {}),
+    ...(targetShape ? { targetShape } : {}),
+  };
+}
+
+function sendOperation(res, started, fallbackSubject) {
+  const active = ["queued", "running"].includes(started.operation.status);
+  sendJson(res, active ? 202 : 200, {
+    ok: true,
+    data: {
+      reused: started.reused,
+      operation: operationView(started.operation),
+      subject: operationSubject(started.operation, fallbackSubject),
+    },
+  });
 }
 
 function retryInputForSource({ repoRoot, env, source }) {
@@ -163,6 +201,7 @@ export function mountDeepIngestRoutes({
   fetchImpl = fetch,
   scanSource = defaultScanDeepIngestSource,
   proposalBuilders = DEFAULT_PROPOSAL_BUILDERS,
+  appOperations = null,
 }) {
   addRoute("GET", "/api/deep-ingest/state", (_req, res) => {
     try {
@@ -184,7 +223,18 @@ export function mountDeepIngestRoutes({
       return;
     }
 
+    let prepared = null;
     try {
+      if (appOperations) {
+        prepared = prepareDeepIngestSourceScan({ repoRoot, env, input: body });
+        const started = await appOperations.start({
+          kind: DEEP_INGEST_SOURCE_SCAN_KIND,
+          input: prepared.request,
+        });
+        prepared = { ...prepared, created: false };
+        sendOperation(res, started, prepared.request);
+        return;
+      }
       const scanned = await scanSource({ input: body, fetchImpl });
       const data = {
         ...persistScannedSource({ repoRoot, env, scanned }),
@@ -192,6 +242,7 @@ export function mountDeepIngestRoutes({
       };
       sendJson(res, 200, { ok: true, data });
     } catch (err) {
+      rollbackPreparedDeepIngestSourceScan({ repoRoot, env, prepared });
       respondError(res, err);
     }
   });
@@ -200,6 +251,17 @@ export function mountDeepIngestRoutes({
     try {
       const body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
       ensureDb(repoRoot, env);
+      if (appOperations) {
+        const operationId = String(body?.operationId || "").trim();
+        if (!operationId) {
+          const error = new Error("operationId is required to retry Deep Ingest work");
+          error.code = "BAD_REQUEST";
+          throw error;
+        }
+        const started = await appOperations.retry({ id: operationId });
+        sendOperation(res, started);
+        return;
+      }
       const source = deepIngestSourceGet({ repoRoot, env, sourceId: body?.sourceId }).source;
       if (!source) {
         const error = new Error("Deep ingest source not found");
@@ -273,15 +335,29 @@ export function mountDeepIngestRoutes({
     writeFileSync(absPath, bytes);
 
     let artifactPersisted = false;
+    let prepared = null;
     try {
       const input = {
         targetShape,
         sourceKind: "file",
         fileName: safeName,
-        bytes,
         artifactPath: relPath,
+        contentDigest: createHash("sha256").update(bytes).digest("hex"),
+        ownedUpload: true,
       };
+      if (!appOperations) input.bytes = bytes;
       normalizeDeepIngestSource(input);
+      if (appOperations) {
+        prepared = prepareDeepIngestSourceScan({ repoRoot, env, input });
+        const started = await appOperations.start({
+          kind: DEEP_INGEST_SOURCE_SCAN_KIND,
+          input: prepared.request,
+        });
+        prepared = { ...prepared, created: false };
+        artifactPersisted = true;
+        sendOperation(res, started, prepared.request);
+        return;
+      }
       const scanned = await scanSource({ input, fetchImpl });
       const persisted = persistScannedSource({ repoRoot, env, scanned, ownedUpload: true });
       artifactPersisted = true;
@@ -297,6 +373,7 @@ export function mountDeepIngestRoutes({
       };
       sendJson(res, 200, { ok: true, data });
     } catch (err) {
+      rollbackPreparedDeepIngestSourceScan({ repoRoot, env, prepared });
       if (!artifactPersisted) {
         removeOwnedUploadArtifact({ repoRoot, env, artifactPath: relPath });
       }
@@ -315,6 +392,14 @@ export function mountDeepIngestRoutes({
     }
 
     try {
+      if (appOperations) {
+        const started = await appOperations.start({
+          kind: DEEP_INGEST_PROPOSAL_BUILD_KIND,
+          input: body,
+        });
+        sendOperation(res, started, body);
+        return;
+      }
       const data = await buildAndPersistProposals({
         repoRoot,
         env,
@@ -414,6 +499,11 @@ export function mountDeepIngestRoutes({
     }
 
     try {
+      assertSettingsBaseRevision({
+        repoRoot,
+        env,
+        expectedBaseRevision: body?.expectedBaseRevision,
+      });
       const result = deepIngestConfirmedItemUpsert({
         repoRoot,
         env,

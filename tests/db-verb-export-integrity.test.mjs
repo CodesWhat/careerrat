@@ -8,12 +8,13 @@
 // caller, so a caller couldn't tell "safe to retry" from "already happened,
 // don't retry the write, just fix the export."
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { closeAll } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
+  activityAppend,
   candidateSetupInitialize,
   ExportFailedError,
   kvGet,
@@ -46,6 +47,65 @@ test("runVerb reports a truthy exported result on the normal path", () => {
   });
   assert.equal(result.ok, true);
   assert.ok(result.exported, "a successful write must report a truthy exported result");
+});
+
+test("activity-only writes update the watched activity export without rebuilding tracker.json", () => {
+  const repoRoot = tempRepo();
+  kvUpsert({ repoRoot, key: "strategyReview", value: { snapshot: { rejected: 0 } } });
+
+  const trackerPath = userPath({ repoRoot }, "workspace/tracker.json");
+  const activityPath = userPath({ repoRoot }, "workspace/activity.jsonl");
+  const trackerBefore = `${readFileSync(trackerPath, "utf8")}\n`;
+  writeFileSync(trackerPath, trackerBefore);
+
+  const result = activityAppend({
+    repoRoot,
+    event: {
+      at: "2026-08-27T18:00:00.000Z",
+      type: "system",
+      title: "Activity-only compatibility signal",
+    },
+  });
+
+  assert.equal(readFileSync(trackerPath, "utf8"), trackerBefore);
+  assert.match(readFileSync(activityPath, "utf8"), /Activity-only compatibility signal/);
+  assert.deepEqual(result.exported.wrote, { tracker: false, activity: true });
+});
+
+test("runVerb applies the configured activity retention bound to canonical DB and export state", () => {
+  const repoRoot = tempRepo();
+  const env = { ...process.env, CAREERRAT_ACTIVITY_MAX: "3" };
+
+  for (let index = 1; index <= 5; index += 1) {
+    activityAppend({
+      repoRoot,
+      env,
+      event: {
+        at: `2026-08-27T18:00:0${index}.000Z`,
+        type: "system",
+        title: `Bounded activity ${index}`,
+      },
+    });
+  }
+
+  const db = openDb({ repoRoot, env });
+  const stored = db
+    .prepare("SELECT data FROM activity_events ORDER BY rowid ASC")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.deepEqual(
+    stored.map((event) => event.title),
+    ["Bounded activity 3", "Bounded activity 4", "Bounded activity 5"]
+  );
+
+  const exported = readFileSync(userPath({ repoRoot, env }, "workspace/activity.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    exported.map((event) => event.title),
+    ["Bounded activity 3", "Bounded activity 4", "Bounded activity 5"]
+  );
 });
 
 test("runVerb surfaces an export failure distinctly from a write failure, without losing the commit", () => {

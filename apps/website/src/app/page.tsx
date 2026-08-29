@@ -33,7 +33,7 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
 const features = [
   {
     title: "Rate before you apply",
-    copy: "Every posting is scored against your constraints first. No cover letters for jobs that don't fit.",
+    copy: "Every full posting is checked against your location, pay, and fit constraints first. No cover letters for jobs that don't fit.",
     Icon: ClipboardList,
   },
   {
@@ -42,13 +42,13 @@ const features = [
     Icon: Target,
   },
   {
-    title: "Runs the whole pipeline",
-    copy: "Sweeps, follow-ups, comp research, interview prep, and outcomes. One agent, end to end.",
+    title: "Search broadly, verify honestly",
+    copy: "Built-in job-board sources search alongside AI open-web discovery for the roles you set. CareerRat discovers additional specialist boards and employer pages as it learns your search. Every AI lead stays unverified until Evaluate reads the posting.",
     Icon: Radar,
   },
   {
     title: "On your machine",
-    copy: "Your résumé, comp numbers, and pipeline live in a local workspace you can inspect and own.",
+    copy: "Your data stays local. Work keeps running in the background as you move between views, and interrupted runs return as a clear retry.",
     Icon: Lock,
   },
 ];
@@ -124,7 +124,7 @@ export default function Home() {
             <article className="step-card">
               <span className="step-card__number">03</span>
               <h3>It hunts, you decide</h3>
-              <p>Search opens when setup is ready. CareerRat ranks the matches and fills safe application fields. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.</p>
+              <p>Search opens when setup is ready. Built-in job-board sources join AI open-web discovery for the roles you set, while CareerRat discovers additional specialist boards and employer pages for your search. When a saved site is added or first used and login is needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that exact search in the visible app browser; No skips it and keeps searching elsewhere. AI discoveries are clearly unverified until Evaluate reads the full posting for location, office days, pay, and fit. It fills safe application fields only after you review missing answers. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.</p>
               <span className="status-pill">SWEEP · 9 CUT · 12 RANKED</span>
             </article>
           </div>
@@ -201,6 +201,9 @@ export default function Home() {
               <p className="eyebrow">You&apos;ll need an AI CLI</p>
               <p>
                 Pick Claude Code or OpenAI Codex. Either one runs the same CareerRat-owned workflows and skills. CareerRat invokes it directly and never falls back to another provider.
+              </p>
+              <p>
+                Automatic picks the right level for each task: Paul stays strong, while web searches and small helpers stay efficient. You can instead choose Faster, Balanced, or Best and set Thinking depth from Low to High. Those controls mean the same thing with Claude Code or OpenAI Codex.
               </p>
               <div className="engine-pills" role="list" aria-label="Detected AI CLI support">
                 <span className="engine-pill" role="listitem">

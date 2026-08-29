@@ -8,8 +8,9 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
-import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { closeAll, dbFilePath, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import {
   activityAppend,
@@ -17,6 +18,7 @@ import {
   appApproveReview,
   appCaptureInterviewIntake,
   appPersistEvaluation,
+  appRecordOutcome,
   appRegisterArtifact,
   appRegisterPacketArtifacts,
   appScheduleInterview,
@@ -42,6 +44,7 @@ import {
   relationshipLeadSetStatus,
   relationshipLeadUpsertBatch,
   sourcedPromote,
+  sourcedReconcilePolicyBatch,
   sourcedSetStatus,
   sourcedUpsertBatch,
   sourceWatermarkUpsert,
@@ -250,6 +253,240 @@ test("appSetStatus: a transition that was never in the interview stage clears no
   assert.equal(app.nextInterviewAt, undefined);
 });
 
+test("appRecordOutcome: rejection atomically clears every linked CTA and leaves unrelated communications unchanged", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  appUpsert({
+    repoRoot,
+    row: { id: "app-unrelated", company: "Pied Piper", role: "Engineer", status: "awaiting" },
+  });
+  commUpsert({
+    repoRoot,
+    row: {
+      id: "comm-with-draft-portal",
+      applicationId: "app-with-draft",
+      company: "Hooli",
+      channel: "portal",
+      status: "needs-reply",
+      summary: "Check the portal for an update.",
+      nextAction: "Check the portal",
+      nextActionDue: "2026-08-10",
+      draft: { body: "Portal follow-up." },
+      messages: [],
+    },
+  });
+  commUpsert({
+    repoRoot,
+    row: {
+      id: "comm-unrelated",
+      applicationId: "app-unrelated",
+      company: "Pied Piper",
+      channel: "email",
+      status: "drafted",
+      summary: "Unrelated recruiter thread.",
+      nextAction: "Reply to recruiter",
+      nextActionDue: "2026-08-11",
+      draft: { body: "Unrelated draft." },
+      messages: [],
+    },
+  });
+  commUpsert({
+    repoRoot,
+    row: {
+      ...JSON.parse(
+        openDb({ repoRoot })
+          .prepare("SELECT data FROM communications WHERE id = ?")
+          .get("comm-with-draft").data
+      ),
+      summary: "Waiting for an outcome.",
+      nextAction: "Follow up",
+      nextActionDue: "2026-08-09",
+      messages: [],
+    },
+  });
+  const db = openDb({ repoRoot });
+  const beforeMeta = readMeta(db);
+  const beforeActivity = activityCount(db);
+
+  const result = appRecordOutcome({
+    repoRoot,
+    id: "app-with-draft",
+    to: "rejected",
+    note: "Role was filled internally.",
+    at: "2026-08-09T14:03:00.000Z",
+  });
+
+  assert.equal(result.clearedCommunicationIds.length, 2);
+  assert.deepEqual(result.clearedCommunicationIds, ["comm-with-draft", "comm-with-draft-portal"]);
+  assert.equal(result.meta.version, beforeMeta.version + 1);
+  assert.equal(activityCount(db), beforeActivity + 1);
+  assert.ok(result.analytics);
+  assert.equal(result.exported.ok, true);
+
+  const app = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-with-draft").data
+  );
+  assert.equal(app.status, "rejected");
+  assert.equal(app.statusNote, "Role was filled internally.");
+  assert.equal(app.followUp.draft, null);
+  for (const id of result.clearedCommunicationIds) {
+    const comm = JSON.parse(
+      db.prepare("SELECT data FROM communications WHERE id = ?").get(id).data
+    );
+    assert.equal(comm.status, "closed", id);
+    assert.equal(comm.nextAction, null, id);
+    assert.equal(comm.nextActionDue, null, id);
+    assert.equal(comm.draft, null, id);
+    assert.equal(comm.messages.at(-1).direction, "note", id);
+    assert.equal(comm.messages.at(-1).at, "2026-08-09T14:03:00.000Z", id);
+    assert.match(comm.messages.at(-1).summary, /rejected/i, id);
+  }
+  const unrelated = JSON.parse(
+    db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-unrelated").data
+  );
+  assert.equal(unrelated.status, "drafted");
+  assert.equal(unrelated.nextAction, "Reply to recruiter");
+  assert.equal(unrelated.nextActionDue, "2026-08-11");
+  assert.deepEqual(unrelated.draft, { body: "Unrelated draft." });
+
+  const exported = JSON.parse(
+    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+  );
+  assert.equal(exported.applications.find((row) => row.id === "app-with-draft").status, "rejected");
+  assert.equal(
+    exported.communications.find((row) => row.id === "comm-with-draft").status,
+    "closed"
+  );
+});
+
+test("appRecordOutcome: applied atomically clears submission CTAs, drafts, and linked communication state", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  commUpsert({
+    repoRoot,
+    row: {
+      ...JSON.parse(
+        db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft").data
+      ),
+      nextAction: "Confirm the application was submitted",
+      nextActionDue: "2026-08-10",
+      messages: [],
+    },
+  });
+
+  const result = appRecordOutcome({
+    repoRoot,
+    id: "app-with-draft",
+    to: "applied",
+    note: "Submission verified in the supervised browser.",
+    at: "2026-08-09T14:03:00.000Z",
+  });
+
+  const app = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-with-draft").data
+  );
+  const comm = JSON.parse(
+    db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft").data
+  );
+  assert.equal(app.status, "applied");
+  assert.equal(app.appliedAt, "2026-08-09T14:03:00.000Z");
+  assert.equal(app.nextAction, null);
+  assert.equal(app.nextActionDue, null);
+  assert.equal(app.followUp.draft, null);
+  assert.deepEqual(result.clearedCommunicationIds, ["comm-with-draft"]);
+  assert.equal(comm.status, "waiting");
+  assert.equal(comm.nextAction, null);
+  assert.equal(comm.nextActionDue, null);
+  assert.equal(comm.draft, null);
+  assert.match(comm.messages.at(-1).summary, /applied/i);
+});
+
+for (const to of ["interview", "offer"]) {
+  test(`appRecordOutcome: ${to} advances linked communications to waiting and preserves round clearing`, () => {
+    const repoRoot = tempRepo();
+    seedFixture(repoRoot);
+    const db = openDb({ repoRoot });
+    const applicationId = to === "offer" ? "app-last-round" : "app-with-draft";
+    const communicationId = to === "offer" ? "comm-offer" : "comm-with-draft";
+    if (to === "offer") {
+      commUpsert({
+        repoRoot,
+        row: {
+          id: communicationId,
+          applicationId,
+          company: "Acme",
+          channel: "email",
+          status: "needs-reply",
+          summary: "Recruiter shared the offer.",
+          nextAction: "Review the offer",
+          nextActionDue: "2026-08-10",
+          draft: { body: "Thanks for the offer." },
+          messages: [],
+        },
+      });
+    }
+
+    appRecordOutcome({
+      repoRoot,
+      id: applicationId,
+      to,
+      note: `${to} received.`,
+      at: "2026-08-09T14:03:00.000Z",
+    });
+
+    const comm = JSON.parse(
+      db.prepare("SELECT data FROM communications WHERE id = ?").get(communicationId).data
+    );
+    assert.equal(comm.status, "waiting");
+    assert.equal(comm.nextAction, null);
+    assert.equal(comm.nextActionDue, null);
+    assert.equal(comm.draft, null);
+    assert.equal(comm.messages.at(-1).direction, "note");
+    assert.match(comm.messages.at(-1).summary, new RegExp(to, "i"));
+    if (to === "offer") {
+      const app = JSON.parse(
+        db.prepare("SELECT data FROM applications WHERE id = ?").get(applicationId).data
+      );
+      assert.equal(app.interviewAt, null);
+      assert.equal(app.nextInterviewAt, null);
+      assert.equal(app.interviewNote, null);
+    }
+  });
+}
+
+test("appRecordOutcome: invalid or missing applications roll back without mutating state", () => {
+  for (const request of [
+    { id: "app-with-draft", to: "accepted" },
+    { id: "app-missing", to: "rejected" },
+  ]) {
+    const repoRoot = tempRepo();
+    seedFixture(repoRoot);
+    const db = openDb({ repoRoot });
+    const beforeMeta = readMeta(db);
+    const beforeActivity = activityCount(db);
+    const beforeApp = db
+      .prepare("SELECT data FROM applications WHERE id = ?")
+      .get("app-with-draft").data;
+    const beforeComm = db
+      .prepare("SELECT data FROM communications WHERE id = ?")
+      .get("comm-with-draft").data;
+
+    assert.throws(() => appRecordOutcome({ repoRoot, ...request }));
+
+    assert.deepEqual(readMeta(db), beforeMeta);
+    assert.equal(activityCount(db), beforeActivity);
+    assert.equal(
+      db.prepare("SELECT data FROM applications WHERE id = ?").get("app-with-draft").data,
+      beforeApp
+    );
+    assert.equal(
+      db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft").data,
+      beforeComm
+    );
+  }
+});
+
 // ---------------------------------------------------------------------------
 // A pre-existing application row with role: null (e.g. imported from a
 // legacy tracker.json, or patched by a non-outcome-changing verb) must not
@@ -300,6 +537,26 @@ test("a pre-existing application row with role: null does not wedge later outcom
     to: "interview",
   });
   assert.equal(result.ok, true);
+});
+
+test("appSetStatus clears a stale application CTA when submission is recorded", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+
+  appSetStatus({
+    repoRoot,
+    id: "app-non-interview",
+    to: "applied",
+    appliedAt: "2026-08-27T20:00:00.000Z",
+  });
+
+  const application = JSON.parse(
+    openDb({ repoRoot })
+      .prepare("SELECT data FROM applications WHERE id = ?")
+      .get("app-non-interview").data
+  );
+  assert.equal(application.nextAction, null);
+  assert.equal(application.nextActionDue, null);
 });
 
 // ---------------------------------------------------------------------------
@@ -1042,6 +1299,75 @@ test("sourcedSetStatus patches status and note, refreshes analytics, and rejects
   assert.throws(
     () => sourcedSetStatus({ repoRoot, id: "missing-role", to: "cut" }),
     (err) => err?.code === "NOT_FOUND"
+  );
+});
+
+test("sourcedUpsertBatch prepares rows before opening its write transaction", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  let prepared = false;
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [{ id: "sourced-prepared-outside-transaction", company: "Prepared Co" }],
+    prepareAcceptedRow(row) {
+      const contender = new DatabaseSync(dbFilePath({ repoRoot }));
+      try {
+        contender.exec("PRAGMA busy_timeout = 1");
+        contender.exec("BEGIN IMMEDIATE");
+        contender.exec("ROLLBACK");
+        prepared = true;
+        return row;
+      } finally {
+        contender.close();
+      }
+    },
+  });
+
+  assert.equal(prepared, true);
+});
+
+test("sourced policy reconciliation rolls back when the active-search guard rejects the write", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEvents = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+
+  assert.throws(
+    () =>
+      sourcedReconcilePolicyBatch({
+        repoRoot,
+        decisions: [
+          {
+            id: "sourced-promote-me",
+            bucket: "salary",
+            reason: "comp-below-floor",
+            expectedStatus: "sourced",
+            expectedUpdatedAt: "",
+            expectedJobArtifact: "",
+          },
+        ],
+        guard: () => {
+          const error = new Error("the search is no longer active");
+          error.code = "SOURCING_RUN_NOT_ACTIVE";
+          throw error;
+        },
+      }),
+    (error) => error?.code === "SOURCING_RUN_NOT_ACTIVE"
+  );
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me").data
+  );
+  assert.deepEqual(after, before);
+  assert.equal(db.prepare("SELECT version FROM meta WHERE id = 1").get().version, beforeMeta);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count,
+    beforeEvents
   );
 });
 

@@ -623,6 +623,7 @@ function buildSettingsStatus(settings = {}) {
       workAuthorization: stringOrFallback(profile.workAuthorization),
     },
     targeting: {
+      fitFloor: Number.isFinite(Number(targeting.fitFloor)) ? Number(targeting.fitFloor) : null,
       primaryRoles: listOrEmpty(targeting.primaryRoles),
       excludedCompanies: listOrEmpty(targeting.excludedCompanies),
     },
@@ -639,10 +640,9 @@ function buildSettingsStatus(settings = {}) {
 
 // The candidate's real compensation floor/target for the Jobs drawer's
 // Compensation Range pins (see compRangeView) — sourced from the settings
-// snapshot's raw $K figures (candidate/profile.yml's compensation.minimum_base
-// / target_base / expected_base, via settings-snapshot.mjs), never a
-// fabricated placeholder. floorK/askK are null when the candidate hasn't set
-// that field.
+// snapshot's raw $K figures (candidate/profile.yml's guaranteed-base and annual
+// cash fields, via settings-snapshot.mjs), never a fabricated placeholder.
+// Each basis stays separate and remains null when the candidate has not set it.
 function profileCompFromSettings(settings) {
   const profile = settings?.profile || {};
   // Number(null) is 0 (finite), so an unset field must be rejected before
@@ -653,9 +653,15 @@ function profileCompFromSettings(settings) {
     return Number.isFinite(number) ? number : null;
   };
   return {
-    floorK: compK(profile.minimumBaseK),
-    askK: compK(profile.targetBaseK) ?? compK(profile.expectedBaseK),
+    baseFloorK: compK(profile.minimumBaseK),
+    annualEarningsFloorK: compK(profile.minimumAnnualEarningsK),
+    baseAskK: compK(profile.targetBaseK) ?? compK(profile.expectedBaseK),
   };
+}
+
+function fitFloorFromSettings(settings) {
+  const fitFloor = Number(settings?.targeting?.fitFloor);
+  return Number.isFinite(fitFloor) ? Math.max(0, Math.min(100, fitFloor)) : null;
 }
 
 function objectList(value) {
@@ -1586,9 +1592,22 @@ function buildStoryEnrichmentSteps(trackerData) {
     .filter(Boolean);
 }
 
-function buildLatestRoles(trackerData) {
+function sourcedRoleIsActive(role) {
+  const status = String(role?.status || "sourced").toLowerCase();
+  return status !== "reviewed-hold" && !TERMINAL_STAGES.has(classifyStage(status));
+}
+
+function sourcedRoleMeetsFitFloor(role, fitFloor) {
+  if (!Number.isFinite(fitFloor)) return true;
+  if (role?.fitScore == null || role.fitScore === "") return true;
+  const score = Number(role?.fitScore);
+  return Number.isFinite(score) && score >= fitFloor;
+}
+
+function buildLatestRoles(trackerData, fitFloor) {
   const sourced = trackerData?.sourced || trackerData?.prospects || [];
   return [...sourced]
+    .filter((role) => sourcedRoleMeetsFitFloor(role, fitFloor))
     .sort((a, b) => Number(b.fitScore || 0) - Number(a.fitScore || 0))
     .slice(0, 3)
     .map((role) => ({
@@ -3675,16 +3694,35 @@ function fitLabel(row) {
   return `${isTriageFit(row) ? "~" : ""}${row.fit}`;
 }
 
-function compactComp(base, tc) {
+function secondaryCompBasis(row = {}) {
+  if (row.compBasis === "annual-earnings" || row.comp?.basis === "annual-earnings") {
+    return "annual-earnings";
+  }
+  const evaluated = row.evaluation?.compensation;
+  if (evaluated?.minAnnualEarnings !== null && evaluated?.minAnnualEarnings !== undefined) {
+    return "annual-earnings";
+  }
+  if (evaluated?.maxAnnualEarnings !== null && evaluated?.maxAnnualEarnings !== undefined) {
+    return "annual-earnings";
+  }
+  return null;
+}
+
+function compactComp(base, tc, basis = null) {
   const baseDisplay = base || "TBD";
   const tcDisplay = tc || "";
-  const midpoint = medianMoneyK(baseDisplay) || medianMoneyK(tcDisplay);
+  const midpoint =
+    basis === "annual-earnings"
+      ? medianMoneyK(tcDisplay)
+      : medianMoneyK(baseDisplay) || medianMoneyK(tcDisplay);
+  const secondaryLabel = basis === "annual-earnings" ? "Annual cash" : "TC";
   return {
     base: baseDisplay,
     tc: tcDisplay,
+    basis,
     midpoint,
     compact: formatMoneyK(midpoint),
-    summary: tcDisplay ? `${baseDisplay} base · ${tcDisplay} TC` : baseDisplay,
+    summary: tcDisplay ? `${baseDisplay} base · ${tcDisplay} ${secondaryLabel}` : baseDisplay,
   };
 }
 
@@ -3896,11 +3934,14 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
     sourceRecord && typeof sourceRecord.compEstimate === "object"
       ? sourceRecord.compEstimate
       : null;
-  // profileComp.floorK/askK are already `number | null` (see
+  // profileComp values are already `number | null` (see
   // profileCompFromSettings) — check for null explicitly before Number()
   // coercion, since Number(null) is 0 (finite), not NaN.
-  const profileFloorK = profileComp.floorK != null ? Number(profileComp.floorK) : null;
-  const profileAskK = profileComp.askK != null ? Number(profileComp.askK) : null;
+  const annualEarnings = secondaryCompBasis(row) === "annual-earnings";
+  const selectedFloorK = annualEarnings ? profileComp.annualEarningsFloorK : profileComp.baseFloorK;
+  const selectedAskK = annualEarnings ? null : profileComp.baseAskK;
+  const profileFloorK = selectedFloorK != null ? Number(selectedFloorK) : null;
+  const profileAskK = selectedAskK != null ? Number(selectedAskK) : null;
   const floorK =
     est && Number.isFinite(Number(est.floorK))
       ? Math.round(Number(est.floorK))
@@ -3914,7 +3955,7 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
         ? Math.round(profileAskK)
         : null;
 
-  const postedBand = moneyBandK(row.comp);
+  const postedBand = moneyBandK(annualEarnings ? row.tc : row.comp);
   if (postedBand) {
     return {
       state: "posted",
@@ -4416,7 +4457,7 @@ function jobDetailFromRow(
   // A stale follow-up draft left after a send must never show a ghost "Ready to send" panel.
   // If a linked comm exists, reuse its status gate ({waiting, closed} = inactive).
   // If no linked comm, block when the application itself is in a terminal/done stage.
-  const FOLLOWUP_DONE_STAGES = new Set(["rejected", "withdrawn", "offer", "accepted"]);
+  const FOLLOWUP_DONE_STAGES = new Set(["applied", "rejected", "withdrawn", "offer", "accepted"]);
   const linkedComm = communications.find((c) => c.applicationId === sourceRecord.id);
   const followUpDraftActive = linkedComm
     ? !["waiting", "closed"].includes(linkedComm.status)
@@ -4568,7 +4609,11 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
   const location = app.loc || app.location || app.mode || "";
   const mode = modeInfo(app.mode || "", location);
   const source = sourceInfo("application", app.channel || "");
-  const comp = compactComp(app.base || app.comp?.base || "", app.tc || app.comp?.tc || "");
+  const comp = compactComp(
+    app.base || app.comp?.base || "",
+    app.tc || app.comp?.tc || "",
+    secondaryCompBasis(app)
+  );
   const displayStageLabel = advancedByHistory
     ? stageGroupLabel(stage)
     : stage === "reviewed-hold"
@@ -4592,6 +4637,7 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     stageGroupLabel: stageGroupLabel(stage),
     comp: comp.base,
     tc: comp.tc,
+    compBasis: comp.basis,
     compCompact: comp.compact,
     compMidpointK: comp.midpoint,
     compSummary: comp.summary,
@@ -4670,7 +4716,12 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
   const location = role.loc || role.location || role.mode || "";
   const mode = modeInfo(role.mode || "", location);
   const source = sourceInfo("sourced", role.fitBasis || "sourced");
-  const comp = compactComp(role.base || role.comp?.base || "", role.tc || role.comp?.tc || "");
+  const aiDiscovered = role.source === "ai-web-search";
+  const comp = compactComp(
+    role.base || role.comp?.base || "",
+    role.tc || role.comp?.tc || "",
+    secondaryCompBasis(role)
+  );
   const row = {
     id: role.id || `sourced-${index + 1}`,
     drawerId: role.id || `sourced-${index + 1}`,
@@ -4686,6 +4737,7 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     stageGroupLabel: stageGroupLabel(stage),
     comp: comp.base,
     tc: comp.tc,
+    compBasis: comp.basis,
     compCompact: comp.compact,
     compMidpointK: comp.midpoint,
     compSummary: comp.summary,
@@ -4696,8 +4748,9 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     mode: mode.id,
     modeLabel: mode.label,
     modeIcon: mode.icon,
-    sourceLabel: source.label,
+    sourceLabel: aiDiscovered ? "Open web" : role.sourceMeta?.sourceLabel || source.label,
     sourceIcon: source.icon,
+    aiDiscovered,
     appliedAt: "",
     postedAt: role.postedAt || "",
     sourcedAt: role.sourcedAt || "",
@@ -4746,6 +4799,24 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     .toLowerCase();
   row.tooltip = jobTooltip(row);
   return { ...row, drawer: jobDetailFromRow(row, role, [], now, profileComp) };
+}
+
+function appendJobWarning(current, warning) {
+  const existing = String(current || "").trim();
+  if (!existing) return warning;
+  if (existing.includes(warning)) return existing;
+  return `${existing} ${warning}`;
+}
+
+function sourcedRoleWithCompanyWarning(role, activeApplicationCompanies) {
+  if (TERMINAL_STAGES.has(classifyStage(role?.status))) return role;
+  const company = activeApplicationCompanies.get(normalizeName(role?.company));
+  if (!company) return role;
+  const warning = `You already have an active application at ${company}. Review it before applying to another role.`;
+  return {
+    ...role,
+    warn: appendJobWarning(role?.warn, warning),
+  };
 }
 
 function communicationsForApplication(app, communications = []) {
@@ -5253,9 +5324,13 @@ function buildJobsRail(rows) {
   };
 }
 
-function buildJobs(trackerData, { now = new Date(), activityEvents = [], profileComp = {} } = {}) {
+function buildJobs(
+  trackerData,
+  { now = new Date(), activityEvents = [], profileComp = {}, fitFloor = null } = {}
+) {
   const communications = trackerData?.communications || [];
-  const applicationRows = (trackerData?.applications || []).map((app, index) =>
+  const applications = trackerData?.applications || [];
+  const applicationRows = applications.map((app, index) =>
     applicationJobRow(
       app,
       index,
@@ -5264,11 +5339,29 @@ function buildJobs(trackerData, { now = new Date(), activityEvents = [], profile
       profileComp
     )
   );
-  const sourcedRows = (trackerData?.sourced || trackerData?.prospects || []).map((role, index) =>
-    sourcedJobRow(role, index, now, profileComp)
+  const activeApplicationCompanies = new Map(
+    applications
+      .filter((app) => app?.company && !TERMINAL_STAGES.has(classifyStage(app.status)))
+      .map((app) => [normalizeName(app.company), app.company])
+  );
+  const sourced = trackerData?.sourced || trackerData?.prospects || [];
+  const sourcedRows = sourced.map((role, index) =>
+    sourcedJobRow(
+      sourcedRoleWithCompanyWarning(role, activeApplicationCompanies),
+      index,
+      now,
+      profileComp
+    )
+  );
+  const visibleActiveSourcedIds = new Set(
+    sourced.flatMap((role, index) =>
+      sourcedRoleMeetsFitFloor(role, fitFloor) ? [role.id || `sourced-${index + 1}`] : []
+    )
   );
   const activeRows = applicationRows.filter((row) => !row.terminal);
-  const activeSourcedRows = sourcedRows.filter((row) => !row.terminal);
+  const activeSourcedRows = sourcedRows.filter(
+    (row) => !row.terminal && visibleActiveSourcedIds.has(row.id)
+  );
   const terminalRows = [...applicationRows, ...sourcedRows].filter((row) => row.terminal);
   const rows = [...activeRows, ...activeSourcedRows, ...terminalRows];
   for (const row of rows) {
@@ -5320,9 +5413,10 @@ function buildReviewHoldRoles(trackerData) {
     }));
 }
 
-function buildSourcedRoles(trackerData) {
+function buildSourcedRoles(trackerData, fitFloor) {
   const sourced = trackerData?.sourced || trackerData?.prospects || [];
   return [...sourced]
+    .filter((role) => sourcedRoleIsActive(role) && sourcedRoleMeetsFitFloor(role, fitFloor))
     .sort((a, b) => Number(b.fitScore || 0) - Number(a.fitScore || 0))
     .map((role, index) => ({
       id: role.id || `sourced-${index + 1}`,
@@ -5348,6 +5442,7 @@ export function buildDashboardViewModel(
   } = {}
 ) {
   activeCandidateName = normalizeName(settings?.profile?.candidate || "");
+  const fitFloor = fitFloorFromSettings(settings);
   const allNextSteps = buildNextSteps(trackerData, now, { limit: null });
   const timeNextSteps = allNextSteps.slice(0, 3);
   // Story-enrichment prompts ("give me more context") append AFTER the 3 time-based
@@ -5355,7 +5450,7 @@ export function buildDashboardViewModel(
   // the time-based steps only — an enrichment ask should never become the headline.
   const enrichmentSteps = buildStoryEnrichmentSteps(trackerData);
   const nextSteps = [...timeNextSteps, ...enrichmentSteps];
-  const latestRoles = buildLatestRoles(trackerData);
+  const latestRoles = buildLatestRoles(trackerData, fitFloor);
   return {
     recency: {
       updatedAt: durableUpdatedAt(trackerData),
@@ -5373,7 +5468,7 @@ export function buildDashboardViewModel(
     nextSteps,
     allNextSteps,
     latestRoles,
-    sourcedRoles: buildSourcedRoles(trackerData),
+    sourcedRoles: buildSourcedRoles(trackerData, fitFloor),
     reviewHoldRoles: buildReviewHoldRoles(trackerData),
     calendar: buildCalendar(trackerData, { now, calendarProviderStatus }),
     strategy: buildStrategyInsights(trackerData, { now }),
@@ -5381,11 +5476,11 @@ export function buildDashboardViewModel(
       now,
       activityEvents,
       profileComp: profileCompFromSettings(settings),
+      fitFloor,
     }),
     network: buildNetwork(trackerData, { now }),
-    // No limit: keep the full history so the "View all" drawer is complete; the
-    // dock view-model slices to DASHBOARD_ACTIVITY_LIMIT at render time.
-    activity: buildActivityPulse(activityEvents, { now, limit: null }),
+    // The app menu is a recent pulse; the complete durable history stays local.
+    activity: buildActivityPulse(activityEvents, { now }),
   };
 }
 

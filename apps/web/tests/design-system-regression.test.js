@@ -245,7 +245,7 @@ describe("CareerRat selection and focus states", () => {
     ["chat-first/workspace-browser.css", '.cf-browser__tab[aria-selected="true"]'],
     ["chat-first/workspace-browser.css", ".cf-browser .cf-filter--active"],
     ["chat-first/workspace-browser.css", ".cf-job-row--selected"],
-    ["chat-first/profile-settings.css", '.cf-profile__tabs button[aria-current="page"]'],
+    ["chat-first/profile-settings.css", '.cf-profile__tabs button[aria-selected="true"]'],
     ["chat-first/profile-settings.css", '.cf-settings-dialog__runtime[data-selected="true"]'],
   ];
 

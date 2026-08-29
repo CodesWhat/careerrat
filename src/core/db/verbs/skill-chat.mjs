@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  choiceMetadataForMessage,
+  resolvePendingMessageChoice,
+} from "../../agent/choice-prompt.mjs";
 import { normalizeSourceReviewArtifact } from "../../discovery/source-review-artifact.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -9,6 +13,9 @@ const CHAT_KINDS = new Set(["agent_error"]);
 const TURN_STATES = new Set(["awaiting-assistant", "awaiting-user", "failed", "completed"]);
 const DECISION_ACTIONS = new Set(["save", "discard"]);
 const DECISION_STATES = new Set(["completed", "failed"]);
+const MAX_EXECUTION_PLAN_BYTES = 16_384;
+const DEFAULT_TURN_LEASE_MS = 2 * 60 * 1000;
+const MAX_PENDING_MESSAGES = 20;
 
 function cleanSkill(value) {
   const skill = String(value ?? "").trim();
@@ -51,6 +58,38 @@ function cleanArtifacts(value) {
   return artifacts;
 }
 
+function cleanExecutionPlan(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    const error = new Error("chat execution plan is invalid");
+    error.code = "BAD_EXECUTION_PLAN";
+    throw error;
+  }
+  const serialized = JSON.stringify(value);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_EXECUTION_PLAN_BYTES) {
+    const error = new Error("chat execution plan is too large");
+    error.code = "BAD_EXECUTION_PLAN";
+    throw error;
+  }
+  return JSON.parse(serialized);
+}
+
+function cleanOwnerId(value) {
+  const ownerId = String(value ?? "").trim();
+  if (!ownerId || ownerId.length > 500 || ownerId.includes("\0")) {
+    const error = new Error("chat turn owner is invalid");
+    error.code = "BAD_TURN_OWNER";
+    throw error;
+  }
+  return ownerId;
+}
+
+function turnLeaseExpiresAt(at, leaseMs) {
+  const duration = Number(leaseMs);
+  const boundedDuration =
+    Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_TURN_LEASE_MS;
+  return new Date(Date.parse(at) + boundedDuration).toISOString();
+}
+
 function dateIso(now) {
   const value = typeof now === "function" ? now() : now;
   const date = value instanceof Date ? value : value == null ? new Date() : new Date(value);
@@ -81,6 +120,123 @@ function readMessages(db, id) {
     .map((row) => JSON.parse(row.data));
 }
 
+function cleanMessageId(value = randomUUID()) {
+  const id = String(value).trim();
+  if (!id || id.length > 500 || id.includes("\0")) {
+    const error = new Error("chat message id is invalid");
+    error.code = "BAD_MESSAGE_ID";
+    throw error;
+  }
+  return id;
+}
+
+function cleanPendingChoice(value) {
+  if (value === undefined) return undefined;
+  let encoded;
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    const error = new Error("choice reply must be JSON-serializable");
+    error.code = "BAD_CHOICE_PROMPT";
+    throw error;
+  }
+  if (encoded === undefined || encoded.length > 12_000) {
+    const error = new Error("choice reply is invalid");
+    error.code = "BAD_CHOICE_PROMPT";
+    throw error;
+  }
+  return JSON.parse(encoded);
+}
+
+function appendMessageInDb(
+  db,
+  {
+    thread,
+    role,
+    text,
+    kind,
+    visibility,
+    metadata,
+    choice,
+    artifacts,
+    runtimeSessionId,
+    messageId,
+    at,
+  }
+) {
+  const existingRow = db
+    .prepare("SELECT data FROM skill_chat_messages WHERE id = ?")
+    .get(messageId);
+  if (existingRow) {
+    const existing = JSON.parse(existingRow.data);
+    if (
+      existing.threadId !== thread.id ||
+      existing.role !== role ||
+      existing.text !== text ||
+      (existing.kind || null) !== (kind || null)
+    ) {
+      const error = new Error(`chat message id already exists: ${messageId}`);
+      error.code = "CONFLICT";
+      throw error;
+    }
+    return { thread, message: existing, reused: true };
+  }
+
+  const sequence = db
+    .prepare(
+      "SELECT coalesce(max(sequence), 0) + 1 AS next FROM skill_chat_messages WHERE thread_id = ?"
+    )
+    .get(thread.id).next;
+  const choiceResult =
+    role === "user"
+      ? resolvePendingMessageChoice(readMessages(db, thread.id), { text, choice, now: at })
+      : null;
+  if (choiceResult) {
+    db.prepare("UPDATE skill_chat_messages SET data = ? WHERE id = ?").run(
+      JSON.stringify(choiceResult.message),
+      choiceResult.message.id
+    );
+  }
+  const messageMetadata = choiceMetadataForMessage({
+    metadata,
+    role,
+    threadId: thread.id,
+    messageId,
+    text,
+  });
+  if (choiceResult) messageMetadata.choiceResolution = choiceResult.resolution;
+  const message = {
+    id: messageId,
+    threadId: thread.id,
+    sequence,
+    role,
+    text,
+    createdAt: at,
+    ...(kind ? { kind } : {}),
+    ...(visibility ? { visibility } : {}),
+    ...(Object.keys(messageMetadata).length ? { metadata: messageMetadata } : {}),
+    ...(artifacts ? { artifacts } : {}),
+    ...(runtimeSessionId ? { runtimeSessionId: String(runtimeSessionId).slice(0, 500) } : {}),
+  };
+  db.prepare(
+    "INSERT INTO skill_chat_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
+  ).run(message.id, thread.id, sequence, JSON.stringify(message));
+
+  const updatedThread = {
+    ...thread,
+    status: "active",
+    messageCount: sequence,
+    lastRole: role,
+    turnState: role === "user" ? "awaiting-assistant" : thread.turnState || "awaiting-assistant",
+    updatedAt: at,
+  };
+  db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
+    JSON.stringify(updatedThread),
+    thread.id
+  );
+  return { thread: updatedThread, message, reused: false };
+}
+
 function createThread(skill, at, { messageCount = 0, turnState } = {}) {
   return {
     id: threadId(skill),
@@ -104,6 +260,103 @@ export function skillChatThreadRead({ repoRoot, env = process.env, skill } = {})
   };
 }
 
+export function skillChatThreadPrepare({
+  repoRoot,
+  env = process.env,
+  skill,
+  executionPlan,
+  ownerId,
+  leaseMs,
+  now,
+} = {}) {
+  const clean = cleanSkill(skill);
+  const at = dateIso(now);
+  const plan = cleanExecutionPlan(executionPlan);
+  const owner = ownerId == null ? null : cleanOwnerId(ownerId);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const current = readThread(db, clean);
+    const thread = current || createThread(clean, at, { turnState: "awaiting-assistant" });
+    if (thread.executionPlan && JSON.stringify(thread.executionPlan) !== JSON.stringify(plan)) {
+      const error = new Error("chat execution plan was already frozen by another app process");
+      error.code = "AI_EXECUTION_PLAN_CONFLICT";
+      throw error;
+    }
+    if (owner && thread.turnState !== "awaiting-assistant") {
+      const error = new Error(`chat turn for skill "${clean}" is not awaiting an assistant`);
+      error.code = "CHAT_TURN_NOT_AWAITING_ASSISTANT";
+      throw error;
+    }
+    const currentClaim = thread.turnClaim;
+    const currentLeaseExpiresAt = Date.parse(currentClaim?.leaseExpiresAt || "");
+    if (
+      owner &&
+      currentClaim?.ownerId &&
+      currentClaim.ownerId !== owner &&
+      Number.isFinite(currentLeaseExpiresAt) &&
+      currentLeaseExpiresAt > Date.parse(at)
+    ) {
+      const error = new Error(
+        `another app process is already handling the chat turn for "${clean}"`
+      );
+      error.code = "CHAT_TURN_ALREADY_CLAIMED";
+      throw error;
+    }
+    const updated = {
+      ...thread,
+      executionPlan: thread.executionPlan || plan,
+      ...(owner
+        ? {
+            turnClaim: {
+              ownerId: owner,
+              heartbeatAt: at,
+              leaseExpiresAt: turnLeaseExpiresAt(at, leaseMs),
+            },
+          }
+        : {}),
+      updatedAt: at,
+    };
+    if (current) {
+      db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
+        JSON.stringify(updated),
+        updated.id
+      );
+    } else {
+      db.prepare("INSERT INTO skill_chat_threads (id, data) VALUES (?, ?)").run(
+        updated.id,
+        JSON.stringify(updated)
+      );
+    }
+    return { ok: true, thread: updated };
+  });
+}
+
+export function skillChatThreadReleaseTurn({
+  repoRoot,
+  env = process.env,
+  skill,
+  ownerId,
+  now,
+} = {}) {
+  const clean = cleanSkill(skill);
+  const owner = cleanOwnerId(ownerId);
+  const at = dateIso(now);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const thread = readThread(db, clean);
+    if (!thread || thread.turnClaim?.ownerId !== owner) {
+      return { ok: true, released: false, thread };
+    }
+    const updated = { ...thread, updatedAt: at };
+    delete updated.turnClaim;
+    db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
+      JSON.stringify(updated),
+      updated.id
+    );
+    return { ok: true, released: true, thread: updated };
+  });
+}
+
 export function skillChatMessageAppend({
   repoRoot,
   env = process.env,
@@ -113,8 +366,10 @@ export function skillChatMessageAppend({
   kind,
   visibility,
   metadata,
+  choice,
   artifacts,
   runtimeSessionId,
+  id,
   now,
 } = {}) {
   const clean = cleanSkill(skill);
@@ -132,10 +387,14 @@ export function skillChatMessageAppend({
     throw error;
   }
   const cleanVisibility = visibility === "internal" ? "internal" : null;
-  const cleanMetadata = metadata?.answerMode === "yes-no" ? { answerMode: "yes-no" } : null;
+  const cleanMetadata = {
+    ...(metadata?.answerMode === "yes-no" ? { answerMode: "yes-no" } : {}),
+    ...(metadata?.choicePrompt ? { choicePrompt: metadata.choicePrompt } : {}),
+  };
   const cleanMessageArtifacts = cleanArtifacts(artifacts);
   const at = dateIso(now);
   const db = requireDb({ repoRoot, env });
+  const messageId = cleanMessageId(id);
 
   return withTransaction(db, () => {
     let thread = readThread(db, clean);
@@ -147,42 +406,136 @@ export function skillChatMessageAppend({
       );
     }
 
-    const sequence = db
-      .prepare(
-        "SELECT coalesce(max(sequence), 0) + 1 AS next FROM skill_chat_messages WHERE thread_id = ?"
-      )
-      .get(thread.id).next;
-    const message = {
-      id: randomUUID(),
-      threadId: thread.id,
-      sequence,
-      role: cleanRole,
-      text: cleanMessage,
-      createdAt: at,
-      ...(cleanKind ? { kind: cleanKind } : {}),
-      ...(cleanVisibility ? { visibility: cleanVisibility } : {}),
-      ...(cleanMetadata ? { metadata: cleanMetadata } : {}),
-      ...(cleanMessageArtifacts ? { artifacts: cleanMessageArtifacts } : {}),
-      ...(runtimeSessionId ? { runtimeSessionId: String(runtimeSessionId).slice(0, 500) } : {}),
+    return {
+      ok: true,
+      ...appendMessageInDb(db, {
+        thread,
+        role: cleanRole,
+        text: cleanMessage,
+        kind: cleanKind,
+        visibility: cleanVisibility,
+        metadata: cleanMetadata,
+        choice,
+        artifacts: cleanMessageArtifacts,
+        runtimeSessionId,
+        messageId,
+        at,
+      }),
     };
-    db.prepare(
-      "INSERT INTO skill_chat_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
-    ).run(message.id, thread.id, sequence, JSON.stringify(message));
+  });
+}
 
-    const updatedThread = {
-      ...thread,
-      status: "active",
-      messageCount: sequence,
-      lastRole: cleanRole,
-      turnState:
-        cleanRole === "user" ? "awaiting-assistant" : thread.turnState || "awaiting-assistant",
-      updatedAt: at,
+export function skillChatPendingMessageEnqueue({
+  repoRoot,
+  env = process.env,
+  skill,
+  text,
+  choice,
+  runtimeSessionId,
+  id,
+  now,
+} = {}) {
+  const clean = cleanSkill(skill);
+  const cleanMessage = cleanText(text);
+  const cleanChoice = cleanPendingChoice(choice);
+  const messageId = cleanMessageId(id);
+  const at = dateIso(now);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    let thread = readThread(db, clean);
+    if (!thread) {
+      thread = createThread(clean, at, { turnState: "awaiting-assistant" });
+      db.prepare("INSERT INTO skill_chat_threads (id, data) VALUES (?, ?)").run(
+        thread.id,
+        JSON.stringify(thread)
+      );
+    }
+    const committed = db
+      .prepare("SELECT data FROM skill_chat_messages WHERE id = ?")
+      .get(messageId);
+    if (committed) {
+      const message = JSON.parse(committed.data);
+      if (
+        message.threadId !== thread.id ||
+        message.role !== "user" ||
+        message.text !== cleanMessage
+      ) {
+        const error = new Error(`chat message id already exists: ${messageId}`);
+        error.code = "CONFLICT";
+        throw error;
+      }
+      return { ok: true, reused: true, state: "committed", thread, message };
+    }
+    const pendingMessages = Array.isArray(thread.pendingMessages) ? thread.pendingMessages : [];
+    const existing = pendingMessages.find((message) => message.id === messageId);
+    if (existing) {
+      if (
+        existing.text !== cleanMessage ||
+        JSON.stringify(existing.choice) !== JSON.stringify(cleanChoice)
+      ) {
+        const error = new Error(`chat pending message id already exists: ${messageId}`);
+        error.code = "CONFLICT";
+        throw error;
+      }
+      return { ok: true, reused: true, state: "pending", thread, message: existing };
+    }
+    if (pendingMessages.length >= MAX_PENDING_MESSAGES) {
+      const error = new Error("too many chat messages are waiting for the current turn");
+      error.code = "CHAT_PENDING_LIMIT";
+      throw error;
+    }
+    const message = {
+      id: messageId,
+      text: cleanMessage,
+      ...(cleanChoice === undefined ? {} : { choice: cleanChoice }),
+      ...(runtimeSessionId ? { runtimeSessionId: String(runtimeSessionId).slice(0, 500) } : {}),
+      acceptedAt: at,
     };
+    const updated = { ...thread, pendingMessages: [...pendingMessages, message], updatedAt: at };
     db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
-      JSON.stringify(updatedThread),
-      thread.id
+      JSON.stringify(updated),
+      updated.id
     );
-    return { ok: true, thread: updatedThread, message };
+    return { ok: true, reused: false, state: "pending", thread: updated, message };
+  });
+}
+
+export function skillChatPendingMessagesDrain({ repoRoot, env = process.env, skill, now } = {}) {
+  const clean = cleanSkill(skill);
+  const drainedAt = dateIso(now);
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    let thread = readThread(db, clean);
+    if (!thread) return { ok: true, thread: null, messages: [] };
+    const pendingMessages = Array.isArray(thread.pendingMessages) ? thread.pendingMessages : [];
+    const messages = [];
+    for (const pending of pendingMessages) {
+      const appended = appendMessageInDb(db, {
+        thread,
+        role: "user",
+        text: cleanText(pending.text),
+        kind: null,
+        visibility: /^\[SYSTEM\]\s/.test(pending.text) ? "internal" : null,
+        metadata: {},
+        choice: cleanPendingChoice(pending.choice),
+        artifacts: null,
+        runtimeSessionId: pending.runtimeSessionId,
+        messageId: cleanMessageId(pending.id),
+        at: pending.acceptedAt || drainedAt,
+      });
+      thread = appended.thread;
+      messages.push(appended.message);
+    }
+    if (pendingMessages.length) {
+      const updated = { ...thread, updatedAt: drainedAt };
+      delete updated.pendingMessages;
+      db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
+        JSON.stringify(updated),
+        updated.id
+      );
+      thread = updated;
+    }
+    return { ok: true, thread, messages };
   });
 }
 
@@ -191,6 +544,7 @@ export function skillChatThreadSetTurnState({
   env = process.env,
   skill,
   turnState,
+  ownerId,
   now,
 } = {}) {
   const clean = cleanSkill(skill);
@@ -209,7 +563,13 @@ export function skillChatThreadSetTurnState({
       error.code = "NOT_FOUND";
       throw error;
     }
+    if (thread.turnClaim?.ownerId && thread.turnClaim.ownerId !== ownerId) {
+      const error = new Error(`chat turn for skill "${clean}" is owned by another app process`);
+      error.code = "STALE_WRITE";
+      throw error;
+    }
     const updated = { ...thread, turnState: cleanState, updatedAt: at };
+    if (cleanState !== "awaiting-assistant") delete updated.turnClaim;
     db.prepare("UPDATE skill_chat_threads SET data = ? WHERE id = ?").run(
       JSON.stringify(updated),
       updated.id

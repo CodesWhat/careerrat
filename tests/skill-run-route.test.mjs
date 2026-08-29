@@ -197,6 +197,42 @@ test("GET /api/runtime/config: reports no AI route and no discovery chat handoff
   }
 });
 
+test("the dedicated AI search stays available when the generic skill allowlist is explicitly empty", async () => {
+  const repoRoot = tempRepoWithSkills(["intake-extract", "search-jobs"]);
+  let called = false;
+  const server = await bootRouteServer(
+    async () => {
+      called = true;
+    },
+    {
+      repoRoot,
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        CAREERRAT_RUNTIME_SKILLS: "",
+      },
+    }
+  );
+  try {
+    const configResponse = await fetch(`${baseUrl(server)}/api/runtime/config`);
+    assert.equal(configResponse.status, 200);
+    const config = await configResponse.json();
+    assert.deepEqual(config.skills, []);
+    assert.deepEqual(config.aiWebSearch, { available: true });
+
+    const genericResponse = await fetch(`${baseUrl(server)}/api/skill/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skill: "intake-extract", input: { path: "/fixture/resume.pdf" } }),
+    });
+    assert.equal(genericResponse.status, 400);
+    assert.match((await genericResponse.json()).error, /allowed: none/);
+    assert.equal(called, false);
+  } finally {
+    await closeServer(server);
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("GET /api/runtime/config: reports unsandboxed tool-heavy execution as unavailable", async () => {
   const repoRoot = tempRepoWithSkills(["apply-job", "sync-status", "evaluate-job"]);
   const server = await bootRouteServer(async () => {}, {

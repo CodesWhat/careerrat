@@ -1,6 +1,6 @@
 ---
 name: research-boards
-description: Web-search + legitimacy-screen NEW job boards for the candidate's domain/role families → propose adding through `careerrat searches`, confirm-first.
+description: Web-search + legitimacy-screen NEW job boards for the candidate's domain/role families → add validated public sources through `careerrat searches`; review only ambiguous sources.
 metadata:
   tier_1_inputs:
     - profile.candidate.domain
@@ -17,8 +17,8 @@ Discovers new job boards and aggregators relevant to the candidate's domain and 
 families. Source config is accessed through `careerrat searches` (`--json` for reads,
 `--add-url` for writes). In DB workspaces this is DB-backed source config; in legacy
 workspaces it persists to `config/search-sources.yml`. Do not edit source YAML
-directly. Never writes a source without explicit user confirmation. Never duplicates
-an already-configured board.
+directly. The explicit discovery request is the authorization to add deterministically
+validated public sources. Never duplicates an already-configured board.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
@@ -47,12 +47,14 @@ Run `careerrat doctor` and confirm it exits clean. If it fails, stop and report.
 Check usage mode:
 
 ```
-careerrat modes allows research:boards
+careerrat modes allows research:boards --explicit
 ```
 
-If it returns `skip`, do not run board discovery by default; explain that lean usage
-mode treats board discovery as discretionary and offer to proceed only if the user
-explicitly overrides. If it returns `run`, continue.
+Use `--explicit` when the user asked for board discovery. Their request authorizes this
+one run and must not trigger another override question or change their saved usage mode.
+For an automatic or background handoff, omit `--explicit`; stop if that verdict is
+`skip`. If the explicit verdict is `downshift`, run a smaller pass. If it is `run`,
+continue normally.
 
 Read candidate context through DB-first accessors/compat exports and read source
 config with `careerrat searches --json`. Extract:
@@ -167,9 +169,9 @@ persists it with the thread, renders one compact summary card, and opens the com
 rejection detail in the Review sources surface. Invalid batches fail closed to a readable retry.
 
 Do not add prose before or after the fence. The app owns the visible summary copy and never exposes
-the protocol. It also owns the completion marker and withholds completion until every proposed
-source is added or skipped. In a one-shot CLI session, this same artifact is the primary result;
-keep using STEP 4's CLI confirmation and write procedure for confirmed writes.
+the protocol. It auto-adds validated high-confidence sources, owns the completion marker, and
+withholds completion only while ambiguous proposals remain undecided. In a one-shot CLI session,
+this same artifact is the primary result; keep using STEP 4's validated write procedure.
 
 ---
 
@@ -186,21 +188,22 @@ Before returning the artifact, classify each passing board into one of two tiers
 - Stable host (domain has been around; not a brand-new or parked domain)
 
 **BORDERLINE / MEDIUM** — any board that passes the STEP 2 gate but fails one or more
-high-confidence criteria above. Requires confirm-first regardless of any user posture.
+high-confidence criteria above. Keep it reviewable instead of auto-adding it.
 
 Record each board's tier (`high` or `borderline/medium`) alongside the STEP 2 verdict.
 This tier drives the STEP 4 auto-add logic below.
 
 ---
 
-## STEP 4 — Add boards (confirm-first by default; opt-in auto-add for high-confidence)
+## STEP 4 — Add validated boards; review ambiguous boards
 
 **External-agent / one-shot CLI runs only.** In conversational chat, this skill runs as an
 embedded session under the `chat` tool profile (`CHAT_RUNTIME_TOOLS`), which has no Bash —
 there is no shell to run `careerrat searches --add-url` from. The STEP 3 Conversational web
 handoff already IS the write mechanism: the `source_review` batch renders one compact card,
-and its review surface provides Add source / Skip controls. Clicking one calls the confirm-first write server-side through the
-exact same `addSearchFromUrl`/source-config guards this step's CLI path uses. Skip this
+and its review surface provides Add source / Skip controls for borderline items. Validated
+high-confidence entries are already added server-side through the exact same
+`addSearchFromUrl`/source-config guards this step's CLI path uses. Skip this
 step's CLI commands, the `careerrat doctor` check, and the optional audit-note/Activity-Pulse
 CLI calls entirely in chat mode. Do not run or narrate running `careerrat searches --add-url`, and do
 not tell the user a board was added — a chat turn ends before any click on the STEP 3
@@ -209,19 +212,10 @@ Claiming a write here without having run one violates the skill's Honesty Firewa
 step's CLI procedure below stays exactly as written for a one-shot, non-embedded
 (external-agent) run, where there is a real shell.
 
-**Default behavior is confirm-first for everything.** Auto-add is only active when the
-user has explicitly opted in during this session by saying something like "auto-add
-high-confidence boards" or "yes, add high-confidence ones without asking."
-
-**Without opt-in (default):** Wait for explicit user confirmation before writing any
-source, regardless of tier. Return the STEP 3 artifact and let the user decide in its review surface.
-
-**With opt-in (user has stated "auto-add high-confidence boards" or equivalent):**
-
-- HIGH-CONFIDENCE boards: add immediately without per-board confirmation. Report each
-  addition as it happens.
-- BORDERLINE / MEDIUM boards: always confirm-first, even with auto-add opted in. Keep them
-  visible as a separate tier in the review surface and wait for explicit approval.
+The explicit discovery request is the authorization. HIGH-CONFIDENCE boards add
+without per-item confirmation after the deterministic checks above pass. BORDERLINE /
+MEDIUM boards stay in the review surface because the unresolved evidence requires a
+real choice. Rejected boards never write.
 
 For each board being added (auto or confirmed), use the existing searches CLI:
 
@@ -330,7 +324,7 @@ explicitly skipped employer ATS discovery, record it with
 The STEP 3 `source_review` artifact is the complete required output. Do not append counts,
 write-state bookkeeping, confirmation status, a registry ledger, or a next-step paragraph.
 The app derives those states from the validated artifact and real user decisions. In one-shot
-CLI mode, report actual confirmed writes only after the CLI command succeeds; never mix an
+CLI mode, report actual writes only after the CLI command succeeds; never mix an
 unobserved future decision into the research result.
 
 ---
@@ -340,14 +334,10 @@ unobserved future decision into the research result.
 - **Domain-neutral.** No hardcoded board names, industries, or aggregator brands appear
   in this skill's prose. Every board name derives from web-search results for the
   candidate's actual domain and role families.
-- **Confirm-first is the default.** Never add a source without the
-  user explicitly approving additions, unless the user has opted into auto-add for
-  high-confidence boards in the current session.
-- **Auto-add is opt-in only.** Auto-add activates only when the user explicitly says
-  "auto-add high-confidence boards" (or equivalent). Without that statement, all writes
-  require confirmation regardless of tier.
-- **Borderline/medium always confirm-first.** Even with auto-add opted in, any board
-  below the high-confidence bar requires explicit user approval before being added.
+- **One authorization.** The explicit discovery request authorizes high-confidence
+  validated public source additions; do not ask for the same approval again.
+- **Borderline/medium stays reviewable.** Any board below the high-confidence bar
+  requires a user decision before being added.
 - **Dedup.** Never propose a board whose root domain or label already appears in the
   configured sources loaded in STEP 0.
 - **Quality gate.** A board must show at least one real, dated, domain-relevant listing

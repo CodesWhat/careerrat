@@ -129,6 +129,22 @@ test("POST /api/boards/preview: derives f_SB2 from minimumBase and f_TPR from wi
   }
 });
 
+test("POST /api/boards/preview: annual earnings never drives LinkedIn f_SB2", async () => {
+  const server = await bootServer(tempRepo());
+  try {
+    const { status, body } = await postJson(server, "/api/boards/preview", {
+      keywords: "Lead Bartender",
+      location: "New York, NY",
+      minimumAnnualEarnings: 85000,
+    });
+
+    assert.equal(status, 200);
+    assert.doesNotMatch(body.linkedin.url, /[?&]f_SB2=/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/boards/preview: missing keywords -> 400", async () => {
   const server = await bootServer(tempRepo());
   try {
@@ -207,6 +223,53 @@ test("POST /api/boards/add: a LinkedIn URL persists an auth:true, enabled:false 
     assert.equal(stored.searches[0].label, "LinkedIn — FDE");
     assert.equal(stored.searches[0].enabled, false);
     assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("browser source add and edit reject known-platform hostname mismatches", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const linkedinUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "linkedin.com",
+          platform: "linkedin",
+          source_type: "browser",
+          auth: true,
+          label: "LinkedIn platform",
+          url: linkedinUrl,
+          enabled: false,
+        },
+      ],
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const added = await postJson(server, "/api/boards/add", {
+      url: "https://jobs.example.com/search",
+      label: "LinkedIn saved search",
+    });
+    assert.equal(added.status, 400);
+    assert.match(added.body.error, /does not match.*hostname/i);
+
+    const edited = await postJson(server, "/api/boards/search/update", {
+      index: 0,
+      label: "LinkedIn platform",
+      target: "https://jobs.example.com/search",
+      enabled: false,
+    });
+    assert.equal(edited.status, 400);
+    assert.match(edited.body.error, /does not match.*hostname/i);
+    assert.equal(
+      sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].url,
+      linkedinUrl
+    );
   } finally {
     await closeServer(server);
   }
@@ -321,6 +384,24 @@ test("source maintenance lists provider, watermark, legitimacy, and enabled stat
           enabled: true,
           recency: { lastRunAt: "2026-08-09T10:00:00.000Z" },
         },
+        {
+          provider: "linkedin",
+          platform: "linkedin",
+          source_type: "browser",
+          label: "LinkedIn NYC",
+          url: "https://www.linkedin.com/jobs/search/?keywords=operations",
+          enabled: false,
+          auth: true,
+        },
+        {
+          provider: "indeed",
+          platform: "indeed",
+          source_type: "browser",
+          label: "Indeed NYC",
+          url: "https://www.indeed.com/jobs?q=operations&l=New+York%2C+NY",
+          enabled: true,
+          auth: true,
+        },
       ],
     },
   });
@@ -363,6 +444,8 @@ test("source maintenance lists provider, watermark, legitimacy, and enabled stat
       lastRunAt: "2026-08-08T10:00:00.000Z",
       legitimacy: "verified-ats",
     });
+    assert.equal(body.searches[1].legitimacy, "login-needed");
+    assert.equal(body.searches[2].legitimacy, "supported");
   } finally {
     await closeServer(server);
   }
@@ -508,6 +591,253 @@ test("source toggles prefer an exact visible label over another source's hostnam
       { label: "RemoteOK", enabled: true },
       { label: "remoteok.com", enabled: false },
     ]
+  );
+});
+
+test("a public source disable never persists a login skip marker", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "remoteok",
+          source_type: "board",
+          label: "RemoteOK",
+          url: "https://remoteok.com/api",
+          enabled: true,
+        },
+      ],
+    },
+  });
+
+  const result = setSearchSourceEnabled({
+    repoRoot,
+    selector: "RemoteOK",
+    enabled: false,
+    loginDecision: "no",
+  });
+
+  assert.equal(result.source.enabled, false);
+  assert.equal(result.source.loginSkipped, undefined);
+  assert.equal(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].login_skipped,
+    undefined
+  );
+});
+
+test("source login toggles one exact URL when saved labels are duplicated", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const firstUrl = "https://www.linkedin.com/jobs/search/?keywords=operations";
+  const secondUrl = "https://www.linkedin.com/jobs/search/?keywords=platform";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "linkedin.com",
+          source_type: "browser",
+          label: "linkedin.com (authenticated)",
+          url: firstUrl,
+          enabled: false,
+        },
+        {
+          provider: "linkedin.com",
+          source_type: "browser",
+          label: "linkedin.com (authenticated)",
+          url: secondUrl,
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  const result = setSearchSourceEnabled({
+    repoRoot,
+    selector: "linkedin.com (authenticated)",
+    sourceUrl: `${secondUrl}#results`,
+    enabled: true,
+  });
+
+  assert.equal(result.source.target, secondUrl);
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.map((source) => ({
+      url: source.url,
+      enabled: source.enabled,
+    })),
+    [
+      { url: firstUrl, enabled: false },
+      { url: secondUrl, enabled: true },
+    ]
+  );
+});
+
+test("source login No persists a skip and a later enable makes the source askable again", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const sourceUrl = "https://www.indeed.com/jobs?q=operations";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "indeed.com",
+          source_type: "browser",
+          auth: true,
+          platform: "indeed",
+          label: "Indeed operations",
+          url: sourceUrl,
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  const skipped = setSearchSourceEnabled({
+    repoRoot,
+    selector: "Indeed operations",
+    sourceUrl,
+    enabled: false,
+    loginDecision: "no",
+  });
+  assert.equal(skipped.changed, true);
+  assert.equal(skipped.source.loginSkipped, true);
+  assert.equal(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].login_skipped,
+    true
+  );
+
+  setSearchSourceEnabled({
+    repoRoot,
+    selector: "Indeed operations",
+    sourceUrl,
+    enabled: true,
+  });
+  const enabled = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0];
+  assert.equal(enabled.enabled, true);
+  assert.equal(enabled.login_skipped, undefined);
+});
+
+test("source maintenance cannot turn a skipped browser source into a hidden login grant", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const sourceUrl = "https://www.indeed.com/jobs?q=operations";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "indeed.com",
+          source_type: "browser",
+          auth: true,
+          platform: "indeed",
+          label: "Indeed operations",
+          url: sourceUrl,
+          enabled: false,
+          login_skipped: true,
+        },
+      ],
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/boards/search/update", {
+      index: 0,
+      label: "Indeed operations",
+      target: sourceUrl,
+      enabled: true,
+    });
+
+    assert.equal(status, 200);
+    assert.equal(body.searches[0].enabled, false);
+    assert.equal(body.searches[0].loginSkipped, true);
+    const saved = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0];
+    assert.equal(saved.enabled, false);
+    assert.equal(saved.login_skipped, true);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source maintenance can enable a browser source that does not require login", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const sourceUrl = "https://www.linkedin.com/jobs/search/?keywords=operations";
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "linkedin.com",
+          source_type: "browser",
+          auth: false,
+          platform: "linkedin",
+          label: "Public LinkedIn operations",
+          url: sourceUrl,
+          enabled: false,
+        },
+      ],
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/boards/search/update", {
+      index: 0,
+      label: "Public LinkedIn operations",
+      target: sourceUrl,
+      enabled: true,
+    });
+
+    assert.equal(status, 200);
+    assert.equal(body.searches[0].enabled, true);
+    assert.equal(
+      sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].enabled,
+      true
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source login toggles reject a stale URL instead of mutating by label", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "wellfound",
+          source_type: "browser",
+          label: "Wellfound import",
+          url: "https://wellfound.com/jobs",
+          enabled: false,
+        },
+      ],
+    },
+  });
+
+  assert.throws(
+    () =>
+      setSearchSourceEnabled({
+        repoRoot,
+        selector: "Wellfound import",
+        sourceUrl: "https://wellfound.com/jobs/changed",
+        enabled: true,
+      }),
+    /no longer matches/i
+  );
+  assert.equal(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].enabled,
+    false
   );
 });
 

@@ -49,22 +49,6 @@ function visibleText(html = "") {
     .trim();
 }
 
-function extractRobots(html = "") {
-  let robots = "";
-  const parser = new Parser(
-    {
-      onopentag(name, attributes) {
-        if (name === "meta" && String(attributes.name || "").toLowerCase() === "robots") {
-          robots = String(attributes.content || "").toLowerCase();
-        }
-      },
-    },
-    { decodeEntities: true }
-  );
-  parser.end(String(html || ""));
-  return robots;
-}
-
 function extractLinks(html = "", baseUrl) {
   const links = [];
   const seen = new Set();
@@ -181,26 +165,7 @@ export async function extractPublicCareersPage({
     });
   }
 
-  const robots = extractRobots(html);
-  if (robots.includes("noindex") || robots.includes("nofollow")) {
-    return baseResult({
-      url: parsedUrl,
-      html,
-      observedAt,
-      status: "robots_disallowed",
-    });
-  }
-
   const text = visibleText(html);
-  if (LOGIN_RE.test(text)) {
-    return baseResult({
-      url: parsedUrl,
-      html,
-      observedAt,
-      status: "login_required",
-    });
-  }
-
   const links = extractLinks(html, parsedUrl);
   for (const link of links) {
     const atsProvider = inferProvider({ careers_url: link.toString() });
@@ -223,6 +188,15 @@ export async function extractPublicCareersPage({
         ],
       },
     };
+  }
+
+  if (LOGIN_RE.test(text)) {
+    return baseResult({
+      url: parsedUrl,
+      html,
+      observedAt,
+      status: "login_required",
+    });
   }
 
   if (NO_OPEN_ROLES_RE.test(text)) {

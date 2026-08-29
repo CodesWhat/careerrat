@@ -17,7 +17,7 @@ a JD URL with clear application intent.
 | `application-limits` config (`candidate/application-limits.yml` only in legacy/export mode) | Per-company caps and cooldowns (step-zero gate) |
 | Agent-visible application defaults | Sanitized `expected_base`, applicant contact facts, and screening answers supplied by CareerRat. Never read raw `candidate/form-defaults.yml`. |
 | `candidate/targeting.yml` | `excluded_companies`, `cut_signals`, `fit_bands`, `role_buckets[].priority` (OE bucket policy) |
-| `candidate/profile.yml` | `compensation.expected_base` (fallback when `form-defaults.yml#expected_base` absent), `compensation.oe_min_base`, `compensation.oe_max_base`, `candidate.toolchain`, contact facts |
+| `candidate/profile.yml` | `compensation.expected_base` (fallback when `form-defaults.yml#expected_base` absent), `compensation.minimum_base`, `compensation.minimum_annual_earnings`, `compensation.oe_min_base`, `compensation.oe_max_base`, `candidate.toolchain`, contact facts |
 | `candidate/honesty.yml` | `tools.confirmed`, `claims.do_not_fabricate`, education policy |
 | `candidate/writing-style.md` + `workspace/writing-samples/` | Voice calibration for tailor step |
 | `workspace/tracker.json` | Application row to update after submission |
@@ -98,7 +98,7 @@ ACTION: apply-now|hold|manual|cut
 
 Read `candidate/targeting.yml#excluded_companies`. If the company is on the list: halt and report.
 
-Read `candidate/profile.yml#compensation.minimum_base` (the walk-away floor). If the posted compensation range is confirmed below the floor and the role does not qualify under an OE-bucket policy: cut.
+Honor the evaluated compensation floor before filling. `compensation.minimum_base` is a guaranteed-base floor. `compensation.minimum_annual_earnings` is an annual cash earnings floor that may include wages, tips, commission, and recurring cash bonuses. Equity and benefits never count toward either floor. If the comparable posted range is confirmed below the applicable floor and the role does not qualify under an OE-bucket policy: cut. If tips, commission, bonus, or total earnings are not stated clearly enough to compare, keep the role in review instead of guessing.
 
 **OE-bucket check:** scan `candidate/targeting.yml#role_buckets[]` for an entry whose `priority` is `oe`. If one matches this role, apply `candidate/profile.yml#compensation.oe_min_base` and `compensation.oe_max_base` as the floor/target range instead of `minimum_base`. If the offer falls within `[oe_min_base, oe_max_base]` the comp gate passes for this bucket regardless of the standard floor.
 

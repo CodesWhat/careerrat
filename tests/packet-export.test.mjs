@@ -8,6 +8,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { after, test } from "node:test";
+import JSZip from "jszip";
 import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
@@ -120,13 +121,16 @@ function fakeExporter(calls) {
     if (formats.includes("pdf")) {
       const pdfPath = `${outBase}.pdf`;
       mkdirSync(dirname(pdfPath), { recursive: true });
-      writeFileSync(pdfPath, "%PDF-1.4\nfake packet pdf\n", "utf8");
+      writeFileSync(pdfPath, "%PDF-1.4\nfake packet pdf\n%%EOF\n", "utf8");
       result.pdf = pdfPath;
     }
     if (formats.includes("docx")) {
       const docxPath = `${outBase}.docx`;
       mkdirSync(dirname(docxPath), { recursive: true });
-      writeFileSync(docxPath, "fake packet docx", "utf8");
+      const zip = new JSZip();
+      zip.file("[Content_Types].xml", "<Types />");
+      zip.file("word/document.xml", "<w:document />");
+      writeFileSync(docxPath, await zip.generateAsync({ type: "nodebuffer" }));
       result.docx = docxPath;
       result.docxTool = "test-double";
       result.docxLabel = "test double";
@@ -297,6 +301,94 @@ test("exportPacketArtifacts preserves generation readiness and gaps", async () =
   assert.equal(manifest.status, "reviewable");
   assert.equal(manifest.gapCount, 1);
   assert.equal(manifest.gaps.length, 1);
+});
+
+test("exportPacketArtifacts clears upload readiness when the document exporter produces no files", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot, "missing-exports");
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: sources,
+      packetManifest: {
+        applicationId: "app-export",
+        generatedAt: "2026-07-06T14:00:00Z",
+        uploadReady: true,
+        status: "upload-ready",
+        gapCount: 0,
+        gaps: [],
+        artifacts: sources,
+      },
+    },
+  ]);
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  const result = await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    exportArtifact: async () => ({}),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const manifest = readApp(repoRoot).packetManifest;
+  assert.equal(result.artifacts.resumePdf ?? null, null);
+  assert.equal(manifest.uploadReady, false);
+  assert.equal(manifest.status, "reviewable");
+  assert.equal(manifest.gapCount, 3);
+  assert.deepEqual(
+    manifest.gaps.map((gap) => gap.code),
+    ["ARTIFACT_EXPORT_FAILED", "ARTIFACT_EXPORT_FAILED", "ARTIFACT_EXPORT_FAILED"]
+  );
+});
+
+test("a successful re-export clears transient export gaps and restores prior generation readiness", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot, "retry-exports");
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: sources,
+      packetManifest: {
+        applicationId: "app-export",
+        generatedAt: "2026-07-06T14:00:00Z",
+        uploadReady: true,
+        status: "upload-ready",
+        gapCount: 0,
+        gaps: [],
+        artifacts: sources,
+      },
+    },
+  ]);
+  const { exportPacketArtifacts } = await importPacketExports();
+  const env = tempDownloadsEnv();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env,
+    appId: "app-export",
+    exportArtifact: async () => ({}),
+  });
+  assert.equal(readApp(repoRoot).packetManifest.uploadReady, false);
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env,
+    appId: "app-export",
+    exportArtifact: fakeExporter([]),
+  });
+
+  const manifest = readApp(repoRoot).packetManifest;
+  assert.equal(manifest.uploadReady, true);
+  assert.equal(manifest.status, "upload-ready");
+  assert.equal(manifest.gapCount, 0);
+  assert.deepEqual(manifest.gaps, []);
 });
 
 test("exportPacketArtifacts archives a prior same-named Downloads PDF on re-export", async () => {

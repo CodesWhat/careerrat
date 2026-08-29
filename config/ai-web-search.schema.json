@@ -15,6 +15,9 @@
           "company",
           "title",
           "url",
+          "comp_text",
+          "base_comp_text",
+          "annual_earnings_text",
           "fit_score",
           "fit_bucket",
           "fit_basis",
@@ -28,6 +31,8 @@
           "url": { "type": "string" },
           "location": { "type": ["string", "null"] },
           "comp_text": { "type": ["string", "null"] },
+          "base_comp_text": { "type": ["string", "null"] },
+          "annual_earnings_text": { "type": ["string", "null"] },
           "posted_at": { "type": ["string", "null"] },
           "body_text": { "type": ["string", "null"] },
           "body_partial": { "type": "boolean" },
@@ -39,6 +44,19 @@
             "items": { "type": "string" }
           },
           "source_evidence": { "type": "string" }
+        }
+      }
+    },
+    "rejected_postings": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["url", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 240 }
         }
       }
     },

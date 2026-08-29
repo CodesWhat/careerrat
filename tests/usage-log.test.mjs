@@ -56,6 +56,28 @@ test("computeCost: prefix-matches a dated snapshot id to its family rate", () =>
   assert.equal(dated.cost_usd, family.cost_usd);
 });
 
+test("computeCost: canonicalizes documented Anthropic gateway model slugs", () => {
+  const gateway = computeCost("anthropic/claude-sonnet-4.6", {
+    tokens_in: 1_000_000,
+    tokens_out: 1_000_000,
+  });
+  const native = computeCost("claude-sonnet-4-6", {
+    tokens_in: 1_000_000,
+    tokens_out: 1_000_000,
+  });
+
+  assert.equal(gateway.priced, true);
+  assert.equal(gateway.cost_usd, 18);
+  assert.deepEqual(gateway, native);
+  assert.equal(
+    computeCost("anthropic/claude-opus-4-8", {
+      tokens_in: 1_000_000,
+      tokens_out: 1_000_000,
+    }).cost_usd,
+    30
+  );
+});
+
 test("computeCost: cache_read at 0.1x and cache_creation at 1.25x the input rate", () => {
   const rate = 3; // claude-sonnet-5 input rate
   const { cost_usd } = computeCost("claude-sonnet-5", {

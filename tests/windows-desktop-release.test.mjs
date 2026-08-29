@@ -364,8 +364,8 @@ test("macOS release credentials are scoped away from install, verification, and 
     mac.indexOf("- name:", mac.indexOf("- name: Verify the signed") + 1)
   );
   const packagedVerify = mac.slice(
-    mac.indexOf("- name: Launch the exact signed"),
-    mac.indexOf("- name:", mac.indexOf("- name: Launch the exact signed") + 1)
+    mac.indexOf("- name: Mount and smoke the canonical notarized DMG"),
+    mac.indexOf("- name:", mac.indexOf("- name: Mount and smoke the canonical notarized DMG") + 1)
   );
   const stageAt = mac.indexOf("- name: Build and stage the app without signing credentials");
   const installAt = mac.indexOf("- name: Install dependencies");
@@ -380,7 +380,7 @@ test("macOS release credentials are scoped away from install, verification, and 
   const dmgAt = mac.indexOf("- name: Sign, notarize, and staple the DMG");
   const cleanupAt = mac.indexOf("- name: Remove signing material from the runner");
   const staticVerifyAt = mac.indexOf("- name: Verify the signed and notarized release");
-  const packagedVerifyAt = mac.indexOf("- name: Launch the exact signed packaged app");
+  const packagedVerifyAt = mac.indexOf("- name: Mount and smoke the canonical notarized DMG");
   const uploadAt = mac.indexOf("- name: Upload the macOS release and updater feed");
 
   for (const section of [header, install, staticVerify, packagedVerify]) {

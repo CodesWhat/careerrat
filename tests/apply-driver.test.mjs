@@ -26,6 +26,10 @@ function refsOf(entries) {
   return refs;
 }
 
+function writeTestPdf(path) {
+  writeFileSync(path, "%PDF-1.4\nfake test document\n%%EOF\n");
+}
+
 // Fake ops: `steps` is the sequence of NormalizedSnapshot fixtures ops.snapshot()
 // cycles through. clickButton advances the cursor (wrapping, so short fixture
 // lists can be reused across a longer step cap test) and every call — in
@@ -247,7 +251,7 @@ test("Ashby detail pages open the Application tab before filling and uploading, 
   try {
     const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
     mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-    writeFileSync(resumePath, "fake resume");
+    writeTestPdf(resumePath);
     const detailPage = {
       origin: ASHBY_URL,
       pageText: "Overview\nApply for this Job",
@@ -295,6 +299,92 @@ test("Ashby detail pages open the Application tab before filling and uploading, 
     assert.deepEqual(
       log.filter((entry) => entry.op === "upload"),
       [{ op: "upload", pageId: "page-1", ref: "e6", files: resumePath }]
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a text file disguised as a PDF is never uploaded to a required resume control", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
+  try {
+    const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(resumePath, "# Resume\n\nThis is markdown, not a PDF.\n");
+    const snapshot = {
+      origin: GREENHOUSE_URL,
+      pageText: 'Application form\n- button "Resume" [required, ref=e1]\nSubmit application',
+      refs: refsOf([
+        ["e1", "button", "Resume", true],
+        ["e2", "button", "Submit Application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([snapshot]);
+    const execute = makeDriver({ ops, repoRoot });
+
+    const result = await execute({
+      applicationId: "app-invalid-pdf",
+      application: {
+        id: "app-invalid-pdf",
+        link: GREENHOUSE_URL,
+        artifacts: { resumePdf: "workspace/tailored/resume.pdf" },
+      },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(result.session.uploadedCount, 0);
+    assert.equal(
+      log.some((entry) => entry.op === "upload"),
+      false
+    );
+    assert.equal(
+      result.session.unresolved.some((entry) => entry.label === "Resume"),
+      true
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a text file disguised as a DOCX is never uploaded to a required Workday resume control", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
+  try {
+    const resumePath = join(repoRoot, "workspace", "tailored", "resume.docx");
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(resumePath, "# Resume\n\nThis is markdown, not a DOCX package.\n");
+    const snapshot = {
+      origin: WORKDAY_URL,
+      pageText: 'Application form\n- button "Resume" [required, ref=e1]\nSubmit application',
+      refs: refsOf([
+        ["e1", "button", "Resume", true],
+        ["e2", "button", "Submit Application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([snapshot]);
+    const execute = makeDriver({ ops, repoRoot });
+
+    const result = await execute({
+      applicationId: "app-invalid-docx",
+      application: {
+        id: "app-invalid-docx",
+        link: WORKDAY_URL,
+        artifacts: { resumeDocx: "workspace/tailored/resume.docx" },
+      },
+      postingUrl: WORKDAY_URL,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(result.session.uploadedCount, 0);
+    assert.equal(
+      log.some((entry) => entry.op === "upload"),
+      false
+    );
+    assert.equal(
+      result.session.unresolved.some((entry) => entry.label === "Resume"),
+      true
     );
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
@@ -425,6 +515,7 @@ test("LinkedIn form preparation uses the supervised-preparation consent capabili
   });
 
   assert.equal(result.state, "blocked");
+  assert.equal(result.code, "APPLICATION_PREPARATION_PERMISSION_REQUIRED");
   assert.equal(seen.length, 1);
   assert.equal(seen[0].capability, "authenticated_apply_preparation");
   assert.equal(seen[0].platform, "linkedin");
@@ -454,6 +545,7 @@ test("external ATS preparation checks consent before opening the application", a
   });
 
   assert.equal(result.state, "blocked");
+  assert.equal(result.code, "APPLICATION_PREPARATION_PERMISSION_REQUIRED");
   assert.equal(
     result.reason,
     "Application preparation for Greenhouse is off. Turn it on in Settings before CareerRat opens the form."
@@ -623,12 +715,76 @@ test("single-page flow fills resolvable fields and stops awaiting-submit, same a
   }
 });
 
+test("a mid-run cancellation stops before any later browser mutation", async () => {
+  const controller = new AbortController();
+  const cancellation = new Error("application preparation cancelled");
+  const mutations = [];
+  let forwardedSignal = null;
+  const snapshot = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "textbox", "Phone Number", false],
+      ["e3", "button", "Submit application", false],
+    ]),
+  };
+  const execute = makeDriver({
+    ops: {
+      async openTab({ signal }) {
+        mutations.push({ op: "openTab" });
+        forwardedSignal = signal;
+        return { pageId: "page-cancelled" };
+      },
+      async snapshot() {
+        return snapshot;
+      },
+      async fillField({ ref, signal }) {
+        mutations.push({ op: "fillField", ref });
+        forwardedSignal = signal;
+        controller.abort(cancellation);
+      },
+      async selectOption({ ref }) {
+        mutations.push({ op: "selectOption", ref });
+      },
+      async toggleField({ ref }) {
+        mutations.push({ op: "toggleField", ref });
+      },
+      async clickButton({ ref }) {
+        mutations.push({ op: "clickButton", ref });
+      },
+      async upload({ ref }) {
+        mutations.push({ op: "upload", ref });
+      },
+      async screenshot() {
+        mutations.push({ op: "screenshot" });
+        return { data: "", format: "png" };
+      },
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      execute({
+        applicationId: "app-cancelled-mid-fill",
+        application: { id: "app-cancelled-mid-fill" },
+        postingUrl: GREENHOUSE_URL,
+        questionCapture: { state: "captured" },
+        signal: controller.signal,
+      }),
+    (error) => error === cancellation
+  );
+
+  assert.equal(forwardedSignal, controller.signal);
+  assert.deepEqual(mutations, [{ op: "openTab" }, { op: "fillField", ref: "e1" }]);
+});
+
 test("a Greenhouse captcha is the final handoff after safe fields and the resume are prepared", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
   try {
     const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
     mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
-    writeFileSync(resumePath, "fake resume");
+    writeTestPdf(resumePath);
     const snapshot = {
       origin: GREENHOUSE_URL,
       pageText:
@@ -2658,7 +2814,7 @@ test("prepare-only never clicks a sole Next control that submits the application
   );
 });
 
-test("prepare-only never reports an already-confirmed page as submitted or verified", async () => {
+test("prepare-only verifies an already-confirmed page after the user submits", async () => {
   const confirmationPage = {
     origin: `${GREENHOUSE_URL}/confirmation`,
     pageText: "Thank you for applying",
@@ -2675,13 +2831,13 @@ test("prepare-only never reports an already-confirmed page as submitted or verif
     prepareOnly: true,
   });
 
-  assert.equal(result.state, "awaiting-submit");
-  assert.equal(result.verified, false);
+  assert.equal(result.state, "submitted");
+  assert.equal(result.verified, true);
+  assert.equal(result.confirmation, "/confirmation");
   assert.equal(result.currentUrl, confirmationPage.origin);
-  assert.equal(result.session.prepareOnly, true);
   assert.equal(
     log.some(({ op }) => op === "screenshot"),
-    false
+    true
   );
 });
 
@@ -2725,6 +2881,108 @@ test("focusSession returns to the exact retained prepared page without opening o
   assert.equal(
     log.some((entry) => entry.op === "clickButton"),
     false
+  );
+});
+
+test("focusSession verifies the retained page after the user presses Submit", async () => {
+  let retainedPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Review your application",
+    refs: refsOf([["e1", "button", "Submit application", false]]),
+  };
+  const log = [];
+  const ops = {
+    async openTab() {
+      log.push({ op: "openTab" });
+      return { pageId: "page-user-submit" };
+    },
+    async snapshot() {
+      log.push({ op: "snapshot" });
+      return retainedPage;
+    },
+    async focusTab(args) {
+      log.push({ op: "focusTab", ...args });
+    },
+    async screenshot() {
+      log.push({ op: "screenshot" });
+      return { data: "", format: "png" };
+    },
+  };
+  const execute = makeDriver({ ops });
+  const request = {
+    applicationId: "app-user-submit",
+    application: { id: "app-user-submit" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  };
+
+  const prepared = await execute(request);
+  assert.equal(prepared.state, "awaiting-submit");
+
+  retainedPage = {
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+    refs: {},
+  };
+  const verified = await execute({ ...request, focusSession: true });
+
+  assert.equal(verified.state, "submitted");
+  assert.equal(verified.verified, true);
+  assert.equal(verified.confirmation, "/confirmation");
+  assert.equal(verified.artifacts[0].kind, "submission_confirmation");
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    1,
+    "verification reuses the retained tab"
+  );
+  assert.equal(
+    log.some((entry) => entry.op === "clickButton"),
+    false,
+    "CareerRat never clicks Submit"
+  );
+});
+
+test("cancelling a focus request preserves the retained page for the next review request", async () => {
+  const reviewPage = {
+    origin: `${GREENHOUSE_URL}?step=review`,
+    pageText: "Review your application",
+    refs: refsOf([["e1", "button", "Submit application", false]]),
+  };
+  const { ops, log } = createFakeOps([reviewPage]);
+  const execute = makeDriver({ ops });
+  const controller = new AbortController();
+  const cancellation = new Error("focus cancelled");
+  let cancelFocus = true;
+  ops.focusTab = async ({ pageId, signal }) => {
+    log.push({ op: "focusTab", pageId });
+    if (cancelFocus) {
+      cancelFocus = false;
+      controller.abort(cancellation);
+      assert.equal(signal, controller.signal);
+    }
+  };
+
+  const request = {
+    applicationId: "app-focus-cancelled",
+    application: { id: "app-focus-cancelled" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  };
+  await execute(request);
+  await assert.rejects(
+    () => execute({ ...request, focusSession: true, signal: controller.signal }),
+    (error) => error === cancellation
+  );
+  const focused = await execute({ ...request, focusSession: true });
+
+  assert.equal(focused.state, "awaiting-submit");
+  assert.equal(focused.session.focused, true);
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    1,
+    "cancellation must not discard and reopen the prepared page"
   );
 });
 

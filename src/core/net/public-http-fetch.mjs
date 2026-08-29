@@ -109,7 +109,10 @@ async function resolveHostWithDeadline(resolveHost, hostname, signal) {
   return Promise.race([hostLookup, abortSignalRejection(signal)]);
 }
 
-async function resolvePublicHttpTarget(rawUrl, { resolveHost = resolvePublicHost, signal } = {}) {
+export async function resolvePublicHttpTarget(
+  rawUrl,
+  { resolveHost = resolvePublicHost, signal } = {}
+) {
   const checked = validatePublicHttpUrl(rawUrl);
   if (!checked.ok) return checked;
 

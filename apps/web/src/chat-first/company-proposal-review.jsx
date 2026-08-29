@@ -1,3 +1,14 @@
+import { useRef } from "react";
+
+import {
+  handleSourceReviewKeyDown,
+  resolveReviewMutationSelection,
+  useReviewDialog,
+} from "./source-review.jsx";
+
+const REVIEW_BATCH_SIZE = 4;
+export const handleCompanyProposalReviewKeyDown = handleSourceReviewKeyDown;
+
 function list(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -8,9 +19,11 @@ function pendingProposal(proposal) {
 
 export function companyProposalReviewForArtifact(artifact) {
   if (artifact?.kind !== "company_proposals" || !artifact?.batchId) return null;
+  const proposals = list(artifact.proposals);
   return {
     ...artifact,
-    proposals: list(artifact.proposals).filter(pendingProposal),
+    proposals: proposals.filter(pendingProposal),
+    resolvedProposals: proposals.filter((proposal) => proposal?.proposalId && proposal?.decision),
   };
 }
 
@@ -42,15 +55,23 @@ export function companyProposalDecisionIntent(artifact, proposal, decision) {
     return null;
   }
 
-  const action =
-    decision === "skip"
-      ? "reject"
-      : decision === "track" &&
-          proposal?.classification === "supported_ats" &&
-          proposal?.atsProvider &&
-          proposal?.jobBoardUrl
-        ? "approve-supported-ats"
-        : null;
+  let action = null;
+  if (decision === "skip") action = "reject";
+  if (
+    decision === "track" &&
+    proposal?.classification === "supported_ats" &&
+    proposal?.atsProvider &&
+    proposal?.jobBoardUrl
+  ) {
+    action = "approve-supported-ats";
+  }
+  if (
+    decision === "track" &&
+    proposal?.classification === "generic_public" &&
+    proposal?.jobBoardUrl
+  ) {
+    action = "approve-public-source";
+  }
   if (!action) return null;
 
   return {
@@ -64,17 +85,67 @@ export function companyProposalDecisionIntent(artifact, proposal, decision) {
   };
 }
 
-function ProposalCard({ artifact, proposal, busy, onIntent }) {
+export function companyProposalBatchIntents(
+  artifact,
+  selectedOptionIds,
+  batchSize = REVIEW_BATCH_SIZE
+) {
+  const review = companyProposalReviewForArtifact(artifact);
+  if (!review) return null;
+  const batch = review.proposals.slice(0, batchSize);
+  if (!batch.length) return [];
+  const selected = new Set(Array.isArray(selectedOptionIds) ? selectedOptionIds.map(String) : []);
+  const batchIds = new Set(batch.map((proposal) => String(proposal.proposalId)));
+  if ([...selected].some((id) => !batchIds.has(id))) return null;
+  const intents = batch.map((proposal) =>
+    companyProposalDecisionIntent(
+      review,
+      proposal,
+      selected.has(String(proposal.proposalId)) ? "track" : "skip"
+    )
+  );
+  return intents.some((intent) => !intent) ? null : intents;
+}
+
+export function companyProposalTextSelection(artifact, text, batchSize = REVIEW_BATCH_SIZE) {
+  const review = companyProposalReviewForArtifact(artifact);
+  if (!review) return null;
+  return resolveReviewMutationSelection(
+    text,
+    review.proposals.slice(0, batchSize).map((proposal) => ({
+      id: String(proposal.proposalId),
+      aliases: [proposal.company?.name, proposal.company?.domain],
+    })),
+    {
+      positiveVerbs: ["track", "add", "save", "select", "include", "keep", "approve"],
+      negativeVerbs: ["skip", "reject", "discard", "exclude", "remove"],
+    }
+  );
+}
+
+export async function submitCompanyProposalBatch({ artifact, selectedOptionIds, onIntent } = {}) {
+  const intents = companyProposalBatchIntents(artifact, selectedOptionIds);
+  if (!intents?.length || typeof onIntent !== "function") return false;
+  for (const intent of intents) {
+    const completed = await onIntent(intent);
+    if (completed === false) return false;
+  }
+  return true;
+}
+
+function ProposalCard({ artifact, proposal, busy }) {
   const company = proposal?.company || {};
   const canTrack = Boolean(companyProposalDecisionIntent(artifact, proposal, "track"));
 
-  function decide(action) {
-    const intent = companyProposalDecisionIntent(artifact, proposal, action);
-    if (intent) onIntent?.(intent);
-  }
-
   return (
-    <article className="company-proposal-review__card">
+    <label className="company-proposal-review__card">
+      <input
+        className="company-proposal-review__checkbox"
+        type="checkbox"
+        name="company-option"
+        value={proposal.proposalId}
+        disabled={busy || !canTrack}
+      />
       <div className="company-proposal-review__heading">
         <strong>{company.name || "Company"}</strong>
         {company.domain ? <span>{company.domain}</span> : null}
@@ -93,27 +164,12 @@ function ProposalCard({ artifact, proposal, busy, onIntent }) {
           <dd>{proposal.jobBoardUrl || "No public board URL captured"}</dd>
         </div>
       </dl>
-      <div className="company-proposal-review__actions">
-        {canTrack ? (
-          <button
-            className="chat-first-pill chat-first-pill--lime"
-            type="button"
-            disabled={busy}
-            onClick={() => decide("track")}
-          >
-            Track
-          </button>
-        ) : null}
-        <button
-          className="chat-first-pill chat-first-pill--outline"
-          type="button"
-          disabled={busy}
-          onClick={() => decide("skip")}
-        >
-          Skip
-        </button>
-      </div>
-    </article>
+      {!canTrack ? (
+        <span className="review-batch__unavailable">
+          CareerRat can't track this board automatically.
+        </span>
+      ) : null}
+    </label>
   );
 }
 
@@ -122,12 +178,57 @@ export function CompanyProposalReview({ artifact, busy = false, onIntent, onClos
   if (!review) return null;
 
   return (
+    <CompanyProposalReviewDialog
+      artifact={artifact}
+      busy={busy}
+      onIntent={onIntent}
+      onClose={onClose}
+      reviewId={review.batchId}
+    />
+  );
+}
+
+function CompanyProposalReviewDialog({ artifact, busy, onIntent, onClose, reviewId }) {
+  const dialogRef = useRef(null);
+  useReviewDialog({ dialogRef, reviewId, onClose });
+  return (
+    <CompanyProposalReviewContent
+      artifact={artifact}
+      busy={busy}
+      onIntent={onIntent}
+      onClose={onClose}
+      dialogRef={dialogRef}
+    />
+  );
+}
+
+export function CompanyProposalReviewContent({
+  artifact,
+  busy = false,
+  onIntent,
+  onClose,
+  dialogRef,
+}) {
+  const review = companyProposalReviewForArtifact(artifact);
+  if (!review) return null;
+  const batch = review.proposals.slice(0, REVIEW_BATCH_SIZE);
+  const resolvedCount = review.resolvedProposals.length;
+
+  async function submitBatch(event) {
+    event.preventDefault();
+    const selectedOptionIds = new FormData(event.currentTarget).getAll("company-option");
+    await submitCompanyProposalBatch({ artifact, selectedOptionIds, onIntent });
+  }
+
+  return (
     <div className="packet-viewer-overlay">
       <section
+        ref={dialogRef}
         className="packet-viewer company-proposal-review"
         role="dialog"
         aria-modal="true"
         aria-label={review.title || "Company proposal review"}
+        tabIndex={-1}
       >
         <header className="packet-viewer__toolbar">
           <div className="company-proposal-review__toolbar-copy">
@@ -146,16 +247,48 @@ export function CompanyProposalReview({ artifact, busy = false, onIntent, onClos
           </button>
         </header>
         <div className="packet-viewer__stage company-proposal-review__stage">
-          {review.proposals.length ? (
-            review.proposals.map((proposal) => (
-              <ProposalCard
-                artifact={review}
-                proposal={proposal}
-                busy={busy}
-                onIntent={onIntent}
-                key={proposal.proposalId}
-              />
-            ))
+          {resolvedCount ? (
+            <p className="review-batch__resolved" aria-live="polite">
+              {resolvedCount} reviewed · {review.proposals.length} remaining
+            </p>
+          ) : null}
+          {batch.length ? (
+            <form className="review-batch" onSubmit={submitBatch}>
+              <fieldset disabled={busy}>
+                <legend>Which companies should CareerRat track?</legend>
+                <p className="review-batch__help">
+                  Select the companies whose job boards belong in your search. Saving skips the
+                  unselected ones in this batch.
+                  {review.proposals.length > batch.length
+                    ? ` Showing ${batch.length} of ${review.proposals.length}.`
+                    : ""}
+                </p>
+                <div className="company-proposal-review__list">
+                  {batch.map((proposal) => (
+                    <ProposalCard
+                      artifact={review}
+                      proposal={proposal}
+                      busy={busy}
+                      key={proposal.proposalId}
+                    />
+                  ))}
+                </div>
+                <footer className="company-proposal-review__footer">
+                  <span>
+                    {review.proposals.length > batch.length
+                      ? `${review.proposals.length - batch.length} more after this batch`
+                      : "This is the last batch"}
+                  </span>
+                  <button
+                    className="chat-first-pill chat-first-pill--lime"
+                    type="submit"
+                    disabled={busy}
+                  >
+                    Save choices
+                  </button>
+                </footer>
+              </fieldset>
+            </form>
           ) : (
             <p className="company-proposal-review__empty">All company proposals are reviewed.</p>
           )}

@@ -16,7 +16,6 @@ import {
   sendMockInterviewMessage,
   sendMockInterviewTurn,
   setChatFirstMissionStatus,
-  setChatFirstMissionStepStatus,
   startMockInterview,
   upsertDeepIngestConfirmedItem,
 } from "./api.js";
@@ -43,6 +42,7 @@ describe("chat-first durable actions", () => {
     await archiveJobThread({ applicationId: "app-1", archived: true });
     await appendJobThreadMessage({
       applicationId: "app-1",
+      id: "packet-answer-user:workspace-request-1",
       role: "user",
       text: "Coach me on the offer.",
     });
@@ -70,6 +70,7 @@ describe("chat-first durable actions", () => {
           method: "POST",
           body: JSON.stringify({
             applicationId: "app-1",
+            id: "packet-answer-user:workspace-request-1",
             role: "user",
             text: "Coach me on the offer.",
           }),
@@ -185,29 +186,16 @@ describe("chat-first durable actions", () => {
     await createChatFirstMission(mission);
     await runChatFirstMission("mission-1");
     await resumeChatFirstMission("mission-1");
+    await resumeChatFirstMission("mission-1", { focusApplicationId: "app-1" });
     await setChatFirstMissionStatus({ id: "mission-1", status: "paused" });
-    await setChatFirstMissionStepStatus({
-      missionId: "mission-1",
-      stepId: "submit-app-1",
-      status: "completed",
-      result: { submittedByUser: true },
-    });
 
     const calls = fetchMock.mock.calls.map(([path, options]) => [path, JSON.parse(options.body)]);
     expect(calls).toEqual([
       ["/api/chat-first/missions", mission],
       ["/api/chat-first/missions/run", { id: "mission-1" }],
       ["/api/chat-first/missions/resume", { id: "mission-1" }],
+      ["/api/chat-first/missions/resume", { id: "mission-1", focusApplicationId: "app-1" }],
       ["/api/chat-first/missions/status", { id: "mission-1", status: "paused" }],
-      [
-        "/api/chat-first/missions/step",
-        {
-          missionId: "mission-1",
-          stepId: "submit-app-1",
-          status: "completed",
-          result: { submittedByUser: true },
-        },
-      ],
     ]);
     expect(JSON.stringify(calls)).not.toMatch(/automaticSubmit|auto-submit/i);
   });
@@ -274,15 +262,26 @@ describe("chat-first durable actions", () => {
 
   it("runs durable assistant turns for job threads and mock interviews", async () => {
     const fetchMock = okFetch();
+    const choice = { promptId: "choice-offer", version: 1, optionIds: ["yes"] };
 
-    await sendJobThreadTurn({ applicationId: "app-1", text: "Coach me on this offer." });
+    await sendJobThreadTurn({
+      applicationId: "app-1",
+      text: "Yes",
+      choice,
+      requestId: "job-thread-request-choice-0001",
+    });
     await sendMockInterviewTurn({ sessionId: "mock-1", text: "I led the migration." });
 
     const calls = fetchMock.mock.calls.map(([path, options]) => [path, JSON.parse(options.body)]);
     expect(calls).toEqual([
       [
         "/api/chat-first/job-thread/turn",
-        { applicationId: "app-1", text: "Coach me on this offer." },
+        {
+          applicationId: "app-1",
+          text: "Yes",
+          choice,
+          requestId: "job-thread-request-choice-0001",
+        },
       ],
       ["/api/chat-first/mock/turn", { sessionId: "mock-1", text: "I led the migration." }],
     ]);

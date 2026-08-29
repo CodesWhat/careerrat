@@ -64,6 +64,22 @@ test("automation consent: relationship_sourcing supports LinkedIn and Wellfound"
   assert.ok(PLATFORMS.includes("wellfound"));
 });
 
+test("job-source login is not part of the global automation permission matrix", () => {
+  const template = parseYaml(readFileSync(join(root, "templates/automation.example.yml"), "utf8"));
+  const schema = loadJson("config/automation.schema.json");
+  const router = readFileSync(join(root, "AGENTS.md"), "utf8");
+
+  assert.equal(Object.hasOwn(CAPABILITIES, "authenticated_search"), false);
+  assert.equal(Object.hasOwn(defaultAutomation().capabilities, "authenticated_search"), false);
+  assert.equal(Object.hasOwn(template.capabilities, "authenticated_search"), false);
+  assert.equal(
+    Object.hasOwn(schema.properties.capabilities.properties, "authenticated_search"),
+    false
+  );
+  assert.doesNotMatch(router, /authenticated[_ ]search/i);
+  assert.match(router, /Do you\s+want to log into <site> so I can use it\?/);
+});
+
 test("automation consent: supervised apply preparation replaces the removed one-click capability", () => {
   assert.deepEqual(CAPABILITIES.authenticated_apply_preparation.platforms, [
     "greenhouse",
@@ -284,8 +300,8 @@ test("automation consent: status reports Playwright package and Chromium readine
   });
 
   assert.equal(status.session.provider, "auto");
-  assert.equal(status.session.effectiveProvider, "extension");
-  assert.equal(status.session.options.find((option) => option.id === "auto").automatedApply, false);
+  assert.equal(status.session.effectiveProvider, "playwright");
+  assert.equal(status.session.options.find((option) => option.id === "auto").automatedApply, true);
   assert.deepEqual(status.session.tooling.playwright, {
     packageInstalled: true,
     browserInstalled: true,
@@ -354,35 +370,27 @@ test("automation consent: Playwright tooling probe never throws when package ins
   });
 });
 
-// Regression for the "auto" option lying about automatic-apply support outside an
-// Orca workspace: it used to read the optimistic literal on the raw `auto`
-// descriptor (always true) instead of what resolveSession() actually resolves
-// "auto" to. Outside Orca that's the extension provider, which genuinely can't
-// drive apply-job's scripted apply path — so the UI (and the JSON `careerrat
-// automation status --json` exposes) must say automatedApply:false there, not
-// true. This is the path that was wrong; a test that only covered the Orca case
-// would have kept passing under the bug.
-test("automation consent: status auto option reports automatedApply:false outside an Orca workspace (resolved to extension, not the optimistic descriptor)", () => {
+test("automation consent: auto uses the app-owned Playwright browser outside Orca", () => {
   const status = automationStatus({ root: emptyRoot, env: {} });
   const autoOption = status.session.options.find((o) => o.id === "auto");
   assert.equal(status.session.provider, "auto", "the default config must leave provider on auto");
-  assert.equal(status.session.effectiveProvider, "extension");
-  assert.equal(autoOption.automatedApply, false);
+  assert.equal(status.session.effectiveProvider, "playwright");
+  assert.equal(autoOption.automatedApply, true);
 });
 
-test("automation consent: status auto option reports automatedApply:true inside an Orca workspace", () => {
+test("automation consent: status auto option reports automatedApply:false inside an Orca workspace", () => {
   const status = automationStatus({ root: emptyRoot, env: { ORCA_WORKTREE_ID: "worktree-123" } });
   const autoOption = status.session.options.find((o) => o.id === "auto");
   assert.equal(status.session.provider, "auto", "the default config must leave provider on auto");
   assert.equal(status.session.effectiveProvider, "orca");
-  assert.equal(autoOption.automatedApply, true);
+  assert.equal(autoOption.automatedApply, false);
 });
 
 test("automation consent: status options list concrete providers with their fixed automatedApply, unaffected by env", () => {
   const status = automationStatus({ root: emptyRoot, env: {} });
   const byId = Object.fromEntries(status.session.options.map((o) => [o.id, o.automatedApply]));
   assert.equal(byId.extension, false);
-  assert.equal(byId.orca, true);
+  assert.equal(byId.orca, false);
   assert.equal(byId.playwright, true);
 });
 

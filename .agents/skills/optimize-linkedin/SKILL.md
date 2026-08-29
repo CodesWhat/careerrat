@@ -360,27 +360,27 @@ changes. The point is an honest profile that reads for the target roles, not a l
 
 ---
 
-## Conversational workspace path
+## In-app and terminal paths
 
-In the Ask workspace, three narrow pieces of this skill are native: the app runs
-typed intents directly in `workspace-agent.mjs`, not this skill's browser steps.
-A terminal or external-agent run still follows STEP 0 onward exactly as written,
-and all profile reading and writing always happens there. The app never opens
-LinkedIn itself.
+CareerRat's in-app path reads the candidate's LinkedIn profile through its owned
+browser workflow after `profile_optimize` permission passes, then creates a
+bounded, evidence-grounded proposal batch for review. A terminal or
+external-agent run still follows STEP 0 onward exactly as written.
 
 - **Requesting a profile pass** (`linkedin.optimize-request`). "Optimize my
-  LinkedIn" offers an "Optimize LinkedIn profile" chip. The handler never
-  refuses: the lean no-consent path (pasted profile text) means the skill is
-  always runnable. The receipt shows both capability states honestly (read and
-  suggest; write approved edits) and, when a recorded batch is pending,
-  renders it for review.
+  LinkedIn" offers an "Optimize LinkedIn profile" chip. Without
+  `profile_optimize`, the handler opens the contextual permission control and
+  leaves any existing proposal batch visible. When reading is allowed, it runs
+  the native profile pass and renders the returned proposal batch for review.
+  Pasted profile text remains available on the terminal or external-agent path.
 - **Reviewing suggestions** (`linkedin.proposal-decide`). The batch recorded by
   STEP 4 renders as per-surface before-and-after cards with Approve and Reject
   buttons. Deciding is ungated: approving stages a field locally and never
   writes to LinkedIn. A stale click (the batch changed underneath) refuses;
   fresh decisions re-render the card. Once every surface is decided the batch
   is reviewed.
-- **What stays here.** Live profile reads, the STEP 5 write-back with its live
-  per-field confirmation, STEP 6 verify-and-log, and the `profile_apply` gate
-  at the point of the write all remain this skill's agent path. STEP 6 flips
-  verified fields to applied so the card stays honest.
+- **Write boundary.** Approving a suggestion in the app stages it locally; no
+  live LinkedIn field changes on approval. Applying approved edits live remains
+  behind the separate `profile_apply` permission and a per-field confirmation on
+  the terminal or external-agent STEP 5 path. STEP 6 verifies the live result and
+  marks only verified fields applied so the card stays honest.

@@ -30,14 +30,15 @@
 // Usage:
 //   node scripts/eval/skill-shape-qa.mjs --list        # enumerate lanes, no AI calls
 //   node scripts/eval/skill-shape-qa.mjs --lane <name>  # run one lane
-//   node scripts/eval/skill-shape-qa.mjs                # run every lane (default)
+//   node scripts/eval/skill-shape-qa.mjs --runtime codex # run one supported runtime
+//   node scripts/eval/skill-shape-qa.mjs                # run every lane and runtime (default)
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  buildInstalledRuntimeInvocation,
   detectInstalledRuntimes,
+  probeInstalledRuntime,
 } from "../../src/core/ai/installed-runtimes.mjs";
 import { coachingPlanSchema } from "../../src/core/coaching/schemas.mjs";
 import { validateCompanyHealth } from "../../src/core/db/verbs/company-health.mjs";
@@ -46,7 +47,7 @@ import { packetGateAiVerdictSchema } from "../../src/core/packet/schemas/packet-
 import { formatErrors, validate } from "../../src/core/profile/schema-validator.mjs";
 import { parseYaml } from "../../src/core/profile/yaml.mjs";
 import { buildSearchPromptContext } from "../../src/core/search/search-prompts.mjs";
-import { callInstalledClaudeForJson } from "./lib/installed-cli-call.mjs";
+import { callInstalledRuntimeForJson } from "./lib/installed-cli-call.mjs";
 import { SINGLE_ROLE_SCHEMA } from "./lib/single-role-schema.mjs";
 import { extractSection, loadSkillMd } from "./lib/skill-sections.mjs";
 
@@ -96,13 +97,25 @@ function withoutCurrentBase(profile) {
 // only pass/fail check for this lane, per the spec.
 const dimensionReplySchema = Object.freeze({
   type: "object",
-  additionalProperties: true,
+  additionalProperties: false,
   required: ["level", "note"],
   properties: {
     level: { type: "string" },
     note: { type: "string" },
-    functionHit: { type: "boolean" },
-    trend: { type: "string" },
+    functionHit: { type: ["boolean", "null"] },
+    trend: { type: ["string", "null"] },
+  },
+});
+
+const companyHealthSignalReplySchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["source", "date", "summary", "url"],
+  properties: {
+    source: { type: "string" },
+    date: { type: "string" },
+    summary: { type: "string" },
+    url: { type: "string" },
   },
 });
 
@@ -129,7 +142,7 @@ const companyHealthReplySchema = Object.freeze({
       },
     },
     rationale: { type: "string" },
-    signals: { type: "array", items: { type: "object", additionalProperties: true } },
+    signals: { type: "array", items: companyHealthSignalReplySchema },
   },
 });
 
@@ -350,13 +363,36 @@ export const LANES = Object.freeze([
 // CLI
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv) {
-  const out = { list: false, lane: null };
+const SUPPORTED_RUNTIME_IDS = new Set(["claude", "codex"]);
+
+export function parseSkillShapeQaArgs(argv) {
+  const out = { list: false, lane: null, runtime: "all" };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--list") out.list = true;
     if (argv[i] === "--lane" && argv[i + 1]) out.lane = argv[++i];
+    if (argv[i] === "--runtime" && argv[i + 1]) out.runtime = argv[++i];
+  }
+  if (out.runtime !== "all" && !SUPPORTED_RUNTIME_IDS.has(out.runtime)) {
+    throw new Error("--runtime must be claude, codex, or all.");
   }
   return out;
+}
+
+export function selectSkillShapeRuntimes(runtimes, requested = "all") {
+  const supported = (Array.isArray(runtimes) ? runtimes : []).filter(
+    (runtime) => SUPPORTED_RUNTIME_IDS.has(runtime?.id) && runtime.available
+  );
+  return requested === "all" ? supported : supported.filter((runtime) => runtime.id === requested);
+}
+
+export async function probeSkillShapeRuntimes(runtimes, { probe = probeInstalledRuntime } = {}) {
+  const verified = [];
+  for (const runtime of runtimes) {
+    const result = await probe(runtime);
+    if (!result?.ready) continue;
+    verified.push({ ...runtime, capabilities: result.capabilities });
+  }
+  return verified;
 }
 
 async function runLane(lane, { runtime, candidate }) {
@@ -364,19 +400,24 @@ async function runLane(lane, { runtime, candidate }) {
   const prompt = lane.buildPrompt({ skillMd, candidate });
   let result;
   try {
-    result = await callInstalledClaudeForJson({
-      buildInvocation: buildInstalledRuntimeInvocation,
+    result = await callInstalledRuntimeForJson({
       runtime,
       prompt,
       schema: lane.schema,
       timeoutMs: RUNTIME_TIMEOUT_MS,
     });
   } catch (error) {
-    return { lane: lane.name, pass: false, message: `AI call failed: ${error.message}` };
+    return {
+      lane: lane.name,
+      runtime: runtime.id,
+      pass: false,
+      message: `AI call failed: ${error.message}`,
+    };
   }
   const outcome = lane.check(result.structured);
   return {
     lane: lane.name,
+    runtime: runtime.id,
     pass: outcome.valid,
     message: outcome.valid ? null : formatErrors(outcome.errors),
     costUsd: result.costUsd,
@@ -384,7 +425,13 @@ async function runLane(lane, { runtime, candidate }) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  let args;
+  try {
+    args = parseSkillShapeQaArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
 
   if (args.list) {
     console.log("skill-shape-qa lanes (one real AI call each — none made by --list):\n");
@@ -401,15 +448,12 @@ async function main() {
     process.exit(1);
   }
 
-  const runtimes = detectInstalledRuntimes();
-  const claude = runtimes.find((runtime) => runtime.id === "claude" && runtime.available);
-  if (!claude) {
+  const detectedRuntimes = selectSkillShapeRuntimes(detectInstalledRuntimes(), args.runtime);
+  const runtimes = await probeSkillShapeRuntimes(detectedRuntimes);
+  if (runtimes.length === 0) {
     console.error(
-      "STOP: no installed 'claude' CLI runtime is available on this machine " +
-        "(src/core/ai/installed-runtimes.mjs detectInstalledRuntimes() found no usable " +
-        "'claude' binary). skill-shape-qa cannot run without a live AI route, and this " +
-        "harness refuses to simulate results. Install/authenticate the Claude Code CLI and " +
-        "re-run."
+      `STOP: no installed ${args.runtime === "all" ? "Claude Code or OpenAI Codex" : args.runtime} runtime is available. ` +
+        "skill-shape-qa requires a live supported AI route and refuses to simulate results."
     );
     process.exit(1);
   }
@@ -417,25 +461,27 @@ async function main() {
   const candidate = loadCandidateContext();
 
   console.log(
-    `skill-shape-qa — ${lanesToRun.length} lane(s) against ${claude.commandShape}, one real ` +
-      "AI call each.\n"
+    `skill-shape-qa — ${lanesToRun.length} lane(s) across ${runtimes.length} runtime(s).`
   );
 
   const results = [];
-  for (const lane of lanesToRun) {
-    process.stdout.write(`[${lane.name}] `);
-    const result = await runLane(lane, { runtime: claude, candidate });
-    results.push(result);
-    console.log(
-      `${result.pass ? "PASS" : "FAIL"}${result.costUsd != null ? ` (cost=$${result.costUsd.toFixed(4)})` : ""}`
-    );
-    if (!result.pass) {
+  for (const runtime of runtimes) {
+    console.log(`\n${runtime.id} — ${runtime.commandShape}`);
+    for (const lane of lanesToRun) {
+      process.stdout.write(`[${lane.name}] `);
+      const result = await runLane(lane, { runtime, candidate });
+      results.push(result);
       console.log(
-        result.message
-          .split("\n")
-          .map((line) => `    ${line}`)
-          .join("\n")
+        `${result.pass ? "PASS" : "FAIL"}${result.costUsd != null ? ` (cost=$${result.costUsd.toFixed(4)})` : ""}`
       );
+      if (!result.pass) {
+        console.log(
+          result.message
+            .split("\n")
+            .map((line) => `    ${line}`)
+            .join("\n")
+        );
+      }
     }
   }
 

@@ -85,8 +85,35 @@ describe("TodayConversation", () => {
           id: "question",
           role: "assistant",
           kind: "text",
-          text: "Should I keep this company in your search?",
-          metadata: { answerMode: "yes-no" },
+          text: "One quick check: should I keep this company in your search?",
+          metadata: {
+            choicePrompt: {
+              id: "choice-question",
+              version: 1,
+              threadId: "workspace-main",
+              messageId: "question",
+              question: "One quick check: should I keep this company in your search?",
+              mode: "binary",
+              minSelections: 1,
+              maxSelections: 1,
+              allowText: true,
+              options: [
+                {
+                  id: "yes",
+                  label: "Yes",
+                  aliases: [],
+                  actionRef: { type: "chat.reply", input: { text: "Yes" } },
+                },
+                {
+                  id: "no",
+                  label: "No",
+                  aliases: [],
+                  actionRef: { type: "chat.reply", input: { text: "No" } },
+                },
+              ],
+              state: "pending",
+            },
+          },
         },
       ],
     });
@@ -109,7 +136,11 @@ describe("TodayConversation", () => {
     expect(buttons.map((button) => button.props.children)).toEqual(["Yes", "No"]);
     expect(buttons.every((button) => button.props.disabled === true)).toBe(true);
     buttons[1].props.onClick();
-    expect(onAnswer).toHaveBeenCalledWith("No");
+    expect(onAnswer).toHaveBeenCalledWith("No", {
+      promptId: "choice-question",
+      version: 1,
+      optionIds: ["no"],
+    });
 
     const answered = markup(
       <MessageTranscript
@@ -119,8 +150,24 @@ describe("TodayConversation", () => {
             id: "question",
             role: "assistant",
             kind: "text",
-            text: "Should I keep this company in your search?",
-            metadata: { answerMode: "yes-no" },
+            text: "One quick check: should I keep this company in your search?",
+            metadata: {
+              choicePrompt: {
+                id: "choice-question",
+                version: 1,
+                threadId: "workspace-main",
+                messageId: "question",
+                question: "One quick check: should I keep this company in your search?",
+                mode: "binary",
+                minSelections: 1,
+                maxSelections: 1,
+                allowText: true,
+                options: [],
+                state: "resolved",
+                selectedOptionIds: ["no"],
+                resolvedAt: "2026-08-27T16:00:00.000Z",
+              },
+            },
           },
           { id: "answer", role: "user", kind: "text", text: "No" },
         ]}
@@ -142,6 +189,53 @@ describe("TodayConversation", () => {
 
     expect(answered).not.toContain("chat-first-binary-actions");
     expect(untyped).not.toContain("chat-first-binary-actions");
+  });
+
+  it("renders the latest multi-select choice as a semantic keyboard form", () => {
+    const onAnswer = vi.fn();
+    const html = markup(
+      <MessageTranscript
+        onAnswer={onAnswer}
+        answerBusy={true}
+        messages={[
+          {
+            id: "role-question",
+            role: "assistant",
+            kind: "text",
+            text: "Which role directions sound interesting?",
+            metadata: {
+              choicePrompt: {
+                id: "choice-roles",
+                version: 3,
+                threadId: "workspace-main",
+                messageId: "role-question",
+                question: "Which role directions sound interesting?",
+                mode: "multi",
+                minSelections: 1,
+                maxSelections: 3,
+                allowText: true,
+                submitLabel: "Try These Roles",
+                options: [
+                  { id: "event", label: "Event operations" },
+                  { id: "venue", label: "Venue operations" },
+                  { id: "customer", label: "Customer operations" },
+                ],
+                state: "pending",
+              },
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("<fieldset");
+    expect(html).toContain(
+      '<legend class="sr-only">Which role directions sound interesting?</legend>'
+    );
+    expect(html.match(/type="checkbox"/g)).toHaveLength(3);
+    expect(html).toContain("Try These Roles");
+    expect(html).toContain('role="status" aria-live="polite"');
+    expect(html).toContain("Saving answer…");
   });
 
   it("keeps indented cards at the handoff intrinsic desktop widths", () => {
@@ -366,9 +460,10 @@ describe("TodayConversation", () => {
       />
     );
 
-    expect(html).toContain("CareerRat needs your permission for this browser task");
+    expect(html).toContain("CareerRat needs permission to review your LinkedIn profile");
     expect(html).toContain("signed-in application dashboard link");
     expect(html).toContain("Sign in or finish the verification step in the CareerRat browser");
+    expect(html).not.toContain("Open Settings");
     expect(html).not.toMatch(/raw (?:consent|status|auth) backend output/i);
   });
 
@@ -539,6 +634,8 @@ describe("TodayConversation", () => {
     );
 
     expect(html.match(/Company discovery: 3 to review/g)).toHaveLength(1);
+    expect(html).toContain("type the company names you want to track");
+    expect(html).toContain("others in this batch will be skipped");
     expect(html).toContain("Job search: Complete");
     expect(html).not.toContain("Job search: Running");
     expect(html).not.toContain("Job search started");
@@ -587,7 +684,7 @@ describe("TodayConversation", () => {
     expect(html).not.toContain("First job search: Running");
   });
 
-  it("offers binary controls for a clear persisted yes-or-no question without model metadata", () => {
+  it("does not invent executable choices from assistant prose without server metadata", () => {
     const html = markup(
       <MessageTranscript
         onAnswer={() => undefined}
@@ -602,8 +699,8 @@ describe("TodayConversation", () => {
       />
     );
 
-    expect(html).toContain(">Yes<");
-    expect(html).toContain(">No<");
+    expect(html).not.toContain(">Yes<");
+    expect(html).not.toContain(">No<");
   });
 
   it("does not collapse a compound persisted question into one Yes or No choice", () => {
@@ -616,6 +713,26 @@ describe("TodayConversation", () => {
             role: "assistant",
             kind: "text",
             text: "Are you authorized to work in the US and will you need sponsorship?",
+          },
+        ]}
+      />
+    );
+
+    expect(html).not.toContain(">Yes<");
+    expect(html).not.toContain(">No<");
+  });
+
+  it("does not trust stale yes-no metadata on an either-or question", () => {
+    const html = markup(
+      <MessageTranscript
+        onAnswer={() => undefined}
+        messages={[
+          {
+            id: "wait-or-boards",
+            role: "assistant",
+            kind: "text",
+            text: "Should I keep waiting or focus on the job boards?",
+            metadata: { answerMode: "yes-no" },
           },
         ]}
       />
@@ -786,6 +903,168 @@ describe("TodayConversation", () => {
     );
   });
 
+  it("restores a persisted contextual permission action and sends its server-owned intent", () => {
+    const onIntentAction = vi.fn();
+    const intent = {
+      type: "settings.apply",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: {
+        change: {
+          kind: "automation",
+          op: "contextual-permission",
+          permission: "status-checks",
+        },
+      },
+    };
+    const tree = MessageTranscript({
+      onIntentAction,
+      messages: [
+        {
+          id: "permission-after-reload",
+          role: "assistant",
+          kind: "action_result",
+          text: "CareerRat needs permission to read Greenhouse, Workday, Ashby, and Lever application statuses. Choose Allow status checks, or type “Allow status checks”.",
+          metadata: {
+            state: "permission-needed",
+            nextActions: [{ label: "Allow status checks", intent }],
+          },
+        },
+      ],
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    const allow = buttons.find((button) => button.props.children === "Allow status checks");
+    expect(allow).toBeTruthy();
+    allow.props.onClick();
+    expect(onIntentAction).toHaveBeenCalledWith(
+      intent,
+      expect.objectContaining({ id: "permission-after-reload" }),
+      expect.objectContaining({ label: "Allow status checks" })
+    );
+  });
+
+  it("restores a site login question with working Yes and No actions", () => {
+    const onAnswer = vi.fn();
+    const message = {
+      id: "source-login-after-reload",
+      role: "assistant",
+      kind: "action_result",
+      text: "Do you want to log into LinkedIn so I can use it?",
+      metadata: {
+        state: "login-needed",
+        sourceLogin: {
+          selector: "LinkedIn search",
+          platform: "linkedin",
+          url: "https://www.linkedin.com/jobs/search/?keywords=platform",
+        },
+        choicePrompt: {
+          id: "choice-source-login",
+          version: 1,
+          threadId: "workspace-main",
+          messageId: "source-login-after-reload",
+          question: "Do you want to log into LinkedIn so I can use it?",
+          mode: "binary",
+          minSelections: 1,
+          maxSelections: 1,
+          allowText: true,
+          options: [
+            {
+              id: "yes",
+              label: "Yes",
+              aliases: [],
+              actionRef: { type: "chat.reply", input: { text: "Yes" } },
+            },
+            {
+              id: "no",
+              label: "No",
+              aliases: [],
+              actionRef: { type: "chat.reply", input: { text: "No" } },
+            },
+          ],
+          state: "pending",
+        },
+      },
+    };
+    const tree = MessageTranscript({ onAnswer, messages: [message] });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    expect(buttons.map((button) => button.props.children)).toEqual(["Yes", "No"]);
+    buttons[1].props.onClick();
+    expect(onAnswer).toHaveBeenCalledWith("No", {
+      promptId: "choice-source-login",
+      version: 1,
+      optionIds: ["no"],
+    });
+  });
+
+  it("renders ambiguity choices as equal neutral actions after reload", () => {
+    const onIntentAction = vi.fn();
+    const actions = ["app-acme-ai", "app-acme-platform"].map((id, index) => ({
+      label: index === 0 ? "Acme · Senior AI Engineer" : "Acme · Staff Platform Engineer",
+      primary: false,
+      intent: {
+        type: "job.evaluate-request",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { jobReference: "Rate the Acme role", jobId: id },
+      },
+    }));
+    const tree = MessageTranscript({
+      onIntentAction,
+      messages: [
+        {
+          id: "ambiguity-after-reload",
+          role: "assistant",
+          kind: "action_error",
+          text: "That matches more than one saved job.",
+          error: {
+            code: "JOB_REFERENCE_AMBIGUOUS",
+            message: "That matches more than one saved job.",
+          },
+          metadata: { state: "needs-choice", nextActions: actions },
+        },
+      ],
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    const choiceButtons = buttons.filter((button) =>
+      actions.some((action) => action.label === button.props.children)
+    );
+    expect(choiceButtons).toHaveLength(2);
+    expect(choiceButtons.every((button) => button.props.className.endsWith("--outline"))).toBe(
+      true
+    );
+    choiceButtons[1].props.onClick();
+    expect(onIntentAction).toHaveBeenCalledWith(
+      actions[1].intent,
+      expect.objectContaining({ id: "ambiguity-after-reload" }),
+      actions[1]
+    );
+  });
+
   it.each(["action_result", "action_error"])(
     "retires old typed actions after a terminal %s without follow-ups",
     (terminalKind) => {
@@ -917,7 +1196,6 @@ describe("TodayConversation", () => {
           title: "Apply to 3 roles",
           steps: ["✓ 3 queued · gates cleared", "◐ Drafting packet 1 of 3 · Aperture Science"],
           footnote: "applies start as each packet lands · submits gate back here",
-          onPause: () => {},
         }}
       />
     );
@@ -926,7 +1204,113 @@ describe("TodayConversation", () => {
     expect(html).toContain("Apply to 3 roles");
     expect(html).toContain("Drafting packet 1 of 3 · Aperture Science");
     expect(html).toContain("submits gate back here");
-    expect(html).toContain("pause");
+    expect(html).not.toContain("pause");
+  });
+
+  it("submits the mission control button as its versioned server choice", () => {
+    const pausePrompt = {
+      id: "choice-mission-pause",
+      version: 4,
+      threadId: "mission:mission-1",
+      messageId: "control:mission.pause",
+      question: "Pause this mission?",
+      mode: "single",
+      minSelections: 1,
+      maxSelections: 1,
+      allowText: true,
+      options: [
+        {
+          id: "pause",
+          label: "Pause",
+          aliases: ["pause mission"],
+          actionRef: {
+            type: "mission.pause",
+            entity: { type: "mission", id: "mission-1" },
+          },
+        },
+      ],
+      state: "pending",
+    };
+    const missionAnswer = vi.fn();
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+
+    visit(
+      TodayConversation({
+        mission: {
+          title: "Prepare one application",
+          steps: ["○ Draft the packet"],
+          choicePrompt: pausePrompt,
+        },
+        onAnswer: missionAnswer,
+      })
+    );
+    const pause = buttons.find((button) => button.props.children === "Pause");
+    expect(pause).toBeTruthy();
+    pause.props.onClick();
+    expect(missionAnswer).toHaveBeenCalledWith("Pause", {
+      promptId: pausePrompt.id,
+      version: pausePrompt.version,
+      optionIds: ["pause"],
+    });
+  });
+
+  it("submits the mock End button as its versioned server choice", () => {
+    const endPrompt = {
+      id: "choice-mock-end",
+      version: 2,
+      threadId: "mock-interview:mock-1",
+      messageId: "control:mock-interview.end",
+      question: "End this mock interview?",
+      mode: "single",
+      minSelections: 1,
+      maxSelections: 1,
+      allowText: true,
+      options: [
+        {
+          id: "end",
+          label: "End interview",
+          aliases: ["end mock interview"],
+          actionRef: {
+            type: "mock-interview.end",
+            entity: { type: "mock-interview", id: "mock-1" },
+          },
+        },
+      ],
+      state: "pending",
+    };
+    const mockAnswer = vi.fn();
+    const tree = MockInterviewContext({
+      title: "Platform practice",
+      detail: "Question 1 of 2",
+      loadedContext: "Saved role context",
+      choicePrompt: endPrompt,
+      onAnswer: mockAnswer,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (typeof node.type === "function") return visit(node.type(node.props));
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+
+    const end = buttons.find((button) => button.props.children === "End interview");
+    expect(end).toBeTruthy();
+    end.props.onClick();
+    expect(mockAnswer).toHaveBeenCalledWith("End interview", {
+      promptId: endPrompt.id,
+      version: endPrompt.version,
+      optionIds: ["end"],
+    });
   });
 });
 
@@ -1112,6 +1496,181 @@ describe("SkillChatConversation", () => {
 });
 
 describe("JobConversation and JobContextPanel", () => {
+  it("surfaces packet gaps in an empty job thread and routes each answer into the composer", () => {
+    const onAnswerGap = vi.fn();
+    const packetReview = {
+      status: "reviewable",
+      uploadReady: false,
+      gapCount: 2,
+      gaps: [
+        {
+          id: "linkedin-profile",
+          label: "LinkedIn Profile",
+          message: "Answer LinkedIn Profile.",
+          answerable: true,
+        },
+        {
+          id: "north-america",
+          label: "Are you currently located in North America?",
+          message: "Answer the location question.",
+          answerable: true,
+          options: ["Yes", "No"],
+        },
+      ],
+    };
+    const conversation = markup(
+      <CanonicalJobConversation
+        eyebrow="HIGHTOUCH · SOFTWARE ENGINEER"
+        packetReview={packetReview}
+      />
+    );
+    expect(conversation).toContain("I need 2 application answers before I can continue");
+    expect(conversation).toContain("Use the application review on the right");
+
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview,
+      onAnswerGap,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+      if (typeof node.type === "function") {
+        visit(node.type(node.props));
+        return;
+      }
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const html = markup(tree);
+    expect(html).toContain("APPLICATION ANSWERS · 2 NEEDED");
+    expect(html).toContain("LinkedIn Profile");
+    expect(html).toContain("Are you currently located in North America?");
+    expect(buttons.map((button) => button.props.children)).toContain("Answer");
+    buttons.find((button) => button.props.children === "Answer").props.onClick();
+    expect(onAnswerGap).toHaveBeenCalledWith(packetReview.gaps[0]);
+    expect(buttons.map((button) => button.props.children)).toEqual(
+      expect.arrayContaining(["Yes", "No"])
+    );
+    buttons.find((button) => button.props.children === "No").props.onClick();
+    expect(onAnswerGap).toHaveBeenCalledWith(packetReview.gaps[1], "No");
+  });
+
+  it("offers resume only after the packet gaps are cleared", () => {
+    const onResumePacket = vi.fn();
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview: {
+        status: "upload-ready",
+        uploadReady: true,
+        gapCount: 0,
+        canResume: true,
+        gaps: [],
+      },
+      applicationPreparation: { status: "ready", ready: true },
+      onResumePacket,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const resume = buttons.find((button) => button.props.children === "Resume preparation");
+    expect(resume).toBeTruthy();
+    resume.props.onClick();
+    expect(onResumePacket).toHaveBeenCalledOnce();
+  });
+
+  it("explains and enables form preparation before offering resume", () => {
+    const onEnableApplicationPreparation = vi.fn();
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview: {
+        status: "upload-ready",
+        uploadReady: true,
+        gapCount: 0,
+        canResume: true,
+        gaps: [],
+      },
+      applicationPreparation: { status: "blocked", ready: false },
+      onEnableApplicationPreparation,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const html = markup(tree);
+    expect(html).toContain("CareerRat needs permission to open and fill application forms");
+    expect(html).toContain("You still press Submit");
+    expect(html).toContain("or type “Allow form preparation”");
+    expect(html).not.toContain("Open Settings");
+    expect(html).not.toContain("Resume preparation");
+    const enable = buttons.find((button) => button.props.children === "Allow form preparation");
+    expect(enable).toBeTruthy();
+    enable.props.onClick();
+    expect(onEnableApplicationPreparation).toHaveBeenCalledOnce();
+  });
+
+  it("offers supervised form preparation without rendering packet diagnostics as questions", () => {
+    const onResumePacket = vi.fn();
+    const packetReview = {
+      status: "reviewable",
+      uploadReady: false,
+      gapCount: 0,
+      canResume: false,
+      canPrepare: true,
+      questionCaptureRequired: true,
+      questionCaptureMessage:
+        "Open and prepare the application form so CareerRat can discover its questions.",
+      gaps: [],
+    };
+    const conversation = markup(
+      <CanonicalJobConversation
+        eyebrow="HIGHTOUCH · SOFTWARE ENGINEER"
+        packetReview={packetReview}
+      />
+    );
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview,
+      applicationPreparation: { status: "ready", ready: true },
+      onResumePacket,
+    });
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    const html = markup(tree);
+
+    expect(conversation).toContain("CareerRat needs to open the application form");
+    expect(conversation).not.toContain("application answer before I can continue");
+    expect(html).toContain("APPLICATION ANSWERS · FORM NEEDED");
+    expect(html).toContain("Open and prepare the application form");
+    expect(html).not.toContain("answers artifact skipped");
+    expect(html).not.toContain("packet questions step");
+    expect(html).not.toContain("1 NEEDED");
+    const prepare = buttons.find((button) => button.props.children === "Prepare form");
+    expect(prepare).toBeTruthy();
+    prepare.props.onClick();
+    expect(onResumePacket).toHaveBeenCalledOnce();
+  });
+
   it("presents canonical inbound communication and its saved reply draft", () => {
     const onApproveAndCopy = vi.fn();
     const onEditDraft = vi.fn();
@@ -1386,19 +1945,19 @@ describe("focused conversation modes", () => {
     expect(html).toContain("Again, tighter this time");
   });
 
-  it("renders job-loaded mock session context with an exit action", () => {
+  it("does not invent a direct exit action without a durable mock choice", () => {
     const html = markup(
       <MockInterviewContext
         title="Systems design · Cyberdyne panel"
         detail="question 2 of 6 · calibrated to Thursday's interviewers"
         loadedContext="their ML org rebuild · your Nexus story · the dossier's likely questions"
-        onEnd={() => {}}
       />
     );
 
     expect(html).toContain("LIVE SESSION");
     expect(html).toContain("Context loaded");
-    expect(html).toContain("End session → back to thread");
+    expect(html).not.toContain("End session → back to thread");
+    expect(html).not.toContain("end mock interview");
   });
 
   it("renders deep ingest as a resumable conversation with accessible intake actions", () => {

@@ -74,11 +74,11 @@ Run the CLI confirm-first. The default is a **dry run** — it shows the exact l
 | Disable a capability | `careerrat automation disable <capability> [platform] --write` | write-and-report |
 | Session browser provider | `careerrat automation session <extension\|playwright> --write` | write-and-report |
 
-**Capabilities:** `status_polling`, `authenticated_search`, `messaging`, `one_click_apply`, `profile_optimize`, `profile_apply`, `mail_access`.
+**Capabilities:** `status_polling`, `messaging`, `one_click_apply`, `profile_optimize`, `profile_apply`, `mail_access`.
 
 **Platforms per capability:**
+
 - `status_polling`: greenhouse, workday, ashby, lever
-- `authenticated_search`: linkedin, indeed, wellfound, glassdoor
 - `messaging`: linkedin, wellfound
 - `one_click_apply`: linkedin
 - `profile_optimize`: linkedin
@@ -167,11 +167,15 @@ Both intents reuse the same validated write paths this skill routes to
   `settings_apply` receipt with the prior and new value. "…to match my current
   salary" phrasings are refused with private-comp copy, never parsed.
 - **What stays in Settings.** Consent grants and enabling any capability beyond
-  `status_polling`/`authenticated_search` are not accepted conversationally,
+  `status_polling` is not accepted conversationally,
   by handler rule, not just matcher scope: the terms and permissions need the
   Settings page's full explanation first. Disabling any capability is always
   allowed from Ask. AI keys, runtime selection, and search-source edits keep
   their own owning flows.
+
+Job-source login is not a setting or automation capability. A source that needs
+login asks one plain Yes/No question when it runs. Yes opens that source in the
+visible CareerRat browser, and No skips it.
 
 ---
 

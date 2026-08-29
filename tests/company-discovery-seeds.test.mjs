@@ -92,6 +92,7 @@ function seedCandidateContext(repoRoot) {
         current_comp_shareable: true,
         current_base: PRIVATE_CURRENT_BASE,
         minimum_base: 200000,
+        minimum_annual_earnings: 250000,
         target_base: 225 * 1000,
         oe_min_base: 100000,
         oe_max_base: 130000,
@@ -268,6 +269,7 @@ test("buildCompanySeedContext includes candidate and dedupe inputs while omittin
   assert.deepEqual(context.compensationFloors, {
     currency: "USD",
     minimum_base: 200000,
+    minimum_annual_earnings: 250000,
     oe_min_base: 100000,
   });
   assert.deepEqual(context.dedupe.companies, [
@@ -458,6 +460,7 @@ test("AI company seed generation uses native-preferred bounded AI with exact lab
   assert.match(calls[0].messages[0].content, /Tracked ATS Co/);
   assert.match(calls[0].messages[0].content, /Applied Already Co/);
   assert.match(calls[0].messages[0].content, /200000/);
+  assert.match(calls[0].messages[0].content, /250000/);
   assert.match(calls[0].messages[0].content, /100000/);
   assert.match(calls[0].messages[0].content, /Focus Example Co/);
   assert.match(calls[0].messages[0].content, /priorityCompanySeeds/);
