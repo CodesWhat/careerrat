@@ -9,9 +9,9 @@ CareerRat's canonical candidate state and local artifacts live on your machine:
 
 - `.careerrat/db/careerrat.db` is the canonical, gitignored SQLite store in new
   workspaces.
-- `candidate/` and `workspace/` are gitignored compatibility exports and local
-  artifacts, including job bodies, tailored documents, recruiter threads, and
-  research.
+- `.careerrat/candidate/` and `.careerrat/workspace/` are gitignored compatibility
+  exports and local artifacts, including job bodies, tailored documents,
+  recruiter threads, and research.
 
 No CareerRat-operated server receives your data. The package is code + skills,
 not a service.
@@ -78,9 +78,10 @@ refuse to write an entry that contains `current_base` in any outbound field.
 
 ## Git safety
 
-The `.gitignore` in the repo root excludes `candidate/`, `workspace/`, and all
-generated runtime files. As long as you work inside a clone of the repo (the
-canonical install path), your data will not be committed or pushed accidentally.
+The `.gitignore` in the repo root excludes `.careerrat/` (holding `candidate/`,
+`workspace/`, and all generated runtime files) as a whole. As long as you work
+inside a clone of the repo (the canonical install path), your data will not be
+committed or pushed accidentally.
 
 If you put `CAREERRAT_HOME` outside the repo tree, the protection is the same —
 the files are simply never in a tracked directory.
@@ -101,11 +102,11 @@ trail, not a highlight reel — log only what actually happened.
 
 ## Research memory
 
-Company intel and comp benchmarks in `workspace/research/` are treated as
-outbound. The `careerrat research` helper refuses to write an artifact that cites no
-source or contains `current_base`. Three fact tiers are enforced:
+Company intel and comp benchmarks in `.careerrat/workspace/research/` are treated
+as outbound. The `careerrat research` helper refuses to write an artifact that
+cites no source or contains `current_base`. Three fact tiers are enforced:
 
-1. **Verified evidence** (`candidate/evidence.yml`) — may appear in résumés and cover letters.
+1. **Verified evidence** (`.careerrat/candidate/evidence.yml`) - may appear in résumés and cover letters.
 2. **Sourced-web facts** (cited with `[source: …]`) — live in research artifacts only.
 3. **Agent-inferred syntheses** (`[AGENT-INFERRED from: …]`) — live in research artifacts only.
 

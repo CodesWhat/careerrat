@@ -1,0 +1,457 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "0d968d6deedfb4671666fb8bec05cf16edebe419",
+  "runtimeId": "claude",
+  "fixtureId": "hospitality",
+  "providerFallback": false,
+  "runtime": {
+    "id": "claude",
+    "path": "~/.local/bin/claude",
+    "realPath": "~/.local/share/claude/versions/2.1.251",
+    "version": "2.1.251",
+    "binaryFingerprint": "625869b01e0050f260b2980fac248fd9cef9e462612bded4ec9d3d49ff8969a5",
+    "capabilities": {
+      "completion": true,
+      "structuredOutput": true,
+      "appWorkflows": true,
+      "exactRead": true,
+      "publicWeb": true,
+      "liveActivity": true,
+      "resumable": true,
+      "taskTools": true,
+      "research": true
+    }
+  },
+  "lanes": {
+    "deterministic": "succeeded",
+    "aiWeb": "succeeded"
+  },
+  "completedAt": "2026-08-29T05:56:20.869Z",
+  "thresholds": {
+    "fitFloor": 65,
+    "minimumPresentedRows": 3,
+    "minimumDistinctRoles": 3,
+    "minimumPresentedBuckets": 2
+  },
+  "counts": {
+    "presentedRows": 18,
+    "distinctRoles": 12,
+    "presentedBuckets": 3,
+    "canonicalAiRows": 1,
+    "canonicalAiOverlapRows": 5
+  },
+  "summary": {
+    "presented": 18,
+    "fitFloor": 65,
+    "errors": [],
+    "failedPromptIds": []
+  },
+  "ai": {
+    "expectedPromptIds": [
+      "nyc-bar-leadership",
+      "nyc-hospitality-operations",
+      "event-and-venue-operations"
+    ],
+    "searched": 3,
+    "queryResults": [
+      {
+        "promptId": "nyc-bar-leadership",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "(\"Bar Manager\" OR \"Assistant Bar Manager\" OR \"Bar Operations Lead\") \"New York, NY\"",
+            "status": "completed"
+          },
+          {
+            "query": "(\"Lead Bartender\" OR \"Head Bartender\") \"New York, NY\"",
+            "status": "completed"
+          },
+          {
+            "query": "(\"Bar Manager\" OR \"Assistant Bar Manager\" OR \"Bar Operations Lead\") \"New York, NY\" careers",
+            "status": "completed"
+          },
+          {
+            "query": "(\"Lead Bartender\" OR \"Head Bartender\") \"New York, NY\" (site:oysterlink.com OR careers)",
+            "status": "completed"
+          },
+          {
+            "query": "\"Bar Manager\" New York bar hiring $85,000 OR $90,000 salary site:linkedin.com/jobs",
+            "status": "completed"
+          },
+          {
+            "query": "\"Head Bartender\" OR \"Lead Bartender\" New York hotel job posting salary",
+            "status": "completed"
+          },
+          {
+            "query": "Highgate Hotels Arthouse Hotel New York lead bartender careers.highgate.com",
+            "status": "completed"
+          },
+          {
+            "query": "\"Bar Manager\" \"New York, NY\" job $85,000 site:jobs.lever.co OR site:greenhouse.io OR site:jobs.smartrecruiters.com",
+            "status": "completed"
+          },
+          {
+            "query": "\"Lead Bartender\" OR \"Head Bartender\" \"New York\" hiring 2026 careers apply",
+            "status": "completed"
+          },
+          {
+            "query": "Soho House New York Bar Manager job-boards.greenhouse.io",
+            "status": "completed"
+          },
+          {
+            "query": "\"Assistant Bar Manager\" OR \"Bar Operations\" New York restaurant careers page apply salary",
+            "status": "completed"
+          },
+          {
+            "query": "\"Bar Manager\" \"New York, NY\" hiring 2026 careers apply",
+            "status": "completed"
+          },
+          {
+            "query": "\"Lead Bartender\" OR \"Head Bartender\" \"New York, NY\" job careers apply 2026",
+            "status": "completed"
+          },
+          {
+            "query": "\"Bar Manager\" \"New York, NY\" careers.hireology.com OR greenhouse.io OR lever.co OR workday",
+            "status": "completed"
+          },
+          {
+            "query": "\"Assistant Bar Manager\" OR \"Bar Operations Lead\" New York City job posting site:culinaryagents.com",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "promptId": "nyc-hospitality-operations",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "(\"Operations Manager, Food & Beverage\" OR \"Assistant General Manager\") \"New York, NY\"",
+            "status": "completed"
+          },
+          {
+            "query": "\"General Manager\" \"New York, NY\"",
+            "status": "completed"
+          },
+          {
+            "query": "(\"Operations Manager, Food & Beverage\" OR \"Assistant General Manager\") \"New York, NY\" careers",
+            "status": "completed"
+          },
+          {
+            "query": "\"General Manager\" \"New York, NY\" (site:oysterlink.com OR careers OR site:hiring.cafe)",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "promptId": "event-and-venue-operations",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "\"Event Operations Manager\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Event Coordinator\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Venue Operations Manager\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Event Operations Manager\" (\"New York, NY\" OR remote \"United States\") site:job-boards.greenhouse.io",
+            "status": "completed"
+          }
+        ]
+      }
+    ],
+    "errors": [],
+    "failedPromptIds": [],
+    "canonicalRows": 1,
+    "canonicalOverlapRows": [
+      {
+        "promptIds": [
+          "nyc-hospitality-operations"
+        ],
+        "rowIdentity": "240da767a1a9d4b6743a161d732913d8b492a4fcd27a855c8fc5eb2fdec1644a",
+        "source": "https://www.ihirehospitality.com/jobs/view/535266624"
+      },
+      {
+        "promptIds": [
+          "nyc-hospitality-operations"
+        ],
+        "rowIdentity": "7198b4bba28214cb715819f97cd8f856b0548e5d5321c01bd0830793b1df44a2",
+        "source": "https://culinaryagents.com/jobs/719032-Assistant-General-Manager"
+      },
+      {
+        "promptIds": [
+          "nyc-hospitality-operations"
+        ],
+        "rowIdentity": "7711ea2b5d9b58b30e3715cd553de755a0f9ddb371bc646d2db46b688d6284fb",
+        "source": "https://www.ihirehospitality.com/jobs/view/517551919"
+      },
+      {
+        "promptIds": [
+          "nyc-hospitality-operations"
+        ],
+        "rowIdentity": "dd5f44275ae69f96dbdbb8d3bc91c6feb4f057e38902467f2a9801719f2518e2",
+        "source": "https://www.ihirehospitality.com/jobs/view/535260936"
+      },
+      {
+        "promptIds": [
+          "nyc-hospitality-operations"
+        ],
+        "rowIdentity": "ec100bda624c03bd956303ba31048b54f20ec5d5fbf827ff3bc7ff09fde93454",
+        "source": "https://culinaryagents.com/jobs/713124-Bar-Manager"
+      }
+    ]
+  },
+  "presentedBuckets": [
+    "Bar leadership",
+    "Event and venue operations",
+    "Hospitality operations"
+  ],
+  "rows": [
+    {
+      "identity": "7198b4bba28214cb715819f97cd8f856b0548e5d5321c01bd0830793b1df44a2",
+      "company": "Major Food Group - New York",
+      "role": "Assistant General Manager",
+      "location": "New York, NY, US",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/719032-Assistant-General-Manager"
+    },
+    {
+      "identity": "240da767a1a9d4b6743a161d732913d8b492a4fcd27a855c8fc5eb2fdec1644a",
+      "company": "Din Tai Fung North America",
+      "role": "General Manager",
+      "location": "New York, NY, 10001, US",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://www.ihirehospitality.com/jobs/view/535266624"
+    },
+    {
+      "identity": "dd5f44275ae69f96dbdbb8d3bc91c6feb4f057e38902467f2a9801719f2518e2",
+      "company": "Tao Group Hospitality",
+      "role": "Lounge General Manager - New York",
+      "location": "New York, NY, 10001, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://www.ihirehospitality.com/jobs/view/535260936"
+    },
+    {
+      "identity": "76133660f71e5a65129a2f2ee81e638fd7fb8f6fcde4ce3b70eb4023f0c183ce",
+      "company": "Arlo Williamsburg",
+      "role": "Bar Manager",
+      "location": "Brooklyn, NY, 11249, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/714781-Bar-Manager"
+    },
+    {
+      "identity": "8589d66e2ff93c160a52dc1b0b949c5997acd4983e83dd0cc231e5b9a4efba51",
+      "company": "Arlo Williamsburg",
+      "role": "Bar Manager & Floor Manager",
+      "location": "Brooklyn, NY, 11249, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://careers.hireology.com/arlo-williamsburg/2838889/description?source=hcareers&utm_source=hcareers&ref=hcareers&ref_m=application"
+    },
+    {
+      "identity": "9479a89c95e069692c6daa5daab072079c36f11ef3938470c7123a73c25db096",
+      "company": "Clemente Bar",
+      "role": "Bar Manager",
+      "location": "New York, NY, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/712707-Bar-Manager"
+    },
+    {
+      "identity": "4632259e792e89d0052cb467dbb14f0ffdda94801b861130a47048372f67734f",
+      "company": "Bar Bianchi",
+      "role": "Lead Bartender",
+      "location": "New York, NY, 10009, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/711787-Lead-Bartender"
+    },
+    {
+      "identity": "6f6eef8d15165ee24e46a8b99fef5a65a03db6089fb9bd86a081ef572984f7d2",
+      "company": "In Tune Hospitality",
+      "role": "Bar Manager",
+      "location": "New York, NY, 10075, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/710921-Bar-Manager"
+    },
+    {
+      "identity": "8a8ee4e8d6a26bf8aa88d482573ed36d8dd9897494af631636cb2a1dccdb1be2",
+      "company": "The Heights Bar & Grill",
+      "role": "Restaurant General Manager",
+      "location": "New York, NY, 10025, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/709358-Restaurant-General-Manager?ad_id=820393&client_id=CA-SP-CULINARYAGENTS&s_id=128902&widget_name=job-search"
+    },
+    {
+      "identity": "7711ea2b5d9b58b30e3715cd553de755a0f9ddb371bc646d2db46b688d6284fb",
+      "company": "New York Athletic Club",
+      "role": "Rooftop Food & Beverage Manager",
+      "location": "New York, NY, 10019, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://www.ihirehospitality.com/jobs/view/517551919"
+    },
+    {
+      "identity": "6c48f3a47c5360f543212f5b820585f9ad4f91bd57e30983e5da6af30c6bbd9b",
+      "company": "Aqua - NYC",
+      "role": "Bar Manager",
+      "location": "New York, NY, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/678855-Bar-Manager"
+    },
+    {
+      "identity": "15b26e56946dc00b255b911cc1f0757d40ced3c4d4223cd205546aa3765539f9",
+      "company": "Summit Events",
+      "role": "Event Coordinator",
+      "location": "New York, NY, 10017, US",
+      "fitScore": 82,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/713975-Event-Coordinator"
+    },
+    {
+      "identity": "ec100bda624c03bd956303ba31048b54f20ec5d5fbf827ff3bc7ff09fde93454",
+      "company": "Mr. Purple",
+      "role": "Bar Manager",
+      "location": "New York, NY, 10002, US",
+      "fitScore": 82,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/713124-Bar-Manager"
+    },
+    {
+      "identity": "f3cdc6614722712c0297a5d8002d33648592d1fa210b40e1e426b3519a800b69",
+      "company": "Elior-Collegiate-Dining",
+      "role": "Catering Coordinator",
+      "location": "New York, NY, 10001, US",
+      "fitScore": 82,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://www.ihirehospitality.com/jobs/view/530908575"
+    },
+    {
+      "identity": "1db24bcee9a0237a0ecaee469b27d20c67b5254a636e33ad27b1d7a6575e2f39",
+      "company": "Cote Korean Steakhouse - Flatiron",
+      "role": "Bar Manager",
+      "location": "New York, NY, 10010, US",
+      "fitScore": 82,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/709529-Bar-Manager"
+    },
+    {
+      "identity": "c32ec3baed8fb628e01f9d9d3f3027a8d14cf83c1aeab56193722a79a87b7b1a",
+      "company": "Dish Food and Events - Long Island City",
+      "role": "Catering Event Producer",
+      "location": "Queens, NY, 11101, US",
+      "fitScore": 82,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://culinaryagents.com/jobs/597573-Catering-Event-Producer"
+    },
+    {
+      "identity": "16cda08a52cb4849f9db91c29b20b0606b8535cdd77ae308c6b0d8c34171028c",
+      "company": "Arlo Williamsburg",
+      "role": "Events & Outlets Operations Manager",
+      "location": "Brooklyn, NY, 11249, US",
+      "fitScore": 81,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://careers.hireology.com/arlo-williamsburg/2850254/description?source=hcareers&utm_source=hcareers&ref=hcareers&ref_m=application"
+    },
+    {
+      "identity": "5483f32e2d9227945b5c0475068feef2ccdf04c740728a78c27ead0a7af298a9",
+      "company": "The Heights Bar & Grill",
+      "role": "Restaurant General Manager",
+      "location": "New York, NY, 10025, US",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://culinaryagents.com/jobs/709358-Restaurant-General-Manager"
+    }
+  ],
+  "manualLiveness": {
+    "verified": true,
+    "reviewer": "careerrat-release-agent",
+    "verifiedAt": "2026-08-29T05:56:31.017Z",
+    "rowIdentities": [
+      "15b26e56946dc00b255b911cc1f0757d40ced3c4d4223cd205546aa3765539f9",
+      "16cda08a52cb4849f9db91c29b20b0606b8535cdd77ae308c6b0d8c34171028c",
+      "1db24bcee9a0237a0ecaee469b27d20c67b5254a636e33ad27b1d7a6575e2f39",
+      "240da767a1a9d4b6743a161d732913d8b492a4fcd27a855c8fc5eb2fdec1644a",
+      "4632259e792e89d0052cb467dbb14f0ffdda94801b861130a47048372f67734f",
+      "5483f32e2d9227945b5c0475068feef2ccdf04c740728a78c27ead0a7af298a9",
+      "6c48f3a47c5360f543212f5b820585f9ad4f91bd57e30983e5da6af30c6bbd9b",
+      "6f6eef8d15165ee24e46a8b99fef5a65a03db6089fb9bd86a081ef572984f7d2",
+      "7198b4bba28214cb715819f97cd8f856b0548e5d5321c01bd0830793b1df44a2",
+      "76133660f71e5a65129a2f2ee81e638fd7fb8f6fcde4ce3b70eb4023f0c183ce",
+      "7711ea2b5d9b58b30e3715cd553de755a0f9ddb371bc646d2db46b688d6284fb",
+      "8589d66e2ff93c160a52dc1b0b949c5997acd4983e83dd0cc231e5b9a4efba51",
+      "8a8ee4e8d6a26bf8aa88d482573ed36d8dd9897494af631636cb2a1dccdb1be2",
+      "9479a89c95e069692c6daa5daab072079c36f11ef3938470c7123a73c25db096",
+      "c32ec3baed8fb628e01f9d9d3f3027a8d14cf83c1aeab56193722a79a87b7b1a",
+      "dd5f44275ae69f96dbdbb8d3bc91c6feb4f057e38902467f2a9801719f2518e2",
+      "ec100bda624c03bd956303ba31048b54f20ec5d5fbf827ff3bc7ff09fde93454",
+      "f3cdc6614722712c0297a5d8002d33648592d1fa210b40e1e426b3519a800b69"
+    ]
+  }
+}

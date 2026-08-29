@@ -6,6 +6,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { PERSONAL_SENTINELS } from "../scripts/lib/personal-sentinels.mjs";
+
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 const LEGACY_BRAND_TERMS = [["role", "ster"].join(""), ["roll", "ster"].join("")];
@@ -527,32 +529,6 @@ test("npm package allowlist names app files, not broad private-data roots", asyn
   assert.ok(!files.some((entry) => entry.includes("search-sources.yml")));
 });
 
-// Shared with the built-dist scan below (apps/web/dist) — one banned list,
-// two surfaces: `git grep` over tracked source, and a plain filesystem walk
-// over generated build output that `git grep` (tracked-files-only) can't see.
-const PERSONAL_SENTINELS = [
-  ["Scott", "Benson"].join(" "),
-  "Bloomfield",
-  "$" + "145K",
-  "145" + "000",
-  "sctt" + "bnsn",
-  ["Work", "OS"].join(""),
-  ["work", "os"].join(""),
-  "Pw" + "C",
-  "pwc",
-  "workos" + ".com",
-  "pwc" + ".com",
-  "shopify" + ".com",
-  ["Anna", "Meyer"].join(" "),
-  ["Robert", "Choe"].join(" "),
-  ["Alex", "Aberg"].join(" "),
-  ["Juniper", "Square"].join(" "),
-  "Sabri" + "na",
-  "225" + "000",
-  "220" + "000",
-  "225" + "K",
-];
-
 test("tracked app files do not contain known production personal sentinels", () => {
   const pattern = PERSONAL_SENTINELS.map(escapeEgrep).join("|");
 
@@ -571,6 +547,7 @@ test("tracked app files do not contain known production personal sentinels", () 
         ":!candidate/**",
         ":!workspace/**",
         ":!tests/release-safety.test.mjs",
+        ":!scripts/lib/personal-sentinels.mjs",
       ],
       { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
     );

@@ -58,9 +58,9 @@ Scripts under `src/` and exposed via `npm run *` should be deterministic:
 
 ### Communication layer
 
-`workspace/tracker.json` stores concise communication metadata. Long message
-bodies and thread summaries live in `workspace/comms/`. `email-comms` reads both
-before drafting.
+`.careerrat/workspace/tracker.json` stores concise communication metadata. Long
+message bodies and thread summaries live in `.careerrat/workspace/comms/`.
+`email-comms` reads both before drafting.
 
 ### Source layer
 
@@ -99,8 +99,8 @@ strategy checks; the native portal poll does not invent that context.
 
 Candidate facts, generated artifacts, and tracker state stay local:
 
-- `candidate/` — private config, gitignored
-- `workspace/` — runtime data, gitignored
+- `.careerrat/candidate/` - private config, gitignored
+- `.careerrat/workspace/` - runtime data, gitignored
 
 ### System layer
 

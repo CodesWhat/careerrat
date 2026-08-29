@@ -15,7 +15,8 @@ careerrat update
 
 The update does a privacy-guarded tarball extract: it downloads the latest
 published package, unpacks only the code files, and replaces them in your
-checkout. It never touches your `candidate/` directory or `workspace/` data.
+checkout. It never touches your `.careerrat/candidate/` directory or
+`.careerrat/workspace/` data.
 
 ## What gets updated
 
@@ -27,9 +28,9 @@ checkout. It never touches your `candidate/` directory or `workspace/` data.
 
 ## What is never touched
 
-- `candidate/` — your profile, targeting config, evidence bank, honesty
+- `.careerrat/candidate/` - your profile, targeting config, evidence bank, honesty
   boundaries, form defaults, modes, automation consent
-- `workspace/` — tracker data, tailored artifacts, comms, research, activity log
+- `.careerrat/workspace/` - tracker data, tailored artifacts, comms, research, activity log
 - Any file that is gitignored in the repo
 
 ## Checking your version

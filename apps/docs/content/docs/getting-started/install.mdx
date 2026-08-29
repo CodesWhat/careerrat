@@ -90,9 +90,9 @@ careerrat start
 
 The `start` command does the whole arc in one shot:
 
-1. Scaffolds `candidate/` and `workspace/` directories (idempotent, safe to re-run).
+1. Scaffolds `.careerrat/candidate/` and `.careerrat/workspace/` directories (idempotent, safe to re-run).
 2. Installs the skills so your agent sees `/apply-job`, `/evaluate-job`, etc.
-3. Seeds `workspace/tracker.json` from the demo template if not yet present.
+3. Seeds `.careerrat/workspace/tracker.json` from the demo template if not yet present.
 4. Boots the live local app at `http://localhost:7777` with event-driven data updates.
 5. Launches your agent with a starter message.
 
@@ -136,8 +136,8 @@ conversationally if your candidate profile is not yet set up.
 
 ## Custom data location
 
-By default `workspace/` and `candidate/` live inside the cloned repo. Set
-`CAREERRAT_HOME` to put them somewhere else:
+By default `.careerrat/` (holding both `workspace/` and `candidate/`) lives
+inside the cloned repo. Set `CAREERRAT_HOME` to put it somewhere else:
 
 ```bash
 export CAREERRAT_HOME=~/careerrat-data

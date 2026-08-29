@@ -1,0 +1,237 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "0d968d6deedfb4671666fb8bec05cf16edebe419",
+  "runtimeId": "claude",
+  "fixtureId": "engineering",
+  "providerFallback": false,
+  "runtime": {
+    "id": "claude",
+    "path": "~/.local/bin/claude",
+    "realPath": "~/.local/share/claude/versions/2.1.251",
+    "version": "2.1.251",
+    "binaryFingerprint": "625869b01e0050f260b2980fac248fd9cef9e462612bded4ec9d3d49ff8969a5",
+    "capabilities": {
+      "completion": true,
+      "structuredOutput": true,
+      "appWorkflows": true,
+      "exactRead": true,
+      "publicWeb": true,
+      "liveActivity": true,
+      "resumable": true,
+      "taskTools": true,
+      "research": true
+    }
+  },
+  "lanes": {
+    "deterministic": "succeeded",
+    "aiWeb": "succeeded"
+  },
+  "completedAt": "2026-08-29T05:53:52.431Z",
+  "thresholds": {
+    "fitFloor": 65,
+    "minimumPresentedRows": 3,
+    "minimumDistinctRoles": 3,
+    "minimumPresentedBuckets": 2
+  },
+  "counts": {
+    "presentedRows": 7,
+    "distinctRoles": 7,
+    "presentedBuckets": 2,
+    "canonicalAiRows": 7,
+    "canonicalAiOverlapRows": 0
+  },
+  "summary": {
+    "presented": 7,
+    "fitFloor": 65,
+    "errors": [],
+    "failedPromptIds": []
+  },
+  "ai": {
+    "expectedPromptIds": [
+      "us-remote-engineering",
+      "nyc-hybrid-engineering",
+      "developer-infrastructure"
+    ],
+    "searched": 3,
+    "queryResults": [
+      {
+        "promptId": "us-remote-engineering",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "\"Staff Platform Engineer\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Platform Engineer\" (\"New York, NY\" OR remote \"United States\") site:job-boards.greenhouse.io",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Backend Engineer\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Backend Engineer\" (\"New York, NY\" OR remote \"United States\") (site:jobs.lever.co OR careers)",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Backend Engineer\" remote United States $150,000 site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com OR site:jobs.lever.co",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "promptId": "nyc-hybrid-engineering",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "(\"Staff Platform Engineer\" OR \"Staff Backend Engineer\") \"New York, NY\"",
+            "status": "completed"
+          },
+          {
+            "query": "(\"Staff Platform Engineer\" OR \"Staff Backend Engineer\") \"New York, NY\" (site:hiring.cafe OR careers)",
+            "status": "completed"
+          },
+          {
+            "query": "Fora \"Staff Backend Engineer\" New York careers",
+            "status": "completed"
+          },
+          {
+            "query": "Amigo \"Staff Backend\" Infra Engineer New York careers job",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "promptId": "developer-infrastructure",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "\"Developer Infrastructure Engineer\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Developer Infrastructure Engineer\" (\"New York, NY\" OR remote \"United States\") site:jobs.lever.co",
+            "status": "completed"
+          },
+          {
+            "query": "\"Developer Experience Engineer\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Developer Experience Engineer\" (\"New York, NY\" OR remote \"United States\") site:jobs.ashbyhq.com",
+            "status": "completed"
+          }
+        ]
+      }
+    ],
+    "errors": [],
+    "failedPromptIds": [],
+    "canonicalRows": 7,
+    "canonicalOverlapRows": []
+  },
+  "presentedBuckets": [
+    "Developer infrastructure",
+    "Platform and backend"
+  ],
+  "rows": [
+    {
+      "identity": "8e7cee05f135d37c1c1ef32be67a25fdfbf77c625005201e8c3433fccf4769ab",
+      "company": "AlphaSense",
+      "role": "Staff Platform Engineer, Core Cloud Platform",
+      "location": "Remote - United States",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/alphasense/jobs/8687627002"
+    },
+    {
+      "identity": "c9d88724abf45b5328027d6dbb9637df55937b54cd6bc5d917b5a3331920f665",
+      "company": "AlphaSense",
+      "role": "Staff Platform Engineer, Cloud Developer Experience",
+      "location": "Remote - United States",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/alphasense/jobs/8687635002"
+    },
+    {
+      "identity": "0fe547230f3837b7a3498674a79c098da171865271edb9055334e37af19a5011",
+      "company": "Fanatics Betting & Gaming",
+      "role": "Staff Platform Engineer, Data Storage - Core",
+      "location": "New York, NY, United States",
+      "fitScore": 86,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/fanaticsfbg/jobs/4324199009"
+    },
+    {
+      "identity": "4a560c9ac41a10d3c5792ca4918d6a90e36e4576971a177ff0ee36f4c219c764",
+      "company": "Calendly",
+      "role": "Staff Platform Engineer",
+      "location": "Remote - US",
+      "fitScore": 86,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/calendly/jobs/8628979002"
+    },
+    {
+      "identity": "3925ca164da655ce39e55f84d3f708b4e7c355494db98a30ca259c8caa97d8ba",
+      "company": "Hiive",
+      "role": "Developer Experience Engineer",
+      "location": "Vancouver, BC (HQ) · Remote (US) · United States · Remote (Canada) · Canada",
+      "fitScore": 86,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://jobs.ashbyhq.com/hiive/ef18ebc7-99f6-4cdc-b75c-5f51b518cfad"
+    },
+    {
+      "identity": "7b086907dfe22a5cbac29071dae87da61854d146ca1f8a6127f306ca646c23ef",
+      "company": "Censys",
+      "role": "Staff Backend Engineer, Exposure Management",
+      "location": "Remote (US/Canada)",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/censys/jobs/8540954002"
+    },
+    {
+      "identity": "e36f598d2f0d3c8e62ac669c2221c4f3fcb351e6588292835f16fa58d3dfdc33",
+      "company": "Addepar",
+      "role": "Staff Backend Software Engineer - Platform Integration",
+      "location": "New York, NY",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/addepar1/jobs/8569217002"
+    }
+  ],
+  "manualLiveness": {
+    "verified": true,
+    "reviewer": "careerrat-release-agent",
+    "verifiedAt": "2026-08-29T05:56:30.887Z",
+    "rowIdentities": [
+      "0fe547230f3837b7a3498674a79c098da171865271edb9055334e37af19a5011",
+      "3925ca164da655ce39e55f84d3f708b4e7c355494db98a30ca259c8caa97d8ba",
+      "4a560c9ac41a10d3c5792ca4918d6a90e36e4576971a177ff0ee36f4c219c764",
+      "7b086907dfe22a5cbac29071dae87da61854d146ca1f8a6127f306ca646c23ef",
+      "8e7cee05f135d37c1c1ef32be67a25fdfbf77c625005201e8c3433fccf4769ab",
+      "c9d88724abf45b5328027d6dbb9637df55937b54cd6bc5d917b5a3331920f665",
+      "e36f598d2f0d3c8e62ac669c2221c4f3fcb351e6588292835f16fa58d3dfdc33"
+    ]
+  }
+}

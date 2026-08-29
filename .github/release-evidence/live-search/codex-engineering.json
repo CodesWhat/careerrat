@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "0d968d6deedfb4671666fb8bec05cf16edebe419",
+  "runtimeId": "codex",
+  "fixtureId": "engineering",
+  "providerFallback": false,
+  "runtime": {
+    "id": "codex",
+    "path": "/opt/homebrew/bin/codex",
+    "realPath": "/opt/homebrew/Caskroom/codex/0.150.1/bin/codex",
+    "version": "0.150.1",
+    "binaryFingerprint": "a14f9a907c12c8812878b70e6b7d65f81c39ed795513e46a55817d7428c0ca6b",
+    "capabilities": {
+      "completion": true,
+      "structuredOutput": true,
+      "appWorkflows": true,
+      "exactRead": true,
+      "publicWeb": true,
+      "liveActivity": true,
+      "resumable": true,
+      "taskTools": true,
+      "research": true
+    }
+  },
+  "lanes": {
+    "deterministic": "succeeded",
+    "aiWeb": "succeeded"
+  },
+  "completedAt": "2026-08-29T05:52:11.149Z",
+  "thresholds": {
+    "fitFloor": 65,
+    "minimumPresentedRows": 3,
+    "minimumDistinctRoles": 3,
+    "minimumPresentedBuckets": 2
+  },
+  "counts": {
+    "presentedRows": 7,
+    "distinctRoles": 7,
+    "presentedBuckets": 2,
+    "canonicalAiRows": 6,
+    "canonicalAiOverlapRows": 0
+  },
+  "summary": {
+    "presented": 7,
+    "fitFloor": 65,
+    "errors": [],
+    "failedPromptIds": []
+  },
+  "ai": {
+    "expectedPromptIds": [
+      "us-remote-engineering",
+      "nyc-hybrid-engineering",
+      "developer-infrastructure"
+    ],
+    "searched": 3,
+    "queryResults": [
+      {
+        "promptId": "us-remote-engineering",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "\"Staff Platform Engineer\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Platform Engineer\" (\"New York, NY\" OR remote \"United States\") site:job-boards.greenhouse.io",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Backend Engineer\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Backend Engineer\" (\"New York, NY\" OR remote \"United States\") (site:jobs.lever.co OR careers)",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "promptId": "nyc-hybrid-engineering",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "(\"Staff Platform Engineer\" OR \"Staff Backend Engineer\") \"New York, NY\"",
+            "status": "completed"
+          },
+          {
+            "query": "(\"Staff Platform Engineer\" OR \"Staff Backend Engineer\") \"New York, NY\" (site:hiring.cafe OR careers)",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "promptId": "developer-infrastructure",
+        "status": "completed",
+        "queries": [
+          {
+            "query": "\"Developer Infrastructure Engineer\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Developer Infrastructure Engineer\" (\"New York, NY\" OR remote \"United States\") site:jobs.lever.co",
+            "status": "completed"
+          },
+          {
+            "query": "\"Developer Experience Engineer\" (\"New York, NY\" OR remote \"United States\")",
+            "status": "completed"
+          },
+          {
+            "query": "\"Developer Experience Engineer\" (\"New York, NY\" OR remote \"United States\") site:jobs.ashbyhq.com",
+            "status": "completed"
+          }
+        ]
+      }
+    ],
+    "errors": [],
+    "failedPromptIds": [],
+    "canonicalRows": 6,
+    "canonicalOverlapRows": []
+  },
+  "presentedBuckets": [
+    "Developer infrastructure",
+    "Platform and backend"
+  ],
+  "rows": [
+    {
+      "identity": "c7c129764e8bee88f42c6818116b8f72efeb20c2f5d9e1ed6ea5b56d5fc1a683",
+      "company": "Avenit Ag",
+      "role": "Senior Software Engineer (m/w/d) | Fullstack für KI-Produkte",
+      "location": "Remote in Deutschland, anywhere, DE",
+      "fitScore": 82,
+      "canonicalReadable": true,
+      "discoveryLane": "deterministic",
+      "partial": false,
+      "unverified": false,
+      "source": "https://www.arbeitnow.com/jobs/companies/avenit-ag/remote-senior-software-engineer-fullstack-fur-ki-produkte-424242"
+    },
+    {
+      "identity": "900dc4df1eba193bb6a14a44efb5c94c51b85a2c1b90ed645bd16aa18f15e901",
+      "company": "AlphaSense",
+      "role": "Staff Platform Engineer, Core Cloud Platform",
+      "location": "Remote - United States",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/alphasense/jobs/8687627002"
+    },
+    {
+      "identity": "b161c1783fe0840411e6fcd670438ce409de0b8e72f8d9bc66279ab094d6ec67",
+      "company": "Ashby",
+      "role": "Staff Platform Engineer - Americas",
+      "location": "Remote - US · Austin · USA · Los Angeles · Portland · Atlanta · Salt Lake City · Boston · Seattle · New York · San Francisco · Denver · Chicago",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://jobs.ashbyhq.com/ashby/0f5dbf59-687b-4d88-88a7-73ee0a66b48d"
+    },
+    {
+      "identity": "c98cba1f3009852a18b3ca8a3021fce96e002e42bbb23145c08dc48873eb9208",
+      "company": "Radar",
+      "role": "Senior / Staff Platform Engineer",
+      "location": "New York · US Remote · United States",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://jobs.ashbyhq.com/radar/ee0bf269-c286-4815-86d4-2b19d7b77448"
+    },
+    {
+      "identity": "289998b2cade9ca7b6a7b2a6fa0091087f73b49418aa0ff85d84cf21fad33a5e",
+      "company": "Kalepa",
+      "role": "Staff Backend Engineer - Core Product (New York)",
+      "location": "New York, NY",
+      "fitScore": 91,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/kalepa/jobs/5995684004"
+    },
+    {
+      "identity": "01f9a21f2a6c806d17d76d110f03a05cf0218e03257f52573794132cfa4f7854",
+      "company": "Kalepa",
+      "role": "Staff Backend Engineer - Submission Processing",
+      "location": "NYC (Hybrid)",
+      "fitScore": 86,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/kalepa/jobs/6111239004"
+    },
+    {
+      "identity": "de3151914cb8f720e513958c7df0ec1cf09481efd2342a1ed8fc31a1ccf141ab",
+      "company": "Elevenlabs",
+      "role": "Developer Experience Engineer",
+      "location": "London · New York · New York City · United States · Remote",
+      "fitScore": 87,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://jobs.ashbyhq.com/elevenlabs/d16a7ad6-ffbd-4655-8716-4872263f99ce"
+    }
+  ],
+  "manualLiveness": {
+    "verified": true,
+    "reviewer": "careerrat-release-agent",
+    "verifiedAt": "2026-08-29T05:56:31.142Z",
+    "rowIdentities": [
+      "01f9a21f2a6c806d17d76d110f03a05cf0218e03257f52573794132cfa4f7854",
+      "289998b2cade9ca7b6a7b2a6fa0091087f73b49418aa0ff85d84cf21fad33a5e",
+      "900dc4df1eba193bb6a14a44efb5c94c51b85a2c1b90ed645bd16aa18f15e901",
+      "b161c1783fe0840411e6fcd670438ce409de0b8e72f8d9bc66279ab094d6ec67",
+      "c7c129764e8bee88f42c6818116b8f72efeb20c2f5d9e1ed6ea5b56d5fc1a683",
+      "c98cba1f3009852a18b3ca8a3021fce96e002e42bbb23145c08dc48873eb9208",
+      "de3151914cb8f720e513958c7df0ec1cf09481efd2342a1ed8fc31a1ccf141ab"
+    ]
+  }
+}

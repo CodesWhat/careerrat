@@ -29,6 +29,7 @@ import {
   liveSearchReceiptFilename,
   verifyLiveSearchReceiptForReview,
 } from "./lib/live-search-receipts.mjs";
+import { containsPersonalSentinel } from "./lib/personal-sentinels.mjs";
 import { runSourcedScan } from "./scan-sourced.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -400,7 +401,7 @@ try {
     deterministicResult,
     aiResult,
   });
-  const rows = annotateCanonicalReadableRows({
+  const discoveredRows = annotateCanonicalReadableRows({
     rows: readDbScannerRows({ repoRoot, env }).map((row) => ({
       company: row.company,
       role: row.role,
@@ -414,6 +415,19 @@ try {
     })),
     sources: canonicalSources,
   });
+  // A live search legitimately returns public postings from companies on the
+  // personal-sentinel list, and committing one trips the release-safety guard
+  // even though nothing personal leaked. Drop them here, before usefulSet and
+  // summary derive their counts from rows, so every number downstream agrees.
+  const withheldRows = discoveredRows.filter((row) => containsPersonalSentinel(row));
+  const rows = discoveredRows.filter((row) => !containsPersonalSentinel(row));
+  if (withheldRows.length) {
+    console.log(
+      `[${runtimeId}/${fixtureId}] Withholding ${withheldRows.length} row(s) matching a personal sentinel: ${withheldRows
+        .map((row) => row.company)
+        .join(", ")}`
+    );
+  }
   const usefulSet = presentedSetReceipt({ fixture, result: aiResult, rows });
   const aiSummary = safeResult(aiResult);
   const summary = {
