@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
+import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import { seedDemo } from "../src/core/db/demo-seed.mjs";
 import { candidateConfigPatch, sourcingRunComplete } from "../src/core/db/verbs/index.mjs";
@@ -24,6 +25,10 @@ async function seedVisualWorkspace(home) {
   };
   const pathCtx = { repoRoot: PRODUCT_ROOT, env };
   seedDemo({ ...pathCtx, today: "2026-08-27" });
+  // Pin a ready engine. Without a selection the workspace asks the host which
+  // AI CLIs are installed, finds none on a machine that has neither, and raises
+  // the modal EngineDownCover over everything, which swallows the clicks below.
+  writeInstalledRuntimeSelection({ ...pathCtx, runtimeId: null, providerFallback: true });
   candidateConfigPatch({
     ...pathCtx,
     name: "form-defaults",
