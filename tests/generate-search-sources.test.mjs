@@ -82,6 +82,33 @@ test("buildSearchSources: title_filter.negative contains conventional noise filt
   assert.ok(result.title_filter.negative.includes("Junior"), "missing Junior in negative");
 });
 
+test("buildSearchSources: explicit ladders replace corporate noise with titles below the target", () => {
+  const result = buildSearchSources(
+    {
+      role_buckets: [
+        {
+          name: "Nursing",
+          priority: "primary",
+          titles: ["Registered Nurse", "RN"],
+          seniority_ladder: [
+            { rank: 30, titles: ["Nurse Practitioner", "NP"] },
+            { rank: 10, titles: ["Certified Nursing Assistant", "CNA"] },
+            { rank: 20, titles: ["Registered Nurse", "RN"] },
+          ],
+        },
+      ],
+      keep_signals: [],
+      cut_signals: ["Travel Nurse"],
+    },
+    profile
+  );
+
+  assert.deepEqual(result.title_filter.below_target, ["Certified Nursing Assistant", "CNA"]);
+  assert.deepEqual(result.title_filter.negative, ["Travel Nurse"]);
+  assert.equal(result.title_filter.negative.includes("Intern"), false);
+  assert.equal(result.title_filter.below_target.includes("Nurse Practitioner"), false);
+});
+
 test("buildSearchSources: location_filter.allow includes Remote, home, and relocation cities", () => {
   const result = buildSearchSources(targeting, profile);
   const allow = result.location_filter.allow;

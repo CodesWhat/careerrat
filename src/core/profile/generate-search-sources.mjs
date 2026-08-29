@@ -1,5 +1,6 @@
 import { CAREER_OPS_PUBLIC_PROVIDER_IDS } from "../providers/provider-parity.mjs";
 import { buildWellfoundUrl } from "../providers/wellfound.mjs";
+import { titlesBelowTarget } from "./seniority.mjs";
 
 // Generate a search-sources configuration object from targeting + profile.
 // Validates against config/search-sources.schema.json.
@@ -409,17 +410,20 @@ export function buildSearchSources(targeting, profile) {
     }
   }
 
-  // 7.4: derive negatives from targeting.cut_signals when present;
-  // Intern/Junior are universal noise filters always included.
-  const universalNegatives = ["Intern", "Junior"];
+  // Existing profiles without an explicit occupation ladder retain the
+  // conventional engineering noise filters. Once the candidate defines a
+  // ranked ladder, its own below-target vocabulary replaces those defaults.
+  const seniority = titlesBelowTarget(targeting);
+  const legacyNegatives = seniority.configured ? [] : ["Intern", "Junior"];
   const cutSignals = targeting.cut_signals ?? [];
   const derivedNegatives =
     cutSignals.length > 0 ? cutSignals.filter((s) => typeof s === "string" && s.length > 0) : [];
-  // Merge: universal first, then derived (deduped)
-  const negativeSet = new Set([...universalNegatives, ...derivedNegatives]);
+  const negativeSet = new Set([...legacyNegatives, ...derivedNegatives]);
   const title_filter = {
     positive: positiveTitles,
     negative: [...negativeSet],
+    below_target: seniority.titles,
+    seniority_basis: seniority.configured ? "candidate-ladder" : "legacy-title-terms",
   };
 
   // --- location_filter ---

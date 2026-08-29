@@ -245,6 +245,54 @@ test("prepareFirstSearchSources replaces stale country blocks when remote scope 
   assert.deepEqual(worldwide.sourcedScan.location_filter.block, []);
 });
 
+test("prepareFirstSearchSources replaces stale corporate seniority filters with the saved ladder", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "healthcare" });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Nursing",
+          priority: "primary",
+          titles: ["Registered Nurse", "RN"],
+          seniority_ladder: [
+            { rank: 30, titles: ["Nurse Practitioner", "NP"] },
+            { rank: 10, titles: ["Certified Nursing Assistant", "CNA"] },
+            { rank: 20, titles: ["Registered Nurse", "RN"] },
+          ],
+        },
+      ],
+      cut_signals: ["Travel Nurse"],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {
+        positive: ["Registered Nurse", "RN"],
+        negative: ["Intern", "Junior", "Travel Nurse"],
+        below_target: ["Old Nursing Title"],
+      },
+      location_filter: null,
+      searches: [],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  const result = await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  assert.deepEqual(result.searchSources.title_filter.negative, ["Travel Nurse"]);
+  assert.deepEqual(result.searchSources.title_filter.below_target, [
+    "Certified Nursing Assistant",
+    "CNA",
+  ]);
+  assert.deepEqual(result.sourcedScan.title_filter, result.searchSources.title_filter);
+});
+
 test("first search can start before location preferences are filled in", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);

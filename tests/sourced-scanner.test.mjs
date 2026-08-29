@@ -215,6 +215,168 @@ test("bounded title equivalence never crosses from engineering management to sta
   assert.equal(filter("Platform Engineering Manager"), false);
 });
 
+test("ranked nursing ladders reject CNA roles while keeping RN and NP roles", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Nursing",
+        priority: "primary",
+        titles: ["Registered Nurse", "RN"],
+        seniority_ladder: [
+          { rank: 30, titles: ["Nurse Practitioner", "NP"] },
+          { rank: 10, titles: ["Certified Nursing Assistant", "CNA"] },
+          { rank: 20, titles: ["Registered Nurse", "RN"] },
+        ],
+      },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const result = filterAndDedupeOffers(
+    [
+      offerForSeniority("cna", "Certified Nursing Assistant"),
+      offerForSeniority("rn", "Registered Nurse"),
+      offerForSeniority("np", "Nurse Practitioner"),
+    ],
+    optionsForSeniority(targeting)
+  );
+
+  assert.deepEqual(
+    result.filteredSeniority.map((offer) => offer.title),
+    ["Certified Nursing Assistant"]
+  );
+  assert.deepEqual(
+    result.kept.map((offer) => offer.title),
+    ["Registered Nurse", "Nurse Practitioner"]
+  );
+});
+
+test("ranked trades ladders reject apprentices while keeping journeyman and master roles", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Electrical",
+        priority: "primary",
+        titles: ["Journeyman Electrician"],
+        seniority_ladder: [
+          { rank: 300, titles: ["Master Electrician"] },
+          { rank: 100, titles: ["Apprentice Electrician"] },
+          { rank: 200, titles: ["Journeyman Electrician"] },
+        ],
+      },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const result = filterAndDedupeOffers(
+    [
+      offerForSeniority("apprentice", "Apprentice Electrician"),
+      offerForSeniority("journeyman", "Journeyman Electrician"),
+      offerForSeniority("master", "Master Electrician"),
+    ],
+    optionsForSeniority(targeting)
+  );
+
+  assert.deepEqual(
+    result.filteredSeniority.map((offer) => offer.title),
+    ["Apprentice Electrician"]
+  );
+  assert.deepEqual(
+    result.kept.map((offer) => offer.title),
+    ["Journeyman Electrician", "Master Electrician"]
+  );
+});
+
+test("ranked bar ladders keep Bar Manager above Lead Bartender without corporate track rules", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Bar",
+        priority: "primary",
+        titles: ["Lead Bartender"],
+        seniority_ladder: [
+          { rank: 40, titles: ["Bar Manager"] },
+          { rank: 10, titles: ["Barback"] },
+          { rank: 30, titles: ["Lead Bartender", "Head Bartender"] },
+          { rank: 20, titles: ["Bartender"] },
+        ],
+      },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const titleFilter = buildTitleFilter(
+    {
+      positive: ["Lead Bartender"],
+      negative: [],
+      below_target: ["Barback", "Bartender"],
+    },
+    targeting
+  );
+  const result = filterAndDedupeOffers(
+    [
+      offerForSeniority("barback", "Barback"),
+      offerForSeniority("bartender", "Bartender"),
+      offerForSeniority("lead", "Lead Bartender"),
+      offerForSeniority("manager", "Bar Manager"),
+    ],
+    { ...optionsForSeniority(targeting), titleFilter }
+  );
+
+  assert.deepEqual(
+    [...result.filteredTitle, ...result.filteredSeniority].map((offer) => offer.title),
+    ["Barback", "Bartender"]
+  );
+  assert.deepEqual(
+    result.kept.map((offer) => offer.title),
+    ["Lead Bartender", "Bar Manager"]
+  );
+});
+
+test("unconfigured engineering targets retain the legacy junior-title guard", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Platform",
+        priority: "primary",
+        titles: ["Staff Backend Engineer"],
+      },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const result = filterAndDedupeOffers(
+    [offerForSeniority("junior-backend", "Junior Backend Engineer")],
+    optionsForSeniority(targeting)
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSeniority[0]?.qualificationReason, "seniority-below-target");
+});
+
+function offerForSeniority(id, title) {
+  return {
+    company: "Example Employer",
+    title,
+    url: `https://jobs.example.test/${id}`,
+    location: "Remote - United States",
+  };
+}
+
+function optionsForSeniority(targeting) {
+  return {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    titleFilter: () => true,
+    locationFilter: () => true,
+    config: {
+      targeting,
+      profile: { location: { home: "", remote: true } },
+    },
+  };
+}
+
 test("coarse scoring does not promote a GTM engineer from backend and platform evidence in the body", () => {
   const result = scoreSourcedOffer(
     {

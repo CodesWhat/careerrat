@@ -470,7 +470,9 @@ const CONFIRM_BLOCK_GUIDANCE =
   "relocation, save an empty array (`[]`), never `false`. Save a hybrid office-day " +
   "limit at profile.location.max_commute_days_per_week as an integer from 0 through 7. " +
   "targeting.role_buckets is an array where every item contains non-empty name, " +
-  "priority, and titles fields. Keep " +
+  "priority, and titles fields. An optional role-bucket seniority_ladder is an array of " +
+  "{rank, titles} levels where every rank is an explicit integer; never infer seniority from " +
+  "array order or bucket priority. Keep " +
   "these blocks fully closed and out of prose otherwise; never describe the JSON to the user in words. " +
   "A candidate's notice period belongs at profile.authorization.notice_period, never " +
   "form-defaults.notice_period. Do not collect an earliest start date during initial setup. " +

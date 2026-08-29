@@ -5,6 +5,7 @@ import { guardedFetch } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { assessCompensationFloors } from "../profile/compensation.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
+import { relativeSeniority } from "../profile/seniority.mjs";
 import {
   fetchCareerOpsProvider,
   inferCareerOpsProvider,
@@ -120,14 +121,22 @@ function normalizeKeywordList(value) {
     .filter(Boolean);
 }
 
-export function buildTitleFilter(titleFilter = {}) {
+export function buildTitleFilter(titleFilter = {}, targeting = {}) {
   const positive = normalizeKeywordList(titleFilter.positive);
   const negative = normalizeKeywordList(titleFilter.negative);
+  const belowTarget = normalizeKeywordList(titleFilter.below_target);
   const classify = (title = "") => {
     const lower = title.toLowerCase();
-    const blocked = negative.some((term) => keywordMatches(lower, term));
+    const standing = relativeSeniority(title, targeting);
+    const rankedEligible = standing.classification === "at-or-above-target";
+    const rankedBelow = standing.classification === "below-target";
+    const blocked =
+      negative.some((term) => keywordMatches(lower, term)) ||
+      rankedBelow ||
+      (!rankedEligible && belowTarget.some((term) => keywordMatches(lower, term)));
     const matched =
       positive.length === 0 ||
+      rankedEligible ||
       positive.some(
         (term) => keywordMatches(lower, term) || boundedRoleTitleEquivalent(lower, term)
       );
@@ -135,7 +144,10 @@ export function buildTitleFilter(titleFilter = {}) {
       matched: matched && !blocked,
       blocked,
       adjacent:
-        !matched && !blocked && positive.some((term) => adjacentRoleTitleEquivalent(lower, term)),
+        !matched &&
+        !blocked &&
+        standing.classification === "unclassified" &&
+        positive.some((term) => adjacentRoleTitleEquivalent(lower, term)),
     };
   };
   const filter = (title = "") => classify(title).matched;
@@ -293,8 +305,11 @@ function adjacentTitleFamiliesCompatible(actualTitle, targetTitle) {
   return actualFamily < 0 || actualFamily === targetFamily;
 }
 
-function targetRoleTitleMatches(actualTitle, targetTitles) {
+function targetRoleTitleMatches(actualTitle, targetTitles, targeting) {
   if (targetTitles.length === 0) return true;
+  const standing = relativeSeniority(actualTitle, targeting);
+  if (standing.classification === "at-or-above-target") return true;
+  if (standing.classification === "below-target") return false;
   const actual = String(actualTitle || "").toLowerCase();
   return targetTitles.some((targetTitle) => {
     const target = String(targetTitle || "").toLowerCase();
@@ -594,6 +609,11 @@ function seniorityEligibility(offer, config) {
   const targets = targetTitles(config);
   if (targets.length === 0) return { eligible: true };
   const title = String(offer?.title || "");
+  const standing = relativeSeniority(title, config?.targeting);
+  if (standing.classification === "below-target") {
+    return { eligible: false, reason: "seniority-below-target" };
+  }
+  if (standing.classification === "at-or-above-target") return { eligible: true };
   const targetsManagement = targets.some((target) => MANAGEMENT_TITLE_RE.test(target));
   if (MANAGEMENT_TITLE_RE.test(title) && !targetsManagement) {
     return { eligible: false, reason: "management-track-mismatch" };
@@ -1076,7 +1096,7 @@ function scoreSourcedOfferFromConfig(
     }
   }
   for (const term of bucketTitles.filter(Boolean)) {
-    if (targetRoleTitleMatches(title, [term])) {
+    if (targetRoleTitleMatches(title, [term], effectiveTargeting)) {
       setBase(82, `matches target title: ${term}`);
     }
   }
@@ -1192,7 +1212,7 @@ function scoreSourcedOfferFromConfig(
   // cannot turn a different job family into a strong target-title match. This
   // also protects a narrowed candidate profile from broader source filters
   // generated earlier in onboarding.
-  if (!targetRoleTitleMatches(title, bucketTitles.filter(Boolean))) {
+  if (!targetRoleTitleMatches(title, bucketTitles.filter(Boolean), effectiveTargeting)) {
     score = Math.min(score, 64);
     reasons.unshift("outside target role titles");
     flag("title-target-mismatch");

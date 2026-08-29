@@ -152,6 +152,27 @@ function mergeFilterObject(existing = {}, generated = {}) {
   return merged;
 }
 
+function mergeTitleFilter(existing = {}, generated = {}) {
+  const reconciledExisting =
+    generated?.seniority_basis === "candidate-ladder"
+      ? {
+          ...existing,
+          negative: asArray(existing?.negative).filter(
+            (value) =>
+              !["intern", "junior"].includes(
+                String(value || "")
+                  .trim()
+                  .toLowerCase()
+              )
+          ),
+        }
+      : existing;
+  const merged = mergeFilterObject(reconciledExisting, generated);
+  merged.below_target = compactArrayValues(asArray(generated?.below_target));
+  if (generated?.seniority_basis) merged.seniority_basis = generated.seniority_basis;
+  return merged;
+}
+
 function mergeLocationFilter(existing = {}, generated = {}) {
   const merged = mergeFilterObject(existing, generated);
   for (const key of ["allow", "block"]) {
@@ -304,7 +325,7 @@ function mergeSearchSources(existing = {}, generated = {}) {
   return {
     ...generated,
     ...existing,
-    title_filter: mergeFilterObject(existing.title_filter, generated.title_filter),
+    title_filter: mergeTitleFilter(existing.title_filter, generated.title_filter),
     location_filter: mergeLocationFilter(existing.location_filter, generated.location_filter),
     searches: resyncDomainGatedEntries(
       mergeEntries(reconciledExistingSearches, generated.searches, sourceEntryKey),
@@ -793,7 +814,7 @@ export async function prepareFirstSearchSources({
     name: "sourced-scan",
     data: {
       ...currentSourcedScan,
-      title_filter: mergeFilterObject(currentSourcedScan.title_filter, next.title_filter),
+      title_filter: mergeTitleFilter(currentSourcedScan.title_filter, next.title_filter),
       location_filter: mergeLocationFilter(
         currentSourcedScan.location_filter,
         next.location_filter
