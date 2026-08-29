@@ -1363,10 +1363,11 @@ const HOURLY_PAY_PREFIX_RE =
 const HOURLY_BASE_PREFIX_RE =
   /\b(?:pay|wage|(?:hourly\s+)?rate)(?:\s+range)?\s*(?::|is|of|from)?\s*$/i;
 const WEEKLY_HOURS_RE = /\b(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:\/|per|a|each)\s*week\b/i;
-const BUSINESS_ENTITY_HOURS_CONTEXT_RE =
-  /\b(?:store|business|restaurant|office|location|facility|venue)\b/i;
-const EMPLOYEE_HOURS_CONTEXT_RE =
-  /\b(?:employees?|staff|workers?|team\s+members?|crew|associates?|personnel|managers?|roles?|positions?|jobs?|candidates?|you|work|works|schedule|scheduled|shifts?)\b/i;
+const BUSINESS_HOURS_CONTEXT_RE =
+  /\b(?:store|business|restaurant|office|location|facility|venue|hours?\s+of\s+operation|opening\s+hours?|we\s+are\s+open)\b/i;
+const EMPLOYEE_HOURS_CONTEXT_SOURCE =
+  "employees?|staff|workers?|team\\s+members?|crew|associates?|personnel|managers?|roles?|positions?|jobs?|candidates?|you|commitment|shifts?";
+const EMPLOYEE_HOURS_CONTEXT_RE = new RegExp(`\\b(?:${EMPLOYEE_HOURS_CONTEXT_SOURCE})\\b`, "i");
 const NON_SCHEDULE_WEEKLY_HOURS_RE =
   /\b(?:overtime|volunteer(?:ing)?|benefits?|eligibility|eligible)\b/i;
 const NON_REGULAR_WEEKLY_HOURS_RE = /\b(?:volunteer(?:ing)?|benefits?|eligibility|eligible)\b/i;
@@ -1375,6 +1376,10 @@ const REGULAR_HOURS_RES = [
   /\bregular(?:ly)?(?:\s+schedule)?(?:\s+(?:is|of))?\s*:?\s*(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\b/i,
 ];
 const WEEKLY_UNIT_RE = /(?:\/|per|a|each)\s*week\b/i;
+const LOCAL_WEEKLY_HOURS_BOUNDARY_RE = new RegExp(
+  `(?:,\\s*|\\s+)(?=(?:while|whereas|but)\\b)|,\\s*(?=with\\b)|(?:,\\s*|\\s+and\\s+)(?=(?:(?:the|this|our|your)\\s+)?(?:${EMPLOYEE_HOURS_CONTEXT_SOURCE})\\b)`,
+  "gi"
+);
 const ANNUAL_PAY_UNIT_RE =
   /\b(?:annually|annualized|per\s+(?:year|annum)|a\s+year)\b|\/\s*(?:year|yr)\b/i;
 const CURRENCY_CODE_SOURCE = currencyCodePatternSource();
@@ -1459,11 +1464,21 @@ function annualWorkHours(line) {
     const nextBoundary = after.search(/[.;\n]/);
     const clauseEnd =
       nextBoundary < 0 ? value.length : matchIndex + explicit[0].length + nextBoundary;
-    const clause = value.slice(clauseStart + 1, clauseEnd);
-    const clausePrefix = value.slice(clauseStart + 1, matchIndex);
+    let localClauseStart = clauseStart + 1;
+    let localClauseEnd = clauseEnd;
+    for (const boundary of value
+      .slice(clauseStart + 1, clauseEnd)
+      .matchAll(LOCAL_WEEKLY_HOURS_BOUNDARY_RE)) {
+      const boundaryIndex = clauseStart + 1 + (boundary.index ?? 0);
+      if (boundaryIndex < matchIndex) localClauseStart = boundaryIndex + boundary[0].length;
+      else {
+        localClauseEnd = boundaryIndex;
+        break;
+      }
+    }
+    const clause = value.slice(localClauseStart, localClauseEnd);
     const businessEntityHours =
-      BUSINESS_ENTITY_HOURS_CONTEXT_RE.test(clausePrefix) &&
-      !EMPLOYEE_HOURS_CONTEXT_RE.test(clausePrefix);
+      BUSINESS_HOURS_CONTEXT_RE.test(clause) && !EMPLOYEE_HOURS_CONTEXT_RE.test(clause);
     if (NON_SCHEDULE_WEEKLY_HOURS_RE.test(clause) || businessEntityHours) {
       continue;
     }

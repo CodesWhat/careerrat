@@ -377,6 +377,48 @@ test("CR5: business-entity weekly hours are not employee schedules", () => {
   }
 });
 
+test("CR5 whole-clause: business hours use the default workweek", () => {
+  const businessHoursClauses = [
+    "Open 80 hours/week at this restaurant",
+    "We are open 80 hours/week",
+    "Hours of operation: 80 hours/week",
+    "Restaurant operating schedule: 80 hours/week",
+    "Store work hours: 80 hours/week",
+    "80 hours/week are the restaurant opening hours",
+  ];
+
+  for (const clause of businessHoursClauses) {
+    for (const text of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+      assert.deepEqual(
+        sourcedScanner.extractCompensationBands(text),
+        {
+          base: { min: 41_600, max: 41_600, currency: "USD" },
+          annualEarnings: null,
+        },
+        text
+      );
+    }
+  }
+});
+
+test("CR5 whole-clause: employee hours remain schedules and win mixed clauses", () => {
+  for (const text of [
+    "This role requires 30 hours/week. Pay: $20/hour.",
+    "Pay: $20/hour. Expected commitment is 30 hours/week.",
+    "We are open 80 hours/week. This role requires 30 hours/week. Pay: $20/hour.",
+    "Pay: $20/hour. Expected commitment is 30 hours/week. We are open 80 hours/week.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 31_200, max: 31_200, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
 test("CR5: employee weekly-hours context wins without relying on an employee noun", () => {
   for (const text of [
     "Schedule: 30 hours per week. Pay: $20/hour.",
@@ -386,6 +428,26 @@ test("CR5: employee weekly-hours context wins without relying on an employee nou
     "Facility open 80 hours per week, with a regular schedule of 30 hours per week. Pay: $20/hour.",
     "Regular schedule: 30 hours per week, while the facility is open 80 hours per week. Pay: $20/hour.",
     "Restaurant stays open daily, for 80 hours per week, while employees work 30 hours per week. Pay: $20/hour.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 31_200, max: 31_200, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5: local clause boundaries keep business hours out of employee schedules", () => {
+  for (const text of [
+    ...["but", "while", "whereas"].map(
+      (conjunction) =>
+        `Restaurant open 80 hours/week ${conjunction} employees work 30 hours/week. Pay: $20/hour.`
+    ),
+    "Restaurant open 80 hours/week and employees work 30 hours/week. Pay: $20/hour.",
+    "Restaurant open 80 hours/week, employees work 30 hours/week. Pay: $20/hour.",
   ]) {
     assert.deepEqual(
       sourcedScanner.extractCompensationBands(text),

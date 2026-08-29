@@ -409,3 +409,59 @@ test("CR5: business-entity hours stay out of comparables while generic schedules
 
   assert.equal(estimate("Schedule: 30 hours per week. Pay: $20/hour.")?.midpointK, 31);
 });
+
+test("CR5 whole-clause: business hours never become a comparable workweek", () => {
+  function estimate(base) {
+    return estimateCompFromComparables({
+      role: "Bar Manager",
+      loc: "New York, NY",
+      mode: "onsite",
+      tracker: {
+        applications: [
+          {
+            company: "Whole Clause Co",
+            role: "Bar Manager",
+            loc: "New York, NY",
+            mode: "onsite",
+            base,
+            status: "rejected",
+          },
+        ],
+      },
+      targeting: { role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }] },
+      compFloors: { home_metro: ["New York"] },
+    });
+  }
+
+  const businessHoursClauses = [
+    "Open 80 hours/week at this restaurant",
+    "We are open 80 hours/week",
+    "Hours of operation: 80 hours/week",
+    "Restaurant operating schedule: 80 hours/week",
+    "Store work hours: 80 hours/week",
+    "80 hours/week are the restaurant opening hours",
+  ];
+
+  for (const clause of businessHoursClauses) {
+    for (const base of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+      const result = estimate(base);
+
+      assert.equal(result?.sampleSize, 1, base);
+      assert.equal(result?.midpointK, 42, base);
+      assert.notEqual(result?.midpointK, 83, base);
+    }
+  }
+
+  assert.equal(estimate("This role requires 30 hours/week. Pay: $20/hour.")?.midpointK, 31);
+  assert.equal(estimate("Pay: $20/hour. Expected commitment is 30 hours/week.")?.midpointK, 31);
+  assert.equal(
+    estimate("We are open 80 hours/week. This role requires 30 hours/week. Pay: $20/hour.")
+      ?.midpointK,
+    31
+  );
+  assert.equal(
+    estimate("Pay: $20/hour. Expected commitment is 30 hours/week. We are open 80 hours/week.")
+      ?.midpointK,
+    31
+  );
+});

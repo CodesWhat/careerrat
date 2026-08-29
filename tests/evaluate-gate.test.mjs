@@ -471,6 +471,30 @@ describe("evaluateCompensation", () => {
     }
   });
 
+  it("CR5 whole-clause: business hours never clear a USD 60,000 floor", () => {
+    const businessHoursClauses = [
+      "Open 80 hours/week at this restaurant",
+      "We are open 80 hours/week",
+      "Hours of operation: 80 hours/week",
+      "Restaurant operating schedule: 80 hours/week",
+      "Store work hours: 80 hours/week",
+      "80 hours/week are the restaurant opening hours",
+    ];
+
+    for (const clause of businessHoursClauses) {
+      for (const body of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+        const result = evaluateCompensation({
+          body,
+          frontmatter: {},
+          profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+        });
+
+        assert.equal(result.verdict, "below-floor", body);
+        assert.deepEqual(result.baseBand, { min: 41_600, max: 41_600, currency: "USD" }, body);
+      }
+    }
+  });
+
   it("CR5: reviews an explicit foreign-currency band instead of comparing it to the profile floor", () => {
     const foreign = evaluateCompensation({
       body: "Base salary: GBP 60,000 - 75,000 per year.",
