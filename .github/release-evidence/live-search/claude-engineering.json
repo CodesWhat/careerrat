@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceRevision": "0d968d6deedfb4671666fb8bec05cf16edebe419",
+  "sourceRevision": "3bb786f004b01c74f7134c2ab7facccb5b056664",
   "runtimeId": "claude",
   "fixtureId": "engineering",
   "providerFallback": false,
@@ -26,7 +26,7 @@
     "deterministic": "succeeded",
     "aiWeb": "succeeded"
   },
-  "completedAt": "2026-08-29T05:53:52.431Z",
+  "completedAt": "2026-08-29T13:03:01.411Z",
   "thresholds": {
     "fitFloor": 65,
     "minimumPresentedRows": 3,
@@ -75,7 +75,11 @@
             "status": "completed"
           },
           {
-            "query": "\"Staff Backend Engineer\" remote United States $150,000 site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com OR site:jobs.lever.co",
+            "query": "\"Staff Backend Engineer\" remote United States $150,000 site:jobs.ashbyhq.com",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Backend Engineer\" remote \"United States\" job posting careers -greenhouse",
             "status": "completed"
           }
         ]
@@ -93,11 +97,43 @@
             "status": "completed"
           },
           {
-            "query": "Fora \"Staff Backend Engineer\" New York careers",
+            "query": "\"Staff Platform Engineer\" OR \"Staff Backend Engineer\" \"New York\" hybrid career site 2026",
             "status": "completed"
           },
           {
-            "query": "Amigo \"Staff Backend\" Infra Engineer New York careers job",
+            "query": "\"Staff Backend Engineer\" New York hybrid job site:greenhouse.io",
+            "status": "completed"
+          },
+          {
+            "query": "\"Infrastructure Engineer\" New York hybrid \"2 days\" OR \"two days\" office career site",
+            "status": "completed"
+          },
+          {
+            "query": "Censys \"Staff Backend Engineer\" \"Exposure Management\" New York hybrid days office salary",
+            "status": "completed"
+          },
+          {
+            "query": "Headway infrastructure engineer New York hybrid greenhouse OR lever",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Platform Engineer\" \"New York, NY\" hybrid site:jobs.ashbyhq.com OR site:boards.greenhouse.io OR site:jobs.lever.co",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Backend Engineer\" New York hybrid $150,000 careers",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Platform Engineer\" Ashby jobs.ashbyhq.com \"New York\" salary hybrid",
+            "status": "completed"
+          },
+          {
+            "query": "\"Staff Infrastructure Engineer\" \"New York, NY\" hybrid site:jobs.ashbyhq.com OR site:boards.greenhouse.io OR site:jobs.lever.co",
+            "status": "completed"
+          },
+          {
+            "query": "Fora \"Staff Backend Engineer\" New York hybrid job posting",
             "status": "completed"
           }
         ]
@@ -196,42 +232,42 @@
       "source": "https://jobs.ashbyhq.com/hiive/ef18ebc7-99f6-4cdc-b75c-5f51b518cfad"
     },
     {
-      "identity": "7b086907dfe22a5cbac29071dae87da61854d146ca1f8a6127f306ca646c23ef",
-      "company": "Censys",
-      "role": "Staff Backend Engineer, Exposure Management",
-      "location": "Remote (US/Canada)",
-      "fitScore": 91,
+      "identity": "245ca9d0671546d0f172ed101194e86825e06d736a18ec1751140a99220d817f",
+      "company": "Wealthfront",
+      "role": "Software Engineer – DevOps Platform",
+      "location": "Palo Alto, CA; New York City, NY; San Francisco, CA; Seattle, WA",
+      "fitScore": 82,
       "canonicalReadable": true,
       "discoveryLane": "ai-web",
       "partial": false,
       "unverified": true,
-      "source": "https://job-boards.greenhouse.io/censys/jobs/8540954002"
+      "source": "https://jobs.lever.co/wealthfront/91c149ed-18fa-4e72-a3a6-386840aae86e"
     },
     {
-      "identity": "e36f598d2f0d3c8e62ac669c2221c4f3fcb351e6588292835f16fa58d3dfdc33",
-      "company": "Addepar",
-      "role": "Staff Backend Software Engineer - Platform Integration",
-      "location": "New York, NY",
-      "fitScore": 91,
+      "identity": "002667c971717fdc38c5f95aafb3df86bc8f6f4337d4e15e9cc8a0e65004c068",
+      "company": "Toast",
+      "role": "Staff Software Engineer, Backend",
+      "location": "Remote, US",
+      "fitScore": 82,
       "canonicalReadable": true,
       "discoveryLane": "ai-web",
       "partial": false,
       "unverified": true,
-      "source": "https://job-boards.greenhouse.io/addepar1/jobs/8569217002"
+      "source": "https://careers.toasttab.com/jobs/staff-software-engineer-backend-remote-united-states"
     }
   ],
   "manualLiveness": {
     "verified": true,
     "reviewer": "careerrat-release-agent",
-    "verifiedAt": "2026-08-29T05:56:30.887Z",
+    "verifiedAt": "2026-08-29T13:26:08.199Z",
     "rowIdentities": [
+      "002667c971717fdc38c5f95aafb3df86bc8f6f4337d4e15e9cc8a0e65004c068",
       "0fe547230f3837b7a3498674a79c098da171865271edb9055334e37af19a5011",
+      "245ca9d0671546d0f172ed101194e86825e06d736a18ec1751140a99220d817f",
       "3925ca164da655ce39e55f84d3f708b4e7c355494db98a30ca259c8caa97d8ba",
       "4a560c9ac41a10d3c5792ca4918d6a90e36e4576971a177ff0ee36f4c219c764",
-      "7b086907dfe22a5cbac29071dae87da61854d146ca1f8a6127f306ca646c23ef",
       "8e7cee05f135d37c1c1ef32be67a25fdfbf77c625005201e8c3433fccf4769ab",
-      "c9d88724abf45b5328027d6dbb9637df55937b54cd6bc5d917b5a3331920f665",
-      "e36f598d2f0d3c8e62ac669c2221c4f3fcb351e6588292835f16fa58d3dfdc33"
+      "c9d88724abf45b5328027d6dbb9637df55937b54cd6bc5d917b5a3331920f665"
     ]
   }
 }

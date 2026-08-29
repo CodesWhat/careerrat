@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "sourceRevision": "0d968d6deedfb4671666fb8bec05cf16edebe419",
+  "sourceRevision": "3bb786f004b01c74f7134c2ab7facccb5b056664",
   "runtimeId": "codex",
   "fixtureId": "engineering",
   "providerFallback": false,
@@ -26,7 +26,7 @@
     "deterministic": "succeeded",
     "aiWeb": "succeeded"
   },
-  "completedAt": "2026-08-29T05:52:11.149Z",
+  "completedAt": "2026-08-29T13:05:41.859Z",
   "thresholds": {
     "fitFloor": 65,
     "minimumPresentedRows": 3,
@@ -34,14 +34,14 @@
     "minimumPresentedBuckets": 2
   },
   "counts": {
-    "presentedRows": 7,
-    "distinctRoles": 7,
+    "presentedRows": 8,
+    "distinctRoles": 8,
     "presentedBuckets": 2,
-    "canonicalAiRows": 6,
+    "canonicalAiRows": 8,
     "canonicalAiOverlapRows": 0
   },
   "summary": {
-    "presented": 7,
+    "presented": 8,
     "fitFloor": 65,
     "errors": [],
     "failedPromptIds": []
@@ -115,7 +115,7 @@
     ],
     "errors": [],
     "failedPromptIds": [],
-    "canonicalRows": 6,
+    "canonicalRows": 8,
     "canonicalOverlapRows": []
   },
   "presentedBuckets": [
@@ -124,28 +124,28 @@
   ],
   "rows": [
     {
-      "identity": "c7c129764e8bee88f42c6818116b8f72efeb20c2f5d9e1ed6ea5b56d5fc1a683",
-      "company": "Avenit Ag",
-      "role": "Senior Software Engineer (m/w/d) | Fullstack für KI-Produkte",
-      "location": "Remote in Deutschland, anywhere, DE",
-      "fitScore": 82,
-      "canonicalReadable": true,
-      "discoveryLane": "deterministic",
-      "partial": false,
-      "unverified": false,
-      "source": "https://www.arbeitnow.com/jobs/companies/avenit-ag/remote-senior-software-engineer-fullstack-fur-ki-produkte-424242"
-    },
-    {
       "identity": "900dc4df1eba193bb6a14a44efb5c94c51b85a2c1b90ed645bd16aa18f15e901",
       "company": "AlphaSense",
       "role": "Staff Platform Engineer, Core Cloud Platform",
       "location": "Remote - United States",
-      "fitScore": 91,
+      "fitScore": 87,
       "canonicalReadable": true,
       "discoveryLane": "ai-web",
       "partial": false,
       "unverified": true,
       "source": "https://job-boards.greenhouse.io/alphasense/jobs/8687627002"
+    },
+    {
+      "identity": "881f8d5d82085abc05a70ab327c8bd3b0d03bae3b5e6daa90786cba1a499fb5b",
+      "company": "Wurl",
+      "role": "Staff Platform Engineer",
+      "location": "Remote - United States",
+      "fitScore": 81,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://job-boards.greenhouse.io/wurljobs/jobs/4664949006"
     },
     {
       "identity": "b161c1783fe0840411e6fcd670438ce409de0b8e72f8d9bc66279ab094d6ec67",
@@ -170,6 +170,18 @@
       "partial": false,
       "unverified": true,
       "source": "https://jobs.ashbyhq.com/radar/ee0bf269-c286-4815-86d4-2b19d7b77448"
+    },
+    {
+      "identity": "c7ddd0a345f2863323abe85adc6a89bb5bc5a7416a231c1ccee998f9beb40f9c",
+      "company": "Superstate",
+      "role": "Staff Backend Engineer",
+      "location": "New York City",
+      "fitScore": 82,
+      "canonicalReadable": true,
+      "discoveryLane": "ai-web",
+      "partial": false,
+      "unverified": true,
+      "source": "https://jobs.lever.co/superstate/381b3714-9e17-4190-973c-20f01bfadbb9"
     },
     {
       "identity": "289998b2cade9ca7b6a7b2a6fa0091087f73b49418aa0ff85d84cf21fad33a5e",
@@ -211,13 +223,14 @@
   "manualLiveness": {
     "verified": true,
     "reviewer": "careerrat-release-agent",
-    "verifiedAt": "2026-08-29T05:56:31.142Z",
+    "verifiedAt": "2026-08-29T13:26:08.514Z",
     "rowIdentities": [
       "01f9a21f2a6c806d17d76d110f03a05cf0218e03257f52573794132cfa4f7854",
       "289998b2cade9ca7b6a7b2a6fa0091087f73b49418aa0ff85d84cf21fad33a5e",
+      "881f8d5d82085abc05a70ab327c8bd3b0d03bae3b5e6daa90786cba1a499fb5b",
       "900dc4df1eba193bb6a14a44efb5c94c51b85a2c1b90ed645bd16aa18f15e901",
       "b161c1783fe0840411e6fcd670438ce409de0b8e72f8d9bc66279ab094d6ec67",
-      "c7c129764e8bee88f42c6818116b8f72efeb20c2f5d9e1ed6ea5b56d5fc1a683",
+      "c7ddd0a345f2863323abe85adc6a89bb5bc5a7416a231c1ccee998f9beb40f9c",
       "c98cba1f3009852a18b3ca8a3021fce96e002e42bbb23145c08dc48873eb9208",
       "de3151914cb8f720e513958c7df0ec1cf09481efd2342a1ed8fc31a1ccf141ab"
     ]
