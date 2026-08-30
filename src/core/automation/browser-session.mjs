@@ -180,7 +180,8 @@ export function createBrowserSessionManager({
   return {
     get(options = {}) {
       const platform = String(options.platform || "default");
-      const key = `${platform}\0${String(options.provider || "configured")}`;
+      const visibility = options.headless === true ? "headless" : "visible";
+      const key = `${platform}\0${String(options.provider || "configured")}\0${visibility}`;
       if (sessions.has(key)) return sessions.get(key);
       const session = createSessionImpl({ ...defaults, ...options, platform });
       if (!session?.available) return session;

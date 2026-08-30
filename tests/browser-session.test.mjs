@@ -87,6 +87,34 @@ test("browser session manager keeps a server-selected provider separate from the
   await manager.shutdown();
 });
 
+test("browser session manager keeps hidden and visible Playwright sessions separate", async () => {
+  const created = [];
+  const manager = createBrowserSessionManager({
+    createSessionImpl: (options) => {
+      created.push(options);
+      return { available: true, async close() {} };
+    },
+  });
+
+  const hidden = manager.get({ platform: "linkedin", provider: "playwright", headless: true });
+  const visible = manager.get({ platform: "linkedin", provider: "playwright", headless: false });
+
+  assert.notEqual(hidden, visible);
+  assert.equal(
+    manager.get({ platform: "linkedin", provider: "playwright", headless: true }),
+    hidden
+  );
+  assert.equal(
+    manager.get({ platform: "linkedin", provider: "playwright", headless: false }),
+    visible
+  );
+  assert.deepEqual(created, [
+    { platform: "linkedin", provider: "playwright", headless: true },
+    { platform: "linkedin", provider: "playwright", headless: false },
+  ]);
+  await manager.shutdown();
+});
+
 test("configured sessions expose whether every network request has a pinned public boundary", () => {
   const playwright = createConfiguredBrowserSession({
     repoRoot: "/repo",
