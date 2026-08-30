@@ -182,3 +182,31 @@ test("CR5: company proposals review foreign-currency bands but keep legacy compa
   assert.ok(foreign.proposal.reviewReasons.some((reason) => /comp|currency/i.test(reason)));
   assert.equal(legacy.rejected?.reason, "comp-below-floor");
 });
+
+test("company proposals fall back from a blank nested floor currency", () => {
+  const offer = {
+    company: "Foreign Currency Co",
+    title: "Bar Manager",
+    url: "https://jobs.example.test/company/foreign-currency-blank-floor",
+    baseComp: "GBP 60,000 - 75,000",
+  };
+  const result = buildCompanyProposal(
+    proposalArgs({
+      resolution: {
+        companyName: offer.company,
+        atsProvider: "lever",
+        jobBoardUrl: "https://jobs.example.test/company",
+      },
+      scanResult: { offers: [offer], errors: [] },
+      capturedOffers: [{ bodyChars: 120, bodyPartial: false, ...offer }],
+      context: {
+        currency: "USD",
+        compensationFloors: { currency: "", minimum_base: 85_000 },
+      },
+    })
+  );
+
+  assert.equal(result.rejected, undefined);
+  assert.equal(result.proposal.confidenceTier, "borderline");
+  assert.ok(result.proposal.reviewReasons.some((reason) => /comp|currency/i.test(reason)));
+});

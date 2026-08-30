@@ -652,7 +652,7 @@ export function buildSearchSources(targeting, profile) {
 
   return {
     generator_revision: 1,
-    generator_state: { title_filter },
+    generator_state: { title_filter, location_filter },
     title_filter,
     location_filter,
     searches,

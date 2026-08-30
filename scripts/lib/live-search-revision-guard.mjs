@@ -63,9 +63,13 @@ export function assertExpectedSourceRevision({ repoRoot, expectedRevision }) {
     );
   }
 
-  const status = gitOutput(repoRoot, ["status", "--porcelain", "--untracked-files=all"], {
-    trim: false,
-  });
+  const status = gitOutput(
+    repoRoot,
+    ["status", "--porcelain", "--untracked-files=all", "--no-renames"],
+    {
+      trim: false,
+    }
+  );
   const receiptPrefix = `${LIVE_SEARCH_RECEIPT_DIRECTORY}/`;
   const changedSourcePath = status
     .split(/\r?\n/)

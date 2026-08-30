@@ -365,6 +365,22 @@ test("native AI search revision guard preserves receipt-only drift", () => {
   }
 });
 
+test("native AI search revision guard rejects a staged source rename into release evidence", () => {
+  const repoRoot = committedRepo();
+  try {
+    const expectedRevision = git(repoRoot, ["rev-parse", "HEAD"]);
+    const receiptDirectory = join(repoRoot, ".github/release-evidence/live-search");
+    mkdirSync(receiptDirectory, { recursive: true });
+    git(repoRoot, ["mv", "source.mjs", join(receiptDirectory, "receipt.json")]);
+    assert.throws(
+      () => assertExpectedSourceRevision({ repoRoot, expectedRevision }),
+      /requires a clean source revision \(source\.mjs\)/i
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("native AI search checks the explicit expected revision before setup and after the run", () => {
   const script = readFileSync(
     new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),

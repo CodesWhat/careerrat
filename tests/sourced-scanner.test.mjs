@@ -727,6 +727,22 @@ test("CR5 closeout: adjacent ISO currencies are retained and conflicting markers
   });
 });
 
+test("currency symbols remain compatible with their supported ISO currency families", () => {
+  for (const [text, currency] of [
+    ["Base salary: AUD $90k-$110k.", "AUD"],
+    ["Base salary: NZD $90k-$110k.", "NZD"],
+    ["Base salary: EGP £90k-£110k.", "EGP"],
+  ]) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text).base, {
+      min: 90_000,
+      max: 110_000,
+      currency,
+    });
+  }
+
+  assert.equal(sourcedScanner.extractCompensationBands("Base salary: EUR $90k-$110k.").base, null);
+});
+
 test("hourly throughput does not become base compensation", () => {
   for (const text of [
     "Compensation analysts process 20 calls per hour.",

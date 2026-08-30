@@ -138,7 +138,8 @@ function compensationFloors(context) {
     minimumAnnualEarnings: positiveNumber(
       context?.compensationFloors?.minimum_annual_earnings ?? context?.minimum_annual_earnings
     ),
-    floorCurrency: trimString(context?.compensationFloors?.currency ?? context?.currency),
+    floorCurrency:
+      trimString(context?.compensationFloors?.currency) || trimString(context?.currency),
   };
 }
 

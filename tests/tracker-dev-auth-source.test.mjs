@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
 import * as trackerDev from "../src/cli/tracker-dev.mjs";
+import { searchSourceBrowserSessionOptions } from "../src/core/automation/browser-session.mjs";
 
 const { openAuthenticatedSource } = trackerDev;
 
 const resolvePublic = async (rawUrl) => ({ ok: true, url: new URL(rawUrl).toString() });
 
 test("public configured sources use hidden Playwright sessions", () => {
-  assert.equal(typeof trackerDev.searchSourceBrowserSessionOptions, "function");
   assert.deepEqual(
-    trackerDev.searchSourceBrowserSessionOptions({
+    searchSourceBrowserSessionOptions({
       provider: "HiringCafe",
       source_type: "url-query",
     }),
@@ -21,7 +20,7 @@ test("public configured sources use hidden Playwright sessions", () => {
     }
   );
   assert.deepEqual(
-    trackerDev.searchSourceBrowserSessionOptions({
+    searchSourceBrowserSessionOptions({
       provider: "Wellfound",
       platform: "wellfound",
       source_type: "browser",
@@ -35,9 +34,8 @@ test("public configured sources use hidden Playwright sessions", () => {
 });
 
 test("login-backed configured sources keep visible Playwright sessions", () => {
-  assert.equal(typeof trackerDev.searchSourceBrowserSessionOptions, "function");
   assert.deepEqual(
-    trackerDev.searchSourceBrowserSessionOptions({
+    searchSourceBrowserSessionOptions({
       provider: "LinkedIn",
       platform: "linkedin",
       source_type: "browser",

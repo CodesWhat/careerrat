@@ -1,3 +1,4 @@
+import { formatCurrencyAmount } from "../currency-format.mjs";
 import { appPersistEvaluation } from "../db/verbs/app.mjs";
 import { evaluatePacketGate } from "./gate.mjs";
 
@@ -13,10 +14,7 @@ function formatRange(minValue, maxValue, currency) {
   const max = optionalNumber(maxValue);
   if (min === null && max === null) return null;
   const code = normalizedCurrency(currency);
-  const money = (value) => {
-    const amount = Math.round(value).toLocaleString("en-US");
-    return !code || code === "USD" ? `$${amount}` : `${code} ${amount}`;
-  };
+  const money = (value) => formatCurrencyAmount(Math.round(value), code);
   if (min !== null && max !== null) return `${money(min)} - ${money(max)}`;
   return money(min ?? max);
 }

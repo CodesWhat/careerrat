@@ -1397,6 +1397,27 @@ const COMPENSATION_RANGE_RE = new RegExp(
   "gi"
 );
 
+const SYMBOL_COMPATIBLE_CURRENCY_CODES = {
+  USD: new Set([
+    "ARS",
+    "AUD",
+    "BRL",
+    "CAD",
+    "CLP",
+    "COP",
+    "FJD",
+    "HKD",
+    "MXN",
+    "NZD",
+    "SGD",
+    "TWD",
+    "USD",
+    "UYU",
+  ]),
+  GBP: new Set(["EGP", "FKP", "GBP", "GIP", "LBP", "SDG", "SHP", "SYP"]),
+  EUR: new Set(["EUR"]),
+};
+
 function compensationMatchCurrency(match) {
   const value = String(match?.[0] || "");
   const codes = new Set(
@@ -1414,8 +1435,8 @@ function compensationMatchCurrency(match) {
 
   const code = codes.values().next().value || null;
   const symbol = symbols.values().next().value || null;
-  const dollarCode = code === "USD" || code === "CAD" || code === "MXN";
-  const symbolMatchesCode = !symbol || symbol === code || (symbol === "USD" && dollarCode);
+  const symbolMatchesCode =
+    !symbol || symbol === code || SYMBOL_COMPATIBLE_CURRENCY_CODES[symbol]?.has(code) === true;
   return {
     conflicting: Boolean(code && !symbolMatchesCode),
     currency: code || symbol,
