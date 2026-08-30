@@ -46,19 +46,23 @@ Before tagging a release:
    `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
 10. GitHub release created from the tag with changelog notes.
 
-### 0.16.8 native-runtime evidence exception
+### Native-runtime search certification
 
-Release 0.16.8 carries one explicit exception because the Claude CLI weekly
-subscription quota was exhausted during the hotfix release. It waives only
-`claude/engineering` and `claude/hospitality`. The older Claude receipts are not
-presented as current evidence.
+Native Claude and Codex live-search evidence is a separate product-certification
+check, not a tag or packaged-release prerequisite. Open-web result mix and paid
+runtime availability are external state, so requiring fresh receipts for every
+patch can reject a healthy build after all deterministic product checks pass.
 
-The release still requires fresh, manually reviewed Codex receipts for both
-fixtures at the exact source revision. The verifier prints `EXCEPTION`, not
-`PASS`, and records the reason in release output. This version-scoped exception
-is rejected for every future release, including prereleases. Later releases
-return to the normal four-receipt policy unless that policy is replaced through
-its own reviewed change.
+Run the live fixtures when the native runtime adapters, unified search, search
+workflow, canonical capture, or ranking behavior changes, and on the scheduled
+certification cadence. `npm run qa:native-search:evidence` validates a completed
+evidence set. Keep its exact-source, native-runtime, canonical-readback, and
+manual-liveness checks strict. Do not weaken those checks to make a release pass.
+
+Every release still requires the protected unit, integration, browser, and build
+matrix. The tag pipeline separately verifies deterministic release metadata,
+builds the app, checks the signed tag, signs and notarizes macOS, exercises the
+native updater, and verifies the published artifacts.
 
 ### Desktop Release Pipeline
 
