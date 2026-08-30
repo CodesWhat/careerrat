@@ -65,14 +65,16 @@ test("paid native AI certification is separate from deterministic release gates"
     desktopWorkflow.indexOf("  build-notarize-upload:"),
     desktopWorkflow.indexOf("  build-windows-upload:")
   );
-  assert.equal(pkg.scripts?.["release:pretag"], "node --test tests/release-consistency.test.mjs");
+  assert.equal(
+    pkg.scripts?.["release:pretag"],
+    "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs"
+  );
   assert.equal(
     pkg.scripts?.["qa:native-search:evidence"],
     "node scripts/verify-live-search-receipts.mjs"
   );
-  assert.match(rootVerify, /releaseVersion:\s*pkg\.version/);
-  assert.match(rootVerify, /EXCEPTION native AI search release evidence/);
-  assert.doesNotMatch(rootVerify, /`PASS[^`]*\$\{result\.evidenceStatus/);
+  assert.doesNotMatch(rootVerify, /releaseVersion|EXCEPTION/);
+  assert.match(rootVerify, /PASS native AI search certification evidence/);
   assert.doesNotMatch(desktopVerify, /live-search|Live-search|verifyLiveSearchReceiptDirectory/);
   assert.doesNotMatch(desktopWorkflow, /Verify current native AI search receipts/);
   assert.match(desktopWorkflow, /Verify deterministic release metadata/);
@@ -81,5 +83,6 @@ test("paid native AI certification is separate from deterministic release gates"
     desktopWorkflow,
     /LIVE_SEARCH_(?:SKIP|BYPASS|EXCEPTION)|skip-live-search|bypass-live-search/i
   );
+  assert.doesNotMatch(macReleaseJob, /ANTHROPIC|OPENAI|CLAUDE|CODEX/);
   assert.match(macReleaseJob, /fetch-depth:\s*0/);
 });

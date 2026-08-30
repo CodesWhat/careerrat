@@ -57,7 +57,8 @@ Run the live fixtures when the native runtime adapters, unified search, search
 workflow, canonical capture, or ranking behavior changes, and on the scheduled
 certification cadence. `npm run qa:native-search:evidence` validates a completed
 evidence set. Keep its exact-source, native-runtime, canonical-readback, and
-manual-liveness checks strict. Do not weaken those checks to make a release pass.
+manual-liveness checks strict. The source-checkout command fails when any receipt
+is missing or stale. Do not weaken those checks to make a release pass.
 
 Every release still requires the protected unit, integration, browser, and build
 matrix. The tag pipeline separately verifies deterministic release metadata,

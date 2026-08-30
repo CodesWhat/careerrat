@@ -102,7 +102,7 @@
     "desktop:fresh": "CAREERRAT_HOME=.careerrat-fresh npm run desktop",
     "desktop:dist": "npm --workspace apps/desktop run dist",
     "desktop:release": "npm --workspace apps/desktop run release",
-    "release:pretag": "node --test tests/release-consistency.test.mjs",
+    "release:pretag": "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs",
     "qa:native-search:evidence": "node scripts/verify-live-search-receipts.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

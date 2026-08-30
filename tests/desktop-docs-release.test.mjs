@@ -94,6 +94,7 @@ test("release docs keep paid native-runtime certification off the release blocke
     /separate product-certification[\s\S]{0,120}not a tag or packaged-release prerequisite/i,
     /Open-web result mix[\s\S]{0,120}external state/i,
     /native runtime adapters[\s\S]{0,240}scheduled\s+certification cadence/i,
+    /source-checkout command fails[\s\S]{0,80}missing or stale/i,
     /protected unit, integration, browser, and build\s+matrix/i,
   ]);
 });
