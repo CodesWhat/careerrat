@@ -199,6 +199,14 @@ export async function openAuthenticatedSource(
   }
 }
 
+export function searchSourceBrowserSessionOptions(source = {}) {
+  return {
+    platform: source.platform || source.provider || "search",
+    provider: "playwright",
+    headless: source.auth !== true,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Server creation
 
@@ -304,10 +312,7 @@ export function createDevServer({
     captureBrowserSourceImpl: (source) =>
       captureBrowserSearchSource({
         source,
-        session: browserSessionManager.get({
-          platform: source?.platform || source?.provider || "search",
-          provider: "playwright",
-        }),
+        session: browserSessionManager.get(searchSourceBrowserSessionOptions(source)),
       }),
   }),
 } = {}) {
@@ -464,10 +469,7 @@ export function createDevServer({
     captureBrowserSourceImpl: (source) =>
       captureBrowserSearchSource({
         source,
-        session: browserSessionManager.get({
-          platform: source?.platform || source?.provider || "search",
-          provider: "playwright",
-        }),
+        session: browserSessionManager.get(searchSourceBrowserSessionOptions(source)),
       }),
   });
   mountSourcingRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
