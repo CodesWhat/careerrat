@@ -5,7 +5,7 @@ description: Record application outcomes, execute status transitions in tracker.
 
 # track-outcomes
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 ## STEP 0 — Classify the incoming outcome
 
@@ -71,10 +71,12 @@ If `candidate/targeting.yml#reevaluation` is absent, use defaults: `rejection_to
 Apply the transition:
 
 - **DB workspace:** run
+
   ```
   careerrat data app set-status <id> <to> --note "<statusNote text>" \
     [--follow-up-due <iso>] [--clear-interview|--no-clear-interview]
   ```
+
   One call sets `status` and `statusNote` (via `--note`) and `followUp.dueAt`
   (via `--follow-up-due`), bumps the stamp, refreshes analytics, and logs the
   activity event — all in one transaction. **On round completion** (leaving
@@ -121,6 +123,7 @@ untouched leaves a ghost CTA on every comm-derived render surface (Next Steps
 card, Focus card, Action Queue).
 
 Set `comm.status`:
+
 - Rejection, candidate withdrawal, role closed → `closed`
 - Interview invite, offer received → `waiting` (next round or decision pending)
 - Ghosted/stale being closed out → `closed`
@@ -140,13 +143,17 @@ draft that backed it is gone — then append a note recording what happened.
      `workspace/tracker.json#communications[]`, apply the `status` /
      `nextActionDue: null` / `draft: null` rules above), then persist the whole
      row:
+
      ```
      careerrat data comm upsert --data '<patched full comm row JSON>'
      ```
+
   2. Append the outcome note:
+
      ```
      careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO timestamp>","summary":"<one-liner, e.g. Rejection received — recorded by track-outcomes>"}'
      ```
+
   If `app.followUp.draft` is set and step 1 wasn't itself a `comm mark-sent`
   call, clear it too: `careerrat data app set-fields <app-id> --data
   '{"followUp": {"draft": null}}'`. Neither call refreshes analytics (not
@@ -156,6 +163,7 @@ draft that backed it is gone — then append a note recording what happened.
   1. Set `comm.status`, `comm.nextActionDue = null`, `comm.draft = null` (and
      `app.followUp.draft = null` if present).
   2. Append a note to `comm.messages[]`:
+
      ```json
      { "direction": "note", "at": "<ISO timestamp>", "summary": "<one-liner: what was recorded, e.g. 'Rejection received — recorded by track-outcomes'>" }
      ```
@@ -171,10 +179,12 @@ draft that backed it is gone — then append a note recording what happened.
   app+comm transaction, so the completeness guarantee is on the sequence of
   calls, not one write — run the STEP 2 and STEP 2b calls back-to-back, never
   deferring the comm call. Validate what landed:
+
   ```
   careerrat data verify          # re-exports, then domain integrity: status/score/modes/channels/dupes
   careerrat tracker --verify     # JSON shape/structure vs tracker.schema.json (data verify doesn't run this)
   ```
+
   If either reports errors, the DB row itself is wrong — fix it with another
   `careerrat data app set-fields` / `comm upsert` call (never hand-edit
   `tracker.json`, it is a regenerated file and the next export overwrites it).
@@ -212,10 +222,13 @@ draft that backed it is gone — then append a note recording what happened.
   Contract, AGENTS.md). If `careerrat tracker-dev` is running, its `fs.watch` on
   `tracker.json` already picked this up and live-reloaded the open page —
   nothing further to do. For a recovery checkpoint, still run:
+
   ```
   careerrat tracker
   ```
+
 - **Legacy workspace (no DB):** run:
+
   ```
   careerrat tracker
   ```
@@ -239,12 +252,15 @@ Log the outcome to the Activity Pulse feed (the dashboard's live timeline — se
   append-message` calls each logged their own). For the richer, outcome-specific
   type below, log an additional event — this verb only logs, it never bumps the
   stamp, and there is no `--write`/dry-run flag, every call is a real write:
+
   ```
   careerrat data activity append --data '{"type":"interview","actor":"world","title":"Interview stage — <Company>","summary":"<stage / detail>","refs":{"applicationId":"<application id>","company":"<Company>"}}'
   ```
+
   Swap `type`/`title`/`summary`/`actor` per the categories below (`offer`,
   `status_change`, `failure` with `"needsUser":true` for a blocker).
 - **Legacy workspace (no DB):**
+
   ```
   # interview / screen / onsite advance:
   careerrat activity append --type interview --actor world \
@@ -288,10 +304,13 @@ Keep entries evidence-linked — only record what was actually observed or state
 Write the entry body to a temp file (e.g. `/tmp/learning-body.md`), then:
 
 1. Dry-run (preview + lint):
+
    ```
    careerrat learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md
    ```
+
 2. If the preview looks correct, commit the entry:
+
    ```
    careerrat learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md --write
    ```
@@ -313,6 +332,7 @@ Read `tracker.json#analytics.reevaluation`:
 Also read `tracker.json#analytics.advanced.byFamily` — a cluster of advances or offers concentrated in one family or channel is a signal to double-down on that targeting even when no rejection threshold fired.
 
 If `reevaluation.due` is `true`, hand off to `reevaluate-strategy` and report:
+
 1. The `dueReasons` strings (which thresholds fired).
 2. The `sinceLastReview` counts (delta totals and per-family breakdown).
 

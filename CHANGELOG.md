@@ -4,6 +4,47 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.8] - 2026-08-29
+
+Data-loss hotfix. An npm-installed CareerRat kept your profile, workspace and
+database inside its own package directory, so reinstalling or updating the
+package deleted them without a word. Anyone on 0.16.7 or earlier who installed
+from npm should update before running anything else.
+
+### Fixed
+
+- An npm install now keeps private data at `~/.careerrat`, never inside the
+  installed package. Reinstalling or updating no longer touches it. A git
+  checkout is unchanged and still uses `.careerrat/` beside the code, and
+  `CAREERRAT_HOME` still wins over both.
+- Data left inside a package directory by an older version is detected and
+  reported with the exact command to move it. Nothing is moved automatically,
+  because the destination may already hold newer data. `careerrat update`
+  refuses to run at all while data is stranded there, instead of extracting a
+  fresh package over it.
+- The AI runtime can read your own files again. Its allowlist was pinned to the
+  old top-level layout and separately blocked anything under `.careerrat`, so on
+  a new install every read of your profile or workspace was denied. It now
+  resolves the same paths the rest of CareerRat does, and still denies internal
+  state, the database, and credentials.
+- `careerrat update --help` prints usage instead of being silently swallowed,
+  and an unrecognized flag is reported rather than ignored.
+- A workspace whose only remaining contents are snapshots is recognized as a
+  real workspace, so `careerrat restore` still finds its backups when
+  `tracker.json` is gone. That is the one case restore exists for.
+- The publish-time privacy guard understands the current data layout and refuses
+  a package carrying a `.careerrat/` tree, not just the two older top-level
+  directory names.
+
+### Changed
+
+- `careerrat init` and `careerrat start` print the resolved data root, so where
+  your files live is never a guess.
+- AGENTS.md states the path-resolution rule once, and every skill points at it.
+  Bare `candidate/` and `workspace/` paths in agent instructions are names to
+  resolve, not literal locations, and the rule covers the legacy layout, the
+  data root, `CAREERRAT_HOME`, and the one segment whose name changes.
+
 ## [0.16.7] - 2026-08-29
 
 0.16.6 was tagged but never published: no release assets, no npm publish, no

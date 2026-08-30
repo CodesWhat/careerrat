@@ -40,13 +40,19 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   findInstalledExecutable,
   INSTALLED_RUNTIME_DEFINITIONS,
 } from "../src/core/ai/installed-runtimes.mjs";
-import { displayPath, resolveUserPaths, userPath } from "../src/core/paths/workspace.mjs";
+import {
+  displayPath,
+  privateDataRoot,
+  resolveUserPaths,
+  strandedPackageDataDir,
+  userPath,
+} from "../src/core/paths/workspace.mjs";
 import {
   classifyLocalAppRuntime,
   commandMatchesTrackerScript,
@@ -140,6 +146,12 @@ if (command === "update") {
   process.exit(runUpdate(rest));
 }
 
+// Data left inside the package dir from before the ~/.careerrat anchor fix (an
+// installed package used to default its data root inside itself, which a plain
+// reinstall then silently deleted). `update` has its own hard-refuse check below;
+// every other command just gets a loud, non-blocking heads-up.
+warnIfStrandedPackageData();
+
 // Background-cached "update available" notice for normal commands (never blocks).
 notifyUpdateAvailable();
 
@@ -176,7 +188,8 @@ function runInit(extra) {
   const code = run(join(root, CLIS.ingest), extra);
   if (code === 0) {
     console.log("");
-    console.log("Workspace ready. Open your agent in this folder and say:");
+    console.log(`Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
+    console.log(`Workspace ready. Open your agent in ${agentStartDir()} and say:`);
     console.log(`    ${STARTER_PROMPT}`);
     console.log("Use `careerrat next` anytime to print the current next agent task.");
   }
@@ -211,6 +224,8 @@ async function runStart(extra) {
   const wantDashboard = !opts.noDashboard;
   const wantAgent = !opts.noAgent;
   const forcedAgent = opts.agent;
+
+  console.log(`• Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
 
   // 1) Scaffold workspace dirs (idempotent).
   for (const dir of WORKSPACE_DIRS) {
@@ -283,8 +298,18 @@ async function runStart(extra) {
   return exitCode;
 }
 
+// The agent has to start where AGENTS.md and .agents/skills/ live, which is the
+// install directory, not wherever the user happens to be standing. `careerrat start`
+// already spawns it with cwd: root; this is the same instruction for the manual
+// handoff. Says "this folder" only when that is actually where they are, since on a
+// global npm install it never is.
+function agentStartDir() {
+  if (root === process.cwd()) return "this folder";
+  return root.length > 1 && root.endsWith(sep) ? root.slice(0, -1) : root;
+}
+
 function printManualAgentHandoff(dash) {
-  console.log("Open your agent in this folder and say:");
+  console.log(`Open your agent in ${agentStartDir()} and say:`);
   console.log("");
   console.log(`    ${STARTER_PROMPT}`);
   console.log("");
@@ -487,25 +512,58 @@ function run(scriptPath, extra) {
 }
 
 function parseUpdateArgs(extra) {
-  const out = { tag: "latest", check: false, force: false };
+  const out = { tag: "latest", check: false, force: false, help: false, unknown: [] };
   for (let i = 0; i < extra.length; i++) {
     const a = extra[i];
     if (a === "--check") out.check = true;
     else if (a === "--force") out.force = true;
     else if (a === "--rc") out.tag = "rc";
     else if (a === "--tag") out.tag = extra[++i] || out.tag;
-    else if (a.startsWith("-")) {
-      /* ignore unknown flag */
-    }
+    else if (a === "--help" || a === "-h") out.help = true;
+    else if (a.startsWith("-")) out.unknown.push(a);
   }
   return out;
 }
 
-// `careerrat update` — refresh THIS install's code from the published npm package.
-// Code only: candidate/ and workspace/ are never in the package, so a user's real
-// data is preserved; a privacy guard refuses any tarball that carries user data.
+function printUpdateHelp() {
+  console.log(`Usage: careerrat update [options]
+
+Update this install to the latest published version.
+
+Options:
+  --check       Check for an update without installing it
+  --force       Reinstall even if already up to date
+  --rc          Update to the latest release-candidate tag instead of latest
+  --tag <name>  Update to a specific npm dist-tag
+  --help, -h    Show this help and exit`);
+}
+
+// `careerrat update` refreshes THIS install's code from the published npm package.
+// Code only: candidate/ and workspace/ are never in the published package, and since
+// the ~/.careerrat data-root fix, a fresh install anchors its private data at
+// ~/.careerrat, never inside the package directory, so a plain reinstall can't touch
+// it. An install that predates that fix can still have real data stranded inside its
+// own package dir; runUpdate hard-refuses rather than silently extracting over it.
+// A separate privacy guard refuses any tarball that carries user-data paths.
 function runUpdate(extra) {
   const opts = parseUpdateArgs(extra);
+  if (opts.help) {
+    printUpdateHelp();
+    return 0;
+  }
+  if (opts.unknown.length) {
+    console.error(
+      `Unknown option${opts.unknown.length > 1 ? "s" : ""} for update: ${opts.unknown.join(", ")}`
+    );
+    console.error("");
+    printUpdateHelp();
+    return 1;
+  }
+  const stranded = strandedDataWarning();
+  if (stranded) {
+    console.error(`REFUSING. ${stranded}`);
+    return 1;
+  }
   const current = readVersion();
 
   console.log(`• Checking npm for careerrat@${opts.tag}…`);
@@ -603,6 +661,35 @@ function restartDashboardAfterUpdate({ port }) {
     return 1;
   }
   return result.status == null ? 1 : result.status;
+}
+
+// Builds the stranded-data message, or null when there is nothing stranded. Shared by
+// the CLI-startup warning and update's hard refuse so both describe the same directory
+// the same way.
+function strandedDataWarning() {
+  const stranded = strandedPackageDataDir(pathCtx);
+  if (!stranded) return null;
+  const target = privateDataRoot(pathCtx);
+  if (existsSync(target)) {
+    return (
+      `Found user data still inside the package directory (${stranded}). CareerRat now ` +
+      `keeps private data at ${target}, and that directory already exists too. Reconcile ` +
+      `the two by hand, then remove the copy inside the package.`
+    );
+  }
+  return (
+    `Found user data still inside the package directory (${stranded}), left over from ` +
+    `before CareerRat moved private data out of the package. Move it, then re-run:\n` +
+    `    mv "${stranded}" "${target}"`
+  );
+}
+
+// Cheap existsSync-based check at CLI startup (never a recursive scan). Loud, once per
+// invocation, never auto-moves anything: an automatic move could silently clobber or
+// merge-conflict with different or newer data already at the real root.
+function warnIfStrandedPackageData() {
+  const warning = strandedDataWarning();
+  if (warning) console.error(`! ${warning}`);
 }
 
 // Print a cached "newer version available" notice (no network) and kick a detached,

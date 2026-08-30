@@ -18,7 +18,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveUserPaths } from "../paths/workspace.mjs";
+import { GENERATED_CONFIG_FILES, resolveUserPaths } from "../paths/workspace.mjs";
+
+// Lowercased to match findUserDataLeaks' normalized entries.
+const GENERATED_CONFIG_LEAK_PATHS = new Set(
+  GENERATED_CONFIG_FILES.map((file) => `config/${file}`.toLowerCase())
+);
 
 const UPDATE_CACHE_FILE = "update-check.json";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // re-check the registry at most once a day
@@ -108,6 +113,12 @@ export function fetchTarball(spec) {
 // Privacy guard: tarball entries that carry user data (candidate/ or non-scaffold
 // workspace/). A non-empty result means the published package leaked — refuse to install.
 //
+// The guard covers every path group resolveUserPaths() treats as user-owned, not
+// just the two bare legacy prefixes. ".careerrat/" because the data root moved and
+// candidate/, workspace/, config/, internal/ and the sqlite db now all nest under
+// it. ".internal/" for the legacy top-level layout. And the four generated config
+// files by exact name, since config/ also ships schemas and *.example.* that a
+// prefix match would wrongly reject.
 // Matching is case-insensitive and normalizes path separators/leading "./" before
 // testing, because CareerRat ships on case-insensitive filesystems (APFS, NTFS) where
 // "Candidate/x" and "candidate/x" are the same real path, and a case-sensitive or
@@ -121,6 +132,9 @@ export function findUserDataLeaks(entries) {
       .toLowerCase();
     return (
       /^candidate\//.test(normalized) ||
+      /^\.careerrat\//.test(normalized) ||
+      /^\.internal\//.test(normalized) ||
+      GENERATED_CONFIG_LEAK_PATHS.has(normalized) ||
       (/^workspace\//.test(normalized) && !/\.gitkeep$/.test(normalized))
     );
   });

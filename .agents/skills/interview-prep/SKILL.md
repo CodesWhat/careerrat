@@ -9,7 +9,7 @@ Use this skill when a submitted role advances to recruiter screen, technical
 screen, hiring-manager interview, panel, assessment, or offer conversation.
 Also use it when the user pastes interview notes, a transcript, or a debrief.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing packet summaries, prep briefs, or debrief summaries. Apply the register from AGENTS.md#mode-switches. `exec-summary` = verdict + 2–3 bullet signals; `standard` = scannable packet with section headers; `technical` = full signal analysis + coaching depth; `verbose` = everything including full question lists and story texts.
 
@@ -49,15 +49,19 @@ Read all of the following before doing anything else:
    leave the family as `other`.
 7. Read prior lessons for this role family before building the packet — they
    sharpen fit signals, likely questions, and comp anchoring. Run:
-   ```
+
+   ```sh
    careerrat learnings read "<role title or family>"
    ```
+
    A missing file is normal — the CLI prints a skip note to stderr and exits 0.
 8. Read any company research artifact before building the packet — it sharpens the
    Positioning Thesis and the questions-to-ask. Run:
-   ```
+
+   ```sh
    careerrat research read "<company>"
    ```
+
    A missing file is normal (skip note to stderr, exit 0). If present, fold its
    sourced signals into the Positioning Thesis and Questions To Ask as **context to
    assess** — never as evidence-backed claims. Treat anything marked
@@ -66,9 +70,11 @@ Read all of the following before doing anything else:
    `research-company`. Never copy a research finding into an evidence/résumé claim.
 9. Read the STAR+R **story bank** before building the packet — it holds reusable
    behavioural answers that already trace to evidence. Run:
-   ```
+
+   ```sh
    careerrat stories match "workspace/jobs/<jd-file>.md.json"
    ```
+
    (or `--signals "a,b,c"` when you don't have the JD JSON path). A missing or empty
    bank is normal. The matched stories become the packet's **Prepared Stories**
    section (STEP 2); uncovered behavioural themes (`careerrat stories gaps`) are
@@ -76,9 +82,11 @@ Read all of the following before doing anything else:
    back.
 10. Run `careerrat tracker --summary` to confirm funnel state.
 11. Check usage mode before building a deep multi-audience packet:
-   ```
+
+   ```sh
    careerrat modes allows interview:packet:deep
    ```
+
    If it returns `downshift`, build one lighter packet focused on the actual next
    round rather than recruiter + hiring-manager + panel variants. If it returns
    `run`, proceed normally. Usage mode never changes honesty/evidence requirements.
@@ -140,7 +148,7 @@ Call `renderInterviewPacket()` from `src/core/interview/packet.mjs` with:
 
 Write the rendered output to:
 
-```
+```text
 workspace/interview-prep/<company>-<role>.md
 ```
 
@@ -178,11 +186,12 @@ traps to *never say*. This exists because the most common failure mode is not
 missing prep — it is having the right answer somewhere in the packet and failing
 to retrieve it under pressure. Pull each "say" line from the strongest backing in
 `candidate/evidence.yml`:
-   - **Impact / adoption / "how do you measure success" answers must state the
+
+- **Impact / adoption / "how do you measure success" answers must state the
      actual metric** from the backing claim (deflection rate, dollars saved, time
      cut, count served) — never a qualitative stand-in ("it's taking off,"
      "people love it") when a real number exists in the evidence bank.
-   - **The "can you do X / what are your weaknesses" answers** are scripted as a
+- **The "can you do X / what are your weaknesses" answers** are scripted as a
      constructive reframe — what the candidate does ship and how — followed by a
      calm, factual boundary, never a self-deprecating disclaimer.
    The numbered sections below are the support; this card is what survives the room.
@@ -325,7 +334,7 @@ to retrieve it under pressure. Pull each "say" line from the strongest backing i
 The story bank compounds across loops — build it as you prep, don't restart each
 round. After writing the packet, check behavioural coverage:
 
-```
+```sh
 careerrat stories gaps
 ```
 
@@ -358,15 +367,19 @@ For each uncovered competency (or a Likely Question with no Prepared Story):
    candidate's real details; go generic only on specifics you genuinely don't have
    (never bracket placeholders). List every claim id used in `evidence_ids`.
 3. Write the draft to a temp YAML file and propose it (dry run):
-   ```
+
+   ```sh
    careerrat stories add --file <draft.yml>
    ```
+
    The firewall refuses a story that cites no or unknown evidence, drops a STAR+R
    field, carries placeholder residue, or leaks comp. On the candidate's
    confirmation, commit (atomic upsert by id):
-   ```
+
+   ```sh
    careerrat stories add --file <draft.yml> --write
    ```
+
 4. **Set `open_questions[]` for anything the story is still missing — don't block
    on it.** The candidate's account is truth: bank the story now, then list the
    thin spots (a metric to confirm, a concrete before/after, a version question, a
@@ -609,7 +622,7 @@ Run `careerrat tracker --verify` immediately after. Then write the outcome to th
 
 Run:
 
-```
+```sh
 node src/cli/lint-placeholders.mjs workspace/interview-prep/<company>-<role>.md
 ```
 
@@ -624,7 +637,7 @@ clean.
 After lint passes clean (STEP 4), render the styled PDF — the only export the
 packet ships:
 
-```
+```sh
 careerrat export workspace/interview-prep/<company>-<role>.md --pdf
 ```
 
@@ -642,13 +655,13 @@ a transcript, or a debrief.*
 
 Write a debrief file to:
 
-```
+```text
 workspace/interview-prep/<company>-<role>-<yyyy-mm-dd>.md
 ```
 
 Structure the debrief file with these sections verbatim:
 
-```
+```text
 ## Status
 Outcome: <advancing / rejected / pending / offer / withdrawn>
 Next step: <what and by when>
@@ -682,12 +695,14 @@ Blockers: <open items>
 - `jobs[].nextActionDue` → next-round date when advancing; `null` when terminal or when the ball is with the employer (pending/offer-review).
 - Comm thread (`comm.status`, `comm.nextActionDue`, `comm.nextAction`): update alongside the app fields — `comm.status → "waiting"` when pending/advancing and it is the employer's turn; `comm.status → "closed"` when terminal.
 - `jobs[].followUp`: when the outcome is `advancing`, `pending`, or `offer`, write a follow-up so the Focus card auto-advances past the now-passed interview slot:
+
   ```json
   {
     "dueAt": "<interview date + 1 business day, ISO date>",
     "kind": "post-round-follow-up"
   }
   ```
+
   Compute the due date as the next business day (Mon–Fri) after the interview date in `app.interviewAt` (or `nextInterviewAt`). Use `"post-round-follow-up"` as the `kind` — never use the word "interview" in this field. When the outcome is terminal (`rejected` / `withdrawn`), set `followUp → null` to clear any prior entry.
 
 **Bank what landed.** For each story under "Stories That Landed", record it back to
@@ -800,6 +815,7 @@ concatenate comp, process, and coaching into `notes`:
 ```
 
 Then route the debrief sections to the right place:
+
 - "Status / outcome + next step" → `conversations[].notes` (2 sentences).
 - "Comp-Level Strategy" → `conversations[].compNote` **and** the row-level `app.compNote`.
 - "What's next / process" → `conversations[].processNote`.
@@ -845,7 +861,7 @@ This makes the Focus card and Next Steps CTA reflect the actual next event. A pa
 
 **Legacy workspace (no DB):** after editing `tracker.json`, run in sequence:
 
-```
+```sh
 careerrat tracker --verify
 npm run verify:tracker
 careerrat tracker
@@ -855,7 +871,7 @@ Both verify commands must pass clean before snapshotting.
 
 Then log the packet or debrief to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md):
 
-```
+```sh
 careerrat activity append --type interview --actor agent \
   --title "Interview prep — <Company>" --summary "<packet built / debrief captured>" \
   --company "<Company>" --app-id <application id> --write
@@ -881,7 +897,7 @@ Write the composed body to a temp file, then dry-run (lint) and commit via the
 learnings CLI (the helper creates `candidate/learnings/` and the family file on
 first write):
 
-```
+```sh
 # dry run — lints for placeholders and comp leaks, prints what would be appended
 careerrat learnings append "<role>" --title "<short label>" --body-file <path>
 

@@ -1,11 +1,14 @@
 import { existsSync, readdirSync } from "node:fs";
-import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_PRIVATE_DIR = ".careerrat";
 
 const DEFAULT_REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const GENERATED_CONFIG_FILES = [
+// Exported so the update tarball guard rejects exactly the files the resolver
+// treats as user-owned. Two hand-maintained copies of this list would drift.
+export const GENERATED_CONFIG_FILES = [
   "search-sources.yml",
   "search-sources.json",
   "sourced-scan.json",
@@ -34,6 +37,13 @@ const WORKSPACE_PRIVATE_DIRS = [
   "captures",
   "logos",
   "legacy",
+  // tracker-snapshot.mjs writes rolling backups here (SNAPSHOT_SUBDIR =
+  // "workspace/.snapshots"). It belongs in this list precisely because the case
+  // that needs it is a workspace whose tracker.json is gone or corrupt: that
+  // drops every WORKSPACE_RUNTIME_FILES hit, so without .snapshots the legacy
+  // probe reads a real workspace as empty, repoints at the new data root, and
+  // `careerrat restore` reports zero snapshots at the one moment it matters.
+  ".snapshots",
 ];
 
 function cleanRel(relPath) {
@@ -46,8 +56,41 @@ function envHome({ repoRoot, env = process.env } = {}) {
   return isAbsolute(raw) ? normalize(raw) : resolve(repoRoot, raw);
 }
 
+// True when repoRoot is an npm-installed package tree rather than a git checkout.
+// Every real install shape (global, local/project dependency, npx cache, pnpm's
+// virtual store after symlink resolution) places the package directory as an
+// immediate child of a literal "node_modules" directory; a clone (including a
+// `git worktree add` checkout) never is. Yarn PnP has no physical node_modules and
+// defeats this check, not a currently supported distribution shape: flagged as a
+// known gap rather than solved here.
+export function isPackageInstall(repoRoot) {
+  return basename(dirname(String(repoRoot))) === "node_modules";
+}
+
+// Where private user data anchors when CAREERRAT_HOME is unset: a git checkout keeps
+// the pre-existing repoRoot/.careerrat default (a job search alongside the code being
+// worked on), but an installed package anchors at ~/.careerrat instead. Anchoring an
+// install at the package directory is what let `npm install -g careerrat` (no --force,
+// same version) silently delete a user's tracker/profile/db on reinstall; anchoring at
+// home also means N installs across N project folders share one job search rather than
+// fragmenting into N silos.
+// Prefers the injected env over the process's own home. Every other read in this
+// module goes through `env`, so calling homedir() directly would silently ignore a
+// caller that passed one, which is a footgun for tests and for any embedder that
+// resolves paths for an env other than its own. Falls back to homedir() so the
+// default (env === process.env) is unchanged, including on Windows where the
+// variable is USERPROFILE.
+function userHome(env = process.env) {
+  const raw = String(env.HOME || env.USERPROFILE || "").trim();
+  return raw || homedir();
+}
+
 export function privateDataRoot({ repoRoot = DEFAULT_REPO_ROOT, env = process.env } = {}) {
-  return envHome({ repoRoot, env }) || join(repoRoot, DEFAULT_PRIVATE_DIR);
+  const explicit = envHome({ repoRoot, env });
+  if (explicit) return explicit;
+  return isPackageInstall(repoRoot)
+    ? join(userHome(env), DEFAULT_PRIVATE_DIR)
+    : join(repoRoot, DEFAULT_PRIVATE_DIR);
 }
 
 function hasExplicitHome(env = process.env) {
@@ -93,6 +136,19 @@ export function resolveUserPaths({ repoRoot = DEFAULT_REPO_ROOT, env = process.e
     internalDir: legacyInternal ? join(repoRoot, ".internal") : join(dataRoot, "internal"),
     usingLegacy: legacyCandidate || legacyWorkspace || legacyInternal || legacyConfig,
   };
+}
+
+// Detects data left behind inside the package directory by a prior run under the
+// OLD broken default (privateDataRoot() used to fall back to repoRoot/.careerrat
+// unconditionally, even for an installed package). This is separate from the legacy
+// top-level probe above: that probe looks for pre-.careerrat/ data shapes that are
+// still the correct place to read from; this looks for the wrong-root .careerrat/
+// itself, which the CLI should surface and never move automatically, since an
+// automatic move could clobber different or newer data already at the real root.
+export function strandedPackageDataDir({ repoRoot = DEFAULT_REPO_ROOT } = {}) {
+  if (!isPackageInstall(repoRoot)) return null;
+  const dir = join(repoRoot, DEFAULT_PRIVATE_DIR);
+  return hasNonPlaceholderPayload(dir) ? dir : null;
 }
 
 export function dataPath(options = {}, relPath = "") {

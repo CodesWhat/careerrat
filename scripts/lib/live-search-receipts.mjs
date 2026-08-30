@@ -41,9 +41,9 @@ export function liveSearchReceiptFilename(runtimeId, fixtureId) {
   return `${runtimeId}-${fixtureId}.json`;
 }
 
-function expectedReceiptPaths() {
+function expectedReceiptPaths(combinations = EXPECTED_LIVE_SEARCH_COMBINATIONS) {
   return new Set(
-    EXPECTED_LIVE_SEARCH_COMBINATIONS.map((combination) => {
+    combinations.map((combination) => {
       const [runtimeId, fixtureId] = combination.split("/");
       return `${LIVE_SEARCH_RECEIPT_DIRECTORY}/${liveSearchReceiptFilename(runtimeId, fixtureId)}`;
     })
@@ -582,9 +582,17 @@ export function verifyLiveSearchReceiptDirectory({
     execFileSyncImpl("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" })
   ).trim();
   const directoryPath = resolve(root, receiptDirectory);
-  const names = readdirSyncImpl(directoryPath)
-    .filter((name) => name.endsWith(".json"))
-    .sort();
+  const entries = readdirSyncImpl(directoryPath, { withFileTypes: true });
+  const nonFileEntry = entries.find(
+    (entry) =>
+      typeof entry !== "string" && (typeof entry?.isFile !== "function" || entry.isFile() !== true)
+  );
+  if (nonFileEntry) {
+    throw new Error(
+      `Native AI search receipt directory may contain only regular files, found ${nonFileEntry.name || "unknown entry"}.`
+    );
+  }
+  const names = entries.map((entry) => (typeof entry === "string" ? entry : entry.name)).sort();
   const expectedNames = EXPECTED_LIVE_SEARCH_COMBINATIONS.map((combination) => {
     const [runtimeId, fixtureId] = combination.split("/");
     return liveSearchReceiptFilename(runtimeId, fixtureId);
@@ -613,5 +621,9 @@ export function verifyLiveSearchReceiptDirectory({
           .split(/\r?\n/)
           .filter(Boolean)
       : [];
-  return verifyLiveSearchReceiptSet({ receipts, currentRevision, changedPathsSinceSource });
+  return verifyLiveSearchReceiptSet({
+    receipts,
+    currentRevision,
+    changedPathsSinceSource,
+  });
 }

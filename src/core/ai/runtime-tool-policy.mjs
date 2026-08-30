@@ -1,9 +1,16 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { validatePublicHttpUrl } from "../deep-ingest/source-fetch.mjs";
+import { resolveUserPaths } from "../paths/workspace.mjs";
 
 const FILE_TOOLS = new Set(["Read", "Glob", "Grep"]);
-const BLOCKED_SEGMENTS = new Set([".git", ".internal", ".careerrat", "node_modules"]);
+// ".careerrat" is deliberately NOT here: it's the real data root on both the
+// legacy checkout layout and the home-anchored installed layout, so blocking
+// the segment outright would block the user's own candidate/workspace files.
+// internal/ and db/ under it are still denied below, by resolved root
+// containment rather than by segment name, because the resolver's fallback
+// (workspace.mjs's privateDataRoot) can now point outside repoRoot entirely.
+const BLOCKED_SEGMENTS = new Set([".git", ".internal", "node_modules"]);
 
 function deny(message) {
   return { behavior: "deny", message, interrupt: false };
@@ -32,7 +39,28 @@ function requestedFilePath(toolName, input) {
   return null;
 }
 
-function pathDecision({ repoRoot, skill, toolName, input }) {
+function isEnvFileName(name) {
+  const normalized = name.toLowerCase();
+  return normalized === ".env" || normalized.startsWith(".env.");
+}
+
+function hasBlockedGrepDescendant(root) {
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch (error) {
+    return error?.code !== "ENOTDIR" && error?.code !== "ENOENT";
+  }
+
+  for (const entry of entries) {
+    const normalized = entry.name.toLowerCase();
+    if (isEnvFileName(normalized) || BLOCKED_SEGMENTS.has(normalized)) return true;
+    if (entry.isDirectory() && hasBlockedGrepDescendant(join(root, entry.name))) return true;
+  }
+  return false;
+}
+
+function pathDecision({ repoRoot, env, skill, toolName, input }) {
   const rawPath = requestedFilePath(toolName, input);
   if (typeof rawPath !== "string" || !rawPath.trim()) {
     return deny(`${toolName} requires an explicit path inside an approved CareerRat data root`);
@@ -40,22 +68,39 @@ function pathDecision({ repoRoot, skill, toolName, input }) {
 
   const canonicalRepo = nearestCanonicalPath(resolve(repoRoot));
   const target = nearestCanonicalPath(resolve(repoRoot, rawPath));
-  const candidateRoot = join(canonicalRepo, "candidate");
-  const privateFormDefaults = join(candidateRoot, "form-defaults.yml");
-  const rel = relative(canonicalRepo, target);
-  const segments = rel.split(/[\\/]+/).filter(Boolean);
   const leaf = basename(target).toLowerCase();
-  if (
-    rel.startsWith("..") ||
-    isAbsolute(rel) ||
-    segments.some((segment) => BLOCKED_SEGMENTS.has(segment)) ||
-    leaf === ".env" ||
-    leaf.startsWith(".env.")
-  ) {
+  if (isEnvFileName(leaf)) {
     return deny(
       `${toolName} cannot access credentials, internal state, or paths outside CareerRat`
     );
   }
+
+  // Same anchor resolution every other caller of userPath/dataPath goes
+  // through (workspace.mjs's resolveUserPaths), so the allowlist tracks
+  // wherever privateDataRoot() actually put the data — legacy top-level,
+  // repoRoot/.careerrat, or (installed package) ~/.careerrat — instead of a
+  // hardcoded join(canonicalRepo, ...) that only ever matched the legacy
+  // shape.
+  const paths = resolveUserPaths({ repoRoot, env });
+  const candidateRoot = nearestCanonicalPath(resolve(paths.candidateDir));
+  const workspaceRoot = nearestCanonicalPath(resolve(paths.workspaceDir));
+  const configRoot = nearestCanonicalPath(resolve(paths.generatedConfigDir));
+  const internalRoot = nearestCanonicalPath(resolve(paths.internalDir));
+  const dbRoot = nearestCanonicalPath(resolve(join(paths.dataRoot, "db")));
+  const privateFormDefaults = join(candidateRoot, "form-defaults.yml");
+
+  // internal/ and the sqlite db/ never leave this check to the resolver's
+  // legacy/installed branching above: dataRoot can now sit outside
+  // canonicalRepo entirely (~/.careerrat), and the installed layout's
+  // internal dir is named "internal" (no dot), which the bare ".internal"
+  // entry in BLOCKED_SEGMENTS never matched anyway. Denying by resolved
+  // root containment catches both shapes the same way.
+  if (isWithin(internalRoot, target) || isWithin(dbRoot, target)) {
+    return deny(
+      `${toolName} cannot access credentials, internal state, or paths outside CareerRat`
+    );
+  }
+
   if (
     target === privateFormDefaults ||
     (toolName === "Grep" &&
@@ -67,20 +112,48 @@ function pathDecision({ repoRoot, skill, toolName, input }) {
   }
 
   const allowedRoots = [
+    // Shipped assets: always anchored to the install root, never the data
+    // root, so these stay reachable regardless of where user data resolves.
     join(canonicalRepo, ".agents", "skills", skill),
-    candidateRoot,
-    join(canonicalRepo, "workspace"),
-    join(canonicalRepo, "config"),
     join(canonicalRepo, "templates"),
+    join(canonicalRepo, "config"),
+    // User data: wherever the resolver actually put it.
+    candidateRoot,
+    workspaceRoot,
+    configRoot,
   ];
   const allowedFiles = new Set([
     join(canonicalRepo, "AGENTS.md"),
     join(canonicalRepo, "README.md"),
     join(canonicalRepo, "package.json"),
   ]);
-  if (!allowedFiles.has(target) && !allowedRoots.some((root) => isWithin(root, target))) {
+  const matchedRoot = allowedRoots.find((root) => isWithin(root, target));
+  if (!allowedFiles.has(target) && !matchedRoot) {
     return deny(`${toolName} path is outside the approved CareerRat runtime roots`);
   }
+
+  // Defense in depth against a stray .git/.internal/node_modules nested
+  // *inside* an otherwise-approved root (e.g. workspaceDir/foo/node_modules).
+  // Scoped to the suffix under the matched root rather than the full
+  // absolute path: an installed package's own repoRoot sits under a literal
+  // node_modules ancestor by construction, so scanning the whole path would
+  // deny every read of the package's own shipped skills/templates/config.
+  if (matchedRoot) {
+    const suffix = relative(matchedRoot, target);
+    const segments = suffix.split(/[\\/]+/).filter(Boolean);
+    if (segments.some((segment) => BLOCKED_SEGMENTS.has(segment))) {
+      return deny(
+        `${toolName} cannot access credentials, internal state, or paths outside CareerRat`
+      );
+    }
+  }
+
+  if (toolName === "Grep" && hasBlockedGrepDescendant(target)) {
+    return deny(
+      `${toolName} cannot recursively scan directories containing credentials or internal state`
+    );
+  }
+
   return { behavior: "allow" };
 }
 
@@ -98,13 +171,13 @@ function skillDecision(skill, input) {
     : deny(`only the selected skill "${skill}" may run in this session`);
 }
 
-export function createRuntimeToolPolicy({ repoRoot, skill, tools = [] } = {}) {
+export function createRuntimeToolPolicy({ repoRoot, skill, tools = [], env = process.env } = {}) {
   const allowedTools = new Set(tools);
 
   function evaluate(toolName, input = {}) {
     if (!allowedTools.has(toolName))
       return deny(`tool "${toolName}" is not in this runtime profile`);
-    if (FILE_TOOLS.has(toolName)) return pathDecision({ repoRoot, skill, toolName, input });
+    if (FILE_TOOLS.has(toolName)) return pathDecision({ repoRoot, env, skill, toolName, input });
     if (toolName === "WebFetch") return webFetchDecision(input);
     if (toolName === "WebSearch") return { behavior: "allow" };
     if (toolName === "Skill") return skillDecision(skill, input);

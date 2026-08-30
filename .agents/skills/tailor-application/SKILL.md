@@ -5,7 +5,7 @@ description: Generate finished, honest role-specific resumes, cover letters, sho
 
 # tailor-application
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 ## STEP 0 — Prerequisites: gate check
 
@@ -13,13 +13,15 @@ Read the current session context for the `evaluate-job` output block. Confirm it
 contains `GATE: KEEP` or `GATE: REVIEW` for this role.
 
 - If the gate output is present, echo the full block:
-  ```
+
+  ```text
   GATE: KEEP|REVIEW - <reason>
   FIT: <band> <score> - <why>
   COMP: <verdict> - <reason>
   COMP ANCHOR: <expected salary to state> - <rationale>
   ACTION: <action>
   ```
+
 - If the gate output is missing, run `evaluate-job` now before proceeding.
 - If `FIT` is stretch (score < `candidate/targeting.yml#fit_bands.med_min`, default
   65), warn: "FIT is stretch — tailoring will require stronger narrative framing.
@@ -52,12 +54,15 @@ analysis defaults only when both are absent. Record the resolved family (e.g. `f
 ## STEP 2 — Load learning context
 
 Run:
-```
+
+```sh
 careerrat learnings read "<role>"
 ```
+
 The helper classifies the role-family from `targeting.yml` and prints the learning file to stdout. If no file exists for this family it prints a skip note to stderr and exits 0 — a missing file is normal, never an error.
 
 When present, extract and note:
+
 - Positioning that has landed well for this track
 - Bullet phrasings that resonate with reviewers
 - Keywords that appear to match
@@ -124,6 +129,7 @@ Rules (all non-negotiable):
 **Always produce a cover letter whenever the application accepts one.** It is a second
 keyword-matching surface for the ATS and a free chance to reinforce fit, so it is the
 default, not an optional extra. Produce one when **any** of the following is true:
+
 - The application form has a cover-letter field — **required OR optional** (an optional
   field still means it accepts one; fill it)
 - The application is sent by email or as an attachment, so a cover letter can ride along
@@ -194,7 +200,8 @@ hand off to `email-comms` instead.
 ## STEP 7 — Placeholder lint
 
 Run:
-```
+
+```sh
 node src/cli/lint-placeholders.mjs workspace/tailored/
 ```
 
@@ -205,7 +212,7 @@ Do not mark any artifact as upload-ready or build-ready until this exits 0.
 Then log the tailored artifacts to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md). One event per tailoring run:
 
-```
+```sh
 careerrat activity append --type tailored --actor agent \
   --title "Tailored application — <Company>" --summary "<what was built, e.g. 'résumé + cover letter'>" \
   --company "<Company>" --role "<Role>" --app-id <application id> --write
@@ -220,7 +227,7 @@ it with the user, not deleting it, is the fix.)
 write the produced artifact paths back to the application row in a single
 `tracker.json` write before proceeding to STEP 8 or STEP 12:
 
-```
+```text
 applications[<id>].artifacts.resume      = "workspace/tailored/<Company> — <Role>.md"
 applications[<id>].artifacts.coverLetter = "<cover letter path or inline text, if produced>"
 applications[<id>].artifacts.answers     = "workspace/tailored/<Company> — <Role> — answers.md" (when form answers were produced)
@@ -229,7 +236,7 @@ applications[<id>].artifacts.resumeNote  = "<one-line tailoring approach>"
 
 Then run the AGENTS.md verify+snapshot gate:
 
-```
+```sh
 careerrat tracker --verify && careerrat tracker
 ```
 
@@ -258,10 +265,12 @@ Read `candidate/profile.yml#candidate.toolchain` (set at onboarding via
 > STEP 11b for any PDF you intend to upload.
 
 **a. `pandoc`:**
-```
+
+```sh
 pandoc "workspace/tailored/<Company> — <Role>.md" -o "workspace/tailored/<Company> — <Role>.docx"
 soffice --headless --convert-to pdf "workspace/tailored/<Company> — <Role>.docx"
 ```
+
 `soffice` is the optional PDF-conversion companion; if it is not installed, mark
 the artifact as `.docx` upload and skip the PDF step.
 
@@ -273,9 +282,11 @@ fails, fix the source and rebuild.
 For PDF, prefer STEP 11b (`careerrat export … --pdf`) — `soffice` opens a raw
 `.md` as plain text and will not render Markdown structure reliably. Use
 LibreOffice only as a last-resort fallback when the bundled export can't run:
-```
+
+```sh
 soffice --headless --convert-to pdf "workspace/tailored/<Company> — <Role>.md"
 ```
+
 If you do fall back to this, eyeball the `.pdf` before marking it the upload
 artifact (1–2 pages, correct font, all black, ASCII, hyphen bullets).
 
@@ -325,9 +336,11 @@ inform keyword and narrative choices. If the session has already reached this po
 without the check, run it now as a final review.
 
 If the role-family has prior tracked applications, run:
-```
+
+```sh
 npm run analyze:outcomes -- --summary
 ```
+
 Scan for rejection patterns in this family or fit band. If a known reject signal
 appears in the current resume framing, flag it and offer to adjust before handing
 off.
@@ -340,7 +353,7 @@ step.
 After artifacts pass placeholder lint (STEP 7) and ATS-safe validation, render
 print-quality output on request or when the user needs a file for upload/print:
 
-```
+```sh
 careerrat export workspace/tailored/<Company> — <Role>.md --pdf --ats   # the copy you upload to an ATS
 careerrat export workspace/tailored/<Company> — <Role>.md --pdf          # brand/print copy (Geist)
 careerrat export workspace/tailored/<Company> — <Role>.md --pdf --docx
@@ -363,7 +376,7 @@ document title (defaults to the file's stem).
 renders (resume and cover letter), copy it there unconditionally, under the
 per-company folder (Artifact Contract: organized by company, then by round):
 
-```
+```text
 ~/Downloads/careerrat/<Company>/<Company> - Resume.pdf
 ~/Downloads/careerrat/<Company>/<Company> - Cover Letter.pdf   # if produced
 ```
@@ -378,7 +391,8 @@ truth; Downloads is a convenience copy for quick access. Plain-text artifacts
 ## STEP 12 — Hand off
 
 Confirm final artifact locations:
-```
+
+```text
 workspace/tailored/<Company> — <Role>.md
 workspace/tailored/<Company> — <Role>.docx   (if built)
 workspace/tailored/<Company> — <Role>.pdf    (if built)
@@ -401,7 +415,7 @@ artifacts to the user, scan `communications[]` for any thread on this role where
 a cover letter. If such a thread exists, include these fields in the SAME
 `tracker.json` write:
 
-```
+```text
 thread.status        = "waiting"
 thread.nextActionDue = null
 thread.nextAction    = "Await recruiter response"   # rewrite to reflect what's next
@@ -415,7 +429,7 @@ the same write. A ghost comm CTA is a broken contract (see AGENTS.md
 
 After any write at this step, run the verify+snapshot gate again:
 
-```
+```sh
 careerrat tracker --verify && careerrat tracker
 ```
 

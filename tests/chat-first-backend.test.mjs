@@ -2499,6 +2499,75 @@ test("application mission attempts freeze their provider-neutral plan and reuse 
   );
 });
 
+test("a promoted sourced application resumes its retained submit handoff by application id", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  const { sourcedUpsertBatch } = await import("../src/core/db/verbs.mjs");
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "source-promoted-handoff",
+        company: "Promoted Handoff Corp",
+        role: "Operations Manager",
+        status: "sourced",
+      },
+    ],
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-promoted-handoff",
+    jobs: [{ type: "sourced", id: "source-promoted-handoff" }],
+  });
+
+  const seen = [];
+  const executeIntent = async ({ intent }) => {
+    seen.push(intent);
+    if (intent.type === "sourced.promote") {
+      return { operationResult: { id: "app-promoted-handoff" } };
+    }
+    return {
+      operationResult: { ok: true },
+      ...(intent.type === "job.prepare-submit"
+        ? { messages: [{ metadata: { state: "awaiting-submit" } }] }
+        : {}),
+    };
+  };
+
+  const prepared = await api.missionRun({
+    repoRoot,
+    id: "mission-promoted-handoff",
+    executeIntent,
+  });
+  assert.equal(prepared.mission.status, "paused");
+  const prepareStep = prepared.mission.steps.find((step) => step.action === "prepare-submit");
+  assert.equal(prepareStep.result.applicationId, "app-promoted-handoff");
+
+  const db = openDb({ repoRoot });
+  const legacyStep = JSON.parse(
+    db
+      .prepare("SELECT data FROM mission_steps WHERE mission_id = ? AND id = ?")
+      .get("mission-promoted-handoff", prepareStep.id).data
+  );
+  delete legacyStep.result.applicationId;
+  db.prepare("UPDATE mission_steps SET data = ? WHERE mission_id = ? AND id = ?").run(
+    JSON.stringify(legacyStep),
+    "mission-promoted-handoff",
+    prepareStep.id
+  );
+
+  const resumed = await api.missionResume({
+    repoRoot,
+    id: "mission-promoted-handoff",
+    focusApplicationId: "app-promoted-handoff",
+    executeIntent,
+  });
+
+  assert.equal(resumed.mission.status, "paused");
+  assert.equal(seen.at(-1).type, "job.prepare-submit");
+  assert.equal(seen.at(-1).input.focusSession, true);
+});
+
 test("mission execution pauses an expired uncertain operation instead of replaying it and refuses a live lease", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();

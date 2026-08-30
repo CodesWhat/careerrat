@@ -5,7 +5,7 @@ description: When CareerRat itself looks broken — a crash, stack trace, non-ze
 
 # report-issue
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: the Privacy Invariant (`current_base` and every piece of candidate PII never leave the machine), the Honesty Firewall (report what actually happened — never invent a repro or a symptom), and the Domain-Neutral Rule. Filing an issue is an **outbound publish to a public repo**: the per-invocation confirm-first gate and the redaction rules below are mandatory, not optional.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: the Privacy Invariant (`current_base` and every piece of candidate PII never leave the machine), the Honesty Firewall (report what actually happened — never invent a repro or a symptom), and the Domain-Neutral Rule. Filing an issue is an **outbound publish to a public repo**: the per-invocation confirm-first gate and the redaction rules below are mandatory, not optional. Bare `candidate/` and `workspace/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`). `exec-summary` = one line ("found a bug in X — want me to file it?") then just the link; `standard` = short diagnosis + the rendered issue preview; `verbose` = full diagnostics before the preview.
 

@@ -46,6 +46,25 @@ Before tagging a release:
    `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
 10. GitHub release created from the tag with changelog notes.
 
+### Native-runtime search certification
+
+Native Claude and Codex live-search evidence is a separate product-certification
+check, not a tag or packaged-release prerequisite. Open-web result mix and paid
+runtime availability are external state, so requiring fresh receipts for every
+patch can reject a healthy build after all deterministic product checks pass.
+
+Run the live fixtures when the native runtime adapters, unified search, search
+workflow, canonical capture, or ranking behavior changes, and on the scheduled
+certification cadence. `npm run qa:native-search:evidence` validates a completed
+evidence set. Keep its exact-source, native-runtime, canonical-readback, and
+manual-liveness checks strict. The source-checkout command fails when any receipt
+is missing or stale. Do not weaken those checks to make a release pass.
+
+Every release still requires the protected unit, integration, browser, and build
+matrix. The tag pipeline separately verifies deterministic release metadata,
+builds the app, checks the signed tag, signs and notarizes macOS, exercises the
+native updater, and verifies the published artifacts.
+
 ### Desktop Release Pipeline
 
 The public trust rules for both platforms are in the

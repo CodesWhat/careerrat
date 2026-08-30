@@ -5,7 +5,7 @@ description: "Interview a new candidate to produce all user-layer config files: 
 
 # ingest-profile
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 > **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing any summary or explanation output. Apply the register semantics from AGENTS.md#mode-switches. This skill's interview is conversational by design, but **step confirmations, progress summaries, and section wrap-ups** must respect the register — e.g. `exec-summary` means a one-line "Got it — moving to targets" not a paragraph recap. Do not ask for a voice mode during initial setup; keep the stored value or use `standard`.
 
@@ -482,7 +482,8 @@ continues the search.
 **Session browser — use the connection already available.** Keep the provider set to
 `auto` unless the user explicitly changes it. CareerRat selects Orca inside an Orca
 workspace, then a compatible browser extension or a Playwright persistent profile
-(`~/.careerrat/board-profiles/<platform>`) when available. The browser session holds the
+(`<data root>/board-profiles/<platform>`, data root per AGENTS.md's Path
+Resolution rule) when available. The browser session holds the
 user's logins; CareerRat never stores site credentials. All skill prose says "use the
 session browser" because the concrete provider is an implementation detail. See
 `docs/BROWSER.md` and the Browser Automation Contract in `AGENTS.md`.
