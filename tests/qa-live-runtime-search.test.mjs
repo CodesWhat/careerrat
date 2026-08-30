@@ -1,18 +1,31 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { assertExpectedSourceRevision } from "../scripts/lib/live-search-revision-guard.mjs";
 
+const GIT_REPOSITORY_ENV_VARS = execFileSync("git", ["rev-parse", "--local-env-vars"], {
+  encoding: "utf8",
+})
+  .trim()
+  .split(/\r?\n/)
+  .filter(Boolean);
+
+function withoutGitRepositoryEnv(env = process.env) {
+  const isolated = { ...env };
+  for (const name of GIT_REPOSITORY_ENV_VARS) delete isolated[name];
+  return isolated;
+}
+
 function git(repoRoot, args) {
   return execFileSync("git", args, {
     cwd: repoRoot,
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...withoutGitRepositoryEnv(),
       GIT_AUTHOR_NAME: "CareerRat Test",
       GIT_AUTHOR_EMAIL: "test@careerrat.invalid",
       GIT_COMMITTER_NAME: "CareerRat Test",
@@ -21,14 +34,60 @@ function git(repoRoot, args) {
   }).trim();
 }
 
-function committedRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-live-search-revision-"));
+function committedRepo(repoRoot = mkdtempSync(join(tmpdir(), "careerrat-live-search-revision-"))) {
   git(repoRoot, ["init", "--quiet"]);
   writeFileSync(join(repoRoot, "source.mjs"), "export const value = 1;\n", "utf8");
   git(repoRoot, ["add", "source.mjs"]);
   git(repoRoot, ["commit", "--quiet", "-m", "test: initial source"]);
   return repoRoot;
 }
+
+test("revision guard fixtures ignore an inherited Git repository context", () => {
+  const sentinelRoot = mkdtempSync(join(tmpdir(), "careerrat-git-context-sentinel-"));
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "careerrat-live-search-revision-"));
+  const isolatedEnv = withoutGitRepositoryEnv();
+  const previousGitContext = new Map(
+    GIT_REPOSITORY_ENV_VARS.map((name) => [name, process.env[name]])
+  );
+  let setupError = null;
+
+  try {
+    execFileSync("git", ["init", "--quiet"], { cwd: sentinelRoot, env: isolatedEnv });
+    process.env.GIT_DIR = join(sentinelRoot, ".git");
+    process.env.GIT_WORK_TREE = sentinelRoot;
+    try {
+      committedRepo(fixtureRoot);
+    } catch (error) {
+      setupError = error;
+    }
+    assert.ifError(setupError);
+    assert.equal(
+      realpathSync(
+        execFileSync("git", ["rev-parse", "--show-toplevel"], {
+          cwd: fixtureRoot,
+          encoding: "utf8",
+          env: isolatedEnv,
+        }).trim()
+      ),
+      realpathSync(fixtureRoot)
+    );
+    const expectedRevision = git(fixtureRoot, ["rev-parse", "HEAD"]);
+    let guardError = null;
+    try {
+      assertExpectedSourceRevision({ repoRoot: fixtureRoot, expectedRevision });
+    } catch (error) {
+      guardError = error;
+    }
+    assert.ifError(guardError);
+  } finally {
+    for (const [name, value] of previousGitContext) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(sentinelRoot, { recursive: true, force: true });
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
 
 test("both native AI search fixtures require three presented roles across two target buckets", () => {
   const script = readFileSync(

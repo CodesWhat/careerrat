@@ -2,10 +2,35 @@ import { execFileSync } from "node:child_process";
 
 import { LIVE_SEARCH_RECEIPT_DIRECTORY } from "./live-search-receipts.mjs";
 
+const GIT_REPOSITORY_ENV_VARS = [
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CONFIG",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_CONFIG_COUNT",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_GRAFT_FILE",
+  "GIT_INDEX_FILE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_PREFIX",
+  "GIT_SHALLOW_FILE",
+  "GIT_COMMON_DIR",
+];
+
+function gitEnvironmentWithoutRepositoryContext(env = process.env) {
+  const isolated = { ...env };
+  for (const name of GIT_REPOSITORY_ENV_VARS) delete isolated[name];
+  return isolated;
+}
+
 function gitOutput(repoRoot, args, { trim = true } = {}) {
   const output = execFileSync("git", args, {
     cwd: repoRoot,
     encoding: "utf8",
+    env: gitEnvironmentWithoutRepositoryContext(),
     stdio: ["ignore", "pipe", "pipe"],
   });
   return trim ? output.trim() : output;
