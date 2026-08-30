@@ -231,6 +231,56 @@ test("the 0.16.8 Claude exception fails closed outside its exact release, shape,
   );
 });
 
+test("the release evidence directory rejects renamed receipts and subdirectories", async () => {
+  const receiptModule = await loadReceiptModule();
+  const receipts = await Promise.all([
+    acceptedReceipt("codex", "engineering", SOURCE_REVISION),
+    acceptedReceipt("codex", "hospitality", SOURCE_REVISION),
+  ]);
+  const files = new Map([
+    ["codex-engineering.json", JSON.stringify(receipts[0])],
+    ["codex-hospitality.json", JSON.stringify(receipts[1])],
+    [
+      "v0.16.8-exception.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        releaseVersion: "0.16.8",
+        waivedCombinations: ["claude/engineering", "claude/hospitality"],
+        reasonCode: "claude-cli-weekly-quota-exhausted",
+        decisionDate: "2026-08-30",
+        authorizedBy: "release-owner",
+      }),
+    ],
+  ]);
+  const execFileSyncImpl = (_command, args) => {
+    if (args[0] === "status") return "";
+    if (args[0] === "rev-parse") return `${SOURCE_REVISION}\n`;
+    throw new Error(`Unexpected git command: ${args.join(" ")}`);
+  };
+  const readFileSyncImpl = (path) => files.get(String(path).split("/").at(-1));
+  const verify = (entries) =>
+    receiptModule.verifyLiveSearchReceiptDirectory({
+      repoRoot: "/repo",
+      releaseVersion: "0.16.8",
+      execFileSyncImpl,
+      readFileSyncImpl,
+      readdirSyncImpl: () => entries,
+    });
+
+  assert.throws(
+    () => verify([...files.keys(), "claude-engineering.json.disabled"]),
+    /must contain exactly/i
+  );
+  assert.throws(
+    () =>
+      verify([
+        ...[...files.keys()].map((name) => ({ name, isFile: () => true })),
+        { name: "archive", isFile: () => false },
+      ]),
+    /regular files/i
+  );
+});
+
 test("native AI search receipt gate rejects missing, stale, fallback, weak, or unreviewed evidence", async () => {
   const receiptModule = await loadReceiptModule();
   assert.equal(typeof receiptModule.verifyLiveSearchReceiptSet, "function");

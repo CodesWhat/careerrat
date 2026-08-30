@@ -662,9 +662,17 @@ export function verifyLiveSearchReceiptDirectory({
     execFileSyncImpl("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" })
   ).trim();
   const directoryPath = resolve(root, receiptDirectory);
-  const names = readdirSyncImpl(directoryPath)
-    .filter((name) => name.endsWith(".json"))
-    .sort();
+  const entries = readdirSyncImpl(directoryPath, { withFileTypes: true });
+  const nonFileEntry = entries.find(
+    (entry) =>
+      typeof entry !== "string" && (typeof entry?.isFile !== "function" || entry.isFile() !== true)
+  );
+  if (nonFileEntry) {
+    throw new Error(
+      `Native AI search receipt directory may contain only regular files, found ${nonFileEntry.name || "unknown entry"}.`
+    );
+  }
+  const names = entries.map((entry) => (typeof entry === "string" ? entry : entry.name)).sort();
   const exceptionRelease = releaseVersion === RELEASE_EXCEPTION_VERSION;
   const expectedCombinations = exceptionRelease
     ? EXPECTED_LIVE_SEARCH_COMBINATIONS.filter(
