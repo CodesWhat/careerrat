@@ -58,10 +58,7 @@ import {
   sourcingRunLatest,
   sourcingRunStart,
 } from "../core/db/verbs/sourcing-runs.mjs";
-import {
-  countDeterministicSources,
-  healSearchSourceConfig,
-} from "../core/onboarding/first-search-run.mjs";
+import { healSearchSourceConfig } from "../core/onboarding/first-search-run.mjs";
 import {
   compactDeterministicCoverage,
   runAiWebSearch as defaultRunAiWebSearch,
@@ -327,21 +324,10 @@ export function mountSearchRoutes({
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/search/sources", (_req, res) => {
     try {
-      let searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
+      const healed = healSearchSourceConfig({ repoRoot, env });
+      const searchSources = healed.searchSources;
       const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
-      let deterministicSources = countDeterministicSources({ searchSources, sourcedScan });
-      // Self-heal on the read path (see healSearchSourceConfig's own header
-      // comment): a pre-6de6fa6b install can be stuck at zero deterministic
-      // sources forever otherwise, since the only repair path used to be
-      // search-time-only. Only attempted when the stored count is already 0
-      // — never on every load — and it makes no AI calls.
-      if (deterministicSources.attempted === 0) {
-        const healed = healSearchSourceConfig({ repoRoot, env });
-        if (healed.healed) {
-          searchSources = healed.searchSources;
-          deterministicSources = healed.deterministicSources;
-        }
-      }
+      const deterministicSources = healed.deterministicSources;
       const list = Array.isArray(searchSources.searches) ? searchSources.searches : [];
       const tracked = Array.isArray(sourcedScan.tracked_companies)
         ? sourcedScan.tracked_companies

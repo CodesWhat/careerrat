@@ -319,6 +319,35 @@ test("POST /api/search/scan: empty DB config settles honestly without reading le
   }
 });
 
+test("POST /api/search/scan: cleared targets disable generated broad boards before scanning", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  putDbSearchSources(repoRoot, [
+    {
+      provider: "remoteok",
+      label: "RemoteOK",
+      source_type: "board",
+      url: "https://remoteok.com/api",
+      enabled: true,
+      enabled_reason: "domain-gate",
+    },
+  ]);
+
+  const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
+  try {
+    const { status, body } = await postJson(server, "/api/search/scan", {});
+    assert.equal(status, 200);
+    assert.equal(body.scanned, 0);
+    assert.deepEqual(body.errors, []);
+    assert.equal(
+      sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].enabled,
+      false
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/search/scan: missing DB -> 409 instead of legacy no-config handling", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });

@@ -878,7 +878,7 @@ test("ranked nursing ladders reject CNA roles while keeping RN and NP roles", ()
   );
 });
 
-test("ranked trades ladders reject apprentices while keeping journeyman and master roles", () => {
+test("ranked trades ladders reject apprentices while keeping journeyman and lead roles", () => {
   const targeting = {
     role_buckets: [
       {
@@ -886,7 +886,7 @@ test("ranked trades ladders reject apprentices while keeping journeyman and mast
         priority: "primary",
         titles: ["Journeyman Electrician"],
         seniority_ladder: [
-          { rank: 300, titles: ["Master Electrician"] },
+          { rank: 300, titles: ["Lead Electrician"] },
           { rank: 100, titles: ["Apprentice Electrician"] },
           { rank: 200, titles: ["Journeyman Electrician"] },
         ],
@@ -899,7 +899,7 @@ test("ranked trades ladders reject apprentices while keeping journeyman and mast
     [
       offerForSeniority("apprentice", "Apprentice Electrician"),
       offerForSeniority("journeyman", "Journeyman Electrician"),
-      offerForSeniority("master", "Master Electrician"),
+      offerForSeniority("lead", "Lead Electrician"),
     ],
     optionsForSeniority(targeting)
   );
@@ -910,7 +910,7 @@ test("ranked trades ladders reject apprentices while keeping journeyman and mast
   );
   assert.deepEqual(
     result.kept.map((offer) => offer.title),
-    ["Journeyman Electrician", "Master Electrician"]
+    ["Journeyman Electrician", "Lead Electrician"]
   );
 });
 

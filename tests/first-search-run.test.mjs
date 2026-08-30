@@ -777,7 +777,7 @@ test("countDeterministicSources counts generated query-only HiringCafe searches"
   });
 });
 
-test("first-search source healing enables the broad remote baseline without configured titles", async () => {
+test("first-search preparation preserves source state without configured target titles", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot, { domain: "operations" });
   candidateConfigPatch({
@@ -791,7 +791,72 @@ test("first-search source healing enables the broad remote baseline without conf
   assert.equal(started.reused, false);
   assert.equal(started.run.status, "running");
   assert.equal(started.run.error, null);
-  assert.equal(started.sources.deterministicSources.attempted, 3);
+  assert.equal(started.sources.deterministicSources.attempted, 0);
+  assert.equal(
+    started.sources.deterministicSources.pendingLogins,
+    undefined,
+    "a disabled browser source without auth is not a pending login"
+  );
+  assert.equal(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.some((source) =>
+      ["remoteok", "remotive", "workingnomads"].includes(source.provider)
+    ),
+    false
+  );
+});
+
+test("search preparation disables generator-owned broad boards after target titles are cleared", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      searches: [
+        {
+          provider: "remoteok",
+          label: "RemoteOK",
+          source_type: "board",
+          url: "https://remoteok.com/api",
+          enabled: true,
+          enabled_reason: "domain-gate",
+        },
+        {
+          provider: "remotive",
+          label: "Remotive",
+          source_type: "board",
+          url: "https://remotive.com/api/remote-jobs",
+          enabled: true,
+          enabled_reason: "domain-gate",
+        },
+        {
+          provider: "workingnomads",
+          label: "Working Nomads",
+          source_type: "board",
+          url: "https://www.workingnomads.com/api/exposed_jobs/",
+          enabled: true,
+          enabled_reason: "domain-gate",
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  const operation = await startManualSearchRun({ repoRoot, env: {} });
+
+  assert.equal(operation.sources.deterministicSources.attempted, 0);
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.map(
+      ({ provider, enabled, enabled_reason }) => ({ provider, enabled, enabled_reason })
+    ),
+    ["remoteok", "remotive", "workingnomads"].map((provider) => ({
+      provider,
+      enabled: false,
+      enabled_reason: "domain-gate",
+    }))
+  );
 });
 
 test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {
@@ -1078,7 +1143,7 @@ test("background search runs browser sources and preserves point-of-use login re
   ]);
 });
 
-test("a manual search tracks a disabled login source alongside the broad remote baseline", async () => {
+test("a manual search preserves a disabled login source without target titles", async () => {
   const repoRoot = tempRepo();
   sourceConfigPut({
     repoRoot,
@@ -1107,7 +1172,7 @@ test("a manual search tracks a disabled login source alongside the broad remote 
   const operation = await startManualSearchRun({ repoRoot, env: {} });
 
   assert.equal(operation.run.status, "running");
-  assert.equal(operation.sources.deterministicSources.attempted, 3);
+  assert.equal(operation.sources.deterministicSources.attempted, 0);
   assert.equal(operation.sources.deterministicSources.pendingLogins, 1);
 });
 

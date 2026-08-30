@@ -89,7 +89,6 @@ import {
 } from "../core/db/verbs.mjs";
 import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
 import {
-  countDeterministicSources,
   healSearchSourceConfig,
   latestSourcingRunForUi,
   runFirstSearchInBackground,
@@ -955,18 +954,13 @@ function dbSourceResumePresent(pathCtx) {
 // longer part of the SETUP CHECKLIST or setupProgress.complete.
 export { computeSetupProgress } from "../core/onboarding/setup-progress.mjs";
 
-// Same self-heal-on-read as search-route.mjs's GET /api/search/sources (see
-// healSearchSourceConfig's header comment in first-search-run.mjs) — this is
-// the identical countDeterministicSources computation, just feeding
-// GET /api/onboard/state's FinishStep readiness display instead of the Jobs
-// page. Only attempts the (no-AI) heal when the stored count is 0.
+// Same provenance-aware reconciliation as search-route.mjs's
+// GET /api/search/sources. It migrates a generated legacy baseline and also
+// disables generated broad boards when candidate target titles are absent.
+// Missing, default-only, and user-owned source state stays untouched.
 function dbDeterministicSourceCounts(pathCtx, config) {
-  const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
-  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
-  const counts = countDeterministicSources({ searchSources, sourcedScan });
-  if (counts.attempted > 0) return counts;
   const healed = healSearchSourceConfig({ ...pathCtx, config });
-  return healed.healed ? healed.deterministicSources : counts;
+  return healed.deterministicSources;
 }
 
 function dbSearchSourcesPresent(pathCtx, config) {
