@@ -378,7 +378,6 @@ function generatedTitleFilterState(searchSources = {}) {
   );
   const titleFilter = searchSources.title_filter || {};
   return {
-    ...titleFilter,
     positive: positive.length > 0 ? positive : asArray(titleFilter.positive),
   };
 }

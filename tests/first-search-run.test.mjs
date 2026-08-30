@@ -965,6 +965,11 @@ test("changing targets migrates a pre-marker generated title filter", async () =
 
   const current = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
   const { generator_revision: _revision, generator_state: _state, ...legacy } = current;
+  legacy.title_filter = {
+    ...legacy.title_filter,
+    negative: [...legacy.title_filter.negative, "Contract"],
+    below_target: [...legacy.title_filter.below_target, "Assistant"],
+  };
   legacy.searches = legacy.searches.map((source) => {
     if (source.enabled_reason !== "targeting") return source;
     const { enabled_reason: _reason, ...unmarked } = source;
@@ -993,6 +998,10 @@ test("changing targets migrates a pre-marker generated title filter", async () =
 
   assert.deepEqual(refreshed.searchSources.title_filter.positive, ["Staff Platform Engineer"]);
   assert.deepEqual(refreshed.sourcedScan.title_filter.positive, ["Staff Platform Engineer"]);
+  assert.deepEqual(refreshed.searchSources.title_filter.negative, ["Intern", "Junior", "Contract"]);
+  assert.deepEqual(refreshed.sourcedScan.title_filter.negative, ["Intern", "Junior", "Contract"]);
+  assert.deepEqual(refreshed.searchSources.title_filter.below_target, ["Assistant"]);
+  assert.deepEqual(refreshed.sourcedScan.title_filter.below_target, ["Assistant"]);
 });
 
 test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {
