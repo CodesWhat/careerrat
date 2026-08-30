@@ -4,6 +4,36 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-08-30
+
+### Added
+
+- Candidate setup and Profile now include an annual-cash worksheet for hourly,
+  weekly, monthly, and tipped compensation. CareerRat keeps the original pay
+  inputs while deriving a comparable annual floor for search and evaluation.
+
+### Changed
+
+- Search and company discovery now use each candidate's own role families,
+  seniority ladder, compensation units, location posture, and source choices
+  instead of assuming a salaried software-engineering search.
+- Generated remote boards are available across job families when they match the
+  candidate's targeting. Custom legacy filters remain intact, while stale
+  generated filters migrate or retire as targeting changes.
+- Compensation checks compare like with like across annual salaries, hourly and
+  tipped wages, employee-owned weekly hours, and explicitly labeled pay ranges.
+  Large descriptions and range comparisons stay bounded and linear.
+
+### Fixed
+
+- Public web-search sources now run in hidden browser sessions, so an ordinary
+  search no longer opens a stack of visible “Google Chrome for Testing” windows.
+  Sources that require the candidate's existing login still open visibly for
+  interaction, and the two session types cannot leak into each other's cache.
+- Candidate-relative seniority is preserved through source generation, scanning,
+  company discovery, persistence, and dashboard display instead of falling back
+  to software-specific title assumptions.
+
 ## [0.16.8] - 2026-08-29
 
 Data-loss hotfix. An npm-installed CareerRat kept your profile, workspace and

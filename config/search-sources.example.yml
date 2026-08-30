@@ -9,9 +9,10 @@ title_filter:
     - "Your Target Title"
     - "A Secondary Target Title"
   negative:
-    - "Intern"
-    - "Junior"
     - "A Role Type To Exclude"
+  below_target:
+    - "A Lower-Level Title To Skip"
+  seniority_basis: "candidate-ladder"
 
 location_filter:
   always_allow:

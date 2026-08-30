@@ -245,7 +245,11 @@ describe("profile settings controller mapping", () => {
       compensation: {
         fields: [
           { id: "minimumBase", value: "210000" },
-          { id: "minimumAnnualEarnings", value: "226000" },
+          {
+            id: "annualCashWorksheet",
+            currency: "USD",
+            value: expect.objectContaining({ annualOverride: "226000" }),
+          },
           { id: "targetBase", value: "230000" },
         ],
       },
@@ -597,7 +601,14 @@ describe("profile settings controller mapping", () => {
     expect(
       profileSectionSavePlan("compensation", {
         minimumBase: "210000",
-        minimumAnnualEarnings: "226000",
+        annualCashWorksheet: {
+          hourlyRate: "50",
+          hoursPerWeek: "30",
+          cashPerShift: "500",
+          shiftsPerWeek: "3",
+          weeksPerYear: "52",
+          annualOverride: "",
+        },
         targetBase: "235000",
       })
     ).toEqual([
@@ -607,7 +618,7 @@ describe("profile settings controller mapping", () => {
         patch: {
           compensation: {
             minimum_base: 210000,
-            minimum_annual_earnings: 226000,
+            minimum_annual_earnings: 156000,
             target_base: 235000,
           },
         },
@@ -708,6 +719,54 @@ describe("profile settings controller mapping", () => {
         },
       },
     ]);
+  });
+
+  it("keeps an older compensation-editor draft compatible with the annual worksheet", () => {
+    expect(
+      profileSectionSavePlan("compensation", {
+        minimumBase: "50000",
+        minimumAnnualEarnings: "85000",
+        targetBase: "90000",
+      })
+    ).toEqual([
+      {
+        kind: "candidate",
+        name: "profile",
+        patch: {
+          compensation: {
+            minimum_base: 50000,
+            minimum_annual_earnings: 85000,
+            target_base: 90000,
+          },
+        },
+      },
+    ]);
+  });
+
+  it("refuses to persist a complete worksheet that derives a zero annual floor", () => {
+    expect(() =>
+      profileSectionSavePlan("compensation", {
+        minimumBase: "",
+        annualCashWorksheet: {
+          hourlyRate: "0",
+          hoursPerWeek: "35",
+          weeksPerYear: "52",
+        },
+        targetBase: "",
+      })
+    ).toThrow("Minimum annual cash earnings must be a positive amount.");
+  });
+
+  it("refuses to persist a sub-unit override that canonicalizes to zero", () => {
+    expect(() =>
+      profileSectionSavePlan("compensation", {
+        minimumBase: "",
+        annualCashWorksheet: {
+          annualOverride: "0.4",
+        },
+        targetBase: "",
+      })
+    ).toThrow("Minimum annual cash earnings must be a positive amount.");
   });
 
   it("preserves every target bucket name, priority, and signal while editing its titles", () => {

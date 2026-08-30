@@ -136,12 +136,16 @@ test("DB-backed search readiness comes from source config, not generated YAML", 
   const onboardRoute = stripJavaScriptComments(source("src/cli/onboard-route.mjs"));
   const dbCounts = functionBlock(onboardRoute, "function dbDeterministicSourceCounts");
   const dbReady = functionBlock(onboardRoute, "function dbSearchSourcesPresent");
-  assert.match(dbCounts, /sourceConfigGet\(\{ \.\.\.pathCtx, name: "search-sources" \}\)/);
-  assert.match(dbCounts, /sourceConfigGet\(\{ \.\.\.pathCtx, name: "sourced-scan" \}\)/);
-  assert.match(dbCounts, /\bcountDeterministicSources\b/);
   assert.match(dbCounts, /\bhealSearchSourceConfig\b/);
   assert.match(dbReady, /dbDeterministicSourceCounts\(pathCtx, config\)\.attempted > 0/);
   assert.doesNotMatch(dbReady, /config\/search-sources\.yml|existsSync/);
+
+  const firstSearch = stripJavaScriptComments(source("src/core/onboarding/first-search-run.mjs"));
+  const healSources = functionBlock(firstSearch, "export function healSearchSourceConfig");
+  assert.match(healSources, /sourceConfigGet\(\{ \.\.\.pathCtx, name: "search-sources" \}\)/);
+  assert.match(healSources, /name: "sourced-scan"/);
+  assert.match(healSources, /\bcountDeterministicSources\b/);
+  assert.match(healSources, /\bhasGeneratedBaselineOwnership\b/);
 
   const dbStateBranch = sliceBetween(
     onboardRoute,
@@ -168,11 +172,8 @@ test("DB-backed search readiness comes from source config, not generated YAML", 
   assert.match(scanRoute, /\bhealSearchSourceConfig\b/);
   assert.match(scanRoute, /\brunSourcedScan\b/);
   assert.doesNotMatch(scanRoute, /\bhasConfiguredDbSourcesOnly\b|configure a search source/);
-  assert.match(
-    searchSourcesRoute,
-    /sourceConfigGet\(\{ \.\.\.pathCtx, name: "search-sources" \}\)/
-  );
-  assert.match(searchSourcesRoute, /\bcountDeterministicSources\b/);
+  assert.match(searchSourcesRoute, /\bhealSearchSourceConfig\b/);
+  assert.match(searchSourcesRoute, /healed\.deterministicSources/);
 });
 
 test("DOCX onboarding offers AI markdown extraction while preserving raw-text local fallback", () => {

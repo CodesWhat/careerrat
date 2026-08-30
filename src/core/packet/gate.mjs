@@ -128,8 +128,9 @@ function positiveNumber(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
-function completeBand(min, max) {
-  return min !== null && max !== null ? { min, max } : null;
+function completeBand(min, max, currency) {
+  if (min === null || max === null) return null;
+  return currency ? { min, max, currency } : { min, max };
 }
 
 function normalizeCompensation(rawComp = {}, profile = {}) {
@@ -139,11 +140,15 @@ function normalizeCompensation(rawComp = {}, profile = {}) {
   const maxAnnualEarnings = optionalNumber(rawComp.maxAnnualEarnings);
   const minimumBase = positiveNumber(profile?.compensation?.minimum_base);
   const minimumAnnualEarningsFloor = positiveNumber(profile?.compensation?.minimum_annual_earnings);
+  const currency = rawComp.currency
+    ? String(rawComp.currency).trim().toUpperCase().slice(0, 12)
+    : null;
   const standing = assessCompensationFloors({
-    baseBand: completeBand(minBase, maxBase),
-    annualEarningsBand: completeBand(minAnnualEarnings, maxAnnualEarnings),
+    baseBand: completeBand(minBase, maxBase, currency),
+    annualEarningsBand: completeBand(minAnnualEarnings, maxAnnualEarnings, currency),
     minimumBase,
     minimumAnnualEarnings: minimumAnnualEarningsFloor,
+    floorCurrency: profile?.compensation?.currency,
   });
   const configuredStandings = [
     ...(minimumBase ? [{ basis: "base", standing: standing.base }] : []),
@@ -174,7 +179,7 @@ function normalizeCompensation(rawComp = {}, profile = {}) {
     floorConfigured,
     value: {
       status,
-      currency: rawComp.currency ? String(rawComp.currency).slice(0, 12) : null,
+      currency,
       minBase,
       maxBase,
       minAnnualEarnings,

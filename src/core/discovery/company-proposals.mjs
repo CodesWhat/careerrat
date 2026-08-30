@@ -103,6 +103,7 @@ function scoringConfigFromContext(context = {}) {
             name: family.name,
             priority: family.priority,
             titles: family.titles,
+            seniority_ladder: family.seniority_ladder,
           }))
         : [],
       keep_signals: context.keepSignals || [],
@@ -111,6 +112,7 @@ function scoringConfigFromContext(context = {}) {
     },
     profile: {
       compensation: {
+        currency: context.compensationFloors?.currency,
         minimum_base: context.compensationFloors?.minimum_base,
         minimum_annual_earnings: context.compensationFloors?.minimum_annual_earnings,
       },

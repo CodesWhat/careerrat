@@ -334,6 +334,26 @@ test("setEnabled toggles by label (case-insensitive)", () => {
   assert.equal(updated.searches[0].enabled, false);
 });
 
+test("setEnabled transfers a generated source to explicit user ownership", () => {
+  for (const enabled of [false, true]) {
+    const source = {
+      provider: "remoteok",
+      source_type: "board",
+      label: "RemoteOK",
+      url: "https://remoteok.com/api",
+      enabled: !enabled,
+      enabled_reason: "domain-gate",
+    };
+    const config = { ...emptyConfig(), searches: [source] };
+
+    const updated = setEnabled(config, 0, enabled);
+
+    assert.equal(updated.searches[0].enabled, enabled);
+    assert.equal(Object.hasOwn(updated.searches[0], "enabled_reason"), false);
+    assert.equal(config.searches[0].enabled_reason, "domain-gate");
+  }
+});
+
 test("setEnabled is immutable — original config unchanged", () => {
   const cfg = addSearchFromQuery(emptyConfig(), { query: "ai engineer", enabled: true });
   const original = cfg.searches[0].enabled;

@@ -13,6 +13,7 @@ import {
   setupIsComplete,
   setupNeedsVoluntaryDefaults,
 } from "../onboarding/onboardingSetup.js";
+import { calculateAnnualCashWorksheet } from "./annual-cash-worksheet.js";
 import { firstRunApi } from "./api.js";
 import { createWorkspaceRequestId } from "./chat-first-app-controller.js";
 import {
@@ -1170,33 +1171,34 @@ export function FirstRunController({
           cut_signals: cleanLines(values.signals),
         });
       } else if (sectionId === "quickFacts") {
-        const hasSeparateAnnualFloor = Object.hasOwn(values, "minimumAnnualEarnings");
         const compensationMode = String(values.compensationFloorType || "");
-        let compensation;
-        if (hasSeparateAnnualFloor) {
-          const minimumBase = moneyAmount(values.minimumBase);
-          const minimumAnnualEarnings = moneyAmount(values.minimumAnnualEarnings);
-          compensation =
-            compensationMode === "guaranteed-base"
-              ? { minimum_base: minimumBase, minimum_annual_earnings: null }
-              : compensationMode === "annual-cash"
-                ? { minimum_base: null, minimum_annual_earnings: minimumAnnualEarnings }
-                : {
-                    minimum_base: minimumBase,
-                    minimum_annual_earnings: minimumAnnualEarnings,
-                  };
-        } else {
-          compensation =
-            compensationMode === "annual-cash"
-              ? {
-                  minimum_base: null,
-                  minimum_annual_earnings: moneyAmount(values.compensationFloor),
-                }
-              : {
-                  minimum_base: moneyAmount(values.compensationFloor ?? values.minimumBase),
-                  minimum_annual_earnings: null,
-                };
+        const worksheet = calculateAnnualCashWorksheet(values.annualCashWorksheet);
+        const usesAnnualCash = compensationMode === "annual-cash" || compensationMode === "both";
+        if (usesAnnualCash && worksheet.error) {
+          throw new UserFacingError(worksheet.error);
         }
+        const legacyAnnualFloor = moneyAmount(
+          values.minimumAnnualEarnings ?? values.compensationFloor
+        );
+        const minimumAnnualEarnings = worksheet.annual || legacyAnnualFloor;
+        const minimumBase = moneyAmount(values.minimumBase ?? values.compensationFloor);
+        if (usesAnnualCash && minimumAnnualEarnings <= 0) {
+          throw new UserFacingError(
+            "Add wage details or enter a minimum annual cash earnings amount."
+          );
+        }
+        if (compensationMode === "both" && minimumBase <= 0) {
+          throw new UserFacingError("Minimum guaranteed base must be a positive amount.");
+        }
+        const compensation =
+          compensationMode === "annual-cash"
+            ? { minimum_base: null, minimum_annual_earnings: minimumAnnualEarnings }
+            : compensationMode === "both"
+              ? {
+                  minimum_base: minimumBase,
+                  minimum_annual_earnings: minimumAnnualEarnings,
+                }
+              : { minimum_base: minimumBase, minimum_annual_earnings: null };
         const remoteScope = values.remoteScope === "worldwide" ? "worldwide" : "home-country";
         await api.saveCandidateFile("profile", {
           candidate: {

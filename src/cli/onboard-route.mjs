@@ -84,14 +84,12 @@ import {
   resumeExtractionRecoverOrphans,
   resumeExtractionStart,
   skillChatThreadRead,
-  sourceConfigGet,
-  sourceConfigPut,
 } from "../core/db/verbs.mjs";
 import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
 import {
-  countDeterministicSources,
   healSearchSourceConfig,
   latestSourcingRunForUi,
+  prepareDeterministicSearchSources,
   runFirstSearchInBackground,
   startFirstSearchRun,
 } from "../core/onboarding/first-search-run.mjs";
@@ -119,7 +117,6 @@ import {
   OPTIONAL_CANDIDATE_FILES,
 } from "../core/profile/candidate-setup.mjs";
 import { atomicWriteFile } from "../core/profile/gate-writer.mjs";
-import { buildSearchSources } from "../core/profile/generate-search-sources.mjs";
 import {
   deriveEvidenceSeed,
   deriveProfileSeed,
@@ -955,18 +952,13 @@ function dbSourceResumePresent(pathCtx) {
 // longer part of the SETUP CHECKLIST or setupProgress.complete.
 export { computeSetupProgress } from "../core/onboarding/setup-progress.mjs";
 
-// Same self-heal-on-read as search-route.mjs's GET /api/search/sources (see
-// healSearchSourceConfig's header comment in first-search-run.mjs) — this is
-// the identical countDeterministicSources computation, just feeding
-// GET /api/onboard/state's FinishStep readiness display instead of the Jobs
-// page. Only attempts the (no-AI) heal when the stored count is 0.
+// Same provenance-aware reconciliation as search-route.mjs's
+// GET /api/search/sources. It migrates a generated legacy baseline and also
+// disables generated broad boards when candidate target titles are absent.
+// Missing, default-only, and user-owned source state stays untouched.
 function dbDeterministicSourceCounts(pathCtx, config) {
-  const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
-  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
-  const counts = countDeterministicSources({ searchSources, sourcedScan });
-  if (counts.attempted > 0) return counts;
   const healed = healSearchSourceConfig({ ...pathCtx, config });
-  return healed.healed ? healed.deterministicSources : counts;
+  return healed.deterministicSources;
 }
 
 function dbSearchSourcesPresent(pathCtx, config) {
@@ -983,129 +975,6 @@ function validateDbProfileAndTargeting(repoRoot, config) {
     profileErrors: profileCheck.errors,
     targetingErrors: targetingCheck.errors,
   };
-}
-
-function compactArrayValues(values = []) {
-  const out = [];
-  const seen = new Set();
-  for (const value of Array.isArray(values) ? values : []) {
-    const key = String(value || "")
-      .trim()
-      .toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(value);
-  }
-  return out;
-}
-
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function mergeFilterObject(existing = {}, generated = {}) {
-  const keys = new Set([...Object.keys(generated || {}), ...Object.keys(existing || {})]);
-  const merged = {};
-  for (const key of keys) {
-    merged[key] = compactArrayValues([...asArray(existing?.[key]), ...asArray(generated?.[key])]);
-  }
-  return merged;
-}
-
-function mergeLocationFilter(existing = {}, generated = {}) {
-  const merged = mergeFilterObject(existing, generated);
-  for (const key of ["allow", "block"]) {
-    if (Array.isArray(generated?.[key])) merged[key] = compactArrayValues(generated[key]);
-  }
-  if (generated?.needs_location !== undefined) {
-    merged.needs_location = generated.needs_location;
-  }
-  return merged;
-}
-
-function sourceEntryKey(entry = {}) {
-  const provider = String(entry.provider || entry.platform || "")
-    .trim()
-    .toLowerCase();
-  const url = String(entry.url || "")
-    .trim()
-    .toLowerCase();
-  if (url) return `url:${url}`;
-  const rssUrl = String(entry.rssUrl || entry.rss_url || "")
-    .trim()
-    .toLowerCase();
-  if (rssUrl) return `rss:${rssUrl}`;
-  const query = String(entry.query || "")
-    .trim()
-    .toLowerCase();
-  if (query) return `query:${provider}:${query}`;
-  const label = String(entry.label || "")
-    .trim()
-    .toLowerCase();
-  return label ? `label:${provider}:${label}` : "";
-}
-
-function companyEntryKey(entry = {}) {
-  const name = String(entry.name || entry)
-    .trim()
-    .toLowerCase();
-  const careersUrl = String(entry.careers_url || entry.url || "")
-    .trim()
-    .toLowerCase();
-  return careersUrl ? `url:${careersUrl}` : name ? `name:${name}` : "";
-}
-
-function mergeEntries(existingEntries, generatedEntries, keyForEntry) {
-  const out = [];
-  const seen = new Set();
-  for (const entry of [
-    ...(Array.isArray(existingEntries) ? existingEntries : []),
-    ...(Array.isArray(generatedEntries) ? generatedEntries : []),
-  ]) {
-    const key = keyForEntry(entry);
-    if (key && seen.has(key)) continue;
-    if (key) seen.add(key);
-    out.push(entry);
-  }
-  return out;
-}
-
-function mergeSourceCatalog(existing = {}, generated = {}) {
-  const keys = new Set([...Object.keys(generated || {}), ...Object.keys(existing || {})]);
-  const merged = {};
-  for (const key of keys) {
-    merged[key] = compactArrayValues([...asArray(existing?.[key]), ...asArray(generated?.[key])]);
-  }
-  return merged;
-}
-
-function mergeSearchSources(existing = {}, generated = {}) {
-  return {
-    ...generated,
-    ...existing,
-    title_filter: mergeFilterObject(existing.title_filter, generated.title_filter),
-    location_filter: mergeLocationFilter(existing.location_filter, generated.location_filter),
-    searches: mergeEntries(existing.searches, generated.searches, sourceEntryKey),
-    tracked_companies: mergeEntries(
-      existing.tracked_companies,
-      generated.tracked_companies,
-      companyEntryKey
-    ),
-    source_catalog: mergeSourceCatalog(existing.source_catalog, generated.source_catalog),
-  };
-}
-
-function buildDbSearchSources(pathCtx, config) {
-  const generated = buildSearchSources(config.targeting, config.profile);
-  const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
-  if (current.stored !== true) return generated;
-  return mergeSearchSources(current.data, generated);
-}
-
-function prepareDbSearchSources(pathCtx, config) {
-  const sources = buildDbSearchSources(pathCtx, config);
-  sourceConfigPut({ ...pathCtx, name: "search-sources", data: sources });
-  return sources;
 }
 
 function sendCandidateError(res, err) {
@@ -1159,7 +1028,11 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
     };
   }
 
-  const sources = prepareDbSearchSources(pathCtx, config);
+  const sources = prepareDeterministicSearchSources({
+    repoRoot,
+    env,
+    config,
+  }).searchSources;
   const searchCount = Array.isArray(sources?.searches) ? sources.searches.length : 0;
   return {
     status: 200,

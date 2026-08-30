@@ -138,6 +138,8 @@ function compensationFloors(context) {
     minimumAnnualEarnings: positiveNumber(
       context?.compensationFloors?.minimum_annual_earnings ?? context?.minimum_annual_earnings
     ),
+    floorCurrency:
+      trimString(context?.compensationFloors?.currency) || trimString(context?.currency),
   };
 }
 
@@ -165,7 +167,7 @@ function compStateForOffer(offer, floors) {
       reviewReasons.push("top-of-band-only");
     } else if (standing.base === "unknown") {
       reviewReasons.push(
-        flags.includes("comp-uncertain") || evidence.unclassifiedComp
+        flags.includes("comp-uncertain") || evidence.unclassifiedComp || bands.base
           ? "comp-uncertain"
           : "comp-unposted"
       );

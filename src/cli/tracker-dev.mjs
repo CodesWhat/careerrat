@@ -39,6 +39,7 @@ import { ingestAppleMail } from "../core/automation/apple-mail-ingest.mjs";
 import {
   classifyBrowserAuthState,
   createBrowserSessionManager,
+  searchSourceBrowserSessionOptions,
   unsafePublicBrowserReason,
 } from "../core/automation/browser-session.mjs";
 import {
@@ -304,10 +305,7 @@ export function createDevServer({
     captureBrowserSourceImpl: (source) =>
       captureBrowserSearchSource({
         source,
-        session: browserSessionManager.get({
-          platform: source?.platform || source?.provider || "search",
-          provider: "playwright",
-        }),
+        session: browserSessionManager.get(searchSourceBrowserSessionOptions(source)),
       }),
   }),
 } = {}) {
@@ -464,10 +462,7 @@ export function createDevServer({
     captureBrowserSourceImpl: (source) =>
       captureBrowserSearchSource({
         source,
-        session: browserSessionManager.get({
-          platform: source?.platform || source?.provider || "search",
-          provider: "playwright",
-        }),
+        session: browserSessionManager.get(searchSourceBrowserSessionOptions(source)),
       }),
   });
   mountSourcingRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });

@@ -1,9 +1,53 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as trackerDev from "../src/cli/tracker-dev.mjs";
+import { searchSourceBrowserSessionOptions } from "../src/core/automation/browser-session.mjs";
 
-import { openAuthenticatedSource } from "../src/cli/tracker-dev.mjs";
+const { openAuthenticatedSource } = trackerDev;
 
 const resolvePublic = async (rawUrl) => ({ ok: true, url: new URL(rawUrl).toString() });
+
+test("public configured sources use hidden Playwright sessions", () => {
+  assert.deepEqual(
+    searchSourceBrowserSessionOptions({
+      provider: "HiringCafe",
+      source_type: "url-query",
+    }),
+    {
+      platform: "HiringCafe",
+      provider: "playwright",
+      headless: true,
+    }
+  );
+  assert.deepEqual(
+    searchSourceBrowserSessionOptions({
+      provider: "Wellfound",
+      platform: "wellfound",
+      source_type: "browser",
+    }),
+    {
+      platform: "wellfound",
+      provider: "playwright",
+      headless: true,
+    }
+  );
+});
+
+test("login-backed configured sources keep visible Playwright sessions", () => {
+  assert.deepEqual(
+    searchSourceBrowserSessionOptions({
+      provider: "LinkedIn",
+      platform: "linkedin",
+      source_type: "browser",
+      auth: true,
+    }),
+    {
+      platform: "linkedin",
+      provider: "playwright",
+      headless: false,
+    }
+  );
+});
 
 test("authenticated source handoff opens the exact URL and stops for visible verification", async () => {
   const opened = [];

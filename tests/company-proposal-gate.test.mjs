@@ -156,3 +156,57 @@ test("company proposals apply annual cash floors to tipped roles by basis", () =
   assert.equal(unknown.proposal.confidenceTier, "borderline");
   assert.ok(unknown.proposal.reviewReasons.includes("annual-earnings-unverified"));
 });
+
+test("CR5: company proposals review foreign-currency bands but keep legacy comparisons", () => {
+  const foreign = compensationProposal(
+    {
+      company: "Foreign Currency Co",
+      title: "Bar Manager",
+      url: "https://jobs.example.test/company/foreign-currency",
+      baseComp: "GBP 60,000 - 75,000",
+    },
+    { currency: "USD", minimum_base: 85_000 }
+  );
+  const legacy = compensationProposal(
+    {
+      company: "Legacy Currency Co",
+      title: "Bar Manager",
+      url: "https://jobs.example.test/company/legacy-currency",
+      baseComp: "60k - 75k",
+    },
+    { currency: "USD", minimum_base: 85_000 }
+  );
+
+  assert.equal(foreign.rejected, undefined);
+  assert.equal(foreign.proposal.confidenceTier, "borderline");
+  assert.ok(foreign.proposal.reviewReasons.some((reason) => /comp|currency/i.test(reason)));
+  assert.equal(legacy.rejected?.reason, "comp-below-floor");
+});
+
+test("company proposals fall back from a blank nested floor currency", () => {
+  const offer = {
+    company: "Foreign Currency Co",
+    title: "Bar Manager",
+    url: "https://jobs.example.test/company/foreign-currency-blank-floor",
+    baseComp: "GBP 60,000 - 75,000",
+  };
+  const result = buildCompanyProposal(
+    proposalArgs({
+      resolution: {
+        companyName: offer.company,
+        atsProvider: "lever",
+        jobBoardUrl: "https://jobs.example.test/company",
+      },
+      scanResult: { offers: [offer], errors: [] },
+      capturedOffers: [{ bodyChars: 120, bodyPartial: false, ...offer }],
+      context: {
+        currency: "USD",
+        compensationFloors: { currency: "", minimum_base: 85_000 },
+      },
+    })
+  );
+
+  assert.equal(result.rejected, undefined);
+  assert.equal(result.proposal.confidenceTier, "borderline");
+  assert.ok(result.proposal.reviewReasons.some((reason) => /comp|currency/i.test(reason)));
+});

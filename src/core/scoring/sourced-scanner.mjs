@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 
+import { currencyCodePatternSource, isIsoCurrencyCode } from "../currency-format.mjs";
 import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
 import { guardedFetch } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { assessCompensationFloors } from "../profile/compensation.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
+import { relativeSeniority } from "../profile/seniority.mjs";
 import {
   fetchCareerOpsProvider,
   inferCareerOpsProvider,
@@ -120,14 +122,22 @@ function normalizeKeywordList(value) {
     .filter(Boolean);
 }
 
-export function buildTitleFilter(titleFilter = {}) {
+export function buildTitleFilter(titleFilter = {}, targeting = {}) {
   const positive = normalizeKeywordList(titleFilter.positive);
   const negative = normalizeKeywordList(titleFilter.negative);
+  const belowTarget = normalizeKeywordList(titleFilter.below_target);
   const classify = (title = "") => {
     const lower = title.toLowerCase();
-    const blocked = negative.some((term) => keywordMatches(lower, term));
+    const standing = relativeSeniority(title, targeting);
+    const rankedEligible = standing.classification === "at-or-above-target";
+    const rankedBelow = standing.classification === "below-target";
+    const blocked =
+      negative.some((term) => keywordMatches(lower, term)) ||
+      rankedBelow ||
+      (!rankedEligible && belowTarget.some((term) => keywordMatches(lower, term)));
     const matched =
       positive.length === 0 ||
+      rankedEligible ||
       positive.some(
         (term) => keywordMatches(lower, term) || boundedRoleTitleEquivalent(lower, term)
       );
@@ -135,7 +145,10 @@ export function buildTitleFilter(titleFilter = {}) {
       matched: matched && !blocked,
       blocked,
       adjacent:
-        !matched && !blocked && positive.some((term) => adjacentRoleTitleEquivalent(lower, term)),
+        !matched &&
+        !blocked &&
+        standing.classification === "unclassified" &&
+        positive.some((term) => adjacentRoleTitleEquivalent(lower, term)),
     };
   };
   const filter = (title = "") => classify(title).matched;
@@ -293,8 +306,11 @@ function adjacentTitleFamiliesCompatible(actualTitle, targetTitle) {
   return actualFamily < 0 || actualFamily === targetFamily;
 }
 
-function targetRoleTitleMatches(actualTitle, targetTitles) {
+function targetRoleTitleMatches(actualTitle, targetTitles, targeting) {
   if (targetTitles.length === 0) return true;
+  const standing = relativeSeniority(actualTitle, targeting);
+  if (standing.classification === "at-or-above-target") return true;
+  if (standing.classification === "below-target") return false;
   const actual = String(actualTitle || "").toLowerCase();
   return targetTitles.some((targetTitle) => {
     const target = String(targetTitle || "").toLowerCase();
@@ -594,6 +610,11 @@ function seniorityEligibility(offer, config) {
   const targets = targetTitles(config);
   if (targets.length === 0) return { eligible: true };
   const title = String(offer?.title || "");
+  const standing = relativeSeniority(title, config?.targeting);
+  if (standing.classification === "below-target") {
+    return { eligible: false, reason: "seniority-below-target" };
+  }
+  if (standing.classification === "at-or-above-target") return { eligible: true };
   const targetsManagement = targets.some((target) => MANAGEMENT_TITLE_RE.test(target));
   if (MANAGEMENT_TITLE_RE.test(title) && !targetsManagement) {
     return { eligible: false, reason: "management-track-mismatch" };
@@ -848,6 +869,7 @@ function salaryEligibility(offer, config) {
     annualEarningsBand: bands.annualEarnings,
     minimumBase: compensation.minimum_base,
     minimumAnnualEarnings: compensation.minimum_annual_earnings,
+    floorCurrency: compensation.currency,
   });
   if (standing.base === "below") {
     return { eligible: false, reason: "comp-below-floor", band: bands.base };
@@ -861,7 +883,7 @@ function salaryEligibility(offer, config) {
   }
   const unknown =
     standing.base === "unknown" || standing.annualEarnings === "unknown" ? "compensation" : null;
-  return { eligible: true, unknown };
+  return { eligible: true, unknown, band: bands.base };
 }
 
 function contentEligibility(offer, config) {
@@ -937,6 +959,7 @@ function qualifyCandidateOffer(
   return {
     eligible: true,
     qualificationUnknowns: [qualifiedLocation.unknown, age.unknown, salary.unknown].filter(Boolean),
+    ...(salary.band ? { compBand: salary.band } : {}),
     ...(qualifiedLocation.displayLocation
       ? { displayLocation: qualifiedLocation.displayLocation }
       : {}),
@@ -986,6 +1009,7 @@ export function requalifyCanonicalOffers(
     result.kept.push({
       ...qualifiedOffer,
       qualificationUnknowns: qualification.qualificationUnknowns,
+      ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
       ...rating,
     });
   }
@@ -1076,7 +1100,7 @@ function scoreSourcedOfferFromConfig(
     }
   }
   for (const term of bucketTitles.filter(Boolean)) {
-    if (targetRoleTitleMatches(title, [term])) {
+    if (targetRoleTitleMatches(title, [term], effectiveTargeting)) {
       setBase(82, `matches target title: ${term}`);
     }
   }
@@ -1127,6 +1151,7 @@ function scoreSourcedOfferFromConfig(
     annualEarningsBand: compBands.annualEarnings,
     minimumBase: hasMinimumBase ? minimumBase : null,
     minimumAnnualEarnings: hasMinimumAnnualEarnings ? minimumAnnualEarnings : null,
+    floorCurrency: profile?.compensation?.currency,
   });
   if (hasMinimumBase) {
     if (compBands.base) {
@@ -1136,6 +1161,8 @@ function scoreSourcedOfferFromConfig(
       } else if (compStanding.base === "overlap") {
         add(-6, "must land top of band");
         flag("top-of-band-only");
+      } else if (compStanding.base === "unknown") {
+        flag("comp-uncertain");
       } else {
         add(4, "comp clears floor");
       }
@@ -1192,7 +1219,7 @@ function scoreSourcedOfferFromConfig(
   // cannot turn a different job family into a strong target-title match. This
   // also protects a narrowed candidate profile from broader source filters
   // generated earlier in onboarding.
-  if (!targetRoleTitleMatches(title, bucketTitles.filter(Boolean))) {
+  if (!targetRoleTitleMatches(title, bucketTitles.filter(Boolean), effectiveTargeting)) {
     score = Math.min(score, 64);
     reasons.unshift("outside target role titles");
     flag("title-target-mismatch");
@@ -1317,28 +1344,205 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
 }
 
 const ANNUAL_WORK_HOURS = 2_080;
+const COMPENSATION_CONTEXT_RADIUS = 1_024;
 const BASE_COMP_LABEL_RE =
   /\b(?:base\s+(?:salary|pay|comp(?:ensation)?)|salary(?:\s+(?:range|band))?)\b/i;
 const ADJACENT_BARE_BASE_PREFIX_RE = /(?:^|[:;,|•])\s*base\s*:?\s*$/i;
 const ADJACENT_BARE_BASE_SUFFIX_RE =
-  /^[\s,]*(?:(?:USD|CAD|MXN|EUR|GBP)\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b(?=\s*(?:$|[,.;:!?()[\]{}•–—]|(?:per\s+(?:year|annum|hour|hr)|a\s+year|annually|annualized|hourly|\/\s*(?:year|yr|hour|hr))\b))/iu;
+  /^[\s,]*(?:[A-Z]{3}\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b(?=\s*(?:$|[,.;:!?()[\]{}•–—]|(?:per\s+(?:year|annum|hour|hr)|a\s+year|annually|annualized|hourly|\/\s*(?:year|yr|hour|hr))\b))/iu;
 const VARIABLE_COMP_LABEL_RE =
-  /\b(?:on-target\s+earnings|ote|bonus|equity|commission|total\s+comp(?:ensation)?|variable\s+(?:pay|compensation)|incentive\s+(?:pay|compensation))\b/i;
+  /\b(?:on-target\s+earnings|ote|bonus|equity|commission|tips?|overtime(?:\s+(?:pay|rate))?|ot\s+pay|total\s+comp(?:ensation)?|variable\s+(?:pay|compensation)|incentive\s+(?:pay|compensation))\b/i;
 const ANNUAL_EARNINGS_LABEL_RE =
   /\b(?:annual\s+(?:cash\s+)?earnings|estimated\s+annual\s+earnings|on-target\s+earnings|ote|total\s+cash\s+comp(?:ensation)?|including\s+(?:tips|commissions?))\b/i;
 const EQUITY_COMP_LABEL_RE = /\b(?:equity|stock|options?)\b/i;
-const HOURLY_COMP_RE = /\b(?:hourly|per\s+(?:hour|hr))\b|\/\s*(?:hour|hr)\b/i;
+const HOURLY_COMP_RE = /\b(?:hourly|(?:per|an)\s+(?:hour|hr))\b|\/\s*(?:hour|hr)\b/i;
+const HOURLY_COMP_SUFFIX_RE = /^\s*(?:hourly\b|(?:per|an)\s+(?:hour|hr)\b|\/\s*(?:hour|hr)\b)/i;
+const HOURLY_COMP_PREFIX_RE =
+  /\bhourly(?:\s+(?:base\s+)?(?:pay|wage|rate|compensation))?\s*:?\s*(?:[A-Z]{3}\s*)?[$£€]?\s*$/i;
+const HOURLY_PAY_PREFIX_RE =
+  /\b(?:pay|wage|compensation|(?:hourly\s+)?rate)(?:\s+range)?\s*(?::|is|of|from)?\s*$/i;
+const HOURLY_BASE_PREFIX_RE =
+  /\b(?:pay|wage|(?:hourly\s+)?rate)(?:\s+range)?\s*(?::|is|of|from)?\s*$/i;
 const WEEKLY_HOURS_RE = /\b(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:\/|per|a|each)\s*week\b/i;
+const BUSINESS_HOURS_CONTEXT_SOURCE =
+  "store|business|restaurant|office|location|facility|venue|hours?\\s+of\\s+operation|opening\\s+hours?|we\\s+are\\s+open";
+const BUSINESS_HOURS_CONTEXT_RE = new RegExp(`\\b(?:${BUSINESS_HOURS_CONTEXT_SOURCE})\\b`, "i");
+const EMPLOYEE_HOURS_CONTEXT_SOURCE =
+  "employees?|staff|workers?|team\\s+members?|crew|associates?|personnel|managers?|roles?|positions?|jobs?|candidates?|you|commitment|shifts?";
+const EMPLOYEE_HOURS_CONTEXT_RE = new RegExp(`\\b(?:${EMPLOYEE_HOURS_CONTEXT_SOURCE})\\b`, "i");
+const NON_SCHEDULE_WEEKLY_HOURS_RE =
+  /\b(?:overtime|volunteer(?:ing)?|benefits?|eligibility|eligible)\b/i;
+const NON_REGULAR_WEEKLY_HOURS_RE = /\b(?:volunteer(?:ing)?|benefits?|eligibility|eligible)\b/i;
+const REGULAR_HOURS_RES = [
+  /\b(\d{1,2}(?:\.\d+)?)\s+regular\s+(?:hours?|hrs?)\b/i,
+  /\bregular(?:ly)?(?:\s+schedule)?(?:\s+(?:is|of))?\s*:?\s*(\d{1,2}(?:\.\d+)?)\s*(?:hours?|hrs?)\b/i,
+];
+const WEEKLY_UNIT_RE = /(?:\/|per|a|each)\s*week\b/i;
+const LOCAL_WEEKLY_HOURS_BOUNDARY_RE = new RegExp(
+  `(?:,\\s*|\\s+)(?=(?:while|whereas|but)\\b)|,\\s*(?=with\\b)|(?:,\\s*|\\s+and\\s+)(?=(?:(?:the|this|our|your)\\s+)?(?:(?:${EMPLOYEE_HOURS_CONTEXT_SOURCE})|(?:${BUSINESS_HOURS_CONTEXT_SOURCE}))\\b)`,
+  "gi"
+);
 const ANNUAL_PAY_UNIT_RE =
   /\b(?:annually|annualized|per\s+(?:year|annum)|a\s+year)\b|\/\s*(?:year|yr)\b/i;
+const CURRENCY_CODE_SOURCE = currencyCodePatternSource();
+const CURRENCY_PREFIX_SOURCE = String.raw`(?:${CURRENCY_CODE_SOURCE}\s{0,4})?[$£€]?\s{0,4}`;
+const CURRENCY_SUFFIX_BOUNDARY_SOURCE = String.raw`(?:$|[.,;:!?()[\]{}•–—]|(?:hourly|annually|annualized|(?:per|an)\s+(?:hour|hr)|(?:per|a)\s+(?:year|yr|annum)|\/\s*(?:hour|hr|year|yr))\b)`;
+const CURRENCY_SUFFIX_SOURCE = String.raw`(?:\s{0,4}${CURRENCY_CODE_SOURCE}(?=\s*${CURRENCY_SUFFIX_BOUNDARY_SOURCE}))?`;
+const SINGLE_COMPENSATION_RE = new RegExp(
+  `${CURRENCY_PREFIX_SOURCE}(\\d{1,7}(?:\\.\\d+)?)(\\s{0,4}k)?\\b${CURRENCY_SUFFIX_SOURCE}`,
+  "gi"
+);
+const COMPENSATION_RANGE_RE = new RegExp(
+  `${CURRENCY_PREFIX_SOURCE}(\\d{1,6}(?:\\.\\d+)?)(\\s{0,4}k)?\\s{0,4}(?:-|–|—|to)\\s{0,4}${CURRENCY_PREFIX_SOURCE}(\\d{1,6}(?:\\.\\d+)?)(\\s{0,4}k)?${CURRENCY_SUFFIX_SOURCE}`,
+  "gi"
+);
+
+const SYMBOL_COMPATIBLE_CURRENCY_CODES = {
+  USD: new Set([
+    "ARS",
+    "AUD",
+    "BRL",
+    "CAD",
+    "CLP",
+    "COP",
+    "FJD",
+    "HKD",
+    "MXN",
+    "NZD",
+    "SGD",
+    "TWD",
+    "USD",
+    "UYU",
+  ]),
+  GBP: new Set(["EGP", "FKP", "GBP", "GIP", "LBP", "SDG", "SHP", "SYP"]),
+  EUR: new Set(["EUR"]),
+};
+
+function compensationMatchCurrency(match) {
+  const value = String(match?.[0] || "");
+  const codes = new Set(
+    [...value.matchAll(/\b([A-Za-z]{3})\b/g)]
+      .map((candidate) => candidate[1].toUpperCase())
+      .filter(isIsoCurrencyCode)
+  );
+  if (codes.size > 1) return { conflicting: true, currency: null };
+
+  const symbols = new Set();
+  if (value.includes("£")) symbols.add("GBP");
+  if (value.includes("€")) symbols.add("EUR");
+  if (value.includes("$")) symbols.add("USD");
+  if (symbols.size > 1) return { conflicting: true, currency: null };
+
+  const code = codes.values().next().value || null;
+  const symbol = symbols.values().next().value || null;
+  const symbolMatchesCode =
+    !symbol || symbol === code || SYMBOL_COMPATIBLE_CURRENCY_CODES[symbol]?.has(code) === true;
+  return {
+    conflicting: Boolean(code && !symbolMatchesCode),
+    currency: code || symbol,
+  };
+}
+
+function containsCurrencyCode(value) {
+  return [...String(value || "").matchAll(/\b([A-Za-z]{3})\b/g)].some((match) =>
+    isIsoCurrencyCode(match[1])
+  );
+}
+
+function compensationBand(min, max, match) {
+  const { conflicting, currency } = compensationMatchCurrency(match);
+  if (conflicting) return null;
+  return currency ? { min, max, currency } : { min, max };
+}
+
+export function hasConflictingCompensationCurrency(text = "") {
+  for (const { line } of compensationLines(String(text || ""))) {
+    const normalized = line.replace(/(?<=\d),(?=\d{3}\b)/g, "");
+    for (const pattern of [COMPENSATION_RANGE_RE, SINGLE_COMPENSATION_RE]) {
+      for (const match of normalized.matchAll(new RegExp(pattern.source, "gi"))) {
+        if (compensationMatchCurrency(match).conflicting) return true;
+      }
+    }
+  }
+  return false;
+}
 
 function annualWorkHours(line) {
-  const explicit = String(line || "").match(WEEKLY_HOURS_RE);
-  if (!explicit) return ANNUAL_WORK_HOURS;
-  const hours = Number(explicit[1]);
-  return Number.isFinite(hours) && hours > 0 && hours <= 80
-    ? Math.round(hours * 52)
-    : ANNUAL_WORK_HOURS;
+  const value = String(line || "");
+  for (const clauseMatch of value.matchAll(/[^.;\n]+/g)) {
+    const clause = clauseMatch[0];
+    if (!WEEKLY_UNIT_RE.test(clause) || NON_REGULAR_WEEKLY_HOURS_RE.test(clause)) continue;
+    const regularHours = REGULAR_HOURS_RES.map((pattern) => clause.match(pattern)).find(Boolean);
+    const hours = Number(regularHours?.[1]);
+    const matchIndex = (clauseMatch.index ?? 0) + (regularHours?.index ?? 0);
+    if (
+      Number.isFinite(hours) &&
+      hours > 0 &&
+      hours <= 80 &&
+      weeklyHoursBelongToWorkSchedule(value, matchIndex, regularHours[0].length, {
+        isRegularHoursMatch: true,
+      })
+    ) {
+      return Math.round(hours * 52);
+    }
+  }
+  for (const explicit of value.matchAll(new RegExp(WEEKLY_HOURS_RE.source, "gi"))) {
+    const matchIndex = explicit.index ?? 0;
+    if (!weeklyHoursBelongToWorkSchedule(value, matchIndex, explicit[0].length)) continue;
+    const hours = Number(explicit[1]);
+    if (Number.isFinite(hours) && hours > 0 && hours <= 80) return Math.round(hours * 52);
+  }
+  return ANNUAL_WORK_HOURS;
+}
+
+function boundedCompensationContext(value, matchIndex, matchLength) {
+  const start = Math.max(0, matchIndex - COMPENSATION_CONTEXT_RADIUS);
+  const end = Math.min(value.length, matchIndex + matchLength + COMPENSATION_CONTEXT_RADIUS);
+  return {
+    value: value.slice(start, end),
+    matchIndex: matchIndex - start,
+  };
+}
+
+function weeklyHoursBelongToWorkSchedule(
+  value,
+  matchIndex,
+  matchLength,
+  { isRegularHoursMatch = false } = {}
+) {
+  const bounded = boundedCompensationContext(value, matchIndex, matchLength);
+  const before = bounded.value.slice(0, bounded.matchIndex);
+  const clauseStart = Math.max(
+    before.lastIndexOf("."),
+    before.lastIndexOf(";"),
+    before.lastIndexOf("\n")
+  );
+  const after = bounded.value.slice(bounded.matchIndex + matchLength);
+  const nextBoundary = after.search(/[.;\n]/);
+  const clauseEnd =
+    nextBoundary < 0 ? bounded.value.length : bounded.matchIndex + matchLength + nextBoundary;
+  let localClauseStart = clauseStart + 1;
+  let localClauseEnd = clauseEnd;
+  for (const boundary of bounded.value
+    .slice(clauseStart + 1, clauseEnd)
+    .matchAll(LOCAL_WEEKLY_HOURS_BOUNDARY_RE)) {
+    const boundaryIndex = clauseStart + 1 + (boundary.index ?? 0);
+    if (boundaryIndex < bounded.matchIndex) {
+      localClauseStart = boundaryIndex + boundary[0].length;
+    } else {
+      localClauseEnd = boundaryIndex;
+      break;
+    }
+  }
+
+  const clause = bounded.value.slice(localClauseStart, localClauseEnd);
+  const nonScheduleHours = isRegularHoursMatch
+    ? NON_REGULAR_WEEKLY_HOURS_RE.test(clause)
+    : NON_SCHEDULE_WEEKLY_HOURS_RE.test(clause);
+  if (nonScheduleHours || !BUSINESS_HOURS_CONTEXT_RE.test(clause)) return !nonScheduleHours;
+
+  const ownershipPrefix = bounded.value.slice(localClauseStart, bounded.matchIndex);
+  return EMPLOYEE_HOURS_CONTEXT_RE.test(ownershipPrefix);
 }
 
 function isCalendarYear(value) {
@@ -1346,9 +1550,14 @@ function isCalendarYear(value) {
   return Number.isInteger(numeric) && numeric >= 1900 && numeric <= 2100;
 }
 
-function plausibleCompensationMatch(line, match, values, suffixes, { hourly = false } = {}) {
+function plausibleCompensationMatch(
+  match,
+  values,
+  suffixes,
+  { hourly = false, annualPayUnit = false } = {}
+) {
   const matchedText = String(match?.[0] || "");
-  const monetaryMarker = /[$£€]|\b(?:USD|CAD|MXN|EUR|GBP)\b/i.test(matchedText);
+  const monetaryMarker = /[$£€]/.test(matchedText) || containsCurrencyCode(matchedText);
   const abbreviated = suffixes.some(
     (suffix) =>
       String(suffix || "")
@@ -1361,7 +1570,7 @@ function plausibleCompensationMatch(line, match, values, suffixes, { hourly = fa
     !monetaryMarker &&
     !abbreviated &&
     !hourly &&
-    !ANNUAL_PAY_UNIT_RE.test(line)
+    !annualPayUnit
   ) {
     return false;
   }
@@ -1374,64 +1583,162 @@ function lastLabelIndex(value, pattern) {
   return index;
 }
 
+function localCompensationContext(line, match) {
+  const matchIndex = match.index ?? 0;
+  const bounded = boundedCompensationContext(line, matchIndex, match[0].length);
+  const prefix = bounded.value.slice(0, bounded.matchIndex);
+  const suffix = bounded.value.slice(bounded.matchIndex + match[0].length);
+  let previousAmountEnd = 0;
+  for (const previous of prefix.matchAll(new RegExp(SINGLE_COMPENSATION_RE.source, "gi"))) {
+    previousAmountEnd = previous.index + previous[0].length;
+  }
+  const nextAmountIndex = suffix.search(new RegExp(SINGLE_COMPENSATION_RE.source, "i"));
+  return {
+    fullPrefix: prefix,
+    hasNextAmount: nextAmountIndex >= 0,
+    prefix: prefix.slice(previousAmountEnd),
+    suffix: nextAmountIndex < 0 ? suffix : suffix.slice(0, nextAmountIndex),
+  };
+}
+
+function compensationMatchBasis(line, match) {
+  const { fullPrefix, hasNextAmount, prefix, suffix } = localCompensationContext(line, match);
+  const prefixBareBaseMatch = prefix.match(ADJACENT_BARE_BASE_PREFIX_RE);
+  const prefixBareBaseIndex = prefixBareBaseMatch?.index ?? -1;
+  const baseLabelIndex = Math.max(lastLabelIndex(prefix, BASE_COMP_LABEL_RE), prefixBareBaseIndex);
+  const variableLabelIndex = lastLabelIndex(prefix, VARIABLE_COMP_LABEL_RE);
+  const suffixBareBaseMatch = suffix.match(ADJACENT_BARE_BASE_SUFFIX_RE);
+  const suffixBareBaseIndex = suffixBareBaseMatch
+    ? suffixBareBaseMatch[0].toLowerCase().lastIndexOf("base")
+    : -1;
+  const suffixStrongBaseLabelIndex = hasNextAmount ? -1 : suffix.search(BASE_COMP_LABEL_RE);
+  const suffixBaseLabelIndex =
+    suffixBareBaseIndex < 0
+      ? suffixStrongBaseLabelIndex
+      : suffixStrongBaseLabelIndex < 0
+        ? suffixBareBaseIndex
+        : Math.min(suffixBareBaseIndex, suffixStrongBaseLabelIndex);
+  const suffixVariableLabelIndex = hasNextAmount ? -1 : suffix.search(VARIABLE_COMP_LABEL_RE);
+  const prefixIsBase = baseLabelIndex >= 0 && baseLabelIndex > variableLabelIndex;
+  const prefixIsVariable = variableLabelIndex >= 0 && variableLabelIndex > baseLabelIndex;
+  const explicitBase =
+    prefixIsBase ||
+    (!prefixIsVariable &&
+      suffixBaseLabelIndex >= 0 &&
+      (suffixVariableLabelIndex < 0 || suffixBaseLabelIndex < suffixVariableLabelIndex));
+  const variable =
+    prefixIsVariable ||
+    (!prefixIsBase &&
+      suffixVariableLabelIndex >= 0 &&
+      (suffixBaseLabelIndex < 0 || suffixVariableLabelIndex < suffixBaseLabelIndex));
+  const hourly = HOURLY_COMP_SUFFIX_RE.test(suffix) || HOURLY_COMP_PREFIX_RE.test(prefix);
+  const hourlyBaseLabelMatch = prefix.match(HOURLY_BASE_PREFIX_RE);
+  const hourlyBaseLabel =
+    hourly &&
+    Boolean(hourlyBaseLabelMatch) &&
+    (!prefixIsVariable ||
+      /(?:^|[:;,|•])\s*$/.test(prefix.slice(0, hourlyBaseLabelMatch.index ?? 0)));
+  const hourlyPayEvidence =
+    hourly &&
+    (/[$£€]/.test(match[0]) || containsCurrencyCode(match[0]) || HOURLY_PAY_PREFIX_RE.test(prefix));
+  return {
+    explicitBase,
+    variable,
+    annualEarnings:
+      ANNUAL_EARNINGS_LABEL_RE.test(prefix) ||
+      (!hasNextAmount && ANNUAL_EARNINGS_LABEL_RE.test(suffix)) ||
+      (ANNUAL_EARNINGS_LABEL_RE.test(fullPrefix) && HOURLY_COMP_RE.test(fullPrefix)),
+    hourly,
+    hourlyBaseLabel,
+    hourlyPayEvidence,
+  };
+}
+
+function compensationLines(source) {
+  const segments = source
+    .split(/\n|\. /)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const lines = [];
+  for (const [index, line] of segments.entries()) {
+    if (
+      /[$£€]|\b(compensation|salary|base|pay range|annual|usd|cad|mxn|eur|gbp)\b/i.test(line) ||
+      containsCurrencyCode(line)
+    ) {
+      const previous = segments[index - 1] || "";
+      const next = segments[index + 1] || "";
+      const nextWorkHours =
+        WEEKLY_HOURS_RE.test(next) ||
+        (WEEKLY_UNIT_RE.test(next) && REGULAR_HOURS_RES.some((pattern) => pattern.test(next)))
+          ? next
+          : "";
+      lines.push({
+        line,
+        workHoursContext: [previous, line, nextWorkHours].filter(Boolean).join(". "),
+      });
+    }
+  }
+  return lines;
+}
+
+function recordCompensationCandidate(groups, candidate, basis, { isBase, isHourly }) {
+  groups.all.push(candidate);
+  if (basis.explicitBase) {
+    groups.explicitBase.push(candidate);
+    if (!isHourly) groups.annualExplicitBase.push(candidate);
+  } else if (isBase) {
+    groups.inferredHourlyBase.push(candidate);
+  } else if (!basis.variable) {
+    groups.nonVariable.push(candidate);
+  }
+}
+
+function preferredCompensationCandidate(groups, baseOnly) {
+  for (const key of ["annualExplicitBase", "explicitBase", "inferredHourlyBase"]) {
+    if (groups[key].length) return groups[key][0];
+  }
+  if (baseOnly) return null;
+  return groups.nonVariable[0] || groups.all[0] || null;
+}
+
+function monotonicSpanMembership(spans) {
+  let cursor = 0;
+  return (index) => {
+    while (cursor < spans.length && index >= spans[cursor][1]) cursor += 1;
+    const span = spans[cursor];
+    return Boolean(span && index >= span[0] && index < span[1]);
+  };
+}
+
 export function extractCompBand(text = "", { baseOnly = false } = {}) {
   const source = String(text || "");
-  const explicitBaseCandidates = [];
-  const nonVariableCandidates = [];
-  const candidates = [];
-  const lines = source
-    .split(/\n|\. /)
-    .filter((line) => /\$|\b(compensation|salary|base|pay range|annual|usd)\b/i.test(line));
+  const candidates = {
+    annualExplicitBase: [],
+    explicitBase: [],
+    inferredHourlyBase: [],
+    nonVariable: [],
+    all: [],
+  };
+  const lines = compensationLines(source);
 
-  for (const line of lines) {
+  for (const { line, workHoursContext } of lines) {
     const normalized = line.replace(/(?<=\d),(?=\d{3}\b)/g, "");
-    const explicitBase = BASE_COMP_LABEL_RE.test(line);
-    const variableComp = VARIABLE_COMP_LABEL_RE.test(line);
-    const annualEarnings = ANNUAL_EARNINGS_LABEL_RE.test(line);
-    const hourly = HOURLY_COMP_RE.test(line);
-    const workHours = annualWorkHours(line);
-    if (baseOnly && annualEarnings && !explicitBase) continue;
-    const re =
-      /(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?\s{0,4}(?:-|–|—|to)\s{0,4}(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?/gi;
-    let foundRange = false;
+    const lineHourly = HOURLY_COMP_RE.test(line);
+    const annualPayUnit = ANNUAL_PAY_UNIT_RE.test(line);
+    const workHours = annualWorkHours(workHoursContext);
+    const re = new RegExp(COMPENSATION_RANGE_RE.source, "gi");
+    const rangeSpans = [];
     for (const match of normalized.matchAll(re)) {
-      const prefix = normalized.slice(0, match.index);
-      const suffix = normalized.slice(match.index + match[0].length);
-      const prefixBareBaseMatch = prefix.match(ADJACENT_BARE_BASE_PREFIX_RE);
-      const prefixBareBaseIndex = prefixBareBaseMatch?.index ?? -1;
-      const baseLabelIndex = Math.max(
-        lastLabelIndex(prefix, BASE_COMP_LABEL_RE),
-        prefixBareBaseIndex
-      );
-      const variableLabelIndex = lastLabelIndex(prefix, VARIABLE_COMP_LABEL_RE);
-      const suffixBareBaseMatch = suffix.match(ADJACENT_BARE_BASE_SUFFIX_RE);
-      const suffixBareBaseIndex = suffixBareBaseMatch
-        ? suffixBareBaseMatch[0].toLowerCase().lastIndexOf("base")
-        : -1;
-      const suffixStrongBaseLabelIndex = suffix.search(BASE_COMP_LABEL_RE);
-      const suffixBaseLabelIndex =
-        suffixBareBaseIndex < 0
-          ? suffixStrongBaseLabelIndex
-          : suffixStrongBaseLabelIndex < 0
-            ? suffixBareBaseIndex
-            : Math.min(suffixBareBaseIndex, suffixStrongBaseLabelIndex);
-      const suffixVariableLabelIndex = suffix.search(VARIABLE_COMP_LABEL_RE);
-      const prefixIsBase = baseLabelIndex >= 0 && baseLabelIndex > variableLabelIndex;
-      const prefixIsVariable = variableLabelIndex >= 0 && variableLabelIndex > baseLabelIndex;
+      rangeSpans.push([match.index, match.index + match[0].length]);
+      const basis = compensationMatchBasis(normalized, match);
       const rangeIsBase =
-        prefixIsBase ||
-        (!prefixIsVariable &&
-          suffixBaseLabelIndex >= 0 &&
-          (suffixVariableLabelIndex < 0 || suffixBaseLabelIndex < suffixVariableLabelIndex));
-      const rangeIsVariable =
-        prefixIsVariable ||
-        (!prefixIsBase &&
-          suffixVariableLabelIndex >= 0 &&
-          (suffixBaseLabelIndex < 0 || suffixVariableLabelIndex < suffixBaseLabelIndex));
-      const rangeIsHourly = rangeIsBase && hourly;
+        basis.explicitBase ||
+        (basis.hourlyPayEvidence && (!basis.variable || basis.hourlyBaseLabel));
+      const rangeIsHourly = rangeIsBase && basis.hourly;
       if (
-        !plausibleCompensationMatch(line, match, [match[1], match[3]], [match[2], match[4]], {
+        !plausibleCompensationMatch(match, [match[1], match[3]], [match[2], match[4]], {
           hourly: rangeIsHourly,
+          annualPayUnit,
         })
       ) {
         continue;
@@ -1440,74 +1747,104 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
       const max = rangeIsHourly ? Number(match[3]) * workHours : normalizeMoney(match[3], match[4]);
       const minimum = rangeIsBase ? 1_000 : 50_000;
       if (min >= minimum && max >= min && max <= 1200000) {
-        const candidate = { min, max };
-        candidates.push(candidate);
-        if (rangeIsBase) explicitBaseCandidates.push(candidate);
-        else if (!rangeIsVariable && !variableComp) nonVariableCandidates.push(candidate);
-        foundRange = true;
+        const candidate = compensationBand(min, max, match);
+        if (!candidate) continue;
+        recordCompensationCandidate(candidates, candidate, basis, {
+          isBase: rangeIsBase,
+          isHourly: rangeIsHourly,
+        });
       }
     }
-    if (foundRange) continue;
-    if (!/\b(?:salary|base\s+(?:salary|pay)|annual\s+(?:salary|pay|compensation))\b/i.test(line)) {
-      continue;
-    }
-    if (variableComp && !explicitBase) {
-      continue;
-    }
-    const single = normalized.match(/(?:USD\s{0,4})?\$?\s{0,4}(\d{2,7}(?:\.\d+)?)(\s{0,4}k)?\b/i);
-    if (!single) continue;
     if (
-      !plausibleCompensationMatch(line, single, [single[1]], [single[2]], {
-        hourly: explicitBase && hourly,
-      })
+      !lineHourly &&
+      !/\b(?:salary|base\s+(?:salary|pay)|annual\s+(?:salary|pay|compensation))\b/i.test(line)
     ) {
       continue;
     }
-    const amount =
-      explicitBase && hourly ? Number(single[1]) * workHours : normalizeMoney(single[1], single[2]);
-    const minimum = explicitBase ? 1_000 : 50_000;
-    if (amount >= minimum && amount <= 1200000) {
-      const candidate = { min: amount, max: amount };
-      candidates.push(candidate);
-      if (explicitBase) explicitBaseCandidates.push(candidate);
-      else if (!variableComp) nonVariableCandidates.push(candidate);
+    const insideRange = monotonicSpanMembership(rangeSpans);
+    for (const single of normalized.matchAll(new RegExp(SINGLE_COMPENSATION_RE.source, "gi"))) {
+      if (insideRange(single.index)) continue;
+      const basis = compensationMatchBasis(normalized, single);
+      const singleIsBase =
+        basis.explicitBase ||
+        (basis.hourlyPayEvidence && (!basis.variable || basis.hourlyBaseLabel));
+      if (basis.variable && !singleIsBase) continue;
+      if (
+        !plausibleCompensationMatch(single, [single[1]], [single[2]], {
+          hourly: singleIsBase && basis.hourly,
+          annualPayUnit,
+        })
+      ) {
+        continue;
+      }
+      const amount =
+        singleIsBase && basis.hourly
+          ? Number(single[1]) * workHours
+          : normalizeMoney(single[1], single[2]);
+      const minimum = singleIsBase ? 1_000 : 50_000;
+      if (amount >= minimum && amount <= 1200000) {
+        const candidate = compensationBand(amount, amount, single);
+        if (!candidate) continue;
+        recordCompensationCandidate(candidates, candidate, basis, {
+          isBase: singleIsBase,
+          isHourly: singleIsBase && basis.hourly,
+        });
+      }
     }
   }
 
-  return (
-    explicitBaseCandidates[0] ||
-    (baseOnly ? null : nonVariableCandidates[0] || candidates[0]) ||
-    null
-  );
+  return preferredCompensationCandidate(candidates, baseOnly);
+}
+
+function annualEarningsContexts(text) {
+  const segments = String(text || "").split(/\n|\. /);
+  const contexts = [];
+  for (const [index, line] of segments.entries()) {
+    if (!ANNUAL_EARNINGS_LABEL_RE.test(line) || EQUITY_COMP_LABEL_RE.test(line)) continue;
+    contexts.push(line);
+    const next = segments[index + 1] || "";
+    if (HOURLY_COMP_RE.test(line) && next) contexts.push(`${line}. ${next}`);
+  }
+  return contexts;
 }
 
 function extractAnnualEarningsBand(text = "") {
-  const lines = String(text || "")
-    .split(/\n|\. /)
-    .filter((line) => ANNUAL_EARNINGS_LABEL_RE.test(line) && !EQUITY_COMP_LABEL_RE.test(line));
-
-  for (const line of lines) {
-    const normalized = line.replace(/,/g, "");
-    const hourly = HOURLY_COMP_RE.test(line);
-    // An hourly base rate with "including tips" does not quantify the tips.
-    // Keep annual cash unknown until the posting supplies an annual amount.
-    if (hourly) continue;
-    const range = normalized.match(
-      /(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?\s{0,4}(?:-|–|—|to)\s{0,4}(?:usd\s{0,4})?\$?\s{0,4}(\d{2,6}(?:\.\d+)?)(\s{0,4}k)?/i
-    );
-    if (range) {
-      if (!plausibleCompensationMatch(line, range, [range[1], range[3]], [range[2], range[4]])) {
+  for (const line of annualEarningsContexts(text)) {
+    const normalized = line.replace(/(?<=\d),(?=\d{3}\b)/g, "");
+    const annualPayUnit = ANNUAL_PAY_UNIT_RE.test(line);
+    const rangeSpans = [];
+    for (const range of normalized.matchAll(new RegExp(COMPENSATION_RANGE_RE.source, "gi"))) {
+      rangeSpans.push([range.index, range.index + range[0].length]);
+      const basis = compensationMatchBasis(normalized, range);
+      if (!basis.annualEarnings || basis.hourly || basis.explicitBase) continue;
+      if (
+        !plausibleCompensationMatch(range, [range[1], range[3]], [range[2], range[4]], {
+          annualPayUnit,
+        })
+      ) {
         continue;
       }
       const min = normalizeMoney(range[1], range[2]);
       const max = normalizeMoney(range[3], range[4]);
-      if (min >= 1_000 && max >= min && max <= 1_200_000) return { min, max };
+      if (min >= 1_000 && max >= min && max <= 1_200_000) {
+        const candidate = compensationBand(min, max, range);
+        if (candidate) return candidate;
+      }
     }
-    const single = normalized.match(/(?:USD\s{0,4})?\$?\s{0,4}(\d{2,7}(?:\.\d+)?)(\s{0,4}k)?\b/i);
-    if (!single) continue;
-    if (!plausibleCompensationMatch(line, single, [single[1]], [single[2]])) continue;
-    const amount = normalizeMoney(single[1], single[2]);
-    if (amount >= 1_000 && amount <= 1_200_000) return { min: amount, max: amount };
+    const insideRange = monotonicSpanMembership(rangeSpans);
+    for (const single of normalized.matchAll(new RegExp(SINGLE_COMPENSATION_RE.source, "gi"))) {
+      if (insideRange(single.index)) continue;
+      const basis = compensationMatchBasis(normalized, single);
+      if (!basis.annualEarnings || basis.hourly || basis.explicitBase) continue;
+      if (!plausibleCompensationMatch(single, [single[1]], [single[2]], { annualPayUnit })) {
+        continue;
+      }
+      const amount = normalizeMoney(single[1], single[2]);
+      if (amount >= 1_000 && amount <= 1_200_000) {
+        const candidate = compensationBand(amount, amount, single);
+        if (candidate) return candidate;
+      }
+    }
   }
   return null;
 }
@@ -1841,6 +2178,7 @@ export function filterAndDedupeOffers(
       reqId: req.id,
       possibleDuplicate,
       qualificationUnknowns: qualification.qualificationUnknowns,
+      ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
       ...(titleRelevance ? { titleRelevance } : {}),
       _qualificationInputIndex: inputIndex,
       ...(rating || scoreSourcedOffer(qualifiedOffer, config)),

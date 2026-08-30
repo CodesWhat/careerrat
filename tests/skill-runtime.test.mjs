@@ -1485,6 +1485,8 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   assert.doesNotMatch(prompt, /consent_mode/);
   assert.match(prompt, /candidate\.location.*string/i);
   assert.match(prompt, /role_buckets.*name.*priority.*titles/i);
+  assert.match(prompt, /seniority_ladder.*at least two/i);
+  assert.match(prompt, /titles array.*non-empty strings/i);
   assert.match(prompt, /capability.*only when.*needed/i);
   assert.match(prompt, /never.*saved job-source search/i);
   assert.match(prompt, /site-specific Yes\/No login question/i);

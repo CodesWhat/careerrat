@@ -130,6 +130,14 @@ function createOrcaBrowserSession({ repoRoot, env = process.env, runOrcaImpl } =
   return wrapOps(createOrcaOps({ runOrcaImpl: run }), "orca");
 }
 
+export function searchSourceBrowserSessionOptions(source = {}) {
+  return {
+    platform: source.platform || source.provider || "search",
+    provider: "playwright",
+    headless: source.auth !== true,
+  };
+}
+
 export function createConfiguredBrowserSession({
   repoRoot,
   env = process.env,
@@ -151,8 +159,9 @@ export function createConfiguredBrowserSession({
   const resolved = resolveSession({ data, repoRoot, env });
   const provider = requestedProvider === "playwright" ? "playwright" : resolved.provider;
   if (provider === "playwright") {
+    const profilePlatform = headless ? `${platform}-headless` : platform;
     return createPlaywrightBrowserSession({
-      profileDir: profilePath(platform, {
+      profileDir: profilePath(profilePlatform, {
         profileRoot: data?.session?.profile_root || resolved.profileRoot,
         repoRoot,
         env,
@@ -180,7 +189,8 @@ export function createBrowserSessionManager({
   return {
     get(options = {}) {
       const platform = String(options.platform || "default");
-      const key = `${platform}\0${String(options.provider || "configured")}`;
+      const visibility = options.headless === true ? "headless" : "visible";
+      const key = `${platform}\0${String(options.provider || "configured")}\0${visibility}`;
       if (sessions.has(key)) return sessions.get(key);
       const session = createSessionImpl({ ...defaults, ...options, platform });
       if (!session?.available) return session;

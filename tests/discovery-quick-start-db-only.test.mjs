@@ -72,3 +72,19 @@ test("discovery quick-start prepares only canonical DB source config", () => {
     assert.equal(existsSync(userPath({ repoRoot, env }, path)), false, path);
   }
 });
+
+test("discovery quick-start does not generate sources without target titles", () => {
+  const careerratHome = mkdtempSync(join(tmpdir(), "careerrat-discovery-empty-targets-"));
+  roots.push(careerratHome);
+  const env = { CAREERRAT_HOME: careerratHome };
+
+  candidateSetupInitialize({ repoRoot, env });
+
+  const result = prepareQuickStartSourcing({ repoRoot, env });
+  const sourceConfig = sourceConfigGet({ repoRoot, env, name: "search-sources" });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.searches.count, 0);
+  assert.equal(sourceConfig.stored, false);
+  assert.deepEqual(sourceConfig.data.searches, []);
+});

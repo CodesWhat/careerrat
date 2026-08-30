@@ -578,7 +578,7 @@ describe("chat-first onboarding controller", () => {
         },
         data: {
           profile: {
-            compensation: { minimum_annual_earnings: 90000 },
+            compensation: { currency: "EUR", minimum_annual_earnings: 90000 },
           },
         },
       },
@@ -595,9 +595,10 @@ describe("chat-first onboarding controller", () => {
           label: "How should CareerRat screen pay?",
         }),
         expect.objectContaining({
-          id: "compensationFloor",
-          value: "90000",
-          label: "Minimum yearly amount",
+          id: "annualCashWorksheet",
+          type: "annual-cash-worksheet",
+          currency: "EUR",
+          value: expect.objectContaining({ annualOverride: "90000" }),
         }),
       ])
     );
@@ -642,9 +643,9 @@ describe("chat-first onboarding controller", () => {
           label: "Minimum guaranteed base pay",
         }),
         expect.objectContaining({
-          id: "minimumAnnualEarnings",
-          value: "85000",
-          label: "Minimum annual cash earnings",
+          id: "annualCashWorksheet",
+          type: "annual-cash-worksheet",
+          value: expect.objectContaining({ annualOverride: "85000" }),
         }),
       ])
     );

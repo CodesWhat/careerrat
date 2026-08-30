@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as ReactRouter from "react-router-dom";
 import { inlineErrorMessage } from "../lib/errorCopy.js";
+import { emptyAnnualCashWorksheet } from "./annual-cash-worksheet.js";
 import { profileSettingsApi } from "./api.js";
 import { useDesktopUpdate } from "./desktop-update.js";
 import { firstRunRuntimeChoices } from "./first-run-controller.js";
@@ -55,6 +56,25 @@ function profileEditorValues(editor) {
       field.type === "checkbox" ? field.checked === true : (field.value ?? ""),
     ])
   );
+}
+
+function hydrateProfileEditorDraft(editor, values) {
+  if (!values || typeof values !== "object" || Array.isArray(values)) return values;
+  const hasAnnualCashWorksheet = (editor?.fields || []).some(
+    (field) => field.id === "annualCashWorksheet"
+  );
+  if (
+    !hasAnnualCashWorksheet ||
+    Object.hasOwn(values, "annualCashWorksheet") ||
+    !Object.hasOwn(values, "minimumAnnualEarnings")
+  ) {
+    return values;
+  }
+  const { minimumAnnualEarnings, ...currentValues } = values;
+  return {
+    ...currentValues,
+    annualCashWorksheet: emptyAnnualCashWorksheet(minimumAnnualEarnings),
+  };
 }
 
 function profileEditorValuesMatch(editor, left, right) {
@@ -212,10 +232,16 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const acceptedDefaultValues = profileEditorValues(acceptedEditor);
   const editorDrafts = editorDraftState.contextId === contextId ? editorDraftState.values : {};
   const acceptedEditorValues = acceptedEditingSection
-    ? (editorDrafts[acceptedEditingSection] ??
-      (draftContext
-        ? readStoredDraft(profileEditorDraftKey(acceptedEditingSection, draftContext), draftContext)
-        : null))
+    ? hydrateProfileEditorDraft(
+        acceptedEditor,
+        editorDrafts[acceptedEditingSection] ??
+          (draftContext
+            ? readStoredDraft(
+                profileEditorDraftKey(acceptedEditingSection, draftContext),
+                draftContext
+              )
+            : null)
+      )
     : null;
   const acceptedVisibleEditorValues = acceptedEditorValues ?? acceptedDefaultValues;
   const editorDirty = Boolean(
@@ -271,10 +297,13 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const profileEditor = editingSection ? model.profile?.editors?.[editingSection] : null;
   const defaultEditorValues = profileEditorValues(profileEditor);
   const editorValues = editingSection
-    ? (editorDrafts[editingSection] ??
-      (draftContext
-        ? readStoredDraft(profileEditorDraftKey(editingSection, draftContext), draftContext)
-        : null))
+    ? hydrateProfileEditorDraft(
+        profileEditor,
+        editorDrafts[editingSection] ??
+          (draftContext
+            ? readStoredDraft(profileEditorDraftKey(editingSection, draftContext), draftContext)
+            : null)
+      )
     : null;
   const visibleEditorValues = editorValues ?? defaultEditorValues;
   const draftDirty = Boolean(dirtyKind);
@@ -769,9 +798,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onEditorChange={(id, value) => {
           const currentValues = editorDraftState.contextId === contextId ? editorDrafts : {};
           const values = {
-            ...(currentValues[editingSection] ||
-              readStoredDraft(profileEditorDraftKey(editingSection, draftContext), draftContext) ||
-              defaultEditorValues),
+            ...(hydrateProfileEditorDraft(
+              profileEditor,
+              currentValues[editingSection] ||
+                readStoredDraft(profileEditorDraftKey(editingSection, draftContext), draftContext)
+            ) || defaultEditorValues),
             [id]: value,
           };
           recordDraftPersistence(

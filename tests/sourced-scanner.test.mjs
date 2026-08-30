@@ -40,8 +40,179 @@ test("compensation parsing separates base pay from annual cash earnings", () => 
     "Base pay: $11.35 per hour. Estimated annual earnings including tips: $95,000 - $120,000."
   );
 
-  assert.deepEqual(bands.base, { min: 23_608, max: 23_608 });
-  assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000 });
+  assert.deepEqual(bands.base, { min: 23_608, max: 23_608, currency: "USD" });
+  assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000, currency: "USD" });
+});
+
+test("CR5: parsed compensation bands normalize and retain explicit currencies", () => {
+  const cases = [
+    ["Base salary: $90k-$110k.", { min: 90_000, max: 110_000, currency: "USD" }],
+    ["Base salary: £90k-£110k.", { min: 90_000, max: 110_000, currency: "GBP" }],
+    ["Base salary: €90k-€110k.", { min: 90_000, max: 110_000, currency: "EUR" }],
+    ["Base salary: CAD 90k-110k.", { min: 90_000, max: 110_000, currency: "CAD" }],
+    ["Base salary: CAD $90k-$110k.", { min: 90_000, max: 110_000, currency: "CAD" }],
+    ["Base salary: $90k-$110k MXN.", { min: 90_000, max: 110_000, currency: "MXN" }],
+    ["Base salary: 90k-110k MXN.", { min: 90_000, max: 110_000, currency: "MXN" }],
+    ["Base salary: 90k GBP.", { min: 90_000, max: 90_000, currency: "GBP" }],
+    ["Base salary: 90k-110k EUR.", { min: 90_000, max: 110_000, currency: "EUR" }],
+    ["Pay: 9 EUR per hour.", { min: 18_720, max: 18_720, currency: "EUR" }],
+    ["Base salary: 90k-110k CAD annually.", { min: 90_000, max: 110_000, currency: "CAD" }],
+  ];
+
+  for (const [text, expected] of cases) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text).base, expected, text);
+  }
+
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Base salary: 90k-110k.").base, {
+    min: 90_000,
+    max: 110_000,
+  });
+  assert.equal(
+    sourcedScanner.extractCompensationBands("Base salary: GBP $90k-$110k per year.").base,
+    null
+  );
+});
+
+test("CR5: base and annual-earnings bands independently preserve currency", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Base pay: GBP 11 per hour. Estimated annual earnings: 95,000-120,000 GBP."
+    ),
+    {
+      base: { min: 22_880, max: 22_880, currency: "GBP" },
+      annualEarnings: { min: 95_000, max: 120_000, currency: "GBP" },
+    }
+  );
+});
+
+test("CR5: single-digit hourly wages parse and annualize", () => {
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Pay: $7 per hour."), {
+    base: { min: 14_560, max: 14_560, currency: "USD" },
+    annualEarnings: null,
+  });
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Pay: EUR 9/hour."), {
+    base: { min: 18_720, max: 18_720, currency: "EUR" },
+    annualEarnings: null,
+  });
+});
+
+test("CR5: hourly annualization uses regular hours when overtime hours share the clause", () => {
+  for (const schedule of [
+    "30 regular hours and 10 overtime hours per week",
+    "10 overtime hours and 30 regular hours per week",
+    "regular schedule is 30 hours per week plus 10 overtime hours",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(`Pay: $20 per hour; schedule is ${schedule}.`),
+      {
+        base: { min: 31_200, max: 31_200, currency: "USD" },
+        annualEarnings: null,
+      },
+      schedule
+    );
+  }
+});
+
+test("CR5 closeout: guaranteed hourly pay outranks tips, variable pay, and overtime in every order", () => {
+  const competingPay = [
+    ["tips", "$35 per hour", "Regular pay"],
+    ["tips", "$30-$35 per hour", "Regular pay"],
+    ["variable pay", "$35 per hour", "Regular pay"],
+    ["variable pay", "$30-$35 per hour", "Regular pay"],
+    ["overtime pay", "$35 per hour", "Regular rate"],
+    ["overtime pay", "$30-$35 per hour", "Regular rate"],
+  ];
+
+  for (const [basis, amount, guaranteedLabel] of competingPay) {
+    for (const text of [
+      `${guaranteedLabel}: $20 per hour. ${basis}: ${amount}.`,
+      `${basis}: ${amount}. ${guaranteedLabel}: $20 per hour.`,
+    ]) {
+      assert.deepEqual(
+        sourcedScanner.extractCompensationBands(text),
+        {
+          base: { min: 41_600, max: 41_600, currency: "USD" },
+          annualEarnings: null,
+        },
+        text
+      );
+    }
+  }
+});
+
+test("CR5: bare overtime hourly pay never outranks guaranteed regular pay", () => {
+  for (const [label, overtimeAmount] of [
+    ["Overtime", "$35 per hour"],
+    ["Overtime", "$30-$35 per hour"],
+    ["OT pay", "$35 per hour"],
+    ["OT pay", "$30-$35 per hour"],
+  ]) {
+    for (const text of [
+      `Regular pay: $20 per hour. ${label}: ${overtimeAmount}.`,
+      `${label}: ${overtimeAmount}. Regular pay: $20 per hour.`,
+    ]) {
+      assert.deepEqual(
+        sourcedScanner.extractCompensationBands(text),
+        {
+          base: { min: 41_600, max: 41_600, currency: "USD" },
+          annualEarnings: null,
+        },
+        text
+      );
+    }
+  }
+});
+
+test("CR5: an annual-earnings label survives an intervening hourly amount", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Estimated annual earnings including tips: base pay is $11.35 per hour and typical earnings are $95,000-$120,000 per year."
+    ),
+    {
+      base: { min: 23_608, max: 23_608, currency: "USD" },
+      annualEarnings: { min: 95_000, max: 120_000, currency: "USD" },
+    }
+  );
+});
+
+test("CR5 closeout: annual-earnings recovery never captures a later explicit base salary", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Estimated annual earnings including tips: base pay is $11.35 per hour. Base salary: $60,000-$75,000 per year."
+    ),
+    {
+      base: { min: 60_000, max: 75_000, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+
+  for (const annualCash of [
+    "$95,000-$120,000 per year.",
+    "Typical annual cash earnings are $95,000-$120,000 per year.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(
+        `Estimated annual earnings including tips: base pay is $11.35 per hour. ${annualCash}`
+      ),
+      {
+        base: { min: 23_608, max: 23_608, currency: "USD" },
+        annualEarnings: { min: 95_000, max: 120_000, currency: "USD" },
+      },
+      annualCash
+    );
+  }
+});
+
+test("annual cash earnings parsing skips only the local hourly amount on a shared line", () => {
+  for (const text of [
+    "Base pay: $11.35 per hour; estimated annual earnings including tips: $95,000-$120,000.",
+    "Estimated annual earnings including tips: $95,000-$120,000; base pay: $11.35 per hour.",
+  ]) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base: { min: 23_608, max: 23_608, currency: "USD" },
+      annualEarnings: { min: 95_000, max: 120_000, currency: "USD" },
+    });
+  }
 });
 
 test("annual cash earnings parsing ignores adjacent non-cash benefits", () => {
@@ -50,7 +221,7 @@ test("annual cash earnings parsing ignores adjacent non-cash benefits", () => {
   );
 
   assert.equal(bands.base, null);
-  assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000 });
+  assert.deepEqual(bands.annualEarnings, { min: 95_000, max: 120_000, currency: "USD" });
 });
 
 test("hourly base annualization honors the posting's explicit weekly hours", () => {
@@ -58,11 +229,535 @@ test("hourly base annualization honors the posting's explicit weekly hours", () 
     "Base pay: $40 per hour, 30 hours per week."
   );
 
-  assert.deepEqual(bands.base, { min: 62_400, max: 62_400 });
+  assert.deepEqual(bands.base, { min: 62_400, max: 62_400, currency: "USD" });
   assert.deepEqual(
     sourcedScanner.extractCompensationBands("Base pay: $40 per hour, full-time.").base,
-    { min: 83_200, max: 83_200 }
+    { min: 83_200, max: 83_200, currency: "USD" }
   );
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Benefits include medical coverage. Pay: $20/hour, schedule: 30 hours per week."
+    ).base,
+    { min: 31_200, max: 31_200, currency: "USD" }
+  );
+});
+
+test("unlabeled hourly pay annualizes as base compensation", () => {
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Pay: $18-$22/hour."), {
+    base: { min: 37_440, max: 45_760, currency: "USD" },
+    annualEarnings: null,
+  });
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Pay: $20 per hour."), {
+    base: { min: 41_600, max: 41_600, currency: "USD" },
+    annualEarnings: null,
+  });
+});
+
+test("unlabeled hourly pay uses weekly hours stated before the wage", () => {
+  for (const text of [
+    "30 hours per week. Pay: $20 per hour",
+    "30 hours per week; Pay: $20 per hour",
+  ]) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base: { min: 31_200, max: 31_200, currency: "USD" },
+      annualEarnings: null,
+    });
+  }
+});
+
+test("unlabeled hourly pay uses weekly hours stated after the wage", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands("Pay: $20 per hour. Schedule: 30 hours per week."),
+    {
+      base: { min: 31_200, max: 31_200, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands("Pay: $18-$22/hour\nSchedule: 30 hours per week"),
+    {
+      base: { min: 28_080, max: 34_320, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+});
+
+test("hourly annualization ignores adjacent non-schedule weekly-hour qualifiers", () => {
+  for (const text of [
+    "Overtime: 10 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Volunteer commitment: 10 hours per week.",
+    "Benefits eligibility begins at 30 hours per week; Pay: $20/hour.",
+    "Pay: $20/hour; benefits begin at 30 hours per week.",
+  ]) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base: { min: 41_600, max: 41_600, currency: "USD" },
+      annualEarnings: null,
+    });
+  }
+});
+
+test("CR5 closeout: business operating hours are not employee weekly schedules", () => {
+  for (const text of [
+    "Store operating hours: 30 hours per week. Pay: $20 per hour.",
+    "Pay: $20 per hour. The business is open 30 hours per week.",
+    "Restaurant hours of operation total 30 hours per week; pay is $20 per hour.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 41_600, max: 41_600, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+
+  for (const text of [
+    "Employee schedule: 30 hours per week. Pay: $20 per hour.",
+    "Pay: $20 per hour. Employees are regularly scheduled for 30 hours per week.",
+    "Pay: $20 per hour. The store manager works 30 hours per week.",
+    "Pay: $20 per hour. The office employee schedule is 30 hours per week.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 31_200, max: 31_200, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5: semantic business operating-hour grammar keeps hourly pay on the default workweek", () => {
+  for (const text of [
+    "Store operates 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store operates 80 hours per week.",
+    "Store operates for 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store operates for 80 hours per week.",
+    "Store operates a total of 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store operates a total of 80 hours per week.",
+    "Store is operating 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store is operating 80 hours per week.",
+    "Store currently operates 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store currently operates 80 hours per week.",
+    "Store operates for a total of 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store is currently operating 80 hours per week.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 41_600, max: 41_600, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5: business-entity weekly hours are not employee schedules", () => {
+  for (const text of [
+    "Restaurant stays open 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Restaurant stays open 80 hours per week.",
+    "Store runs 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Store runs 80 hours per week.",
+    "Facility open 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Facility open 80 hours per week.",
+    "Restaurant stays open daily, for 80 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Facility open year-round, 80 hours per week.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 41_600, max: 41_600, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5 ownership: employee context must own the matched hours", () => {
+  for (const clause of [
+    "Restaurant is open 80 hours/week to give employees flexible shifts",
+    "Restaurant operates 80 hours/week for staff coverage",
+  ]) {
+    for (const text of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+      assert.deepEqual(
+        sourcedScanner.extractCompensationBands(text),
+        {
+          base: { min: 41_600, max: 41_600, currency: "USD" },
+          annualEarnings: null,
+        },
+        text
+      );
+    }
+  }
+
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Pay: $20/hour. Employees at the restaurant work 30 hours per week."
+    ),
+    {
+      base: { min: 31_200, max: 31_200, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Pay: $20/hour. Employees work flexible shifts and the restaurant operates 80 hours/week."
+    ),
+    {
+      base: { min: 41_600, max: 41_600, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+});
+
+test("CR5 ownership: a business regular schedule stays on the default workweek", () => {
+  for (const text of [
+    "Store's regular schedule is 80 hours/week. Pay: $20/hour.",
+    "Pay: $20/hour. Store's regular schedule is 80 hours/week.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 41_600, max: 41_600, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5 next-sentence: explicit regular hours win over overtime hours", () => {
+  const text =
+    "Pay: $20/hour. The position includes 10 overtime hours and 30 regular hours per week.";
+
+  assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+    base: { min: 31_200, max: 31_200, currency: "USD" },
+    annualEarnings: null,
+  });
+});
+
+test("CR5 large-input: compensation parsing does not restart full-body regex scans per amount", () => {
+  const text = `Hourly pay: $9 per hour, volunteer ${"40 hours per week ".repeat(3_500)}`;
+  const originalExec = RegExp.prototype.exec;
+  let fullBodyRestarts = 0;
+  RegExp.prototype.exec = function countedExec(input) {
+    if (String(input).length > text.length / 2 && this.lastIndex === 0) fullBodyRestarts += 1;
+    return Reflect.apply(originalExec, this, [input]);
+  };
+
+  let bands;
+  try {
+    bands = sourcedScanner.extractCompensationBands(text);
+  } finally {
+    RegExp.prototype.exec = originalExec;
+  }
+
+  assert.deepEqual(bands, {
+    base: { min: 18_720, max: 18_720, currency: "USD" },
+    annualEarnings: null,
+  });
+  assert.ok(
+    fullBodyRestarts <= 40,
+    `expected bounded full-body regex restarts, received ${fullBodyRestarts}`
+  );
+});
+
+test("CR5 large-input: range membership checks stay linear in posting length", () => {
+  const text = `Salary: ${"$1000-$1001 ".repeat(8_000)}`;
+  const originalSome = Array.prototype.some;
+  let rangeMembershipProbes = 0;
+  Array.prototype.some = function countedSome(callback, ...args) {
+    if (this.length > 1_000 && Array.isArray(this[0]) && this[0].length === 2) {
+      return Reflect.apply(originalSome, this, [
+        (value, index, array) => {
+          rangeMembershipProbes += 1;
+          return callback(value, index, array);
+        },
+        ...args,
+      ]);
+    }
+    return Reflect.apply(originalSome, this, [callback, ...args]);
+  };
+
+  try {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base: { min: 1_000, max: 1_001, currency: "USD" },
+      annualEarnings: null,
+    });
+  } finally {
+    Array.prototype.some = originalSome;
+  }
+
+  assert.ok(
+    rangeMembershipProbes <= 32_000,
+    `expected linear range membership, received ${rangeMembershipProbes} probes`
+  );
+});
+
+test("CR5 whole-clause: business hours use the default workweek", () => {
+  const businessHoursClauses = [
+    "Open 80 hours/week at this restaurant",
+    "We are open 80 hours/week",
+    "Hours of operation: 80 hours/week",
+    "Restaurant operating schedule: 80 hours/week",
+    "Store work hours: 80 hours/week",
+    "80 hours/week are the restaurant opening hours",
+  ];
+
+  for (const clause of businessHoursClauses) {
+    for (const text of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+      assert.deepEqual(
+        sourcedScanner.extractCompensationBands(text),
+        {
+          base: { min: 41_600, max: 41_600, currency: "USD" },
+          annualEarnings: null,
+        },
+        text
+      );
+    }
+  }
+});
+
+test("CR5 whole-clause: employee hours remain schedules and win mixed clauses", () => {
+  for (const text of [
+    "This role requires 30 hours/week. Pay: $20/hour.",
+    "Pay: $20/hour. Expected commitment is 30 hours/week.",
+    "We are open 80 hours/week. This role requires 30 hours/week. Pay: $20/hour.",
+    "Pay: $20/hour. Expected commitment is 30 hours/week. We are open 80 hours/week.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 31_200, max: 31_200, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5: employee weekly-hours context wins without relying on an employee noun", () => {
+  for (const text of [
+    "Schedule: 30 hours per week. Pay: $20/hour.",
+    "Pay: $20/hour. Regularly scheduled 30 hours per week.",
+    "Restaurant stays open 80 hours per week, while employees work 30 hours per week. Pay: $20/hour.",
+    "Employees work 30 hours per week, while the store runs 80 hours per week. Pay: $20/hour.",
+    "Facility open 80 hours per week, with a regular schedule of 30 hours per week. Pay: $20/hour.",
+    "Regular schedule: 30 hours per week, while the facility is open 80 hours per week. Pay: $20/hour.",
+    "Restaurant stays open daily, for 80 hours per week, while employees work 30 hours per week. Pay: $20/hour.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 31_200, max: 31_200, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5: local clause boundaries keep business hours out of employee schedules", () => {
+  for (const text of [
+    ...["but", "while", "whereas"].map(
+      (conjunction) =>
+        `Restaurant open 80 hours/week ${conjunction} employees work 30 hours/week. Pay: $20/hour.`
+    ),
+    "Restaurant open 80 hours/week and employees work 30 hours/week. Pay: $20/hour.",
+    "Restaurant open 80 hours/week, employees work 30 hours/week. Pay: $20/hour.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 31_200, max: 31_200, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5: active business hours do not hide an employee schedule in the same clause", () => {
+  for (const text of [
+    "Store operates 80 hours per week, while employees work 30 hours per week. Pay: $20/hour.",
+    "Employees work 30 hours per week, while the store operates 80 hours per week. Pay: $20/hour.",
+    "Store operates a total of 80 hours per week, while the employee schedule is 30 hours per week. Pay: $20/hour.",
+    "This employee works 30 hours per week, while the store is operating 80 hours per week. Pay: $20/hour.",
+    "Store operates for a total of 80 hours per week, while employees work 30 hours per week. Pay: $20/hour.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 31_200, max: 31_200, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("unlabeled hourly pay stays base when a later amount is variable cash", () => {
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands("Pay: $20 per hour plus a $200 signing bonus"),
+    {
+      base: { min: 41_600, max: 41_600, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands("Pay: $18-$22/hour plus a $200 signing bonus"),
+    {
+      base: { min: 37_440, max: 45_760, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands("Pay: $20 per hour plus a signing bonus of $200"),
+    {
+      base: { min: 41_600, max: 41_600, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands("Pay: $18-$22/hour plus a signing bonus of $200"),
+    {
+      base: { min: 37_440, max: 45_760, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Pay: $20 per hour plus an annual bonus of $50,000-$75,000"
+    ),
+    {
+      base: { min: 41_600, max: 41_600, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Signing bonus: $200 per hour"), {
+    base: null,
+    annualEarnings: null,
+  });
+});
+
+test("unlabeled hourly pay survives adjacent unquantified variable-pay language", () => {
+  const cases = [
+    ["Pay: $20 per hour plus bonus", { min: 41_600, max: 41_600, currency: "USD" }],
+    ["Bonus eligible; pay: $20 per hour", { min: 41_600, max: 41_600, currency: "USD" }],
+    ["Pay: $18-$22/hour plus bonus", { min: 37_440, max: 45_760, currency: "USD" }],
+    ["Bonus eligible; pay: $18-$22/hour", { min: 37_440, max: 45_760, currency: "USD" }],
+    ["Wage: $20/hour plus commission", { min: 41_600, max: 41_600, currency: "USD" }],
+    ["Commission eligible; wage: $18-$22/hour", { min: 37_440, max: 45_760, currency: "USD" }],
+    ["Pay: $20/hour including tips", { min: 41_600, max: 41_600, currency: "USD" }],
+    ["Pay: $18-$22/hour including tips", { min: 37_440, max: 45_760, currency: "USD" }],
+  ];
+
+  for (const [text, base] of cases) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base,
+      annualEarnings: null,
+    });
+  }
+});
+
+test("explicit annual base outranks an adjacent generic hourly rate", () => {
+  for (const text of [
+    "Base salary: $80,000; hourly rate: $20/hour",
+    "Hourly rate: $20/hour; base salary: $80,000",
+  ]) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base: { min: 80_000, max: 80_000, currency: "USD" },
+      annualEarnings: null,
+    });
+  }
+});
+
+test("an-hour pay units annualize single amounts and ranges", () => {
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Pay: $20 an hour"), {
+    base: { min: 41_600, max: 41_600, currency: "USD" },
+    annualEarnings: null,
+  });
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Pay: $18-$22 an hour"), {
+    base: { min: 37_440, max: 45_760, currency: "USD" },
+    annualEarnings: null,
+  });
+});
+
+test("unlabeled non-dollar hourly pay annualizes single amounts and ranges", () => {
+  const cases = [
+    ["Pay: £20 per hour", { min: 41_600, max: 41_600, currency: "GBP" }],
+    ["Pay: €18-€22/hour", { min: 37_440, max: 45_760, currency: "EUR" }],
+    ["Pay: GBP 20 per hour", { min: 41_600, max: 41_600, currency: "GBP" }],
+    ["Pay: EUR 18-EUR 22/hour", { min: 37_440, max: 45_760, currency: "EUR" }],
+  ];
+
+  for (const [text, base] of cases) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base,
+      annualEarnings: null,
+    });
+  }
+});
+
+test("CR5 closeout: adjacent ISO currencies are retained and conflicting markers stay unknown", () => {
+  for (const currency of ["CHF", "AUD", "PLN"]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(`Base salary: 90k-110k ${currency}.`).base,
+      { min: 90_000, max: 110_000, currency },
+      currency
+    );
+  }
+
+  for (const text of ["Base salary: USD 90k-110k CHF.", "Base salary: AUD 90k-PLN 110k."]) {
+    assert.equal(sourcedScanner.extractCompensationBands(text).base, null, text);
+  }
+
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Base salary: 90k-110k.").base, {
+    min: 90_000,
+    max: 110_000,
+  });
+  assert.deepEqual(sourcedScanner.extractCompensationBands("Base salary: PAY 90k-110k.").base, {
+    min: 90_000,
+    max: 110_000,
+  });
+});
+
+test("currency symbols remain compatible with their supported ISO currency families", () => {
+  for (const [text, currency] of [
+    ["Base salary: AUD $90k-$110k.", "AUD"],
+    ["Base salary: NZD $90k-$110k.", "NZD"],
+    ["Base salary: EGP £90k-£110k.", "EGP"],
+  ]) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text).base, {
+      min: 90_000,
+      max: 110_000,
+      currency,
+    });
+  }
+
+  assert.equal(sourcedScanner.extractCompensationBands("Base salary: EUR $90k-$110k.").base, null);
+});
+
+test("hourly throughput does not become base compensation", () => {
+  for (const text of [
+    "Compensation analysts process 20 calls per hour.",
+    "Compensation: 20 guests per hour.",
+    "Compensation: $20 guests per hour.",
+    "Total compensation: $20 per hour plus bonus.",
+    "Variable pay: $20 per hour.",
+    "Incentive pay: $20 per hour.",
+    "Bonus pay: $20 per hour.",
+  ]) {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base: null,
+      annualEarnings: null,
+    });
+  }
 });
 
 test("unquantified tips never turn hourly base pay into annual cash earnings", () => {
@@ -70,7 +765,7 @@ test("unquantified tips never turn hourly base pay into annual cash earnings", (
     "Base pay: $11.35 per hour including tips."
   );
 
-  assert.deepEqual(bands.base, { min: 23_608, max: 23_608 });
+  assert.deepEqual(bands.base, { min: 23_608, max: 23_608, currency: "USD" });
   assert.equal(bands.annualEarnings, null);
 });
 
@@ -89,7 +784,7 @@ test("unlabeled compensation stays unclassified instead of becoming guaranteed b
     annualEarnings: null,
   });
   assert.deepEqual(sourcedScanner.extractCompensationBands("Base salary: $95k-$120k per year"), {
-    base: { min: 95_000, max: 120_000 },
+    base: { min: 95_000, max: 120_000, currency: "USD" },
     annualEarnings: null,
   });
   assert.deepEqual(sourcedScanner.resolveCompensationEvidence({ comp: "$95k-$120k" }), {
@@ -100,7 +795,10 @@ test("unlabeled compensation stays unclassified instead of becoming guaranteed b
 });
 
 test("explicit base compensation labels classify a guaranteed-base band", () => {
-  const expected = { base: { min: 95_000, max: 120_000 }, annualEarnings: null };
+  const expected = {
+    base: { min: 95_000, max: 120_000, currency: "USD" },
+    annualEarnings: null,
+  };
 
   assert.deepEqual(
     [
@@ -114,7 +812,10 @@ test("explicit base compensation labels classify a guaranteed-base band", () => 
 });
 
 test("trailing bare base labels remain explicit before compensation prose", () => {
-  const expected = { base: { min: 95_000, max: 120_000 }, annualEarnings: null };
+  const expected = {
+    base: { min: 95_000, max: 120_000, currency: "USD" },
+    annualEarnings: null,
+  };
 
   assert.deepEqual(
     ["$95k-$120k base, depending on experience", "$95k-$120k base, plus bonus and equity"].map(
@@ -214,6 +915,168 @@ test("bounded title equivalence never crosses from engineering management to sta
 
   assert.equal(filter("Platform Engineering Manager"), false);
 });
+
+test("ranked nursing ladders reject CNA roles while keeping RN and NP roles", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Nursing",
+        priority: "primary",
+        titles: ["Registered Nurse", "RN"],
+        seniority_ladder: [
+          { rank: 30, titles: ["Nurse Practitioner", "NP"] },
+          { rank: 10, titles: ["Certified Nursing Assistant", "CNA"] },
+          { rank: 20, titles: ["Registered Nurse", "RN"] },
+        ],
+      },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const result = filterAndDedupeOffers(
+    [
+      offerForSeniority("cna", "Certified Nursing Assistant"),
+      offerForSeniority("rn", "Registered Nurse"),
+      offerForSeniority("np", "Nurse Practitioner"),
+    ],
+    optionsForSeniority(targeting)
+  );
+
+  assert.deepEqual(
+    result.filteredSeniority.map((offer) => offer.title),
+    ["Certified Nursing Assistant"]
+  );
+  assert.deepEqual(
+    result.kept.map((offer) => offer.title),
+    ["Registered Nurse", "Nurse Practitioner"]
+  );
+});
+
+test("ranked trades ladders reject apprentices while keeping journeyman and lead roles", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Electrical",
+        priority: "primary",
+        titles: ["Journeyman Electrician"],
+        seniority_ladder: [
+          { rank: 300, titles: ["Lead Electrician"] },
+          { rank: 100, titles: ["Apprentice Electrician"] },
+          { rank: 200, titles: ["Journeyman Electrician"] },
+        ],
+      },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const result = filterAndDedupeOffers(
+    [
+      offerForSeniority("apprentice", "Apprentice Electrician"),
+      offerForSeniority("journeyman", "Journeyman Electrician"),
+      offerForSeniority("lead", "Lead Electrician"),
+    ],
+    optionsForSeniority(targeting)
+  );
+
+  assert.deepEqual(
+    result.filteredSeniority.map((offer) => offer.title),
+    ["Apprentice Electrician"]
+  );
+  assert.deepEqual(
+    result.kept.map((offer) => offer.title),
+    ["Journeyman Electrician", "Lead Electrician"]
+  );
+});
+
+test("ranked bar ladders keep Bar Manager above Lead Bartender without corporate track rules", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Bar",
+        priority: "primary",
+        titles: ["Lead Bartender"],
+        seniority_ladder: [
+          { rank: 40, titles: ["Bar Manager"] },
+          { rank: 10, titles: ["Barback"] },
+          { rank: 30, titles: ["Lead Bartender", "Head Bartender"] },
+          { rank: 20, titles: ["Bartender"] },
+        ],
+      },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const titleFilter = buildTitleFilter(
+    {
+      positive: ["Lead Bartender"],
+      negative: [],
+      below_target: ["Barback", "Bartender"],
+    },
+    targeting
+  );
+  const result = filterAndDedupeOffers(
+    [
+      offerForSeniority("barback", "Barback"),
+      offerForSeniority("bartender", "Bartender"),
+      offerForSeniority("lead", "Lead Bartender"),
+      offerForSeniority("manager", "Bar Manager"),
+    ],
+    { ...optionsForSeniority(targeting), titleFilter }
+  );
+
+  assert.deepEqual(
+    [...result.filteredTitle, ...result.filteredSeniority].map((offer) => offer.title),
+    ["Barback", "Bartender"]
+  );
+  assert.deepEqual(
+    result.kept.map((offer) => offer.title),
+    ["Lead Bartender", "Bar Manager"]
+  );
+});
+
+test("unconfigured engineering targets retain the legacy junior-title guard", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Platform",
+        priority: "primary",
+        titles: ["Staff Backend Engineer"],
+      },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const result = filterAndDedupeOffers(
+    [offerForSeniority("junior-backend", "Junior Backend Engineer")],
+    optionsForSeniority(targeting)
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSeniority[0]?.qualificationReason, "seniority-below-target");
+});
+
+function offerForSeniority(id, title) {
+  return {
+    company: "Example Employer",
+    title,
+    url: `https://jobs.example.test/${id}`,
+    location: "Remote - United States",
+  };
+}
+
+function optionsForSeniority(targeting) {
+  return {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    titleFilter: () => true,
+    locationFilter: () => true,
+    config: {
+      targeting,
+      profile: { location: { home: "", remote: true } },
+    },
+  };
+}
 
 test("coarse scoring does not promote a GTM engineer from backend and platform evidence in the body", () => {
   const result = scoreSourcedOffer(
@@ -1536,12 +2399,22 @@ test("extracts compensation ranges and strips ATS HTML bodies", () => {
   assert.deepEqual(extractCompBand("The salary range for this role is $200,000 - $300,000 base."), {
     min: 200000,
     max: 300000,
+    currency: "USD",
   });
-  assert.deepEqual(extractCompBand("USD 180000-230000"), { min: 180000, max: 230000 });
-  assert.deepEqual(extractCompBand("$153K – $325K • Offers Equity"), { min: 153000, max: 325000 });
+  assert.deepEqual(extractCompBand("USD 180000-230000"), {
+    min: 180000,
+    max: 230000,
+    currency: "USD",
+  });
+  assert.deepEqual(extractCompBand("$153K – $325K • Offers Equity"), {
+    min: 153000,
+    max: 325000,
+    currency: "USD",
+  });
   assert.deepEqual(extractCompBand("$221.7K - $266K • Offers Equity"), {
     min: 221700,
     max: 266000,
+    currency: "USD",
   });
   assert.equal(htmlToText("&lt;p&gt;Build &amp; ship&lt;/p&gt;"), "Build & ship");
   assert.deepEqual(
@@ -1550,13 +2423,13 @@ test("extracts compensation ranges and strips ATS HTML bodies", () => {
         "&lt;span&gt;$258,000&lt;/span&gt;&lt;span&gt;&amp;mdash;&lt;/span&gt;&lt;span&gt;$348,000 USD&lt;/span&gt;"
       )
     ),
-    { min: 258000, max: 348000 }
+    { min: 258000, max: 348000, currency: "USD" }
   );
   assert.deepEqual(
     extractCompBand(
       "Bar Manager\nFull Time • Salary ($70k)\nRole details\nOther jobs you might be interested in\nBar Director\nSalary ($120k - $140k)"
     ),
-    { min: 70000, max: 70000 }
+    { min: 70000, max: 70000, currency: "USD" }
   );
 });
 
@@ -1983,7 +2856,11 @@ test("qualification recognizes a single annual salary below the saved floor", ()
 
   assert.equal(result.kept.length, 0);
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
-  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 60000, max: 60000 });
+  assert.deepEqual(result.filteredSalary[0]?.compBand, {
+    min: 60000,
+    max: 60000,
+    currency: "USD",
+  });
 });
 
 test("qualification trusts the role compensation before unrelated recommendation salaries", () => {
@@ -2014,7 +2891,11 @@ test("qualification trusts the role compensation before unrelated recommendation
 
   assert.equal(result.kept.length, 0);
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
-  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 70000, max: 70000 });
+  assert.deepEqual(result.filteredSalary[0]?.compBand, {
+    min: 70000,
+    max: 70000,
+    currency: "USD",
+  });
 });
 
 test("qualification uses base salary instead of variable and total compensation ranges", () => {
@@ -2049,7 +2930,11 @@ test("qualification uses base salary instead of variable and total compensation 
   assert.equal(result.kept.length, 0);
   assert.deepEqual(
     result.filteredSalary.map((offer) => offer.compBand),
-    Array.from({ length: nonBaseRanges.length }, () => ({ min: 70000, max: 80000 }))
+    Array.from({ length: nonBaseRanges.length }, () => ({
+      min: 70000,
+      max: 80000,
+      currency: "USD",
+    }))
   );
 });
 
@@ -2080,7 +2965,11 @@ test("qualification selects same-sentence base salary instead of total compensat
 
   assert.equal(result.kept.length, 0);
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
-  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 70000, max: 80000 });
+  assert.deepEqual(result.filteredSalary[0]?.compBand, {
+    min: 70000,
+    max: 80000,
+    currency: "USD",
+  });
 });
 
 test("qualification treats variable and total compensation without base pay as unknown", () => {
@@ -2175,7 +3064,115 @@ test("qualification annualizes a single explicit hourly base-pay amount", () => 
 
   assert.equal(result.kept.length, 0);
   assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
-  assert.deepEqual(result.filteredSalary[0]?.compBand, { min: 83200, max: 83200 });
+  assert.deepEqual(result.filteredSalary[0]?.compBand, {
+    min: 83200,
+    max: 83200,
+    currency: "USD",
+  });
+});
+
+test("qualification ignores benefit thresholds when annualizing hourly base pay", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Schedule Context Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/schedule-context-hourly-pay",
+        location: "New York, NY",
+        bodyText: "Benefits eligibility begins at 20 hours per week. Pay: $40 per hour.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 80_000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.match(result.kept[0]?.ratingReason || "", /comp clears floor/);
+});
+
+test("qualification admits a non-dollar hourly base range", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "International Hourly Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/international-hourly-pay",
+        location: "London, UK",
+        bodyText: "Pay: GBP 40-GBP 45 per hour.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { minimum_base: 85_000 },
+          location: { home: "London, UK", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.filteredSalary.length, 0);
+  assert.ok(result.kept[0]?.ruleFlags.includes("top-of-band-only"));
+});
+
+test("CR5: sourced qualification and requalification review foreign-currency bands", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Foreign Currency Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/foreign-currency",
+        location: "New York, NY",
+        bodyText: "Base salary: GBP 60,000 - 75,000 per year.",
+      },
+      {
+        company: "Legacy Currency Corp",
+        title: "Bar Manager",
+        url: "https://jobs.example.test/legacy-currency",
+        location: "New York, NY",
+        bodyText: "Base salary: 60k - 75k per year.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Bar Manager"] }] },
+        profile: {
+          compensation: { currency: "USD", minimum_base: 85_000 },
+          location: { home: "New York, NY", onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.deepEqual(
+    result.kept.map(({ company }) => company),
+    ["Foreign Currency Corp"]
+  );
+  assert.equal(result.kept[0].gate, "review");
+  assert.ok(result.kept[0].qualificationUnknowns.includes("compensation"));
+  assert.deepEqual(result.kept[0].compBand, {
+    min: 60_000,
+    max: 75_000,
+    currency: "GBP",
+  });
+  assert.equal(result.filteredSalary[0]?.company, "Legacy Currency Corp");
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "comp-below-floor");
 });
 
 test("annual earnings floor keeps low tipped base pay unverified", () => {
@@ -2242,8 +3239,46 @@ test("annual earnings floor compares explicit tipped earnings without treating t
   );
   assert.equal(result.filteredSalary[0]?.company, "Below Bar");
   assert.equal(result.filteredSalary[0]?.qualificationReason, "annual-earnings-below-floor");
-  assert.deepEqual(result.filteredSalary[0]?.annualEarningsBand, { min: 60000, max: 75000 });
+  assert.deepEqual(result.filteredSalary[0]?.annualEarningsBand, {
+    min: 60000,
+    max: 75000,
+    currency: "USD",
+  });
   assert.equal(result.kept.find((offer) => offer.company === "Overlap Bar")?.gate, "review");
+});
+
+test("annual earnings hard gate reads a same-line tipped band beside hourly base pay", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Same Line Tipped Bar",
+        title: "Lead Bartender",
+        url: "https://jobs.example.test/same-line-tipped-bar",
+        location: "New York, NY",
+        bodyText:
+          "Base pay: $11.35 per hour; estimated annual earnings including tips: $60,000-$75,000.",
+      },
+    ],
+    {
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: { role_buckets: [{ titles: ["Lead Bartender"] }] },
+        profile: {
+          compensation: { minimum_annual_earnings: 85_000 },
+          location: { home: "New York, NY", remote: true, hybrid: true, onsite: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSalary[0]?.qualificationReason, "annual-earnings-below-floor");
+  assert.deepEqual(result.filteredSalary[0]?.annualEarningsBand, {
+    min: 60_000,
+    max: 75_000,
+    currency: "USD",
+  });
 });
 
 test("basis-specific offer fields participate in scanner hard gates", () => {
@@ -2295,11 +3330,16 @@ test("basis-specific offer fields participate in scanner hard gates", () => {
   );
 
   assert.equal(baseResult.filteredSalary[0]?.qualificationReason, "comp-below-floor");
-  assert.deepEqual(baseResult.filteredSalary[0]?.compBand, { min: 83_200, max: 83_200 });
+  assert.deepEqual(baseResult.filteredSalary[0]?.compBand, {
+    min: 83_200,
+    max: 83_200,
+    currency: "USD",
+  });
   assert.equal(annualResult.filteredSalary[0]?.qualificationReason, "annual-earnings-below-floor");
   assert.deepEqual(annualResult.filteredSalary[0]?.annualEarningsBand, {
     min: 60_000,
     max: 75_000,
+    currency: "USD",
   });
 });
 

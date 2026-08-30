@@ -18,6 +18,7 @@ import {
 import {
   countDeterministicSources,
   latestSourcingRunForUi,
+  prepareDeterministicSearchSources,
   prepareFirstSearchSources,
   runFirstSearchInBackground,
   startFirstSearchRun,
@@ -245,6 +246,103 @@ test("prepareFirstSearchSources replaces stale country blocks when remote scope 
   assert.deepEqual(worldwide.sourcedScan.location_filter.block, []);
 });
 
+test("prepareFirstSearchSources preserves manual location rules while replacing generated ones", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+  const searchSources = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const sourcedScan = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data;
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      ...searchSources,
+      location_filter: {
+        ...searchSources.location_filter,
+        allow: [...searchSources.location_filter.allow, "Hudson Valley"],
+        block: [...searchSources.location_filter.block, "Overnight travel"],
+      },
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      ...sourcedScan,
+      location_filter: {
+        ...sourcedScan.location_filter,
+        allow: [...sourcedScan.location_filter.allow, "Hudson Valley"],
+        block: [...sourcedScan.location_filter.block, "Overnight travel"],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { location: { remote: true, remote_scope: "worldwide" } },
+  });
+
+  const worldwide = await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  for (const locationFilter of [
+    worldwide.searchSources.location_filter,
+    worldwide.sourcedScan.location_filter,
+  ]) {
+    assert.ok(locationFilter.allow.includes("Hudson Valley"));
+    assert.ok(locationFilter.block.includes("Overnight travel"));
+    assert.equal(locationFilter.block.includes("India"), false);
+  }
+});
+
+test("prepareFirstSearchSources replaces stale corporate seniority filters with the saved ladder", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "healthcare" });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Nursing",
+          priority: "primary",
+          titles: ["Registered Nurse", "RN"],
+          seniority_ladder: [
+            { rank: 30, titles: ["Nurse Practitioner", "NP"] },
+            { rank: 10, titles: ["Certified Nursing Assistant", "CNA"] },
+            { rank: 20, titles: ["Registered Nurse", "RN"] },
+          ],
+        },
+      ],
+      cut_signals: ["Travel Nurse"],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {
+        positive: ["Registered Nurse", "RN"],
+        negative: ["Intern", "Junior", "Travel Nurse"],
+        below_target: ["Old Nursing Title"],
+      },
+      location_filter: null,
+      searches: [],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  const result = await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  assert.deepEqual(result.searchSources.title_filter.negative, ["Travel Nurse"]);
+  assert.deepEqual(result.searchSources.title_filter.below_target, [
+    "Certified Nursing Assistant",
+    "CNA",
+  ]);
+  assert.deepEqual(result.sourcedScan.title_filter, result.searchSources.title_filter);
+});
+
 test("first search can start before location preferences are filled in", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
@@ -300,7 +398,7 @@ test("an explicit manual search can start before the onboarding readiness gate",
 
 test("prepareFirstSearchSources only re-syncs stored entries owned by the domain gate", async () => {
   const repoRoot = tempRepo();
-  markSearchReady(repoRoot);
+  markSearchReady(repoRoot, { domain: "hospitality and food service" });
   const storedRemoteOk = {
     provider: "remoteok",
     label: "Stored RemoteOK label",
@@ -318,6 +416,13 @@ test("prepareFirstSearchSources only re-syncs stored entries owned by the domain
     enabled: false,
     stored_only: "user choice",
   };
+  const storedUnmarkedLegacyShape = {
+    provider: "workingnomads",
+    label: "Working Nomads",
+    source_type: "board",
+    url: "https://www.workingnomads.com/jobsapi/job/_search",
+    enabled: false,
+  };
   const orphanedMarker = {
     provider: "custom",
     label: "Retired domain-gated board",
@@ -333,7 +438,7 @@ test("prepareFirstSearchSources only re-syncs stored entries owned by the domain
     data: {
       title_filter: {},
       location_filter: null,
-      searches: [storedRemoteOk, storedUserOwned, orphanedMarker],
+      searches: [storedRemoteOk, storedUserOwned, storedUnmarkedLegacyShape, orphanedMarker],
       tracked_companies: [],
       source_catalog: {},
     },
@@ -345,12 +450,17 @@ test("prepareFirstSearchSources only re-syncs stored entries owned by the domain
   assert.deepEqual(
     stored.find((source) => source.url === storedRemoteOk.url),
     { ...storedRemoteOk, enabled: true },
-    "the generated tech gate may update enabled but must preserve every other stored field"
+    "the generated baseline may update enabled but must preserve every other stored field"
   );
   assert.deepEqual(
     stored.find((source) => source.url === storedUserOwned.url),
     storedUserOwned,
     "an unmarked entry is user-owned and must stay disabled"
+  );
+  assert.deepEqual(
+    stored.find((source) => source.url === storedUnmarkedLegacyShape.url),
+    storedUnmarkedLegacyShape,
+    "one legacy-shaped row is ambiguous and must stay user-owned without the complete cohort"
   );
   assert.deepEqual(
     stored.find((source) => source.url === orphanedMarker.url),
@@ -717,7 +827,7 @@ test("countDeterministicSources counts generated query-only HiringCafe searches"
   });
 });
 
-test("first-search starts honestly when source healing still leaves no deterministic sources", async () => {
+test("first-search preparation preserves source state without configured target titles", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot, { domain: "operations" });
   candidateConfigPatch({
@@ -732,6 +842,215 @@ test("first-search starts honestly when source healing still leaves no determini
   assert.equal(started.run.status, "running");
   assert.equal(started.run.error, null);
   assert.equal(started.sources.deterministicSources.attempted, 0);
+  assert.equal(
+    started.sources.deterministicSources.pendingLogins,
+    undefined,
+    "a disabled browser source without auth is not a pending login"
+  );
+  assert.equal(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.some((source) =>
+      ["remoteok", "remotive", "workingnomads"].includes(source.provider)
+    ),
+    false
+  );
+});
+
+test("search preparation disables generator-owned broad boards after target titles are cleared", async () => {
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      searches: [
+        {
+          provider: "remoteok",
+          label: "RemoteOK",
+          source_type: "board",
+          url: "https://remoteok.com/api",
+          enabled: true,
+          enabled_reason: "domain-gate",
+        },
+        {
+          provider: "remotive",
+          label: "Remotive",
+          source_type: "board",
+          url: "https://remotive.com/api/remote-jobs",
+          enabled: true,
+          enabled_reason: "domain-gate",
+        },
+        {
+          provider: "workingnomads",
+          label: "Working Nomads",
+          source_type: "board",
+          url: "https://www.workingnomads.com/api/exposed_jobs/",
+          enabled: true,
+          enabled_reason: "domain-gate",
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  const operation = await startManualSearchRun({ repoRoot, env: {} });
+
+  assert.equal(operation.sources.deterministicSources.attempted, 0);
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.map(
+      ({ provider, enabled, enabled_reason }) => ({ provider, enabled, enabled_reason })
+    ),
+    ["remoteok", "remotive", "workingnomads"].map((provider) => ({
+      provider,
+      enabled: false,
+      enabled_reason: "domain-gate",
+    }))
+  );
+});
+
+test("search preparation retires the complete generated baseline after target titles are cleared", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "software engineering" });
+
+  const generated = await prepareFirstSearchSources({ repoRoot, env: {} });
+  assert.ok(generated.deterministicSources.attempted > 0);
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { role_buckets: [] },
+  });
+
+  const retired = await prepareFirstSearchSources({ repoRoot, env: {} });
+  const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+
+  assert.equal(retired.deterministicSources.attempted, 0);
+  assert.deepEqual(stored.title_filter.positive, []);
+  assert.equal(
+    stored.searches.every((source) => source.enabled === false),
+    true,
+    "every generator-owned query, RSS, browser, and board source must retire with its target"
+  );
+});
+
+test("clearing targets preserves a generated source transferred to user ownership", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "software engineering" });
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  const generated = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const selected = generated.searches.find((source) => source.provider === "HiringCafe");
+  const { enabled_reason: _generatedReason, ...userOwned } = selected;
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      ...generated,
+      searches: generated.searches.map((source) => (source === selected ? userOwned : source)),
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { role_buckets: [] },
+  });
+
+  const retired = await prepareFirstSearchSources({ repoRoot, env: {} });
+  const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const preserved = stored.searches.find((source) => source.provider === "HiringCafe");
+
+  assert.equal(retired.deterministicSources.attempted, 1);
+  assert.equal(preserved.enabled, true);
+  assert.equal(Object.hasOwn(preserved, "enabled_reason"), false);
+  assert.equal(
+    stored.searches
+      .filter((source) => source.enabled_reason != null)
+      .every((source) => source.enabled === false),
+    true
+  );
+});
+
+test("changing targets replaces stale generator-owned queries and filters", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "software engineering" });
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Platform", priority: "primary", titles: ["Staff Platform Engineer"] },
+      ],
+    },
+  });
+
+  const refreshed = await prepareFirstSearchSources({ repoRoot, env: {} });
+  const targetingSources = refreshed.searchSources.searches.filter(
+    (source) => source.enabled_reason === "targeting"
+  );
+
+  assert.deepEqual(refreshed.searchSources.title_filter.positive, ["Staff Platform Engineer"]);
+  assert.deepEqual(refreshed.sourcedScan.title_filter.positive, ["Staff Platform Engineer"]);
+  assert.equal(
+    targetingSources.some((source) => JSON.stringify(source).toLowerCase().includes("ai engineer")),
+    false
+  );
+  assert.equal(
+    targetingSources.every(
+      (source) =>
+        JSON.stringify(source).toLowerCase().includes("staff platform engineer") ||
+        String(source.url || "").includes("staff-platform-engineer")
+    ),
+    true
+  );
+});
+
+test("changing targets migrates a pre-marker generated title filter", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "software engineering" });
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  const current = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const { generator_revision: _revision, generator_state: _state, ...legacy } = current;
+  legacy.title_filter = {
+    ...legacy.title_filter,
+    negative: [...legacy.title_filter.negative, "Contract"],
+    below_target: [...legacy.title_filter.below_target, "Assistant"],
+  };
+  legacy.searches = legacy.searches.map((source) => {
+    if (source.enabled_reason !== "targeting") return source;
+    const { enabled_reason: _reason, ...unmarked } = source;
+    return unmarked;
+  });
+  sourceConfigPut({ repoRoot, name: "search-sources", data: legacy });
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      ...sourceConfigGet({ repoRoot, name: "sourced-scan" }).data,
+      title_filter: legacy.title_filter,
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Platform", priority: "primary", titles: ["Staff Platform Engineer"] },
+      ],
+    },
+  });
+
+  const refreshed = prepareDeterministicSearchSources({ repoRoot, env: {} });
+
+  assert.deepEqual(refreshed.searchSources.title_filter.positive, ["Staff Platform Engineer"]);
+  assert.deepEqual(refreshed.sourcedScan.title_filter.positive, ["Staff Platform Engineer"]);
+  assert.deepEqual(refreshed.searchSources.title_filter.negative, ["Intern", "Junior", "Contract"]);
+  assert.deepEqual(refreshed.sourcedScan.title_filter.negative, ["Intern", "Junior", "Contract"]);
+  assert.deepEqual(refreshed.searchSources.title_filter.below_target, ["Assistant"]);
+  assert.deepEqual(refreshed.sourcedScan.title_filter.below_target, ["Assistant"]);
 });
 
 test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {
@@ -909,7 +1228,7 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.status, "completed");
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
-  assert.equal(latest.run.summary.deterministicSources.attempted, 3);
+  assert.equal(latest.run.summary.deterministicSources.attempted, 6);
 });
 
 test("the shared worker can own deterministic terminal settlement", async () => {
@@ -1018,7 +1337,7 @@ test("background search runs browser sources and preserves point-of-use login re
   ]);
 });
 
-test("a manual search with only a disabled login source starts so the login preflight can settle", async () => {
+test("a manual search preserves a disabled login source without target titles", async () => {
   const repoRoot = tempRepo();
   sourceConfigPut({
     repoRoot,

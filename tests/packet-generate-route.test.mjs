@@ -1027,6 +1027,52 @@ test("POST /api/packet/gate: deterministically reviews an annual earnings overla
   }
 });
 
+test("CR5: packet gate reviews and persists an explicit foreign-currency band", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { currency: "USD", minimum_base: 85_000 } },
+  });
+  const verdict = {
+    ...typedGateVerdict(),
+    compensation: {
+      status: "below-floor",
+      currency: "GBP",
+      minBase: 60_000,
+      maxBase: 75_000,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: "base",
+      source: "job-description",
+      summary: "GBP 60k–75k base is explicit in the job description.",
+    },
+  };
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.gate, "review");
+    assert.equal(body.data?.compensation?.status, "unknown");
+    assert.equal(body.data?.compensation?.currency, "GBP");
+    assert.equal(body.data?.manual?.required, true);
+
+    const app = readApp(repoRoot, "app-packet");
+    assert.equal(app.evaluation.compensation.status, "unknown");
+    assert.equal(app.evaluation.compensation.currency, "GBP");
+    assert.equal(app.base, "GBP 60,000 - GBP 75,000");
+    assert.equal(app.compEstimate.currency, "GBP");
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/packet/gate: missing JD body returns review/manual state and skips AI", async () => {
   const repoRoot = tempRepo();
   importTrackerFixture(repoRoot, [

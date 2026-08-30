@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { formatCurrencyThousands } from "../../../../src/core/currency-format.mjs";
 import { ArtifactViewerModal } from "../jobs/ArtifactViewerModal.jsx";
 import {
   classifyDurableSearchRun,
@@ -1085,7 +1086,9 @@ function jobSourceLine(source) {
 function offerPositionLine(source) {
   const amount = (value, label) => {
     const number = Number(value);
-    return Number.isFinite(number) && number > 0 ? `${label} $${Math.round(number)}k` : null;
+    return Number.isFinite(number) && number > 0
+      ? `${label} ${formatCurrencyThousands(number, source?.currency, { unit: "k" })}`
+      : null;
   };
   const parts = [
     amount(source?.floor, "your floor"),

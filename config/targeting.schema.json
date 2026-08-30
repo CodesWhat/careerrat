@@ -18,7 +18,25 @@
           "titles": { "type": "array", "items": { "type": "string" } },
           "notes": { "type": "string" },
           "fit_signals": { "type": "array", "items": { "type": "string" } },
-          "down_signals": { "type": "array", "items": { "type": "string" } }
+          "down_signals": { "type": "array", "items": { "type": "string" } },
+          "seniority_ladder": {
+            "type": "array",
+            "minItems": 2,
+            "description": "Optional occupation-specific title ladder. Rank is explicit because array order is not seniority.",
+            "items": {
+              "type": "object",
+              "required": ["rank", "titles"],
+              "additionalProperties": false,
+              "properties": {
+                "rank": { "type": "integer" },
+                "titles": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
         }
       }
     },

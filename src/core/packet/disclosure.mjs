@@ -14,6 +14,8 @@
 // disclosure answer states expected_base only, or degrades to the NEEDS YOU
 // path (via the null return below) when expected_base isn't set.
 
+import { formatCurrencyAmount, normalizeCurrencyCode } from "../currency-format.mjs";
+
 const CATEGORY_PATTERNS = [
   ["workAuthorization", /\b(legally\s+)?authoriz|work\s+authorization|eligible\s+to\s+work/i],
   ["sponsorship", /sponsor|visa\s+status/i],
@@ -67,10 +69,6 @@ function findScreeningAnswer(label, formDefaults) {
   return null;
 }
 
-function formatThousands(amount) {
-  return Math.round(Number(amount)).toLocaleString("en-US");
-}
-
 function profileAnswer(category, profile) {
   const authorization = profile?.authorization || {};
   const compensation = profile?.compensation || {};
@@ -101,8 +99,9 @@ function profileAnswer(category, profile) {
     // to the NEEDS YOU marker (see module doc comment above).
     const expected = Number(compensation.expected_base);
     if (Number.isFinite(expected) && expected > 0) {
-      const currency = compensation.currency || "USD";
-      return `My target base salary is $${formatThousands(expected)} ${currency} per year; I'm flexible within the posted range depending on level and total compensation.`;
+      const currency = normalizeCurrencyCode(compensation.currency);
+      const figure = `${formatCurrencyAmount(Math.round(expected), currency)}${currency === "USD" ? " USD" : ""}`;
+      return `My target base salary is ${figure} per year; I'm flexible within the posted range depending on level and total compensation.`;
     }
     return null;
   }
