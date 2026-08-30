@@ -377,6 +377,70 @@ test("CR5: business-entity weekly hours are not employee schedules", () => {
   }
 });
 
+test("CR5 ownership: employee context must own the matched hours", () => {
+  for (const clause of [
+    "Restaurant is open 80 hours/week to give employees flexible shifts",
+    "Restaurant operates 80 hours/week for staff coverage",
+  ]) {
+    for (const text of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+      assert.deepEqual(
+        sourcedScanner.extractCompensationBands(text),
+        {
+          base: { min: 41_600, max: 41_600, currency: "USD" },
+          annualEarnings: null,
+        },
+        text
+      );
+    }
+  }
+
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Pay: $20/hour. Employees at the restaurant work 30 hours per week."
+    ),
+    {
+      base: { min: 31_200, max: 31_200, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+
+  assert.deepEqual(
+    sourcedScanner.extractCompensationBands(
+      "Pay: $20/hour. Employees work flexible shifts and the restaurant operates 80 hours/week."
+    ),
+    {
+      base: { min: 41_600, max: 41_600, currency: "USD" },
+      annualEarnings: null,
+    }
+  );
+});
+
+test("CR5 ownership: a business regular schedule stays on the default workweek", () => {
+  for (const text of [
+    "Store's regular schedule is 80 hours/week. Pay: $20/hour.",
+    "Pay: $20/hour. Store's regular schedule is 80 hours/week.",
+  ]) {
+    assert.deepEqual(
+      sourcedScanner.extractCompensationBands(text),
+      {
+        base: { min: 41_600, max: 41_600, currency: "USD" },
+        annualEarnings: null,
+      },
+      text
+    );
+  }
+});
+
+test("CR5 next-sentence: explicit regular hours win over overtime hours", () => {
+  const text =
+    "Pay: $20/hour. The position includes 10 overtime hours and 30 regular hours per week.";
+
+  assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+    base: { min: 31_200, max: 31_200, currency: "USD" },
+    annualEarnings: null,
+  });
+});
+
 test("CR5 whole-clause: business hours use the default workweek", () => {
   const businessHoursClauses = [
     "Open 80 hours/week at this restaurant",

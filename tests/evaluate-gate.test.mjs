@@ -471,6 +471,51 @@ describe("evaluateCompensation", () => {
     }
   });
 
+  it("CR5 ownership: incidental employee nouns cannot claim business hours", () => {
+    for (const clause of [
+      "Restaurant is open 80 hours/week to give employees flexible shifts",
+      "Restaurant operates 80 hours/week for staff coverage",
+    ]) {
+      for (const body of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+        const result = evaluateCompensation({
+          body,
+          frontmatter: {},
+          profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+        });
+
+        assert.equal(result.verdict, "below-floor", body);
+        assert.deepEqual(result.baseBand, { min: 41_600, max: 41_600, currency: "USD" }, body);
+      }
+    }
+  });
+
+  it("CR5 ownership: a business regular schedule cannot clear a USD 60,000 floor", () => {
+    for (const body of [
+      "Store's regular schedule is 80 hours/week. Pay: $20/hour.",
+      "Pay: $20/hour. Store's regular schedule is 80 hours/week.",
+    ]) {
+      const result = evaluateCompensation({
+        body,
+        frontmatter: {},
+        profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+      });
+
+      assert.equal(result.verdict, "below-floor", body);
+      assert.deepEqual(result.baseBand, { min: 41_600, max: 41_600, currency: "USD" }, body);
+    }
+  });
+
+  it("CR5 next-sentence: regular hours determine the below-floor annual base", () => {
+    const result = evaluateCompensation({
+      body: "Pay: $20/hour. The position includes 10 overtime hours and 30 regular hours per week.",
+      frontmatter: {},
+      profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+    });
+
+    assert.equal(result.verdict, "below-floor");
+    assert.deepEqual(result.baseBand, { min: 31_200, max: 31_200, currency: "USD" });
+  });
+
   it("CR5 whole-clause: business hours never clear a USD 60,000 floor", () => {
     const businessHoursClauses = [
       "Open 80 hours/week at this restaurant",

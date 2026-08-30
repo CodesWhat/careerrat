@@ -3,6 +3,28 @@ import test, { describe, it } from "node:test";
 
 import { estimateCompFromComparables } from "../src/core/evaluate/comp-comparables.mjs";
 
+function estimateHourlyComparable(base) {
+  return estimateCompFromComparables({
+    role: "Bar Manager",
+    loc: "New York, NY",
+    mode: "onsite",
+    tracker: {
+      applications: [
+        {
+          company: "Ownership Co",
+          role: "Bar Manager",
+          loc: "New York, NY",
+          mode: "onsite",
+          base,
+          status: "rejected",
+        },
+      ],
+    },
+    targeting: { role_buckets: [{ name: "Hospitality", titles: ["Bar Manager"] }] },
+    compFloors: { home_metro: ["New York"] },
+  });
+}
+
 const TARGETING = {
   role_families: [{ name: "Hospitality Management", patterns: ["bar manager"] }],
 };
@@ -408,6 +430,35 @@ test("CR5: business-entity hours stay out of comparables while generic schedules
   }
 
   assert.equal(estimate("Schedule: 30 hours per week. Pay: $20/hour.")?.midpointK, 31);
+});
+
+test("CR5 ownership: incidental employee nouns do not claim comparable business hours", () => {
+  for (const clause of [
+    "Restaurant is open 80 hours/week to give employees flexible shifts",
+    "Restaurant operates 80 hours/week for staff coverage",
+  ]) {
+    for (const base of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+      assert.equal(estimateHourlyComparable(base)?.midpointK, 42, base);
+    }
+  }
+});
+
+test("CR5 ownership: a business regular schedule keeps the default comparable workweek", () => {
+  for (const base of [
+    "Store's regular schedule is 80 hours/week. Pay: $20/hour.",
+    "Pay: $20/hour. Store's regular schedule is 80 hours/week.",
+  ]) {
+    assert.equal(estimateHourlyComparable(base)?.midpointK, 42, base);
+  }
+});
+
+test("CR5 next-sentence: regular hours determine the comparable midpoint", () => {
+  assert.equal(
+    estimateHourlyComparable(
+      "Pay: $20/hour. The position includes 10 overtime hours and 30 regular hours per week."
+    )?.midpointK,
+    31
+  );
 });
 
 test("CR5 whole-clause: business hours never become a comparable workweek", () => {
