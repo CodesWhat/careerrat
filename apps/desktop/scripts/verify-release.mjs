@@ -17,10 +17,16 @@ const metadataPath = join(desktopRoot, "dist", "latest-mac.yml");
 let zipPath = null;
 
 try {
-  const evidence = verifyLiveSearchReceiptDirectory({ repoRoot });
-  console.log(
-    `PASS live-search release evidence ${evidence.combinations.join(", ")} from ${evidence.sourceRevision}`
-  );
+  const evidence = verifyLiveSearchReceiptDirectory({ repoRoot, releaseVersion: pkg.version });
+  if (evidence.evidenceStatus === "version-scoped-exception") {
+    console.log(
+      `EXCEPTION live-search release evidence ${evidence.combinations.join(", ")} from ${evidence.sourceRevision}; waived ${evidence.waivedCombinations.join(", ")} (${evidence.reasonCode})`
+    );
+  } else {
+    console.log(
+      `PASS live-search release evidence ${evidence.combinations.join(", ")} from ${evidence.sourceRevision}`
+    );
+  }
 } catch (error) {
   console.error(`Live-search release evidence failed: ${error?.message || String(error)}`);
   process.exitCode = 1;
