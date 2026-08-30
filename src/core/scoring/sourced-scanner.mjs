@@ -1680,6 +1680,15 @@ function preferredCompensationCandidate(groups, baseOnly) {
   return groups.nonVariable[0] || groups.all[0] || null;
 }
 
+function monotonicSpanMembership(spans) {
+  let cursor = 0;
+  return (index) => {
+    while (cursor < spans.length && index >= spans[cursor][1]) cursor += 1;
+    const span = spans[cursor];
+    return Boolean(span && index >= span[0] && index < span[1]);
+  };
+}
+
 export function extractCompBand(text = "", { baseOnly = false } = {}) {
   const source = String(text || "");
   const candidates = {
@@ -1731,8 +1740,9 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
     ) {
       continue;
     }
+    const insideRange = monotonicSpanMembership(rangeSpans);
     for (const single of normalized.matchAll(new RegExp(SINGLE_COMPENSATION_RE.source, "gi"))) {
-      if (rangeSpans.some(([start, end]) => single.index >= start && single.index < end)) continue;
+      if (insideRange(single.index)) continue;
       const basis = compensationMatchBasis(normalized, single);
       const singleIsBase =
         basis.explicitBase ||
@@ -1800,8 +1810,9 @@ function extractAnnualEarningsBand(text = "") {
         if (candidate) return candidate;
       }
     }
+    const insideRange = monotonicSpanMembership(rangeSpans);
     for (const single of normalized.matchAll(new RegExp(SINGLE_COMPENSATION_RE.source, "gi"))) {
-      if (rangeSpans.some(([start, end]) => single.index >= start && single.index < end)) continue;
+      if (insideRange(single.index)) continue;
       const basis = compensationMatchBasis(normalized, single);
       if (!basis.annualEarnings || basis.hourly || basis.explicitBase) continue;
       if (!plausibleCompensationMatch(single, [single[1]], [single[2]], { annualPayUnit })) {

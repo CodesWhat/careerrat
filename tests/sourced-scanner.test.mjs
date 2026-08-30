@@ -467,6 +467,38 @@ test("CR5 large-input: compensation parsing does not restart full-body regex sca
   );
 });
 
+test("CR5 large-input: range membership checks stay linear in posting length", () => {
+  const text = `Salary: ${"$1000-$1001 ".repeat(8_000)}`;
+  const originalSome = Array.prototype.some;
+  let rangeMembershipProbes = 0;
+  Array.prototype.some = function countedSome(callback, ...args) {
+    if (this.length > 1_000 && Array.isArray(this[0]) && this[0].length === 2) {
+      return Reflect.apply(originalSome, this, [
+        (value, index, array) => {
+          rangeMembershipProbes += 1;
+          return callback(value, index, array);
+        },
+        ...args,
+      ]);
+    }
+    return Reflect.apply(originalSome, this, [callback, ...args]);
+  };
+
+  try {
+    assert.deepEqual(sourcedScanner.extractCompensationBands(text), {
+      base: { min: 1_000, max: 1_001, currency: "USD" },
+      annualEarnings: null,
+    });
+  } finally {
+    Array.prototype.some = originalSome;
+  }
+
+  assert.ok(
+    rangeMembershipProbes <= 32_000,
+    `expected linear range membership, received ${rangeMembershipProbes} probes`
+  );
+});
+
 test("CR5 whole-clause: business hours use the default workweek", () => {
   const businessHoursClauses = [
     "Open 80 hours/week at this restaurant",
