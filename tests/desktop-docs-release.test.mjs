@@ -87,6 +87,17 @@ test("release docs require one verified macOS install and update bundle before p
   ]);
 });
 
+test("release docs disclose the exact 0.16.8 native-runtime evidence exception", async () => {
+  const release = await readText("docs/RELEASE.md");
+
+  assertIncludes(release, "docs/RELEASE.md", [
+    /0\.16\.8[\s\S]{0,240}Claude CLI weekly\s+subscription quota/i,
+    /claude\/engineering[\s\S]{0,120}claude\/hospitality/i,
+    /fresh[\s\S]{0,120}Codex[\s\S]{0,120}source revision/i,
+    /version-scoped exception[\s\S]{0,160}future release/i,
+  ]);
+});
+
 test("architecture docs describe the exact packaged runtime boundaries", async () => {
   const architecture = await readText("docs/ARCHITECTURE.md");
 

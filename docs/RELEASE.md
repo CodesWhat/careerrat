@@ -46,6 +46,20 @@ Before tagging a release:
    `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
 10. GitHub release created from the tag with changelog notes.
 
+### 0.16.8 native-runtime evidence exception
+
+Release 0.16.8 carries one explicit exception because the Claude CLI weekly
+subscription quota was exhausted during the hotfix release. It waives only
+`claude/engineering` and `claude/hospitality`. The older Claude receipts are not
+presented as current evidence.
+
+The release still requires fresh, manually reviewed Codex receipts for both
+fixtures at the exact source revision. The verifier prints `EXCEPTION`, not
+`PASS`, and records the reason in release output. This version-scoped exception
+is rejected for every future release, including prereleases. Later releases
+return to the normal four-receipt policy unless that policy is replaced through
+its own reviewed change.
+
 ### Desktop Release Pipeline
 
 The public trust rules for both platforms are in the

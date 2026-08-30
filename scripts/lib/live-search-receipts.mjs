@@ -9,6 +9,17 @@ export const LIVE_SEARCH_RECEIPT_DIRECTORY = ".github/release-evidence/live-sear
 const RUNTIME_IDS = ["claude", "codex"];
 const FIXTURE_IDS = ["hospitality", "engineering"];
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/i;
+const RELEASE_EXCEPTION_VERSION = "0.16.8";
+const RELEASE_EXCEPTION_FILENAME = `v${RELEASE_EXCEPTION_VERSION}-exception.json`;
+const RELEASE_EXCEPTION_COMBINATIONS = Object.freeze(["claude/engineering", "claude/hospitality"]);
+const RELEASE_EXCEPTION_FIELDS = Object.freeze([
+  "authorizedBy",
+  "decisionDate",
+  "reasonCode",
+  "releaseVersion",
+  "schemaVersion",
+  "waivedCombinations",
+]);
 
 export const EXPECTED_LIVE_SEARCH_PROMPT_IDS = Object.freeze({
   hospitality: Object.freeze([
@@ -41,13 +52,72 @@ export function liveSearchReceiptFilename(runtimeId, fixtureId) {
   return `${runtimeId}-${fixtureId}.json`;
 }
 
-function expectedReceiptPaths() {
+function expectedReceiptPaths(combinations = EXPECTED_LIVE_SEARCH_COMBINATIONS) {
   return new Set(
-    EXPECTED_LIVE_SEARCH_COMBINATIONS.map((combination) => {
+    combinations.map((combination) => {
       const [runtimeId, fixtureId] = combination.split("/");
       return `${LIVE_SEARCH_RECEIPT_DIRECTORY}/${liveSearchReceiptFilename(runtimeId, fixtureId)}`;
     })
   );
+}
+
+function releaseEvidencePolicy({ releaseVersion, releaseException } = {}) {
+  if (releaseVersion !== RELEASE_EXCEPTION_VERSION) {
+    if (releaseException) {
+      if (!String(releaseVersion || "").trim()) {
+        throw new Error("Native AI search release version is required for an exception.");
+      }
+      throw new Error(`Release ${releaseVersion} requires all four native AI search receipts.`);
+    }
+    return {
+      evidenceStatus: "complete",
+      expectedCombinations: EXPECTED_LIVE_SEARCH_COMBINATIONS,
+      waivedCombinations: [],
+      reasonCode: null,
+    };
+  }
+
+  if (
+    !releaseException ||
+    typeof releaseException !== "object" ||
+    Array.isArray(releaseException)
+  ) {
+    throw new Error(`Release ${RELEASE_EXCEPTION_VERSION} requires its exact release exception.`);
+  }
+  const fields = Object.keys(releaseException).sort();
+  if (JSON.stringify(fields) !== JSON.stringify([...RELEASE_EXCEPTION_FIELDS].sort())) {
+    throw new Error(
+      `Release ${RELEASE_EXCEPTION_VERSION} exception must contain its exact fields.`
+    );
+  }
+  if (
+    releaseException.schemaVersion !== 1 ||
+    releaseException.releaseVersion !== RELEASE_EXCEPTION_VERSION ||
+    releaseException.reasonCode !== "claude-cli-weekly-quota-exhausted" ||
+    releaseException.decisionDate !== "2026-08-30" ||
+    releaseException.authorizedBy !== "release-owner"
+  ) {
+    throw new Error(
+      `Release ${RELEASE_EXCEPTION_VERSION} exception does not match its approved policy.`
+    );
+  }
+  if (
+    JSON.stringify(releaseException.waivedCombinations) !==
+    JSON.stringify(RELEASE_EXCEPTION_COMBINATIONS)
+  ) {
+    throw new Error(
+      `Release ${RELEASE_EXCEPTION_VERSION} exception must waive the exact Claude combinations.`
+    );
+  }
+
+  return {
+    evidenceStatus: "version-scoped-exception",
+    expectedCombinations: EXPECTED_LIVE_SEARCH_COMBINATIONS.filter(
+      (combination) => !RELEASE_EXCEPTION_COMBINATIONS.includes(combination)
+    ),
+    waivedCombinations: RELEASE_EXCEPTION_COMBINATIONS,
+    reasonCode: releaseException.reasonCode,
+  };
 }
 
 function nonEmptyString(value, label) {
@@ -519,19 +589,25 @@ export function verifyLiveSearchReceiptSet({
   receipts,
   currentRevision,
   changedPathsSinceSource = [],
+  releaseVersion,
+  releaseException,
 }) {
+  const policy = releaseEvidencePolicy({ releaseVersion, releaseException });
   const byCombination = new Map();
   for (const receipt of receipts || []) {
     const combination = assertReceipt(receipt);
+    if (!policy.expectedCombinations.includes(combination)) {
+      throw new Error(`Unexpected native AI search receipt ${combination}.`);
+    }
     if (byCombination.has(combination))
       throw new Error(`Duplicate native AI search receipt ${combination}.`);
     byCombination.set(combination, receipt);
   }
-  for (const combination of EXPECTED_LIVE_SEARCH_COMBINATIONS) {
+  for (const combination of policy.expectedCombinations) {
     if (!byCombination.has(combination))
       throw new Error(`Missing native AI search receipt ${combination}.`);
   }
-  if (byCombination.size !== EXPECTED_LIVE_SEARCH_COMBINATIONS.length) {
+  if (byCombination.size !== policy.expectedCombinations.length) {
     throw new Error("Unexpected extra native AI search receipts are present.");
   }
 
@@ -545,7 +621,7 @@ export function verifyLiveSearchReceiptSet({
     throw new Error("Current release revision must be a full commit SHA.");
   }
   if (String(currentRevision).toLowerCase() !== sourceRevision) {
-    const allowedPaths = expectedReceiptPaths();
+    const allowedPaths = expectedReceiptPaths(policy.expectedCombinations);
     const stalePath = changedPathsSinceSource.find((path) => !allowedPaths.has(String(path)));
     if (stalePath) {
       throw new Error(`Native AI search evidence is stale because ${stalePath} changed.`);
@@ -560,11 +636,15 @@ export function verifyLiveSearchReceiptSet({
   return {
     sourceRevision,
     combinations: [...byCombination.keys()].sort(),
+    evidenceStatus: policy.evidenceStatus,
+    waivedCombinations: [...policy.waivedCombinations],
+    reasonCode: policy.reasonCode,
   };
 }
 
 export function verifyLiveSearchReceiptDirectory({
   repoRoot,
+  releaseVersion,
   receiptDirectory = LIVE_SEARCH_RECEIPT_DIRECTORY,
   execFileSyncImpl = execFileSync,
   readFileSyncImpl = readFileSync,
@@ -585,18 +665,30 @@ export function verifyLiveSearchReceiptDirectory({
   const names = readdirSyncImpl(directoryPath)
     .filter((name) => name.endsWith(".json"))
     .sort();
-  const expectedNames = EXPECTED_LIVE_SEARCH_COMBINATIONS.map((combination) => {
+  const exceptionRelease = releaseVersion === RELEASE_EXCEPTION_VERSION;
+  const expectedCombinations = exceptionRelease
+    ? EXPECTED_LIVE_SEARCH_COMBINATIONS.filter(
+        (combination) => !RELEASE_EXCEPTION_COMBINATIONS.includes(combination)
+      )
+    : EXPECTED_LIVE_SEARCH_COMBINATIONS;
+  const expectedNames = expectedCombinations.map((combination) => {
     const [runtimeId, fixtureId] = combination.split("/");
     return liveSearchReceiptFilename(runtimeId, fixtureId);
-  }).sort();
+  });
+  if (exceptionRelease) expectedNames.push(RELEASE_EXCEPTION_FILENAME);
+  expectedNames.sort();
   if (JSON.stringify(names) !== JSON.stringify(expectedNames)) {
     throw new Error(
       `Native AI search receipt directory must contain exactly: ${expectedNames.join(", ")}.`
     );
   }
-  const receipts = names.map((name) =>
+  const receiptNames = names.filter((name) => name !== RELEASE_EXCEPTION_FILENAME);
+  const receipts = receiptNames.map((name) =>
     JSON.parse(readFileSyncImpl(join(directoryPath, name), "utf8"))
   );
+  const releaseException = exceptionRelease
+    ? JSON.parse(readFileSyncImpl(join(directoryPath, RELEASE_EXCEPTION_FILENAME), "utf8"))
+    : null;
   const sourceRevision = receipts[0]?.sourceRevision;
   const changedPathsSinceSource =
     sourceRevision && sourceRevision !== currentRevision
@@ -613,5 +705,11 @@ export function verifyLiveSearchReceiptDirectory({
           .split(/\r?\n/)
           .filter(Boolean)
       : [];
-  return verifyLiveSearchReceiptSet({ receipts, currentRevision, changedPathsSinceSource });
+  return verifyLiveSearchReceiptSet({
+    receipts,
+    currentRevision,
+    changedPathsSinceSource,
+    releaseVersion,
+    releaseException,
+  });
 }

@@ -53,9 +53,10 @@ test("all deterministic product builds are declared as protected contexts", asyn
   assert.doesNotMatch(workflow, /Non-gating for now/i);
 });
 
-test("pre-tag and packaged release verification both require the four native AI search receipts", async () => {
-  const [rootPackage, desktopVerify, desktopWorkflow] = await Promise.all([
+test("pre-tag and packaged release verification both use the version-scoped native AI evidence gate", async () => {
+  const [rootPackage, rootVerify, desktopVerify, desktopWorkflow] = await Promise.all([
     source("package.json"),
+    source("scripts/verify-live-search-receipts.mjs"),
     source("apps/desktop/scripts/verify-release.mjs"),
     source(".github/workflows/desktop-release.yml"),
   ]);
@@ -70,8 +71,17 @@ test("pre-tag and packaged release verification both require the four native AI 
   );
 
   assert.equal(pkg.scripts?.["release:pretag"], "node scripts/verify-live-search-receipts.mjs");
+  assert.match(rootVerify, /releaseVersion:\s*pkg\.version/);
+  assert.match(rootVerify, /EXCEPTION native AI search release evidence/);
+  assert.doesNotMatch(rootVerify, /`PASS[^`]*\$\{result\.evidenceStatus/);
   assert.match(desktopVerify, /verifyLiveSearchReceiptDirectory/);
+  assert.match(desktopVerify, /releaseVersion:\s*pkg\.version/);
+  assert.match(desktopVerify, /EXCEPTION live-search release evidence/);
   assert.match(desktopWorkflow, /Verify current native AI search receipts/);
   assert.match(desktopWorkflow, /npm run release:pretag/);
+  assert.doesNotMatch(
+    desktopWorkflow,
+    /LIVE_SEARCH_(?:SKIP|BYPASS|EXCEPTION)|skip-live-search|bypass-live-search/i
+  );
   assert.match(checkoutBeforeReceiptGate, /fetch-depth:\s*0/);
 });
