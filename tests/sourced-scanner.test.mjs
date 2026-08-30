@@ -441,6 +441,32 @@ test("CR5 next-sentence: explicit regular hours win over overtime hours", () => 
   });
 });
 
+test("CR5 large-input: compensation parsing does not restart full-body regex scans per amount", () => {
+  const text = `Hourly pay: $9 per hour, volunteer ${"40 hours per week ".repeat(3_500)}`;
+  const originalExec = RegExp.prototype.exec;
+  let fullBodyRestarts = 0;
+  RegExp.prototype.exec = function countedExec(input) {
+    if (String(input).length > text.length / 2 && this.lastIndex === 0) fullBodyRestarts += 1;
+    return Reflect.apply(originalExec, this, [input]);
+  };
+
+  let bands;
+  try {
+    bands = sourcedScanner.extractCompensationBands(text);
+  } finally {
+    RegExp.prototype.exec = originalExec;
+  }
+
+  assert.deepEqual(bands, {
+    base: { min: 18_720, max: 18_720, currency: "USD" },
+    annualEarnings: null,
+  });
+  assert.ok(
+    fullBodyRestarts <= 40,
+    `expected bounded full-body regex restarts, received ${fullBodyRestarts}`
+  );
+});
+
 test("CR5 whole-clause: business hours use the default workweek", () => {
   const businessHoursClauses = [
     "Open 80 hours/week at this restaurant",

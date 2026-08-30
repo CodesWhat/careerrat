@@ -1344,6 +1344,7 @@ function gateFromScoreAndFlags(score, flags, modes = {}) {
 }
 
 const ANNUAL_WORK_HOURS = 2_080;
+const COMPENSATION_CONTEXT_RADIUS = 1_024;
 const BASE_COMP_LABEL_RE =
   /\b(?:base\s+(?:salary|pay|comp(?:ensation)?)|salary(?:\s+(?:range|band))?)\b/i;
 const ADJACENT_BARE_BASE_PREFIX_RE = /(?:^|[:;,|•])\s*base\s*:?\s*$/i;
@@ -1473,41 +1474,53 @@ function annualWorkHours(line) {
   return ANNUAL_WORK_HOURS;
 }
 
+function boundedCompensationContext(value, matchIndex, matchLength) {
+  const start = Math.max(0, matchIndex - COMPENSATION_CONTEXT_RADIUS);
+  const end = Math.min(value.length, matchIndex + matchLength + COMPENSATION_CONTEXT_RADIUS);
+  return {
+    value: value.slice(start, end),
+    matchIndex: matchIndex - start,
+  };
+}
+
 function weeklyHoursBelongToWorkSchedule(
   value,
   matchIndex,
   matchLength,
   { isRegularHoursMatch = false } = {}
 ) {
-  const before = value.slice(0, matchIndex);
+  const bounded = boundedCompensationContext(value, matchIndex, matchLength);
+  const before = bounded.value.slice(0, bounded.matchIndex);
   const clauseStart = Math.max(
     before.lastIndexOf("."),
     before.lastIndexOf(";"),
     before.lastIndexOf("\n")
   );
-  const after = value.slice(matchIndex + matchLength);
+  const after = bounded.value.slice(bounded.matchIndex + matchLength);
   const nextBoundary = after.search(/[.;\n]/);
-  const clauseEnd = nextBoundary < 0 ? value.length : matchIndex + matchLength + nextBoundary;
+  const clauseEnd =
+    nextBoundary < 0 ? bounded.value.length : bounded.matchIndex + matchLength + nextBoundary;
   let localClauseStart = clauseStart + 1;
   let localClauseEnd = clauseEnd;
-  for (const boundary of value
+  for (const boundary of bounded.value
     .slice(clauseStart + 1, clauseEnd)
     .matchAll(LOCAL_WEEKLY_HOURS_BOUNDARY_RE)) {
     const boundaryIndex = clauseStart + 1 + (boundary.index ?? 0);
-    if (boundaryIndex < matchIndex) localClauseStart = boundaryIndex + boundary[0].length;
-    else {
+    if (boundaryIndex < bounded.matchIndex) {
+      localClauseStart = boundaryIndex + boundary[0].length;
+    } else {
       localClauseEnd = boundaryIndex;
       break;
     }
   }
 
-  const clause = value.slice(localClauseStart, localClauseEnd);
+  const clause = bounded.value.slice(localClauseStart, localClauseEnd);
   const nonScheduleHours = isRegularHoursMatch
     ? NON_REGULAR_WEEKLY_HOURS_RE.test(clause)
     : NON_SCHEDULE_WEEKLY_HOURS_RE.test(clause);
   if (nonScheduleHours || !BUSINESS_HOURS_CONTEXT_RE.test(clause)) return !nonScheduleHours;
 
-  const ownershipPrefix = value.slice(localClauseStart, matchIndex);
+  const ownershipPrefix = bounded.value.slice(localClauseStart, bounded.matchIndex);
   return EMPLOYEE_HOURS_CONTEXT_RE.test(ownershipPrefix);
 }
 
@@ -1516,7 +1529,12 @@ function isCalendarYear(value) {
   return Number.isInteger(numeric) && numeric >= 1900 && numeric <= 2100;
 }
 
-function plausibleCompensationMatch(line, match, values, suffixes, { hourly = false } = {}) {
+function plausibleCompensationMatch(
+  match,
+  values,
+  suffixes,
+  { hourly = false, annualPayUnit = false } = {}
+) {
   const matchedText = String(match?.[0] || "");
   const monetaryMarker = /[$£€]/.test(matchedText) || containsCurrencyCode(matchedText);
   const abbreviated = suffixes.some(
@@ -1531,7 +1549,7 @@ function plausibleCompensationMatch(line, match, values, suffixes, { hourly = fa
     !monetaryMarker &&
     !abbreviated &&
     !hourly &&
-    !ANNUAL_PAY_UNIT_RE.test(line)
+    !annualPayUnit
   ) {
     return false;
   }
@@ -1546,8 +1564,9 @@ function lastLabelIndex(value, pattern) {
 
 function localCompensationContext(line, match) {
   const matchIndex = match.index ?? 0;
-  const prefix = line.slice(0, matchIndex);
-  const suffix = line.slice(matchIndex + match[0].length);
+  const bounded = boundedCompensationContext(line, matchIndex, match[0].length);
+  const prefix = bounded.value.slice(0, bounded.matchIndex);
+  const suffix = bounded.value.slice(bounded.matchIndex + match[0].length);
   let previousAmountEnd = 0;
   for (const previous of prefix.matchAll(new RegExp(SINGLE_COMPENSATION_RE.source, "gi"))) {
     previousAmountEnd = previous.index + previous[0].length;
@@ -1675,6 +1694,7 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
   for (const { line, workHoursContext } of lines) {
     const normalized = line.replace(/(?<=\d),(?=\d{3}\b)/g, "");
     const lineHourly = HOURLY_COMP_RE.test(line);
+    const annualPayUnit = ANNUAL_PAY_UNIT_RE.test(line);
     const workHours = annualWorkHours(workHoursContext);
     const re = new RegExp(COMPENSATION_RANGE_RE.source, "gi");
     const rangeSpans = [];
@@ -1686,8 +1706,9 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
         (basis.hourlyPayEvidence && (!basis.variable || basis.hourlyBaseLabel));
       const rangeIsHourly = rangeIsBase && basis.hourly;
       if (
-        !plausibleCompensationMatch(line, match, [match[1], match[3]], [match[2], match[4]], {
+        !plausibleCompensationMatch(match, [match[1], match[3]], [match[2], match[4]], {
           hourly: rangeIsHourly,
+          annualPayUnit,
         })
       ) {
         continue;
@@ -1718,8 +1739,9 @@ export function extractCompBand(text = "", { baseOnly = false } = {}) {
         (basis.hourlyPayEvidence && (!basis.variable || basis.hourlyBaseLabel));
       if (basis.variable && !singleIsBase) continue;
       if (
-        !plausibleCompensationMatch(line, single, [single[1]], [single[2]], {
+        !plausibleCompensationMatch(single, [single[1]], [single[2]], {
           hourly: singleIsBase && basis.hourly,
+          annualPayUnit,
         })
       ) {
         continue;
@@ -1758,12 +1780,17 @@ function annualEarningsContexts(text) {
 function extractAnnualEarningsBand(text = "") {
   for (const line of annualEarningsContexts(text)) {
     const normalized = line.replace(/(?<=\d),(?=\d{3}\b)/g, "");
+    const annualPayUnit = ANNUAL_PAY_UNIT_RE.test(line);
     const rangeSpans = [];
     for (const range of normalized.matchAll(new RegExp(COMPENSATION_RANGE_RE.source, "gi"))) {
       rangeSpans.push([range.index, range.index + range[0].length]);
       const basis = compensationMatchBasis(normalized, range);
       if (!basis.annualEarnings || basis.hourly || basis.explicitBase) continue;
-      if (!plausibleCompensationMatch(line, range, [range[1], range[3]], [range[2], range[4]])) {
+      if (
+        !plausibleCompensationMatch(range, [range[1], range[3]], [range[2], range[4]], {
+          annualPayUnit,
+        })
+      ) {
         continue;
       }
       const min = normalizeMoney(range[1], range[2]);
@@ -1777,7 +1804,9 @@ function extractAnnualEarningsBand(text = "") {
       if (rangeSpans.some(([start, end]) => single.index >= start && single.index < end)) continue;
       const basis = compensationMatchBasis(normalized, single);
       if (!basis.annualEarnings || basis.hourly || basis.explicitBase) continue;
-      if (!plausibleCompensationMatch(line, single, [single[1]], [single[2]])) continue;
+      if (!plausibleCompensationMatch(single, [single[1]], [single[2]], { annualPayUnit })) {
+        continue;
+      }
       const amount = normalizeMoney(single[1], single[2]);
       if (amount >= 1_000 && amount <= 1_200_000) {
         const candidate = compensationBand(amount, amount, single);
