@@ -1,4 +1,5 @@
 import "./profile-settings.css";
+import { AnnualCashWorksheet } from "./AnnualCashWorksheet.jsx";
 import { ArrowLeftIcon } from "./chat-first-icons.jsx";
 import { runtimeIsSupported, runtimePresentation } from "./first-run-controller.js";
 import { RuntimeIcon } from "./RuntimeIcon.jsx";
@@ -863,6 +864,18 @@ function ProfileSectionEditor({
         ) : null}
         {safeArray(editor?.fields).map((field) => {
           const inputId = `cf-profile-editor-${field.id}`;
+          if (field.type === "annual-cash-worksheet") {
+            return (
+              <AnnualCashWorksheet
+                currency={field.currency}
+                idPrefix={inputId}
+                key={field.id}
+                value={values[field.id]}
+                disabled={busy}
+                onChange={(value) => onChange?.(field.id, value)}
+              />
+            );
+          }
           if (field.type === "checkbox") {
             return (
               <label className="cf-profile-editor__check" htmlFor={inputId} key={field.id}>

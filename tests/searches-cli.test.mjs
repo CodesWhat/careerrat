@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll } from "../src/core/db/connection.mjs";
 import { sourceConfigGet } from "../src/core/db/verbs.mjs";
+import { prepareFirstSearchSources } from "../src/core/onboarding/first-search-run.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const cleanupHomes = [];
@@ -159,6 +160,57 @@ test("careerrat searches --from-targeting writes generated DB source config with
   assert.equal(stored.stored, true);
   assert.ok(stored.data.searches.length > 0);
   assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
+});
+
+test("careerrat searches --disable survives first-search source preparation", async () => {
+  const home = tempHome();
+  const env = { ...process.env, CAREERRAT_HOME: home };
+  assert.equal(runData(["init"], home).status, 0);
+  assert.equal(
+    runData(
+      [
+        "candidate",
+        "patch",
+        "profile",
+        "--data",
+        JSON.stringify({
+          candidate: { domain: "hospitality and food service" },
+          location: { home: "New York, NY", remote: true },
+        }),
+      ],
+      home
+    ).status,
+    0
+  );
+  assert.equal(
+    runData(
+      [
+        "candidate",
+        "patch",
+        "targeting",
+        "--data",
+        JSON.stringify({
+          role_buckets: [{ name: "Hospitality", titles: ["Bartender"] }],
+        }),
+      ],
+      home
+    ).status,
+    0
+  );
+  const generated = runSearches(["--from-targeting", "--json"], home);
+  assert.equal(generated.status, 0, generated.stderr || generated.stdout);
+
+  const disabled = runSearches(["--disable", "RemoteOK", "--json"], home);
+  assert.equal(disabled.status, 0, disabled.stderr || disabled.stdout);
+  let remoteOk = sourceConfig(home).data.searches.find((source) => source.provider === "remoteok");
+  assert.equal(remoteOk.enabled, false);
+  assert.equal(Object.hasOwn(remoteOk, "enabled_reason"), false);
+
+  await prepareFirstSearchSources({ repoRoot: ROOT, env });
+
+  remoteOk = sourceConfig(home).data.searches.find((source) => source.provider === "remoteok");
+  assert.equal(remoteOk.enabled, false);
+  assert.equal(Object.hasOwn(remoteOk, "enabled_reason"), false);
 });
 
 test("careerrat searches --from-targeting rejects a generated baseline containing only boards", () => {

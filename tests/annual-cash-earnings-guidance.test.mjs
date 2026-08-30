@@ -19,6 +19,18 @@ test("candidate workflows explain annual cash earnings consistently", () => {
   }
 });
 
+test("ingest-profile derives a wage-shaped annual floor visibly", () => {
+  const body = read(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(body, /hourly wage/i);
+  assert.match(body, /paid hours per week/i);
+  assert.match(body, /cash per shift/i);
+  assert.match(body, /shifts per week/i);
+  assert.match(body, /weeks per year/i);
+  assert.match(body, /show the arithmetic/i);
+  assert.match(body, /confirm.*annual.*before.*writ/i);
+});
+
 test("public compensation docs distinguish guaranteed base from annual cash earnings", () => {
   const readme = read("README.md");
   const foundations = read("docs/foundations-spec.md");

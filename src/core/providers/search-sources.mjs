@@ -406,7 +406,11 @@ export function addSearchFromUrl(
 export function setEnabled(config, selector, enabled) {
   const searches = config.searches ?? [];
   const idx = resolveSelector(searches, selector);
-  const updated = searches.map((s, i) => (i === idx ? { ...s, enabled } : s));
+  const updated = searches.map((source, index) => {
+    if (index !== idx) return source;
+    const { enabled_reason: _generatedEnabledReason, ...userOwnedSource } = source;
+    return { ...userOwnedSource, enabled };
+  });
   return { ...config, searches: updated };
 }
 

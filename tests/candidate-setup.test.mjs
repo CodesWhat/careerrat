@@ -437,6 +437,34 @@ describe("candidate setup DB readiness and document formats", () => {
     assert.ok(!config.setup.missing.apply_ready.includes("compensation floor"));
   });
 
+  it("persists explicit seniority ladders on DB-backed search tracks", () => {
+    const repoRoot = buildDbRoot();
+    const seniorityLadder = [
+      { rank: 40, titles: ["Bar Manager"] },
+      { rank: 10, titles: ["Barback"] },
+      { rank: 30, titles: ["Lead Bartender"] },
+      { rank: 20, titles: ["Bartender"] },
+    ];
+
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [
+          {
+            name: "Bar",
+            priority: "primary",
+            titles: ["Lead Bartender"],
+            seniority_ladder: seniorityLadder,
+          },
+        ],
+      },
+    });
+
+    const config = candidateConfigGet({ repoRoot });
+    assert.deepEqual(config.targeting.role_buckets[0].seniority_ladder, seniorityLadder);
+  });
+
   it("lets a résumé-less candidate search after they choose to build their profile from answers", () => {
     const repoRoot = buildDbRoot();
 

@@ -441,6 +441,12 @@ function normalizeSearchTracks(buckets) {
     if (!titles.length) continue;
     const fitSignals = compactStrings(bucket?.fit_signals);
     const downSignals = compactStrings(bucket?.down_signals);
+    const seniorityLadder = Array.isArray(bucket?.seniority_ladder)
+      ? bucket.seniority_ladder.map((level) => ({
+          ...level,
+          titles: compactStrings(level?.titles),
+        }))
+      : null;
     const order = out.length + 1;
     out.push({
       name: String(bucket?.name || (order === 1 ? "Primary" : "Secondary")).trim(),
@@ -449,6 +455,7 @@ function normalizeSearchTracks(buckets) {
       ...(String(bucket?.notes || "").trim() ? { notes: String(bucket.notes).trim() } : {}),
       ...(fitSignals.length ? { fit_signals: fitSignals } : {}),
       ...(downSignals.length ? { down_signals: downSignals } : {}),
+      ...(seniorityLadder ? { seniority_ladder: seniorityLadder } : {}),
     });
   }
   return out;

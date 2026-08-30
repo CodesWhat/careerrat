@@ -11,6 +11,20 @@ role_buckets:
       - "Forward Deployed Engineer"
       - "Applied AI Engineer"
     notes: "Roles where the candidate's core edge is central."
+    # Optional. Each rank is explicit; list order never implies seniority.
+    seniority_ladder:
+      - rank: 30
+        titles:
+          - "Staff Forward Deployed Engineer"
+          - "Staff Applied AI Engineer"
+      - rank: 10
+        titles:
+          - "Associate Forward Deployed Engineer"
+          - "Junior Applied AI Engineer"
+      - rank: 20
+        titles:
+          - "Forward Deployed Engineer"
+          - "Applied AI Engineer"
   - name: "Secondary"
     priority: "secondary"
     titles:

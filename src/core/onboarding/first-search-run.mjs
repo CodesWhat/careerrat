@@ -121,6 +121,12 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function hasConfiguredTargetTitles(config = {}) {
+  return asArray(config?.targeting?.role_buckets).some((bucket) =>
+    asArray(bucket?.titles).some((title) => String(title || "").trim().length > 0)
+  );
+}
+
 function compactArrayValues(values = []) {
   const out = [];
   const seen = new Set();
@@ -149,6 +155,27 @@ function mergeFilterObject(existing = {}, generated = {}) {
       merged[key] = existingValue ?? generatedValue;
     }
   }
+  return merged;
+}
+
+function mergeTitleFilter(existing = {}, generated = {}) {
+  const reconciledExisting =
+    generated?.seniority_basis === "candidate-ladder"
+      ? {
+          ...existing,
+          negative: asArray(existing?.negative).filter(
+            (value) =>
+              !["intern", "junior"].includes(
+                String(value || "")
+                  .trim()
+                  .toLowerCase()
+              )
+          ),
+        }
+      : existing;
+  const merged = mergeFilterObject(reconciledExisting, generated);
+  merged.below_target = compactArrayValues(asArray(generated?.below_target));
+  if (generated?.seniority_basis) merged.seniority_basis = generated.seniority_basis;
   return merged;
 }
 
@@ -219,32 +246,235 @@ function mergeSourceCatalog(existing = {}, generated = {}) {
   return merged;
 }
 
-// mergeEntries above always keeps the EXISTING stored entry on a key
-// collision (never clobbering a user's other edits to that entry) — which
-// means an `enabled:false` seeded by an earlier run (e.g. before
-// candidate.domain/titles told generate-search-sources.mjs's domain gate
-// these tech-only boards should default on) would otherwise shadow a freshly
-// generated `enabled:true` forever. Entries generate-search-sources.mjs
-// marks `enabled_reason: "domain-gate"` are machine-set by that gate, not a
-// user's own toggle, so this post-pass re-syncs ONLY `enabled` (nothing
-// else on the entry) from the freshly generated copy whenever the merged
-// entry still carries that marker. Nothing clears the marker today; a
-// future settings-UI toggle that lets a user pin a board on/off by hand
-// would need to delete `enabled_reason` at that point so this re-sync stops
-// overriding the user's explicit choice.
-function resyncDomainGatedEntries(mergedEntries, generatedEntries, keyForEntry) {
-  const generatedByKey = new Map();
-  for (const entry of Array.isArray(generatedEntries) ? generatedEntries : []) {
-    const key = keyForEntry(entry);
-    if (key) generatedByKey.set(key, entry);
+// Before generated sources carried enabled_reason, one release wrote this
+// complete disabled trio. A single unmarked row is ambiguous and stays
+// user-owned. The exact three-row cohort is the provenance signal: remove all
+// untouched copies only when every historical row is still present, then let
+// the current generator add one enabled canonical copy of each board.
+const LEGACY_UNMARKED_REMOTE_BOARD_BUNDLE = Object.freeze([
+  Object.freeze({
+    provider: "remoteok",
+    label: "Remote OK",
+    source_type: "board",
+    url: "https://remoteok.com/api",
+    enabled: false,
+  }),
+  Object.freeze({
+    provider: "remotive",
+    label: "Remotive",
+    source_type: "board",
+    url: "https://remotive.com/api/remote-jobs",
+    enabled: false,
+  }),
+  Object.freeze({
+    provider: "workingnomads",
+    label: "Working Nomads",
+    source_type: "board",
+    url: "https://www.workingnomads.com/jobsapi/job/_search",
+    enabled: false,
+  }),
+]);
+
+function isExactLegacyRemoteBoard(entry, expected) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  const entryKeys = Object.keys(entry);
+  const expectedKeys = Object.keys(expected);
+  return (
+    entryKeys.length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(entry, key) && Object.is(entry[key], expected[key]))
+  );
+}
+
+function hasCompleteLegacyRemoteBoardBundle(existingEntries) {
+  const entries = asArray(existingEntries);
+  return LEGACY_UNMARKED_REMOTE_BOARD_BUNDLE.every((expected) =>
+    entries.some((entry) => isExactLegacyRemoteBoard(entry, expected))
+  );
+}
+
+const GENERATED_SOURCE_REASONS = new Set([
+  "targeting",
+  "domain-gate",
+  "hospitality-domain",
+  "baseline",
+]);
+
+function hasGeneratedBaselineOwnership(searchSources = {}) {
+  const entries = asArray(searchSources.searches);
+  return (
+    Number(searchSources.generator_revision) >= 1 ||
+    entries.some((entry) => GENERATED_SOURCE_REASONS.has(entry?.enabled_reason)) ||
+    hasCompleteLegacyRemoteBoardBundle(entries)
+  );
+}
+
+function normalizedTargetTitles(searchSources = {}) {
+  return new Set(
+    asArray(searchSources?.title_filter?.positive)
+      .map((title) =>
+        String(title || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+}
+
+function targetTitleSlug(title) {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function isLegacyGeneratedTargetSource(entry, searchSources) {
+  if (entry?.enabled_reason != null) return false;
+  if (Number(searchSources.generator_revision) >= 1) return false;
+  const titles = normalizedTargetTitles(searchSources);
+  if (titles.size === 0) return false;
+  const query = String(entry?.query || "")
+    .trim()
+    .toLowerCase();
+
+  if (entry?.provider === "HiringCafe") {
+    return (
+      entry.source_type === "url-query" &&
+      titles.has(query) &&
+      String(entry.label || "")
+        .trim()
+        .toLowerCase() === query &&
+      entry.searchState?.sortBy === "date" &&
+      !entry.url
+    );
   }
-  return mergedEntries.map((entry) => {
-    if (entry?.enabled_reason !== "domain-gate") return entry;
-    const key = keyForEntry(entry);
-    const generated = key ? generatedByKey.get(key) : null;
-    if (!generated || generated.enabled === entry.enabled) return entry;
-    return { ...entry, enabled: generated.enabled };
+  if (entry?.provider === "RemoteVibeCodingJobs") {
+    return titles.has(query) && entry.rssUrl === "https://remotevibecodingjobs.com/feed.xml";
+  }
+  if (entry?.provider === "Wellfound" && entry.source_type === "browser" && !entry.platform) {
+    const path = (() => {
+      try {
+        return new URL(entry.url).pathname.toLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+    return [...titles].some((title) => {
+      const slug = targetTitleSlug(title);
+      return slug && path.split("/").includes(slug);
+    });
+  }
+  return false;
+}
+
+function generatedTitleFilterState(searchSources = {}) {
+  const stored = searchSources?.generator_state?.title_filter;
+  if (stored) return stored;
+  if (!hasGeneratedBaselineOwnership(searchSources)) return null;
+
+  const positive = compactArrayValues(
+    asArray(searchSources.searches)
+      .filter((entry) => isLegacyGeneratedTargetSource(entry, searchSources))
+      .map((entry) => entry.query)
+  );
+  const titleFilter = searchSources.title_filter || {};
+  return {
+    positive: positive.length > 0 ? positive : asArray(titleFilter.positive),
+  };
+}
+
+function disableGeneratedBaselineWithoutTargets(searchSources = {}) {
+  if (!hasGeneratedBaselineOwnership(searchSources)) return searchSources;
+  let changed = false;
+  const searches = asArray(searchSources.searches).map((entry) => {
+    const generated =
+      GENERATED_SOURCE_REASONS.has(entry?.enabled_reason) ||
+      isLegacyGeneratedTargetSource(entry, searchSources);
+    if (!generated || entry.enabled === false) return entry;
+    changed = true;
+    return { ...entry, enabled: false };
   });
+  const titleFilter = clearGeneratedTitleFilter(
+    searchSources.title_filter,
+    generatedTitleFilterState(searchSources)
+  );
+  if (!changed && titleFilter === searchSources.title_filter) return searchSources;
+  return {
+    ...searchSources,
+    generator_revision: 1,
+    title_filter: titleFilter,
+    searches,
+  };
+}
+
+function withoutGeneratedValues(values, generatedValues) {
+  const generated = new Set(
+    asArray(generatedValues).map((value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+    )
+  );
+  return asArray(values).filter(
+    (value) =>
+      !generated.has(
+        String(value || "")
+          .trim()
+          .toLowerCase()
+      )
+  );
+}
+
+function replaceGeneratedTitleFilter(existingConfig = {}, generatedConfig = {}) {
+  const previousGenerated = generatedTitleFilterState(existingConfig);
+  if (!previousGenerated) {
+    return mergeTitleFilter(existingConfig.title_filter, generatedConfig.title_filter);
+  }
+  const existing = existingConfig.title_filter || {};
+  const generated = generatedConfig.title_filter || {};
+  const next = { ...existing };
+  for (const key of ["positive", "negative", "below_target"]) {
+    next[key] = compactArrayValues([
+      ...withoutGeneratedValues(existing[key], previousGenerated[key]),
+      ...asArray(generated[key]),
+    ]);
+  }
+  if (generated.seniority_basis) next.seniority_basis = generated.seniority_basis;
+  return next;
+}
+
+function clearGeneratedTitleFilter(titleFilter = {}, generatedTitleFilter = null) {
+  if (!generatedTitleFilter) {
+    if (
+      asArray(titleFilter.positive).length === 0 &&
+      asArray(titleFilter.below_target).length === 0
+    ) {
+      return titleFilter;
+    }
+    return { ...titleFilter, positive: [], below_target: [] };
+  }
+  const next = { ...titleFilter };
+  let changed = false;
+  for (const key of ["positive", "negative", "below_target"]) {
+    const retained = withoutGeneratedValues(titleFilter[key], generatedTitleFilter[key]);
+    if (retained.length !== asArray(titleFilter[key]).length) changed = true;
+    next[key] = retained;
+  }
+  if (titleFilter.seniority_basis === generatedTitleFilter.seniority_basis) {
+    delete next.seniority_basis;
+    changed = true;
+  }
+  return changed ? next : titleFilter;
+}
+
+function reconcileLegacyUnmarkedRemoteBoards(existingEntries) {
+  const entries = asArray(existingEntries);
+  if (!hasCompleteLegacyRemoteBoardBundle(entries)) return entries;
+  return entries.filter(
+    (entry) =>
+      !LEGACY_UNMARKED_REMOTE_BOARD_BUNDLE.some((expected) =>
+        isExactLegacyRemoteBoard(entry, expected)
+      )
+  );
 }
 
 // Pre-6de6fa6b installs can carry stored RemoteVibeCodingJobs/Wellfound
@@ -297,20 +527,52 @@ function isLegacyHardcodedAggregatorEntry(entry = {}, generatedEntries = []) {
   return false;
 }
 
-function mergeSearchSources(existing = {}, generated = {}) {
-  const reconciledExistingSearches = asArray(existing.searches).filter(
-    (entry) => !isLegacyHardcodedAggregatorEntry(entry, asArray(generated.searches))
+function reconcileGeneratedSearches(existingConfig = {}, generatedEntries = []) {
+  const generatedByKey = new Map();
+  for (const entry of asArray(generatedEntries)) {
+    const key = sourceEntryKey(entry);
+    if (key) generatedByKey.set(key, entry);
+  }
+  const reconciledLegacy = reconcileLegacyUnmarkedRemoteBoards(existingConfig.searches).filter(
+    (entry) => !isLegacyHardcodedAggregatorEntry(entry, generatedEntries)
   );
+  const retained = [];
+  for (const entry of reconciledLegacy) {
+    const markerOwned = GENERATED_SOURCE_REASONS.has(entry?.enabled_reason);
+    const legacyOwned = isLegacyGeneratedTargetSource(entry, existingConfig);
+    const generated = generatedByKey.get(sourceEntryKey(entry));
+    const retiresWithTarget =
+      ["targeting", "hospitality-domain", "baseline"].includes(entry?.enabled_reason) ||
+      legacyOwned;
+    if (!generated && retiresWithTarget) continue;
+    if (generated && (markerOwned || legacyOwned)) {
+      if (entry.enabled_reason === "domain-gate") {
+        retained.push({ ...entry, enabled: generated.enabled });
+      } else {
+        retained.push({
+          ...entry,
+          ...generated,
+          ...(entry.recency || generated.recency
+            ? { recency: { ...generated.recency, ...entry.recency } }
+            : {}),
+        });
+      }
+      continue;
+    }
+    retained.push(entry);
+  }
+  return mergeEntries(retained, generatedEntries, sourceEntryKey);
+}
+
+function mergeSearchSources(existing = {}, generated = {}) {
   return {
     ...generated,
     ...existing,
-    title_filter: mergeFilterObject(existing.title_filter, generated.title_filter),
+    generator_revision: generated.generator_revision,
+    generator_state: generated.generator_state,
+    title_filter: replaceGeneratedTitleFilter(existing, generated),
     location_filter: mergeLocationFilter(existing.location_filter, generated.location_filter),
-    searches: resyncDomainGatedEntries(
-      mergeEntries(reconciledExistingSearches, generated.searches, sourceEntryKey),
-      generated.searches,
-      sourceEntryKey
-    ),
+    searches: reconcileGeneratedSearches(existing, generated.searches),
     tracked_companies: mergeEntries(
       existing.tracked_companies,
       generated.tracked_companies,
@@ -709,24 +971,23 @@ export function countDeterministicSources({ searchSources, sourcedScan } = {}) {
 // seeded with zero deterministic sources (company boards seeded
 // `enabled:false`, no tech RSS, no `enabled_reason: "domain-gate"` marker
 // yet) — the only thing that ever repaired that doc was
-// prepareFirstSearchSources's generate + mergeSearchSources (which folds in
-// resyncDomainGatedEntries) pass, and that only ever runs inside an actual
-// search run. That's a deadlock: the config can't heal because a search
-// can't run because the config isn't healed. Callers on the readiness READ
-// path (GET /api/search/sources, GET /api/onboard/state) call this whenever
-// the stored count is 0, so readiness can flip true from a page load alone —
-// no search run, and (unlike backfillCompanyBoards' LAYER 3 above) ZERO AI
-// calls: this only regenerates+merges the search-sources doc itself, never
-// touching sourced-scan's tracked-company board resolution (that stays
-// search-time-only, per AGENTS.md's "no AI spend without intent"). Idempotent:
-// re-running against an already-healed doc finds nothing left to merge and
+// prepareFirstSearchSources's generate + mergeSearchSources (which reconciles
+// the exact legacy cohort and re-syncs marked generated entries) pass, and
+// that only ever runs inside an actual search run. That's a deadlock when a
+// generated baseline has known provenance and can be migrated safely.
+// Callers on the readiness READ path (GET /api/search/sources,
+// GET /api/onboard/state) call this whenever the stored count is 0. The heal
+// runs only when target titles exist and the stored rows prove generator
+// ownership through the current marker or exact legacy cohort. Missing,
+// default-only, and user-owned configs stay untouched and cannot become ready
+// from a page load. This makes no AI calls and never touches sourced-scan's
+// tracked-company board resolution (that stays search-time-only, per
+// AGENTS.md's "no AI spend without intent"). Re-running an already-healed doc
 // returns `healed: false` without writing.
 export function healSearchSourceConfig({ repoRoot, env = process.env, config = null } = {}) {
   const pathCtx = { repoRoot, env };
   const candidateConfig = config || candidateConfigGet(pathCtx);
-  const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
   const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
-  const merged = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
   const sourcedScan = sourceConfigGet({
     ...pathCtx,
     name: "sourced-scan",
@@ -736,6 +997,42 @@ export function healSearchSourceConfig({ repoRoot, env = process.env, config = n
     searchSources: current.data,
     sourcedScan,
   });
+  if (!hasConfiguredTargetTitles(candidateConfig)) {
+    const eligible = disableGeneratedBaselineWithoutTargets(current.data);
+    if (current.stored !== true || eligible === current.data) {
+      return {
+        healed: false,
+        searchSources: current.data,
+        deterministicSources: before,
+      };
+    }
+    const written = sourceConfigPut({
+      ...pathCtx,
+      name: "search-sources",
+      data: eligible,
+    });
+    return {
+      healed: true,
+      searchSources: written.data,
+      deterministicSources: countDeterministicSources({
+        searchSources: written.data,
+        sourcedScan,
+      }),
+    };
+  }
+
+  const canHealGeneratedBaseline =
+    current.stored === true && hasGeneratedBaselineOwnership(current.data);
+  if (!canHealGeneratedBaseline) {
+    return {
+      healed: false,
+      searchSources: current.data,
+      deterministicSources: before,
+    };
+  }
+
+  const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
+  const merged = mergeSearchSources(current.data, generated);
   const after = countDeterministicSources({
     searchSources: merged,
     sourcedScan,
@@ -763,6 +1060,87 @@ export function healSearchSourceConfig({ repoRoot, env = process.env, config = n
   };
 }
 
+export function prepareDeterministicSearchSources({
+  repoRoot,
+  env = process.env,
+  config = null,
+} = {}) {
+  const pathCtx = { repoRoot, env };
+  const candidateConfig = config || candidateConfigGet(pathCtx);
+  const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+  let sources = current;
+  let sourcedScan = sourceConfigGet({
+    ...pathCtx,
+    name: "sourced-scan",
+  }).data;
+  const previousGeneratedTitleFilter = generatedTitleFilterState(current.data);
+  if (hasConfiguredTargetTitles(candidateConfig)) {
+    const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
+    const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
+    sources = sourceConfigPut({
+      ...pathCtx,
+      name: "search-sources",
+      data: next,
+    });
+    sourcedScan = sourceConfigPut({
+      ...pathCtx,
+      name: "sourced-scan",
+      data: {
+        ...sourcedScan,
+        title_filter: replaceGeneratedTitleFilter(
+          {
+            title_filter: sourcedScan.title_filter,
+            ...(previousGeneratedTitleFilter
+              ? {
+                  generator_state: {
+                    title_filter: previousGeneratedTitleFilter,
+                  },
+                }
+              : {}),
+          },
+          generated
+        ),
+        location_filter: mergeLocationFilter(sourcedScan.location_filter, next.location_filter),
+      },
+    }).data;
+  } else if (current.stored === true) {
+    const eligible = disableGeneratedBaselineWithoutTargets(current.data);
+    if (eligible !== current.data) {
+      sources = sourceConfigPut({
+        ...pathCtx,
+        name: "search-sources",
+        data: eligible,
+      });
+    }
+    if (hasGeneratedBaselineOwnership(current.data)) {
+      const titleFilter = clearGeneratedTitleFilter(
+        sourcedScan.title_filter,
+        previousGeneratedTitleFilter
+      );
+      if (titleFilter !== sourcedScan.title_filter) {
+        sourcedScan = sourceConfigPut({
+          ...pathCtx,
+          name: "sourced-scan",
+          data: { ...sourcedScan, title_filter: titleFilter },
+        }).data;
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    sources,
+    searchSources: sources.data,
+    sourcedScan,
+    deterministicSources: countDeterministicSources({
+      searchSources: sources.data,
+      sourcedScan,
+    }),
+    readiness: candidateConfig.setup?.readiness || {},
+    missing: candidateConfig.setup?.missing || {},
+  };
+}
+
 export async function prepareFirstSearchSources({
   repoRoot,
   env = process.env,
@@ -776,30 +1154,13 @@ export async function prepareFirstSearchSources({
 } = {}) {
   const pathCtx = { repoRoot, env };
   const candidateConfig = config || candidateConfigGet(pathCtx);
-  const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
-  const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
-  const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
-  const sources = sourceConfigPut({
-    ...pathCtx,
-    name: "search-sources",
-    data: next,
+  const prepared = prepareDeterministicSearchSources({
+    repoRoot,
+    env,
+    config: candidateConfig,
   });
-  const currentSourcedScan = sourceConfigGet({
-    ...pathCtx,
-    name: "sourced-scan",
-  }).data;
-  let sourcedScan = sourceConfigPut({
-    ...pathCtx,
-    name: "sourced-scan",
-    data: {
-      ...currentSourcedScan,
-      title_filter: mergeFilterObject(currentSourcedScan.title_filter, next.title_filter),
-      location_filter: mergeLocationFilter(
-        currentSourcedScan.location_filter,
-        next.location_filter
-      ),
-    },
-  }).data;
+  const { sources } = prepared;
+  let { sourcedScan } = prepared;
 
   const companyBoardResolution = await backfillCompanyBoards({
     repoRoot,
@@ -819,14 +1180,10 @@ export async function prepareFirstSearchSources({
   });
 
   return {
-    ok: true,
-    sources,
-    searchSources: sources.data,
+    ...prepared,
     sourcedScan,
     deterministicSources,
     companyBoardResolution,
-    readiness: candidateConfig.setup?.readiness || {},
-    missing: candidateConfig.setup?.missing || {},
   };
 }
 

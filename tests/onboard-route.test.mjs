@@ -972,6 +972,44 @@ describe("GET /api/onboard/state", () => {
       await closeServer(server);
     }
   });
+
+  it("does not report generated broad boards ready after target titles are cleared", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      sourceConfigPut({
+        repoRoot,
+        name: "search-sources",
+        data: {
+          title_filter: { positive: [], negative: [] },
+          location_filter: null,
+          searches: [
+            {
+              provider: "remoteok",
+              label: "RemoteOK",
+              source_type: "board",
+              url: "https://remoteok.com/api",
+              enabled: true,
+              enabled_reason: "domain-gate",
+            },
+          ],
+          tracked_companies: [],
+          source_catalog: {},
+        },
+      });
+
+      const body = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(body.searchSourcesPresent, false);
+      assert.equal(body.deterministicSources.attempted, 0);
+      assert.equal(
+        sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0].enabled,
+        false
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -164,16 +164,46 @@ test("tech-majority pre-fix source config heals once and persists deterministic 
   assert.equal(sourceConfigUpdatedAt(repoRoot), updatedAfterFirst);
 });
 
-test("non-tech config adds runnable role searches plus one broad source and converges", () => {
+test("non-tech pre-fix generated boards heal to one enabled canonical row each and converge", () => {
   const repoRoot = tempRepo();
   seedCandidate(repoRoot, ["Registered Nurse", "Nurse Practitioner", "Clinical Manager"]);
   putPreFixSearchSources(repoRoot);
 
   const first = healSearchSourceConfig({ repoRoot, env: {} });
-  assert.equal(first.deterministicSources.attempted, 4);
+  assert.equal(first.deterministicSources.attempted, 7);
   assert.equal(first.deterministicSources.rss, 0);
-  assert.equal(first.deterministicSources.boards, 1);
+  assert.equal(first.deterministicSources.boards, 4);
   assert.equal(first.deterministicSources.browser, 3);
+  assert.deepEqual(
+    first.searchSources.searches
+      .filter((source) => ["remoteok", "remotive", "workingnomads"].includes(source.provider))
+      .map(({ provider, url, enabled, enabled_reason }) => ({
+        provider,
+        url,
+        enabled,
+        enabled_reason,
+      })),
+    [
+      {
+        provider: "remoteok",
+        url: "https://remoteok.com/api",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+      {
+        provider: "remotive",
+        url: "https://remotive.com/api/remote-jobs",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+      {
+        provider: "workingnomads",
+        url: "https://www.workingnomads.com/api/exposed_jobs/",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+    ]
+  );
   assert.equal(
     first.searchSources.searches.some(
       (source) =>
@@ -190,7 +220,7 @@ test("non-tech config adds runnable role searches plus one broad source and conv
   const updatedAfterFirst = sourceConfigUpdatedAt(repoRoot);
   const second = healSearchSourceConfig({ repoRoot, env: {} });
   assert.equal(second.healed, false);
-  assert.equal(second.deterministicSources.attempted, 4);
+  assert.equal(second.deterministicSources.attempted, 7);
   assert.deepEqual(second.searchSources, storedAfterFirst);
   assert.equal(sourceConfigUpdatedAt(repoRoot), updatedAfterFirst);
 });

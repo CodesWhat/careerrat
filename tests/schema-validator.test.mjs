@@ -321,6 +321,53 @@ test("targeting: valid → { valid: true, errors: [] }", () => {
   assert.deepEqual(result.errors, []);
 });
 
+test("targeting: role buckets accept explicitly ranked occupation seniority ladders", () => {
+  const data = makeTargeting({
+    role_buckets: [
+      {
+        name: "Nursing",
+        priority: "primary",
+        titles: ["Registered Nurse", "RN"],
+        seniority_ladder: [
+          { rank: 30, titles: ["Nurse Practitioner", "NP"] },
+          { rank: 10, titles: ["Certified Nursing Assistant", "CNA"] },
+          { rank: 20, titles: ["Registered Nurse", "RN"] },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(validate(data, targetingSchema), { valid: true, errors: [] });
+});
+
+test("targeting: seniority ladder levels require explicit ranks", () => {
+  const data = makeTargeting({
+    role_buckets: [
+      {
+        name: "Trades",
+        priority: "primary",
+        titles: ["Journeyman Electrician"],
+        seniority_ladder: [
+          { titles: ["Apprentice Electrician"] },
+          { rank: 20, titles: ["Journeyman Electrician"] },
+        ],
+      },
+    ],
+  });
+  const result = validate(data, targetingSchema);
+
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(
+      (error) =>
+        error.path === "role_buckets[0].seniority_ladder[0]" &&
+        error.message.includes("missing required property") &&
+        error.message.includes("rank")
+    ),
+    JSON.stringify(result.errors)
+  );
+});
+
 test("targeting: role_buckets[0].priority 'bogus' → invalid enum at role_buckets[0].priority", () => {
   const data = makeTargeting();
   data.role_buckets[0].priority = "bogus";

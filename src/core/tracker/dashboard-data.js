@@ -653,6 +653,10 @@ function profileCompFromSettings(settings) {
     return Number.isFinite(number) ? number : null;
   };
   return {
+    currency:
+      String(profile.currency || "")
+        .trim()
+        .toUpperCase() || "USD",
     baseFloorK: compK(profile.minimumBaseK),
     annualEarningsFloorK: compK(profile.minimumAnnualEarningsK),
     baseAskK: compK(profile.targetBaseK) ?? compK(profile.expectedBaseK),
@@ -3639,13 +3643,43 @@ function medianMoneyK(value) {
   return values.length % 2 ? values[Math.floor(mid)] : (values[mid - 1] + values[mid]) / 2;
 }
 
-function formatMoneyK(value) {
+// Browser-local mirror of src/core/currency-format.mjs. This file is copied
+// verbatim to workspace/dashboard-data.js, so it must remain dependency-free.
+function normalizeCurrencyCode(value, fallback = "USD") {
+  const code = String(value || fallback)
+    .trim()
+    .toUpperCase();
+  return code || fallback;
+}
+
+function currencyMarker(currency) {
+  const code = normalizeCurrencyCode(currency);
+  return code === "USD" ? "$" : `${code} `;
+}
+
+function formatCurrencyThousands(value, currency) {
+  return `${currencyMarker(currency)}${Math.round(Number(value))}K`;
+}
+
+function formatMoneyK(value, currency) {
   if (!value || !Number.isFinite(value)) return "TBD";
   if (value >= 1000) {
     const millions = value / 1000;
-    return `$${Number.isInteger(millions) ? millions.toFixed(0) : millions.toFixed(2).replace(/0$/, "")}M`;
+    return `${currencyMarker(currency)}${Number.isInteger(millions) ? millions.toFixed(0) : millions.toFixed(2).replace(/0$/, "")}M`;
   }
-  return `$${Math.round(value)}K`;
+  return formatCurrencyThousands(value, currency);
+}
+
+function compensationCurrency(...values) {
+  for (const value of values) {
+    const text = String(value || "");
+    const code = text.match(/\b([A-Z]{3})\b/)?.[1];
+    if (code) return code;
+    if (text.includes("£")) return "GBP";
+    if (text.includes("€")) return "EUR";
+    if (text.includes("$")) return "USD";
+  }
+  return null;
 }
 
 function stageLabel(status, source) {
@@ -3695,7 +3729,11 @@ function fitLabel(row) {
 }
 
 function secondaryCompBasis(row = {}) {
-  if (row.compBasis === "annual-earnings" || row.comp?.basis === "annual-earnings") {
+  if (
+    row.compBasis === "annual-earnings" ||
+    row.comp?.basis === "annual-earnings" ||
+    row.compEstimate?.compensationBasis === "annual-earnings"
+  ) {
     return "annual-earnings";
   }
   const evaluated = row.evaluation?.compensation;
@@ -3708,7 +3746,7 @@ function secondaryCompBasis(row = {}) {
   return null;
 }
 
-function compactComp(base, tc, basis = null) {
+function compactComp(base, tc, basis = null, currency = null) {
   const baseDisplay = base || "TBD";
   const tcDisplay = tc || "";
   const midpoint =
@@ -3721,7 +3759,7 @@ function compactComp(base, tc, basis = null) {
     tc: tcDisplay,
     basis,
     midpoint,
-    compact: formatMoneyK(midpoint),
+    compact: formatMoneyK(midpoint, currency || compensationCurrency(base, tc)),
     summary: tcDisplay ? `${baseDisplay} base · ${tcDisplay} ${secondaryLabel}` : baseDisplay,
   };
 }
@@ -3938,6 +3976,12 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
   // profileCompFromSettings) — check for null explicitly before Number()
   // coercion, since Number(null) is 0 (finite), not NaN.
   const annualEarnings = secondaryCompBasis(row) === "annual-earnings";
+  const currency = normalizeCurrencyCode(
+    est?.currency ||
+      sourceRecord?.evaluation?.compensation?.currency ||
+      compensationCurrency(row.comp, row.tc) ||
+      profileComp.currency
+  );
   const selectedFloorK = annualEarnings ? profileComp.annualEarningsFloorK : profileComp.baseFloorK;
   const selectedAskK = annualEarnings ? null : profileComp.baseAskK;
   const profileFloorK = selectedFloorK != null ? Number(selectedFloorK) : null;
@@ -3958,6 +4002,7 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
   const postedBand = moneyBandK(annualEarnings ? row.tc : row.comp);
   if (postedBand) {
     return {
+      currency,
       state: "posted",
       stateLabel: "Posted band",
       hasMarket: true,
@@ -3974,6 +4019,7 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
 
   if (est && est.source === "comparables" && Number.isFinite(Number(est.midpointK))) {
     return {
+      currency,
       state: "built",
       stateLabel: "Built from data",
       hasMarket: true,
@@ -3990,6 +4036,7 @@ function compRangeView(row, sourceRecord = {}, profileComp = {}) {
   }
 
   return {
+    currency,
     state: "needs-info",
     stateLabel: "Needs more info",
     hasMarket: false,
@@ -4012,7 +4059,7 @@ function missingCompAction(row, estimate) {
     label: "Comp",
     title: hasEstimate ? `Confirm comp for ${row.company}` : `Resolve comp for ${row.company}`,
     summary: hasEstimate
-      ? `No posted band. Best guess $${estimate.lowK}K–$${estimate.highK}K (mid $${estimate.midpointK}K) from ${estimate.sampleSize} comparable${estimate.sampleSize === 1 ? "" : "s"}. Confirm before promoting.`
+      ? `No posted band. Best guess ${formatCurrencyThousands(estimate.lowK, estimate.currency)}–${formatCurrencyThousands(estimate.highK, estimate.currency)} (mid ${formatCurrencyThousands(estimate.midpointK, estimate.currency)}) from ${estimate.sampleSize} comparable${estimate.sampleSize === 1 ? "" : "s"}. Confirm before promoting.`
       : "No posted comp and no comparable roles yet. Gather a number before deciding.",
     meta: `${row.sourceLabel} · ${row.role}`,
     dueAt: "",
@@ -4551,6 +4598,7 @@ function jobDetailFromRow(
     marketLo: compView.marketLo,
     marketP50: compView.marketP50,
     marketHi: compView.marketHi,
+    currency: compView.currency,
     compState: compView.state,
     compStateLabel: compView.stateLabel,
     compBasis: compView.basis,
@@ -4612,7 +4660,8 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
   const comp = compactComp(
     app.base || app.comp?.base || "",
     app.tc || app.comp?.tc || "",
-    secondaryCompBasis(app)
+    secondaryCompBasis(app),
+    app.compEstimate?.currency || app.evaluation?.compensation?.currency
   );
   const displayStageLabel = advancedByHistory
     ? stageGroupLabel(stage)
@@ -4720,7 +4769,8 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
   const comp = compactComp(
     role.base || role.comp?.base || "",
     role.tc || role.comp?.tc || "",
-    secondaryCompBasis(role)
+    secondaryCompBasis(role),
+    role.compEstimate?.currency || role.evaluation?.compensation?.currency
   );
   const row = {
     id: role.id || `sourced-${index + 1}`,
