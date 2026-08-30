@@ -42,6 +42,12 @@ function roleFamiliesFromTargeting(targeting = {}) {
       name: trimString(bucket?.name),
       priority: trimString(bucket?.priority),
       titles: compactStrings(bucket?.titles),
+      seniority_ladder: (Array.isArray(bucket?.seniority_ladder) ? bucket.seniority_ladder : [])
+        .map((level) => ({
+          rank: level?.rank,
+          titles: compactStrings(level?.titles),
+        }))
+        .filter((level) => Number.isInteger(level.rank) && level.titles.length > 0),
     }))
     .filter((bucket) => bucket.name || bucket.titles.length);
 }

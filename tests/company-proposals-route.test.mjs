@@ -701,6 +701,66 @@ test("company proposal rescoring preserves worldwide remote scope in its candida
   assert.equal(body.data.autoAdded[0].company.name, "Worldwide Remote Co");
 });
 
+test("company proposal rescoring preserves a non-tech seniority ladder", async () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      candidate: { domain: "hospitality" },
+      location: { home: "New York, NY", remote: true, remote_scope: "worldwide" },
+      compensation: { currency: "USD", minimum_annual_earnings: 60000 },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Bar leadership",
+          priority: "primary",
+          titles: ["Lead Bartender"],
+          seniority_ladder: [
+            { rank: 10, titles: ["Barback"] },
+            { rank: 20, titles: ["Bartender"] },
+            { rank: 30, titles: ["Lead Bartender"] },
+            { rank: 40, titles: ["Bar Manager"] },
+          ],
+        },
+      ],
+    },
+  });
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async ({ seed }) => supportedResolution(seed),
+    scanCompaniesImpl: async () => ({
+      offers: [
+        {
+          company: "Hospitality Ladder Co",
+          title: "Bar Manager",
+          url: "https://jobs.lever.co/hospitality-ladder/bar-manager",
+          location: "Remote",
+          comp: "Expected annual earnings: $85,000",
+          bodyText: "Lead beverage operations, service standards, and bar staff.",
+        },
+      ],
+      errors: [],
+    }),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [{ name: "Hospitality Ladder Co" }],
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.data.rejected.length, 0, JSON.stringify(body.data.rejected));
+  assert.equal(
+    [...body.data.proposals, ...(body.data.autoAdded || [])][0].company.name,
+    "Hospitality Ladder Co"
+  );
+});
+
 test("POST /api/discovery/company-proposals maps malformed JSON to 400", async () => {
   const repoRoot = tempRepo();
   candidateSetupInitialize({ repoRoot });

@@ -103,6 +103,7 @@ function scoringConfigFromContext(context = {}) {
             name: family.name,
             priority: family.priority,
             titles: family.titles,
+            seniority_ladder: family.seniority_ladder,
           }))
         : [],
       keep_signals: context.keepSignals || [],
