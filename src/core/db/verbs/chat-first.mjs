@@ -1795,13 +1795,30 @@ function retryablePrepareStep(step) {
   );
 }
 
-function focusablePrepareStep(step, applicationId) {
+function sameMissionJob(left, right) {
+  const type = left?.jobRef?.type;
+  const id = left?.jobRef?.id;
+  return Boolean(type && id && type === right?.jobRef?.type && id === right?.jobRef?.id);
+}
+
+function preparedApplicationId(step, steps = []) {
+  if (step?.result?.applicationId) return step.result.applicationId;
+  if (step?.jobRef?.type === "application") return step.jobRef.id;
+  return steps.find(
+    (candidate) =>
+      candidate?.action === "submit-gate" &&
+      sameMissionJob(candidate, step) &&
+      candidate?.result?.requiresUserSubmit === true &&
+      candidate.result.applicationId
+  )?.result.applicationId;
+}
+
+function focusablePrepareStep(step, applicationId, steps = []) {
   return (
     step.action === "prepare-submit" &&
     step.status === "completed" &&
     step.result?.state === "awaiting-submit" &&
-    (step.result?.applicationId === applicationId ||
-      (step.jobRef?.type === "application" && step.jobRef?.id === applicationId))
+    preparedApplicationId(step, steps) === applicationId
   );
 }
 
@@ -1929,7 +1946,7 @@ function claimMissionStepAttempt({
     if (!step) throw new NotFoundError(`no mission step with id "${stepId}"`);
     const retryableBlocked = retryablePrepareStep(step);
     const retryableFocus = focusApplicationId
-      ? focusablePrepareStep(step, focusApplicationId)
+      ? focusablePrepareStep(step, focusApplicationId, missionSteps(db, missionId))
       : false;
     if (step.status !== "pending" && !retryableBlocked && !retryableFocus) {
       throw makeError(`mission step cannot be claimed from ${step.status}`, "CONFLICT");
@@ -2175,7 +2192,7 @@ export async function missionRun({
   }
   if (
     focusedApplicationId &&
-    !mission.steps.some((step) => focusablePrepareStep(step, focusedApplicationId))
+    !mission.steps.some((step) => focusablePrepareStep(step, focusedApplicationId, mission.steps))
   ) {
     throw makeError(
       `mission has no prepared application handoff for ${focusedApplicationId}`,
@@ -2194,7 +2211,7 @@ export async function missionRun({
   for (const step of mission.steps) {
     const retryablePrepare = retryablePrepareStep(step);
     const retryableFocus = focusedApplicationId
-      ? focusablePrepareStep(step, focusedApplicationId)
+      ? focusablePrepareStep(step, focusedApplicationId, mission.steps)
       : false;
     if (focusedApplicationId && !retryableFocus) continue;
     if (step.status !== "pending" && !retryablePrepare && !retryableFocus) continue;
@@ -2324,7 +2341,10 @@ export async function missionRun({
         idempotencyClassification: claimed.attempt.idempotency.classification,
       });
       heartbeat.stop();
-      const result = operationSummary(execution);
+      const result = {
+        ...operationSummary(execution),
+        ...(step.action === "prepare-submit" ? { applicationId } : {}),
+      };
       if (step.action === "promote") {
         const promotedId = result.id || result.applicationId;
         if (!promotedId)
@@ -2467,7 +2487,7 @@ export async function missionResume({
     : null;
   if (
     focusedApplicationId &&
-    !current.steps.some((step) => focusablePrepareStep(step, focusedApplicationId))
+    !current.steps.some((step) => focusablePrepareStep(step, focusedApplicationId, current.steps))
   ) {
     throw makeError(
       `mission has no prepared application handoff for ${focusedApplicationId}`,
