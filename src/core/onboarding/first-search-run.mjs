@@ -246,32 +246,6 @@ function mergeSourceCatalog(existing = {}, generated = {}) {
   return merged;
 }
 
-// mergeEntries above always keeps the EXISTING stored entry on a key
-// collision (never clobbering a user's other edits to that entry) — which
-// means an `enabled:false` seeded by an earlier generator default would
-// otherwise shadow a freshly generated `enabled:true` forever. Entries
-// generate-search-sources.mjs marks `enabled_reason: "domain-gate"` are
-// machine-set, not a user's own toggle, so this post-pass re-syncs ONLY
-// `enabled` (nothing else on the entry) from the freshly generated copy
-// whenever the merged entry still carries that marker. The source Settings
-// writers in boards-route.mjs and the `careerrat searches` setEnabled owner
-// remove `enabled_reason` on every explicit edit or toggle, transferring
-// ownership to the user so this re-sync stops.
-function resyncDomainGatedEntries(mergedEntries, generatedEntries, keyForEntry) {
-  const generatedByKey = new Map();
-  for (const entry of Array.isArray(generatedEntries) ? generatedEntries : []) {
-    const key = keyForEntry(entry);
-    if (key) generatedByKey.set(key, entry);
-  }
-  return mergedEntries.map((entry) => {
-    if (entry?.enabled_reason !== "domain-gate") return entry;
-    const key = keyForEntry(entry);
-    const generated = key ? generatedByKey.get(key) : null;
-    if (!generated || generated.enabled === entry.enabled) return entry;
-    return { ...entry, enabled: generated.enabled };
-  });
-}
-
 // Before generated sources carried enabled_reason, one release wrote this
 // complete disabled trio. A single unmarked row is ambiguous and stays
 // user-owned. The exact three-row cohort is the provenance signal: remove all
@@ -318,22 +292,162 @@ function hasCompleteLegacyRemoteBoardBundle(existingEntries) {
   );
 }
 
+const GENERATED_SOURCE_REASONS = new Set([
+  "targeting",
+  "domain-gate",
+  "hospitality-domain",
+  "baseline",
+]);
+
 function hasGeneratedBaselineOwnership(searchSources = {}) {
   const entries = asArray(searchSources.searches);
   return (
-    entries.some((entry) => entry?.enabled_reason === "domain-gate") ||
+    Number(searchSources.generator_revision) >= 1 ||
+    entries.some((entry) => GENERATED_SOURCE_REASONS.has(entry?.enabled_reason)) ||
     hasCompleteLegacyRemoteBoardBundle(entries)
   );
 }
 
+function normalizedTargetTitles(searchSources = {}) {
+  return new Set(
+    asArray(searchSources?.title_filter?.positive)
+      .map((title) =>
+        String(title || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+}
+
+function targetTitleSlug(title) {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function isLegacyGeneratedTargetSource(entry, searchSources) {
+  if (entry?.enabled_reason != null) return false;
+  if (Number(searchSources.generator_revision) >= 1) return false;
+  const titles = normalizedTargetTitles(searchSources);
+  if (titles.size === 0) return false;
+  const query = String(entry?.query || "")
+    .trim()
+    .toLowerCase();
+
+  if (entry?.provider === "HiringCafe") {
+    return (
+      entry.source_type === "url-query" &&
+      titles.has(query) &&
+      String(entry.label || "")
+        .trim()
+        .toLowerCase() === query &&
+      entry.searchState?.sortBy === "date" &&
+      !entry.url
+    );
+  }
+  if (entry?.provider === "RemoteVibeCodingJobs") {
+    return titles.has(query) && entry.rssUrl === "https://remotevibecodingjobs.com/feed.xml";
+  }
+  if (entry?.provider === "Wellfound" && entry.source_type === "browser" && !entry.platform) {
+    const path = (() => {
+      try {
+        return new URL(entry.url).pathname.toLowerCase();
+      } catch {
+        return "";
+      }
+    })();
+    return [...titles].some((title) => {
+      const slug = targetTitleSlug(title);
+      return slug && path.split("/").includes(slug);
+    });
+  }
+  return false;
+}
+
 function disableGeneratedBaselineWithoutTargets(searchSources = {}) {
+  if (!hasGeneratedBaselineOwnership(searchSources)) return searchSources;
   let changed = false;
   const searches = asArray(searchSources.searches).map((entry) => {
-    if (entry?.enabled_reason !== "domain-gate" || entry.enabled === false) return entry;
+    const generated =
+      GENERATED_SOURCE_REASONS.has(entry?.enabled_reason) ||
+      isLegacyGeneratedTargetSource(entry, searchSources);
+    if (!generated || entry.enabled === false) return entry;
     changed = true;
     return { ...entry, enabled: false };
   });
-  return changed ? { ...searchSources, searches } : searchSources;
+  const titleFilter = clearGeneratedTitleFilter(
+    searchSources.title_filter,
+    searchSources?.generator_state?.title_filter
+  );
+  if (!changed && titleFilter === searchSources.title_filter) return searchSources;
+  return {
+    ...searchSources,
+    generator_revision: 1,
+    title_filter: titleFilter,
+    searches,
+  };
+}
+
+function withoutGeneratedValues(values, generatedValues) {
+  const generated = new Set(
+    asArray(generatedValues).map((value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+    )
+  );
+  return asArray(values).filter(
+    (value) =>
+      !generated.has(
+        String(value || "")
+          .trim()
+          .toLowerCase()
+      )
+  );
+}
+
+function replaceGeneratedTitleFilter(existingConfig = {}, generatedConfig = {}) {
+  const previousGenerated = existingConfig?.generator_state?.title_filter;
+  if (!previousGenerated) {
+    return mergeTitleFilter(existingConfig.title_filter, generatedConfig.title_filter);
+  }
+  const existing = existingConfig.title_filter || {};
+  const generated = generatedConfig.title_filter || {};
+  const next = { ...existing };
+  for (const key of ["positive", "negative", "below_target"]) {
+    next[key] = compactArrayValues([
+      ...withoutGeneratedValues(existing[key], previousGenerated[key]),
+      ...asArray(generated[key]),
+    ]);
+  }
+  if (generated.seniority_basis) next.seniority_basis = generated.seniority_basis;
+  return next;
+}
+
+function clearGeneratedTitleFilter(titleFilter = {}, generatedTitleFilter = null) {
+  if (!generatedTitleFilter) {
+    if (
+      asArray(titleFilter.positive).length === 0 &&
+      asArray(titleFilter.below_target).length === 0
+    ) {
+      return titleFilter;
+    }
+    return { ...titleFilter, positive: [], below_target: [] };
+  }
+  const next = { ...titleFilter };
+  let changed = false;
+  for (const key of ["positive", "negative", "below_target"]) {
+    const retained = withoutGeneratedValues(titleFilter[key], generatedTitleFilter[key]);
+    if (retained.length !== asArray(titleFilter[key]).length) changed = true;
+    next[key] = retained;
+  }
+  if (titleFilter.seniority_basis === generatedTitleFilter.seniority_basis) {
+    delete next.seniority_basis;
+    changed = true;
+  }
+  return changed ? next : titleFilter;
 }
 
 function reconcileLegacyUnmarkedRemoteBoards(existingEntries) {
@@ -397,20 +511,52 @@ function isLegacyHardcodedAggregatorEntry(entry = {}, generatedEntries = []) {
   return false;
 }
 
-function mergeSearchSources(existing = {}, generated = {}) {
-  const reconciledExistingSearches = reconcileLegacyUnmarkedRemoteBoards(existing.searches).filter(
-    (entry) => !isLegacyHardcodedAggregatorEntry(entry, asArray(generated.searches))
+function reconcileGeneratedSearches(existingConfig = {}, generatedEntries = []) {
+  const generatedByKey = new Map();
+  for (const entry of asArray(generatedEntries)) {
+    const key = sourceEntryKey(entry);
+    if (key) generatedByKey.set(key, entry);
+  }
+  const reconciledLegacy = reconcileLegacyUnmarkedRemoteBoards(existingConfig.searches).filter(
+    (entry) => !isLegacyHardcodedAggregatorEntry(entry, generatedEntries)
   );
+  const retained = [];
+  for (const entry of reconciledLegacy) {
+    const markerOwned = GENERATED_SOURCE_REASONS.has(entry?.enabled_reason);
+    const legacyOwned = isLegacyGeneratedTargetSource(entry, existingConfig);
+    const generated = generatedByKey.get(sourceEntryKey(entry));
+    const retiresWithTarget =
+      ["targeting", "hospitality-domain", "baseline"].includes(entry?.enabled_reason) ||
+      legacyOwned;
+    if (!generated && retiresWithTarget) continue;
+    if (generated && (markerOwned || legacyOwned)) {
+      if (entry.enabled_reason === "domain-gate") {
+        retained.push({ ...entry, enabled: generated.enabled });
+      } else {
+        retained.push({
+          ...entry,
+          ...generated,
+          ...(entry.recency || generated.recency
+            ? { recency: { ...generated.recency, ...entry.recency } }
+            : {}),
+        });
+      }
+      continue;
+    }
+    retained.push(entry);
+  }
+  return mergeEntries(retained, generatedEntries, sourceEntryKey);
+}
+
+function mergeSearchSources(existing = {}, generated = {}) {
   return {
     ...generated,
     ...existing,
-    title_filter: mergeTitleFilter(existing.title_filter, generated.title_filter),
+    generator_revision: generated.generator_revision,
+    generator_state: generated.generator_state,
+    title_filter: replaceGeneratedTitleFilter(existing, generated),
     location_filter: mergeLocationFilter(existing.location_filter, generated.location_filter),
-    searches: resyncDomainGatedEntries(
-      mergeEntries(reconciledExistingSearches, generated.searches, sourceEntryKey),
-      generated.searches,
-      sourceEntryKey
-    ),
+    searches: reconcileGeneratedSearches(existing, generated.searches),
     tracked_companies: mergeEntries(
       existing.tracked_companies,
       generated.tracked_companies,
@@ -898,15 +1044,9 @@ export function healSearchSourceConfig({ repoRoot, env = process.env, config = n
   };
 }
 
-export async function prepareFirstSearchSources({
+export function prepareDeterministicSearchSources({
   repoRoot,
   env = process.env,
-  fetchImpl = fetch,
-  // Optional AI-call override, threaded down to the LAYER 3 rescue's
-  // fillManualDomainHints call — same override shape company-seeds.mjs's own
-  // callers (and its tests) already use. Production callers omit it and
-  // runBoundedAI falls back to the default callAI.
-  call,
   config = null,
 } = {}) {
   const pathCtx = { repoRoot, env };
@@ -930,7 +1070,13 @@ export async function prepareFirstSearchSources({
       name: "sourced-scan",
       data: {
         ...sourcedScan,
-        title_filter: mergeTitleFilter(sourcedScan.title_filter, next.title_filter),
+        title_filter: replaceGeneratedTitleFilter(
+          {
+            title_filter: sourcedScan.title_filter,
+            generator_state: current.data?.generator_state,
+          },
+          generated
+        ),
         location_filter: mergeLocationFilter(sourcedScan.location_filter, next.location_filter),
       },
     }).data;
@@ -943,7 +1089,55 @@ export async function prepareFirstSearchSources({
         data: eligible,
       });
     }
+    if (hasGeneratedBaselineOwnership(current.data)) {
+      const titleFilter = clearGeneratedTitleFilter(
+        sourcedScan.title_filter,
+        current.data?.generator_state?.title_filter
+      );
+      if (titleFilter !== sourcedScan.title_filter) {
+        sourcedScan = sourceConfigPut({
+          ...pathCtx,
+          name: "sourced-scan",
+          data: { ...sourcedScan, title_filter: titleFilter },
+        }).data;
+      }
+    }
   }
+
+  return {
+    ok: true,
+    sources,
+    searchSources: sources.data,
+    sourcedScan,
+    deterministicSources: countDeterministicSources({
+      searchSources: sources.data,
+      sourcedScan,
+    }),
+    readiness: candidateConfig.setup?.readiness || {},
+    missing: candidateConfig.setup?.missing || {},
+  };
+}
+
+export async function prepareFirstSearchSources({
+  repoRoot,
+  env = process.env,
+  fetchImpl = fetch,
+  // Optional AI-call override, threaded down to the LAYER 3 rescue's
+  // fillManualDomainHints call — same override shape company-seeds.mjs's own
+  // callers (and its tests) already use. Production callers omit it and
+  // runBoundedAI falls back to the default callAI.
+  call,
+  config = null,
+} = {}) {
+  const pathCtx = { repoRoot, env };
+  const candidateConfig = config || candidateConfigGet(pathCtx);
+  const prepared = prepareDeterministicSearchSources({
+    repoRoot,
+    env,
+    config: candidateConfig,
+  });
+  const { sources } = prepared;
+  let { sourcedScan } = prepared;
 
   const companyBoardResolution = await backfillCompanyBoards({
     repoRoot,
@@ -963,14 +1157,10 @@ export async function prepareFirstSearchSources({
   });
 
   return {
-    ok: true,
-    sources,
-    searchSources: sources.data,
+    ...prepared,
     sourcedScan,
     deterministicSources,
     companyBoardResolution,
-    readiness: candidateConfig.setup?.readiness || {},
-    missing: candidateConfig.setup?.missing || {},
   };
 }
 

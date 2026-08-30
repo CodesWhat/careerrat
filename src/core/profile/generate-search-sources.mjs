@@ -456,6 +456,7 @@ export function buildSearchSources(targeting, profile) {
           label: title,
           query: title,
           enabled: true,
+          enabled_reason: "targeting",
           recency: { ...recency },
           searchState: {
             sortBy: "date",
@@ -492,6 +493,7 @@ export function buildSearchSources(targeting, profile) {
         query: aggregatorQuery,
         rssUrl: "https://remotevibecodingjobs.com/feed.xml",
         enabled: true,
+        enabled_reason: "targeting",
       });
 
       // Tech-only aggregator: Wellfound (startup/tech-leaning marketplace).
@@ -507,6 +509,7 @@ export function buildSearchSources(targeting, profile) {
           location: !loc.remote && loc.home ? loc.home : undefined,
         }),
         enabled: true,
+        enabled_reason: "targeting",
       });
     }
   }
@@ -648,6 +651,8 @@ export function buildSearchSources(targeting, profile) {
   };
 
   return {
+    generator_revision: 1,
+    generator_state: { title_filter },
     title_filter,
     location_filter,
     searches,

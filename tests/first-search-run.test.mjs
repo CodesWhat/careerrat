@@ -859,6 +859,104 @@ test("search preparation disables generator-owned broad boards after target titl
   );
 });
 
+test("search preparation retires the complete generated baseline after target titles are cleared", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "software engineering" });
+
+  const generated = await prepareFirstSearchSources({ repoRoot, env: {} });
+  assert.ok(generated.deterministicSources.attempted > 0);
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { role_buckets: [] },
+  });
+
+  const retired = await prepareFirstSearchSources({ repoRoot, env: {} });
+  const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+
+  assert.equal(retired.deterministicSources.attempted, 0);
+  assert.deepEqual(stored.title_filter.positive, []);
+  assert.equal(
+    stored.searches.every((source) => source.enabled === false),
+    true,
+    "every generator-owned query, RSS, browser, and board source must retire with its target"
+  );
+});
+
+test("clearing targets preserves a generated source transferred to user ownership", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "software engineering" });
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  const generated = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const selected = generated.searches.find((source) => source.provider === "HiringCafe");
+  const { enabled_reason: _generatedReason, ...userOwned } = selected;
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      ...generated,
+      searches: generated.searches.map((source) => (source === selected ? userOwned : source)),
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { role_buckets: [] },
+  });
+
+  const retired = await prepareFirstSearchSources({ repoRoot, env: {} });
+  const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const preserved = stored.searches.find((source) => source.provider === "HiringCafe");
+
+  assert.equal(retired.deterministicSources.attempted, 1);
+  assert.equal(preserved.enabled, true);
+  assert.equal(Object.hasOwn(preserved, "enabled_reason"), false);
+  assert.equal(
+    stored.searches
+      .filter((source) => source.enabled_reason != null)
+      .every((source) => source.enabled === false),
+    true
+  );
+});
+
+test("changing targets replaces stale generator-owned queries and filters", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "software engineering" });
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Platform", priority: "primary", titles: ["Staff Platform Engineer"] },
+      ],
+    },
+  });
+
+  const refreshed = await prepareFirstSearchSources({ repoRoot, env: {} });
+  const targetingSources = refreshed.searchSources.searches.filter(
+    (source) => source.enabled_reason === "targeting"
+  );
+
+  assert.deepEqual(refreshed.searchSources.title_filter.positive, ["Staff Platform Engineer"]);
+  assert.deepEqual(refreshed.sourcedScan.title_filter.positive, ["Staff Platform Engineer"]);
+  assert.equal(
+    targetingSources.some((source) => JSON.stringify(source).toLowerCase().includes("ai engineer")),
+    false
+  );
+  assert.equal(
+    targetingSources.every(
+      (source) =>
+        JSON.stringify(source).toLowerCase().includes("staff platform engineer") ||
+        String(source.url || "").includes("staff-platform-engineer")
+    ),
+    true
+  );
+});
+
 test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
