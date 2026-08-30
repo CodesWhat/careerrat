@@ -366,6 +366,23 @@ function isLegacyGeneratedTargetSource(entry, searchSources) {
   return false;
 }
 
+function generatedTitleFilterState(searchSources = {}) {
+  const stored = searchSources?.generator_state?.title_filter;
+  if (stored) return stored;
+  if (!hasGeneratedBaselineOwnership(searchSources)) return null;
+
+  const positive = compactArrayValues(
+    asArray(searchSources.searches)
+      .filter((entry) => isLegacyGeneratedTargetSource(entry, searchSources))
+      .map((entry) => entry.query)
+  );
+  const titleFilter = searchSources.title_filter || {};
+  return {
+    ...titleFilter,
+    positive: positive.length > 0 ? positive : asArray(titleFilter.positive),
+  };
+}
+
 function disableGeneratedBaselineWithoutTargets(searchSources = {}) {
   if (!hasGeneratedBaselineOwnership(searchSources)) return searchSources;
   let changed = false;
@@ -379,7 +396,7 @@ function disableGeneratedBaselineWithoutTargets(searchSources = {}) {
   });
   const titleFilter = clearGeneratedTitleFilter(
     searchSources.title_filter,
-    searchSources?.generator_state?.title_filter
+    generatedTitleFilterState(searchSources)
   );
   if (!changed && titleFilter === searchSources.title_filter) return searchSources;
   return {
@@ -409,7 +426,7 @@ function withoutGeneratedValues(values, generatedValues) {
 }
 
 function replaceGeneratedTitleFilter(existingConfig = {}, generatedConfig = {}) {
-  const previousGenerated = existingConfig?.generator_state?.title_filter;
+  const previousGenerated = generatedTitleFilterState(existingConfig);
   if (!previousGenerated) {
     return mergeTitleFilter(existingConfig.title_filter, generatedConfig.title_filter);
   }
@@ -1057,6 +1074,7 @@ export function prepareDeterministicSearchSources({
     ...pathCtx,
     name: "sourced-scan",
   }).data;
+  const previousGeneratedTitleFilter = generatedTitleFilterState(current.data);
   if (hasConfiguredTargetTitles(candidateConfig)) {
     const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
     const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
@@ -1073,7 +1091,13 @@ export function prepareDeterministicSearchSources({
         title_filter: replaceGeneratedTitleFilter(
           {
             title_filter: sourcedScan.title_filter,
-            generator_state: current.data?.generator_state,
+            ...(previousGeneratedTitleFilter
+              ? {
+                  generator_state: {
+                    title_filter: previousGeneratedTitleFilter,
+                  },
+                }
+              : {}),
           },
           generated
         ),
@@ -1092,7 +1116,7 @@ export function prepareDeterministicSearchSources({
     if (hasGeneratedBaselineOwnership(current.data)) {
       const titleFilter = clearGeneratedTitleFilter(
         sourcedScan.title_filter,
-        current.data?.generator_state?.title_filter
+        previousGeneratedTitleFilter
       );
       if (titleFilter !== sourcedScan.title_filter) {
         sourcedScan = sourceConfigPut({

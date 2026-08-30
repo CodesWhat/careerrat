@@ -18,6 +18,7 @@ import {
 import {
   countDeterministicSources,
   latestSourcingRunForUi,
+  prepareDeterministicSearchSources,
   prepareFirstSearchSources,
   runFirstSearchInBackground,
   startFirstSearchRun,
@@ -955,6 +956,43 @@ test("changing targets replaces stale generator-owned queries and filters", asyn
     ),
     true
   );
+});
+
+test("changing targets migrates a pre-marker generated title filter", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "software engineering" });
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  const current = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const { generator_revision: _revision, generator_state: _state, ...legacy } = current;
+  legacy.searches = legacy.searches.map((source) => {
+    if (source.enabled_reason !== "targeting") return source;
+    const { enabled_reason: _reason, ...unmarked } = source;
+    return unmarked;
+  });
+  sourceConfigPut({ repoRoot, name: "search-sources", data: legacy });
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      ...sourceConfigGet({ repoRoot, name: "sourced-scan" }).data,
+      title_filter: legacy.title_filter,
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        { name: "Platform", priority: "primary", titles: ["Staff Platform Engineer"] },
+      ],
+    },
+  });
+
+  const refreshed = prepareDeterministicSearchSources({ repoRoot, env: {} });
+
+  assert.deepEqual(refreshed.searchSources.title_filter.positive, ["Staff Platform Engineer"]);
+  assert.deepEqual(refreshed.sourcedScan.title_filter.positive, ["Staff Platform Engineer"]);
 });
 
 test("first-search completion is reused only while targeting and source inputs are unchanged", async () => {
