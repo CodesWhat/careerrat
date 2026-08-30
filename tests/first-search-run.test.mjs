@@ -246,6 +246,55 @@ test("prepareFirstSearchSources replaces stale country blocks when remote scope 
   assert.deepEqual(worldwide.sourcedScan.location_filter.block, []);
 });
 
+test("prepareFirstSearchSources preserves manual location rules while replacing generated ones", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+  const searchSources = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const sourcedScan = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data;
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      ...searchSources,
+      location_filter: {
+        ...searchSources.location_filter,
+        allow: [...searchSources.location_filter.allow, "Hudson Valley"],
+        block: [...searchSources.location_filter.block, "Overnight travel"],
+      },
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      ...sourcedScan,
+      location_filter: {
+        ...sourcedScan.location_filter,
+        allow: [...sourcedScan.location_filter.allow, "Hudson Valley"],
+        block: [...sourcedScan.location_filter.block, "Overnight travel"],
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { location: { remote: true, remote_scope: "worldwide" } },
+  });
+
+  const worldwide = await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  for (const locationFilter of [
+    worldwide.searchSources.location_filter,
+    worldwide.sourcedScan.location_filter,
+  ]) {
+    assert.ok(locationFilter.allow.includes("Hudson Valley"));
+    assert.ok(locationFilter.block.includes("Overnight travel"));
+    assert.equal(locationFilter.block.includes("India"), false);
+  }
+});
+
 test("prepareFirstSearchSources replaces stale corporate seniority filters with the saved ladder", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot, { domain: "healthcare" });

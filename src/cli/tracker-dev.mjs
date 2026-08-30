@@ -39,6 +39,7 @@ import { ingestAppleMail } from "../core/automation/apple-mail-ingest.mjs";
 import {
   classifyBrowserAuthState,
   createBrowserSessionManager,
+  searchSourceBrowserSessionOptions,
   unsafePublicBrowserReason,
 } from "../core/automation/browser-session.mjs";
 import {
@@ -197,14 +198,6 @@ export async function openAuthenticatedSource(
       summary: `${site} couldn't open in CareerRat. Close and reopen CareerRat, then try again.`,
     };
   }
-}
-
-export function searchSourceBrowserSessionOptions(source = {}) {
-  return {
-    platform: source.platform || source.provider || "search",
-    provider: "playwright",
-    headless: source.auth !== true,
-  };
 }
 
 // ---------------------------------------------------------------------------

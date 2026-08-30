@@ -2142,6 +2142,30 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.saveCandidateFile).not.toHaveBeenCalled();
   });
 
+  it("refuses to persist both compensation floors without a positive base floor", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+
+    await expect(
+      view.props.onSaveKnowledgeSection(
+        { id: "quickFacts" },
+        {
+          name: "Jordan Rivera",
+          home: "New York, NY",
+          compensationFloorType: "both",
+          minimumBase: "",
+          minimumAnnualEarnings: "$85,000",
+          remoteScope: "home-country",
+        }
+      )
+    ).rejects.toThrow("Minimum guaranteed base must be a positive amount.");
+
+    view = rerender(module, api);
+    expect(view.props.error).toBe("Minimum guaranteed base must be a positive amount.");
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+  });
+
   it("round-trips named target lanes and evidence claim ids through whole-section edits", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();

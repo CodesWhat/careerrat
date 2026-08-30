@@ -471,7 +471,8 @@ const CONFIRM_BLOCK_GUIDANCE =
   "limit at profile.location.max_commute_days_per_week as an integer from 0 through 7. " +
   "targeting.role_buckets is an array where every item contains non-empty name, " +
   "priority, and titles fields. An optional role-bucket seniority_ladder is an array of " +
-  "{rank, titles} levels where every rank is an explicit integer; never infer seniority from " +
+  "at least two {rank, titles} levels where every rank is an explicit integer and every titles array " +
+  "contains one or more non-empty strings; never infer seniority from " +
   "array order or bucket priority. Keep " +
   "these blocks fully closed and out of prose otherwise; never describe the JSON to the user in words. " +
   "A candidate's notice period belongs at profile.authorization.notice_period, never " +

@@ -170,7 +170,7 @@ test("configured Playwright sessions forward an explicit browser channel", async
   assert.equal(launchOptions.channel, "chrome");
   assert.equal(
     launchOptions.profileDir,
-    "/tmp/careerrat-browser-channel-test/profiles/gmail",
+    "/tmp/careerrat-browser-channel-test/profiles/gmail-headless",
     "an explicit session.profile_root must remain authoritative"
   );
   await session.close();
@@ -235,7 +235,7 @@ test("configured Playwright sessions forward an explicit public-target resolver"
 });
 
 test("configured Playwright sessions isolate default profiles by CareerRat home", async () => {
-  async function launchedProfileDir(dataRoot) {
+  async function launchedProfileDir(dataRoot, headless) {
     let launchOptions = null;
     const page = {
       async goto() {},
@@ -247,7 +247,7 @@ test("configured Playwright sessions isolate default profiles by CareerRat home"
       repoRoot: "/repo",
       env: { CAREERRAT_HOME: dataRoot },
       platform: "linkedin",
-      headless: true,
+      headless,
       loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
       launchImpl: async (options) => {
         launchOptions = options;
@@ -263,10 +263,13 @@ test("configured Playwright sessions isolate default profiles by CareerRat home"
     return launchOptions.profileDir;
   }
 
-  const first = await launchedProfileDir("/private/candidate-a");
-  const second = await launchedProfileDir("/private/candidate-b");
+  const first = await launchedProfileDir("/private/candidate-a", true);
+  const second = await launchedProfileDir("/private/candidate-b", true);
+  const visible = await launchedProfileDir("/private/candidate-a", false);
 
-  assert.equal(first, join("/private/candidate-a", "board-profiles", "linkedin"));
-  assert.equal(second, join("/private/candidate-b", "board-profiles", "linkedin"));
+  assert.equal(first, join("/private/candidate-a", "board-profiles", "linkedin-headless"));
+  assert.equal(second, join("/private/candidate-b", "board-profiles", "linkedin-headless"));
   assert.notEqual(first, second);
+  assert.equal(visible, join("/private/candidate-a", "board-profiles", "linkedin"));
+  assert.notEqual(first, visible);
 });

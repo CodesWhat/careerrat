@@ -179,15 +179,27 @@ function mergeTitleFilter(existing = {}, generated = {}) {
   return merged;
 }
 
-function mergeLocationFilter(existing = {}, generated = {}) {
-  const merged = mergeFilterObject(existing, generated);
-  for (const key of ["allow", "block"]) {
-    if (Array.isArray(generated?.[key])) merged[key] = compactArrayValues(generated[key]);
+function generatedLocationFilterState(searchSources = {}) {
+  return searchSources?.generator_state?.location_filter || null;
+}
+
+function replaceGeneratedLocationFilter(existingConfig = {}, generatedConfig = {}) {
+  const existing = existingConfig.location_filter || {};
+  const generated = generatedConfig.location_filter || {};
+  const previousGenerated = generatedLocationFilterState(existingConfig);
+  if (!previousGenerated) return mergeFilterObject(existing, generated);
+
+  const next = mergeFilterObject(existing, generated);
+  for (const key of ["always_allow", "allow", "block"]) {
+    next[key] = compactArrayValues([
+      ...withoutGeneratedValues(existing[key], previousGenerated[key]),
+      ...asArray(generated[key]),
+    ]);
   }
-  if (generated?.needs_location !== undefined) {
-    merged.needs_location = generated.needs_location;
+  if (generated.needs_location !== undefined) {
+    next.needs_location = generated.needs_location;
   }
-  return merged;
+  return next;
 }
 
 function sourceEntryKey(entry = {}) {
@@ -571,7 +583,7 @@ function mergeSearchSources(existing = {}, generated = {}) {
     generator_revision: generated.generator_revision,
     generator_state: generated.generator_state,
     title_filter: replaceGeneratedTitleFilter(existing, generated),
-    location_filter: mergeLocationFilter(existing.location_filter, generated.location_filter),
+    location_filter: replaceGeneratedLocationFilter(existing, generated),
     searches: reconcileGeneratedSearches(existing, generated.searches),
     tracked_companies: mergeEntries(
       existing.tracked_companies,
@@ -1074,6 +1086,7 @@ export function prepareDeterministicSearchSources({
     name: "sourced-scan",
   }).data;
   const previousGeneratedTitleFilter = generatedTitleFilterState(current.data);
+  const previousGeneratedLocationFilter = generatedLocationFilterState(current.data);
   if (hasConfiguredTargetTitles(candidateConfig)) {
     const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
     const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
@@ -1100,7 +1113,22 @@ export function prepareDeterministicSearchSources({
           },
           generated
         ),
-        location_filter: mergeLocationFilter(sourcedScan.location_filter, next.location_filter),
+        location_filter: mergeFilterObject(
+          next.location_filter,
+          replaceGeneratedLocationFilter(
+            {
+              location_filter: sourcedScan.location_filter,
+              ...(previousGeneratedLocationFilter
+                ? {
+                    generator_state: {
+                      location_filter: previousGeneratedLocationFilter,
+                    },
+                  }
+                : {}),
+            },
+            generated
+          )
+        ),
       },
     }).data;
   } else if (current.stored === true) {

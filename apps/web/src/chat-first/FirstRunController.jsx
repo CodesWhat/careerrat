@@ -1187,6 +1187,9 @@ export function FirstRunController({
             "Add wage details or enter a minimum annual cash earnings amount."
           );
         }
+        if (compensationMode === "both" && minimumBase <= 0) {
+          throw new UserFacingError("Minimum guaranteed base must be a positive amount.");
+        }
         const compensation =
           compensationMode === "annual-cash"
             ? { minimum_base: null, minimum_annual_earnings: minimumAnnualEarnings }
