@@ -87,14 +87,15 @@ test("release docs require one verified macOS install and update bundle before p
   ]);
 });
 
-test("release docs disclose the exact 0.16.8 native-runtime evidence exception", async () => {
+test("release docs keep paid native-runtime certification off the release blocker", async () => {
   const release = await readText("docs/RELEASE.md");
 
   assertIncludes(release, "docs/RELEASE.md", [
-    /0\.16\.8[\s\S]{0,240}Claude CLI weekly\s+subscription quota/i,
-    /claude\/engineering[\s\S]{0,120}claude\/hospitality/i,
-    /fresh[\s\S]{0,120}Codex[\s\S]{0,120}source revision/i,
-    /version-scoped exception[\s\S]{0,160}future release/i,
+    /separate product-certification[\s\S]{0,120}not a tag or packaged-release prerequisite/i,
+    /Open-web result mix[\s\S]{0,120}external state/i,
+    /native runtime adapters[\s\S]{0,240}scheduled\s+certification cadence/i,
+    /source-checkout command fails[\s\S]{0,80}missing or stale/i,
+    /protected unit, integration, browser, and build\s+matrix/i,
   ]);
 });
 

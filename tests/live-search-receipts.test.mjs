@@ -125,133 +125,20 @@ test("four reviewed native AI search receipts pass the release gate", async () =
   assert.equal(result.sourceRevision, SOURCE_REVISION);
 });
 
-test("0.16.8 reports an exact Claude-only exception while requiring fresh reviewed Codex evidence", async () => {
-  const receiptModule = await loadReceiptModule();
-  const receipts = await Promise.all([
-    acceptedReceipt("codex", "hospitality", SOURCE_REVISION),
-    acceptedReceipt("codex", "engineering", SOURCE_REVISION),
-  ]);
-  const changedPaths = [
-    ".github/release-evidence/live-search/codex-engineering.json",
-    ".github/release-evidence/live-search/codex-hospitality.json",
-  ];
-  const releaseException = {
-    schemaVersion: 1,
-    releaseVersion: "0.16.8",
-    waivedCombinations: ["claude/engineering", "claude/hospitality"],
-    reasonCode: "claude-cli-weekly-quota-exhausted",
-    decisionDate: "2026-08-30",
-    authorizedBy: "release-owner",
-  };
-
-  const result = receiptModule.verifyLiveSearchReceiptSet({
-    receipts,
-    currentRevision: CURRENT_REVISION,
-    releaseVersion: "0.16.8",
-    releaseException,
-    changedPathsSinceSource: changedPaths,
-  });
-
-  assert.equal(result.sourceRevision, SOURCE_REVISION);
-  assert.equal(result.evidenceStatus, "version-scoped-exception");
-  assert.deepEqual(result.combinations, ["codex/engineering", "codex/hospitality"]);
-  assert.deepEqual(result.waivedCombinations, ["claude/engineering", "claude/hospitality"]);
-  assert.equal(result.reasonCode, "claude-cli-weekly-quota-exhausted");
-});
-
-test("the 0.16.8 Claude exception fails closed outside its exact release, shape, and receipt-only drift", async () => {
-  const receiptModule = await loadReceiptModule();
-  const receipts = await Promise.all([
-    acceptedReceipt("codex", "hospitality", SOURCE_REVISION),
-    acceptedReceipt("codex", "engineering", SOURCE_REVISION),
-  ]);
-  const claudeReceipt = await acceptedReceipt("claude", "engineering", SOURCE_REVISION);
-  const changedPaths = [
-    ".github/release-evidence/live-search/codex-engineering.json",
-    ".github/release-evidence/live-search/codex-hospitality.json",
-  ];
-  const releaseException = {
-    schemaVersion: 1,
-    releaseVersion: "0.16.8",
-    waivedCombinations: ["claude/engineering", "claude/hospitality"],
-    reasonCode: "claude-cli-weekly-quota-exhausted",
-    decisionDate: "2026-08-30",
-    authorizedBy: "release-owner",
-  };
-  const verify = (overrides = {}) =>
-    receiptModule.verifyLiveSearchReceiptSet({
-      receipts,
-      currentRevision: CURRENT_REVISION,
-      releaseVersion: "0.16.8",
-      releaseException,
-      changedPathsSinceSource: changedPaths,
-      ...overrides,
-    });
-
-  for (const releaseVersion of ["0.16.9", "0.17.0", "0.16.8-rc.1", ""]) {
-    assert.throws(
-      () => verify({ releaseVersion }),
-      /requires all four native AI search receipts|release version is required/i
-    );
-  }
-  assert.throws(
-    () =>
-      verify({
-        changedPathsSinceSource: [...changedPaths, "src/unreviewed-change.mjs"],
-      }),
-    /stale.*src\/unreviewed-change\.mjs/i
-  );
-  assert.throws(
-    () =>
-      verify({
-        changedPathsSinceSource: [
-          ...changedPaths,
-          ".github/release-evidence/live-search/v0.16.8-exception.json",
-        ],
-      }),
-    /stale.*v0\.16\.8-exception\.json/i
-  );
-  assert.throws(
-    () =>
-      verify({
-        releaseException: { ...releaseException, waivedCombinations: ["claude/engineering"] },
-      }),
-    /exact claude combinations/i
-  );
-  assert.throws(
-    () => verify({ releaseException: { ...releaseException, extra: true } }),
-    /exact fields/i
-  );
-  assert.throws(
-    () =>
-      verify({
-        receipts: [...receipts, claudeReceipt],
-      }),
-    /unexpected native AI search receipt claude\/engineering/i
-  );
-});
-
 test("the release evidence directory rejects renamed receipts and subdirectories", async () => {
   const receiptModule = await loadReceiptModule();
   const receipts = await Promise.all([
+    acceptedReceipt("claude", "engineering", SOURCE_REVISION),
+    acceptedReceipt("claude", "hospitality", SOURCE_REVISION),
     acceptedReceipt("codex", "engineering", SOURCE_REVISION),
     acceptedReceipt("codex", "hospitality", SOURCE_REVISION),
   ]);
-  const files = new Map([
-    ["codex-engineering.json", JSON.stringify(receipts[0])],
-    ["codex-hospitality.json", JSON.stringify(receipts[1])],
-    [
-      "v0.16.8-exception.json",
-      JSON.stringify({
-        schemaVersion: 1,
-        releaseVersion: "0.16.8",
-        waivedCombinations: ["claude/engineering", "claude/hospitality"],
-        reasonCode: "claude-cli-weekly-quota-exhausted",
-        decisionDate: "2026-08-30",
-        authorizedBy: "release-owner",
-      }),
-    ],
-  ]);
+  const files = new Map(
+    receipts.map((receipt) => [
+      `${receipt.runtimeId}-${receipt.fixtureId}.json`,
+      JSON.stringify(receipt),
+    ])
+  );
   const execFileSyncImpl = (_command, args) => {
     if (args[0] === "status") return "";
     if (args[0] === "rev-parse") return `${SOURCE_REVISION}\n`;
@@ -261,7 +148,6 @@ test("the release evidence directory rejects renamed receipts and subdirectories
   const verify = (entries) =>
     receiptModule.verifyLiveSearchReceiptDirectory({
       repoRoot: "/repo",
-      releaseVersion: "0.16.8",
       execFileSyncImpl,
       readFileSyncImpl,
       readdirSyncImpl: () => entries,

@@ -247,7 +247,7 @@ jobs:
           fi
       - name: Install dependencies
         run: npm ci
-      - name: Verify current native AI search receipts
+      - name: Verify deterministic release metadata
         run: npm run release:pretag
       - name: Build and stage the app without signing credentials
         run: npm run app:build && npm --workspace apps/desktop run stage
