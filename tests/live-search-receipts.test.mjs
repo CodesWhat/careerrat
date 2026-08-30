@@ -59,10 +59,10 @@ function runtimeVerification(runtimeId) {
 
 const SUCCEEDED_LANES = { deterministic: "succeeded", aiWeb: "succeeded" };
 
-async function acceptedReceipt(runtimeId, fixtureId) {
+async function acceptedReceipt(runtimeId, fixtureId, sourceRevision = SOURCE_REVISION) {
   const receiptModule = await loadReceiptModule();
   const receipt = receiptModule.buildLiveSearchReceipt({
-    sourceRevision: SOURCE_REVISION,
+    sourceRevision,
     runtimeId,
     fixtureId,
     providerFallback: false,
@@ -123,6 +123,48 @@ test("four reviewed native AI search receipts pass the release gate", async () =
     "codex/hospitality",
   ]);
   assert.equal(result.sourceRevision, SOURCE_REVISION);
+});
+
+test("the release evidence directory rejects renamed receipts and subdirectories", async () => {
+  const receiptModule = await loadReceiptModule();
+  const receipts = await Promise.all([
+    acceptedReceipt("claude", "engineering", SOURCE_REVISION),
+    acceptedReceipt("claude", "hospitality", SOURCE_REVISION),
+    acceptedReceipt("codex", "engineering", SOURCE_REVISION),
+    acceptedReceipt("codex", "hospitality", SOURCE_REVISION),
+  ]);
+  const files = new Map(
+    receipts.map((receipt) => [
+      `${receipt.runtimeId}-${receipt.fixtureId}.json`,
+      JSON.stringify(receipt),
+    ])
+  );
+  const execFileSyncImpl = (_command, args) => {
+    if (args[0] === "status") return "";
+    if (args[0] === "rev-parse") return `${SOURCE_REVISION}\n`;
+    throw new Error(`Unexpected git command: ${args.join(" ")}`);
+  };
+  const readFileSyncImpl = (path) => files.get(String(path).split("/").at(-1));
+  const verify = (entries) =>
+    receiptModule.verifyLiveSearchReceiptDirectory({
+      repoRoot: "/repo",
+      execFileSyncImpl,
+      readFileSyncImpl,
+      readdirSyncImpl: () => entries,
+    });
+
+  assert.throws(
+    () => verify([...files.keys(), "claude-engineering.json.disabled"]),
+    /must contain exactly/i
+  );
+  assert.throws(
+    () =>
+      verify([
+        ...[...files.keys()].map((name) => ({ name, isFile: () => true })),
+        { name: "archive", isFile: () => false },
+      ]),
+    /regular files/i
+  );
 });
 
 test("native AI search receipt gate rejects missing, stale, fallback, weak, or unreviewed evidence", async () => {

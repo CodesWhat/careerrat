@@ -87,6 +87,18 @@ test("release docs require one verified macOS install and update bundle before p
   ]);
 });
 
+test("release docs keep paid native-runtime certification off the release blocker", async () => {
+  const release = await readText("docs/RELEASE.md");
+
+  assertIncludes(release, "docs/RELEASE.md", [
+    /separate product-certification[\s\S]{0,120}not a tag or packaged-release prerequisite/i,
+    /Open-web result mix[\s\S]{0,120}external state/i,
+    /native runtime adapters[\s\S]{0,240}scheduled\s+certification cadence/i,
+    /source-checkout command fails[\s\S]{0,80}missing or stale/i,
+    /protected unit, integration, browser, and build\s+matrix/i,
+  ]);
+});
+
 test("architecture docs describe the exact packaged runtime boundaries", async () => {
   const architecture = await readText("docs/ARCHITECTURE.md");
 

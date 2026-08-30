@@ -53,9 +53,10 @@ test("all deterministic product builds are declared as protected contexts", asyn
   assert.doesNotMatch(workflow, /Non-gating for now/i);
 });
 
-test("pre-tag and packaged release verification both require the four native AI search receipts", async () => {
-  const [rootPackage, desktopVerify, desktopWorkflow] = await Promise.all([
+test("paid native AI certification is separate from deterministic release gates", async () => {
+  const [rootPackage, rootVerify, desktopVerify, desktopWorkflow] = await Promise.all([
     source("package.json"),
+    source("scripts/verify-live-search-receipts.mjs"),
     source("apps/desktop/scripts/verify-release.mjs"),
     source(".github/workflows/desktop-release.yml"),
   ]);
@@ -64,14 +65,24 @@ test("pre-tag and packaged release verification both require the four native AI 
     desktopWorkflow.indexOf("  build-notarize-upload:"),
     desktopWorkflow.indexOf("  build-windows-upload:")
   );
-  const checkoutBeforeReceiptGate = macReleaseJob.slice(
-    macReleaseJob.indexOf("actions/checkout@"),
-    macReleaseJob.indexOf("Verify current native AI search receipts")
+  assert.equal(
+    pkg.scripts?.["release:pretag"],
+    "node --test tests/release-consistency.test.mjs tests/release-gating-ci.test.mjs tests/release-workflow-chain.test.mjs"
   );
-
-  assert.equal(pkg.scripts?.["release:pretag"], "node scripts/verify-live-search-receipts.mjs");
-  assert.match(desktopVerify, /verifyLiveSearchReceiptDirectory/);
-  assert.match(desktopWorkflow, /Verify current native AI search receipts/);
+  assert.equal(
+    pkg.scripts?.["qa:native-search:evidence"],
+    "node scripts/verify-live-search-receipts.mjs"
+  );
+  assert.doesNotMatch(rootVerify, /releaseVersion|EXCEPTION/);
+  assert.match(rootVerify, /PASS native AI search certification evidence/);
+  assert.doesNotMatch(desktopVerify, /live-search|Live-search|verifyLiveSearchReceiptDirectory/);
+  assert.doesNotMatch(desktopWorkflow, /Verify current native AI search receipts/);
+  assert.match(desktopWorkflow, /Verify deterministic release metadata/);
   assert.match(desktopWorkflow, /npm run release:pretag/);
-  assert.match(checkoutBeforeReceiptGate, /fetch-depth:\s*0/);
+  assert.doesNotMatch(
+    desktopWorkflow,
+    /LIVE_SEARCH_(?:SKIP|BYPASS|EXCEPTION)|skip-live-search|bypass-live-search/i
+  );
+  assert.doesNotMatch(macReleaseJob, /ANTHROPIC|OPENAI|CLAUDE|CODEX/);
+  assert.match(macReleaseJob, /fetch-depth:\s*0/);
 });
