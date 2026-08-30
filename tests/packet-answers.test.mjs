@@ -815,7 +815,7 @@ test("CR5 closeout: salary disclosures use the saved ISO currency and preserve U
       },
     });
 
-    assert.match(result.answers[0].answer, new RegExp(expected.replace("$", "\\$")), currency);
+    assert.ok(result.answers[0].answer.includes(expected), currency);
     if (currency !== "USD") assert.doesNotMatch(result.answers[0].answer, /\$/);
   }
 });
