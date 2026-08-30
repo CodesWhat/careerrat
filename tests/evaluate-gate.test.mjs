@@ -219,8 +219,12 @@ describe("evaluateCompensation", () => {
     });
     assert.equal(result.verdict, "clear");
     assert.equal(result.basis, "annual-earnings");
-    assert.deepEqual(result.baseBand, { min: 23_608, max: 23_608 });
-    assert.deepEqual(result.annualEarningsBand, { min: 95_000, max: 120_000 });
+    assert.deepEqual(result.baseBand, { min: 23_608, max: 23_608, currency: "USD" });
+    assert.deepEqual(result.annualEarningsBand, {
+      min: 95_000,
+      max: 120_000,
+      currency: "USD",
+    });
   });
 
   it("keeps tipped compensation unverified when only low base pay is posted", () => {
@@ -230,6 +234,96 @@ describe("evaluateCompensation", () => {
       profile: { compensation: { minimum_annual_earnings: 85_000 } },
       bucket: TARGETING.role_buckets[0],
     });
+    assert.equal(result.verdict, "review");
+    assert.equal(result.basis, "annual-earnings");
+    assert.match(result.reason, /annual earnings are unverified/i);
+  });
+
+  it("estimates an unposted annual-earnings band from annual cash comparables", () => {
+    const result = evaluateCompensation({
+      body: "Competitive compensation offered.",
+      frontmatter: { role: "Bar Manager", location: "Remote", mode: "remote" },
+      profile: { compensation: { minimum_annual_earnings: 85_000 } },
+      targeting: {
+        role_families: [{ name: "Hospitality Management", patterns: ["bar manager"] }],
+      },
+      tracker: {
+        applications: [
+          {
+            company: "One",
+            role: "Bar Manager",
+            loc: "Remote",
+            mode: "remote",
+            tc: "$70,000 - $80,000",
+            compBasis: "annual-earnings",
+          },
+          {
+            company: "Two",
+            role: "Bar Manager",
+            loc: "Remote",
+            mode: "remote",
+            tc: "$75,000 - $85,000",
+            compBasis: "annual-earnings",
+          },
+          {
+            company: "Three",
+            role: "Bar Manager",
+            loc: "Remote",
+            mode: "remote",
+            comp: { tc: "$80,000 - $90,000", basis: "annual-earnings" },
+          },
+        ],
+      },
+    });
+
+    assert.equal(result.verdict, "estimated-below-floor");
+    assert.equal(result.basis, "annual-earnings");
+    assert.equal(result.floor, 85_000);
+    assert.equal(result.estimate.compensationBasis, "annual-earnings");
+    assert.match(result.reason, /annual earnings/i);
+    assert.match(result.reason, /confirm live before deciding/i);
+    assert.doesNotMatch(result.reason, /non-cash benefits/i);
+  });
+
+  it("keeps annual earnings unverified when tracker comparables contain only base pay", () => {
+    const result = evaluateCompensation({
+      body: "Competitive compensation offered.",
+      frontmatter: { role: "Bar Manager" },
+      profile: { compensation: { minimum_annual_earnings: 85_000 } },
+      targeting: {
+        role_families: [{ name: "Hospitality Management", patterns: ["bar manager"] }],
+      },
+      tracker: {
+        applications: [
+          { company: "One", role: "Bar Manager", base: "$70,000 - $80,000" },
+          { company: "Two", role: "Bar Manager", base: "$80,000 - $90,000" },
+        ],
+      },
+    });
+
+    assert.equal(result.verdict, "review");
+    assert.equal(result.basis, "annual-earnings");
+    assert.match(result.reason, /annual earnings are unverified/i);
+  });
+
+  it("does not let base comparables satisfy a separate annual-earnings floor", () => {
+    const result = evaluateCompensation({
+      body: "Competitive compensation offered.",
+      frontmatter: { role: "Bar Manager" },
+      profile: {
+        compensation: { minimum_base: 25_000, minimum_annual_earnings: 85_000 },
+      },
+      targeting: {
+        role_families: [{ name: "Hospitality Management", patterns: ["bar manager"] }],
+      },
+      tracker: {
+        applications: [
+          { company: "One", role: "Bar Manager", base: "$70,000 - $80,000" },
+          { company: "Two", role: "Bar Manager", base: "$80,000 - $90,000" },
+        ],
+      },
+    });
+
     assert.equal(result.verdict, "review");
     assert.equal(result.basis, "annual-earnings");
     assert.match(result.reason, /annual earnings are unverified/i);
@@ -258,7 +352,11 @@ describe("evaluateCompensation", () => {
     assert.equal(result.verdict, "review");
     assert.equal(result.basis, "base");
     assert.equal(result.baseBand, null);
-    assert.deepEqual(result.annualEarningsBand, { min: 95_000, max: 120_000 });
+    assert.deepEqual(result.annualEarningsBand, {
+      min: 95_000,
+      max: 120_000,
+      currency: "USD",
+    });
   });
 
   it("reads persisted annual cash evidence from frontmatter.tc", () => {
@@ -270,7 +368,11 @@ describe("evaluateCompensation", () => {
 
     assert.equal(result.verdict, "clear");
     assert.equal(result.basis, "annual-earnings");
-    assert.deepEqual(result.annualEarningsBand, { min: 95_000, max: 120_000 });
+    assert.deepEqual(result.annualEarningsBand, {
+      min: 95_000,
+      max: 120_000,
+      currency: "USD",
+    });
   });
 
   it("lets a hard base miss win over unknown annual earnings", () => {
@@ -299,6 +401,22 @@ describe("evaluateCompensation", () => {
     assert.equal(result.basis, "annual-earnings");
   });
 
+  it("CR5 closeout: an annual-earnings label cannot relabel a later explicit base salary", () => {
+    const result = evaluateCompensation({
+      body: "Estimated annual earnings including tips: base pay is $11.35 per hour. Base salary: $60,000-$75,000 per year.",
+      frontmatter: {},
+      profile: {
+        compensation: { minimum_base: 50_000, minimum_annual_earnings: 85_000 },
+      },
+    });
+
+    assert.deepEqual(result.baseBand, { min: 60_000, max: 75_000, currency: "USD" });
+    assert.equal(result.annualEarningsBand, null);
+    assert.equal(result.verdict, "review");
+    assert.equal(result.basis, "annual-earnings");
+    assert.match(result.reason, /annual earnings are unverified/i);
+  });
+
   it("returns 'below-floor' when comp band max < minimum_base", () => {
     const result = evaluateCompensation({
       body: "Salary: $100,000 - $140,000 per year.",
@@ -307,6 +425,181 @@ describe("evaluateCompensation", () => {
       bucket: TARGETING.role_buckets[0],
     });
     assert.equal(result.verdict, "below-floor");
+  });
+
+  it("CR5: semantic store operating hours cannot clear a USD 60,000 floor", () => {
+    for (const body of [
+      "Store operates 80 hours per week. Pay: $20/hour.",
+      "Pay: $20/hour. Store operates 80 hours per week.",
+      "Store operates for 80 hours per week. Pay: $20/hour.",
+      "Pay: $20/hour. Store operates for 80 hours per week.",
+      "Store operates a total of 80 hours per week. Pay: $20/hour.",
+      "Pay: $20/hour. Store operates a total of 80 hours per week.",
+      "Store is operating 80 hours per week. Pay: $20/hour.",
+      "Pay: $20/hour. Store is operating 80 hours per week.",
+      "Store currently operates 80 hours per week. Pay: $20/hour.",
+      "Pay: $20/hour. Store currently operates 80 hours per week.",
+    ]) {
+      const result = evaluateCompensation({
+        body,
+        frontmatter: {},
+        profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+      });
+
+      assert.equal(result.verdict, "below-floor", body);
+      assert.deepEqual(result.baseBand, { min: 41_600, max: 41_600, currency: "USD" }, body);
+    }
+  });
+
+  it("CR5: business-entity weekly hours cannot clear a USD 60,000 floor", () => {
+    for (const body of [
+      "Restaurant stays open 80 hours per week. Pay: $20/hour.",
+      "Pay: $20/hour. Restaurant stays open 80 hours per week.",
+      "Store runs 80 hours per week. Pay: $20/hour.",
+      "Pay: $20/hour. Store runs 80 hours per week.",
+      "Facility open 80 hours per week. Pay: $20/hour.",
+      "Pay: $20/hour. Facility open 80 hours per week.",
+    ]) {
+      const result = evaluateCompensation({
+        body,
+        frontmatter: {},
+        profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+      });
+
+      assert.equal(result.verdict, "below-floor", body);
+      assert.deepEqual(result.baseBand, { min: 41_600, max: 41_600, currency: "USD" }, body);
+    }
+  });
+
+  it("CR5 ownership: incidental employee nouns cannot claim business hours", () => {
+    for (const clause of [
+      "Restaurant is open 80 hours/week to give employees flexible shifts",
+      "Restaurant operates 80 hours/week for staff coverage",
+    ]) {
+      for (const body of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+        const result = evaluateCompensation({
+          body,
+          frontmatter: {},
+          profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+        });
+
+        assert.equal(result.verdict, "below-floor", body);
+        assert.deepEqual(result.baseBand, { min: 41_600, max: 41_600, currency: "USD" }, body);
+      }
+    }
+  });
+
+  it("CR5 ownership: a business regular schedule cannot clear a USD 60,000 floor", () => {
+    for (const body of [
+      "Store's regular schedule is 80 hours/week. Pay: $20/hour.",
+      "Pay: $20/hour. Store's regular schedule is 80 hours/week.",
+    ]) {
+      const result = evaluateCompensation({
+        body,
+        frontmatter: {},
+        profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+      });
+
+      assert.equal(result.verdict, "below-floor", body);
+      assert.deepEqual(result.baseBand, { min: 41_600, max: 41_600, currency: "USD" }, body);
+    }
+  });
+
+  it("CR5 next-sentence: regular hours determine the below-floor annual base", () => {
+    const result = evaluateCompensation({
+      body: "Pay: $20/hour. The position includes 10 overtime hours and 30 regular hours per week.",
+      frontmatter: {},
+      profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+    });
+
+    assert.equal(result.verdict, "below-floor");
+    assert.deepEqual(result.baseBand, { min: 31_200, max: 31_200, currency: "USD" });
+  });
+
+  it("CR5 whole-clause: business hours never clear a USD 60,000 floor", () => {
+    const businessHoursClauses = [
+      "Open 80 hours/week at this restaurant",
+      "We are open 80 hours/week",
+      "Hours of operation: 80 hours/week",
+      "Restaurant operating schedule: 80 hours/week",
+      "Store work hours: 80 hours/week",
+      "80 hours/week are the restaurant opening hours",
+    ];
+
+    for (const clause of businessHoursClauses) {
+      for (const body of [`${clause}. Pay: $20/hour.`, `Pay: $20/hour. ${clause}.`]) {
+        const result = evaluateCompensation({
+          body,
+          frontmatter: {},
+          profile: { compensation: { currency: "USD", minimum_base: 60_000 } },
+        });
+
+        assert.equal(result.verdict, "below-floor", body);
+        assert.deepEqual(result.baseBand, { min: 41_600, max: 41_600, currency: "USD" }, body);
+      }
+    }
+  });
+
+  it("CR5: reviews an explicit foreign-currency band instead of comparing it to the profile floor", () => {
+    const foreign = evaluateCompensation({
+      body: "Base salary: GBP 60,000 - 75,000 per year.",
+      frontmatter: { comp: "" },
+      profile: { compensation: { currency: "USD", minimum_base: 85_000 } },
+    });
+    const legacy = evaluateCompensation({
+      body: "Base salary: 60k - 75k per year.",
+      frontmatter: { comp: "" },
+      profile: { compensation: { currency: "USD", minimum_base: 85_000 } },
+    });
+
+    assert.equal(foreign.verdict, "review");
+    assert.equal(foreign.basis, "base");
+    assert.deepEqual(foreign.baseBand, { min: 60_000, max: 75_000, currency: "GBP" });
+    assert.match(foreign.reason, /currency/i);
+    assert.equal(legacy.verdict, "below-floor");
+  });
+
+  it("CR5 closeout: unsupported adjacent ISO currencies and conflicting markers stay explicit unknowns", () => {
+    for (const currency of ["CHF", "AUD", "PLN"]) {
+      const result = evaluateCompensation({
+        body: `Base salary: 60k-75k ${currency} per year.`,
+        frontmatter: {},
+        profile: { compensation: { currency: "USD", minimum_base: 85_000 } },
+      });
+
+      assert.equal(result.verdict, "review", currency);
+      assert.deepEqual(result.baseBand, { min: 60_000, max: 75_000, currency }, currency);
+      assert.match(result.reason, /currency/i, currency);
+    }
+
+    const mismatch = evaluateCompensation({
+      body: "Base salary: USD 60k-75k CHF per year.",
+      frontmatter: {},
+      profile: { compensation: { currency: "USD", minimum_base: 85_000 } },
+    });
+    assert.equal(mismatch.verdict, "review");
+    assert.equal(mismatch.baseBand, null);
+    assert.match(mismatch.reason, /currency/i);
+
+    const legacy = evaluateCompensation({
+      body: "Base salary: 60k-75k per year.",
+      frontmatter: {},
+      profile: { compensation: { currency: "USD", minimum_base: 85_000 } },
+    });
+    assert.equal(legacy.verdict, "below-floor");
+  });
+
+  it("CR5: formats same-currency hard-gate reasons without a false dollar marker", () => {
+    const result = evaluateCompensation({
+      body: "Base salary: GBP 60,000 - 75,000 per year.",
+      frontmatter: { comp: "" },
+      profile: { compensation: { currency: "GBP", minimum_base: 85_000 } },
+    });
+
+    assert.equal(result.verdict, "below-floor");
+    assert.match(result.reason, /GBP 75,000/);
+    assert.match(result.reason, /GBP 85,000/);
+    assert.doesNotMatch(result.reason, /\$/);
   });
 
   it("returns 'review' when no comp found in JD or frontmatter", () => {
@@ -667,6 +960,50 @@ describe("renderGateBlock", () => {
     const block = renderGateBlock(result);
     assert.ok(block.includes("CUT"), `Expected CUT in: ${block}`);
     assert.ok(block.includes("ACTION: cut"), `Expected ACTION: cut in: ${block}`);
+  });
+
+  it("CR5 closeout: gate blocks format non-USD anchors without a dollar sign and preserve USD", () => {
+    function blockFor(currency) {
+      const job = {
+        frontmatter: {
+          company: "GoodCo",
+          role: "Solutions Engineer",
+          comp: `${currency} 90,000 - 110,000`,
+        },
+        body: `Agentic AI and LLM API deployment. Base salary: ${currency} 90,000 - 110,000 per year.`,
+      };
+      const profile = {
+        ...PROFILE,
+        compensation: { currency, minimum_base: 85_000, target_base: 100_000 },
+      };
+      return renderGateBlock(evaluateGate({ job, targeting: TARGETING, profile }));
+    }
+
+    const nonUsd = blockFor("GBP");
+    assert.match(nonUsd, /GBP 100,000/);
+    assert.doesNotMatch(nonUsd, /\$/);
+
+    const usd = blockFor("USD");
+    assert.match(usd, /\$100,000/);
+  });
+
+  it("CR5 closeout: an unposted-comp anchor keeps the profile currency", () => {
+    const result = evaluateGate({
+      job: {
+        frontmatter: { company: "GoodCo", role: "Solutions Engineer" },
+        body: "Agentic AI and LLM API deployment with no published compensation.",
+      },
+      targeting: TARGETING,
+      profile: {
+        ...PROFILE,
+        compensation: { currency: "gbp", minimum_base: 85_000, target_base: 100_000 },
+      },
+    });
+    const block = renderGateBlock(result);
+
+    assert.equal(result.anchor?.currency, "GBP");
+    assert.match(block, /COMP ANCHOR: GBP 100,000/);
+    assert.doesNotMatch(block, /COMP ANCHOR: \$/);
   });
 });
 

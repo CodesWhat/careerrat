@@ -2005,6 +2005,31 @@ describe("FirstRunController chat event reconciliation", () => {
       { id: "quickFacts" },
       {
         name: "Jordan Rivera",
+        home: "New York, NY",
+        compensationFloorType: "annual-cash",
+        minimumBase: "",
+        annualCashWorksheet: {
+          hourlyRate: "15",
+          hoursPerWeek: "35",
+          cashPerShift: "300",
+          shiftsPerWeek: "4",
+          weeksPerYear: "52",
+          annualOverride: "",
+        },
+        remoteScope: "home-country",
+      }
+    );
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      expect.objectContaining({
+        compensation: { minimum_base: null, minimum_annual_earnings: 89700 },
+      })
+    );
+
+    await view.props.onSaveKnowledgeSection(
+      { id: "quickFacts" },
+      {
+        name: "Jordan Rivera",
         email: "jordan@example.test",
         phone: "+1 212 555 0199",
         home: "New York, NY",
@@ -2062,6 +2087,58 @@ describe("FirstRunController chat event reconciliation", () => {
     view = rerender(module, api);
     expect(view.props.error).toBe("Add at least one target role.");
     expect(api.parseResumeText).not.toHaveBeenCalled();
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+  });
+
+  it("refuses to persist an onboarding worksheet that derives a zero annual floor", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+
+    await expect(
+      view.props.onSaveKnowledgeSection(
+        { id: "quickFacts" },
+        {
+          name: "Jordan Rivera",
+          home: "New York, NY",
+          compensationFloorType: "annual-cash",
+          annualCashWorksheet: {
+            hourlyRate: "0",
+            hoursPerWeek: "35",
+            weeksPerYear: "52",
+          },
+          remoteScope: "home-country",
+        }
+      )
+    ).rejects.toThrow("Minimum annual cash earnings must be a positive amount.");
+
+    view = rerender(module, api);
+    expect(view.props.error).toBe("Minimum annual cash earnings must be a positive amount.");
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+  });
+
+  it("refuses to persist an onboarding override that canonicalizes to zero", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    let view = await bootController(module, api);
+
+    await expect(
+      view.props.onSaveKnowledgeSection(
+        { id: "quickFacts" },
+        {
+          name: "Jordan Rivera",
+          home: "New York, NY",
+          compensationFloorType: "annual-cash",
+          annualCashWorksheet: {
+            annualOverride: "0.4",
+          },
+          remoteScope: "home-country",
+        }
+      )
+    ).rejects.toThrow("Minimum annual cash earnings must be a positive amount.");
+
+    view = rerender(module, api);
+    expect(view.props.error).toBe("Minimum annual cash earnings must be a positive amount.");
     expect(api.saveCandidateFile).not.toHaveBeenCalled();
   });
 

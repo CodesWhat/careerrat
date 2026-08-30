@@ -58,6 +58,8 @@ const profile = {
   },
 };
 
+const BROAD_REMOTE_BOARD_PROVIDERS = ["remoteok", "remotive", "workingnomads"];
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -80,6 +82,33 @@ test("buildSearchSources: title_filter.negative contains conventional noise filt
   const result = buildSearchSources(targeting, profile);
   assert.ok(result.title_filter.negative.includes("Intern"), "missing Intern in negative");
   assert.ok(result.title_filter.negative.includes("Junior"), "missing Junior in negative");
+});
+
+test("buildSearchSources: explicit ladders replace corporate noise with titles below the target", () => {
+  const result = buildSearchSources(
+    {
+      role_buckets: [
+        {
+          name: "Nursing",
+          priority: "primary",
+          titles: ["Registered Nurse", "RN"],
+          seniority_ladder: [
+            { rank: 30, titles: ["Nurse Practitioner", "NP"] },
+            { rank: 10, titles: ["Certified Nursing Assistant", "CNA"] },
+            { rank: 20, titles: ["Registered Nurse", "RN"] },
+          ],
+        },
+      ],
+      keep_signals: [],
+      cut_signals: ["Travel Nurse"],
+    },
+    profile
+  );
+
+  assert.deepEqual(result.title_filter.below_target, ["Certified Nursing Assistant", "CNA"]);
+  assert.deepEqual(result.title_filter.negative, ["Travel Nurse"]);
+  assert.equal(result.title_filter.negative.includes("Intern"), false);
+  assert.equal(result.title_filter.below_target.includes("Nurse Practitioner"), false);
 });
 
 test("buildSearchSources: location_filter.allow includes Remote, home, and relocation cities", () => {
@@ -138,7 +167,7 @@ test("buildSearchSources: no home, relocation, or remote posture needs a locatio
   assert.equal(buildLocationFilter(result.location_filter)("Remote"), false);
 });
 
-test("buildSearchSources: every searches item has provider, label, and a query/url/rssUrl; non-board items are enabled by default", () => {
+test("buildSearchSources: every searches item has provider, label, and a query/url/rssUrl", () => {
   const result = buildSearchSources(targeting, profile);
   for (const item of result.searches) {
     assert.ok(
@@ -149,9 +178,6 @@ test("buildSearchSources: every searches item has provider, label, and a query/u
       typeof item.label === "string" && item.label.length > 0,
       `missing label: ${JSON.stringify(item)}`
     );
-    // Board-wide aggregator entries (RemoteOK/Remotive/Working Nomads) are seeded
-    // present-but-disabled for non-tech domains/titles so any domain can flip them
-    // on later; every other generated entry stays enabled regardless.
     if (item.source_type !== "board") {
       assert.equal(item.enabled, true, `enabled must be true: ${JSON.stringify(item)}`);
     }
@@ -224,10 +250,10 @@ test("buildSearchSources: empty-domain title inference requires a strict tech-ti
     );
     assert.equal(
       result.searches
-        .filter((source) => source.enabled_reason === "domain-gate")
-        .every((source) => source.enabled === false),
+        .filter((source) => BROAD_REMOTE_BOARD_PROVIDERS.includes(source.provider))
+        .every((source) => source.enabled === true),
       true,
-      `${label} must keep every tech-gated board disabled`
+      `${label} must default every broad remote board on`
     );
     assert.equal(
       result.searches.some((source) => source.provider === "arbeitnow" && source.enabled === true),
@@ -328,7 +354,35 @@ test("buildSearchSources: seeds broad public fallback plus tech boards for tech"
   );
 });
 
-test("buildSearchSources: keeps tech boards disabled but runs a broad public fallback for healthcare", () => {
+test("buildSearchSources: defaults broad remote boards on for every candidate domain", () => {
+  const cases = [
+    { domain: "hospitality and food service", title: "Bartender" },
+    { domain: "nursing and healthcare", title: "Registered Nurse" },
+    { domain: "construction trades", title: "Electrician" },
+    { domain: "software engineering", title: "Platform Engineer" },
+  ];
+
+  for (const { domain, title } of cases) {
+    const result = buildSearchSources(
+      { role_buckets: [{ name: "Primary", priority: "primary", titles: [title] }] },
+      {
+        ...profile,
+        candidate: { ...profile.candidate, domain },
+      }
+    );
+    const broadRemoteBoards = result.searches.filter((source) =>
+      BROAD_REMOTE_BOARD_PROVIDERS.includes(source.provider)
+    );
+
+    assert.deepEqual(
+      broadRemoteBoards.map(({ provider, enabled }) => ({ provider, enabled })),
+      BROAD_REMOTE_BOARD_PROVIDERS.map((provider) => ({ provider, enabled: true })),
+      domain
+    );
+  }
+});
+
+test("buildSearchSources: keeps broad remote boards enabled and runs a public fallback for healthcare", () => {
   const result = buildSearchSources(targeting, {
     ...profile,
     candidate: { ...profile.candidate, domain: "nursing and healthcare" },
@@ -338,9 +392,9 @@ test("buildSearchSources: keeps tech boards disabled but runs a broad public fal
   assert.deepEqual(
     boards.map(({ provider, source_type, enabled }) => ({ provider, source_type, enabled })),
     [
-      { provider: "remoteok", source_type: "board", enabled: false },
-      { provider: "remotive", source_type: "board", enabled: false },
-      { provider: "workingnomads", source_type: "board", enabled: false },
+      { provider: "remoteok", source_type: "board", enabled: true },
+      { provider: "remotive", source_type: "board", enabled: true },
+      { provider: "workingnomads", source_type: "board", enabled: true },
       { provider: "arbeitnow", source_type: "board", enabled: true },
     ]
   );

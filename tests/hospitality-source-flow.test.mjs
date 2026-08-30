@@ -64,6 +64,16 @@ test("hospitality source generation scans relevant local roles without making Ar
     hospitalitySources.every((source) => source.enabled),
     true
   );
+  assert.deepEqual(
+    config.searches
+      .filter((source) => ["remoteok", "remotive", "workingnomads"].includes(source.provider))
+      .map(({ provider, enabled }) => ({ provider, enabled })),
+    [
+      { provider: "remoteok", enabled: true },
+      { provider: "remotive", enabled: true },
+      { provider: "workingnomads", enabled: true },
+    ]
+  );
   assert.equal(
     hospitalitySources.find((source) => source.provider === "ihirehospitality").url,
     "https://www.ihirehospitality.com/t-hospitality-s-new-york-jobs.html"
@@ -239,7 +249,16 @@ test("hospitality source generation normalizes common New York location forms", 
     assert.equal(oyster.url, "https://oysterlink.com/jobs/bartender/new-york-ny/", home);
     assert.deepEqual(
       [...new Set(providers)].sort(),
-      ["culinaryagents", "hcareers", "hospitalityonline", "ihirehospitality", "oysterlink"],
+      [
+        "culinaryagents",
+        "hcareers",
+        "hospitalityonline",
+        "ihirehospitality",
+        "oysterlink",
+        "remoteok",
+        "remotive",
+        "workingnomads",
+      ],
       home
     );
   }

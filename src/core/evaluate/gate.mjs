@@ -1,11 +1,19 @@
 // evaluate/gate.mjs — M4 evaluate-job gate logic for CareerRat.
 // Zero runtime dependencies. Node v24 ESM.
 
+import {
+  formatCurrencyAmount,
+  formatCurrencyThousands,
+  normalizeCurrencyCode,
+} from "../currency-format.mjs";
 import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
 import { assessCompensationFloors } from "../profile/compensation.mjs";
 import { shouldReviewMediumBodyReadFits } from "../profile/modes.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
-import { extractCompensationBands } from "../scoring/sourced-scanner.mjs";
+import {
+  extractCompensationBands,
+  hasConflictingCompensationCurrency,
+} from "../scoring/sourced-scanner.mjs";
 import { classifyEstimateAgainstFloor, estimateCompFromComparables } from "./comp-comparables.mjs";
 import { assessLegitimacy } from "./legitimacy.mjs";
 
@@ -251,6 +259,7 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     annualEarningsBand: bands.annualEarnings,
     minimumBase: hasBaseFloor ? floor : null,
     minimumAnnualEarnings: hasAnnualEarningsFloor ? minimumAnnualEarnings : null,
+    floorCurrency: profile?.compensation?.currency,
   });
   const bandFields = {
     baseBand: bands.base,
@@ -259,11 +268,12 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
 
   if (standing.base === "below") {
     const reloWhere = label && label !== "relocation" ? ` to ${label}` : "";
+    const currency = bands.base?.currency || profile?.compensation?.currency;
     return {
       verdict: "below-floor",
       reason: relo
-        ? `relocation${reloWhere} requires $${floor.toLocaleString()} base; band tops at $${bands.base.max.toLocaleString()}`
-        : `band max $${bands.base.max.toLocaleString()} < floor $${floor.toLocaleString()}`,
+        ? `relocation${reloWhere} requires ${formatCurrencyAmount(floor, currency)} base; band tops at ${formatCurrencyAmount(bands.base.max, currency)}`
+        : `band max ${formatCurrencyAmount(bands.base.max, currency)} < floor ${formatCurrencyAmount(floor, currency)}`,
       band: bands.base,
       basis: "base",
       relo,
@@ -273,9 +283,10 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
   }
 
   if (hasAnnualEarningsFloor && standing.annualEarnings === "below") {
+    const currency = bands.annualEarnings?.currency || profile?.compensation?.currency;
     return {
       verdict: "below-floor",
-      reason: `annual earnings top out at $${bands.annualEarnings.max.toLocaleString()}, below your $${minimumAnnualEarnings.toLocaleString()} floor`,
+      reason: `annual earnings top out at ${formatCurrencyAmount(bands.annualEarnings.max, currency)}, below your ${formatCurrencyAmount(minimumAnnualEarnings, currency)} floor`,
       band: bands.annualEarnings,
       basis: "annual-earnings",
       floor: minimumAnnualEarnings,
@@ -285,9 +296,10 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
   }
 
   if (standing.base === "overlap") {
+    const currency = bands.base?.currency || profile?.compensation?.currency;
     return {
       verdict: "review",
-      reason: `base range overlaps your $${floor.toLocaleString()} floor`,
+      reason: `base range overlaps your ${formatCurrencyAmount(floor, currency)} floor`,
       band: bands.base,
       basis: "base",
       floor,
@@ -297,12 +309,25 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
   }
 
   if (hasAnnualEarningsFloor && standing.annualEarnings === "overlap") {
+    const currency = bands.annualEarnings?.currency || profile?.compensation?.currency;
     return {
       verdict: "review",
-      reason: `annual earnings range overlaps your $${minimumAnnualEarnings.toLocaleString()} floor`,
+      reason: `annual earnings range overlaps your ${formatCurrencyAmount(minimumAnnualEarnings, currency)} floor`,
       band: bands.annualEarnings || bands.base,
       basis: "annual-earnings",
       floor: minimumAnnualEarnings,
+      ...bandFields,
+    };
+  }
+
+  if (hasBaseFloor && standing.base === "unknown" && bands.base) {
+    return {
+      verdict: "review",
+      reason: `posted ${bands.base.currency || "unknown"} currency cannot be compared to your ${profile?.compensation?.currency || "configured"} floor`,
+      band: bands.base,
+      basis: "base",
+      floor,
+      relo,
       ...bandFields,
     };
   }
@@ -319,6 +344,85 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     };
   }
 
+  // No comp posted: instead of just handing the question back, estimate the
+  // likely band from comparable roles already in the tracker (same role family
+  // + same area, rejected ones included). An estimate is advisory only — it
+  // pushes to REVIEW and never hard-cuts, since it's a guess, not a posted band.
+  if (!bands.base && !bands.annualEarnings && !(hasBaseFloor && hasAnnualEarningsFloor)) {
+    if (hasConflictingCompensationCurrency(compSource)) {
+      return {
+        verdict: "review",
+        reason: "conflicting posted currency markers cannot be compared to your configured floor",
+        band: null,
+        basis: "base",
+        floor,
+        relo,
+        ...bandFields,
+      };
+    }
+    const estimateBasis = !hasBaseFloor && hasAnnualEarningsFloor ? "annual-earnings" : "base";
+    const estimateFloor =
+      estimateBasis === "annual-earnings" ? minimumAnnualEarnings : hasBaseFloor ? floor : null;
+    const estimate = estimateCompFromComparables({
+      role: frontmatter?.role,
+      loc: frontmatter?.location,
+      mode: frontmatter?.mode,
+      tracker,
+      targeting,
+      compFloors: {
+        ...(profile?.compensation?.comp_floors || {}),
+        currency: profile?.compensation?.currency,
+      },
+      compensationBasis: estimateBasis,
+    });
+
+    if (!estimate) {
+      if (estimateBasis === "base") {
+        return {
+          verdict: "review",
+          reason: "no comp in JD",
+          band: null,
+        };
+      }
+    } else {
+      const estimateStanding = classifyEstimateAgainstFloor(estimate, estimateFloor);
+      const range = `${formatCurrencyThousands(estimate.lowK, estimate.currency)}–${formatCurrencyThousands(estimate.highK, estimate.currency)} (mid ${formatCurrencyThousands(estimate.midpointK, estimate.currency)})`;
+      const floorText =
+        estimateFloor != null && Number.isFinite(estimateFloor)
+          ? formatCurrencyThousands(estimateFloor / 1000, estimate.currency)
+          : "";
+      const floorBasis = estimateBasis === "annual-earnings" ? " annual earnings" : "";
+
+      if (estimateStanding === "below" || estimateStanding === "thin") {
+        const advisory =
+          estimateBasis === "annual-earnings"
+            ? "confirm live before deciding"
+            : "likely pass unless strong non-cash benefits";
+        return {
+          verdict: "estimated-below-floor",
+          reason: `no comp posted; estimated ${range} from ${estimate.basis}${floorText ? `, under your ${floorText}${floorBasis} floor` : ""}, ${advisory}`,
+          band: null,
+          estimate,
+          confirmNeeded: true,
+          floor: estimateFloor ?? undefined,
+          basis: estimateBasis,
+          ...bandFields,
+        };
+      }
+
+      return {
+        verdict: "estimated",
+        reason: `no comp posted; estimated ${range} from ${estimate.basis}${estimateStanding === "clear" && floorText ? `, clears your ${floorText}${floorBasis} floor` : ""} (confirm live)`,
+        band: null,
+        estimate,
+        confirmNeeded: true,
+        floor: estimateFloor ?? undefined,
+        basis: estimateBasis,
+        ...bandFields,
+      };
+    }
+  }
+
   if (hasAnnualEarningsFloor && standing.annualEarnings === "unknown") {
     return {
       verdict: "review",
@@ -331,64 +435,12 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
     };
   }
 
-  // No comp posted: instead of just handing the question back, estimate the
-  // likely band from comparable roles already in the tracker (same role family
-  // + same area, rejected ones included). An estimate is advisory only — it
-  // pushes to REVIEW and never hard-cuts, since it's a guess, not a posted band.
-  if (!bands.base && !bands.annualEarnings) {
-    const estimate = estimateCompFromComparables({
-      role: frontmatter?.role,
-      loc: frontmatter?.location,
-      mode: frontmatter?.mode,
-      tracker,
-      targeting,
-      compFloors: profile?.compensation?.comp_floors,
-    });
-
-    if (!estimate) {
-      return {
-        verdict: "review",
-        reason: "no comp in JD",
-        band: null,
-      };
-    }
-
-    const standing = classifyEstimateAgainstFloor(estimate, hasBaseFloor ? floor : null);
-    const range = `$${estimate.lowK}K–$${estimate.highK}K (mid $${estimate.midpointK}K)`;
-    const floorText =
-      floor != null && Number.isFinite(floor) ? `$${Math.round(floor / 1000)}K` : "";
-
-    if (standing === "below" || standing === "thin") {
-      return {
-        verdict: "estimated-below-floor",
-        reason: `no comp posted; estimated ${range} from ${estimate.basis}${floorText ? `, under your ${floorText} floor` : ""}, likely pass unless strong non-cash benefits`,
-        band: null,
-        estimate,
-        confirmNeeded: true,
-        floor: floor ?? undefined,
-        basis: "base",
-        ...bandFields,
-      };
-    }
-
-    return {
-      verdict: "estimated",
-      reason: `no comp posted; estimated ${range} from ${estimate.basis}${standing === "clear" && floorText ? `, clears your ${floorText} floor` : ""} (confirm live)`,
-      band: null,
-      estimate,
-      confirmNeeded: true,
-      floor: floor ?? undefined,
-      basis: "base",
-      ...bandFields,
-    };
-  }
-
   // If no floor configured, treat as clear.
   if (!hasBaseFloor && !hasAnnualEarningsFloor) {
     const band = bands.base || bands.annualEarnings;
     return {
       verdict: "clear",
-      reason: `band $${band.min.toLocaleString()}–$${band.max.toLocaleString()} (no floor configured)`,
+      reason: `band ${formatCurrencyAmount(band.min, band.currency)}–${formatCurrencyAmount(band.max, band.currency)} (no floor configured)`,
       band,
       basis: bands.base ? "base" : "annual-earnings",
       relo: false,
@@ -400,12 +452,13 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
   const relevantFloor = hasAnnualEarningsFloor ? minimumAnnualEarnings : floor;
   const relevantBasis = hasAnnualEarningsFloor ? "annual-earnings" : "base";
   const reloWhere = label && label !== "relocation" ? ` to ${label}` : "";
+  const currency = band?.currency || profile?.compensation?.currency;
 
   return {
     verdict: "clear",
     reason: relo
-      ? `band $${band.min.toLocaleString()}–$${band.max.toLocaleString()} clears relocation${reloWhere} floor $${relevantFloor.toLocaleString()}`
-      : `band $${band.min.toLocaleString()}–$${band.max.toLocaleString()} clears floor $${relevantFloor.toLocaleString()}`,
+      ? `band ${formatCurrencyAmount(band.min, currency)}–${formatCurrencyAmount(band.max, currency)} clears relocation${reloWhere} floor ${formatCurrencyAmount(relevantFloor, currency)}`
+      : `band ${formatCurrencyAmount(band.min, currency)}–${formatCurrencyAmount(band.max, currency)} clears floor ${formatCurrencyAmount(relevantFloor, currency)}`,
     band,
     basis: relevantBasis,
     relo: false,
@@ -420,13 +473,18 @@ export function evaluateCompensation({ body, frontmatter, profile, bucket, track
  * OE roles. NEVER current_base or minimum_base. Returns null when no target is
  * configured (the skill then asks the user / runs research-comp).
  *
- * @returns {{ value: number, rationale: string } | null}
+ * @returns {{ value: number, currency: string, rationale: string } | null}
  */
 function computeCompAnchor({ profile, bucket, comp }) {
   const c = profile?.compensation ? profile.compensation : {};
+  const currency = normalizeCurrencyCode(c.currency);
   if (bucket && bucket.priority === "oe") {
     if (c.oe_max_base != null)
-      return { value: Number(c.oe_max_base), rationale: "top of your OE range (oe_max_base)" };
+      return {
+        value: Number(c.oe_max_base),
+        currency,
+        rationale: "top of your OE range (oe_max_base)",
+      };
     return null;
   }
   if (c.target_base != null) {
@@ -434,7 +492,7 @@ function computeCompAnchor({ profile, bucket, comp }) {
       comp && comp.verdict === "below-floor"
         ? "your target base: JD band is below your floor, so anchor up or pass"
         : "your target base";
-    return { value: Number(c.target_base), rationale };
+    return { value: Number(c.target_base), currency, rationale };
   }
   return null;
 }
@@ -822,15 +880,23 @@ export function renderGateBlock(result) {
     `FIT: ${fit.tier} ${fit.score} - ${fit.why} | caveats: ${fit.caveats} | priority: ${fit.priority}`,
     `COMP: ${comp.verdict} - ${comp.reason}`,
   ];
-  if (comp && comp.estimate) {
+  if (comp?.estimate) {
     const e = comp.estimate;
     lines.push(
-      `COMP ESTIMATE: $${e.lowK}K–$${e.highK}K (mid $${e.midpointK}K) - ${e.basis}; confidence ${e.confidence} (confirm live before anchoring)`
+      `COMP ESTIMATE: ${formatCurrencyThousands(e.lowK, e.currency)}–${formatCurrencyThousands(e.highK, e.currency)} (mid ${formatCurrencyThousands(e.midpointK, e.currency)}) - ${e.basis}; confidence ${e.confidence} (confirm live before anchoring)`
     );
   }
   if (anchor && anchor.value != null) {
+    const anchorCurrency =
+      anchor.currency ||
+      comp?.band?.currency ||
+      comp?.baseBand?.currency ||
+      comp?.annualEarningsBand?.currency ||
+      comp?.estimate?.currency;
     const figure =
-      typeof anchor.value === "number" ? `$${anchor.value.toLocaleString()}` : String(anchor.value);
+      typeof anchor.value === "number"
+        ? formatCurrencyAmount(anchor.value, anchorCurrency)
+        : String(anchor.value);
     lines.push(`COMP ANCHOR: ${figure} - ${anchor.rationale}`);
   }
   if (legitimacy && legitimacy.verdict === "suspect") {

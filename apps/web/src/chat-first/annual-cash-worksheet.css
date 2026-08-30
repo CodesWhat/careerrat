@@ -1,0 +1,71 @@
+.cf-annual-cash {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border: 1.5px solid var(--line-cool, var(--line-warm-2));
+  border-radius: 14px;
+  background: var(--tint-cool, var(--cream));
+  color: var(--ink);
+}
+
+.cf-annual-cash legend {
+  padding: 0 6px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.cf-annual-cash p,
+.cf-annual-cash output {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cf-annual-cash__inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cf-annual-cash label {
+  display: grid;
+  gap: 5px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cf-annual-cash input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1.5px solid var(--line-cool, var(--line-warm-2));
+  border-radius: 12px;
+  outline: 0;
+  background: var(--white, var(--cream));
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.cf-annual-cash input:focus-visible {
+  border-color: var(--ink);
+  outline: var(--cf-focus-ring);
+}
+
+.cf-annual-cash output {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--white, var(--cream));
+  color: var(--ink);
+  font-weight: 700;
+}
+
+@media (max-width: 620px) {
+  .cf-annual-cash__inputs {
+    grid-template-columns: 1fr;
+  }
+}

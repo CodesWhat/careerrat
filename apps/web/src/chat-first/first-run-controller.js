@@ -1,6 +1,7 @@
 import { parseChatAnswerMode } from "../../../../src/core/ai/chat-answer-mode.mjs";
 import { parseConfirmBlocks } from "../onboarding/confirmBlocks.js";
 import { setupDisclosureRows, setupProgressFromState } from "../onboarding/onboardingSetup.js";
+import { emptyAnnualCashWorksheet } from "./annual-cash-worksheet.js";
 
 function list(value) {
   return Array.isArray(value) ? value : [];
@@ -261,65 +262,39 @@ function buildKnowledgeEditor(key, state) {
     const hasMinimumAnnualEarnings =
       Number.isFinite(minimumAnnualEarnings) && minimumAnnualEarnings > 0;
     const useAnnualCash = hasMinimumAnnualEarnings && !hasMinimumBase;
-    const compensationFloor = useAnnualCash ? minimumAnnualEarnings : minimumBase;
-    const compensationFields =
-      hasMinimumBase && hasMinimumAnnualEarnings
-        ? [
-            editorField(
-              "compensationFloorType",
-              "How should CareerRat screen pay?",
-              "select",
-              "both",
-              {
-                options: [
-                  { value: "both", label: "Keep both floors" },
-                  { value: "guaranteed-base", label: "Guaranteed base pay only" },
-                  { value: "annual-cash", label: "Annual cash earnings only" },
-                ],
-              }
-            ),
-            editorField(
-              "minimumBase",
-              "Minimum guaranteed base pay",
-              "number",
-              String(minimumBase),
-              { min: "0", step: "1000" }
-            ),
-            editorField(
-              "minimumAnnualEarnings",
-              "Minimum annual cash earnings",
-              "number",
-              String(minimumAnnualEarnings),
-              { min: "0", step: "1000" }
-            ),
-          ]
-        : [
-            editorField(
-              "compensationFloorType",
-              "How should CareerRat screen pay?",
-              "select",
-              useAnnualCash ? "annual-cash" : "guaranteed-base",
-              {
-                options: [
-                  { value: "guaranteed-base", label: "Guaranteed base pay" },
-                  {
-                    value: "annual-cash",
-                    label:
-                      "Total yearly cash earnings (tips, commission, or cash bonuses included)",
-                  },
-                ],
-              }
-            ),
-            editorField(
-              "compensationFloor",
-              "Minimum yearly amount",
-              "number",
-              Number.isFinite(compensationFloor) && compensationFloor > 0
-                ? String(compensationFloor)
-                : "",
-              { min: "0", step: "1000" }
-            ),
-          ];
+    const compensationFields = [
+      editorField(
+        "compensationFloorType",
+        "How should CareerRat screen pay?",
+        "select",
+        hasMinimumBase && hasMinimumAnnualEarnings
+          ? "both"
+          : useAnnualCash
+            ? "annual-cash"
+            : "guaranteed-base",
+        {
+          options: [
+            { value: "guaranteed-base", label: "Guaranteed base pay only" },
+            { value: "annual-cash", label: "Annual cash earnings only" },
+            { value: "both", label: "Keep both floors" },
+          ],
+        }
+      ),
+      editorField(
+        "minimumBase",
+        "Minimum guaranteed base pay",
+        "number",
+        hasMinimumBase ? String(minimumBase) : "",
+        { min: "0", step: "1000" }
+      ),
+      editorField(
+        "annualCashWorksheet",
+        "Minimum annual cash earnings",
+        "annual-cash-worksheet",
+        emptyAnnualCashWorksheet(hasMinimumAnnualEarnings ? minimumAnnualEarnings : null),
+        { currency: profile.compensation?.currency || "USD" }
+      ),
+    ];
     return {
       fields: [
         editorField("name", "Name", "text", candidate.full_name || ""),

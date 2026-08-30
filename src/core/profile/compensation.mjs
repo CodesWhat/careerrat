@@ -27,11 +27,26 @@ export function assessCompensationFloors({
   annualEarningsBand,
   minimumBase,
   minimumAnnualEarnings,
+  floorCurrency,
 } = {}) {
-  const base = compareCompensationBandToFloor(baseBand, minimumBase);
-  let annualEarnings = compareCompensationBandToFloor(annualEarningsBand, minimumAnnualEarnings);
+  const compare = (band, floor) => {
+    const standing = compareCompensationBandToFloor(band, floor);
+    if (standing === "no-floor") return standing;
+    const bandCurrency = String(band?.currency || "")
+      .trim()
+      .toUpperCase();
+    const normalizedFloorCurrency = String(floorCurrency || "")
+      .trim()
+      .toUpperCase();
+    if (bandCurrency && normalizedFloorCurrency && bandCurrency !== normalizedFloorCurrency) {
+      return "unknown";
+    }
+    return standing;
+  };
+  const base = compare(baseBand, minimumBase);
+  let annualEarnings = compare(annualEarningsBand, minimumAnnualEarnings);
   if (annualEarnings === "unknown" && baseBand) {
-    const guaranteedStanding = compareCompensationBandToFloor(baseBand, minimumAnnualEarnings);
+    const guaranteedStanding = compare(baseBand, minimumAnnualEarnings);
     annualEarnings = guaranteedStanding === "below" ? "unknown" : guaranteedStanding;
   }
   return { base, annualEarnings };

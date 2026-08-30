@@ -466,7 +466,7 @@ export async function runSourcedScan({
     .filter(([, s]) => s.cold)
     .map(([fam, s]) => `${fam} (0/${s.total})`);
 
-  const titleFilter = buildTitleFilter(config.title_filter);
+  const titleFilter = buildTitleFilter(config.title_filter, candidateConfig.targeting);
   const locationFilter = buildLocationFilter(config.location_filter);
 
   const scanned = { offers: [], errors: [], loginRequests: [], sourceCoverage: [] };

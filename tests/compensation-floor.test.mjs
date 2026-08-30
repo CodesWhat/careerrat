@@ -37,6 +37,41 @@ test("compensation floor comparison keeps overlapping and unknown bands for revi
   assert.equal(compare({ min: 70_000, max: 80_000 }, null), "no-floor");
 });
 
+test("CR5: shared floor assessment never compares different explicit currencies nominally", () => {
+  const assess = compensation.assessCompensationFloors;
+
+  assert.deepEqual(
+    assess({
+      baseBand: { min: 60_000, max: 75_000, currency: "GBP" },
+      annualEarningsBand: { min: 60_000, max: 75_000, currency: "GBP" },
+      minimumBase: 85_000,
+      minimumAnnualEarnings: 85_000,
+      floorCurrency: "USD",
+    }),
+    { base: "unknown", annualEarnings: "unknown" }
+  );
+  assert.deepEqual(
+    assess({
+      baseBand: { min: 60_000, max: 75_000, currency: "USD" },
+      annualEarningsBand: { min: 60_000, max: 75_000 },
+      minimumBase: 85_000,
+      minimumAnnualEarnings: 85_000,
+      floorCurrency: "USD",
+    }),
+    { base: "below", annualEarnings: "below" }
+  );
+  assert.deepEqual(
+    assess({
+      baseBand: { min: 60_000, max: 75_000, currency: "GBP" },
+      annualEarningsBand: { min: 60_000, max: 75_000, currency: "GBP" },
+      minimumBase: null,
+      minimumAnnualEarnings: null,
+      floorCurrency: "USD",
+    }),
+    { base: "no-floor", annualEarnings: "no-floor" }
+  );
+});
+
 test("annual earnings stays unknown when low base pay may be supplemented by tips", () => {
   const assess = compensation.assessCompensationFloors;
 
@@ -78,5 +113,36 @@ test("tracker evaluation schema keeps annual earnings separate from base pay", (
   assert.deepEqual(compensationSchema.basis, {
     type: ["string", "null"],
     enum: ["base", "annual-earnings", null],
+  });
+});
+
+test("tracker comp estimates persist their compensation basis", () => {
+  const trackerSchema = JSON.parse(
+    readFileSync(new URL("../config/tracker.schema.json", import.meta.url), "utf8")
+  );
+  const compEstimate = trackerSchema.$defs.compEstimate.properties;
+  assert.deepEqual(compEstimate.compensationBasis, {
+    type: ["string", "null"],
+    enum: ["base", "annual-earnings", null],
+  });
+});
+
+test("CR5: tracker evaluation schema preserves supported compensation currencies", () => {
+  const schema = JSON.parse(
+    readFileSync(new URL("../config/tracker.schema.json", import.meta.url), "utf8")
+  );
+  const currency =
+    schema.properties.applications.items.properties.evaluation.properties.compensation.properties
+      .currency;
+
+  assert.ok(currency.type.includes("string"));
+  assert.ok(currency.type.includes("null"));
+  if (currency.enum) {
+    for (const value of ["USD", "GBP", "EUR", "CAD", "MXN", "CHF", "AUD", "PLN", null]) {
+      assert.ok(currency.enum.includes(value), `tracker schema should accept ${String(value)}`);
+    }
+  }
+  assert.deepEqual(schema.$defs.compEstimate.properties.currency, {
+    type: ["string", "null"],
   });
 });
