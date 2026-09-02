@@ -97,14 +97,12 @@ export function sanitizeArtifactHtml(html) {
 }
 
 // ---------------------------------------------------------------------------
-// normalizeAtsText — scrub typographic glyphs before PDF/submission export
+// normalizeDocumentText / normalizeAtsText — scrub typographic glyphs before export
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize known-problematic typographic glyphs to ATS-safe equivalents.
- * Applied to the raw markdown before HTML conversion on the PDF/submission
- * path so that LLM-generated smart quotes, dashes, and invisible characters
- * don't corrupt ATS text extraction.
+ * Normalize typographic glyphs that LLM-generated markdown commonly produces
+ * to their plain-text equivalents, regardless of export destination.
  *
  * Conservative: only the specific glyphs listed below are transformed.
  *
@@ -112,23 +110,47 @@ export function sanitizeArtifactHtml(html) {
  * |--------------|-----------|----------------------|
  * | em dash (—)  | U+2014    | hyphen-minus (-)     |
  * | en dash (–)  | U+2013    | hyphen-minus (-)     |
- * | left dquote (") | U+201C | straight dquote (")  |
- * | right dquote (") | U+201D | straight dquote (") |
- * | left squote (') | U+2018 | straight squote (')  |
- * | right squote (') | U+2019 | straight squote (') |
+ * | left dquote (“) | U+201C | straight dquote (")  |
+ * | right dquote (”) | U+201D | straight dquote (") |
+ * | left squote (‘) | U+2018 | straight squote (')  |
+ * | right squote (’) | U+2019 | straight squote (') |
  * | NBSP         | U+00A0    | regular space        |
  * | zero-width space/non-joiner/joiner/BOM (U+200B/200C/200D/FEFF) | removed |
  *
  * @param {string} text
  * @returns {string}
  */
-function normalizeAtsText(text) {
+export function normalizeDocumentText(text) {
   return text
     .replace(/[—–]/g, "-") // em / en dash -> hyphen
     .replace(/[“”]/g, '"') // curly double quotes -> straight
     .replace(/[‘’]/g, "'") // curly single quotes -> straight
     .replace(/ /g, " ") // non-breaking space -> regular space
     .replace(/​|‌|‍|﻿/g, ""); // zero-width chars -> removed
+}
+
+/**
+ * Normalize markdown for ATS submission copies: everything
+ * normalizeDocumentText does, plus stripping characters used to spoof
+ * displayed text or smuggle hidden content past ATS parsers and human
+ * reviewers, the channels that matter in a submission copy rather than
+ * ordinary typography.
+ *
+ * | Glyph        | Codepoint | Reason removed |
+ * |--------------|-----------|-----------------|
+ * | soft hyphen, word joiner, Mongolian vowel separator (U+00AD, U+2060, U+180E) | invisible formatting characters that can hide injected text |
+ * | bidi controls (U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069, matched via \p{Bidi_Control}) | can reorder displayed text to disguise what a parser actually reads |
+ * | variation selectors (U+FE00-U+FE0F, U+E0100-U+E01EF) | can be chained onto visible characters to encode hidden data |
+ * | Unicode tag characters (U+E0000-U+E007F) | invisible-text smuggling channel |
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function normalizeAtsText(text) {
+  return normalizeDocumentText(text).replace(
+    /\p{Bidi_Control}|[\u00AD\u2060\u180E]|[\uFE00-\uFE0F]|[\u{E0000}-\u{E007F}]|[\u{E0100}-\u{E01EF}]/gu,
+    ""
+  ); // bidi controls, word joiner, soft hyphen, Mongolian vowel separator, variation selectors, tag chars -> removed
 }
 
 // ---------------------------------------------------------------------------
@@ -659,10 +681,17 @@ export async function renderPdf({
   env = process.env,
   fetchImpl = globalThis.fetch,
 }) {
-  // Normalize typographic glyphs on the markdown path so ATS text extraction
+  // Normalize typographic glyphs on the markdown path so text extraction
   // isn't corrupted by smart quotes / dashes / invisible chars from LLM output.
+  // ATS submission copies additionally strip bidi/hidden-text channels;
+  // non-ATS copies (interview dossiers, etc.) keep legitimate non-ASCII text.
   // When the caller supplies pre-built HTML, normalization is their responsibility.
-  const source = html || documentHtml(normalizeAtsText(markdown || ""), { title, ats });
+  const source =
+    html ||
+    documentHtml((ats ? normalizeAtsText : normalizeDocumentText)(markdown || ""), {
+      title,
+      ats,
+    });
 
   const desktopRenderer = desktopPdfRendererConfig(env);
   if (desktopRenderer) {
@@ -797,18 +826,21 @@ export function detectDocxCapability() {
  * Render markdown to DOCX using the best available tool.
  * pandoc: direct conversion; soffice: via intermediate HTML; ooxml: hand-rolled.
  *
- * @param {{ markdown: string, outPath: string, title?: string }} opts
+ * @param {{ markdown: string, outPath: string, title?: string, ats?: boolean }} opts
+ *   ats: strip bidi/hidden-text channels from the markdown before dispatching
+ *   to any backend, for ATS submission copies.
  * @returns {Promise<{ outPath: string, tool: string, label: string }>}
  */
-async function renderDocx({ markdown, outPath, title = "Document" }) {
+async function renderDocx({ markdown, outPath, title = "Document", ats = false }) {
   const cap = detectDocxCapability();
+  const source = (ats ? normalizeAtsText : normalizeDocumentText)(markdown);
 
   if (cap.tool === "pandoc") {
-    await renderDocxViaPandoc({ markdown, outPath, title });
+    await renderDocxViaPandoc({ markdown: source, outPath, title });
   } else if (cap.tool === "soffice") {
-    await renderDocxViaSoffice({ markdown, outPath, title });
+    await renderDocxViaSoffice({ markdown: source, outPath, title });
   } else {
-    await renderDocxOoxml({ markdown, outPath, title });
+    await renderDocxOoxml({ markdown: source, outPath, title });
   }
 
   return { outPath, tool: cap.tool, label: cap.label };
@@ -1602,7 +1634,8 @@ function dosDateTime(date) {
  *   outBase: string,          e.g. "/path/to/Resume" (no extension)
  *   formats: Array<'pdf'|'docx'>,
  *   title?: string,
- *   ats?: boolean             render the PDF with the ATS-safe standard font stack
+ *   ats?: boolean             render the PDF with the ATS-safe standard font stack and
+ *                             scrub bidi/hidden-text channels from both the PDF and DOCX
  * }} opts
  * @returns {Promise<{ pdf?: string, docx?: string, docxTool?: string, docxLabel?: string }>}
  */
@@ -1622,7 +1655,7 @@ export async function exportArtifact({
       result.pdf = pdfPath;
     } else if (fmt === "docx") {
       const docxPath = `${outBase}.docx`;
-      const info = await renderDocx({ markdown, outPath: docxPath, title });
+      const info = await renderDocx({ markdown, outPath: docxPath, title, ats });
       result.docx = docxPath;
       result.docxTool = info.tool;
       result.docxLabel = info.label;

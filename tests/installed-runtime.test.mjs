@@ -286,6 +286,26 @@ test("detectInstalledRuntimes finds multiple CLIs outside the inherited PATH", (
   }
 });
 
+test("detectInstalledRuntimes finds Antigravity by its agy binary", () => {
+  const root = tempRoot();
+  const binDir = join(root, "bin");
+  const agyPath = join(binDir, "agy");
+  executable(agyPath);
+  try {
+    const inventory = detectInstalledRuntimes({
+      env: { PATH: binDir },
+      platform: "darwin",
+      homeDir: join(root, "home"),
+    });
+    const antigravity = inventory.find(({ id }) => id === "antigravity");
+    assert.equal(antigravity.available, true);
+    assert.equal(antigravity.path, agyPath);
+    assert.equal(antigravity.commandShape, "agy -p");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("detection publishes declared adapters as unverified until readiness runs", () => {
   const root = tempRoot();
   const binDir = join(root, "bin");

@@ -237,8 +237,8 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
   {
     id: "antigravity",
     name: "Antigravity",
-    binaries: ["antigravity", "antigravitycli"],
-    commandShape: "antigravity -p",
+    binaries: ["agy", "antigravity", "antigravitycli"],
+    commandShape: "agy -p",
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "Make sure you're signed in.",
     installUrl: "https://antigravity.google/docs/cli/install",
