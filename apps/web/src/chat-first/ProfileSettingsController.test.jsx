@@ -982,6 +982,51 @@ describe("ProfileSettingsController foreground", () => {
     }
   });
 
+  it("clears editor dirty state when a worksheet field is edited then reverted", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getOnboardState.mockResolvedValue({
+      draftContext: onboardState().draftContext,
+      data: {
+        profile: {
+          compensation: {
+            currency: "USD",
+            minimum_base: 50_000,
+            minimum_annual_earnings: 70_000,
+            target_base: 90_000,
+          },
+        },
+      },
+      publicSyncPreference: { enabled: true, source: "default", updatedAt: null },
+    });
+    router.location = {
+      pathname: "/settings",
+      search: "?panel=editor&section=compensation",
+      state: null,
+    };
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+    const original = props.editorValues.annualCashWorksheet;
+
+    props.onEditorChange("annualCashWorksheet", { ...original, hoursPerWeek: "30" });
+    props = settingsProps(renderController(module, api));
+    props.onTabChange("settings");
+    props = settingsProps(renderController(module, api));
+    expect.soft(props.discardEditorOpen).toBe(true);
+    props.onKeepEditing();
+
+    props = settingsProps(renderController(module, api));
+    props.onEditorChange("annualCashWorksheet", { ...original });
+    props = settingsProps(renderController(module, api));
+    props.onTabChange("settings");
+    props = settingsProps(renderController(module, api));
+
+    expect.soft(props.discardEditorOpen).toBe(false);
+    expect.soft(props.activeTab).toBe("settings");
+  });
+
   it("never renders a panel on the contradictory Settings tab", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();

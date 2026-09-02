@@ -8,8 +8,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
-- Candidate setup and Profile now include an annual-cash worksheet for hourly,
-  weekly, monthly, and tipped compensation. CareerRat keeps the original pay
+- Candidate setup and Profile now include an annual-cash worksheet for hourly
+  and tipped or shift-based compensation. CareerRat keeps the original pay
   inputs while deriving a comparable annual floor for search and evaluation.
 
 ### Changed
