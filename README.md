@@ -283,7 +283,7 @@ The app and terminal flow share the same public skill definitions.
 
 ## Terminal and source use
 
-Terminal mode requires Node.js 24 or newer and launches Claude Code or Codex.
+Terminal mode requires Node.js 24.15 or newer and launches Claude Code or Codex.
 Both use the same canonical skills and local data.
 
 ```bash

@@ -7,7 +7,7 @@ does not depend on one provider's session history.
 
 ## Prerequisites
 
-- Node.js >= 24
+- Node.js >= 24.15
 - A supported coding-agent CLI on your PATH:
   - Claude Code:  `npm install -g @anthropic-ai/claude-code`  (<https://claude.com/claude-code>)
   - Codex:        `npm install -g @openai/codex`               (<https://github.com/openai/codex>)
