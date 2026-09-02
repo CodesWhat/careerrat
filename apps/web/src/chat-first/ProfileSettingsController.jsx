@@ -77,8 +77,28 @@ function hydrateProfileEditorDraft(editor, values) {
   };
 }
 
+function fieldValuesMatch(left, right) {
+  if (Object.is(left, right)) return true;
+  if (
+    typeof left !== "object" ||
+    typeof right !== "object" ||
+    left === null ||
+    right === null ||
+    Array.isArray(left) ||
+    Array.isArray(right)
+  ) {
+    return false;
+  }
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => Object.is(left[key], right[key]));
+}
+
 function profileEditorValuesMatch(editor, left, right) {
-  return (editor?.fields || []).every((field) => Object.is(left?.[field.id], right?.[field.id]));
+  return (editor?.fields || []).every((field) =>
+    fieldValuesMatch(left?.[field.id], right?.[field.id])
+  );
 }
 
 function normalizeDraftContext(context) {
