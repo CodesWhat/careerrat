@@ -1,7 +1,7 @@
 // Board-wide aggregator feed for Working Nomads (https://www.workingnomads.com/api/exposed_jobs/).
 //
-// Ported from santifer/career-ops (MIT License, Copyright (c) 2026 Santiago
-// Fernández de Valderrama — github.com/santifer/career-ops) providers/workingnomads.mjs.
+// Ported from career-ops-hq/career-ops (MIT License, Copyright (c) 2026 Santiago
+// Fernández de Valderrama — github.com/career-ops-hq/career-ops) providers/workingnomads.mjs.
 // Same feed + field mapping; adapted to careerrat's (entry, fetchImpl) → offers[]
 // contract (the sourced-scanner offer shape) instead of career-ops' {id, fetch}
 // Provider object.
