@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { markdownToHtml, sanitizeArtifactHtml } from "../src/core/documents/export.mjs";
+import {
+  markdownToHtml,
+  normalizeAtsText,
+  sanitizeArtifactHtml,
+} from "../src/core/documents/export.mjs";
 
 test("markdown artifact links render executable and malformed targets as inert text", () => {
   const html = markdownToHtml(`
@@ -61,4 +65,15 @@ test("the final artifact fragment sanitizer removes any non-renderer HTML capabi
   assert.doesNotMatch(html, /<img|<script|onerror=|onclick=|javascript:/i);
   assert.match(html, /<p>Text<\/p>/);
   assert.match(html, />Bad</);
+});
+
+test("ATS text normalization strips bidi overrides and tag characters but keeps ordinary non-ASCII text", () => {
+  const rtlOverride = "R\u00e9sum\u00e9\u202Eevil\u202C.pdf";
+  const tagSequence = `Engineer${String.fromCodePoint(0xe0001, 0xe0065, 0xe006e)}`;
+
+  assert.equal(normalizeAtsText(rtlOverride), "Résuméevil.pdf");
+  assert.equal(normalizeAtsText(tagSequence), "Engineer");
+
+  const ordinary = "café über 日本語";
+  assert.equal(normalizeAtsText(ordinary), ordinary);
 });

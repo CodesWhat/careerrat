@@ -63,7 +63,10 @@ export function extractReqId(rawUrl = "") {
       return {
         provider: "workday",
         value: workday[1],
-        id: `workday:${workdayHost[1].toLowerCase()}:${workday[1].toLowerCase()}`,
+        // The dedup key drops Workday's cross-site "-N" disambiguator so the same
+        // requisition republished on a second site collapses to one row; value keeps
+        // the literal suffix because detail lookups match it against jobReqId.
+        id: `workday:${workdayHost[1].toLowerCase()}:${workday[1].replace(/-\d+$/, "").toLowerCase()}`,
       };
   } catch {
     return { provider: null, value: null, id: null };

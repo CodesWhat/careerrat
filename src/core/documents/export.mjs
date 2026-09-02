@@ -118,17 +118,25 @@ export function sanitizeArtifactHtml(html) {
  * | right squote (') | U+2019 | straight squote (') |
  * | NBSP         | U+00A0    | regular space        |
  * | zero-width space/non-joiner/joiner/BOM (U+200B/200C/200D/FEFF) | removed |
+ * | word joiner (U+2060), soft hyphen (U+00AD), Mongolian vowel separator (U+180E) | removed |
+ * | bidi embedding/override controls (U+202A-U+202E), bidi isolate controls (U+2066-U+2069) | removed |
+ * | variation selectors (U+FE00-U+FE0F, U+E0100-U+E01EF) | removed |
+ * | Unicode tag characters (U+E0000-U+E007F) | removed |
  *
  * @param {string} text
  * @returns {string}
  */
-function normalizeAtsText(text) {
+export function normalizeAtsText(text) {
   return text
     .replace(/[—–]/g, "-") // em / en dash -> hyphen
     .replace(/[“”]/g, '"') // curly double quotes -> straight
     .replace(/[‘’]/g, "'") // curly single quotes -> straight
     .replace(/ /g, " ") // non-breaking space -> regular space
-    .replace(/​|‌|‍|﻿/g, ""); // zero-width chars -> removed
+    .replace(/​|‌|‍|﻿/g, "") // zero-width chars -> removed
+    .replace(
+      /[\u00AD\u180E\u2060\u202A-\u202E\u2066-\u2069]|[\uFE00-\uFE0F]|[\u{E0000}-\u{E007F}]|[\u{E0100}-\u{E01EF}]/gu,
+      ""
+    ); // bidi controls, word joiner, soft hyphen, variation selectors, tag chars -> removed
 }
 
 // ---------------------------------------------------------------------------

@@ -2069,6 +2069,7 @@ test("extracts canonical req ids from common ATS URLs", () => {
     null
   );
   for (const requisition of ["JR12269", "JR13123-1", "R100123149", "HB344468-3"]) {
+    const baseRequisition = requisition.replace(/-\d+$/, "");
     assert.deepEqual(
       extractReqId(
         `https://shakeshack.wd5.myworkdayjobs.com/en-US/External/job/New-York-NY/Assistant-General-Manager_${requisition}`
@@ -2076,7 +2077,7 @@ test("extracts canonical req ids from common ATS URLs", () => {
       {
         provider: "workday",
         value: requisition,
-        id: `workday:shakeshack:${requisition.toLowerCase()}`,
+        id: `workday:shakeshack:${baseRequisition.toLowerCase()}`,
       }
     );
   }
@@ -2096,6 +2097,29 @@ test("scopes Workday requisition identity to its tenant", () => {
   assert.equal(shakeShack.id, "workday:shakeshack:jr12269");
   assert.equal(acme.id, "workday:acme:jr12269");
   assert.notEqual(shakeShack.id, acme.id);
+});
+
+test("dedupes Workday postings republished with a cross-site disambiguator suffix", () => {
+  const unsuffixed = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345"
+  );
+  const suffixedTwo = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2"
+  );
+  const suffixedThree = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-3/"
+  );
+
+  assert.equal(unsuffixed.id, "workday:acme:jr12345");
+  assert.equal(suffixedTwo.id, "workday:acme:jr12345");
+  assert.equal(suffixedThree.id, "workday:acme:jr12345");
+  assert.equal(suffixedTwo.value, "JR12345-2");
+  assert.equal(suffixedThree.value, "JR12345-3");
+
+  const unrelatedHost = extractReqId(
+    "https://careers.example.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2"
+  );
+  assert.equal(unrelatedHost.id, null);
 });
 
 // ---------------------------------------------------------------------------

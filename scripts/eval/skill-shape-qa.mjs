@@ -39,6 +39,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   detectInstalledRuntimes,
   probeInstalledRuntime,
+  SUPPORTED_INSTALLED_RUNTIME_IDS,
 } from "../../src/core/ai/installed-runtimes.mjs";
 import { coachingPlanSchema } from "../../src/core/coaching/schemas.mjs";
 import { validateCompanyHealth } from "../../src/core/db/verbs/company-health.mjs";
@@ -363,7 +364,7 @@ export const LANES = Object.freeze([
 // CLI
 // ---------------------------------------------------------------------------
 
-const SUPPORTED_RUNTIME_IDS = new Set(["claude", "codex"]);
+const SUPPORTED_RUNTIME_IDS = new Set(SUPPORTED_INSTALLED_RUNTIME_IDS);
 
 export function parseSkillShapeQaArgs(argv) {
   const out = { list: false, lane: null, runtime: "all" };
