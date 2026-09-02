@@ -57,7 +57,7 @@ test("companies --list explains that empty tracked companies means ATS scans are
     assert.equal(result.status, 0);
     assert.match(result.stdout, /No tracked companies yet\./);
     assert.match(result.stdout, /Ask your agent to run discover-companies next/);
-    assert.match(result.stdout, /77 public Career Ops adapters/);
+    assert.match(result.stdout, /82 public Career Ops adapters/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
