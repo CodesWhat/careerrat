@@ -300,6 +300,7 @@ test("detectInstalledRuntimes finds Antigravity by its agy binary", () => {
     const antigravity = inventory.find(({ id }) => id === "antigravity");
     assert.equal(antigravity.available, true);
     assert.equal(antigravity.path, agyPath);
+    assert.equal(antigravity.commandShape, "agy -p");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
