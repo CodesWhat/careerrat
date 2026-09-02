@@ -166,7 +166,6 @@
   },
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
-    "esbuild@0.25.12": true,
     "fsevents@2.3.2": true,
     "fsevents@2.3.3": true,
     "esbuild@0.28.2": true,
@@ -174,6 +173,7 @@
     "core-js": false
   },
   "overrides": {
+    "vite": "8.2.2",
     "postcss": "^8.5.10",
     "sharp": "$sharp"
   },
