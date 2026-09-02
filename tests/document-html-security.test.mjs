@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import JSZip from "jszip";
 
 import {
+  exportArtifact,
   markdownToHtml,
   normalizeAtsText,
+  normalizeDocumentText,
   sanitizeArtifactHtml,
 } from "../src/core/documents/export.mjs";
 
@@ -76,4 +82,95 @@ test("ATS text normalization strips bidi overrides and tag characters but keeps 
 
   const ordinary = "café über 日本語";
   assert.equal(normalizeAtsText(ordinary), ordinary);
+});
+
+test("ATS text normalization strips every bidi control character and tag-character flag sequences", () => {
+  const arabicLetterMark = "؜price: $9";
+  const leftToRightMark = "left‎right";
+  const rightToLeftMark = "right‏left";
+  const rtlOverride = "Résumé‮evil.pdf";
+  const leftToRightIsolate = "start⁦end";
+  const englandFlag = String.fromCodePoint(
+    0x1f3f4,
+    0xe0067,
+    0xe0062,
+    0xe0065,
+    0xe006e,
+    0xe0067,
+    0xe007f
+  );
+
+  assert.equal(normalizeAtsText(arabicLetterMark), "price: $9");
+  assert.equal(normalizeAtsText(leftToRightMark), "leftright");
+  assert.equal(normalizeAtsText(rightToLeftMark), "rightleft");
+  assert.equal(normalizeAtsText(rtlOverride), "Résuméevil.pdf");
+  assert.equal(normalizeAtsText(leftToRightIsolate), "startend");
+  assert.equal(
+    normalizeAtsText(`Engineer ${englandFlag}`),
+    `Engineer ${String.fromCodePoint(0x1f3f4)}`
+  );
+});
+
+test("document-level normalization (non-ATS PDFs) keeps flag sequences, Mongolian vowel separator, and emoji presentation selectors", () => {
+  const englandFlag = String.fromCodePoint(
+    0x1f3f4,
+    0xe0067,
+    0xe0062,
+    0xe0065,
+    0xe006e,
+    0xe0067,
+    0xe007f
+  );
+  const mongolianVowelSeparator = "᠐᠎᠑";
+  const heartWithPresentationSelector = "❤️";
+  const zeroWidthSpace = "zero​width";
+
+  assert.equal(normalizeDocumentText(`Flag: ${englandFlag}`), `Flag: ${englandFlag}`);
+  assert.equal(normalizeDocumentText(mongolianVowelSeparator), mongolianVowelSeparator);
+  assert.equal(normalizeDocumentText(heartWithPresentationSelector), heartWithPresentationSelector);
+  assert.equal(normalizeDocumentText(zeroWidthSpace), "zerowidth");
+});
+
+test("exportArtifact DOCX strips bidi overrides from ATS copies but keeps them in non-ATS copies", async () => {
+  const markdown = "Résumé‮evil.pdf";
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-docx-ats-"));
+  const savedPath = process.env.PATH;
+
+  try {
+    // Force detectDocxCapability to find neither pandoc nor soffice, so
+    // exportArtifact deterministically falls back to the built-in OOXML
+    // writer regardless of what's installed on the machine running this test.
+    process.env.PATH = "";
+
+    const ats = await exportArtifact({
+      markdown,
+      outBase: join(dir, "ats"),
+      formats: ["docx"],
+      title: "Resume",
+      ats: true,
+    });
+    const nonAts = await exportArtifact({
+      markdown,
+      outBase: join(dir, "non-ats"),
+      formats: ["docx"],
+      title: "Resume",
+      ats: false,
+    });
+
+    assert.equal(ats.docxTool, "ooxml");
+    assert.equal(nonAts.docxTool, "ooxml");
+
+    const atsXml = await (await JSZip.loadAsync(readFileSync(ats.docx)))
+      .file("word/document.xml")
+      .async("string");
+    const nonAtsXml = await (await JSZip.loadAsync(readFileSync(nonAts.docx)))
+      .file("word/document.xml")
+      .async("string");
+
+    assert.doesNotMatch(atsXml, /‮/);
+    assert.match(nonAtsXml, /‮/);
+  } finally {
+    process.env.PATH = savedPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
