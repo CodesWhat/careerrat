@@ -2116,6 +2116,16 @@ test("dedupes Workday postings republished with a cross-site disambiguator suffi
   assert.equal(suffixedTwo.value, "JR12345-2");
   assert.equal(suffixedThree.value, "JR12345-3");
 
+  const sequenceOne = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Data-Engineer_R1234-0001"
+  );
+  const sequenceTwo = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Platform-Engineer_R1234-0002"
+  );
+  assert.equal(sequenceOne.id, "workday:acme:r1234-0001");
+  assert.equal(sequenceTwo.id, "workday:acme:r1234-0002");
+  assert.notEqual(sequenceOne.id, sequenceTwo.id);
+
   const unrelatedHost = extractReqId(
     "https://careers.example.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2"
   );

@@ -65,8 +65,10 @@ export function extractReqId(rawUrl = "") {
         value: workday[1],
         // The dedup key drops Workday's cross-site "-N" disambiguator so the same
         // requisition republished on a second site collapses to one row; value keeps
-        // the literal suffix because detail lookups match it against jobReqId.
-        id: `workday:${workdayHost[1].toLowerCase()}:${workday[1].replace(/-\d+$/, "").toLowerCase()}`,
+        // the literal suffix because detail lookups match it against jobReqId. Only
+        // one or two digits count as the disambiguator, matching the vendored
+        // workdayDedupKey: a longer tail ("R1234-0001") is part of the requisition.
+        id: `workday:${workdayHost[1].toLowerCase()}:${workday[1].replace(/-\d{1,2}$/, "").toLowerCase()}`,
       };
   } catch {
     return { provider: null, value: null, id: null };
