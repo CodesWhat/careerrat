@@ -130,7 +130,7 @@ try {
   );
   if (
     jobs.length === 1 &&
-    jobs[0].url.includes("jobs.bytedance.com") &&
+    new URL(jobs[0].url).hostname === "jobs.bytedance.com" &&
     requested.length === 2 &&
     requested.every((r) => r.url === "https://jobs.bytedance.com/api/v1/search/job/posts") &&
     requested.every((r) => r.redirect === "error") &&
