@@ -833,7 +833,7 @@ export function detectDocxCapability() {
  */
 async function renderDocx({ markdown, outPath, title = "Document", ats = false }) {
   const cap = detectDocxCapability();
-  const source = ats ? normalizeAtsText(markdown) : markdown;
+  const source = (ats ? normalizeAtsText : normalizeDocumentText)(markdown);
 
   if (cap.tool === "pandoc") {
     await renderDocxViaPandoc({ markdown: source, outPath, title });

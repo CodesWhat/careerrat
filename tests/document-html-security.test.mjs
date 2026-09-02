@@ -132,7 +132,7 @@ test("document-level normalization (non-ATS PDFs) keeps flag sequences, Mongolia
 });
 
 test("exportArtifact DOCX strips bidi overrides from ATS copies but keeps them in non-ATS copies", async () => {
-  const markdown = "Résumé‮evil.pdf";
+  const markdown = "Résumé‮evil.pdf “quoted”\u00a0text";
   const dir = mkdtempSync(join(tmpdir(), "careerrat-docx-ats-"));
   const savedPath = process.env.PATH;
 
@@ -169,6 +169,8 @@ test("exportArtifact DOCX strips bidi overrides from ATS copies but keeps them i
 
     assert.doesNotMatch(atsXml, /‮/);
     assert.match(nonAtsXml, /‮/);
+    assert.doesNotMatch(nonAtsXml, /[\u201C\u201D\u00A0]/);
+    assert.match(nonAtsXml, /quoted.{0,6} text/);
   } finally {
     process.env.PATH = savedPath;
     rmSync(dir, { recursive: true, force: true });
