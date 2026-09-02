@@ -235,7 +235,12 @@ jobs:
         with:
           name: careerrat-browser-visual
           path: output/playwright
-          if-no-files-found: error
+          # warn, not error: this step runs on failure too, and a test that
+          # times out before it screenshots leaves the path empty. Erroring
+          # there replaces the real failure with "No files were found" and
+          # uploads nothing, which is exactly when the trace is needed. The
+          # test step already failed the job, so the signal is not lost.
+          if-no-files-found: warn
           retention-days: 7
 
   # Qlty (shell/Docker/Actions/YAML lint, secret + dependency scanning — see
