@@ -15,17 +15,17 @@
     "fumadocs-core": "^16.10.5",
     "fumadocs-mdx": "^15.0.12",
     "fumadocs-ui": "^16.10.5",
-    "next": "16.3.1",
-    "posthog-js": "1.417.1",
+    "next": "16.3.3",
+    "posthog-js": "1.422.5",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
     "@types/mdx": "2.0.14",
-    "@types/node": "26.2.0",
+    "@types/node": "26.4.0",
     "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
+    "@types/react-dom": "19.2.5",
     "postcss": "8.5.26",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3"
