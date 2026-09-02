@@ -2,7 +2,7 @@
   "name": "careerrat",
   "version": "0.17.0",
   "private": false,
-  "packageManager": "npm@11.19.0",
+  "packageManager": "npm@12.0.2",
   "publishConfig": {
     "access": "public"
   },
