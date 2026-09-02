@@ -120,6 +120,38 @@ describe("estimateCompFromComparables", () => {
     assert.equal(estimate, null);
   });
 
+  it("excludes a labeled annual-earnings row whose figure is unavailable, instead of falling back to the base line", () => {
+    const estimate = estimateCompFromComparables({
+      role: "Bar Manager",
+      targeting: TARGETING,
+      compensationBasis: "annual-earnings",
+      tracker: {
+        applications: [
+          {
+            company: "One",
+            role: "Bar Manager",
+            tc: "Base salary $50,000; total annual earnings unavailable",
+            compBasis: "annual-earnings",
+          },
+          {
+            company: "Two",
+            role: "Bar Manager",
+            tc: "$90,000 - $100,000",
+            compBasis: "annual-earnings",
+          },
+        ],
+      },
+    });
+
+    assert.equal(estimate.compensationBasis, "annual-earnings");
+    assert.equal(estimate.midpointK, 95);
+    assert.equal(estimate.comparables.length, 1);
+    assert.deepEqual(
+      estimate.comparables.map((row) => row.company),
+      ["Two"]
+    );
+  });
+
   it("does not treat legacy equity-inclusive total compensation as annual cash", () => {
     const estimate = estimateCompFromComparables({
       role: "Bar Manager",

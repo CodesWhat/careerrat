@@ -1421,11 +1421,12 @@ const SYMBOL_COMPATIBLE_CURRENCY_CODES = {
 // ISO 4217 codes that also read as ordinary English words (Tongan Paʻanga,
 // Turkish Lira, Albanian Lek, Peruvian Sol, Colombian Peso, Bolivian
 // Boliviano, Cuban Peso, Georgian Lari, Somali Shilling, Lao Kip, Yemeni
-// Rial, Romanian Leu, Bosnia-Herzegovina Mark). ISO 4217 changes rarely, so
-// this list is closed and stable, unlike an open-ended denylist of posting
-// jargon (DOE, OTE, RSU, ...): written in lowercase or title case, "try" or
-// "Top" is the sentence word, not the currency; written in full caps, TRY or
-// TOP is the code, same as any other.
+// Rial, Romanian Leu, Bosnia-Herzegovina Mark, Moroccan Dirham, Macanese
+// Pataca, Russian Ruble). ISO 4217 changes rarely, so this list is closed and
+// stable, unlike an open-ended denylist of posting jargon (DOE, OTE, RSU,
+// ...): written in lowercase or title case, "try" or "Top" is the sentence
+// word, not the currency; written in full caps, TRY or TOP is the code, same
+// as any other.
 const CURRENCY_CODE_ENGLISH_HOMOGRAPHS = new Set([
   "TOP",
   "ALL",
@@ -1440,6 +1441,9 @@ const CURRENCY_CODE_ENGLISH_HOMOGRAPHS = new Set([
   "YER",
   "RON",
   "BAM",
+  "MAD",
+  "MOP",
+  "RUB",
 ]);
 
 // A token reads as a currency code when it is a real ISO code AND (it is
@@ -1889,6 +1893,17 @@ export function extractCompensationBands(text = "") {
     base: extractCompBand(text, { baseOnly: true }),
     annualEarnings: extractAnnualEarningsBand(text),
   };
+}
+
+// True when the text labels an amount as annual earnings at all (e.g. "total
+// annual earnings", "OTE"), regardless of whether a numeric band could be
+// pulled from that label's context. Callers use this to tell a genuinely
+// unlabeled bare range (safe to reparse generically) apart from a labeled
+// annual-earnings figure that turned out to have no parseable number (e.g.
+// "total annual earnings unavailable"), which should never fall back to a
+// base figure sitting elsewhere in the same text.
+export function hasAnnualEarningsLabel(text = "") {
+  return ANNUAL_EARNINGS_LABEL_RE.test(String(text || ""));
 }
 
 function classifyCompensationText(text = "") {

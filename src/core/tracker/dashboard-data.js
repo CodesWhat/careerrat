@@ -3652,6 +3652,31 @@ const DASHBOARD_CURRENCY_CODE_SET = new Set(
     : DASHBOARD_FALLBACK_CURRENCY_CODES
 );
 
+// Mirror of CURRENCY_CODE_ENGLISH_HOMOGRAPHS in src/core/scoring/sourced-scanner.mjs,
+// that file's copy is the source of truth. Keep the two in sync by hand, the
+// same way DASHBOARD_CURRENCY_CODE_SET mirrors CURRENCY_CODE_SET above. An
+// uppercase ISO code that also reads as an ordinary English word (e.g. "ALL"
+// in "$120K ALL IN") must never outrank a real currency symbol already
+// present in the text.
+const DASHBOARD_CURRENCY_CODE_ENGLISH_HOMOGRAPHS = new Set([
+  "TOP",
+  "ALL",
+  "TRY",
+  "PEN",
+  "COP",
+  "BOB",
+  "CUP",
+  "GEL",
+  "SOS",
+  "LAK",
+  "YER",
+  "RON",
+  "BAM",
+  "MAD",
+  "MOP",
+  "RUB",
+]);
+
 function normalizeCurrencyCode(value, fallback = "USD") {
   const code = String(value || fallback)
     .trim()
@@ -3677,14 +3702,20 @@ function formatMoneyK(value, currency) {
   return formatCurrencyThousands(value, currency);
 }
 
-function compensationCurrency(...values) {
+export function compensationCurrency(...values) {
   for (const value of values) {
     const text = String(value || "");
+    const code = text.match(/\b([A-Z]{3})\b/)?.[1];
+    if (
+      code &&
+      DASHBOARD_CURRENCY_CODE_SET.has(code) &&
+      !DASHBOARD_CURRENCY_CODE_ENGLISH_HOMOGRAPHS.has(code)
+    ) {
+      return code;
+    }
     if (text.includes("£")) return "GBP";
     if (text.includes("€")) return "EUR";
     if (text.includes("$")) return "USD";
-    const code = text.match(/\b([A-Z]{3})\b/)?.[1];
-    if (code && DASHBOARD_CURRENCY_CODE_SET.has(code)) return code;
   }
   return null;
 }

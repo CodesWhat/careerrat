@@ -14,7 +14,10 @@ import {
   extractCompBand,
   hasConflictingCompensationCurrency,
 } from "../src/core/scoring/sourced-scanner.mjs";
-import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
+import {
+  buildDashboardViewModel,
+  compensationCurrency,
+} from "../src/core/tracker/dashboard-data.js";
 
 // Sanity check on the trap itself: these are real ISO codes for lesser-known
 // currencies that also happen to be ordinary English words, which is exactly
@@ -36,6 +39,9 @@ test("ISO currency set contains the reported homograph codes", () => {
     "YER",
     "RON",
     "BAM",
+    "MAD",
+    "MOP",
+    "RUB",
   ]) {
     assert.equal(isIsoCurrencyCode(code), true, `${code} should be a real ISO code`);
   }
@@ -140,6 +146,24 @@ test("scanner: an English-word collision only reads as a currency code in full c
   });
 });
 
+test("scanner: a lowercase 'mad' next to an amount is not read as the Moroccan dirham", () => {
+  assert.equal(
+    hasConflictingCompensationCurrency("Salary: you'd be mad to turn down $70,000 here"),
+    false
+  );
+  assert.deepEqual(extractCompBand("Salary: you'd be mad to turn down $70,000 here"), {
+    min: 70000,
+    max: 70000,
+    currency: "USD",
+  });
+  // Full caps MAD is still the real code.
+  assert.deepEqual(extractCompBand("Base salary MAD 70,000"), {
+    min: 70000,
+    max: 70000,
+    currency: "MAD",
+  });
+});
+
 // --- Dashboard path (src/core/tracker/dashboard-data.js) -------------------
 
 function dashboardCurrencyFor(base) {
@@ -182,4 +206,30 @@ test("dashboard: a real currency code still resolves in prefix or suffix positio
   assert.equal(dashboardCurrencyFor("70,000 EUR")?.currency, "EUR");
   assert.equal(dashboardCurrencyFor("CAD 85,000")?.currency, "CAD");
   assert.equal(dashboardCurrencyFor("$70,000 USD")?.currency, "USD");
+});
+
+// CR11 follow-up: a valid ISO code must win over the $ fallback (a real code
+// beats an unlabeled symbol), but a homograph code must never win over a real
+// symbol that IS present in the same text, or "$120K ALL IN" would read as
+// Albanian lek instead of the dollar sign sitting right there.
+test("dashboard: a valid code resolves ahead of the dollar sign, but a homograph never outranks a real symbol", () => {
+  const cases = [
+    ["$70,000 CAD", "CAD"],
+    ["$70,000 USD", "USD"],
+    ["$120K ALL IN", "USD"],
+    ["$120K-$150K DOE", "USD"],
+    ["$130,000 OTE", "USD"],
+    ["$120K base + RSU", "USD"],
+    ["Comp TBD, $90K-$110K", "USD"],
+    ["£80,000", "GBP"],
+    ["EUR 70,000", "EUR"],
+    ["No comp listed", null],
+  ];
+  for (const [base, expected] of cases) {
+    assert.equal(compensationCurrency(base), expected, base);
+  }
+});
+
+test("dashboard: the ALL IN homograph resolves correctly through the full drawer pipeline too", () => {
+  assert.equal(dashboardCurrencyFor("$120K ALL IN")?.currency, "USD");
 });
