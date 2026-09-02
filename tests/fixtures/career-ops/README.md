@@ -1,6 +1,6 @@
 # Career Ops provider conformance snapshot
 
-These provider contract tests come from `santifer/career-ops` commit
+These provider contract tests come from `career-ops-hq/career-ops` commit
 `10a569b1e9178aa90ef8028ea287e411a831e1b6` under its MIT license.
 
 Rolled forward 2026-08-23 from `8be39e0934b83410276d66b541bf3a2edf3411cb`. Only
