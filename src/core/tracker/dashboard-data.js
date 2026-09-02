@@ -3645,6 +3645,13 @@ function medianMoneyK(value) {
 
 // Browser-local mirror of src/core/currency-format.mjs. This file is copied
 // verbatim to workspace/dashboard-data.js, so it must remain dependency-free.
+const DASHBOARD_FALLBACK_CURRENCY_CODES = ["AUD", "CAD", "CHF", "EUR", "GBP", "MXN", "PLN", "USD"];
+const DASHBOARD_CURRENCY_CODE_SET = new Set(
+  typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("currency")
+    : DASHBOARD_FALLBACK_CURRENCY_CODES
+);
+
 function normalizeCurrencyCode(value, fallback = "USD") {
   const code = String(value || fallback)
     .trim()
@@ -3673,11 +3680,11 @@ function formatMoneyK(value, currency) {
 function compensationCurrency(...values) {
   for (const value of values) {
     const text = String(value || "");
-    const code = text.match(/\b([A-Z]{3})\b/)?.[1];
-    if (code) return code;
     if (text.includes("£")) return "GBP";
     if (text.includes("€")) return "EUR";
     if (text.includes("$")) return "USD";
+    const code = text.match(/\b([A-Z]{3})\b/)?.[1];
+    if (code && DASHBOARD_CURRENCY_CODE_SET.has(code)) return code;
   }
   return null;
 }

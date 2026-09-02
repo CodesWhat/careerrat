@@ -1418,12 +1418,47 @@ const SYMBOL_COMPATIBLE_CURRENCY_CODES = {
   EUR: new Set(["EUR"]),
 };
 
+// ISO 4217 codes that also read as ordinary English words (Tongan Paʻanga,
+// Turkish Lira, Albanian Lek, Peruvian Sol, Colombian Peso, Bolivian
+// Boliviano, Cuban Peso, Georgian Lari, Somali Shilling, Lao Kip, Yemeni
+// Rial, Romanian Leu, Bosnia-Herzegovina Mark). ISO 4217 changes rarely, so
+// this list is closed and stable, unlike an open-ended denylist of posting
+// jargon (DOE, OTE, RSU, ...): written in lowercase or title case, "try" or
+// "Top" is the sentence word, not the currency; written in full caps, TRY or
+// TOP is the code, same as any other.
+const CURRENCY_CODE_ENGLISH_HOMOGRAPHS = new Set([
+  "TOP",
+  "ALL",
+  "TRY",
+  "PEN",
+  "COP",
+  "BOB",
+  "CUP",
+  "GEL",
+  "SOS",
+  "LAK",
+  "YER",
+  "RON",
+  "BAM",
+]);
+
+// A token reads as a currency code when it is a real ISO code AND (it is
+// written in full caps, the written convention for currency codes, OR it
+// isn't one of the known English-word collisions above).
+function isCurrencyCodeToken(token) {
+  const upper = token.toUpperCase();
+  if (!isIsoCurrencyCode(upper)) return false;
+  if (token === upper) return true;
+  return !CURRENCY_CODE_ENGLISH_HOMOGRAPHS.has(upper);
+}
+
 function compensationMatchCurrency(match) {
   const value = String(match?.[0] || "");
   const codes = new Set(
     [...value.matchAll(/\b([A-Za-z]{3})\b/g)]
-      .map((candidate) => candidate[1].toUpperCase())
-      .filter(isIsoCurrencyCode)
+      .map((candidate) => candidate[1])
+      .filter(isCurrencyCodeToken)
+      .map((candidate) => candidate.toUpperCase())
   );
   if (codes.size > 1) return { conflicting: true, currency: null };
 
@@ -1445,7 +1480,7 @@ function compensationMatchCurrency(match) {
 
 function containsCurrencyCode(value) {
   return [...String(value || "").matchAll(/\b([A-Za-z]{3})\b/g)].some((match) =>
-    isIsoCurrencyCode(match[1])
+    isCurrencyCodeToken(match[1])
   );
 }
 

@@ -81,6 +81,29 @@ describe("estimateCompFromComparables", () => {
     );
   });
 
+  it("scores tipped total earnings, not just the base line, for annual-earnings", () => {
+    const estimate = estimateCompFromComparables({
+      role: "Bar Manager",
+      targeting: TARGETING,
+      compensationBasis: "annual-earnings",
+      tracker: {
+        applications: [
+          {
+            company: "One",
+            role: "Bar Manager",
+            tc: "Base salary $50,000 plus average tips of $30,000, for total annual earnings of $70,000-$80,000.",
+            compBasis: "annual-earnings",
+          },
+        ],
+      },
+    });
+
+    assert.equal(estimate.compensationBasis, "annual-earnings");
+    assert.equal(estimate.midpointK, 75);
+    assert.equal(estimate.lowK, 75);
+    assert.equal(estimate.highK, 75);
+  });
+
   it("does not build an annual-earnings estimate from base-only evidence", () => {
     const estimate = estimateCompFromComparables({
       role: "Bar Manager",
