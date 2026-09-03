@@ -1466,9 +1466,9 @@ test("a supported ACP runtime whose transport handshake fails stays not-ready wi
   });
 });
 
-test("Claude readiness keeps completion available below the tool boundary version", async () => {
+test("Claude below the tool boundary version reports update_required, not ready", async () => {
   const calls = [];
-  const ready = await probeInstalledRuntime(
+  const blocked = await probeInstalledRuntime(
     { id: "claude", path: "/safe/claude", available: true },
     {
       spawnSyncImpl(_path, args) {
@@ -1479,11 +1479,13 @@ test("Claude readiness keeps completion available below the tool boundary versio
       },
     }
   );
-  assert.deepEqual(ready, {
-    status: "ready",
-    ready: true,
-    action: null,
+  assert.deepEqual(blocked, {
+    status: "update_required",
+    ready: false,
+    action: "retry",
+    actionLabel: "Check again",
     version: "2.1.200",
+    minimumVersion: "2.1.241",
     capabilities: {
       completion: true,
       structuredOutput: true,
@@ -1495,6 +1497,7 @@ test("Claude readiness keeps completion available below the tool boundary versio
       taskTools: false,
       research: false,
     },
+    probeMessage: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
     capabilityReason: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
   });
   assert.deepEqual(calls, [["--version"], ["auth", "status"]]);

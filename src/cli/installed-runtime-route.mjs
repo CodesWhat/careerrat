@@ -6,6 +6,7 @@ import {
   hasInstalledRuntimeCompletion,
   installedRuntimeCapabilities,
   installedRuntimeSignInCommand,
+  isInstalledRuntimeBelowVersionBoundary,
   isSupportedInstalledRuntime,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
@@ -227,6 +228,7 @@ export function mountInstalledRuntimeRoutes({
   startSignInImpl = startInstalledRuntimeSignIn,
   startGuidedSetupImpl = startInstalledRuntimeGuidedSetup,
   probeCustomImpl = probeCustomRuntimeCommand,
+  belowBoundaryImpl = isInstalledRuntimeBelowVersionBoundary,
   platform = process.platform,
 } = {}) {
   const inspect = (autoSelect = true, { forceCompletionProbeFor = null } = {}) =>
@@ -459,12 +461,15 @@ export function mountInstalledRuntimeRoutes({
     }
     const runtime = detectImpl({ env }).find(({ id }) => id === runtimeId);
     if (runtime?.available) {
-      sendJson(res, 409, {
-        ok: false,
-        code: "RUNTIME_ALREADY_INSTALLED",
-        error: "Claude Code is already installed. Sign in instead.",
-      });
-      return;
+      const belowVersionBoundary = await belowBoundaryImpl(runtime, { env, platform });
+      if (!belowVersionBoundary) {
+        sendJson(res, 409, {
+          ok: false,
+          code: "RUNTIME_ALREADY_INSTALLED",
+          error: "Claude Code is already installed. Sign in instead.",
+        });
+        return;
+      }
     }
     let closed = false;
     let started = false;

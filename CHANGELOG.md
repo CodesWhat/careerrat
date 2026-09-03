@@ -18,6 +18,9 @@ All notable changes to CareerRat are documented here. This project follows
 - Starting the app no longer flashes the first-run setup screen before the
   chat loads; a short boot screen shows while CareerRat checks your
   workspace and engine.
+- A Claude Code older than 2.1.241 can no longer be picked as the engine; the
+  picker shows Update needed with the installed and required versions and an
+  Update Claude Code button that runs the installer from inside the app.
 
 ## [0.18.0] - 2026-09-03
 

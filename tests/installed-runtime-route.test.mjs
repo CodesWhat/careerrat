@@ -61,6 +61,7 @@ function boot({
   env = { CAREERRAT_DESKTOP_SHELL: "1" },
   startSignInImpl,
   startGuidedSetupImpl,
+  belowBoundaryImpl,
   platform,
   probeCustomImpl,
   onProbe,
@@ -78,6 +79,7 @@ function boot({
     },
     startSignInImpl,
     startGuidedSetupImpl,
+    belowBoundaryImpl,
     platform,
     probeCustomImpl,
   });
@@ -279,6 +281,62 @@ test("a signed-in CLI without a usable completion stays unselected with a plain 
     error: "Codex is signed in, but it didn't return a usable test reply.",
     action: "retry",
     actionLabel: "Try again",
+  });
+});
+
+test("a Claude below the tool boundary version is unselectable with an update reason and a retry action", async () => {
+  const belowBoundaryProbe = {
+    status: "update_required",
+    ready: false,
+    action: "retry",
+    actionLabel: "Check again",
+    version: "2.1.200",
+    minimumVersion: "2.1.241",
+    capabilities: {
+      completion: true,
+      structuredOutput: true,
+      appWorkflows: true,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: true,
+      resumable: true,
+    },
+    probeMessage: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+    capabilityReason: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+  };
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: belowBoundaryProbe,
+      codex: { status: "authentication_required", ready: false, action: "start_sign_in" },
+    },
+  });
+
+  const inventory = await request(server, "GET", "/api/settings/ai-runtimes");
+  const claude = inventory.body.runtimes.find(({ id }) => id === "claude");
+  assert.equal(inventory.body.selectedId, null);
+  assert.equal(claude.status, "update_required");
+  assert.equal(claude.ready, false);
+  assert.equal(claude.selectable, false);
+  assert.equal(claude.version, "2.1.200");
+  assert.equal(claude.minimumVersion, "2.1.241");
+  assert.equal(claude.action, "retry");
+  assert.equal(claude.actionLabel, "Check again");
+  assert.equal(
+    claude.capabilityReason,
+    "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs."
+  );
+
+  const selected = await request(server, "POST", "/api/settings/ai-runtime/select", {
+    runtimeId: "claude",
+  });
+  assert.equal(selected.status, 409);
+  assert.deepEqual(selected.body, {
+    ok: false,
+    code: "RUNTIME_PROBE_FAILED",
+    error: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+    action: "retry",
+    actionLabel: "Check again",
   });
 });
 
@@ -892,6 +950,7 @@ test("guided setup rejects unsupported, installed, and non-desktop requests", as
     probes: {},
     platform: "darwin",
     startGuidedSetupImpl: (runtimeId) => started.push(runtimeId),
+    belowBoundaryImpl: async () => false,
   };
   const unsupported = boot({
     ...options,
@@ -932,6 +991,69 @@ test("guided setup rejects unsupported, installed, and non-desktop requests", as
   assert.equal(browserResponse.status, 409);
   assert.equal(browserResponse.body.code, "RUNTIME_GUIDED_SETUP_UNAVAILABLE");
   assert.deepEqual(started, []);
+});
+
+test("guided setup lets an in-place update run for a below-boundary Claude but still refuses one already at the version boundary", async () => {
+  const boundaryCalls = [];
+  const started = [];
+  const belowBoundary = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    startGuidedSetupImpl: async (runtimeId, { onOutput, onStart }) => {
+      started.push(runtimeId);
+      onStart();
+      onOutput("Updating Claude Code…");
+      return {
+        runtimeId,
+        installCommand: "curl -fsSL https://claude.ai/install.sh | bash",
+      };
+    },
+    belowBoundaryImpl: async (runtime, options) => {
+      boundaryCalls.push({ runtimeId: runtime.id, ...options });
+      return true;
+    },
+  });
+  const updateResponse = await requestStream(
+    belowBoundary,
+    "POST",
+    "/api/settings/ai-runtime/guided-setup",
+    { runtimeId: "claude" }
+  );
+  assert.equal(updateResponse.status, 200);
+  assert.deepEqual(updateResponse.events, [
+    {
+      type: "started",
+      runtimeId: "claude",
+      installCommand: "curl -fsSL https://claude.ai/install.sh | bash",
+    },
+    { type: "output", message: "Updating Claude Code…" },
+    { type: "done", runtimeId: "claude" },
+  ]);
+  assert.deepEqual(started, ["claude"]);
+  assert.equal(boundaryCalls.length, 1);
+  assert.equal(boundaryCalls[0].runtimeId, "claude");
+  assert.equal(boundaryCalls[0].env.CAREERRAT_DESKTOP_CLI_ONLY, "1");
+  assert.equal(boundaryCalls[0].platform, "darwin");
+
+  const atBoundary = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    startGuidedSetupImpl: (runtimeId) => started.push(runtimeId),
+    belowBoundaryImpl: async () => false,
+  });
+  const refusedResponse = await request(
+    atBoundary,
+    "POST",
+    "/api/settings/ai-runtime/guided-setup",
+    { runtimeId: "claude" }
+  );
+  assert.equal(refusedResponse.status, 409);
+  assert.equal(refusedResponse.body.code, "RUNTIME_ALREADY_INSTALLED");
+  assert.deepEqual(started, ["claude"]);
 });
 
 test("selection rejects an unavailable or unauthenticated runtime with an actionable code", async () => {

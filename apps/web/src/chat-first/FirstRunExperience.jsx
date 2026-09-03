@@ -58,6 +58,16 @@ function engineDescription(engine) {
   const presentation = runtimePresentation(engine);
   if (presentation.state === "auth_required")
     return "Detected on this computer. Sign in before CareerRat can use it.";
+  if (presentation.state === "update_required") {
+    const name = engine.name || "This AI CLI";
+    const installed = engine.version
+      ? `${name} ${engine.version} is installed.`
+      : `${name} is installed.`;
+    const minimum = engine.minimumVersion
+      ? ` CareerRat needs ${engine.minimumVersion} or newer.`
+      : "";
+    return `${installed}${minimum}`;
+  }
   if (presentation.state === "ready")
     return `Ready to run the complete CareerRat workflow with ${engine.name || "this AI CLI"}.`;
   if (engine?.probeMessage) return engine.probeMessage;
@@ -88,13 +98,15 @@ function DetectedEngine({
   onChooseEngine,
   onRetryEngine,
   onStartEngineSignIn,
+  onStartGuidedSetup,
 }) {
   const selectable = engineSelectable(engine);
   const presentation = runtimePresentation(engine);
   const canCompleteSetup =
     presentation.state === "auth_required" && engine.action === "start_sign_in";
   const canRetry = engine.detected === true && engine.ready !== true;
-  const hasActions = canCompleteSetup || canRetry;
+  const needsUpdate = presentation.state === "update_required";
+  const hasActions = canCompleteSetup || canRetry || needsUpdate;
   const className = `cf-first-run__engine-choice${engine.selected ? " is-selected" : ""}`;
   const content = (
     <>
@@ -134,6 +146,16 @@ function DetectedEngine({
       {content}
       {hasActions ? (
         <span className="cf-first-run__engine-actions">
+          {needsUpdate ? (
+            <button
+              className="cf-first-run__engine-action"
+              type="button"
+              disabled={submitting}
+              onClick={() => onStartGuidedSetup?.(engine.id)}
+            >
+              Update {engine.name || "Claude Code"}
+            </button>
+          ) : null}
           {canCompleteSetup ? (
             <button
               className="cf-first-run__engine-action"
@@ -445,6 +467,7 @@ export function EngineSelection({
                 onChooseEngine={onChooseEngine}
                 onRetryEngine={onRetryEngine}
                 onStartEngineSignIn={onStartEngineSignIn}
+                onStartGuidedSetup={onStartGuidedSetup}
               />
             ))
           ) : (

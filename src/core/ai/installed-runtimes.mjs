@@ -1135,6 +1135,47 @@ async function assertInstalledRuntimeBoundaryVersion(
   }
 }
 
+// A lightweight, non-throwing companion to assertInstalledRuntimeBoundaryVersion.
+// The guided-setup route uses this to decide whether an already-installed
+// Claude Code may still run the native installer as an in-place update: it
+// only runs the cheap --version check and skips the auth and completion
+// probes entirely, since it never needs to know anything beyond the version
+// gap to make that call.
+export async function isInstalledRuntimeBelowVersionBoundary(
+  runtime,
+  {
+    spawnImpl = spawn,
+    spawnSyncImpl = spawnSync,
+    treeKillImpl = spawnSync,
+    env = process.env,
+    platform = process.platform,
+    timeoutMs = 5000,
+  } = {}
+) {
+  const definition = installedRuntimeDefinition(runtime?.id);
+  if (!definition?.minimumBoundaryVersion || !runtime?.path) return false;
+  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
+    env: childEnv,
+    platform,
+  });
+  const result = await runInstalledRuntimeProbe(versionInvocation, {
+    spawnImpl,
+    spawnSyncImpl,
+    treeKillImpl,
+    env: childEnv,
+    platform,
+    timeoutMs,
+  });
+  return (
+    result?.status !== 0 ||
+    !versionAtLeast(
+      `${result?.stdout || ""}\n${result?.stderr || ""}`,
+      definition.minimumBoundaryVersion
+    )
+  );
+}
+
 export async function probeInstalledRuntime(
   runtime,
   {
@@ -1296,6 +1337,19 @@ export async function probeInstalledRuntime(
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       capabilityEvidence: capabilityEvidenceForProbe(definition, capabilityOverrides),
     }).capabilities;
+    if (capabilityReason) {
+      return {
+        status: "update_required",
+        ready: false,
+        action: "retry",
+        actionLabel: "Check again",
+        version: runtimeVersion,
+        minimumVersion: definition.minimumBoundaryVersion,
+        capabilities: runtimeCapabilities,
+        probeMessage: capabilityReason,
+        capabilityReason,
+      };
+    }
     return {
       status: definition.authProbe.launchOnly ? "ready_unverified" : "ready",
       ready: true,
