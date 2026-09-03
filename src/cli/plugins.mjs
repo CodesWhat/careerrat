@@ -106,18 +106,23 @@ function cmdList() {
 }
 
 function cmdVerify() {
-  const results = verifyBundledPlugins({ root: pluginsRoot });
-  const ok = results.every((r) => r.ok);
+  const verification = verifyBundledPlugins({ root: pluginsRoot });
+  const { ok, error, plugins: results } = verification;
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok, results }, null, 2));
+    console.log(JSON.stringify({ ok, error, results }, null, 2));
     process.exit(ok ? 0 : 1);
     return;
   }
 
+  if (error) {
+    console.log(`ERROR ${error}`);
+    console.log("");
+  }
+
   if (results.length === 0) {
-    console.log("No bundled plugins found.");
-    process.exit(0);
+    console.log(error ? "Could not verify bundled plugins." : "No bundled plugins found.");
+    process.exit(ok ? 0 : 1);
     return;
   }
 

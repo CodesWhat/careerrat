@@ -13,6 +13,27 @@ import test from "node:test";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
+test("npm pack ships the bundled example-echo plugin (manifest + entry)", () => {
+  // --ignore-scripts skips the "prepack" build of apps/web — this test only
+  // cares about which paths package.json's `files` allowlist ships, not
+  // about producing a real tarball.
+  const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const [pkg] = JSON.parse(result.stdout);
+  const paths = pkg.files.map((f) => f.path);
+  assert.ok(
+    paths.includes("plugins/example-echo/manifest.json"),
+    "npm pack must ship the bundled plugin's manifest.json"
+  );
+  assert.ok(
+    paths.includes("plugins/example-echo/index.mjs"),
+    "npm pack must ship the bundled plugin's entry file"
+  );
+});
+
 function tempHome() {
   return mkdtempSync(join(tmpdir(), "careerrat-plugins-cli-"));
 }
@@ -136,6 +157,48 @@ test("doctor --json includes a plugins block reporting the bundled example-echo 
     assert.ok(parsed.plugins, "expected a plugins block in doctor --json output");
     assert.ok(parsed.plugins.bundled >= 1);
     assert.equal(parsed.plugins.runnable, parsed.plugins.bundled);
+    assert.deepEqual(parsed.plugins.invalid, []);
+    assert.equal(parsed.plugins.error, null);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor --json still parses and reports the failure when the plugins path is a regular file", () => {
+  const home = tempHome();
+  const pluginsRoot = tempHome();
+  try {
+    // A regular file sitting where the `plugins/` directory should be -
+    // readdirSync on it throws ENOTDIR, which must never escape as an
+    // unhandled crash that skips doctor's JSON envelope.
+    writeFileSync(join(pluginsRoot, "plugins"), "not a directory");
+    const result = runCli("src/cli/doctor.mjs", ["--json"], home, {
+      CAREERRAT_PLUGINS_ROOT: pluginsRoot,
+    });
+    assert.equal(result.status, 1);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.ok, false);
+    assert.ok(parsed.plugins.error, "expected a directory-level plugins error");
+    assert.equal(parsed.plugins.bundled, 0);
+    assert.deepEqual(parsed.plugins.invalid, []);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(pluginsRoot, { recursive: true, force: true });
+  }
+});
+
+test("doctor --json still parses and reports the failure when CAREERRAT_PLUGINS_ROOT points nowhere", () => {
+  const home = tempHome();
+  const missingRoot = join(tmpdir(), `careerrat-missing-plugins-root-${Date.now()}`);
+  try {
+    const result = runCli("src/cli/doctor.mjs", ["--json"], home, {
+      CAREERRAT_PLUGINS_ROOT: missingRoot,
+    });
+    assert.equal(result.status, 1);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.ok, false);
+    assert.ok(parsed.plugins.error, "expected a directory-level plugins error");
+    assert.equal(parsed.plugins.bundled, 0);
     assert.deepEqual(parsed.plugins.invalid, []);
   } finally {
     rmSync(home, { recursive: true, force: true });

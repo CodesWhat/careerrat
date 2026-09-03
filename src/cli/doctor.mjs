@@ -178,9 +178,15 @@ const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 // Bundled plugins (plugins/<name>/). Informational: a plugin needing a
 // consent capability is unaffected by this block, that's the automation
 // block above. An invalid bundled manifest IS a defect in the shipped
-// package though, so unlike the rest of this section it flips result.ok.
-const pluginVerification = verifyBundledPlugins({ root });
-const invalidPlugins = pluginVerification.filter((p) => !p.ok);
+// package though, so unlike the rest of this section it flips result.ok —
+// and so does a directory-level enumeration failure (an unreadable plugins
+// root, or a `plugins` path that isn't a directory), which
+// verifyBundledPlugins now reports instead of throwing synchronously.
+// CAREERRAT_PLUGINS_ROOT overrides discovery only, same as `careerrat
+// plugins` — used by tests to point at a scratch tree with a broken root.
+const pluginsRoot = String(process.env.CAREERRAT_PLUGINS_ROOT || "").trim() || root;
+const pluginVerification = verifyBundledPlugins({ root: pluginsRoot });
+const invalidPlugins = pluginVerification.plugins.filter((p) => !p.ok);
 
 // Setup resume state (workspace/setup-state.json). Written by ingest-profile and
 // the explicit discovery-skip helper; read-only here.
@@ -228,7 +234,7 @@ const result = {
     missingUser.length === 0 &&
     missingSystem.length === 0 &&
     modes.valid &&
-    invalidPlugins.length === 0 &&
+    pluginVerification.ok &&
     (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
   missingSystem,
@@ -259,9 +265,10 @@ const result = {
     detail: sessionBrowser.presence.detail,
   },
   plugins: {
-    bundled: pluginVerification.length,
-    runnable: pluginVerification.length - invalidPlugins.length,
+    bundled: pluginVerification.plugins.length,
+    runnable: pluginVerification.plugins.length - invalidPlugins.length,
     invalid: invalidPlugins.map((p) => ({ name: p.name, errors: p.errors })),
+    error: pluginVerification.error,
   },
   setup,
   candidateSetup: candidateSetupReadiness,
@@ -400,12 +407,15 @@ if (!automation.exists) {
 }
 
 {
-  const runnable = pluginVerification.length - invalidPlugins.length;
-  console.log(`Plugins: ${pluginVerification.length} bundled, ${runnable} runnable.`);
+  const runnable = pluginVerification.plugins.length - invalidPlugins.length;
+  console.log(`Plugins: ${pluginVerification.plugins.length} bundled, ${runnable} runnable.`);
+  if (pluginVerification.error) {
+    console.log(`- ${pluginVerification.error}`);
+  }
   for (const p of invalidPlugins) {
     console.log(`- ${p.name}: ${p.errors.join("; ")}`);
   }
-  if (invalidPlugins.length > 0) {
+  if (invalidPlugins.length > 0 || pluginVerification.error) {
     console.log("  fix: run `careerrat plugins verify` for details.");
   }
   console.log("");
