@@ -110,8 +110,13 @@ export function createDesktopUpdateController({
   }
 
   const supported = Boolean(selfUpdateSupported);
-  let saved = { ...DEFAULT_STATE, ...persisted };
-  const recoveredOperation = savedOperation(saved.operation);
+  let saved = {
+    enabled: persisted.enabled ?? DEFAULT_STATE.enabled,
+    lastCheckedAt: persisted.lastCheckedAt ?? DEFAULT_STATE.lastCheckedAt,
+    skippedVersion: persisted.skippedVersion ?? DEFAULT_STATE.skippedVersion,
+    operation: savedOperation(persisted.operation),
+  };
+  const recoveredOperation = saved.operation;
   let startupCheckPending = supported && recoveredOperation?.phase === "ready";
   const interrupted =
     supported &&
