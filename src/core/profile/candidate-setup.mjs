@@ -225,3 +225,89 @@ export function lintPlaceholders({ root = DEFAULT_ROOT } = {}) {
 
   return { clean: findings.length === 0, findings };
 }
+
+// ---------------------------------------------------------------------------
+// checkTemplateLeftovers
+// ---------------------------------------------------------------------------
+
+// Literal strings that only appear in a candidate file because it still carries
+// content copied verbatim from templates/*.example.yml — the "Jane Candidate"
+// tech-demo persona and the evidence/honesty placeholder entries. Unlike
+// PLACEHOLDER_PATTERNS above (broad residue words: TODO, TBD, lorem ipsum), each
+// entry here names the exact template file it comes from, so the coverage test
+// in tests/health-template-leftovers.test.mjs can assert the marker still
+// appears in that template on disk — if a template edit drops or changes one of
+// these values without updating this list, that test fails instead of the check
+// silently going blind.
+export const TEMPLATE_LEFTOVER_MARKERS = [
+  { marker: "Jane Candidate", template: "templates/profile.example.yml" },
+  { marker: "jane@example.com", template: "templates/profile.example.yml" },
+  { marker: "+1-555-0100", template: "templates/profile.example.yml" },
+  { marker: "janecandidate", template: "templates/profile.example.yml" },
+  { marker: "Example Tool", template: "templates/honesty.example.yml" },
+  { marker: "Adjacent Tool", template: "templates/honesty.example.yml" },
+  { marker: "Tool Never Used", template: "templates/honesty.example.yml" },
+  {
+    marker: "Describe the real project, scope, stakeholders, and shipped result.",
+    template: "templates/evidence.example.yml",
+  },
+  { marker: "Add measurable impact if true.", template: "templates/evidence.example.yml" },
+];
+
+// Walks a parsed YAML value, yielding [dotted.key.path, leafStringValue] pairs.
+// Array entries get a numeric index segment (e.g. "tools.confirmed[0]").
+function* flattenLeaves(value, prefix) {
+  if (typeof value === "string") {
+    yield [prefix, value];
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      yield* flattenLeaves(value[i], `${prefix}[${i}]`);
+    }
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      yield* flattenLeaves(child, prefix ? `${prefix}.${key}` : key);
+    }
+  }
+}
+
+/**
+ * Scan each existing candidate file for values that still match a known
+ * template marker. Unlike lintPlaceholders, findings never carry the real
+ * candidate value or surrounding line — only the file, the YAML key path, and
+ * the matched marker itself, so a report never leaks candidate PII or comp.
+ *
+ * @param {{ root?: string }} [options]
+ * @returns {{ clean: boolean, findings: Array<{ file, key, marker }> }}
+ *   file is relative to root; key is a dotted YAML path.
+ */
+export function checkTemplateLeftovers({ root = DEFAULT_ROOT } = {}) {
+  const findings = [];
+
+  for (const entry of CANDIDATE_FILES) {
+    const fullPath = userPath({ repoRoot: root }, entry.candidatePath);
+    if (!existsSync(fullPath)) continue;
+    const display = displayPath({ repoRoot: root }, entry.candidatePath);
+
+    let data;
+    try {
+      data = parseYaml(readFileSync(fullPath, "utf8"));
+    } catch {
+      continue; // unparseable → let schema validation speak
+    }
+
+    for (const [key, leaf] of flattenLeaves(data, "")) {
+      for (const { marker } of TEMPLATE_LEFTOVER_MARKERS) {
+        if (leaf.includes(marker)) {
+          findings.push({ file: display, key, marker });
+          break; // one finding per leaf
+        }
+      }
+    }
+  }
+
+  return { clean: findings.length === 0, findings };
+}

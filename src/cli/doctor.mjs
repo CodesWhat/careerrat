@@ -25,6 +25,7 @@ import { detectSession } from "../core/automation/session.mjs";
 import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
+import { checkTemplateLeftovers } from "../core/profile/candidate-setup.mjs";
 import { candidateConfigSource, loadCandidateConfig } from "../core/profile/config-store.mjs";
 import { loadEvidence } from "../core/profile/evidence-writer.mjs";
 import { listLearnings } from "../core/profile/learnings.mjs";
@@ -132,6 +133,17 @@ const candidateSetupReadiness = loadCandidateSetupReadiness();
 const missingUser =
   candidateSource === "db" ? [] : userPrereqs.filter((item) => !checkUserPath(item.path));
 const missingSystem = systemPrereqs.filter((path) => !checkPath(path));
+
+// Personalization files that pass the missingUser existence check but still carry
+// template content — e.g. candidate/profile.yml never edited from the "Jane
+// Candidate" tech-demo persona it was copied from. Non-blocking by design (does
+// NOT feed result.ok): doctor's job is to say the scaffold is present and valid,
+// and an unedited personalization file must not make an otherwise-working
+// CareerRat install look broken. It DOES need to be visible, since evaluations
+// and tailored artifacts silently degrade when it's missed — surfaced as its own
+// field an agent can branch on instead of a string it has to pattern-match out.
+const templateLeftovers =
+  candidateSource === "db" ? { clean: true, findings: [] } : checkTemplateLeftovers({ root });
 for (const dir of workspaceDirs) ensureUserDir(dir);
 
 // Per-role-family learning store (candidate/learnings/<family>.md). Informational
@@ -209,6 +221,7 @@ const result = {
     (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
   missingSystem,
+  templateLeftovers,
   skillsNotDiscoverable,
   workspaceDirs,
   learnings: { count: learnings.length, families: learnings.map((l) => l.family) },
@@ -276,6 +289,17 @@ if (missingUser.length > 0) {
     console.log(`- ${displayPath(pathCtx, item.path)}`);
     console.log(`  fix: ${item.fix}`);
   }
+  console.log("");
+}
+
+if (templateLeftovers.findings.length > 0) {
+  console.log("Personalization incomplete (still has template content):");
+  for (const finding of templateLeftovers.findings) {
+    console.log(`- ${finding.file} ${finding.key}: still has template marker "${finding.marker}"`);
+  }
+  console.log(
+    "  fix: personalize these fields with your own information, or re-run `careerrat ingest --check`."
+  );
   console.log("");
 }
 

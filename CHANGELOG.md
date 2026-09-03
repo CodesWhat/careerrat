@@ -4,6 +4,14 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `careerrat doctor` now flags candidate personalization files (profile,
+  evidence, honesty) that still carry unedited template content, reporting the
+  file, key, and matched marker without ever printing the candidate's real data.
+
 ## [0.17.0] - 2026-08-30
 
 ### Added
