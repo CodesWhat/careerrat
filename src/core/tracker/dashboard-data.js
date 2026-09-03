@@ -3645,6 +3645,38 @@ function medianMoneyK(value) {
 
 // Browser-local mirror of src/core/currency-format.mjs. This file is copied
 // verbatim to workspace/dashboard-data.js, so it must remain dependency-free.
+const DASHBOARD_FALLBACK_CURRENCY_CODES = ["AUD", "CAD", "CHF", "EUR", "GBP", "MXN", "PLN", "USD"];
+const DASHBOARD_CURRENCY_CODE_SET = new Set(
+  typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("currency")
+    : DASHBOARD_FALLBACK_CURRENCY_CODES
+);
+
+// Mirror of CURRENCY_CODE_ENGLISH_HOMOGRAPHS in src/core/scoring/sourced-scanner.mjs,
+// that file's copy is the source of truth. Keep the two in sync by hand, the
+// same way DASHBOARD_CURRENCY_CODE_SET mirrors CURRENCY_CODE_SET above. An
+// uppercase ISO code that also reads as an ordinary English word (e.g. "ALL"
+// in "$120K ALL IN") must never outrank a real currency symbol already
+// present in the text.
+const DASHBOARD_CURRENCY_CODE_ENGLISH_HOMOGRAPHS = new Set([
+  "TOP",
+  "ALL",
+  "TRY",
+  "PEN",
+  "COP",
+  "BOB",
+  "CUP",
+  "GEL",
+  "SOS",
+  "LAK",
+  "YER",
+  "RON",
+  "BAM",
+  "MAD",
+  "MOP",
+  "RUB",
+]);
+
 function normalizeCurrencyCode(value, fallback = "USD") {
   const code = String(value || fallback)
     .trim()
@@ -3670,11 +3702,17 @@ function formatMoneyK(value, currency) {
   return formatCurrencyThousands(value, currency);
 }
 
-function compensationCurrency(...values) {
+export function compensationCurrency(...values) {
   for (const value of values) {
     const text = String(value || "");
     const code = text.match(/\b([A-Z]{3})\b/)?.[1];
-    if (code) return code;
+    if (
+      code &&
+      DASHBOARD_CURRENCY_CODE_SET.has(code) &&
+      !DASHBOARD_CURRENCY_CODE_ENGLISH_HOMOGRAPHS.has(code)
+    ) {
+      return code;
+    }
     if (text.includes("£")) return "GBP";
     if (text.includes("€")) return "EUR";
     if (text.includes("$")) return "USD";
@@ -4626,6 +4664,12 @@ function jobDetailFromRow(
     interview: buildInterviewBlock(sourceRecord),
     statusNote: String(sourceRecord.statusNote || "").trim(),
     compNote: String(sourceRecord.compNote || "").trim(),
+    // Evaluate verdict's per-requirement table (CR26 Port A). Null when the
+    // evaluation carries no requirements array, so the drawer section hides
+    // instead of rendering an empty table.
+    requirements: Array.isArray(sourceRecord.evaluation?.requirements)
+      ? sourceRecord.evaluation.requirements
+      : null,
     roleFit:
       sourceRecord.roleFit &&
       (sourceRecord.roleFit.why?.length || sourceRecord.roleFit.risks?.length)

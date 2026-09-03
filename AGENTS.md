@@ -965,11 +965,14 @@ days). This stamp is unconditional — a no-change review still counts as a revi
 marker is mechanical (timestamp + counts); the skill owns the strategy judgement.
 
 **Two distinct gates — don't conflate them.** The dashboard "review ready" nudge
-(`buildStrategyReviewTrigger`) fires on **≥5 newly-resolved outcomes of any kind**
-(advances + rejections) over the rolling 30-day funnel. The `reevaluation.due` trip fires
-on the **rejection-only delta** (`sinceLastReview`) against `targeting.yml` thresholds.
-A nudge can show with few or zero rejections; never read the dashboard pill as
-`reevaluation.due: true`, and never read `reevaluation.due` as the nudge.
+(`buildStrategyReviewTrigger`) first fires once the rolling 30-day funnel clears
+`meetsThreshold` (**≥3 applied, and ≥2 advanced or ≥2 rejected**). After a review is
+stamped, it only re-fires on fresh signal: **≥5 new resolved outcomes**
+(`STRATEGY_REVIEW_NEW_SIGNAL`) since that review, or **≥1 new outcome** once
+**21 days** (`STRATEGY_REVIEW_COOLDOWN_DAYS`) have passed. The `reevaluation.due` trip
+fires on the **rejection-only delta** (`sinceLastReview`) against `targeting.yml`
+thresholds. A nudge can show with few or zero rejections; never read the dashboard pill
+as `reevaluation.due: true`, and never read `reevaluation.due` as the nudge.
 
 ## Learning Memory
 
@@ -1170,6 +1173,22 @@ via `email-comms`.
 - **Draft quality.** Use the candidate's real name (always known). When a
   counterparty detail is unknown, go generic — never emit a bracketed placeholder
   such as `[Company]` or `[Recruiter]`. Brackets in output are a build failure.
+- **Never claim authorship.** Never claim the candidate authored, built, or
+  contributed to an open-source project, repo, library, tool, or framework
+  unless `candidate/evidence.yml` or the candidate's own material attributes
+  it to them. Using a tool is not building it. Tool-of-trade conflation
+  (candidate uses X, so the draft says the candidate built X) is the single
+  most common fabrication pattern in generated outbound artifacts and is
+  forbidden.
+- **Reformulate, never invent.** Keywords and phrasing get reordered,
+  reframed, and emphasized to match a JD or thread, never fabricated. If a
+  claim is not backed by `evidence.yml`, `honesty.yml`, or another in-scope
+  candidate file, ask the candidate, and record a yes in `evidence.yml`
+  through the evidence firewall (`computeEvidenceWrite` and
+  `candidateEvidenceMerge`) before the draft uses it. Authorship and
+  tool-construction claims need that recorded attribution, never a
+  conversational answer alone. If there is no answer, omit it. Silence on a
+  topic beats a manufactured detail.
 
 ### Privacy Invariant (pointer)
 
@@ -1251,22 +1270,25 @@ three-layer substrate (static `WebFetch` → headless capture →
 the live "session browser") is mapped in `docs/BROWSER.md`; this contract governs
 the authenticated, agent-driven uses of Layer 3.
 
-**The permission predicate (hard).** A capability may run on a platform **only if all
-four are true**: automation is in the "advanced" setup mode, the capability's global
-switch, that platform's per-capability switch, and that platform's one-time ToS
-consent. This is a single AND — never hardcode it in skill prose. Ask the config:
+**The permission predicate (hard).** A capability may run on a platform **only if the
+three switches are all on**: the capability's global switch, that platform's
+per-capability switch, and that platform's one-time ToS consent. **And** either the
+setup mode is "advanced" or the capability has a contextual scoped grant for that
+platform. Never hardcode this in skill prose. Ask the config:
 
 ```
 import { mayRun } from "src/core/automation/consent.mjs";
 const { allowed, reasons } = mayRun({ capability, platform, root });
-// allowed === (setup_mode === "advanced") ∧ capabilities[cap].enabled ∧ capabilities[cap].platforms[platform] ∧ consent[platform]
+// allowed === (setup_mode === "advanced" || scoped_grants[platform]) ∧ capabilities[cap].enabled ∧ capabilities[cap].platforms[platform] ∧ consent[platform]
 ```
 
 Setup mode is the coarse "has the user opted into automation at all" gate — `basic`
 (the default) keeps every capability hard-off no matter what the granular switches
-say; `advanced` lets them govern individually. Flip it with `careerrat automation mode
-advanced --write` — run this **before** `consent`/`enable`, or the granular switches
-below have nothing to attach to.
+say, unless a contextual scoped grant covers that capability and platform; `advanced`
+lets the granular switches govern individually with no scoped grant needed. Flip it
+with `careerrat automation mode advanced --write`; run this **before** `consent`/`enable`
+if you're not relying on a scoped grant, or the granular switches below have nothing
+to attach to.
 
 If `allowed` is false, surface `reasons` (each names the exact switch that's off and
 the command to flip it) and **stop** — do not drive the browser.
@@ -1278,7 +1300,8 @@ hand-edit — so writes stay schema-validated, comment-preserving, and atomic:
 
 - `careerrat automation status [--json]` — show the matrix + what's actually live.
 - `careerrat automation mode <basic|advanced> --write` — flip the coarse setup-mode
-  gate. Must be `advanced` before any capability can go live; run this first.
+  gate. Must be `advanced` before any capability can go live, unless a contextual
+  scoped grant already covers that capability and platform; run this first otherwise.
 - `careerrat automation consent <platform> --write` — record ToS consent (after the
   user reads that platform's terms). `revoke <platform> --write` withdraws it.
 - `careerrat automation enable <capability> [platform] --write` — flip the global
@@ -1294,12 +1317,12 @@ session is user-initiated with the agent in the loop.
 
 **No stored credentials.** CareerRat stores no passwords. The browser session holds the
 logins. The default `auto` provider uses Orca's supervised browser inside an Orca
-workspace, otherwise the Chrome extension (Claude-in-Chrome / Codex); a
-**Playwright persistent profile** the user signs into once per platform remains the
-fallback (`<data root>/board-profiles/<platform>`, data root per Path Resolution,
-the `scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
-the session browser," never an MCP namespace or vendor tool name. See
-`src/core/automation/session.mjs` and `docs/BROWSER.md`.
+workspace, otherwise CareerRat's app-owned **Playwright persistent profile** the user
+signs into once per platform (`<data root>/board-profiles/<platform>`, data root per
+Path Resolution, the `scripts/capture-board-snapshot.mjs` model). The Chrome extension
+(Claude-in-Chrome / Codex) remains selectable as an explicit, non-default provider.
+Write skill prose tool-agnostically — "use the session browser," never an MCP namespace
+or vendor tool name. See `src/core/automation/session.mjs` and `docs/BROWSER.md`.
 
 **Agent drives the DOM live.** Snapshot/read the page **before each action**, never rely
 on hardcoded selectors — the same model as `apply-job`. This is why selector fragility

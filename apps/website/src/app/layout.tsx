@@ -44,14 +44,7 @@ export const metadata: Metadata = {
   description: siteDescription,
   applicationName: "CareerRat",
   alternates: { canonical: "/" },
-  keywords: [
-    "job search",
-    "local-first",
-    "agentic",
-    "resume",
-    "career",
-    "privacy",
-  ],
+  keywords: ["job search", "local-first", "agentic", "resume", "career", "privacy"],
   openGraph: {
     title: "CareerRat: Rate. Apply. Track.",
     description: siteDescription,
@@ -88,11 +81,7 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={figtree.variable}>
       <body>{children}</body>

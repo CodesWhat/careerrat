@@ -1162,6 +1162,7 @@ function jobContext(view, thread, mockSession, actions) {
         source: jobSourceLine(source) || null,
         fitReasons: source?.roleFit?.why || [],
         risks: source?.roleFit?.risks || [],
+        requirements: Array.isArray(source?.requirements) ? source.requirements : [],
       }}
       summary={
         lines.length

@@ -4,12 +4,84 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-09-03
+
+### Added
+
+- The evaluate-job verdict now includes an evidence-tiered requirements table
+  (each JD requirement scored for importance, evidence, and how well it
+  matches the candidate), built in the same evaluation pass with no extra AI
+  call. Fit risks are now derived from that table instead of scored
+  separately.
+- `careerrat doctor` now flags candidate files (profile, targeting, evidence,
+  honesty, form defaults) that still carry unedited template content, reporting
+  the file, key, and matched marker without printing the candidate's real data.
+  A file it could not read is reported as unchecked, never as clean.
+- `careerrat export --ats` now prints an ATS parseability score (0-100) with
+  fixable issues, such as a missing section heading or unreachable contact
+  info, for the submission copy of a tailored resume.
+- The annual-cash worksheet now takes a flat weekly or flat monthly amount as
+  the base pay, alongside the existing hourly wage. Tips, commission, or cash
+  bonuses per shift still layer on top of any one of the three.
+- Requirements table from the evaluate verdict shows in the chat verdict card and the This job panel, collapsed by default.
+- `careerrat plugins` lists and verifies the bundled plugins for developers,
+  and doctor reports them.
+- CareerRat now has a sandboxed runtime for bundled plugins: each plugin
+  declares exactly what it may read and which hosts it may reach, runs behind
+  the existing point-of-need consent gate, and every run is recorded to the
+  audit trail. This is internal groundwork only; no bundled plugin changes
+  candidate-facing behavior yet.
+
+### Changed
+
+- The website's feature cards and how-it-works copy are now shorter, plainer
+  sentences, and the docs Quick start leads with the Mac app download, moving
+  the npm/CLI path into a For developers subsection.
+- The README is now a desktop-first setup guide: download the Mac app, open
+  it, pick an engine, and see what the first run asks for. npm, the CLI, and
+  build-from-source now live only under a For developers section.
+- The docs no longer claim a Codex version floor CareerRat doesn't enforce,
+  describe both triggers for the strategy-review nudge (first fire on a
+  cleared funnel threshold, re-fire after a cooldown), and list every skill
+  under its cluster.
+- The vendored career-ops job-source snapshot moved to a newer upstream pin,
+  adding five new job-board providers and improving location, pagination, and
+  category coverage on several existing ones.
+- Routine dependency updates (#272, #280, #283, #288).
+
+### Fixed
+
+- Closed five small correctness gaps found in a QA sweep: a Workday job
+  posted on two sites could dedupe into two tracker rows, the Antigravity CLI
+  could never be detected, hidden formatting characters could survive into
+  submitted resume text, and the `health --help` footer read like an error
+  even when nothing was wrong.
+- Closed four compensation-parsing bugs found reviewing the v0.17.0 diff:
+  ordinary words like TOP or OTE next to a dollar figure no longer misread as
+  a foreign currency code, and combined base-plus-tips earnings figures
+  compare correctly instead of collapsing to the base salary alone.
+- An AI runtime reached through the ACP protocol could report itself ready
+  right after the initial handshake, before ever proving it could complete a
+  request. It now has to pass the same completion check every other runtime
+  does first.
+- Every writing skill (tailoring, answering questions, email, LinkedIn,
+  interview prep) now carries the same anti-fabrication rules: never claim
+  the candidate authored or contributed to something without their own
+  evidence backing it, and never invent a keyword that evidence doesn't
+  support.
+- Fixed a flaky browser QA test that could click before the
+  onboarding-to-workspace redirect was decided; developer-facing only, no
+  effect on the app itself.
+- Fixed runtime-detection tests seeing real CLI tools installed on a
+  developer's machine instead of only the isolated test fixtures;
+  developer-facing only, no effect on the app itself.
+
 ## [0.17.0] - 2026-08-30
 
 ### Added
 
-- Candidate setup and Profile now include an annual-cash worksheet for hourly,
-  weekly, monthly, and tipped compensation. CareerRat keeps the original pay
+- Candidate setup and Profile now include an annual-cash worksheet for hourly
+  and tipped or shift-based compensation. CareerRat keeps the original pay
   inputs while deriving a comparable annual floor for search and evaluation.
 
 ### Changed
@@ -113,7 +185,7 @@ cask update. Everything listed under 0.16.6 ships here, plus the fixes below.
 
 ### Fixed
 
-- AI web search no longer stops at the old two-minute runtime limit and reports a misleading structured-output error. Claude Code and Codex now share an explicit eight-minute bound, and real runtime failures stop immediately instead of repeating the entire search as a schema retry.
+- AI web search no longer stops at the old two-minute runtime limit and reports a misleading structured-output error. Claude Code and Codex now share an explicit thirty-minute per-prompt bound, and real runtime failures stop immediately instead of repeating the entire search as a schema retry.
 - Long searches keep their sourcing run alive while CareerRat reads and saves full job descriptions, so a completed model search cannot be marked failed during post-search capture.
 - Paul and the durable chat history show a plain-English retry message instead of model schemas, provider output, runtime codes, or parser details when AI search fails.
 - Yes/No buttons appear only for genuinely binary questions. Either-or questions stay as normal text responses, while binary questions with a short lead-in still get buttons.

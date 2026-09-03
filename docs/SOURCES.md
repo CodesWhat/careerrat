@@ -122,7 +122,7 @@ Use it as both:
 ## How to add a source provider
 
 CareerRat vendors the public-network provider contract from Career Ops commit
-`8be39e0934b83410276d66b541bf3a2edf3411cb`. The canonical inventory is
+`ffb49be1f394041840c31c23a5d3a3347854340e`. The canonical inventory is
 `src/core/providers/provider-parity.mjs`; inspect it with
 `careerrat searches --providers` or `careerrat searches --providers --json`.
 
@@ -163,11 +163,11 @@ never written here.
 | Google Jobs | general | aggregator | high | planned | structured-data aggregator; field-neutral; no provider impl yet |
 | Wellfound | tech/software | aggregator | high | implemented | `src/core/providers/wellfound.mjs`; SPA browser source; tech-domain only |
 | Remote Vibe Coding Jobs | tech/software, remote | aggregator | high | implemented | URL builder in `source-url.mjs`; RSS via `src/core/providers/rss.mjs`; AI-native remote aggregator |
-| Ashby | general | ATS | high | implemented | `fetchAshby` in `sourced-scanner.mjs`; company-level ATS API |
-| Greenhouse | general | ATS | high | implemented | `fetchGreenhouse` in `sourced-scanner.mjs`; company-level ATS API |
+| Ashby | general | ATS | high | implemented | Career Ops deterministic adapter; company-level ATS API |
+| Greenhouse | general | ATS | high | implemented | Career Ops deterministic adapter; company-level ATS API |
 | Lever | general | ATS | high | implemented | `src/core/providers/lever.mjs`; JSON API in `capture-search-sources.mjs`; company-level ATS API |
-| Workable | general | ATS | high | implemented | `fetchWorkable` in `sourced-scanner.mjs`; company-level ATS API |
-| SmartRecruiters | general | ATS | high | implemented | `fetchSmartRecruiters` in `sourced-scanner.mjs`; company-level ATS API |
+| Workable | general | ATS | high | implemented | Career Ops deterministic adapter; company-level ATS API |
+| SmartRecruiters | general | ATS | high | implemented | Career Ops deterministic adapter; company-level ATS API |
 | Recruitee | general | ATS | high | implemented | Career Ops deterministic adapter; company-level public API |
 | Workday | general | ATS | high | implemented | Career Ops deterministic adapter with bounded pagination |
 | RemoteOK | remote | niche-board | high | implemented | public board-wide API |
@@ -199,7 +199,7 @@ never written here.
 ## Deterministic provider parity
 
 The curated table above is a starter menu, not the complete runtime inventory.
-CareerRat accounts for all 78 providers in the pinned Career Ops snapshot: 77
+CareerRat accounts for all 83 providers in the pinned Career Ops snapshot: 82
 public-network adapters are implemented, and `local-parser` is intentionally
 unsupported because it executes user-configured local commands rather than making
 a public network call. The npm package includes the adapter sources, MIT license,

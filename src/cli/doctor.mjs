@@ -25,6 +25,8 @@ import { detectSession } from "../core/automation/session.mjs";
 import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
+import { verifyBundledPlugins } from "../core/plugins/index.mjs";
+import { checkTemplateLeftovers } from "../core/profile/candidate-setup.mjs";
 import { candidateConfigSource, loadCandidateConfig } from "../core/profile/config-store.mjs";
 import { loadEvidence } from "../core/profile/evidence-writer.mjs";
 import { listLearnings } from "../core/profile/learnings.mjs";
@@ -132,6 +134,19 @@ const candidateSetupReadiness = loadCandidateSetupReadiness();
 const missingUser =
   candidateSource === "db" ? [] : userPrereqs.filter((item) => !checkUserPath(item.path));
 const missingSystem = systemPrereqs.filter((path) => !checkPath(path));
+
+// Personalization files that pass the missingUser existence check but still carry
+// template content — e.g. candidate/profile.yml never edited from the "Jane
+// Candidate" tech-demo persona it was copied from. Non-blocking by design (does
+// NOT feed result.ok): doctor's job is to say the scaffold is present and valid,
+// and an unedited personalization file must not make an otherwise-working
+// CareerRat install look broken. It DOES need to be visible, since evaluations
+// and tailored artifacts silently degrade when it's missed — surfaced as its own
+// field an agent can branch on instead of a string it has to pattern-match out.
+const templateLeftovers =
+  candidateSource === "db"
+    ? { clean: true, status: "clean", findings: [], files: [] }
+    : checkTemplateLeftovers({ root });
 for (const dir of workspaceDirs) ensureUserDir(dir);
 
 // Per-role-family learning store (candidate/learnings/<family>.md). Informational
@@ -159,6 +174,19 @@ const modes = loadModes({ root });
 // HOW a session runs, not WHETHER a capability is allowed. Never fails doctor.
 const automationData = loadAutomation({ root }).data;
 const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
+
+// Bundled plugins (plugins/<name>/). Informational: a plugin needing a
+// consent capability is unaffected by this block, that's the automation
+// block above. An invalid bundled manifest IS a defect in the shipped
+// package though, so unlike the rest of this section it flips result.ok —
+// and so does a directory-level enumeration failure (an unreadable plugins
+// root, or a `plugins` path that isn't a directory), which
+// verifyBundledPlugins now reports instead of throwing synchronously.
+// CAREERRAT_PLUGINS_ROOT overrides discovery only, same as `careerrat
+// plugins` — used by tests to point at a scratch tree with a broken root.
+const pluginsRoot = String(process.env.CAREERRAT_PLUGINS_ROOT || "").trim() || root;
+const pluginVerification = verifyBundledPlugins({ root: pluginsRoot });
+const invalidPlugins = pluginVerification.plugins.filter((p) => !p.ok);
 
 // Setup resume state (workspace/setup-state.json). Written by ingest-profile and
 // the explicit discovery-skip helper; read-only here.
@@ -206,9 +234,11 @@ const result = {
     missingUser.length === 0 &&
     missingSystem.length === 0 &&
     modes.valid &&
+    pluginVerification.ok &&
     (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
   missingSystem,
+  templateLeftovers,
   skillsNotDiscoverable,
   workspaceDirs,
   learnings: { count: learnings.length, families: learnings.map((l) => l.family) },
@@ -233,6 +263,12 @@ const result = {
     configured: automation.exists,
     presence: sessionBrowser.presence.status,
     detail: sessionBrowser.presence.detail,
+  },
+  plugins: {
+    bundled: pluginVerification.plugins.length,
+    runnable: pluginVerification.plugins.length - invalidPlugins.length,
+    invalid: invalidPlugins.map((p) => ({ name: p.name, errors: p.errors })),
+    error: pluginVerification.error,
   },
   setup,
   candidateSetup: candidateSetupReadiness,
@@ -276,6 +312,35 @@ if (missingUser.length > 0) {
     console.log(`- ${displayPath(pathCtx, item.path)}`);
     console.log(`  fix: ${item.fix}`);
   }
+  console.log("");
+}
+
+if (templateLeftovers.findings.length > 0) {
+  console.log("Personalization incomplete (still has template content):");
+  for (const finding of templateLeftovers.findings) {
+    if (finding.key === "(whole file)") {
+      console.log(
+        `- ${finding.file}: ${finding.marker}, it doesn't look like it's been edited yet.`
+      );
+    } else {
+      console.log(
+        `- ${finding.file} ${finding.key}: still has template marker "${finding.marker}"`
+      );
+    }
+  }
+  console.log(
+    "  fix: personalize these fields with your own information, or re-run `careerrat ingest --check`."
+  );
+  console.log("");
+}
+
+const unreadableTemplateFiles = templateLeftovers.files.filter((f) => f.status === "unreadable");
+if (unreadableTemplateFiles.length > 0) {
+  console.log("Could not check some files for leftover template content:");
+  for (const file of unreadableTemplateFiles) console.log(`- ${file.file}`);
+  console.log(
+    "  fix: make sure the file is readable and is valid YAML, then run `careerrat doctor` again."
+  );
   console.log("");
 }
 
@@ -338,6 +403,21 @@ if (!automation.exists) {
   console.log(
     "  change with `careerrat automation session <auto|extension|orca|playwright> --write` (see docs/BROWSER.md)."
   );
+  console.log("");
+}
+
+{
+  const runnable = pluginVerification.plugins.length - invalidPlugins.length;
+  console.log(`Plugins: ${pluginVerification.plugins.length} bundled, ${runnable} runnable.`);
+  if (pluginVerification.error) {
+    console.log(`- ${pluginVerification.error}`);
+  }
+  for (const p of invalidPlugins) {
+    console.log(`- ${p.name}: ${p.errors.join("; ")}`);
+  }
+  if (invalidPlugins.length > 0 || pluginVerification.error) {
+    console.log("  fix: run `careerrat plugins verify` for details.");
+  }
   console.log("");
 }
 

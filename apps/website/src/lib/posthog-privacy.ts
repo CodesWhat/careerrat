@@ -56,7 +56,9 @@ export function sanitizeRoute(input: unknown): string {
 }
 
 function surfaceForPath(path: string): "docs" | "marketing" {
-  return path === DOCS_PATH_PREFIX || path.startsWith(`${DOCS_PATH_PREFIX}/`) ? "docs" : "marketing";
+  return path === DOCS_PATH_PREFIX || path.startsWith(`${DOCS_PATH_PREFIX}/`)
+    ? "docs"
+    : "marketing";
 }
 
 type EventInput = {
@@ -134,7 +136,7 @@ function createCommonProperties(properties: Record<string, unknown>) {
 function createSanitizedEvent(
   input: EventInput,
   event: SanitizedEvent["event"],
-  properties: SanitizedEvent["properties"],
+  properties: SanitizedEvent["properties"]
 ): SanitizedEvent {
   const result: SanitizedEvent = { event, properties };
   if (typeof input.uuid === "string") result.uuid = input.uuid;

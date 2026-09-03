@@ -365,6 +365,11 @@ ATS résumé parsers extract text from a common system face far more reliably th
 from an embedded variable brand font. Drop `--ats` only for a copy meant for human
 eyes (portfolio, print, direct email to a person) where the brand face is wanted.
 
+`--ats` also prints an ATS parseability score (0-100) with any fixable issues,
+such as missing section headings, unreachable contact info, sparse text, or a
+structural problem like a table or embedded image. It's advisory, not a gate:
+review it and fix what's cheap to fix, but a lower score never blocks handoff.
+
 PDF needs no setup — it uses the Playwright Chromium bundled with the repo.
 DOCX auto-detects pandoc, then LibreOffice/soffice, then falls back to a
 built-in OOXML writer. Zero new dependencies in either case.

@@ -25,11 +25,14 @@ test("README states runtime, update, and Windows boundaries without overclaiming
 
   assert.match(flattened, /Claude Code/);
   assert.match(flattened, /OpenAI Codex/);
-  assert.match(flattened, /only supported product runtime choices/i);
-  assert.match(flattened, /invokes the selected installed CLI directly/i);
-  assert.match(flattened, /same CareerRat-owned workflows, skills, and durable state/i);
+  assert.match(flattened, /works with/i);
+  assert.match(flattened, /keeps using the one you picked/i);
+  assert.match(flattened, /passes a quick check/i);
   assert.doesNotMatch(readme, /Hermes Agent|Gemini CLI|OpenCode|GitHub Copilot/);
-  assert.match(readme, /never falls back to or silently switches providers/);
+  assert.match(readme, /never falls back to another tool or switches on its own/);
+  assert.match(flattened, /You do not need it before you open the app/);
+  assert.match(flattened, /install Claude Code from inside the app on first run/);
+  assert.doesNotMatch(flattened, /already installed before anything in the app works/i);
   assert.doesNotMatch(readme, /equal, complete CareerRat engines/i);
   assert.match(readme, /downloads the signed and notarized\s+app update/i);
   assert.match(readme, /Restart and install/);

@@ -7,6 +7,13 @@ export const BROWSER_LIKE_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 CareerRat/0.7";
 
+// macOS browser User-Agent for providers whose WAF rejects the shared
+// BROWSER_LIKE_USER_AGENT signature above (upstream: feishu-jobs). Ported
+// from upstream's user-agent.mjs, which this shim does not otherwise vendor.
+export const MACOS_BROWSER_LIKE_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
 const JITTER_MS = 250;
 const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = "unexpected redirect";
