@@ -1180,8 +1180,12 @@ via `email-comms`.
 - **Reformulate, never invent.** Keywords and phrasing get reordered,
   reframed, and emphasized to match a JD or thread, never fabricated. If a
   claim is not backed by `evidence.yml`, `honesty.yml`, or another in-scope
-  candidate file, ask the candidate before including it. If there is no
-  answer, omit it. Silence on a topic beats a manufactured detail.
+  candidate file, ask the candidate, and record a yes in `evidence.yml`
+  through the evidence firewall (`computeEvidenceWrite` and
+  `candidateEvidenceMerge`) before the draft uses it. Authorship and
+  tool-construction claims need that recorded attribution, never a
+  conversational answer alone. If there is no answer, omit it. Silence on a
+  topic beats a manufactured detail.
 
 ### Privacy Invariant (pointer)
 
