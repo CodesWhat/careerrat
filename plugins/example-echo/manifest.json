@@ -1,0 +1,9 @@
+{
+  "name": "example-echo",
+  "version": "0.1.0",
+  "description": "Test-only example plugin that echoes back the reads it received. Template for future bundled plugins.",
+  "capability": null,
+  "reads": ["role", "company", "jd", "targeting"],
+  "fetchHosts": [],
+  "entry": "index.mjs"
+}

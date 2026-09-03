@@ -849,6 +849,85 @@
   font-weight: 650;
 }
 
+.chat-first-artifact-card__requirements {
+  flex-basis: 100%;
+  margin-left: 31px;
+  color: var(--slate);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* Shared with .chat-first-context-card__requirements (This job panel). */
+.chat-first-artifact-card__requirements summary,
+.chat-first-context-card__requirements summary {
+  width: fit-content;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-first-artifact-card__requirements table,
+.chat-first-context-card__requirements table {
+  width: 100%;
+  margin-top: 7px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.chat-first-artifact-card__requirements th,
+.chat-first-context-card__requirements th {
+  padding: 0 6px 4px 0;
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.chat-first-artifact-card__requirements th:nth-child(1),
+.chat-first-context-card__requirements th:nth-child(1) {
+  width: 55%;
+}
+
+.chat-first-artifact-card__requirements th:nth-child(2),
+.chat-first-context-card__requirements th:nth-child(2),
+.chat-first-artifact-card__requirements th:nth-child(3),
+.chat-first-context-card__requirements th:nth-child(3) {
+  width: 22%;
+}
+
+.chat-first-artifact-card__requirements td,
+.chat-first-context-card__requirements td {
+  padding: 5px 6px 5px 0;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.chat-first-artifact-card__requirements th:last-child,
+.chat-first-context-card__requirements th:last-child,
+.chat-first-artifact-card__requirements td:last-child,
+.chat-first-context-card__requirements td:last-child {
+  padding-right: 0;
+}
+
+.chat-first-artifact-card__requirements td small,
+.chat-first-context-card__requirements td small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Evidence tier label: same quiet treatment as the jdSignal line, but smaller
+   and never italic, since it's a plain-word tag rather than a quote. */
+.chat-first-requirement-evidence {
+  font-size: 10px;
+  font-style: normal;
+}
+
 .company-proposal-review {
   max-width: 860px;
 }
@@ -2075,6 +2154,18 @@ form.chat-first-choice-actions > fieldset {
   flex-direction: column;
   gap: 3px;
   padding-left: 16px;
+}
+
+/* Table styling (summary/table/th/td) shared with
+   .chat-first-artifact-card__requirements, defined earlier in this file. */
+.chat-first-context-card__requirements {
+  display: block;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .chat-first-packet-review {
