@@ -154,6 +154,58 @@ export function normalizeAtsText(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Pipe-table detection: shared by markdownToHtml, the DOCX block parser
+// below, and validateAtsSafe (tailor.mjs), so all three agree on what counts
+// as a GFM table. Outer pipes are optional (`Col A | Col B` is a table row
+// just as `| Col A | Col B |` is), matching what GitHub-flavored Markdown
+// actually renders.
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a pipe-table row into trimmed cell strings. Outer pipes are optional.
+ *
+ * @param {string} line
+ * @returns {string[]}
+ */
+function splitPipeRow(line) {
+  const s = line.trim();
+  const inner = s.startsWith("|") ? s.slice(1) : s;
+  const cells = inner.endsWith("|") ? inner.slice(0, -1).split("|") : inner.split("|");
+  return cells.map((c) => c.trim());
+}
+
+/**
+ * Whether a row's cells form a pipe-table delimiter row (`---`, `:--`, `--:`, `:-:`).
+ *
+ * @param {string[]} cells
+ * @returns {boolean}
+ */
+function isPipeTableDelimRow(cells) {
+  return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
+}
+
+/**
+ * Whether `markdown` contains at least one GFM pipe table: a line with a `|`
+ * immediately followed by a valid delimiter row. Mirrors the exact condition
+ * markdownToHtml and the DOCX block parser use to start rendering a table, so
+ * a table that renders is always a table validateAtsSafe can see too.
+ *
+ * @param {string} markdown
+ * @returns {boolean}
+ */
+export function containsPipeTable(markdown) {
+  const lines = String(markdown ?? "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!/\|/.test(line)) continue;
+    const headerCells = splitPipeRow(line);
+    const delimCells = splitPipeRow(lines[i + 1] || "");
+    if (headerCells.length >= 2 && isPipeTableDelimRow(delimCells)) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // markdownToHtml
 // ---------------------------------------------------------------------------
 
@@ -183,17 +235,6 @@ export function markdownToHtml(markdown) {
   const listStack = []; // stack of { type: 'ul'|'ol', indent: number }
   let inPara = false;
   let pendingBlank = false;
-
-  // Helper: split a pipe-table line into trimmed cell strings (strips outer pipes)
-  const splitPipeRow = (line) => {
-    const s = line.trim();
-    const inner = s.startsWith("|") ? s.slice(1) : s;
-    const cells = inner.endsWith("|") ? inner.slice(0, -1).split("|") : inner.split("|");
-    return cells.map((c) => c.trim());
-  };
-
-  // Helper: detect a pipe-table delimiter row (cells are :?-+:?)
-  const isDelimRow = (cells) => cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
 
   const escHtml = (s) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -339,7 +380,7 @@ export function markdownToHtml(markdown) {
       const nextLine = lines[i + 1] || "";
       const headerCells = splitPipeRow(line);
       const delimCells = splitPipeRow(nextLine);
-      if (headerCells.length >= 2 && isDelimRow(delimCells)) {
+      if (headerCells.length >= 2 && isPipeTableDelimRow(delimCells)) {
         closeOpenPara();
         closeAllLists();
         // Consume header + delimiter
@@ -1192,15 +1233,6 @@ function parseMdBlocks(markdown) {
   const lines = markdown.split(/\r?\n/);
   const blocks = [];
 
-  // Pipe-table helpers (mirrors markdownToHtml helpers)
-  const splitPipeRow = (ln) => {
-    const s = ln.trim();
-    const inner = s.startsWith("|") ? s.slice(1) : s;
-    const cells = inner.endsWith("|") ? inner.slice(0, -1).split("|") : inner.split("|");
-    return cells.map((c) => c.trim());
-  };
-  const isDelimRow = (cells) => cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
-
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
@@ -1255,7 +1287,7 @@ function parseMdBlocks(markdown) {
       const nextLine = lines[i + 1] || "";
       const headerCells = splitPipeRow(line);
       const delimCells = splitPipeRow(nextLine);
-      if (headerCells.length >= 2 && isDelimRow(delimCells)) {
+      if (headerCells.length >= 2 && isPipeTableDelimRow(delimCells)) {
         i += 2; // skip header + delimiter rows
         const bodyRows = [];
         while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim() !== "") {
