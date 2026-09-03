@@ -148,6 +148,25 @@ test("normalizeRequirements: jdText option blanks an invented jdSignal but keeps
   assert.equal(rows[0].jdSignal, "");
 });
 
+test("normalizeRequirements: jdText option keeps a jdSignal whose quotes and dashes were straightened", () => {
+  const jdText = "You’ll need 5+ years of production Kubernetes – “hands-on”, not advisory.";
+  const rows = normalizeRequirements(
+    [
+      {
+        requirement: "5+ years production Kubernetes",
+        importance: "critical",
+        match: "partial",
+        jdSignal: 'You\'ll need 5+ years of production Kubernetes - "hands-on", not advisory.',
+      },
+    ],
+    { jdText }
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(
+    rows[0].jdSignal,
+    'You\'ll need 5+ years of production Kubernetes - "hands-on", not advisory.'
+  );
+});
 test("normalizeRequirements: no jdText option means no jdSignal check runs", () => {
   const rows = normalizeRequirements([
     { requirement: "Some requirement", jdSignal: "A phrase that appears nowhere in particular" },

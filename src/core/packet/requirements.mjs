@@ -45,8 +45,16 @@ function clampEnum(value, allowed, fallback) {
 // collapseWhitespace(value) — whitespace-collapsed, case-insensitive form
 // used to compare a jdSignal against the saved JD text without caring about
 // line wraps or incidental spacing differences.
+// collapseWhitespace also folds the punctuation a model straightens while
+// serializing JSON: curly quotes, curly apostrophes and en/em dashes become
+// their ASCII forms on both sides of the jdSignal comparison, and NFKC
+// normalization handles ligatures and full-width characters.
 function collapseWhitespace(value) {
   return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2010\u2011\u2012\u2013\u2014]/g, "-")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
