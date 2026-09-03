@@ -162,8 +162,29 @@ export async function fetchPublicHttpText(
     maxRedirects = DEFAULT_MAX_REDIRECTS,
     readErrorBody = true,
     signal,
+    allowedHosts,
   } = {}
 ) {
+  // allowedHosts is a caller-scoped allowlist (e.g. a plugin's
+  // manifest.fetchHosts) and is checked from the URL's own hostname alone,
+  // BEFORE resolvePublicHttpTarget ever runs — that function is what issues
+  // resolveHost/DNS lookups. A host outside the allowlist is refused here
+  // with zero resolver calls, rather than only after DNS has already run.
+  const initialHostCheck = validatePublicHttpUrl(rawUrl);
+  if (!initialHostCheck.ok) {
+    return failure("unsafe_url", initialHostCheck.reason, { url: rawUrl });
+  }
+  const initialHostname = normalizedHostname(new URL(initialHostCheck.url).hostname);
+  if (!hostAllowed(initialHostname, allowedHosts)) {
+    return failure(
+      "host_not_allowed",
+      `host "${initialHostname}" is not in the allowed host list`,
+      {
+        url: rawUrl,
+      }
+    );
+  }
+
   let target;
   {
     // The initial resolution has no hop-scoped controller yet (that is
@@ -210,6 +231,24 @@ export async function fetchPublicHttpText(
             url: rawUrl,
             finalUrl: currentUrl,
           });
+        }
+        // Same ordering as the initial hop: check the redirect target's
+        // hostname against allowedHosts from the URL alone, before
+        // resolvePublicHttpTarget issues a resolveHost/DNS call for it.
+        const redirectHostCheck = validatePublicHttpUrl(redirectUrl);
+        if (!redirectHostCheck.ok) {
+          return failure("unsafe_redirect", `unsafe redirect target: ${redirectHostCheck.reason}`, {
+            url: rawUrl,
+            finalUrl: redirectUrl,
+          });
+        }
+        const redirectHostname = normalizedHostname(new URL(redirectHostCheck.url).hostname);
+        if (!hostAllowed(redirectHostname, allowedHosts)) {
+          return failure(
+            "host_not_allowed",
+            `redirect host "${redirectHostname}" is not in the allowed host list`,
+            { url: rawUrl, finalUrl: redirectUrl }
+          );
         }
         // The current hop's controller/timeout is still live here (its
         // `finally` hasn't run yet), so reusing controller.signal bounds this
@@ -293,6 +332,18 @@ export async function fetchPublicHttpText(
   }
 
   return failure("too_many_redirects", "too many redirects", { url: rawUrl });
+}
+
+// Caller-supplied host allowlist (e.g. a plugin's manifest.fetchHosts). Undefined
+// means "no restriction" so every other caller of fetchPublicHttpText is
+// unaffected. Checked on the initial target AND on every redirect hop, so a
+// caller that scopes the fetch this way can't be handed off to an unlisted host
+// mid-chain even though the SSRF/DNS-rebinding guard above already approved it.
+function hostAllowed(hostname, allowedHosts) {
+  if (!allowedHosts) return true;
+  const list = Array.isArray(allowedHosts) ? allowedHosts : [];
+  const normalized = String(hostname || "").toLowerCase();
+  return list.some((h) => String(h || "").toLowerCase() === normalized);
 }
 
 function combineAbortSignals(...signals) {
@@ -525,7 +576,7 @@ function normalizeAddresses(values) {
     .filter(({ address, family }) => address && (family === 4 || family === 6));
 }
 
-function normalizedHostname(value) {
+export function normalizedHostname(value) {
   return String(value || "")
     .replace(/^\[|\]$/g, "")
     .toLowerCase();
