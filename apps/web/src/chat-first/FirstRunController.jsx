@@ -15,6 +15,7 @@ import {
 } from "../onboarding/onboardingSetup.js";
 import { calculateAnnualCashWorksheet } from "./annual-cash-worksheet.js";
 import { firstRunApi } from "./api.js";
+import { BootScreen } from "./BootScreen.jsx";
 import { createWorkspaceRequestId } from "./chat-first-app-controller.js";
 import {
   clearCompanyDiscoveryOperation,
@@ -36,6 +37,7 @@ import {
   runtimeSelectionReady,
 } from "./first-run-controller.js";
 import { profileSettingsRoute } from "./profile-settings-controller.js";
+import { useMinimumBootScreen } from "./use-boot-screen.js";
 
 const INTERVIEW_SKILL = "ingest-profile";
 const PROFILE_BLOCK_KINDS = new Set(["authorization", "candidate_patch", "evidence_claim"]);
@@ -1588,7 +1590,17 @@ export function FirstRunController({
   }, [completeKnowledgeSectionIds]);
   const configuredAgentName = firstRunAgentName(onboardState, agentName);
   const voluntaryDefaultsRequired = setupNeedsVoluntaryDefaults(onboardState);
+  // The engine picker's "Let's get CareerRat ready." heading is only correct
+  // once the runtime probe has actually come back empty. Until then (or if
+  // the probe fails and hands off to the error copy on the picker itself),
+  // show the same boot screen App renders during its own gate check so the
+  // two never look like two different flashes.
+  const showBootScreen = useMinimumBootScreen(
+    !voluntaryDefaultsRequired && runtimeState === null && !engineError
+  );
   const openSettings = () => navigate(profileSettingsRoute({ tab: "settings", panel: "engine" }));
+
+  if (showBootScreen) return <BootScreen />;
 
   const companyReview =
     companyReviewOpen && companyProposalBatch ? (

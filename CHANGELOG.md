@@ -11,6 +11,12 @@ All notable changes to CareerRat are documented here. This project follows
 - Completed sections in the What Paul knows panel collapse to a single line
   with a Done mark; open one with its chevron to see or edit the details.
 
+### Fixed
+
+- Starting the app no longer flashes the first-run setup screen before the
+  chat loads; a short boot screen shows while CareerRat checks your
+  workspace and engine.
+
 ## [0.18.0] - 2026-09-03
 
 ### Added
