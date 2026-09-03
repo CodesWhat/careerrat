@@ -1086,6 +1086,77 @@ button.cf-first-run__engine-choice:not(.is-selected):hover {
   background: var(--cream);
 }
 
+.cf-first-run__knowledge-card--collapsed {
+  padding: 10px 15px;
+  gap: 0;
+}
+
+.cf-first-run__knowledge-card-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cf-first-run__knowledge-check {
+  display: inline-flex;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--lime);
+  color: var(--ink);
+}
+
+.cf-first-run__knowledge-check svg {
+  width: 12px;
+  height: 12px;
+}
+
+.cf-first-run__knowledge-card-title {
+  color: var(--slate);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+}
+
+.cf-first-run__knowledge-done {
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  background: var(--lime);
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.cf-first-run__knowledge-chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-soft);
+  transition: transform 0.15s ease;
+}
+
+.cf-first-run__knowledge-chevron--open {
+  transform: rotate(180deg);
+}
+
+.cf-first-run__knowledge-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
 .cf-first-run__knowledge-card--active {
   background: var(--white);
 }

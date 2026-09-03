@@ -4,6 +4,13 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Completed sections in the What Paul knows panel collapse to a single line
+  with a Done mark; open one with its chevron to see or edit the details.
+
 ## [0.18.0] - 2026-09-03
 
 ### Added
