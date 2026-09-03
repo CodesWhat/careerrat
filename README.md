@@ -18,7 +18,6 @@
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/careerrat"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/careerrat?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
   <br>
   <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/dm/careerrat" alt="npm downloads"></a>
-  <a href="https://github.com/CodesWhat/careerrat/stargazers"><img src="https://img.shields.io/github/stars/CodesWhat/careerrat?style=flat" alt="Stars"></a>
 </p>
 
 <p align="center"><small>CareerRat itself costs nothing. Your AI provider may have its own plan or usage costs.</small></p>
@@ -35,6 +34,8 @@
 - [Star History](#star-history)
 - [Built With](#built-with)
 - [Community & Support](#community-support)
+
+<p align="center"><a href="https://careerrat.com/docs"><strong>Read the docs at careerrat.com/docs</strong></a></p>
 
 <hr>
 
@@ -62,13 +63,14 @@ The current macOS release is a signed and notarized Apple Silicon app for macOS
 3. Choose Claude Code or Codex if it is ready. If neither is installed, CareerRat
    offers in-app Claude Code setup and the official OpenAI Codex setup guide.
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) and
-[OpenAI Codex](https://developers.openai.com/codex/cli/) are CareerRat's only
-supported product runtime choices. Both use the same CareerRat-owned workflows,
-skills, and durable state. The packaged app invokes the selected installed CLI
-directly and never falls back to or silently switches providers. A runtime
-becomes `Ready` only after local availability, authentication, and its readiness
-check pass.
+CareerRat works with [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
+or [OpenAI Codex](https://developers.openai.com/codex/cli/), CareerRat's only
+supported product runtime choices. Install and sign in to either one, then pick
+it in CareerRat. Both use the same CareerRat-owned workflows, skills, and
+durable state. CareerRat invokes the selected installed CLI directly and
+never falls back to or silently switches providers, so it keeps using the
+one you picked. It shows `Ready` once the tool is installed, signed in, and
+passes a quick check.
 
 ### Any other platform (npm)
 
@@ -428,7 +430,7 @@ threads fold into the same workspace as the rest of your search.
 
 <h2 align="center" id="built-with">Built With</h2>
 
-[![Node 24](https://img.shields.io/badge/Node_24-339933?logo=nodedotjs&logoColor=fff)](https://nodejs.org/)
+[![Node engine](https://img.shields.io/node/v/careerrat)](https://nodejs.org/)
 [![Electron](https://img.shields.io/badge/Electron_44-47848F?logo=electron&logoColor=fff)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React_19-149eca?logo=react&logoColor=fff)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite_8-646CFF?logo=vite&logoColor=fff)](https://vite.dev/)
