@@ -97,6 +97,26 @@
               },
               "fitReasons": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string" } },
               "fitRisks": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string" } },
+              "requirements": {
+                "type": ["array", "null"],
+                "maxItems": 20,
+                "description": "Evidence-tiered requirements table this verdict's fitRisks were derived from. Optional: absent on verdicts evaluated before this field existed.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "requirement": { "type": "string" },
+                    "importance": {
+                      "type": "string",
+                      "enum": ["critical", "high", "meaningful", "preferred", "low_signal"]
+                    },
+                    "evidence": { "type": "string", "enum": ["stated", "structural", "inferred"] },
+                    "jdSignal": { "type": "string" },
+                    "match": { "type": "string", "enum": ["strong", "partial", "missing", "na"] },
+                    "note": { "type": "string" }
+                  }
+                }
+              },
               "confidence": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
               "evaluatedAt": { "type": ["string", "null"] }
             }

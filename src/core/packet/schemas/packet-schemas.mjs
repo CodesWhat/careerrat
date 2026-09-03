@@ -71,6 +71,29 @@ export const packetGateAiVerdictSchema = {
     fitReasons: { type: "array", maxItems: 3, items: { type: "string", maxLength: 80 } },
     fitRisks: { type: "array", maxItems: 3, items: { type: "string", maxLength: 80 } },
     confidence: { type: "string", enum: ["low", "medium", "high"] },
+    // Optional — absent on older verdicts, which must still validate.
+    // Evidence-tiered requirements table; fitRisks is derived from it (see
+    // deriveFitRisks in ../requirements.mjs).
+    requirements: {
+      type: "array",
+      maxItems: 20,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["requirement", "importance", "evidence", "jdSignal", "match", "note"],
+        properties: {
+          requirement: { type: "string", maxLength: 120 },
+          importance: {
+            type: "string",
+            enum: ["critical", "high", "meaningful", "preferred", "low_signal"],
+          },
+          evidence: { type: "string", enum: ["stated", "structural", "inferred"] },
+          jdSignal: { type: "string", maxLength: 160 },
+          match: { type: "string", enum: ["strong", "partial", "missing", "na"] },
+          note: { type: "string", maxLength: 200 },
+        },
+      },
+    },
   },
 };
 
@@ -87,6 +110,13 @@ export function validatePacketGateVerdictQuality(verdict = {}) {
       : []),
     ...(Array.isArray(verdict.fitRisks)
       ? verdict.fitRisks.map((value, index) => [`fitRisks[${index}]`, value])
+      : []),
+    ...(Array.isArray(verdict.requirements)
+      ? verdict.requirements.flatMap((row, index) => [
+          [`requirements[${index}].requirement`, row?.requirement],
+          [`requirements[${index}].jdSignal`, row?.jdSignal],
+          [`requirements[${index}].note`, row?.note],
+        ])
       : []),
   ];
   return entries
