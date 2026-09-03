@@ -48,12 +48,27 @@ Routes are grouped below by cluster.
 - "Set up searches", "build search config" → `setup-searches`
 - "Tailor résumé / cover letter / short answer" (after gate passes) →
   `tailor-application`
+- "How should I answer this", a pasted form/screening question outside a full
+  apply run → `answer-question` (`tailor-application` STEP 6 owns the answers
+  artifact during a full tailor/apply run instead)
+- "How do I close this fit gap", "what should I do about this review" →
+  `coach-gaps` (only fires on an `evaluate-job` verdict already at
+  `gate: review` with named `fitRisks`; explicit-click only, never auto-fires)
+- "Optimize / review my LinkedIn profile", make it read for targeted roles →
+  `optimize-linkedin` (read-only before→after diff by default; write-back is a
+  separate opt-in, confirm-first per field)
 
 ### Research Loop
 
 - "Research this company" / company URL or name pasted → `research-company`
 - "What's market comp", "benchmark my salary ask" → `research-comp`
 - "Find more boards", "what sources should I add", stale queue → `research-boards`
+- "How risky / stable / healthy is this company", factor company risk into a
+  role → `company-health` (cost-gated; auto-fires at the interview stage by
+  default; internal signal only, never enters an outbound artifact)
+- "Find companies likely to be hiring my target roles" → `discover-companies`
+  (resolves, validates, and dedupes high-confidence public ATS boards; review
+  only ambiguous or unsupported results)
 
 ### Communications
 
@@ -61,6 +76,15 @@ Routes are grouped below by cluster.
   written negotiation counter → `email-comms`
 - Live / verbal offer call, real-time negotiation coaching, rehearsal →
   `interview-prep`
+- "When can you talk", proposed time slots, confirm or reschedule a
+  recruiter/hiring-team call → `schedule-meeting` (owns timezone resolution,
+  double-booking avoidance, and calendar-ready holds; non-scheduling threads
+  hand back to `email-comms`)
+- Write a tracked interview, assessment, follow-up, or deadline to a real
+  calendar → `calendar-sync` (opt-in, confirm-first)
+- Find likely recruiters, hiring-team members, or warm contacts for tracked
+  companies → `relationship-sourcing` (opt-in, session browser;
+  candidate-reviewed leads are captured into Network)
 
 ### Interview & Story Bank
 
@@ -81,6 +105,13 @@ Routes are grouped below by cluster.
 - "Change a setting", comp floor/target, exclusions, writing style, form defaults,
   search sources, usage mode, application mode, browser automation, or session
   browser → `configure`
+
+### Product Support
+
+- CareerRat itself crashes, throws a stack trace, exits non-zero, or looks
+  clearly broken; "report a bug" → `report-issue` (assembles redacted
+  diagnostics; opens a GitHub issue on the upstream repo only with the user's
+  explicit yes)
 
 `apply-job` must run or verify `evaluate-job` as step zero.
 
@@ -241,9 +272,9 @@ plan is immutable for the life of the operation and its retries. Adapters map
 that plan to Claude Code or OpenAI Codex; the user never needs to choose a
 provider based on model capability.
 
-Claude Code 2.1.241 or newer and OpenAI Codex 0.149.1 or newer are the supported
-engines for the complete CareerRat product. Each runtime must pass local
-availability, authentication, and the complete readiness check before
+Claude Code 2.1.241 or newer, and OpenAI Codex on its current release, are the
+supported engines for the complete CareerRat product. Each runtime must pass
+local availability, authentication, and the complete readiness check before
 selection. Both adapters run from disposable task directories with bounded
 input, approved-file reads, the guarded CareerRat public web MCP, structured
 output, live activity, and canonical CareerRat resume. Claude receives a fixed

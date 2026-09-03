@@ -108,7 +108,7 @@ test("architecture docs describe the exact packaged runtime boundaries", async (
     /generic chat surface exposes only[\s\S]*`company-health`/i,
     /Claude Code 2\.1\.241\s+or newer/i,
     /guarded CareerRat public\s+web MCP/i,
-    /OpenAI Codex 0\.149\.1 or newer[\s\S]{0,100}complete CareerRat product/i,
+    /OpenAI Codex on its current release[\s\S]{0,100}complete CareerRat product/i,
     /allowlisted process\s+environment/i,
     /app never silently switches engines/i,
     /only HTML product surface/i,
