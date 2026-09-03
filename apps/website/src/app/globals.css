@@ -389,7 +389,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-top: 14px;
+  margin: 14px 0 0;
   border-radius: var(--radius-panel);
   background: var(--white);
   padding: 22px 26px;
