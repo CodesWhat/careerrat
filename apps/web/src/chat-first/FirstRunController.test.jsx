@@ -353,10 +353,52 @@ describe("FirstRunController boot screen", () => {
     expect(view.props.stage).toBe("engine");
     expect(view.props.engines[0]).toMatchObject({ id: "claude", selected: true });
   });
+
+  it("keeps the picker visible during a successful refresh after the startup probe fails", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getInstalledAiRuntimes.mockRejectedValueOnce(new Error("runtime probe failed"));
+
+    const failedView = await bootController(module, api, { startInterview: false });
+
+    expect(failedView.type).toBe(FirstRunExperience);
+    expect(failedView.props.stage).toBe("engine");
+    expect(failedView.props.error).toBe("CareerRat couldn't start setup. Try again.");
+
+    const pending = deferred();
+    api.getInstalledAiRuntimes.mockReset().mockReturnValueOnce(pending.promise);
+    const refresh = failedView.props.onRefreshEngines();
+    const refreshingView = rerender(module, api);
+
+    expect(refreshingView.type).toBe(FirstRunExperience);
+    expect(refreshingView.props.submitting).toBe(true);
+    expect(refreshingView.props.error).toBeNull();
+
+    pending.resolve({
+      selectedId: "claude",
+      runtimes: [
+        {
+          id: "claude",
+          supported: true,
+          available: true,
+          ready: true,
+          selectable: true,
+          capabilityTier: "task_tools",
+          capabilities: FULL_RUNTIME_CAPABILITIES,
+        },
+      ],
+    });
+    await refresh;
+    const refreshedView = rerender(module, api);
+
+    expect(refreshedView.type).toBe(FirstRunExperience);
+    expect(refreshedView.props.submitting).toBe(false);
+    expect(refreshedView.props.engines[0]).toMatchObject({ id: "claude", selected: true });
+  });
 });
 
 describe("FirstRunController chat event reconciliation", () => {
-  it("renders the local upgrade choice on the first frame from the state App already loaded", async () => {
+  it("renders the local upgrade choice without a boot screen on the first frame from App state", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
     const upgradeState = {
@@ -380,6 +422,8 @@ describe("FirstRunController chat event reconciliation", () => {
 
     const view = rerender(module, api, { initialOnboardState: upgradeState });
 
+    expect(view.type).toBe(FirstRunExperience);
+    expect(view.type).not.toBe(BootScreen);
     expect(view.props.stage).toBe("voluntary-defaults");
     expect(view.props.voluntaryDefaultsRequired).toBe(true);
     expect(api.initOnboard).not.toHaveBeenCalled();

@@ -163,6 +163,21 @@ describe("App chat-first flip", () => {
     expect(html).toContain('role="status"');
   });
 
+  it("renders the boot screen on the navigation frame from an ungated route while the gate is checking", async () => {
+    const module = await loadApp();
+    routerState.pathname = "/settings";
+
+    const settings = renderApp(module);
+    await flushEffects();
+    expect(settings).toContain("profile-settings-controller");
+
+    routerState.pathname = "/";
+    const html = renderApp(module);
+
+    expect(html).toContain("Getting things ready.");
+    expect(html).toContain('role="status"');
+  });
+
   it("keeps a completed fresh setup gated until local application defaults are confirmed", async () => {
     const module = await loadApp();
     apiMocks.getOnboardState.mockResolvedValueOnce({
