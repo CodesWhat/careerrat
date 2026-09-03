@@ -1170,6 +1170,18 @@ via `email-comms`.
 - **Draft quality.** Use the candidate's real name (always known). When a
   counterparty detail is unknown, go generic — never emit a bracketed placeholder
   such as `[Company]` or `[Recruiter]`. Brackets in output are a build failure.
+- **Never claim authorship.** Never claim the candidate authored, built, or
+  contributed to an open-source project, repo, library, tool, or framework
+  unless `candidate/evidence.yml` or the candidate's own material attributes
+  it to them. Using a tool is not building it. Tool-of-trade conflation
+  (candidate uses X, so the draft says the candidate built X) is the single
+  most common fabrication pattern in generated outbound artifacts and is
+  forbidden.
+- **Reformulate, never invent.** Keywords and phrasing get reordered,
+  reframed, and emphasized to match a JD or thread, never fabricated. If a
+  claim is not backed by `evidence.yml`, `honesty.yml`, or another in-scope
+  candidate file, ask the candidate before including it. If there is no
+  answer, omit it. Silence on a topic beats a manufactured detail.
 
 ### Privacy Invariant (pointer)
 
