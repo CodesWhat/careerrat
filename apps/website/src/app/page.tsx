@@ -40,7 +40,7 @@ const features = [
   },
   {
     title: "On your machine",
-    copy: "Your data stays local. It keeps working in the background as you move between views, and if something gets interrupted, you get a clear retry instead of losing your place.",
+    copy: "Your workspace lives on your machine. Only the context a task needs goes to the AI provider you picked, under its terms. It keeps working in the background as you move between views, and if something gets interrupted, you get a clear retry instead of losing your place.",
     Icon: Lock,
   },
 ];
@@ -135,8 +135,10 @@ export default function Home() {
             </article>
           </div>
 
-          {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: existing pattern, out of scope for this copy pass */}
-          <div className="chat-demo" aria-label="Example CareerRat conversation">
+          <figure className="chat-demo" aria-labelledby="chat-demo-title">
+            <h3 id="chat-demo-title" className="visually-hidden">
+              Example CareerRat conversation
+            </h3>
             <div className="chat-demo__user">what should the Cyberdyne staff role pay?</div>
             <div className="chat-demo__agent-row">
               <span className="chat-demo__avatar" aria-hidden="true">
@@ -144,25 +146,26 @@ export default function Home() {
               </span>
               <div className="chat-demo__agent">
                 Checking now. I&apos;ll compare the posting against your floor of $210k.
-                {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: existing pattern, out of scope for this copy pass */}
-                <div className="activity-list" aria-label="Agent activity">
-                  <span className="activity-pill activity-pill--running">
+                <ul className="activity-list" aria-label="Agent activity">
+                  <li className="activity-pill activity-pill--running">
                     <LoaderCircle className="activity-spinner" aria-hidden="true" size={13} />
                     Searching the web
-                  </span>
-                  <span className="activity-pill">
+                  </li>
+                  <li className="activity-pill">
                     <FileUp aria-hidden="true" size={13} />
                     Read evidence-bank.md
-                  </span>
-                  <span className="activity-pill">
+                  </li>
+                  <li className="activity-pill">
                     <Radar aria-hidden="true" size={13} />
                     Compared 4 sources
-                  </span>
-                </div>
+                  </li>
+                </ul>
               </div>
             </div>
-            <p className="chat-demo__caption">You watch it read, search, and write as it works.</p>
-          </div>
+            <figcaption className="chat-demo__caption">
+              You watch it read, search, and write as it works.
+            </figcaption>
+          </figure>
 
           <div className="guardrails-card">
             <p className="eyebrow">What stays in your hands</p>
@@ -233,9 +236,10 @@ export default function Home() {
             </div>
             <div className="engine-card">
               <p className="eyebrow">You&apos;ll need an AI CLI</p>
-              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
               <p>
-                Pick Claude Code (2.1.241 or newer) or OpenAI Codex. Either one runs the same CareerRat-owned workflows and skills. CareerRat invokes it directly and never falls back to another provider.
+                Pick Claude Code (2.1.241 or newer) or OpenAI Codex. Either one runs the same
+                CareerRat-owned workflows and skills. CareerRat invokes it directly and never falls
+                back to another provider.
               </p>
               <p>
                 Automatic picks the right level for each task: complex judgment stays strong, while
@@ -243,24 +247,16 @@ export default function Home() {
                 Balanced, or Best, and set Thinking depth to Automatic, Low, Medium, or High. Those
                 controls work the same with Claude Code or OpenAI Codex.
               </p>
-              {/* biome-ignore lint/a11y/useSemanticElements: existing role="list" pattern, out of scope for this copy pass */}
-              <div className="engine-pills" role="list" aria-label="Detected AI CLI support">
-                {/* biome-ignore lint/a11y/useSemanticElements: existing role="listitem" pattern, out of scope for this copy pass */}
-                <span className="engine-pill" role="listitem">
-                  Claude Code
-                </span>
-                {/* biome-ignore lint/a11y/useSemanticElements: existing role="listitem" pattern, out of scope for this copy pass */}
-                <span className="engine-pill" role="listitem">
-                  OpenAI Codex
-                </span>
-                {/* biome-ignore lint/a11y/useSemanticElements: existing role="listitem" pattern, out of scope for this copy pass */}
-                <span className="engine-pill" role="listitem">
-                  Same CareerRat workflow
-                </span>
-              </div>
-              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <ul className="engine-pills" aria-label="Detected AI CLI support">
+                <li className="engine-pill">Claude Code</li>
+                <li className="engine-pill">OpenAI Codex</li>
+                <li className="engine-pill">Same CareerRat workflow</li>
+              </ul>
               <p className="engine-card__note">
-                A runtime appears ready only when it is available, signed in, and passes its readiness check. CareerRat itself costs nothing; your AI provider may have its own plan or usage costs. Signed Mac updates download in the app and wait for you to choose Restart and install.
+                A runtime appears ready only when it is available, signed in, and passes its
+                readiness check. CareerRat itself costs nothing; your AI provider may have its own
+                plan or usage costs. Signed Mac updates download in the app and wait for you to
+                choose Restart and install.
               </p>
             </div>
           </div>
