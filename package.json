@@ -33,6 +33,7 @@
     "config/*.example.*",
     "config/paste-intake-routes.json",
     "templates",
+    "plugins",
     ".agents/skills/answer-question/SKILL.md",
     ".agents/skills/apply-job/SKILL.md",
     ".agents/skills/calendar-sync/SKILL.md",

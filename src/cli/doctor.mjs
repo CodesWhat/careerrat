@@ -25,6 +25,7 @@ import { detectSession } from "../core/automation/session.mjs";
 import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
+import { verifyBundledPlugins } from "../core/plugins/index.mjs";
 import { checkTemplateLeftovers } from "../core/profile/candidate-setup.mjs";
 import { candidateConfigSource, loadCandidateConfig } from "../core/profile/config-store.mjs";
 import { loadEvidence } from "../core/profile/evidence-writer.mjs";
@@ -174,6 +175,19 @@ const modes = loadModes({ root });
 const automationData = loadAutomation({ root }).data;
 const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 
+// Bundled plugins (plugins/<name>/). Informational: a plugin needing a
+// consent capability is unaffected by this block, that's the automation
+// block above. An invalid bundled manifest IS a defect in the shipped
+// package though, so unlike the rest of this section it flips result.ok —
+// and so does a directory-level enumeration failure (an unreadable plugins
+// root, or a `plugins` path that isn't a directory), which
+// verifyBundledPlugins now reports instead of throwing synchronously.
+// CAREERRAT_PLUGINS_ROOT overrides discovery only, same as `careerrat
+// plugins` — used by tests to point at a scratch tree with a broken root.
+const pluginsRoot = String(process.env.CAREERRAT_PLUGINS_ROOT || "").trim() || root;
+const pluginVerification = verifyBundledPlugins({ root: pluginsRoot });
+const invalidPlugins = pluginVerification.plugins.filter((p) => !p.ok);
+
 // Setup resume state (workspace/setup-state.json). Written by ingest-profile and
 // the explicit discovery-skip helper; read-only here.
 const setupState = readSetupState({ root });
@@ -220,6 +234,7 @@ const result = {
     missingUser.length === 0 &&
     missingSystem.length === 0 &&
     modes.valid &&
+    pluginVerification.ok &&
     (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
   missingSystem,
@@ -248,6 +263,12 @@ const result = {
     configured: automation.exists,
     presence: sessionBrowser.presence.status,
     detail: sessionBrowser.presence.detail,
+  },
+  plugins: {
+    bundled: pluginVerification.plugins.length,
+    runnable: pluginVerification.plugins.length - invalidPlugins.length,
+    invalid: invalidPlugins.map((p) => ({ name: p.name, errors: p.errors })),
+    error: pluginVerification.error,
   },
   setup,
   candidateSetup: candidateSetupReadiness,
@@ -382,6 +403,21 @@ if (!automation.exists) {
   console.log(
     "  change with `careerrat automation session <auto|extension|orca|playwright> --write` (see docs/BROWSER.md)."
   );
+  console.log("");
+}
+
+{
+  const runnable = pluginVerification.plugins.length - invalidPlugins.length;
+  console.log(`Plugins: ${pluginVerification.plugins.length} bundled, ${runnable} runnable.`);
+  if (pluginVerification.error) {
+    console.log(`- ${pluginVerification.error}`);
+  }
+  for (const p of invalidPlugins) {
+    console.log(`- ${p.name}: ${p.errors.join("; ")}`);
+  }
+  if (invalidPlugins.length > 0 || pluginVerification.error) {
+    console.log("  fix: run `careerrat plugins verify` for details.");
+  }
   console.log("");
 }
 
