@@ -162,6 +162,7 @@ export async function fetchPublicHttpText(
     maxRedirects = DEFAULT_MAX_REDIRECTS,
     readErrorBody = true,
     signal,
+    allowedHosts,
   } = {}
 ) {
   let target;
@@ -182,6 +183,15 @@ export async function fetchPublicHttpText(
     }
   }
   if (!target.ok) return failure("unsafe_url", target.reason, { url: rawUrl });
+  if (!hostAllowed(target.hostname, allowedHosts)) {
+    return failure(
+      "host_not_allowed",
+      `host "${target.hostname}" is not in the allowed host list`,
+      {
+        url: rawUrl,
+      }
+    );
+  }
 
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
     const currentUrl = target.url;
@@ -223,6 +233,13 @@ export async function fetchPublicHttpText(
             url: rawUrl,
             finalUrl: redirectUrl,
           });
+        }
+        if (!hostAllowed(next.hostname, allowedHosts)) {
+          return failure(
+            "host_not_allowed",
+            `redirect host "${next.hostname}" is not in the allowed host list`,
+            { url: rawUrl, finalUrl: redirectUrl }
+          );
         }
         target = next;
         continue;
@@ -293,6 +310,18 @@ export async function fetchPublicHttpText(
   }
 
   return failure("too_many_redirects", "too many redirects", { url: rawUrl });
+}
+
+// Caller-supplied host allowlist (e.g. a plugin's manifest.fetchHosts). Undefined
+// means "no restriction" so every other caller of fetchPublicHttpText is
+// unaffected. Checked on the initial target AND on every redirect hop, so a
+// caller that scopes the fetch this way can't be handed off to an unlisted host
+// mid-chain even though the SSRF/DNS-rebinding guard above already approved it.
+function hostAllowed(hostname, allowedHosts) {
+  if (!allowedHosts) return true;
+  const list = Array.isArray(allowedHosts) ? allowedHosts : [];
+  const normalized = String(hostname || "").toLowerCase();
+  return list.some((h) => String(h || "").toLowerCase() === normalized);
 }
 
 function combineAbortSignals(...signals) {

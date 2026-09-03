@@ -476,3 +476,46 @@ test("guardedFetch passes redirect: 'error'/'manual' straight through to fetchIm
   assert.equal(result.ok, true);
   assert.equal(receivedInit.redirect, "error");
 });
+
+test("fetchPublicHttpText allowedHosts lets a listed host through unchanged", async () => {
+  const result = await fetchPublicHttpText("https://public.example.test/jobs", {
+    resolveHost: async () => PUBLIC_ADDRESSES,
+    dispatcherFactory: () => ({ close: async () => {} }),
+    allowedHosts: ["public.example.test"],
+    fetchImpl: async () =>
+      new Response("ok", { status: 200, headers: { "content-type": "text/plain" } }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.rawText, "ok");
+});
+
+test("fetchPublicHttpText allowedHosts rejects an unlisted host before touching the network", async () => {
+  let fetchCalls = 0;
+  const result = await fetchPublicHttpText("https://public.example.test/jobs", {
+    resolveHost: async () => PUBLIC_ADDRESSES,
+    allowedHosts: ["only-this-host.example.test"],
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error("must not be called");
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "host_not_allowed");
+  assert.equal(fetchCalls, 0);
+});
+
+test("fetchPublicHttpText allowedHosts is re-checked on a redirect hop", async () => {
+  const result = await fetchPublicHttpText("https://public.example.test/start", {
+    resolveHost: async (host) =>
+      host === "public.example.test" ? PUBLIC_ADDRESSES : [{ address: "93.184.216.35", family: 4 }],
+    dispatcherFactory: () => ({ close: async () => {} }),
+    allowedHosts: ["public.example.test"],
+    fetchImpl: async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://other.example.test/next" },
+      }),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "host_not_allowed");
+});
