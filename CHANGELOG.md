@@ -4,7 +4,7 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.18.0] - 2026-09-03
 
 ### Added
 
@@ -26,12 +26,55 @@ All notable changes to CareerRat are documented here. This project follows
 - Requirements table from the evaluate verdict shows in the chat verdict card and the This job panel, collapsed by default.
 - `careerrat plugins` lists and verifies the bundled plugins for developers,
   and doctor reports them.
+- CareerRat now has a sandboxed runtime for bundled plugins: each plugin
+  declares exactly what it may read and which hosts it may reach, runs behind
+  the existing point-of-need consent gate, and every run is recorded to the
+  audit trail. This is internal groundwork only; no bundled plugin changes
+  candidate-facing behavior yet.
 
 ### Changed
 
 - The website's feature cards and how-it-works copy are now shorter, plainer
   sentences, and the docs Quick start leads with the Mac app download, moving
   the npm/CLI path into a For developers subsection.
+- The README is now a desktop-first setup guide: download the Mac app, open
+  it, pick an engine, and see what the first run asks for. npm, the CLI, and
+  build-from-source now live only under a For developers section.
+- The docs no longer claim a Codex version floor CareerRat doesn't enforce,
+  describe both triggers for the strategy-review nudge (first fire on a
+  cleared funnel threshold, re-fire after a cooldown), and list every skill
+  under its cluster.
+- The vendored career-ops job-source snapshot moved to a newer upstream pin,
+  adding five new job-board providers and improving location, pagination, and
+  category coverage on several existing ones.
+- Routine dependency updates (#272, #280, #283, #288).
+
+### Fixed
+
+- Closed five small correctness gaps found in a QA sweep: a Workday job
+  posted on two sites could dedupe into two tracker rows, the Antigravity CLI
+  could never be detected, hidden formatting characters could survive into
+  submitted resume text, and the `health --help` footer read like an error
+  even when nothing was wrong.
+- Closed four compensation-parsing bugs found reviewing the v0.17.0 diff:
+  ordinary words like TOP or OTE next to a dollar figure no longer misread as
+  a foreign currency code, and combined base-plus-tips earnings figures
+  compare correctly instead of collapsing to the base salary alone.
+- An AI runtime reached through the ACP protocol could report itself ready
+  right after the initial handshake, before ever proving it could complete a
+  request. It now has to pass the same completion check every other runtime
+  does first.
+- Every writing skill (tailoring, answering questions, email, LinkedIn,
+  interview prep) now carries the same anti-fabrication rules: never claim
+  the candidate authored or contributed to something without their own
+  evidence backing it, and never invent a keyword that evidence doesn't
+  support.
+- Fixed a flaky browser QA test that could click before the
+  onboarding-to-workspace redirect was decided; developer-facing only, no
+  effect on the app itself.
+- Fixed runtime-detection tests seeing real CLI tools installed on a
+  developer's machine instead of only the isolated test fixtures;
+  developer-facing only, no effect on the app itself.
 
 ## [0.17.0] - 2026-08-30
 
