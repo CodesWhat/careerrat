@@ -381,6 +381,13 @@ describe("TodayConversation", () => {
     expect(html).not.toContain("<th>Evidence</th>");
     expect(html).toMatch(/<tr title="stated"/);
     expect(html).not.toContain(">stated<");
+    expect(html).toContain(
+      '<small class="chat-first-requirement-evidence">from the posting</small>'
+    );
+    expect(html).toContain(
+      '<small class="chat-first-requirement-evidence">implied by the role</small>'
+    );
+    expect(html).toContain('<small class="chat-first-requirement-evidence">inferred</small>');
   });
 
   it("renders no Requirements section for a job_evaluation artifact without requirement rows", () => {
@@ -2038,6 +2045,13 @@ describe("JobConversation and JobContextPanel", () => {
     expect(html).toContain("Only exposure through one prior role");
     expect(html).toContain("nice to have");
     expect(html).not.toContain(">stated<");
+    expect(html).toContain(
+      '<small class="chat-first-requirement-evidence">from the posting</small>'
+    );
+    expect(html).toContain(
+      '<small class="chat-first-requirement-evidence">implied by the role</small>'
+    );
+    expect(html).toContain('<small class="chat-first-requirement-evidence">inferred</small>');
   });
 
   it("renders no Requirements section in the This job panel when the job carries no requirements", () => {

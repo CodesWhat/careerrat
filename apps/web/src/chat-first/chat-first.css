@@ -921,6 +921,13 @@
   font-weight: 400;
 }
 
+/* Evidence tier label: same quiet treatment as the jdSignal line, but smaller
+   and never italic, since it's a plain-word tag rather than a quote. */
+.chat-first-requirement-evidence {
+  font-size: 10px;
+  font-style: normal;
+}
+
 .company-proposal-review {
   max-width: 860px;
 }

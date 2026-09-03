@@ -2222,6 +2222,45 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("5+ years backend engineering");
   });
 
+  it("renders both rows of a tracker-projected requirements table through jobContext and JobContextPanel", async () => {
+    // Same shape asserted end to end in tests/dashboard-data.test.mjs (tracker
+    // row -> buildDashboardViewModel -> buildChatFirstView -> jobDetails).
+    // This half of the chain covers jobContext()/JobContextPanel rendering it.
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        jobDetails: {
+          "app-1": {
+            requirements: [
+              {
+                requirement: "5+ years backend engineering",
+                importance: "critical",
+                evidence: "stated",
+                jdSignal: "5+ years of backend experience required",
+                match: "strong",
+                note: "",
+              },
+              {
+                requirement: "Experience with distributed systems",
+                importance: "meaningful",
+                evidence: "inferred",
+                jdSignal: "",
+                match: "partial",
+                note: "Only exposure through one prior role",
+              },
+            ],
+          },
+        },
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+    });
+
+    expect(html).toContain('<details class="chat-first-context-card__requirements">');
+    expect(html).toContain("Requirements (2)");
+    expect(html).toContain("5+ years backend engineering");
+    expect(html).toContain("Experience with distributed systems");
+  });
+
   it("shows no Requirements section in the This job panel when jobDetails carries no requirements", async () => {
     const html = await renderView({
       view: {

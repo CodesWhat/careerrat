@@ -355,12 +355,24 @@ const REQUIREMENT_MATCH_COPY = {
   na: "n/a",
 };
 
+// Plain-word labels for the evidence tier, rendered as visible text (not just
+// the <tr title>) so touch, keyboard and screen-reader users can reach it too.
+const REQUIREMENT_EVIDENCE_COPY = {
+  stated: "from the posting",
+  structural: "implied by the role",
+  inferred: "inferred",
+};
+
 function requirementImportanceCopy(importance) {
   return REQUIREMENT_IMPORTANCE_COPY[importance] || String(importance || "").trim();
 }
 
 function requirementMatchCopy(match) {
   return REQUIREMENT_MATCH_COPY[match] || String(match || "").trim();
+}
+
+function requirementEvidenceCopy(evidence) {
+  return REQUIREMENT_EVIDENCE_COPY[evidence] || String(evidence || "").trim();
 }
 
 function jobEvaluationRequirements(evaluation) {
@@ -393,6 +405,11 @@ function RequirementsDetails({ requirements, blockClassName }) {
             >
               <td>
                 <div>{row?.requirement}</div>
+                {row?.evidence ? (
+                  <small className="chat-first-requirement-evidence">
+                    {requirementEvidenceCopy(row.evidence)}
+                  </small>
+                ) : null}
                 {row?.jdSignal ? <small>“{row.jdSignal}”</small> : null}
                 {row?.note ? <small>{row.note}</small> : null}
               </td>
