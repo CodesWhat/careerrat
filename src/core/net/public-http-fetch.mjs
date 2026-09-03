@@ -576,7 +576,7 @@ function normalizeAddresses(values) {
     .filter(({ address, family }) => address && (family === 4 || family === 6));
 }
 
-function normalizedHostname(value) {
+export function normalizedHostname(value) {
   return String(value || "")
     .replace(/^\[|\]$/g, "")
     .toLowerCase();

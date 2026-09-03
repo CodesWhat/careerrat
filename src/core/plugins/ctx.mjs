@@ -8,7 +8,7 @@
 // manifest claims — buildPluginContext only ever reads its own four named
 // parameters, never a caller's full workspace state.
 
-import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
+import { fetchPublicHttpText, normalizedHostname } from "../net/public-http-fetch.mjs";
 
 const READ_SOURCE_KEYS = ["role", "company", "jd", "targeting"];
 
@@ -37,7 +37,7 @@ export function buildPluginContext({ manifest, role, company, jd, targeting, sig
   ctx.fetch = async (url) => {
     let hostname;
     try {
-      hostname = new URL(String(url)).hostname.toLowerCase();
+      hostname = normalizedHostname(new URL(String(url)).hostname);
     } catch {
       return { ok: false, code: "invalid_url", reason: "invalid URL", url: String(url) };
     }
