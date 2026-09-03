@@ -175,12 +175,12 @@ export function calculateAnnualCashWorksheet(value, { currency = "USD" } = {}) {
       ? `${formatAnnualCashAmount(weeklyPay.value, {
           currency,
           digits: Number.isInteger(weeklyPay.value) ? 0 : 2,
-        })}/week × 52 weeks`
+        })}/week × ${weeksPerYear.value} weeks`
       : `${formatAnnualCashAmount(monthlyPay.value, {
           currency,
           digits: Number.isInteger(monthlyPay.value) ? 0 : 2,
         })}/month × 12 months`;
-    const baseAnnual = weeklyStarted ? weeklyPay.value * 52 : monthlyPay.value * 12;
+    const baseAnnual = weeklyStarted ? weeklyPay.value * weeksPerYear.value : monthlyPay.value * 12;
     const annual = Math.round(baseAnnual + shiftAnnual);
     if (annual <= 0) return positiveAnnualCashError();
     const terms = [

@@ -137,11 +137,20 @@ describe("annual cash worksheet", () => {
     }
   });
 
-  it("annualizes a flat weekly amount by 52 weeks", () => {
+  it("annualizes a flat weekly amount by 52 weeks when weeks per year is not overridden", () => {
     expect(calculateAnnualCashWorksheet({ weeklyPay: "800" })).toEqual({
       annual: 41_600,
       error: null,
       formula: "$800/week × 52 weeks",
+      source: "derived",
+    });
+  });
+
+  it("annualizes a flat weekly amount by the worksheet's own weeks per year, not a fixed 52", () => {
+    expect(calculateAnnualCashWorksheet({ weeklyPay: "800", weeksPerYear: "40" })).toEqual({
+      annual: 32_000,
+      error: null,
+      formula: "$800/week × 40 weeks",
       source: "derived",
     });
   });
