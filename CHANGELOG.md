@@ -4,6 +4,14 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `careerrat export --ats` now prints an ATS parseability score (0-100) with
+  fixable issues, such as a missing section heading or unreachable contact
+  info, for the submission copy of a tailored resume.
+
 ## [0.17.0] - 2026-08-30
 
 ### Added
