@@ -2,6 +2,7 @@
 // Selection, assembly, and validation only — NEVER fabricates content.
 // Zero runtime dependencies.
 
+import { containsPipeTable } from "./export.mjs";
 import { lintArtifact } from "./placeholder-lint.mjs";
 
 // ---------------------------------------------------------------------------
@@ -207,8 +208,10 @@ export function containsForbiddenPhrase(text, phrase) {
 export function validateAtsSafe(markdown) {
   const issues = [];
 
-  // Markdown tables (pipe-separated with separator row)
-  if (/^\|[-| :]+\|/m.test(markdown)) {
+  // Markdown tables (pipe-separated with separator row; outer pipes optional,
+  // mirrors what the renderer (export.mjs's markdownToHtml) actually turns
+  // into a <table>, so a table that renders is always a table this catches)
+  if (containsPipeTable(markdown)) {
     issues.push("markdown table detected (ATS-unsafe)");
   }
 
