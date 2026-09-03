@@ -340,8 +340,95 @@ function searchRejectionRows(artifact) {
     .slice(0, 4);
 }
 
+const REQUIREMENT_IMPORTANCE_COPY = {
+  critical: "critical",
+  high: "high",
+  meaningful: "useful",
+  preferred: "nice to have",
+  low_signal: "low signal",
+};
+
+const REQUIREMENT_MATCH_COPY = {
+  strong: "strong",
+  partial: "partial",
+  missing: "missing",
+  na: "n/a",
+};
+
+// Plain-word labels for the evidence tier, rendered as visible text (not just
+// the <tr title>) so touch, keyboard and screen-reader users can reach it too.
+const REQUIREMENT_EVIDENCE_COPY = {
+  stated: "from the posting",
+  structural: "implied by the role",
+  inferred: "inferred",
+};
+
+function requirementImportanceCopy(importance) {
+  return REQUIREMENT_IMPORTANCE_COPY[importance] || String(importance || "").trim();
+}
+
+function requirementMatchCopy(match) {
+  return REQUIREMENT_MATCH_COPY[match] || String(match || "").trim();
+}
+
+function requirementEvidenceCopy(evidence) {
+  return REQUIREMENT_EVIDENCE_COPY[evidence] || String(evidence || "").trim();
+}
+
+function jobEvaluationRequirements(evaluation) {
+  const rows = evaluation?.requirements;
+  return Array.isArray(rows) ? rows : EMPTY_LIST;
+}
+
+// Shared table used by both requirements surfaces (the chat verdict card and
+// the This job panel). Renders nothing when there are no rows, matching the
+// "absent or empty on older evaluations" contract.
+function RequirementsDetails({ requirements, blockClassName }) {
+  const rows = Array.isArray(requirements) ? requirements : EMPTY_LIST;
+  if (!rows.length) return null;
+  return (
+    <details className={blockClassName}>
+      <summary>Requirements ({rows.length})</summary>
+      <table>
+        <thead>
+          <tr>
+            <th>Requirement</th>
+            <th>Importance</th>
+            <th>Match</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={`${row?.requirement || "requirement"}:${row?.importance || ""}:${row?.match || ""}`}
+              title={row?.evidence || undefined}
+            >
+              <td>
+                <div>{row?.requirement}</div>
+                {row?.evidence ? (
+                  <small className="chat-first-requirement-evidence">
+                    {requirementEvidenceCopy(row.evidence)}
+                  </small>
+                ) : null}
+                {row?.jdSignal ? <small>“{row.jdSignal}”</small> : null}
+                {row?.note ? <small>{row.note}</small> : null}
+              </td>
+              <td>{requirementImportanceCopy(row?.importance)}</td>
+              <td>{requirementMatchCopy(row?.match)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
 function ArtifactCard({ artifact }) {
   const rejectionRows = searchRejectionRows(artifact);
+  const requirementRows =
+    artifact.kind === "job_evaluation"
+      ? jobEvaluationRequirements(artifact.evaluation)
+      : EMPTY_LIST;
   return (
     <article className="chat-first-artifact-card">
       <span className="chat-first-artifact-card__icon" aria-hidden="true">
@@ -382,6 +469,10 @@ function ArtifactCard({ artifact }) {
           </ul>
         </details>
       ) : null}
+      <RequirementsDetails
+        requirements={requirementRows}
+        blockClassName="chat-first-artifact-card__requirements"
+      />
     </article>
   );
 }
@@ -995,6 +1086,10 @@ export function JobContextPanel({
               </ul>
             </div>
           ) : null}
+          <RequirementsDetails
+            requirements={job.requirements}
+            blockClassName="chat-first-context-card__requirements"
+          />
         </section>
       ) : null}
       {packetReview ? (
