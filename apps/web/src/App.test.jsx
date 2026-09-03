@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BOOT_SCREEN_MIN_VISIBLE_MS } from "./chat-first/use-boot-screen.js";
+import { BOOT_SCREEN_MIN_VISIBLE_MS, resetBootScreenClock } from "./chat-first/use-boot-screen.js";
 
 const hooks = vi.hoisted(() => ({
   cursor: 0,
@@ -136,6 +136,7 @@ async function renderAtWhenComplete(module, path) {
 }
 
 beforeEach(() => {
+  resetBootScreenClock();
   hooks.clear();
   apiMocks.finishOnboarding.mockReset().mockResolvedValue({ ok: true });
   apiMocks.getOnboardState.mockReset();

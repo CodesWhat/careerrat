@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api.js";
 import { BootScreen } from "./BootScreen.jsx";
 import { FirstRunExperience } from "./FirstRunExperience.jsx";
-import { BOOT_SCREEN_MIN_VISIBLE_MS } from "./use-boot-screen.js";
+import { BOOT_SCREEN_MIN_VISIBLE_MS, resetBootScreenClock } from "./use-boot-screen.js";
 
 const hooks = vi.hoisted(() => ({
   callbackDeps: [],
@@ -253,6 +253,7 @@ function companyAddReply(name = "Acme") {
 }
 
 beforeEach(() => {
+  resetBootScreenClock();
   hooks.clear();
   sse.calls = [];
   vi.clearAllMocks();

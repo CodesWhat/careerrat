@@ -4,34 +4,37 @@ import { useEffect, useState } from "react";
 // probe/gate check never reads as a flicker instead of a deliberate screen.
 export const BOOT_SCREEN_MIN_VISIBLE_MS = 400;
 
+// One clock per page load. App shows the boot screen during its gate check
+// and FirstRunController shows it again during the runtime probe; both count
+// the minimum from the first time either of them painted it, so a fast start
+// pays the minimum once, not once per stage.
+let bootShownAt = null;
+
+export function resetBootScreenClock() {
+  bootShownAt = null;
+}
+
 // `active` is the raw "should we be booting" condition (a gate check, a
-// runtime probe, ...). The returned value stays true until at least
-// `minVisibleMs` has passed since the screen first appeared, so a check that
-// already took longer than that hands off immediately and a fast one holds
-// for the remainder. Callers never need their own delay-on-fetch logic.
+// runtime probe, ...). The result is true whenever `active` is, and stays
+// true afterwards only until the shared minimum has elapsed, so a check that
+// already took longer hands off at once and a fast one holds the remainder.
 export function useMinimumBootScreen(active, minVisibleMs = BOOT_SCREEN_MIN_VISIBLE_MS) {
-  const [visible, setVisible] = useState(active);
-  // A mutable holder in state rather than a ref, so the timing survives
-  // re-renders without ever triggering one.
-  const [shown] = useState(() => ({ at: active ? Date.now() : null }));
+  const [holding, setHolding] = useState(active);
+  if (active && bootShownAt === null) bootShownAt = Date.now();
 
   useEffect(() => {
     if (active) {
-      if (shown.at === null) shown.at = Date.now();
-      setVisible(true);
+      setHolding(true);
       return undefined;
     }
-    if (shown.at === null) {
-      setVisible(false);
+    if (bootShownAt === null) {
+      setHolding(false);
       return undefined;
     }
-    const remaining = Math.max(0, minVisibleMs - (Date.now() - shown.at));
-    const timer = setTimeout(() => {
-      shown.at = null;
-      setVisible(false);
-    }, remaining);
+    const remaining = Math.max(0, minVisibleMs - (Date.now() - bootShownAt));
+    const timer = setTimeout(() => setHolding(false), remaining);
     return () => clearTimeout(timer);
-  }, [active, minVisibleMs, shown]);
+  }, [active, minVisibleMs]);
 
-  return visible;
+  return active || holding;
 }
