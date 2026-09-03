@@ -4,6 +4,14 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The annual-cash worksheet now takes a flat weekly or flat monthly amount as
+  the base pay, alongside the existing hourly wage. Tips, commission, or cash
+  bonuses per shift still layer on top of any one of the three.
+
 ## [0.17.0] - 2026-08-30
 
 ### Added
