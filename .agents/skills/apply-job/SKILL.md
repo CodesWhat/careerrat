@@ -245,17 +245,18 @@ Run:
 careerrat automation status --json
 ```
 
-Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means all four conditions are simultaneously true: automation is in the "advanced" setup mode, the `authenticated_apply_preparation` capability global switch is on, LinkedIn's per-capability switch is on, and LinkedIn's one-time ToS consent is recorded. This is the four-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
+Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means three switches are simultaneously on: the `authenticated_apply_preparation` capability global switch, LinkedIn's per-capability switch, and LinkedIn's one-time ToS consent. And either the "advanced" setup mode is on or the capability has a contextual scoped grant for LinkedIn. This is the predicate from `mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose.
 
 If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, explain exactly how to opt in, then **stop** — do not open a browser:
 
-1. Read LinkedIn's terms of service yourself to confirm that automated Easy Apply is permitted under your account's usage.
-2. Record consent: `careerrat automation consent linkedin --write`
-3. Enable the capability global switch: `careerrat automation enable authenticated_apply_preparation --write`
-4. Enable for LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
-5. Verify: `careerrat automation status --json`
+1. Switch to advanced setup mode: `careerrat automation mode advanced --write`
+2. Read LinkedIn's terms of service yourself to confirm that automated Easy Apply is permitted under your account's usage.
+3. Record consent: `careerrat automation consent linkedin --write`
+4. Enable the capability global switch: `careerrat automation enable authenticated_apply_preparation --write`
+5. Enable for LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
+6. Verify: `careerrat automation status --json`
 
-State clearly: this capability is OFF by default; enabling it is a deliberate choice. The user must read LinkedIn's ToS themselves before recording consent — CareerRat records the decision, it does not make it. This step is always user-initiated and must never run on a schedule or unattended.
+State clearly: this capability is OFF by default; enabling it is a deliberate choice. The user must read LinkedIn's ToS themselves before recording consent; CareerRat records the decision, it does not make it. This step is always user-initiated and must never run on a schedule or unattended. A contextual scoped grant given in the app is an alternative to step 1: it authorizes this capability for this platform without switching the account to advanced mode.
 
 ### Session browser + live DOM
 

@@ -28,25 +28,29 @@ careerrat automation status --json
 ```
 
 Inspect the `capabilities.messaging` entry. The applicable platforms are `linkedin`
-and `wellfound`. For each platform, `allowed: true` means all four conditions are
-simultaneously true: automation is in the "advanced" setup mode, the `messaging`
-capability global switch is on, that platform's per-capability switch is on, and
-the platform's one-time ToS consent is recorded. This is the four-part AND from
-`mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
+and `wellfound`. For each platform, `allowed: true` means three switches are
+simultaneously on: the `messaging` capability global switch, that platform's
+per-capability switch, and the platform's one-time ToS consent. And either
+automation is in the "advanced" setup mode or the capability has a contextual
+scoped grant for that platform. This is the predicate from `mayRun()` in
+`src/core/automation/consent.mjs`; never re-derive it in prose.
 
 If **no platform** shows `allowed: true`, explain exactly how to opt in, then
 stop — do not open a browser:
 
-1. Read the platform's terms of service yourself to confirm automated messaging reads
+1. `careerrat automation mode advanced --write`
+2. Read the platform's terms of service yourself to confirm automated messaging reads
    are permitted.
-2. Record consent: `careerrat automation consent <platform> --write`
-3. Enable the capability global switch: `careerrat automation enable messaging --write`
-4. Enable for the specific platform: `careerrat automation enable messaging <platform> --write`
-5. Verify: `careerrat automation status --json`
+3. Record consent: `careerrat automation consent <platform> --write`
+4. Enable the capability global switch: `careerrat automation enable messaging --write`
+5. Enable for the specific platform: `careerrat automation enable messaging <platform> --write`
+6. Verify: `careerrat automation status --json`
 
 State clearly: this capability is OFF by default; enabling it is a deliberate choice.
 The user must read the platform ToS themselves before recording consent — CareerRat
-records the decision but does not make it.
+records the decision but does not make it. A contextual scoped grant given in the app
+is an alternative to step 1: it authorizes this capability for that platform without
+switching to advanced mode.
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
 
@@ -414,8 +418,9 @@ Ingest complete:
 
 - **Opt-in, OFF by default.** Only poll platforms where `careerrat automation status --json`
   shows `messaging` `allowed: true` for that platform. The `allowed` field encodes the
-  four-part AND (advanced setup mode · global switch · platform switch · ToS consent) from
-  `mayRun()` in `src/core/automation/consent.mjs` — never re-derive the predicate in prose.
+  predicate (global switch · platform switch · ToS consent, all on, and either advanced
+  setup mode or a contextual scoped grant for that platform) from `mayRun()` in
+  `src/core/automation/consent.mjs`; never re-derive the predicate in prose.
 
 - **Highest ToS exposure — strongest consent gate.** In-platform messaging reads most
   directly risk a platform's terms of service. Consent must be deliberate: the user

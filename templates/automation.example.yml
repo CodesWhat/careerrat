@@ -4,12 +4,15 @@
 # safe default and the intended state for most users. Everything below is off until
 # you deliberately turn it on, one capability and one platform at a time.
 #
-# THE RULE (read this once): a capability runs on a platform ONLY IF all four are true —
-#   1. setup_mode: advanced                          (the coarse opt-in gate below)
-#   2. capabilities.<capability>.enabled            (the capability's global switch)
-#   3. capabilities.<capability>.platforms.<name>   (that platform, for that capability)
-#   4. consent.<name>                               (you've read that platform's ToS)
-# Miss any one and the agent will not act — it tells you which switch is off.
+# THE RULE (read this once): a capability runs on a platform ONLY IF these three
+# switches are all true:
+#   1. capabilities.<capability>.enabled            (the capability's global switch)
+#   2. capabilities.<capability>.platforms.<name>   (that platform, for that capability)
+#   3. consent.<name>                               (you've read that platform's ToS)
+# AND EITHER setup_mode: advanced (the coarse opt-in gate below) OR the app has
+# granted a contextual scoped grant for that capability and platform in the moment
+# (set by the app, not hand-edited here). Miss a switch and the agent will not act,
+# it tells you which one is off.
 #
 # NO STORED CREDENTIALS. CareerRat never stores your passwords. The browser session
 # holds your logins. With `session.provider: auto`, CareerRat selects Orca inside an

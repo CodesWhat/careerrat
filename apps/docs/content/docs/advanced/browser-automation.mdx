@@ -76,12 +76,13 @@ The desktop job review offers **Allow form preparation** when an otherwise-ready
 application needs this permission. Terminal users can manage the same underlying
 capability matrix with the commands below.
 
-All four conditions must be true for a capability to run on a platform:
+Three switches must all be on for a capability to run on a platform, and the
+setup mode must be "advanced" **or** the capability must have a contextual
+scoped grant for that platform:
 
-1. Automation is in the "advanced" setup mode.
-2. The capability's global switch is on.
-3. That platform's per-capability switch is on.
-4. That platform's one-time ToS consent is recorded.
+1. The capability's global switch is on.
+2. That platform's per-capability switch is on.
+3. That platform's one-time ToS consent is recorded.
 
 ```bash
 careerrat automation status                               # current matrix

@@ -113,7 +113,7 @@ cask update. Everything listed under 0.16.6 ships here, plus the fixes below.
 
 ### Fixed
 
-- AI web search no longer stops at the old two-minute runtime limit and reports a misleading structured-output error. Claude Code and Codex now share an explicit nine-minute bound, and real runtime failures stop immediately instead of repeating the entire search as a schema retry.
+- AI web search no longer stops at the old two-minute runtime limit and reports a misleading structured-output error. Claude Code and Codex now share an explicit thirty-minute per-prompt bound, and real runtime failures stop immediately instead of repeating the entire search as a schema retry.
 - Long searches keep their sourcing run alive while CareerRat reads and saves full job descriptions, so a completed model search cannot be marked failed during post-search capture.
 - Paul and the durable chat history show a plain-English retry message instead of model schemas, provider output, runtime codes, or parser details when AI search fails.
 - Yes/No buttons appear only for genuinely binary questions. Either-or questions stay as normal text responses, while binary questions with a short lead-in still get buttons.

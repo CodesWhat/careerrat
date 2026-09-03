@@ -24,19 +24,24 @@ careerrat automation status --json
 
 Inspect the `capabilities.status_polling` entry. The applicable platforms are
 `greenhouse`, `workday`, `ashby`, and `lever`. For each platform, `allowed: true`
-means all four conditions are met: automation is in the "advanced" setup mode,
-the capability global switch is on, that platform's per-capability switch is on,
-and the platform's one-time ToS consent is recorded. This is the four-part AND
-from `mayRun()` in `src/core/automation/consent.mjs` — never hardcode it here.
+means three switches are on: the capability global switch, that platform's
+per-capability switch, and the platform's one-time ToS consent. And either
+automation is in the "advanced" setup mode or the capability has a contextual
+scoped grant for that platform. This is the predicate from `mayRun()` in
+`src/core/automation/consent.mjs`; never hardcode it here.
 
 If **no platform** shows `allowed: true`, explain exactly how to opt in, then
 stop — do not open a browser:
 
-1. Read the platform's terms of service yourself.
-2. Record consent: `careerrat automation consent <platform> --write`
-3. Enable the capability: `careerrat automation enable status_polling --write`
-4. Enable for the specific platform: `careerrat automation enable status_polling <platform> --write`
-5. Verify: `careerrat automation status --json`
+1. `careerrat automation mode advanced --write`
+2. Read the platform's terms of service yourself.
+3. Record consent: `careerrat automation consent <platform> --write`
+4. Enable the capability: `careerrat automation enable status_polling --write`
+5. Enable for the specific platform: `careerrat automation enable status_polling <platform> --write`
+6. Verify: `careerrat automation status --json`
+
+A contextual scoped grant given in the app is an alternative to step 1: it
+authorizes this capability for that platform without switching to advanced mode.
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
 
@@ -180,7 +185,7 @@ the comm thread open after a portal-confirmed transition.
   tracker mutations to `track-outcomes`. The CareerRat in-app path uses the
   canonical atomic status-sync DB verb described below. Never fabricate a
   tracker mutation or hand-edit generated `workspace/tracker.json`.
-- Opt-in and OFF by default. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the four-part AND ("advanced" setup mode, global switch, platform switch, ToS consent) from `mayRun()` — never re-derive the predicate in prose.
+- Opt-in and OFF by default. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the predicate (global switch, platform switch, ToS consent, all on, and either "advanced" setup mode or a contextual scoped grant for that platform) from `mayRun()`; never re-derive the predicate in prose.
 - Never run on a schedule or unattended. Always user-initiated with the agent in the loop.
 - Halt and ask on captcha, 2FA, login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge.
 - Use tool-agnostic browser prose: "the session browser," "snapshot or read the page."
