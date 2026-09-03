@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowUp,
   CalendarDays,
+  Check,
   ChevronDown,
   FileUp,
   FolderOpen,
@@ -30,6 +31,7 @@ export const SettingsIcon = chatFirstIcon(Settings2, "settings-2");
 export const CalendarIcon = chatFirstIcon(CalendarDays, "calendar-days");
 export const PulseIcon = chatFirstIcon(Activity, "activity");
 export const ChevronDownIcon = chatFirstIcon(ChevronDown, "chevron-down");
+export const CheckIcon = chatFirstIcon(Check, "check");
 export const SearchIcon = chatFirstIcon(Search, "search");
 export const ArrowLeftIcon = chatFirstIcon(ArrowLeft, "arrow-left");
 export const UploadIcon = chatFirstIcon(FileUp, "file-up");

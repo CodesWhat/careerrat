@@ -315,6 +315,7 @@ export function FirstRunController({
   const [resumeUploadingName, setResumeUploadingName] = useState("");
   const [editingKnowledgeSection, setEditingKnowledgeSection] = useState(null);
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
+  const [expandedKnowledgeSections, setExpandedKnowledgeSections] = useState({});
   const [engineError, setEngineError] = useState(null);
   const [firstSearchRetryAvailable, setFirstSearchRetryAvailable] = useState(false);
   const [companyOperation, setCompanyOperation] = useState(null);
@@ -1564,6 +1565,27 @@ export function FirstRunController({
     (candidate) => candidate.id === runtimeState?.selectedId
   );
   const knowledge = buildFirstRunKnowledge(onboardState, runtime);
+  const completeKnowledgeSectionIds = knowledge.items
+    .filter((item) => item.status === "complete")
+    .map((item) => item.id)
+    .join(",");
+  // A section only carries a manually-toggled expanded flag while it is
+  // complete. Drop the flag the moment it leaves "complete" so a later
+  // re-completion starts collapsed again instead of remembering stale state.
+  useEffect(() => {
+    const stillComplete = new Set(
+      completeKnowledgeSectionIds ? completeKnowledgeSectionIds.split(",") : []
+    );
+    setExpandedKnowledgeSections((current) => {
+      let changed = false;
+      const next = {};
+      for (const [sectionId, expanded] of Object.entries(current)) {
+        if (expanded && stillComplete.has(sectionId)) next[sectionId] = true;
+        else changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [completeKnowledgeSectionIds]);
   const configuredAgentName = firstRunAgentName(onboardState, agentName);
   const voluntaryDefaultsRequired = setupNeedsVoluntaryDefaults(onboardState);
   const openSettings = () => navigate(profileSettingsRoute({ tab: "settings", panel: "engine" }));
@@ -1597,6 +1619,7 @@ export function FirstRunController({
       resumeUploadingName={resumeUploadingName}
       editingKnowledgeSection={editingKnowledgeSection}
       knowledgeSaving={knowledgeSaving}
+      expandedKnowledgeSections={expandedKnowledgeSections}
       voluntaryDefaultsRequired={voluntaryDefaultsRequired}
       onChooseEngine={chooseEngine}
       onStartInterview={startInterview}
@@ -1636,6 +1659,12 @@ export function FirstRunController({
         setEditingKnowledgeSection(item);
       }}
       onCancelKnowledgeEdit={() => setEditingKnowledgeSection(null)}
+      onToggleKnowledgeSection={(sectionId) =>
+        setExpandedKnowledgeSections((current) => ({
+          ...current,
+          [sectionId]: !current[sectionId],
+        }))
+      }
       onResumeFile={handleResumeFile}
       onSaveKnowledgeSection={commitKnowledgeSection}
       onDraftChange={setDraft}

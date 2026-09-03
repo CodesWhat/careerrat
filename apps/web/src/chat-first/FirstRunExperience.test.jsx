@@ -733,6 +733,9 @@ describe("FirstRunExperience", () => {
           },
           { id: "comp", label: "COMPENSATION", status: "active", lines: [] },
         ]}
+        // Complete sections collapse by default now, so "targets" is opened
+        // explicitly to assert its body content still renders correctly.
+        expandedKnowledgeSections={{ targets: true }}
         progress={{ completed: 1, total: 6 }}
         draft=""
       />
@@ -778,18 +781,159 @@ describe("FirstRunExperience", () => {
       knowledge: [roles, quickFacts, { id: "evidence", label: "EVIDENCE", status: "pending" }],
       progress: { completed: 1, total: 3 },
       onEditKnowledgeSection,
+      // "roles" is complete, so it collapses by default. Expand it up front
+      // (the same state a header click leaves behind) so its Edit action and
+      // checked lines are part of what this test can see.
+      expandedKnowledgeSections: { roles: true },
     });
     const panelElement = tree.props.children[2];
     const panel = panelElement.type(panelElement.props);
     const panelHtml = renderToStaticMarkup(panel);
-    const edits = findElements(panel, (node) => node.type === "button" && textOf(node) === "Edit");
+    // quickFacts is "populated", so it stays inline and reachable by the
+    // plain element-tree walk. "roles" is "complete", so it renders through
+    // the collapsible CompleteKnowledgeCard component and has to be invoked
+    // directly to reach its (already-expanded) Edit button.
+    const quickFactsEdit = findElement(
+      panel,
+      (node) => node.type === "button" && textOf(node) === "Edit"
+    );
+    const rolesCardElement = findElement(panel, (node) => node.props?.item?.id === "roles");
+    const rolesTree = rolesCardElement.type(rolesCardElement.props);
+    const rolesEdit = findElement(
+      rolesTree,
+      (node) => node.type === "button" && textOf(node) === "Edit"
+    );
 
-    expect(edits).toHaveLength(2);
     expect(panelHtml).toContain("✓ Staff Engineer");
     expect(panelHtml).not.toContain("✓ NYC");
-    edits[0].props.onClick();
-    edits[1].props.onClick();
-    expect(onEditKnowledgeSection.mock.calls).toEqual([[roles], [quickFacts]]);
+    quickFactsEdit.props.onClick();
+    rolesEdit.props.onClick();
+    expect(onEditKnowledgeSection.mock.calls).toEqual([[quickFacts], [roles]]);
+  });
+
+  it("renders a complete knowledge section collapsed with a Done pill and no visible body", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      <FirstRunChat
+        agentName="Paul"
+        messages={[]}
+        knowledge={[
+          {
+            id: "engine",
+            label: "ENGINE",
+            status: "complete",
+            lines: ["Claude Code · ready"],
+            editor: { fields: [] },
+          },
+        ]}
+        progress={{ completed: 1, total: 6 }}
+      />
+    );
+
+    expect(html).toContain("ENGINE");
+    expect(html).toContain('<span class="cf-first-run__knowledge-done">Done</span>');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("Claude Code · ready");
+    expect(html).not.toContain(">Edit<");
+  });
+
+  it("renders a complete knowledge section expanded while its editor is open", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const engine = {
+      id: "engine",
+      label: "ENGINE",
+      status: "complete",
+      lines: ["Claude Code · ready"],
+      editor: { fields: [] },
+    };
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [],
+      knowledge: [engine],
+      progress: { completed: 1, total: 6 },
+      editingKnowledgeSection: engine,
+      expandedKnowledgeSections: {},
+    });
+    const panel = tree.props.children[2];
+    const html = renderToStaticMarkup(panel);
+
+    expect(panel.props.editingSectionId).toBe("engine");
+    expect(panel.props.expandedSections).toEqual({});
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("Claude Code · ready");
+    expect(html).toContain(">Edit<");
+  });
+
+  it("clicking the header toggles the section and reveals the Edit action once expanded", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const onToggleKnowledgeSection = vi.fn();
+    const engine = {
+      id: "engine",
+      label: "ENGINE",
+      status: "complete",
+      lines: ["Claude Code · ready"],
+      editor: { fields: [] },
+    };
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [],
+      knowledge: [engine],
+      progress: { completed: 1, total: 6 },
+      onToggleKnowledgeSection,
+    });
+    const panelElement = tree.props.children[2];
+    const panel = panelElement.type(panelElement.props);
+    const engineCardElement = findElement(panel, (node) => node.props?.item?.id === "engine");
+    const engineTree = engineCardElement.type(engineCardElement.props);
+    const toggle = findElement(
+      engineTree,
+      (node) =>
+        node.type === "button" && node.props.className === "cf-first-run__knowledge-card-toggle"
+    );
+    toggle.props.onClick();
+    expect(onToggleKnowledgeSection).toHaveBeenCalledWith("engine");
+
+    // The click above only hands the section id to the controller, which owns
+    // expandedKnowledgeSections and re-renders. Render that resulting state
+    // directly to confirm the body (lines, Edit action, open chevron) shows
+    // once expanded.
+    const expandedHtml = renderToStaticMarkup(
+      <FirstRunChat
+        agentName="Paul"
+        messages={[]}
+        knowledge={[engine]}
+        progress={{ completed: 1, total: 6 }}
+        expandedKnowledgeSections={{ engine: true }}
+      />
+    );
+    expect(expandedHtml).toContain("Claude Code · ready");
+    expect(expandedHtml).toContain(">Edit<");
+    expect(expandedHtml).toContain('aria-expanded="true"');
+    expect(expandedHtml).toContain("cf-first-run__knowledge-chevron--open");
+  });
+
+  it("renders an incomplete section expanded with no Done pill and no toggle", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      <FirstRunChat
+        agentName="Paul"
+        messages={[]}
+        knowledge={[
+          {
+            id: "comp",
+            label: "COMPENSATION",
+            status: "populated",
+            lines: ["$210K floor"],
+            editor: { fields: [] },
+          },
+        ]}
+        progress={{ completed: 0, total: 6 }}
+      />
+    );
+
+    expect(html).toContain("$210K floor");
+    expect(html).not.toContain("cf-first-run__knowledge-done");
+    expect(html).not.toContain("aria-expanded");
   });
 
   it("keeps explicit non-profile confirmation choices visible", async () => {

@@ -1,6 +1,6 @@
 import { AnnualCashWorksheet } from "./AnnualCashWorksheet.jsx";
 import { cleanAgentCopy } from "./agent-copy.js";
-import { SendUpIcon } from "./chat-first-icons.jsx";
+import { CheckIcon, ChevronDownIcon, SendUpIcon } from "./chat-first-icons.jsx";
 import {
   isFirstRunExtractedFact,
   runtimeIsSupported,
@@ -639,7 +639,85 @@ function TranscriptMessage({
   });
 }
 
-function KnowledgePanel({ agentName, knowledge = [], progress = {}, onEditSection, onResumeFile }) {
+function CompleteKnowledgeCard({
+  item,
+  isEditing,
+  isExpanded,
+  onToggle,
+  onEditSection,
+  onResumeFile,
+}) {
+  const lines = safeArray(item.lines);
+  const expanded = isEditing || isExpanded;
+  const bodyId = `cf-first-run-knowledge-body-${item.id}`;
+  return (
+    <article
+      className={`cf-first-run__knowledge-card cf-first-run__knowledge-card--complete${
+        expanded ? "" : " cf-first-run__knowledge-card--collapsed"
+      }`}
+    >
+      <button
+        type="button"
+        className="cf-first-run__knowledge-card-toggle"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={() => onToggle?.(item.id)}
+      >
+        <span className="cf-first-run__knowledge-check" aria-hidden="true">
+          <CheckIcon />
+        </span>
+        <span className="cf-first-run__knowledge-card-title">{item.label || "PROFILE DETAIL"}</span>
+        <span className="cf-first-run__knowledge-done">Done</span>
+        <ChevronDownIcon
+          className={`cf-first-run__knowledge-chevron${expanded ? " cf-first-run__knowledge-chevron--open" : ""}`}
+        />
+      </button>
+      {expanded ? (
+        <div id={bodyId} className="cf-first-run__knowledge-card-body">
+          <div className="cf-first-run__knowledge-card-actions">
+            {item.id === "resume" ? (
+              <label className="cf-first-run__file-action">
+                Drop resume
+                <input
+                  type="file"
+                  accept={RESUME_ACCEPT}
+                  onChange={(event) => {
+                    const file = firstFile(event.target.files);
+                    if (file) onResumeFile?.(file);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            ) : null}
+            {item.editor ? (
+              <button type="button" onClick={() => onEditSection?.(item)}>
+                Edit
+              </button>
+            ) : null}
+          </div>
+          {lines.length > 0 ? (
+            <div className="cf-first-run__knowledge-lines">
+              {lines.map((line) => (
+                <span key={String(line)}>✓ {line}</span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function KnowledgePanel({
+  agentName,
+  knowledge = [],
+  progress = {},
+  onEditSection,
+  onResumeFile,
+  expandedSections = {},
+  onToggleSection,
+  editingSectionId = null,
+}) {
   const current = progressValues(progress);
   return (
     <aside className="cf-first-run__knowledge" aria-label={`What ${agentName} knows`}>
@@ -664,6 +742,19 @@ function KnowledgePanel({ agentName, knowledge = [], progress = {}, onEditSectio
       <div className="cf-first-run__knowledge-cards">
         {safeArray(knowledge).length > 0 ? (
           knowledge.map((item) => {
+            if (item.status === "complete") {
+              return (
+                <CompleteKnowledgeCard
+                  key={item.id}
+                  item={item}
+                  isEditing={editingSectionId === item.id}
+                  isExpanded={Boolean(expandedSections?.[item.id])}
+                  onToggle={onToggleSection}
+                  onEditSection={onEditSection}
+                  onResumeFile={onResumeFile}
+                />
+              );
+            }
             const lines = safeArray(item.lines);
             return (
               <article
@@ -697,10 +788,7 @@ function KnowledgePanel({ agentName, knowledge = [], progress = {}, onEditSectio
                 {lines.length > 0 ? (
                   <div className="cf-first-run__knowledge-lines">
                     {lines.map((line) => (
-                      <span key={String(line)}>
-                        {item.status === "complete" ? "✓ " : ""}
-                        {line}
-                      </span>
+                      <span key={String(line)}>{line}</span>
                     ))}
                   </div>
                 ) : item.status === "active" ? (
@@ -934,10 +1022,12 @@ export function FirstRunChat({
   resumeUploadingName = "",
   editingKnowledgeSection = null,
   knowledgeSaving = false,
+  expandedKnowledgeSections = {},
   onChooseOption,
   onEditKnowledgeSection,
   onCancelKnowledgeEdit,
   onSaveKnowledgeSection,
+  onToggleKnowledgeSection,
   onResumeFile,
   onDraftChange,
   onRetrySearch,
@@ -1045,6 +1135,9 @@ export function FirstRunChat({
         progress={progress}
         onEditSection={onEditKnowledgeSection}
         onResumeFile={onResumeFile}
+        expandedSections={expandedKnowledgeSections}
+        onToggleSection={onToggleKnowledgeSection}
+        editingSectionId={editingKnowledgeSection?.id ?? null}
       />
       {editingKnowledgeSection ? (
         <KnowledgeSectionEditor

@@ -94,6 +94,28 @@ const ONBOARD_STATE = {
   setupProgress: { complete: false, completedCount: 0, total: 1, items: [] },
 };
 
+function roleKnowledgeState(done) {
+  return {
+    data: {
+      modes: { agent_name: "Paul" },
+      setup: { readiness: { search_ready: false } },
+      sourcing: {},
+      profile: {},
+      targeting: { role_buckets: [{ titles: ["Staff Engineer"] }] },
+      evidence: { claims: [] },
+    },
+    setupProgress: {
+      complete: false,
+      completedCount: done ? 1 : 0,
+      total: 2,
+      items: [
+        { key: "roles", done },
+        { key: "evidence", done: false },
+      ],
+    },
+  };
+}
+
 const FULL_RUNTIME_CAPABILITIES = {
   completion: true,
   structuredOutput: true,
@@ -1925,6 +1947,52 @@ describe("FirstRunController chat event reconciliation", () => {
 
     view.props.onEditKnowledgeSection({ id: "engine", label: "ENGINE" });
     expect(navigate).toHaveBeenCalledWith("/settings?tab=settings&panel=engine");
+  });
+
+  it("toggles a complete knowledge section through controller state", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const completeState = roleKnowledgeState(true);
+    let view = rerender(module, api, { initialOnboardState: completeState });
+
+    expect(view.props.knowledge.find((item) => item.id === "roles")?.status).toBe("complete");
+    expect(view.props.expandedKnowledgeSections.roles).toBeUndefined();
+
+    view.props.onToggleKnowledgeSection("roles");
+    view = rerender(module, api, { initialOnboardState: completeState });
+    expect(view.props.expandedKnowledgeSections.roles).toBe(true);
+
+    view.props.onToggleKnowledgeSection("roles");
+    view = rerender(module, api, { initialOnboardState: completeState });
+    expect(view.props.expandedKnowledgeSections.roles).toBe(false);
+  });
+
+  it("forgets expansion when a knowledge section leaves complete status", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const completeState = roleKnowledgeState(true);
+    const incompleteState = roleKnowledgeState(false);
+    let view = rerender(module, api, { initialOnboardState: completeState });
+
+    view.props.onToggleKnowledgeSection("roles");
+    view = rerender(module, api, { initialOnboardState: completeState });
+    expect(view.props.expandedKnowledgeSections.roles).toBe(true);
+
+    api.getOnboardState.mockResolvedValueOnce(incompleteState);
+    await view.props.onSaveKnowledgeSection({ id: "roles" }, { titles: "Staff Engineer" });
+    view = rerender(module, api, { initialOnboardState: completeState });
+    expect(view.props.knowledge.find((item) => item.id === "roles")?.status).not.toBe("complete");
+    await flushEffects();
+    view = rerender(module, api, { initialOnboardState: completeState });
+    expect(view.props.expandedKnowledgeSections.roles).toBeUndefined();
+
+    api.getOnboardState.mockResolvedValueOnce(completeState);
+    await view.props.onSaveKnowledgeSection({ id: "roles" }, { titles: "Staff Engineer" });
+    view = rerender(module, api, { initialOnboardState: completeState });
+    await flushEffects();
+    view = rerender(module, api, { initialOnboardState: completeState });
+    expect(view.props.knowledge.find((item) => item.id === "roles")?.status).toBe("complete");
+    expect(view.props.expandedKnowledgeSections.roles).toBeUndefined();
   });
 
   it("writes whole-section modal edits through canonical candidate APIs", async () => {
