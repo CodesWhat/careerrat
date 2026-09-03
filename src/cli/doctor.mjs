@@ -143,7 +143,9 @@ const missingSystem = systemPrereqs.filter((path) => !checkPath(path));
 // and tailored artifacts silently degrade when it's missed — surfaced as its own
 // field an agent can branch on instead of a string it has to pattern-match out.
 const templateLeftovers =
-  candidateSource === "db" ? { clean: true, findings: [] } : checkTemplateLeftovers({ root });
+  candidateSource === "db"
+    ? { clean: true, status: "clean", findings: [], files: [] }
+    : checkTemplateLeftovers({ root });
 for (const dir of workspaceDirs) ensureUserDir(dir);
 
 // Per-role-family learning store (candidate/learnings/<family>.md). Informational
@@ -295,10 +297,28 @@ if (missingUser.length > 0) {
 if (templateLeftovers.findings.length > 0) {
   console.log("Personalization incomplete (still has template content):");
   for (const finding of templateLeftovers.findings) {
-    console.log(`- ${finding.file} ${finding.key}: still has template marker "${finding.marker}"`);
+    if (finding.key === "(whole file)") {
+      console.log(
+        `- ${finding.file}: ${finding.marker}, it doesn't look like it's been edited yet.`
+      );
+    } else {
+      console.log(
+        `- ${finding.file} ${finding.key}: still has template marker "${finding.marker}"`
+      );
+    }
   }
   console.log(
     "  fix: personalize these fields with your own information, or re-run `careerrat ingest --check`."
+  );
+  console.log("");
+}
+
+const unreadableTemplateFiles = templateLeftovers.files.filter((f) => f.status === "unreadable");
+if (unreadableTemplateFiles.length > 0) {
+  console.log("Could not check some files for leftover template content:");
+  for (const file of unreadableTemplateFiles) console.log(`- ${file.file}`);
+  console.log(
+    "  fix: make sure the file is readable and is valid YAML, then run `careerrat doctor` again."
   );
   console.log("");
 }
