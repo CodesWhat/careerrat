@@ -272,7 +272,7 @@ plan is immutable for the life of the operation and its retries. Adapters map
 that plan to Claude Code or OpenAI Codex; the user never needs to choose a
 provider based on model capability.
 
-Claude Code 2.1.241 or newer, and OpenAI Codex on its current release, are the
+Claude Code 2.1.241 or newer and OpenAI Codex are the
 supported engines for the complete CareerRat product. Each runtime must pass
 local availability, authentication, and the complete readiness check before
 selection. Both adapters run from disposable task directories with bounded

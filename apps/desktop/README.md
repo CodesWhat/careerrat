@@ -63,8 +63,8 @@ imported. It points at Electron's per-user data directory:
 and `internal/ai.env` live there, outside the signed resources tree.
 
 CareerRat owns the workflows and threads, so durable product state stays
-provider-neutral. Claude Code 2.1.241 or newer, and OpenAI Codex on its current
-release, are the two supported product runtime choices. Both run the same
+provider-neutral. Claude Code 2.1.241 or newer and OpenAI Codex are the two
+supported product runtime choices. Both run the same
 CareerRat-owned workflows, skills, and durable state. A runtime is
 selectable only after Finder-safe detection confirms its availability,
 authentication, and complete readiness check. Both adapters run fixed,
