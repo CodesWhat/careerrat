@@ -120,6 +120,30 @@ describe("desktop updater controller", () => {
     assert.equal(writes.at(-1).lastCheckedAt, Date.parse("2026-08-26T20:00:00Z"));
   });
 
+  it("drops retired state keys on the next persist", () => {
+    const operation = { phase: "ready", version: "0.16.4" };
+    const { controller, writes } = makeController({
+      persisted: {
+        enabled: false,
+        lastCheckedAt: "2026-08-25T20:00:00Z",
+        skippedVersion: "0.16.3",
+        operation,
+        latestVersion: "0.16.4",
+        latestReleaseUrl: "https://example.com/release",
+        latestDmgUrl: "https://example.com/careerrat.dmg",
+      },
+    });
+
+    controller.setEnabled(false);
+
+    assert.deepEqual(writes.at(-1), {
+      enabled: false,
+      lastCheckedAt: "2026-08-25T20:00:00Z",
+      skippedVersion: "0.16.3",
+      operation,
+    });
+  });
+
   it("only installs after update-downloaded and uses the v6 positional API", () => {
     const { controller, updater } = makeController();
 

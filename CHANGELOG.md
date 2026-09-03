@@ -13,6 +13,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- The desktop update checker drops settings keys left over from older versions
+  instead of carrying them forward.
 - Starting the app no longer flashes the first-run setup screen before the
   chat loads; a short boot screen shows while CareerRat checks your
   workspace and engine.
