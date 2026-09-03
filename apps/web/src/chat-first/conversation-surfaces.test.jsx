@@ -312,6 +312,105 @@ describe("TodayConversation", () => {
     expect(html).not.toContain("[object Object]");
   });
 
+  it("shows a closed Requirements table on a job_evaluation verdict card", () => {
+    const html = markup(
+      <MessageTranscript
+        onMessageAction={() => undefined}
+        messages={[
+          {
+            id: "evaluation-1",
+            role: "assistant",
+            kind: "text",
+            text: "Evaluated Hightouch: Keep (82/100 fit).",
+            artifacts: [
+              {
+                kind: "job_evaluation",
+                title: "Hightouch: Keep",
+                applicationId: "app-1",
+                evaluation: {
+                  gate: "keep",
+                  fitScore: 82,
+                  requirements: [
+                    {
+                      requirement: "5+ years backend engineering",
+                      importance: "critical",
+                      evidence: "stated",
+                      jdSignal: "5+ years of backend experience required",
+                      match: "strong",
+                      note: "",
+                    },
+                    {
+                      requirement: "Experience with distributed systems",
+                      importance: "meaningful",
+                      evidence: "inferred",
+                      jdSignal: "",
+                      match: "partial",
+                      note: "Only exposure through one prior role",
+                    },
+                    {
+                      requirement: "Familiarity with Kubernetes",
+                      importance: "preferred",
+                      evidence: "structural",
+                      jdSignal: "",
+                      match: "missing",
+                      note: "",
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("Hightouch: Keep");
+    expect(html).toContain('<details class="chat-first-artifact-card__requirements">');
+    expect(html).toContain("Requirements (3)");
+    expect(html).toContain("5+ years backend engineering");
+    expect(html).toContain("Experience with distributed systems");
+    expect(html).toContain("Familiarity with Kubernetes");
+    expect(html).toContain("“5+ years of backend experience required”");
+    expect(html).toContain("Only exposure through one prior role");
+    expect(html).toContain("critical");
+    expect(html).toContain("useful");
+    expect(html).toContain("nice to have");
+    expect(html).toContain("strong");
+    expect(html).toContain("partial");
+    expect(html).toContain("missing");
+    expect(html).not.toContain("<th>Evidence</th>");
+    expect(html).toMatch(/<tr title="stated"/);
+    expect(html).not.toContain(">stated<");
+  });
+
+  it("renders no Requirements section for a job_evaluation artifact without requirement rows", () => {
+    const html = markup(
+      <MessageTranscript
+        onMessageAction={() => undefined}
+        messages={[
+          {
+            id: "evaluation-2",
+            role: "assistant",
+            kind: "text",
+            text: "Evaluated Initech: Review (64/100 fit).",
+            artifacts: [
+              {
+                kind: "job_evaluation",
+                title: "Initech: Review",
+                applicationId: "app-2",
+                evaluation: { gate: "review", fitScore: 64 },
+              },
+            ],
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain("Initech: Review");
+    expect(html).not.toContain("chat-first-artifact-card__requirements");
+    expect(html).not.toContain("Requirements (");
+  });
+
   it("replaces browser-workflow failure summaries with actionable candidate copy", () => {
     const html = markup(
       <MessageTranscript
@@ -1890,6 +1989,66 @@ describe("JobConversation and JobContextPanel", () => {
 
     expect(html).toContain("Remote - United States");
     expect(html).not.toContain("Remote - United States · Remote");
+  });
+
+  it("shows a closed Requirements table in the This job panel when the evaluation carries rows", () => {
+    const html = markup(
+      <JobContextPanel
+        job={{
+          company: "Hightouch",
+          role: "Software Engineer",
+          stage: "Review",
+          fit: 82,
+          requirements: [
+            {
+              requirement: "5+ years backend engineering",
+              importance: "critical",
+              evidence: "stated",
+              jdSignal: "5+ years of backend experience required",
+              match: "strong",
+              note: "",
+            },
+            {
+              requirement: "Experience with distributed systems",
+              importance: "meaningful",
+              evidence: "inferred",
+              jdSignal: "",
+              match: "partial",
+              note: "Only exposure through one prior role",
+            },
+            {
+              requirement: "Familiarity with Kubernetes",
+              importance: "preferred",
+              evidence: "structural",
+              jdSignal: "",
+              match: "missing",
+              note: "",
+            },
+          ],
+        }}
+      />
+    );
+
+    expect(html).toContain('<details class="chat-first-context-card__requirements">');
+    expect(html).toContain("Requirements (3)");
+    expect(html).toContain("5+ years backend engineering");
+    expect(html).toContain("Experience with distributed systems");
+    expect(html).toContain("Familiarity with Kubernetes");
+    expect(html).toContain("“5+ years of backend experience required”");
+    expect(html).toContain("Only exposure through one prior role");
+    expect(html).toContain("nice to have");
+    expect(html).not.toContain(">stated<");
+  });
+
+  it("renders no Requirements section in the This job panel when the job carries no requirements", () => {
+    const html = markup(
+      <JobContextPanel
+        job={{ company: "Hightouch", role: "Software Engineer", stage: "Review", fit: 82 }}
+      />
+    );
+
+    expect(html).not.toContain("chat-first-context-card__requirements");
+    expect(html).not.toContain("Requirements (");
   });
 });
 

@@ -2195,6 +2195,46 @@ describe("ChatFirstAppView", () => {
     expect(html).not.toContain("Run mock interview");
   });
 
+  it("threads the evaluate verdict's requirements table into the This job panel", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        jobDetails: {
+          "app-1": {
+            requirements: [
+              {
+                requirement: "5+ years backend engineering",
+                importance: "critical",
+                evidence: "stated",
+                jdSignal: "5+ years of backend experience required",
+                match: "strong",
+                note: "",
+              },
+            ],
+          },
+        },
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+    });
+
+    expect(html).toContain('<details class="chat-first-context-card__requirements">');
+    expect(html).toContain("Requirements (1)");
+    expect(html).toContain("5+ years backend engineering");
+  });
+
+  it("shows no Requirements section in the This job panel when jobDetails carries no requirements", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        jobDetails: { "app-1": {} },
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+    });
+
+    expect(html).not.toContain("chat-first-context-card__requirements");
+    expect(html).not.toContain("Requirements (");
+  });
+
   it("wires packet-gap review into the job thread and its composer", async () => {
     const packetGap = {
       id: "linkedin-profile",

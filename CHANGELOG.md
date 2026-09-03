@@ -18,6 +18,7 @@ All notable changes to CareerRat are documented here. This project follows
 - The annual-cash worksheet now takes a flat weekly or flat monthly amount as
   the base pay, alongside the existing hourly wage. Tips, commission, or cash
   bonuses per shift still layer on top of any one of the three.
+- Requirements table from the evaluate verdict shows in the chat verdict card and the This job panel, collapsed by default.
 
 ## [0.17.0] - 2026-08-30
 
