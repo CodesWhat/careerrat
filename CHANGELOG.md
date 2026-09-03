@@ -8,9 +8,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
-- `careerrat doctor` now flags candidate personalization files (profile,
-  evidence, honesty) that still carry unedited template content, reporting the
-  file, key, and matched marker without ever printing the candidate's real data.
+- `careerrat doctor` now flags candidate files (profile, targeting, evidence,
+  honesty, form defaults) that still carry unedited template content, reporting
+  the file, key, and matched marker without printing the candidate's real data.
+  A file it could not read is reported as unchecked, never as clean.
 - The annual-cash worksheet now takes a flat weekly or flat monthly amount as
   the base pay, alongside the existing hourly wage. Tips, commission, or cash
   bonuses per shift still layer on top of any one of the three.
