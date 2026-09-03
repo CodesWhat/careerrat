@@ -1,5 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../lib/api.js";
+import { BootScreen } from "./BootScreen.jsx";
+import { FirstRunExperience } from "./FirstRunExperience.jsx";
+import { BOOT_SCREEN_MIN_VISIBLE_MS, resetBootScreenClock } from "./use-boot-screen.js";
 
 const hooks = vi.hoisted(() => ({
   callbackDeps: [],
@@ -178,6 +182,11 @@ async function flushEffects() {
   const effects = hooks.pendingEffects.splice(0);
   for (const effect of effects) effect();
   for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+  // The boot screen's minimum-visible timer is real time under the hood
+  // (fake timers are armed for every test below); clear it so a resolved
+  // runtime probe reaches the picker instead of staying parked on the boot
+  // screen for the rest of the test.
+  await vi.advanceTimersByTimeAsync(BOOT_SCREEN_MIN_VISIBLE_MS);
 }
 
 async function bootController(module, api, { startInterview = true, controllerProps = {} } = {}) {
@@ -244,9 +253,15 @@ function companyAddReply(name = "Acme") {
 }
 
 beforeEach(() => {
+  resetBootScreenClock();
   hooks.clear();
   sse.calls = [];
   vi.clearAllMocks();
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("FirstRunController error copy", () => {
@@ -271,8 +286,119 @@ describe("FirstRunController error copy", () => {
   });
 });
 
+describe("FirstRunController boot screen", () => {
+  it("shows the boot screen while the AI runtime probe is still pending, never the setup heading", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    const pending = deferred();
+    api.getInstalledAiRuntimes.mockReturnValue(pending.promise);
+
+    hooks.resetRender();
+    module.FirstRunController({ api, inWorkspace: false });
+    await flushEffects();
+    hooks.resetRender();
+    const view = module.FirstRunController({ api, inWorkspace: false });
+
+    expect(view.type).toBe(BootScreen);
+    expect(renderToStaticMarkup(view)).not.toContain("Let’s get CareerRat ready");
+  });
+
+  it("reaches the real setup screen, not the boot screen, once the probe resolves with no detected engines", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getInstalledAiRuntimes.mockResolvedValue({ selectedId: null, runtimes: [] });
+
+    const view = await bootController(module, api, { startInterview: false });
+
+    expect(view.type).toBe(FirstRunExperience);
+    expect(view.props.stage).toBe("engine");
+    expect(view.props.engines).toEqual([]);
+  });
+
+  it("moves from the boot screen straight to the engine picker when the probe resolves with a ready engine", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    const pending = deferred();
+    api.getInstalledAiRuntimes.mockReturnValue(pending.promise);
+
+    hooks.resetRender();
+    module.FirstRunController({ api, inWorkspace: false });
+    await flushEffects();
+    hooks.resetRender();
+    const pendingView = module.FirstRunController({ api, inWorkspace: false });
+    expect(pendingView.type).toBe(BootScreen);
+
+    pending.resolve({
+      selectedId: "claude",
+      runtimes: [
+        {
+          id: "claude",
+          supported: true,
+          available: true,
+          ready: true,
+          selectable: true,
+          capabilityTier: "task_tools",
+          capabilities: FULL_RUNTIME_CAPABILITIES,
+        },
+      ],
+    });
+    await flushEffects();
+    hooks.resetRender();
+    module.FirstRunController({ api, inWorkspace: false });
+    await flushEffects();
+    hooks.resetRender();
+    const view = module.FirstRunController({ api, inWorkspace: false });
+
+    expect(view.type).toBe(FirstRunExperience);
+    expect(view.props.stage).toBe("engine");
+    expect(view.props.engines[0]).toMatchObject({ id: "claude", selected: true });
+  });
+
+  it("keeps the picker visible during a successful refresh after the startup probe fails", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi({ transcript: [] });
+    api.getInstalledAiRuntimes.mockRejectedValueOnce(new Error("runtime probe failed"));
+
+    const failedView = await bootController(module, api, { startInterview: false });
+
+    expect(failedView.type).toBe(FirstRunExperience);
+    expect(failedView.props.stage).toBe("engine");
+    expect(failedView.props.error).toBe("CareerRat couldn't start setup. Try again.");
+
+    const pending = deferred();
+    api.getInstalledAiRuntimes.mockReset().mockReturnValueOnce(pending.promise);
+    const refresh = failedView.props.onRefreshEngines();
+    const refreshingView = rerender(module, api);
+
+    expect(refreshingView.type).toBe(FirstRunExperience);
+    expect(refreshingView.props.submitting).toBe(true);
+    expect(refreshingView.props.error).toBeNull();
+
+    pending.resolve({
+      selectedId: "claude",
+      runtimes: [
+        {
+          id: "claude",
+          supported: true,
+          available: true,
+          ready: true,
+          selectable: true,
+          capabilityTier: "task_tools",
+          capabilities: FULL_RUNTIME_CAPABILITIES,
+        },
+      ],
+    });
+    await refresh;
+    const refreshedView = rerender(module, api);
+
+    expect(refreshedView.type).toBe(FirstRunExperience);
+    expect(refreshedView.props.submitting).toBe(false);
+    expect(refreshedView.props.engines[0]).toMatchObject({ id: "claude", selected: true });
+  });
+});
+
 describe("FirstRunController chat event reconciliation", () => {
-  it("renders the local upgrade choice on the first frame from the state App already loaded", async () => {
+  it("renders the local upgrade choice without a boot screen on the first frame from App state", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
     const upgradeState = {
@@ -296,6 +422,8 @@ describe("FirstRunController chat event reconciliation", () => {
 
     const view = rerender(module, api, { initialOnboardState: upgradeState });
 
+    expect(view.type).toBe(FirstRunExperience);
+    expect(view.type).not.toBe(BootScreen);
     expect(view.props.stage).toBe("voluntary-defaults");
     expect(view.props.voluntaryDefaultsRequired).toBe(true);
     expect(api.initOnboard).not.toHaveBeenCalled();
@@ -532,6 +660,8 @@ describe("FirstRunController chat event reconciliation", () => {
 
     expect(api.finishOnboarding).toHaveBeenCalledOnce();
     expect(onComplete).toHaveBeenCalledOnce();
+    rerender(module, api, { onComplete });
+    await flushEffects();
     expect(rerender(module, api, { onComplete }).props.voluntaryDefaultsRequired).toBe(false);
     expect(api.finishOnboarding.mock.invocationCallOrder[0]).toBeLessThan(
       onComplete.mock.invocationCallOrder[0]
@@ -1953,7 +2083,10 @@ describe("FirstRunController chat event reconciliation", () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
     const completeState = roleKnowledgeState(true);
-    let view = rerender(module, api, { initialOnboardState: completeState });
+    let view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { initialOnboardState: completeState },
+    });
 
     expect(view.props.knowledge.find((item) => item.id === "roles")?.status).toBe("complete");
     expect(view.props.expandedKnowledgeSections.roles).toBeUndefined();
@@ -1972,7 +2105,10 @@ describe("FirstRunController chat event reconciliation", () => {
     const api = createApi();
     const completeState = roleKnowledgeState(true);
     const incompleteState = roleKnowledgeState(false);
-    let view = rerender(module, api, { initialOnboardState: completeState });
+    let view = await bootController(module, api, {
+      startInterview: false,
+      controllerProps: { initialOnboardState: completeState },
+    });
 
     view.props.onToggleKnowledgeSection("roles");
     view = rerender(module, api, { initialOnboardState: completeState });

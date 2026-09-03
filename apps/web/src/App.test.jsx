@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BOOT_SCREEN_MIN_VISIBLE_MS, resetBootScreenClock } from "./chat-first/use-boot-screen.js";
 
 const hooks = vi.hoisted(() => ({
   cursor: 0,
@@ -118,6 +119,10 @@ async function flushEffects() {
   const effects = hooks.pendingEffects.splice(0);
   for (const effect of effects) effect();
   for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+  // Same boot-screen minimum-visible timer as FirstRunController.test.jsx:
+  // clear it so a resolved gate reaches its real destination instead of
+  // staying parked on the boot screen for the rest of the test.
+  await vi.advanceTimersByTimeAsync(BOOT_SCREEN_MIN_VISIBLE_MS);
 }
 
 async function renderAtWhenComplete(module, path) {
@@ -125,10 +130,13 @@ async function renderAtWhenComplete(module, path) {
   apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
   renderApp(module);
   await flushEffects();
+  renderApp(module);
+  await flushEffects();
   return renderApp(module);
 }
 
 beforeEach(() => {
+  resetBootScreenClock();
   hooks.clear();
   apiMocks.finishOnboarding.mockReset().mockResolvedValue({ ok: true });
   apiMocks.getOnboardState.mockReset();
@@ -136,9 +144,40 @@ beforeEach(() => {
   firstRun.props = null;
   navigate.mockReset();
   delete globalThis.careerratDesktopApp;
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("App chat-first flip", () => {
+  it("shows the boot screen instead of a blank window while the onboard gate is checking", async () => {
+    const module = await loadApp();
+    apiMocks.getOnboardState.mockImplementation(() => new Promise(() => {}));
+
+    const html = renderApp(module);
+
+    expect(html).not.toBe("");
+    expect(html).toContain("Getting things ready.");
+    expect(html).toContain('role="status"');
+  });
+
+  it("renders the boot screen on the navigation frame from an ungated route while the gate is checking", async () => {
+    const module = await loadApp();
+    routerState.pathname = "/settings";
+
+    const settings = renderApp(module);
+    await flushEffects();
+    expect(settings).toContain("profile-settings-controller");
+
+    routerState.pathname = "/";
+    const html = renderApp(module);
+
+    expect(html).toContain("Getting things ready.");
+    expect(html).toContain('role="status"');
+  });
+
   it("keeps a completed fresh setup gated until local application defaults are confirmed", async () => {
     const module = await loadApp();
     apiMocks.getOnboardState.mockResolvedValueOnce({
@@ -156,7 +195,11 @@ describe("App chat-first flip", () => {
       },
     });
 
-    expect(renderApp(module)).toBe("");
+    const boot = renderApp(module);
+    expect(boot).toContain("Getting things ready.");
+    expect(boot).not.toContain("first-run-controller");
+    await flushEffects();
+    renderApp(module);
     await flushEffects();
     const html = renderApp(module);
 
@@ -190,6 +233,8 @@ describe("App chat-first flip", () => {
     };
     apiMocks.getOnboardState.mockResolvedValueOnce(malformedState);
 
+    renderApp(module);
+    await flushEffects();
     renderApp(module);
     await flushEffects();
     const html = renderApp(module);
@@ -228,7 +273,10 @@ describe("App chat-first flip", () => {
     const module = await loadApp();
     apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: false } });
 
-    expect(renderApp(module)).toBe("");
+    const boot = renderApp(module);
+    expect(boot).toContain("Getting things ready.");
+    await flushEffects();
+    renderApp(module);
     await flushEffects();
 
     const html = renderApp(module);
@@ -252,7 +300,10 @@ describe("App chat-first flip", () => {
       handoff: { reused: false },
     });
 
-    expect(renderApp(module)).toBe("");
+    const boot = renderApp(module);
+    expect(boot).toContain("Getting things ready.");
+    await flushEffects();
+    renderApp(module);
     await flushEffects();
     const html = renderApp(module);
 
@@ -274,6 +325,8 @@ describe("App chat-first flip", () => {
 
     renderApp(module);
     await flushEffects();
+    renderApp(module);
+    await flushEffects();
     const html = renderApp(module);
 
     expect(apiMocks.finishOnboarding).toHaveBeenCalledOnce();
@@ -285,6 +338,8 @@ describe("App chat-first flip", () => {
     const module = await loadApp();
     apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: false } });
 
+    renderApp(module);
+    await flushEffects();
     renderApp(module);
     await flushEffects();
     renderApp(module);
