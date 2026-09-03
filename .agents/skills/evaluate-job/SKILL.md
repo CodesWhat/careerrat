@@ -278,6 +278,8 @@ FIT: high|med|stretch <score> - <why> | caveats: <...> | priority: apply-now|hol
 
 Update the saved JD file frontmatter: set `fitScore: <N>` and `fitBucket: <high|med|stretch>`.
 
+**Requirements table (app-automated evaluate).** When this evaluation runs through the local app's automated packet gate (a chat "evaluate this job" turn, not this skill's own manual body-read), the same completion that produces the verdict also builds `evaluation.requirements`: an evidence-tiered table of the JD's actual requirements (max 20 rows), each row scored `importance` (critical, high, meaningful, preferred, low_signal), `evidence` (stated, structural, inferred), and `match` (strong, partial, missing, na) against the candidate context, with the justifying `jdSignal` phrase and a plain-English `note`. `fitRisks` is derived from that table, not written separately — every `fitRisks` entry names a row whose `match` is missing or partial and whose `importance` is critical or high (`src/core/packet/requirements.mjs#deriveFitRisks`). A body-read run of this skill has no such table; caveats above remain the manual equivalent.
+
 ---
 
 ## STEP 7 — COMP ANCHOR

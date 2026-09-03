@@ -8,6 +8,11 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- The evaluate-job verdict now includes an evidence-tiered requirements table
+  (each JD requirement scored for importance, evidence, and how well it
+  matches the candidate), built in the same evaluation pass with no extra AI
+  call. Fit risks are now derived from that table instead of scored
+  separately.
 - `careerrat doctor` now flags candidate files (profile, targeting, evidence,
   honesty, form defaults) that still carry unedited template content, reporting
   the file, key, and matched marker without printing the candidate's real data.
