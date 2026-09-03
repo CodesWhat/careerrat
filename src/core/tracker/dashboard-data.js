@@ -4664,6 +4664,12 @@ function jobDetailFromRow(
     interview: buildInterviewBlock(sourceRecord),
     statusNote: String(sourceRecord.statusNote || "").trim(),
     compNote: String(sourceRecord.compNote || "").trim(),
+    // Evaluate verdict's per-requirement table (CR26 Port A). Null when the
+    // evaluation carries no requirements array, so the drawer section hides
+    // instead of rendering an empty table.
+    requirements: Array.isArray(sourceRecord.evaluation?.requirements)
+      ? sourceRecord.evaluation.requirements
+      : null,
     roleFit:
       sourceRecord.roleFit &&
       (sourceRecord.roleFit.why?.length || sourceRecord.roleFit.risks?.length)

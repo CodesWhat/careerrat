@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { buildChatFirstView } from "../apps/web/src/chat-first/chat-first-model.js";
 import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
 import { buildLibrarySnapshot } from "../src/core/tracker/library-snapshot.mjs";
 
@@ -2434,4 +2435,70 @@ test("Dashboard nextsteps use action labels and reference the related job's deta
   assert.equal(step.actionLabel, "Interview");
   assert.equal(step.actionToneClass, "text-on-tertiary-container");
   assert.equal(step.supportingText, "Aperture · tomorrow");
+});
+
+test("evaluate verdict requirements project end to end from tracker data through the chat-first view", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "app-two-rows",
+        company: "Hightouch",
+        role: "Software Engineer",
+        status: "reviewed-hold",
+        evaluation: {
+          gate: "review",
+          fitScore: 82,
+          requirements: [
+            {
+              requirement: "5+ years backend engineering",
+              importance: "critical",
+              evidence: "stated",
+              jdSignal: "5+ years of backend experience required",
+              match: "strong",
+              note: "",
+            },
+            {
+              requirement: "Experience with distributed systems",
+              importance: "meaningful",
+              evidence: "inferred",
+              jdSignal: "",
+              match: "partial",
+              note: "Only exposure through one prior role",
+            },
+          ],
+        },
+      },
+      {
+        id: "app-no-requirements-key",
+        company: "Initech",
+        role: "Software Engineer",
+        status: "reviewed-hold",
+        evaluation: { gate: "review", fitScore: 64 },
+      },
+      {
+        id: "app-empty-requirements",
+        company: "Globex",
+        role: "Software Engineer",
+        status: "reviewed-hold",
+        evaluation: { gate: "review", fitScore: 70, requirements: [] },
+      },
+    ],
+    sourced: [],
+  };
+
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-15T13:30:00.000Z"),
+  });
+  const view = buildChatFirstView(vm, {});
+
+  assert.deepEqual(
+    view.jobDetails["app-two-rows"].requirements,
+    tracker.applications[0].evaluation.requirements
+  );
+  // Older evaluations without a requirements array project to null so the
+  // drawer/panel section hides instead of rendering an empty table.
+  assert.equal(view.jobDetails["app-no-requirements-key"].requirements, null);
+  // An explicit empty array carries no rows either; either representation
+  // (null or an empty array) must leave the UI with nothing to render.
+  assert.equal(view.jobDetails["app-empty-requirements"].requirements?.length || 0, 0);
 });
