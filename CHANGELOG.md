@@ -4,12 +4,27 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `careerrat doctor` now flags candidate files (profile, targeting, evidence,
+  honesty, form defaults) that still carry unedited template content, reporting
+  the file, key, and matched marker without printing the candidate's real data.
+  A file it could not read is reported as unchecked, never as clean.
+- `careerrat export --ats` now prints an ATS parseability score (0-100) with
+  fixable issues, such as a missing section heading or unreachable contact
+  info, for the submission copy of a tailored resume.
+- The annual-cash worksheet now takes a flat weekly or flat monthly amount as
+  the base pay, alongside the existing hourly wage. Tips, commission, or cash
+  bonuses per shift still layer on top of any one of the three.
+
 ## [0.17.0] - 2026-08-30
 
 ### Added
 
-- Candidate setup and Profile now include an annual-cash worksheet for hourly,
-  weekly, monthly, and tipped compensation. CareerRat keeps the original pay
+- Candidate setup and Profile now include an annual-cash worksheet for hourly
+  and tipped or shift-based compensation. CareerRat keeps the original pay
   inputs while deriving a comparable annual floor for search and evaluation.
 
 ### Changed
@@ -113,7 +128,7 @@ cask update. Everything listed under 0.16.6 ships here, plus the fixes below.
 
 ### Fixed
 
-- AI web search no longer stops at the old two-minute runtime limit and reports a misleading structured-output error. Claude Code and Codex now share an explicit eight-minute bound, and real runtime failures stop immediately instead of repeating the entire search as a schema retry.
+- AI web search no longer stops at the old two-minute runtime limit and reports a misleading structured-output error. Claude Code and Codex now share an explicit thirty-minute per-prompt bound, and real runtime failures stop immediately instead of repeating the entire search as a schema retry.
 - Long searches keep their sourcing run alive while CareerRat reads and saves full job descriptions, so a completed model search cannot be marked failed during post-search capture.
 - Paul and the durable chat history show a plain-English retry message instead of model schemas, provider output, runtime codes, or parser details when AI search fails.
 - Yes/No buttons appear only for genuinely binary questions. Either-or questions stay as normal text responses, while binary questions with a short lead-in still get buttons.

@@ -2,11 +2,14 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { hasCompleteCareerRatCapabilities } from "../../src/core/ai/installed-runtimes.mjs";
+import {
+  hasCompleteCareerRatCapabilities,
+  SUPPORTED_INSTALLED_RUNTIME_IDS,
+} from "../../src/core/ai/installed-runtimes.mjs";
 
 export const LIVE_SEARCH_RECEIPT_DIRECTORY = ".github/release-evidence/live-search";
 
-const RUNTIME_IDS = ["claude", "codex"];
+const RUNTIME_IDS = SUPPORTED_INSTALLED_RUNTIME_IDS;
 const FIXTURE_IDS = ["hospitality", "engineering"];
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/i;
 

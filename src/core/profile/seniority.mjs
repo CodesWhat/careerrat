@@ -11,19 +11,85 @@ function compactTitles(values) {
   return out;
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function titleWords(value) {
+  return String(value || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
 }
 
+// Split a posting title into punctuation-delimited segments (commas, parens,
+// slashes, dashes) and word-tokenize each one. "Platform Engineer, Staff" ->
+// [[platform, engineer], [staff]]; a title with no such punctuation is a
+// single segment.
+function titleSegments(value) {
+  return String(value || "")
+    .split(/[,()/\-–—]+/)
+    .map((segment) => titleWords(segment))
+    .filter((tokens) => tokens.length > 0);
+}
+
+// Cap on segment count before trying every reordering. Realistic Greenhouse
+// or Lever titles carry at most 2-3 punctuation-delimited segments ("Role,
+// Level" or "Role (Level) - Team"); 4! = 24 orderings is cheap. Above the
+// cap we skip the reorder search rather than let a pathological
+// many-segment title (e.g. one string of dashes) blow up factorially -
+// such a title still gets checked in its original segment order, just not
+// permuted.
+const MAX_PERMUTATION_SEGMENTS = 4;
+
+function segmentPermutations(segments) {
+  if (segments.length <= 1 || segments.length > MAX_PERMUTATION_SEGMENTS) return [segments];
+  const results = [];
+  const used = new Array(segments.length).fill(false);
+  const current = [];
+  const backtrack = () => {
+    if (current.length === segments.length) {
+      results.push(current.slice());
+      return;
+    }
+    for (let i = 0; i < segments.length; i += 1) {
+      if (used[i]) continue;
+      used[i] = true;
+      current.push(segments[i]);
+      backtrack();
+      current.pop();
+      used[i] = false;
+    }
+  };
+  backtrack();
+  return results;
+}
+
+function containsContiguousSequence(haystack, needle) {
+  if (needle.length === 0 || needle.length > haystack.length) return false;
+  outer: for (let i = 0; i <= haystack.length - needle.length; i += 1) {
+    for (let j = 0; j < needle.length; j += 1) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
+// A configured title matches when its words appear CONTIGUOUSLY and in order
+// within some reordering of the posting title's punctuation-delimited
+// segments. This catches "Role, Level" and "Role (Level)" renderings (common
+// on Greenhouse/Lever) that a plain contiguous-substring check misses,
+// without going as loose as an unordered word-anywhere-in-the-title test:
+// words from unrelated segments (e.g. "Senior Manager, Engineer Enablement")
+// can never interleave to form a match, because a permutation only reorders
+// whole segments, never the words inside or across them out of sequence.
 function titleContains(title, configuredTitle) {
-  const text = String(title || "").toLowerCase();
-  const term = String(configuredTitle || "")
-    .trim()
-    .toLowerCase();
-  if (!term) return false;
-  const left = /^[a-z0-9]/.test(term) ? "(^|[^a-z0-9])" : "";
-  const right = /[a-z0-9]$/.test(term) ? "($|[^a-z0-9])" : "";
-  return new RegExp(`${left}${escapeRegExp(term)}${right}`).test(text);
+  const termWords = titleWords(configuredTitle);
+  if (termWords.length === 0) return false;
+  const segments = titleSegments(title);
+  if (segments.length === 0) return false;
+  for (const order of segmentPermutations(segments)) {
+    const haystack = order.flat();
+    if (containsContiguousSequence(haystack, termWords)) return true;
+  }
+  return false;
 }
 
 function validLevels(bucket) {

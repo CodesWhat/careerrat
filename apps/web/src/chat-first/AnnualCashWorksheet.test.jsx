@@ -76,6 +76,42 @@ describe("AnnualCashWorksheet", () => {
     expect(html).not.toContain("Annual cash floor set to $0");
   });
 
+  it("accepts a decimal weekly or monthly pay value at input, calculation, and save time", () => {
+    const weeklyHtml = renderToStaticMarkup(
+      <AnnualCashWorksheet
+        idPrefix="pay-weekly-decimal"
+        name="annualCashWorksheet"
+        value={{
+          weeklyPay: "800.50",
+          weeksPerYear: "52",
+        }}
+      />
+    );
+
+    expect(weeklyHtml).toContain(
+      'id="pay-weekly-decimal-weeklyPay" type="number" min="0" step="0.01" placeholder="800" value="800.50"'
+    );
+    expect(weeklyHtml).toContain("$41,626 estimated annual cash");
+    expect(weeklyHtml).toContain("$800.50/week × 52 weeks");
+    expect(weeklyHtml).toContain("&quot;weeklyPay&quot;:&quot;800.50&quot;");
+
+    const monthlyHtml = renderToStaticMarkup(
+      <AnnualCashWorksheet
+        idPrefix="pay-monthly-decimal"
+        name="annualCashWorksheet"
+        value={{
+          monthlyPay: "3500.25",
+        }}
+      />
+    );
+
+    expect(monthlyHtml).toContain(
+      'id="pay-monthly-decimal-monthlyPay" type="number" min="0" step="0.01" placeholder="3500" value="3500.25"'
+    );
+    expect(monthlyHtml).toContain("$3,500.25/month × 12 months");
+    expect(monthlyHtml).toContain("&quot;monthlyPay&quot;:&quot;3500.25&quot;");
+  });
+
   it("keeps malformed legacy override text visible while validation explains it", () => {
     const html = renderToStaticMarkup(
       <AnnualCashWorksheet

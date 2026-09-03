@@ -81,6 +81,29 @@ describe("estimateCompFromComparables", () => {
     );
   });
 
+  it("scores tipped total earnings, not just the base line, for annual-earnings", () => {
+    const estimate = estimateCompFromComparables({
+      role: "Bar Manager",
+      targeting: TARGETING,
+      compensationBasis: "annual-earnings",
+      tracker: {
+        applications: [
+          {
+            company: "One",
+            role: "Bar Manager",
+            tc: "Base salary $50,000 plus average tips of $30,000, for total annual earnings of $70,000-$80,000.",
+            compBasis: "annual-earnings",
+          },
+        ],
+      },
+    });
+
+    assert.equal(estimate.compensationBasis, "annual-earnings");
+    assert.equal(estimate.midpointK, 75);
+    assert.equal(estimate.lowK, 75);
+    assert.equal(estimate.highK, 75);
+  });
+
   it("does not build an annual-earnings estimate from base-only evidence", () => {
     const estimate = estimateCompFromComparables({
       role: "Bar Manager",
@@ -95,6 +118,38 @@ describe("estimateCompFromComparables", () => {
     });
 
     assert.equal(estimate, null);
+  });
+
+  it("excludes a labeled annual-earnings row whose figure is unavailable, instead of falling back to the base line", () => {
+    const estimate = estimateCompFromComparables({
+      role: "Bar Manager",
+      targeting: TARGETING,
+      compensationBasis: "annual-earnings",
+      tracker: {
+        applications: [
+          {
+            company: "One",
+            role: "Bar Manager",
+            tc: "Base salary $50,000; total annual earnings unavailable",
+            compBasis: "annual-earnings",
+          },
+          {
+            company: "Two",
+            role: "Bar Manager",
+            tc: "$90,000 - $100,000",
+            compBasis: "annual-earnings",
+          },
+        ],
+      },
+    });
+
+    assert.equal(estimate.compensationBasis, "annual-earnings");
+    assert.equal(estimate.midpointK, 95);
+    assert.equal(estimate.comparables.length, 1);
+    assert.deepEqual(
+      estimate.comparables.map((row) => row.company),
+      ["Two"]
+    );
   });
 
   it("does not treat legacy equity-inclusive total compensation as annual cash", () => {

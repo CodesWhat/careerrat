@@ -24,6 +24,11 @@
 //   ID-Main  → id.jobstreet.com (Indonesia)
 //   SG-Main  → sg.jobstreet.com (Singapore)
 //   MY-Main  → my.jobstreet.com (Malaysia)
+//   HK-Main  → hk.jobsdb.com    (Hong Kong)
+//
+// Hong Kong runs under the JobsDB brand rather than Jobstreet, but it is the
+// same SEEK platform behind the same v5 endpoint, so it needs no separate
+// provider — only its hostname in the allowlist below and siteKey: HK-Main.
 
 const DEFAULT_API = 'https://id.jobstreet.com/api/jobsearch/v5/search';
 const DEFAULT_SITE_KEY = 'ID-Main';
@@ -38,6 +43,8 @@ const ALLOWED_JOBSTREET_HOSTS = new Set([
   'jobstreet.co.id',
   'sg.jobstreet.com',
   'my.jobstreet.com',
+  // SEEK's Hong Kong property keeps the JobsDB brand; same v5 search API.
+  'hk.jobsdb.com',
   'www.seek.com.au',
   'www.seek.co.nz',
 ]);
@@ -57,7 +64,7 @@ function assertJobstreetUrl(url) {
   }
   if (parsed.protocol !== 'https:') throw new Error(`jobstreet: URL must use HTTPS: ${url}`);
   if (!ALLOWED_JOBSTREET_HOSTS.has(parsed.hostname))
-    throw new Error(`jobstreet: untrusted hostname "${parsed.hostname}". Must be one of: ${[...ALLOWED_JOBSTREET_HOSTS].join(', ')}`);
+    throw new Error(`jobstreet: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_JOBSTREET_HOSTS].join(', ')}`);
   return url;
 }
 
@@ -196,7 +203,7 @@ export default {
         // If page 1 fails, surface the error. Later pages failing is non-fatal
         // — we return whatever we've collected so far.
         if (page === 1) throw err;
-        console.error(`jobstreet: page ${page} fetch failed: ${err.message}`);
+        console.error(`jobstreet: page ${page} fetch failed — ${err.message}`);
         break;
       }
 

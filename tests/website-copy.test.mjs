@@ -596,8 +596,8 @@ test("website stays download-only while docs keep the public careerrat CLI conve
   assert.match(publicAgents, /careerrat start claude/);
   assert.match(publicAgents, /careerrat ingest/);
   assert.match(publicAgents, /careerrat update/);
-  assert.equal(packageJson.engines.node, ">=24");
-  assert.match(installDocs, /Node\.js >= 24/);
+  assert.equal(packageJson.engines.node, ">=24.15.0");
+  assert.match(installDocs, /Node\.js >= 24\.15/);
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
 });

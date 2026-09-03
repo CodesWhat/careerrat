@@ -12,7 +12,11 @@
 // browser dashboard never imports this — it renders the persisted `compEstimate`
 // the agent writes onto each tracker row.
 
-import { extractCompBand } from "../scoring/sourced-scanner.mjs";
+import {
+  extractCompBand,
+  extractCompensationBands,
+  hasAnnualEarningsLabel,
+} from "../scoring/sourced-scanner.mjs";
 import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
 
 function median(sortedNums) {
@@ -81,7 +85,22 @@ function resolveMetroGroup(loc, mode, compFloors) {
 const CATCHALL_FAMILIES = new Set(["other", "uncategorized"]);
 
 function comparableCompensationBand(compensation, compensationBasis) {
-  if (compensationBasis === "annual-earnings") return extractCompBand(compensation);
+  if (compensationBasis === "annual-earnings") {
+    // The caller has already established (via hasAnnualEarningsProvenance) that
+    // this tracker text represents annual earnings, not base. Prefer the
+    // label-scoped annual-earnings band so a stated base figure alongside it
+    // (e.g. "Base salary $X plus tips, for total annual earnings of $Y-$Z")
+    // never wins by default. Fall back to a general parse only when the text
+    // carries no annual-earnings label of its own (a bare range with nothing
+    // to disambiguate, e.g. "$70,000 - $80,000"). When a label IS present but
+    // no band could be pulled from it (e.g. "total annual earnings
+    // unavailable"), skip the row instead of reusing a base figure that sits
+    // outside the label, which would silently reintroduce a base-only
+    // midpoint into the annual-earnings pool.
+    const annualBand = extractCompensationBands(compensation).annualEarnings;
+    if (annualBand) return annualBand;
+    return hasAnnualEarningsLabel(compensation) ? null : extractCompBand(compensation);
+  }
   return (
     extractCompBand(compensation, { baseOnly: true }) ||
     extractCompBand(`Base pay: ${compensation}`, { baseOnly: true })

@@ -199,5 +199,6 @@ asOf (YYYY-MM-DD), provenance (built-from-data|needs-more-info|stale), dimension
 defaults to 0), signals (array). It is refused if it names the private
 current_base field, or if fitDelta is positive.
 
-This is a database-backed command: ${NO_DATABASE_MESSAGE}`);
+This is a database-backed command. Without a database it stops with:
+  ${NO_DATABASE_MESSAGE}`);
 }

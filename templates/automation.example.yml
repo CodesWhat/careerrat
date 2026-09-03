@@ -4,16 +4,20 @@
 # safe default and the intended state for most users. Everything below is off until
 # you deliberately turn it on, one capability and one platform at a time.
 #
-# THE RULE (read this once): a capability runs on a platform ONLY IF all three are true —
+# THE RULE (read this once): a capability runs on a platform ONLY IF these three
+# switches are all true:
 #   1. capabilities.<capability>.enabled            (the capability's global switch)
 #   2. capabilities.<capability>.platforms.<name>   (that platform, for that capability)
 #   3. consent.<name>                               (you've read that platform's ToS)
-# Miss any one and the agent will not act — it tells you which switch is off.
+# AND EITHER setup_mode: advanced (the coarse opt-in gate below) OR the app has
+# granted a contextual scoped grant for that capability and platform in the moment
+# (set by the app, not hand-edited here). Miss a switch and the agent will not act,
+# it tells you which one is off.
 #
 # NO STORED CREDENTIALS. CareerRat never stores your passwords. The browser session
 # holds your logins. With `session.provider: auto`, CareerRat selects Orca inside an
-# Orca workspace, then a compatible extension or a Playwright persistent profile when
-# available. See docs/BROWSER.md and AGENTS.md → Browser Automation Contract.
+# Orca workspace, otherwise CareerRat's app-owned Playwright browser. See
+# docs/BROWSER.md and AGENTS.md → Browser Automation Contract.
 #
 # TERMS OF SERVICE ARE YOUR CALL. Automating a logged-in platform may violate its
 # terms. `consent.<platform>` is your one-time acknowledgment that you've read that
@@ -22,6 +26,7 @@
 #
 # Don't hand-edit blindly — use the CLI (it validates + preserves these comments):
 #   careerrat automation status                     show the full matrix
+#   careerrat automation mode <basic|advanced> --write     flip the coarse setup-mode gate
 #   careerrat automation consent <platform> --write       record ToS consent
 #   careerrat automation enable <capability> [platform] --write
 #   careerrat automation disable <capability> [platform] --write
@@ -155,7 +160,7 @@ capabilities:
       outlook_calendar: false
 
 # ── Session browser (tool-agnostic) ───────────────────────────────────────────
-# provider: auto (recommended; Orca in Orca, compatible extension otherwise) |
+# provider: auto (recommended; Orca in Orca, CareerRat's own Playwright browser otherwise) |
 # extension (holds your logins) | orca (supervised embedded browser) |
 # playwright (persistent profile you log into once per platform).
 # profile_root null = ~/.careerrat/board-profiles

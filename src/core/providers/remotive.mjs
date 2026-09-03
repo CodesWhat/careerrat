@@ -1,7 +1,7 @@
 // Board-wide aggregator feed for Remotive (https://remotive.com/api/remote-jobs).
 //
-// Ported from santifer/career-ops (MIT License, Copyright (c) 2026 Santiago
-// Fernández de Valderrama — github.com/santifer/career-ops) providers/remotive.mjs.
+// Ported from career-ops-hq/career-ops (MIT License, Copyright (c) 2026 Santiago
+// Fernández de Valderrama — github.com/career-ops-hq/career-ops) providers/remotive.mjs.
 // Same feed + field mapping; adapted to careerrat's (entry, fetchImpl) → offers[]
 // contract (the sourced-scanner offer shape) instead of career-ops' {id, fetch}
 // Provider object.

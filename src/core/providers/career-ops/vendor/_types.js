@@ -123,6 +123,12 @@
  * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
  * @property {(entry: PortalEntry, job: Job, ctx: Context) => Promise<Job>} [fetchDetail]
  *                                                                            Optional exact-posting enrichment.
+ * @property {((job: Job) => (string | null))} [dedupKey]                     Optional. A
+ *   provider-scoped identifier for a job, precise where URL normalization
+ *   isn't (e.g. a Workday requisition ID), so the same posting served under
+ *   several sites of one tenant (different paths/hosts) collapses to one key
+ *   (#3439). Return null when no such key is derivable for a given job;
+ *   callers then fall back to normalizeUrlForDedup(job.url) as before.
  */
 
 export {};
