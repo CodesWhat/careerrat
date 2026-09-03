@@ -56,10 +56,11 @@ careerrat automation status --json
 ```
 
 Inspect `capabilities.mail_access` for the requested platform. `allowed: true`
-means all three conditions are simultaneously true: the `mail_access` capability
-global switch is on, that mail provider's per-capability switch is on, and that
-provider's one-time ToS consent is recorded. This is the three-part AND from
-`mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
+means all four conditions are simultaneously true: automation is in the
+"advanced" setup mode, the `mail_access` capability global switch is on, that
+mail provider's per-capability switch is on, and that provider's one-time ToS
+consent is recorded. This is the four-part AND from `mayRun()` in
+`src/core/automation/consent.mjs` — never re-derive it in prose.
 
 If `mail_access` is not allowed, stop before opening a browser and show the exact
 opt-in steps:

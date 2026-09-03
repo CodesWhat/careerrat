@@ -35,12 +35,11 @@ forms, reading in-platform DMs, polling ATS status. The agent reads the live DOM
 before each action, never uses hardcoded selectors, and stays confirm-first.
 
 **Automatic provider selection:** Orca's visible supervised browser is used inside an
-Orca workspace; bundled Playwright is selected in the packaged desktop app; the
-compatible extension session is selected otherwise. Playwright creates persistent local
-browser storage when a workflow first needs it. Public application forms open without a
-login; account-gated sites ask the candidate to sign in only when necessary. If the selected
-provider cannot execute a workflow, CareerRat shows a supervised/manual handoff instead of
-claiming it ran.
+Orca workspace; CareerRat's app-owned Playwright browser is selected everywhere else.
+Playwright creates persistent local browser storage when a workflow first needs it.
+Public application forms open without a login; account-gated sites ask the candidate
+to sign in only when necessary. If the selected provider cannot execute a workflow,
+CareerRat shows a supervised/manual handoff instead of claiming it ran.
 
 Automatic is the default. Settings shows the effective browser and allows an explicit
 override without requiring the candidate to understand their CLI setup during onboarding.
@@ -77,11 +76,12 @@ The desktop job review offers **Allow form preparation** when an otherwise-ready
 application needs this permission. Terminal users can manage the same underlying
 capability matrix with the commands below.
 
-All three conditions must be true for a capability to run on a platform:
+All four conditions must be true for a capability to run on a platform:
 
-1. The capability's global switch is on.
-2. That platform's per-capability switch is on.
-3. That platform's one-time ToS consent is recorded.
+1. Automation is in the "advanced" setup mode.
+2. The capability's global switch is on.
+3. That platform's per-capability switch is on.
+4. That platform's one-time ToS consent is recorded.
 
 ```bash
 careerrat automation status                               # current matrix

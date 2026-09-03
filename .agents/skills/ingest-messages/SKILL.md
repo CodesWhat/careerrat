@@ -28,11 +28,11 @@ careerrat automation status --json
 ```
 
 Inspect the `capabilities.messaging` entry. The applicable platforms are `linkedin`
-and `wellfound`. For each platform, `allowed: true` means all three conditions are
-simultaneously true: the `messaging` capability global switch is on, that platform's
-per-capability switch is on, and the platform's one-time ToS consent is recorded.
-This is the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` —
-never re-derive it in prose.
+and `wellfound`. For each platform, `allowed: true` means all four conditions are
+simultaneously true: automation is in the "advanced" setup mode, the `messaging`
+capability global switch is on, that platform's per-capability switch is on, and
+the platform's one-time ToS consent is recorded. This is the four-part AND from
+`mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
 
 If **no platform** shows `allowed: true`, explain exactly how to opt in, then
 stop — do not open a browser:
@@ -414,8 +414,8 @@ Ingest complete:
 
 - **Opt-in, OFF by default.** Only poll platforms where `careerrat automation status --json`
   shows `messaging` `allowed: true` for that platform. The `allowed` field encodes the
-  three-part AND (global switch · platform switch · ToS consent) from `mayRun()` in
-  `src/core/automation/consent.mjs` — never re-derive the predicate in prose.
+  four-part AND (advanced setup mode · global switch · platform switch · ToS consent) from
+  `mayRun()` in `src/core/automation/consent.mjs` — never re-derive the predicate in prose.
 
 - **Highest ToS exposure — strongest consent gate.** In-platform messaging reads most
   directly risk a platform's terms of service. Consent must be deliberate: the user

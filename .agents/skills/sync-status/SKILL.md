@@ -24,10 +24,10 @@ careerrat automation status --json
 
 Inspect the `capabilities.status_polling` entry. The applicable platforms are
 `greenhouse`, `workday`, `ashby`, and `lever`. For each platform, `allowed: true`
-means all three conditions are met: the capability global switch is on, that
-platform's per-capability switch is on, and the platform's one-time ToS consent
-is recorded. This is the three-part AND from `mayRun()` in
-`src/core/automation/consent.mjs` — never hardcode it here.
+means all four conditions are met: automation is in the "advanced" setup mode,
+the capability global switch is on, that platform's per-capability switch is on,
+and the platform's one-time ToS consent is recorded. This is the four-part AND
+from `mayRun()` in `src/core/automation/consent.mjs` — never hardcode it here.
 
 If **no platform** shows `allowed: true`, explain exactly how to opt in, then
 stop — do not open a browser:
@@ -180,7 +180,7 @@ the comm thread open after a portal-confirmed transition.
   tracker mutations to `track-outcomes`. The CareerRat in-app path uses the
   canonical atomic status-sync DB verb described below. Never fabricate a
   tracker mutation or hand-edit generated `workspace/tracker.json`.
-- Opt-in and OFF by default. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the three-part AND (global switch, platform switch, ToS consent) from `mayRun()` — never re-derive the predicate in prose.
+- Opt-in and OFF by default. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the four-part AND ("advanced" setup mode, global switch, platform switch, ToS consent) from `mayRun()` — never re-derive the predicate in prose.
 - Never run on a schedule or unattended. Always user-initiated with the agent in the loop.
 - Halt and ask on captcha, 2FA, login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge.
 - Use tool-agnostic browser prose: "the session browser," "snapshot or read the page."

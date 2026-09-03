@@ -245,7 +245,7 @@ Run:
 careerrat automation status --json
 ```
 
-Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means all three conditions are simultaneously true: the `authenticated_apply_preparation` capability global switch is on, LinkedIn's per-capability switch is on, and LinkedIn's one-time ToS consent is recorded. This is the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
+Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means all four conditions are simultaneously true: automation is in the "advanced" setup mode, the `authenticated_apply_preparation` capability global switch is on, LinkedIn's per-capability switch is on, and LinkedIn's one-time ToS consent is recorded. This is the four-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
 
 If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, explain exactly how to opt in, then **stop** — do not open a browser:
 

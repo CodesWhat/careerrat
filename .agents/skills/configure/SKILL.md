@@ -85,7 +85,7 @@ Run the CLI confirm-first. The default is a **dry run** — it shows the exact l
 - `profile_apply`: linkedin
 - `mail_access`: gmail, outlook, webmail (`webmail` is provider-agnostic verification-code access; Gmail/Outlook also support webmail ingest)
 
-A capability runs on a platform only if all three conditions are true: the capability's global switch, that platform's per-capability switch, and that platform's one-time ToS consent. This is the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never re-derive the predicate here.
+A capability runs on a platform only if all four conditions are true: automation is in the "advanced" setup mode, the capability's global switch, that platform's per-capability switch, and that platform's one-time ToS consent. This is the four-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never re-derive the predicate here.
 
 **ToS warning:** automating a logged-in platform may violate that platform's terms of service. The user must read those terms themselves before recording consent. Surface this before running any `consent` command.
 

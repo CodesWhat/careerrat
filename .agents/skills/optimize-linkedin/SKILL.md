@@ -18,7 +18,7 @@ actually want. With a second, separate opt-in it can write the approved edits ba
   live profile through the session browser, **confirm-first PER FIELD**.
 
 Reading/suggesting and writing carry different ToS exposure and intent, so they are
-independently gated through the same `mayRun()` three-part AND — turning on suggestions
+independently gated through the same `mayRun()` four-part AND — turning on suggestions
 never implies write-back. Both halt on captcha / 2FA / login-wall.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
@@ -42,10 +42,11 @@ careerrat automation status --json
 ```
 
 Inspect `capabilities.profile_optimize` and `capabilities.profile_apply` for platform
-`linkedin`. For each, `allowed: true` means all three conditions hold simultaneously: the
-capability's global switch is on, `linkedin` is on for that capability, and `linkedin`
-ToS consent is recorded. This is the three-part AND from `mayRun()` in
-`src/core/automation/consent.mjs` — never re-derive it in prose.
+`linkedin`. For each, `allowed: true` means all four conditions hold simultaneously:
+automation is in the "advanced" setup mode, the capability's global switch is on,
+`linkedin` is on for that capability, and `linkedin` ToS consent is recorded. This is
+the four-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never
+re-derive it in prose.
 
 Resolve the run mode from the two verdicts:
 
@@ -298,9 +299,10 @@ changes. The point is an honest profile that reads for the target roles, not a l
 - **Opt-in, OFF by default, two separate gates.** Run a browser pass only where
   `careerrat automation status --json` shows the capability `allowed: true` for
   `linkedin`. `profile_optimize` gates reading + suggesting; `profile_apply` separately
-  gates write-back. The `allowed` field encodes the three-part AND (global switch ·
-  platform switch · ToS consent) from `mayRun()` in `src/core/automation/consent.mjs` —
-  never re-derive the predicate in prose. Suggestions on never implies write-back.
+  gates write-back. The `allowed` field encodes the four-part AND (advanced setup mode ·
+  global switch · platform switch · ToS consent) from `mayRun()` in
+  `src/core/automation/consent.mjs` — never re-derive the predicate in prose. Suggestions
+  on never implies write-back.
 
 - **Dry-run preview is the default and the first move.** Always produce the full read-only
   before→after set before writing anything. Applying is a deliberate, per-field opt-in

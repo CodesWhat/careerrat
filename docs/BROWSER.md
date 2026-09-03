@@ -96,10 +96,10 @@ verification-code reads and opted-in `ingest-mail` webmail reads).
 
 The switchboard is `.careerrat/candidate/automation.yml` (gitignored; schema
 `config/automation.schema.json`, template `templates/automation.example.yml`). A
-capability runs on a platform **only if all three are true** — the capability's global
-switch, that platform's per-capability switch, and that platform's one-time ToS
-consent. Query it with `mayRun()` in `src/core/automation/consent.mjs`; never hardcode
-the policy in skill prose.
+capability runs on a platform **only if all four are true** — automation is in the
+"advanced" setup mode, the capability's global switch, that platform's per-capability
+switch, and that platform's one-time ToS consent. Query it with `mayRun()` in
+`src/core/automation/consent.mjs`; never hardcode the policy in skill prose.
 
 Job sources use a simpler point-of-use flow instead of this switchboard. When a
 source is added or first used and login is needed, CareerRat asks one
