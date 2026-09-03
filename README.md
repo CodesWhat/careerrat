@@ -64,11 +64,12 @@ you probably already have on your machine, Claude Code or OpenAI Codex, and
 gives that assistant a full recruiter's job to do: read the posting, check it
 against what you want, write your materials, and keep score of everything.
 
-CareerRat needs at least one AI engine already installed before anything in the
-app works: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
+CareerRat needs one AI engine to do the actual work: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
 2.1.241 or newer, or [OpenAI Codex](https://developers.openai.com/codex/cli/)
-(any version). CareerRat detects which one is ready on your machine and you
-pick it.
+(any version). You do not need it before you open the app. If neither is
+installed, CareerRat can install Claude Code from inside the app on first run,
+or point you at the Codex setup guide. CareerRat detects which one is ready on
+your machine and you pick it.
 
 ### Get the Mac app (Apple Silicon)
 
