@@ -112,9 +112,7 @@ export function calculateAnnualCashWorksheet(value, { currency = "USD" } = {}) {
     !weeklyPay.valid ||
     !monthlyPay.valid ||
     !cashPerShift.valid ||
-    !shiftsPerWeek.valid ||
-    !weeksPerYear.valid ||
-    weeksPerYear.value === 0
+    !shiftsPerWeek.valid
   ) {
     return {
       annual: null,
@@ -127,6 +125,7 @@ export function calculateAnnualCashWorksheet(value, { currency = "USD" } = {}) {
   const hourlyStarted = hourlyRate.value !== null || hoursPerWeek.value !== null;
   const weeklyStarted = weeklyPay.value !== null;
   const monthlyStarted = monthlyPay.value !== null;
+  const shiftCashStarted = cashPerShift.value !== null || shiftsPerWeek.value !== null;
   const baseShapeCount = [hourlyStarted, weeklyStarted, monthlyStarted].filter(Boolean).length;
   if (baseShapeCount > 1) {
     return {
@@ -148,7 +147,6 @@ export function calculateAnnualCashWorksheet(value, { currency = "USD" } = {}) {
       source: null,
     };
   }
-  const shiftCashStarted = cashPerShift.value !== null || shiftsPerWeek.value !== null;
   if (shiftCashStarted && (cashPerShift.value === null || shiftsPerWeek.value === null)) {
     return {
       annual: null,
@@ -164,9 +162,25 @@ export function calculateAnnualCashWorksheet(value, { currency = "USD" } = {}) {
     return { annual: null, error: null, formula: null, source: null };
   }
 
+  // weeksPerYear only annualizes hourly pay, weekly pay, and shift cash; a flat
+  // monthly amount always annualizes by 12 and never needs it, so an invalid or
+  // zero weeksPerYear must not block a monthly-only worksheet.
+  const weeksPerYearRequired = hourlyStarted || weeklyStarted || shiftCashStarted;
+  if (weeksPerYearRequired && (!weeksPerYear.valid || weeksPerYear.value === 0)) {
+    return {
+      annual: null,
+      error: "Use non-negative pay amounts and valid weekly or yearly quantities.",
+      formula: null,
+      source: null,
+    };
+  }
+
   if (weeklyStarted || monthlyStarted) {
     const shiftTerm = shiftCashStarted
-      ? `${formatAnnualCashAmount(cashPerShift.value, { currency })}/shift × ${shiftsPerWeek.value} shifts/week`
+      ? `${formatAnnualCashAmount(cashPerShift.value, {
+          currency,
+          digits: Number.isInteger(cashPerShift.value) ? 0 : 2,
+        })}/shift × ${shiftsPerWeek.value} shifts/week`
       : null;
     const shiftAnnual = shiftCashStarted
       ? cashPerShift.value * shiftsPerWeek.value * weeksPerYear.value
@@ -207,7 +221,10 @@ export function calculateAnnualCashWorksheet(value, { currency = "USD" } = {}) {
         })}/hr × ${hoursPerWeek.value} hrs/week`
       : null,
     shiftCashStarted
-      ? `${formatAnnualCashAmount(cashPerShift.value, { currency })}/shift × ${shiftsPerWeek.value} shifts/week`
+      ? `${formatAnnualCashAmount(cashPerShift.value, {
+          currency,
+          digits: Number.isInteger(cashPerShift.value) ? 0 : 2,
+        })}/shift × ${shiftsPerWeek.value} shifts/week`
       : null,
   ].filter(Boolean);
   return {
