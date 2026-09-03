@@ -129,7 +129,7 @@ export default function Home() {
               <h3>It hunts, you decide</h3>
               {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
               <p>
-                Search opens when setup is ready. Built-in job-board sources look for the roles you set, and CareerRat also finds specialist boards and employer pages on its own as it learns your search. When a saved site is added or first used and a login is needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that exact search in the visible app browser; No skips it and keeps searching elsewhere. Anything it finds this way stays unverified until Evaluate reads the full posting for location, office days, pay, and fit. It fills safe application fields for you, but only after you review any missing answers. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.
+                Search opens when setup is ready. It looks in built-in job boards, and finds specialist boards and employer pages on its own as it learns. Nothing counts until Evaluate reads the full posting. You review any missing answers before it fills anything, and CAPTCHAs and Submit stay with you.
               </p>
               <span className="status-pill">SWEEP · 9 CUT · 12 RANKED</span>
             </article>
@@ -162,6 +162,28 @@ export default function Home() {
               </div>
             </div>
             <p className="chat-demo__caption">You watch it read, search, and write as it works.</p>
+          </div>
+
+          <div className="guardrails-card">
+            <p className="eyebrow">What stays in your hands</p>
+            <ul className="guardrails-list">
+              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <li>
+                When a saved job site is added or first used and a login is needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that exact search in the visible app browser; No skips it and keeps searching elsewhere.
+              </li>
+              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <li>
+                It fills safe application fields for you, but only after you review any missing answers.
+              </li>
+              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <li>
+                Voluntary questions stay blank by default; local Application defaults can choose a decline option when available.
+              </li>
+              <li>
+                Anything found this way stays unverified until Evaluate reads the full posting for
+                location, office days, pay, and fit.
+              </li>
+            </ul>
           </div>
         </section>
 

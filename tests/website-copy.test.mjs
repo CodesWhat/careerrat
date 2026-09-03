@@ -228,16 +228,23 @@ test("public docs explain durable background work without claiming interrupted w
   }
 });
 
-test("website explains the first-run handoff and supervised apply boundary plainly", async () => {
+test("website explains the first-run handoff and keeps step 03 short", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
 
   assert.match(page, /questions in plain English/i);
   assert.match(page, /what would make one job worth applying to before another/i);
   assert.match(page, /Search opens when setup is ready/i);
+  assert.match(page, /CAPTCHAs and Submit stay with you/i);
+});
+
+test("website moves the supervised apply boundary into its own guardrails block", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+
+  assert.match(page, /What stays in your hands/i);
   assert.match(page, /fills safe application fields/i);
   assert.match(page, /Voluntary questions stay blank by default/i);
   assert.match(page, /local Application defaults can choose a decline option when available/i);
-  assert.match(page, /CAPTCHAs and Submit stay with you/i);
+  assert.match(page, /unverified until Evaluate reads the full posting/i);
 });
 
 test("public copy keeps local Application defaults and plain-English onboarding aligned", async () => {
