@@ -837,6 +837,33 @@ describe("FirstRunExperience", () => {
     expect(html).not.toContain(">Edit<");
   });
 
+  it("renders a complete knowledge section expanded while its editor is open", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const engine = {
+      id: "engine",
+      label: "ENGINE",
+      status: "complete",
+      lines: ["Claude Code · ready"],
+      editor: { fields: [] },
+    };
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [],
+      knowledge: [engine],
+      progress: { completed: 1, total: 6 },
+      editingKnowledgeSection: engine,
+      expandedKnowledgeSections: {},
+    });
+    const panel = tree.props.children[2];
+    const html = renderToStaticMarkup(panel);
+
+    expect(panel.props.editingSectionId).toBe("engine");
+    expect(panel.props.expandedSections).toEqual({});
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("Claude Code · ready");
+    expect(html).toContain(">Edit<");
+  });
+
   it("clicking the header toggles the section and reveals the Edit action once expanded", async () => {
     const { FirstRunChat } = await loadFirstRun();
     const onToggleKnowledgeSection = vi.fn();
