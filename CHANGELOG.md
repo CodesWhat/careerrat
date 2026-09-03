@@ -24,6 +24,12 @@ All notable changes to CareerRat are documented here. This project follows
   the base pay, alongside the existing hourly wage. Tips, commission, or cash
   bonuses per shift still layer on top of any one of the three.
 
+### Changed
+
+- The website's feature cards and how-it-works copy are now shorter, plainer
+  sentences, and the docs Quick start leads with the Mac app download, moving
+  the npm/CLI path into a For developers subsection.
+
 ## [0.17.0] - 2026-08-30
 
 ### Added
