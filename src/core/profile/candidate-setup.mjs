@@ -237,7 +237,7 @@ export function lintPlaceholders({ root = DEFAULT_ROOT } = {}) {
 // words: TODO, TBD, lorem ipsum), each entry here names the exact template
 // file it comes from, so the coverage test in
 // tests/health-template-leftovers.test.mjs can assert the marker still
-// appears in that template on disk — if a template edit drops or changes one
+// appears in that template on disk. If a template edit drops or changes one
 // of these values without updating this list, that test fails instead of the
 // check silently going blind.
 //
@@ -246,8 +246,8 @@ export function lintPlaceholders({ root = DEFAULT_ROOT } = {}) {
 // legitimate value in one file (e.g. an evidence claim that happens to mention
 // "Adjacent Tool") never trips a marker that belongs to a different file
 // (honesty.yml). templates/form-defaults.example.yml has no distinctive
-// placeholder value of its own — every value in it is a genuine default a real
-// candidate might keep — so form-defaults relies on the whole-file "unedited
+// placeholder value of its own: every value in it is a genuine default a real
+// candidate might keep, so form-defaults relies on the whole-file "unedited
 // copy" fallback below instead of a curated marker here.
 export const TEMPLATE_LEFTOVER_MARKERS = [
   { marker: "Jane Candidate", template: "templates/profile.example.yml" },
@@ -303,7 +303,7 @@ function markerMatchesLeaf(leaf, marker) {
 }
 
 // Order-insensitive structural equality, used only to detect a candidate file
-// that is still byte-for-byte (post-parse) identical to its shipped template —
+// that is still byte-for-byte (post-parse) identical to its shipped template,
 // i.e. never edited at all. Local rather than imported so this module has no
 // dependency on schema-validator's internals.
 function deepEqual(a, b) {
@@ -350,7 +350,7 @@ function* flattenLeaves(value, prefix) {
  * the matched marker itself, so a report never leaks candidate PII or comp.
  *
  * Matching is scoped per file: a marker only ever runs against the candidate
- * file whose matching template it came from, never against the other four —
+ * file whose matching template it came from, never against the other four,
  * so a legitimate value in one file can't trip a marker that belongs to
  * another. A file that fails to read or parse gets status "unreadable" rather
  * than being silently treated as clean, and the block's overall status is
@@ -365,8 +365,8 @@ function* flattenLeaves(value, prefix) {
  *   files: Array<{ file, status: "clean" | "leftovers" | "unreadable" }>,
  * }}
  *   file is relative to root; key is a dotted YAML path (or "(whole file)" for
- *   the whole-file "unedited copy" fallback, used by templates — like
- *   form-defaults — that carry no single distinctive placeholder value).
+ *   the whole-file "unedited copy" fallback, used by templates, like
+ *   form-defaults, that carry no single distinctive placeholder value).
  */
 export function checkTemplateLeftovers({ root = DEFAULT_ROOT } = {}) {
   const findings = [];

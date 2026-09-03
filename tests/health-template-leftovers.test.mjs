@@ -496,7 +496,7 @@ describe("TEMPLATE_LEFTOVER_MARKERS coverage", () => {
     // profile, honesty, evidence, and targeting carry persona/placeholder content;
     // form-defaults has no distinctive literal value at all (every value in it is
     // a genuine default a real candidate might keep), so it relies entirely on
-    // checkTemplateLeftovers's whole-file "unedited copy" fallback instead — see
+    // checkTemplateLeftovers's whole-file "unedited copy" fallback instead, see
     // the reverse-coverage test above, which covers it via that path.
     for (const template of [
       "templates/profile.example.yml",
