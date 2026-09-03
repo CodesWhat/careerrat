@@ -124,7 +124,9 @@ button {
   color: var(--ink-soft);
   font-size: 12.5px;
   font-weight: 700;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .site-nav__links > a:not(.button):hover {
@@ -213,7 +215,9 @@ button {
   font-size: 14px;
   font-weight: 700;
   line-height: 1;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .button--large {
@@ -688,7 +692,9 @@ button {
   border-radius: var(--radius-pill);
   background: var(--cream);
   padding: 5px 11px 5px 7px;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .codeswhat-badge:hover {
@@ -842,9 +848,15 @@ button {
   *,
   *::before,
   *::after {
+    /* The standard prefers-reduced-motion override: !important on every line here
+       is required to beat any element's own transition/animation duration. */
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above */
     animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above */
     animation-iteration-count: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above */
     scroll-behavior: auto !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above */
     transition-duration: 0.01ms !important;
   }
 }
