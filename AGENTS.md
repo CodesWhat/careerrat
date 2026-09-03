@@ -965,11 +965,14 @@ days). This stamp is unconditional — a no-change review still counts as a revi
 marker is mechanical (timestamp + counts); the skill owns the strategy judgement.
 
 **Two distinct gates — don't conflate them.** The dashboard "review ready" nudge
-(`buildStrategyReviewTrigger`) fires on **≥5 newly-resolved outcomes of any kind**
-(advances + rejections) over the rolling 30-day funnel. The `reevaluation.due` trip fires
-on the **rejection-only delta** (`sinceLastReview`) against `targeting.yml` thresholds.
-A nudge can show with few or zero rejections; never read the dashboard pill as
-`reevaluation.due: true`, and never read `reevaluation.due` as the nudge.
+(`buildStrategyReviewTrigger`) first fires once the rolling 30-day funnel clears
+`meetsThreshold` (**≥3 applied, and ≥2 advanced or ≥2 rejected**). After a review is
+stamped, it only re-fires on fresh signal: **≥5 new resolved outcomes**
+(`STRATEGY_REVIEW_NEW_SIGNAL`) since that review, or **≥1 new outcome** once
+**21 days** (`STRATEGY_REVIEW_COOLDOWN_DAYS`) have passed. The `reevaluation.due` trip
+fires on the **rejection-only delta** (`sinceLastReview`) against `targeting.yml`
+thresholds. A nudge can show with few or zero rejections; never read the dashboard pill
+as `reevaluation.due: true`, and never read `reevaluation.due` as the nudge.
 
 ## Learning Memory
 
