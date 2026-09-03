@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { scoreAtsParseability } from "../core/documents/ats-parseability.mjs";
+import { detectArtifactKind, scoreAtsParseability } from "../core/documents/ats-parseability.mjs";
 import { detectDocxCapability, exportArtifact } from "../core/documents/export.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
@@ -29,15 +29,28 @@ if (args.includes("--help") || args.includes("-h") || args.length === 0) {
 const positional = args.filter((a) => !a.startsWith("-"));
 const inputArg = positional[0];
 
-if (!inputArg) {
-  console.error("Provide an input markdown file path. See: careerrat export --help");
-  process.exit(1);
-}
-
 const wantPdf = args.includes("--pdf");
 const wantDocx = args.includes("--docx");
 const wantAts = args.includes("--ats");
 const wantJson = args.includes("--json");
+
+// Every failure past this point, when --json is set, prints a single JSON
+// object on stdout and exits 1 instead of prose on stderr. Matches the
+// `{ ok: false, error }` shape other CLIs in src/cli/ (gate.mjs, health.mjs,
+// activity.mjs) use for their --json failure paths.
+function fail(message) {
+  if (wantJson) {
+    console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+  } else {
+    console.error(message);
+  }
+  process.exit(1);
+}
+
+if (!inputArg) {
+  fail("Provide an input markdown file path. See: careerrat export --help");
+}
+
 const formats = [];
 if (wantPdf) formats.push("pdf");
 if (wantDocx) formats.push("docx");
@@ -60,8 +73,7 @@ if (!existsSync(inputPath)) {
   if (existsSync(repoRel)) {
     inputPath = repoRel;
   } else {
-    console.error(`Input file not found:\n  ${inputPath}\n  ${repoRel}`);
-    process.exit(1);
+    fail(`Input file not found:\n  ${inputPath}\n  ${repoRel}`);
   }
 }
 
@@ -99,17 +111,23 @@ let result;
 try {
   result = await exportArtifact({ markdown, outBase, formats, title, ats: wantAts });
 } catch (err) {
-  console.error(`Export failed: ${err.message}`);
-  if (/Chromium not found/.test(err.message)) {
-    console.error("Run: npx playwright install chromium");
-  }
-  process.exit(1);
+  const hint = /Chromium not found/.test(err.message)
+    ? "\nRun: npx playwright install chromium"
+    : "";
+  fail(`Export failed: ${err.message}${hint}`);
 }
 
 // --- ATS parseability score (the --ats copy is the one that goes through an
-// ATS parser, so that's when the score is relevant) ---
+// ATS parser, so that's when the score is relevant). scoreAtsParseability's
+// resume-specific section checks (Experience, Skills) only fire for kind
+// "resume"; a cover letter or interview packet gets the generic checks only.
+// Kind is derived from the input path, per the same directory convention
+// this CLI's own --help examples use (workspace/tailored/ vs
+// workspace/interview-prep/) and tailor-application's cover-letter naming.
 
-const atsResult = wantAts ? scoreAtsParseability(markdown) : null;
+const atsResult = wantAts
+  ? scoreAtsParseability(markdown, { kind: detectArtifactKind(inputPath) })
+  : null;
 
 // --- Report results ---
 
