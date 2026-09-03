@@ -123,3 +123,8 @@ Until `ingest-profile` has run, `careerrat doctor` reports that local candidate
 setup is incomplete and lists the `.careerrat/candidate/*.yml` files to create.
 That is the expected pre-setup state, the agent fills them in during onboarding.
 It is not an error.
+
+`doctor` also flags any candidate file that still carries unedited template
+content (the "Jane Candidate" example persona, placeholder tool names, and the
+like) so you can catch a half-personalized profile before it skews your job
+evaluations.

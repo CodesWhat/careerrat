@@ -33,6 +33,7 @@ import {
   ONE_SHOT_RUNTIME_TIMEOUT_MS,
   parseCustomCommandString,
   probeCustomRuntimeCommand,
+  probeInstalledRuntimeCompletion,
   probeInstalledRuntime as probeInstalledRuntimeCore,
   RUNTIME_TOOL_PROFILE_UNSUPPORTED,
   readInstalledRuntimeScopedFile,
@@ -154,6 +155,39 @@ function executable(path) {
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, "#!/bin/sh\nexit 0\n", "utf8");
   chmodSync(path, 0o755);
+}
+
+// Every ACP definition in the live registry currently ships with
+// supported: undefined, so this flips one to true for the span of `fn` to
+// exercise the "supported: true ACP runtime" path the readiness fix targets,
+// then restores the original registry entry so other tests are unaffected.
+async function withSupportedAcpDefinition(id, fn) {
+  const definition = INSTALLED_RUNTIME_DEFINITIONS.find((entry) => entry.id === id);
+  const hadSupported = Object.hasOwn(definition, "supported");
+  const originalSupported = definition.supported;
+  definition.supported = true;
+  try {
+    return await fn(definition);
+  } finally {
+    if (hadSupported) definition.supported = originalSupported;
+    else delete definition.supported;
+  }
+}
+
+// Routes a readiness-level completionProbeImpl call through the real
+// probeInstalledRuntimeCompletion, so the ACP tests below exercise the same
+// JSON.parse + COMPLETION_SMOKE_SCHEMA check the non-ACP path uses, with only
+// the actual provider transport call (runInstalledRuntimeImpl) faked.
+function fakeAcpCompletionProbe(smokeText) {
+  return async (args) =>
+    probeInstalledRuntimeCompletion({
+      ...args,
+      nowImpl: () => Date.parse("2026-08-27T16:00:00.000Z"),
+      runtimeIdentityImpl: fixtureRuntimeIdentity,
+      loadCompletionSmokeCacheImpl: () => null,
+      saveCompletionSmokeCacheImpl: () => {},
+      runInstalledRuntimeImpl: async () => ({ text: smokeText }),
+    });
 }
 
 function verifiedClaudeVersion() {
@@ -281,6 +315,26 @@ test("detectInstalledRuntimes finds multiple CLIs outside the inherited PATH", (
       inventory.find(({ id }) => id === "gemini").installUrl,
       INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === "gemini").installUrl
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("detectInstalledRuntimes finds Antigravity by its agy binary", () => {
+  const root = tempRoot();
+  const binDir = join(root, "bin");
+  const agyPath = join(binDir, "agy");
+  executable(agyPath);
+  try {
+    const inventory = detectInstalledRuntimes({
+      env: { PATH: binDir },
+      platform: "darwin",
+      homeDir: join(root, "home"),
+    });
+    const antigravity = inventory.find(({ id }) => id === "antigravity");
+    assert.equal(antigravity.available, true);
+    assert.equal(antigravity.path, agyPath);
+    assert.equal(antigravity.commandShape, "agy -p");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1233,6 +1287,131 @@ test("an empty ACP handshake proves protocol readiness without workflow capabili
   assert.equal(hasCompleteCareerRatCapabilities(ready.capabilities), false);
   assert.equal(ready.capabilities.taskTools, false);
   assert.equal(ready.capabilities.research, false);
+});
+
+test("a supported ACP runtime whose completion smoke returns malformed JSON is not ready", async () => {
+  await withSupportedAcpDefinition("hermes", async () => {
+    const ready = await probeInstalledRuntimeCore(
+      { id: "hermes", name: "Hermes", path: "/safe/hermes", available: true },
+      {
+        spawnSyncImpl(_path, args) {
+          return args[0] === "--version"
+            ? { status: 0, stdout: "1.0.0", stderr: "" }
+            : { status: 0, stdout: "", stderr: "" };
+        },
+        probeAcpRuntimeImpl: async () => ({
+          ready: true,
+          agentCapabilities: {},
+          agentInfo: { name: "Hermes" },
+        }),
+        completionProbeImpl: fakeAcpCompletionProbe("this is not JSON"),
+        cwd: "/safe/workspace",
+      }
+    );
+
+    assert.equal(ready.status, "completion_probe_failed");
+    assert.equal(ready.ready, false);
+    assert.equal(ready.action, "retry");
+    assert.equal(ready.actionLabel, "Try again");
+    assert.deepEqual(ready.capabilities, {
+      completion: false,
+      structuredOutput: false,
+      appWorkflows: false,
+      exactRead: false,
+      publicWeb: false,
+      liveActivity: false,
+      resumable: false,
+      taskTools: false,
+      research: false,
+    });
+  });
+});
+
+test("a supported ACP runtime whose completion smoke returns schema-valid JSON is ready with capabilities from the smoke", async () => {
+  await withSupportedAcpDefinition("hermes", async () => {
+    const ready = await probeInstalledRuntimeCore(
+      { id: "hermes", name: "Hermes", path: "/safe/hermes", available: true },
+      {
+        spawnSyncImpl(_path, args) {
+          return args[0] === "--version"
+            ? { status: 0, stdout: "1.0.0", stderr: "" }
+            : { status: 0, stdout: "", stderr: "" };
+        },
+        probeAcpRuntimeImpl: async () => ({
+          ready: true,
+          agentCapabilities: {},
+          agentInfo: { name: "Hermes" },
+        }),
+        completionProbeImpl: fakeAcpCompletionProbe('{"receipt":"CAREERRAT_COMPLETION_READY"}'),
+        cwd: "/safe/workspace",
+      }
+    );
+
+    assert.equal(ready.status, "ready");
+    assert.equal(ready.ready, true);
+    assert.equal(ready.version, "1.0.0");
+    assert.deepEqual(ready.capabilities, {
+      completion: true,
+      structuredOutput: true,
+      appWorkflows: true,
+      exactRead: true,
+      publicWeb: true,
+      liveActivity: true,
+      resumable: true,
+      taskTools: true,
+      research: true,
+    });
+    assert.equal(ready.capabilityReason, null);
+  });
+});
+
+test("a supported ACP runtime whose transport handshake fails stays not-ready without ever running the completion smoke", async () => {
+  await withSupportedAcpDefinition("hermes", async () => {
+    let completionCalls = 0;
+    const spawnSyncImpl = (_path, args) =>
+      args[0] === "--version"
+        ? { status: 0, stdout: "1.0.0", stderr: "" }
+        : { status: 0, stdout: "", stderr: "" };
+    const completionProbeImpl = async () => {
+      completionCalls += 1;
+      return { ok: true };
+    };
+
+    const failed = await probeInstalledRuntimeCore(
+      { id: "hermes", name: "Hermes", path: "/safe/hermes", available: true },
+      {
+        spawnSyncImpl,
+        probeAcpRuntimeImpl: async () => {
+          throw new Error("handshake failed");
+        },
+        completionProbeImpl,
+        cwd: "/safe/workspace",
+      }
+    );
+    assert.deepEqual(failed, { status: "probe_failed", ready: false, action: "retry" });
+
+    const authError = Object.assign(new Error("needs sign-in"), {
+      code: "RUNTIME_AUTH_REQUIRED",
+    });
+    const signedOut = await probeInstalledRuntimeCore(
+      { id: "hermes", name: "Hermes", path: "/safe/hermes", available: true },
+      {
+        spawnSyncImpl,
+        probeAcpRuntimeImpl: async () => {
+          throw authError;
+        },
+        completionProbeImpl,
+        cwd: "/safe/workspace",
+      }
+    );
+    assert.deepEqual(signedOut, {
+      status: "authentication_required",
+      ready: false,
+      action: "start_sign_in",
+    });
+
+    assert.equal(completionCalls, 0);
+  });
 });
 
 test("Claude readiness keeps completion available below the tool boundary version", async () => {

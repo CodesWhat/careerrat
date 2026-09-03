@@ -237,8 +237,8 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
   {
     id: "antigravity",
     name: "Antigravity",
-    binaries: ["antigravity", "antigravitycli"],
-    commandShape: "antigravity -p",
+    binaries: ["agy", "antigravity", "antigravitycli"],
+    commandShape: "agy -p",
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "Make sure you're signed in.",
     installUrl: "https://antigravity.google/docs/cli/install",
@@ -1181,6 +1181,31 @@ export async function probeInstalledRuntime(
         timeoutMs,
         platform,
       });
+      if (definition.supported === true) {
+        const completionProbe = await completionProbeImpl({
+          runtime: { ...runtime, name: definition.name },
+          version: runtimeVersion,
+          cwd,
+          env: childEnv,
+          force: forceCompletionProbe,
+          timeoutMs: Math.min(COMPLETION_SMOKE_TIMEOUT_MS, Math.max(1, timeoutMs * 6)),
+        });
+        if (completionProbe?.ok !== true) {
+          const acpCapabilityReason =
+            completionProbe?.probeMessage || completionSmokeMessage(runtime, false);
+          return {
+            status: "completion_probe_failed",
+            ready: false,
+            action: completionProbe?.action || "retry",
+            actionLabel: completionProbe?.actionLabel || "Try again",
+            probeMessage: acpCapabilityReason,
+            capabilities: installedRuntimeCapabilities(definition.id, {
+              capabilityEvidence: capabilityEvidenceForProbe(definition, { completion: false }),
+            }).capabilities,
+            capabilityReason: acpCapabilityReason,
+          };
+        }
+      }
       const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
         capabilityEvidence:
           definition.supported === true

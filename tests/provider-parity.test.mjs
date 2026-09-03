@@ -29,6 +29,7 @@ const EXPECTED_PROVIDER_IDS = [
   "bamboohr",
   "beesite",
   "breezy",
+  "careerviet",
   "comeet",
   "consider",
   "cryptocurrencyjobs",
@@ -37,6 +38,7 @@ const EXPECTED_PROVIDER_IDS = [
   "deutschebahn",
   "echojobs",
   "eightfold",
+  "feishu-jobs",
   "flowxtra",
   "gem",
   "getonbrd",
@@ -49,6 +51,7 @@ const EXPECTED_PROVIDER_IDS = [
   "himalayas",
   "ibm",
   "icims",
+  "itviec",
   "jibeapply",
   "jobbankca",
   "jobicy",
@@ -64,6 +67,7 @@ const EXPECTED_PROVIDER_IDS = [
   "local-parser",
   "manfred",
   "meituan",
+  "mokahr",
   "mycareersfuture",
   "nodesk",
   "nofluffjobs",
@@ -88,6 +92,7 @@ const EXPECTED_PROVIDER_IDS = [
   "thehub",
   "themuse",
   "tkms",
+  "torre",
   "vdab",
   "weworkremotely",
   "workable",
@@ -99,13 +104,13 @@ const EXPECTED_PROVIDER_IDS = [
 
 test("Career Ops provider parity is pinned to the audited upstream snapshot", () => {
   assert.deepEqual(CAREER_OPS_UPSTREAM, {
-    repository: "https://github.com/santifer/career-ops",
-    commit: "10a569b1e9178aa90ef8028ea287e411a831e1b6",
-    providerCount: 78,
+    repository: "https://github.com/career-ops-hq/career-ops",
+    commit: "ffb49be1f394041840c31c23a5d3a3347854340e",
+    providerCount: 83,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
-  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 78);
-  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 78);
+  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 83);
+  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 83);
 });
 
 test("every provider in the pinned upstream inventory has an explicit disposition", () => {
@@ -114,7 +119,7 @@ test("every provider in the pinned upstream inventory has an explicit dispositio
   // provider upstream silently added at the pin was never adopted, deferred,
   // or excluded here. CAREER_OPS_UPSTREAM_PROVIDER_IDS is instead a
   // hard-coded copy of the real upstream inventory at the pinned commit
-  // (fetched directly from santifer/career-ops), independent of what this
+  // (fetched directly from career-ops-hq/career-ops), independent of what this
   // repo has actually adopted.
   //
   // local-parser is deliberately not double-counted: it is already present
@@ -140,7 +145,7 @@ test("every provider in the pinned upstream inventory has an explicit dispositio
     [...upstream].sort(),
     "adopted + deferred must exactly equal the pinned upstream inventory"
   );
-  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 78);
+  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 83);
 });
 
 test("every upstream provider has an explicit runtime disposition", () => {

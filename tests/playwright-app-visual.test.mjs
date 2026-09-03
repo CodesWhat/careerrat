@@ -64,7 +64,7 @@ async function closeDevServer(dev) {
 
 test("real Chromium renders the built chat-first workspace without selection glow or alignment drift", {
   skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run the built app visual contract",
-  timeout: 30_000,
+  timeout: 60_000,
 }, async () => {
   assert.equal(
     existsSync(join(PRODUCT_ROOT, "apps", "web", "dist", "index.html")),
@@ -77,11 +77,17 @@ test("real Chromium renders the built chat-first workspace without selection glo
   const dev = createDevServer(pathCtx);
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  // Playwright's own default wait is 30s, exactly this test's budget, so a stuck
-  // locator used to surface as a bare "test timed out after 30000ms" that never
-  // said which element it was waiting on. Failing the locator first keeps the
-  // element name in the error.
-  page.setDefaultTimeout(10_000);
+  // Keep the locator timeout strictly under the test budget. Playwright's own
+  // default equals the budget, so a stuck locator used to surface as a bare
+  // "test timed out" that never said which element it was waiting on; failing
+  // the locator first keeps the element name in the error, which is how the
+  // 2026-08/09 flake was diagnosed at all.
+  //
+  // 10s was too tight for the budget it sat under. This test is render-bound
+  // and runs on a shared 4-vCPU runner, and it intermittently blew the 10s
+  // default waiting on the active thread card while passing in under 3s on an
+  // idle machine. Both numbers move together so the ordering invariant holds.
+  page.setDefaultTimeout(25_000);
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
@@ -200,7 +206,7 @@ test("real Chromium renders the built chat-first workspace without selection glo
 
 test("real Chromium restores the original Settings editor control after Keep editing", {
   skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run the built app visual contract",
-  timeout: 30_000,
+  timeout: 60_000,
 }, async () => {
   assert.equal(
     existsSync(join(PRODUCT_ROOT, "apps", "web", "dist", "index.html")),
@@ -213,6 +219,10 @@ test("real Chromium restores the original Settings editor control after Keep edi
   const dev = createDevServer(pathCtx);
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  // Same reason as the visual contract above: keep the locator timeout under
+  // the test budget so a stuck wait names the element instead of reporting a
+  // bare test timeout.
+  page.setDefaultTimeout(25_000);
 
   try {
     await dev.listen({ port: 0, host: "127.0.0.1" });
