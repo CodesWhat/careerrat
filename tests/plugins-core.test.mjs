@@ -9,13 +9,15 @@
 // throw, consent refused) that must never escape as an unhandled rejection.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { defaultAutomation } from "../src/core/automation/consent.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { exportToTracker } from "../src/core/db/export-to-tracker.mjs";
 import {
   buildPluginContext,
   listBundledPlugins,
@@ -25,6 +27,10 @@ import {
   validateManifest,
 } from "../src/core/plugins/index.mjs";
 import { readActivity } from "../src/core/tracker/activity-log.mjs";
+
+after(() => {
+  closeAll();
+});
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -265,6 +271,46 @@ test("recordPluginRun records a failed run with a warning tone and error text", 
   }
 });
 
+// Regression: a DB-backed workspace treats activity_events as canonical, and
+// exportToTracker fully regenerates workspace/activity.jsonl from that table.
+// Before the fix, recordPluginRun always wrote straight to the legacy JSONL
+// via appendActivity, so a plugin run in a DB workspace would appear once
+// but vanish the next time anything triggered an export (since the DB table
+// never had the row to export). This pins that the row is now canonical DB
+// data: it survives an explicit, independent exportToTracker call.
+test("recordPluginRun writes through the canonical DB verb in a DB-backed workspace and survives export", () => {
+  const root = tempRoot();
+  try {
+    openDb({ repoRoot: root, env: {} });
+
+    const appendResult = recordPluginRun({
+      plugin: "example-echo",
+      version: "0.1.0",
+      roleId: null,
+      startedAt: "2026-09-01T00:00:00.000Z",
+      finishedAt: "2026-09-01T00:00:01.000Z",
+      ok: true,
+      error: null,
+      fetched: [],
+      root,
+      env: {},
+    });
+    assert.equal(appendResult.ok, true);
+
+    // A second, independent export cycle — exactly what a legacy-only write
+    // would not survive, since exportToTracker rebuilds activity.jsonl from
+    // activity_events alone.
+    exportToTracker({ repoRoot: root, env: {} });
+
+    const events = readActivity({ root });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].skill, "plugin:example-echo");
+    assert.equal(events[0].operation, "plugin:run");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // runner.mjs — runPlugin
 // ---------------------------------------------------------------------------
@@ -415,6 +461,140 @@ test("runPlugin rejects a plugin fetch to a host outside fetchHosts", async () =
 });
 
 // ---------------------------------------------------------------------------
+// runner.mjs — path traversal / symlink escape / name-mismatch regressions
+// ---------------------------------------------------------------------------
+
+test("runPlugin rejects a path-traversal plugin name without importing anything", async () => {
+  const root = tempRoot();
+  try {
+    // A real target at root/outside/index.mjs that would prove it was
+    // imported by throwing a distinctive error — must never be reached if
+    // name validation rejects "../outside" before any path.join/import.
+    const outsideDir = join(root, "outside");
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(
+      join(outsideDir, "manifest.json"),
+      JSON.stringify(goodManifest({ name: "outside" }), null, 2)
+    );
+    writeFileSync(
+      join(outsideDir, "index.mjs"),
+      `throw new Error("SENTINEL: outside plugin was imported");\n`
+    );
+
+    const outcome = await runPlugin("../outside", { root });
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.error.code, "invalid_plugin_name");
+    assert.ok(!String(outcome.error.message).includes("SENTINEL"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runPlugin rejects a plugin directory that is a symlink escaping the plugins root", async () => {
+  const root = tempRoot();
+  const outsideRoot = tempRoot();
+  try {
+    const realOutsideDir = join(outsideRoot, "real-plugin");
+    mkdirSync(realOutsideDir, { recursive: true });
+    writeFileSync(
+      join(realOutsideDir, "manifest.json"),
+      JSON.stringify(goodManifest({ name: "escaped-plugin" }), null, 2)
+    );
+    writeFileSync(
+      join(realOutsideDir, "index.mjs"),
+      `throw new Error("SENTINEL: escaped plugin was imported");\n`
+    );
+
+    mkdirSync(join(root, "plugins"), { recursive: true });
+    symlinkSync(realOutsideDir, join(root, "plugins", "escaped-plugin"), "dir");
+
+    const outcome = await runPlugin("escaped-plugin", { root });
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.error.code, "plugin_path_escape");
+    assert.ok(!String(outcome.error.message).includes("SENTINEL"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("runPlugin rejects a plugin whose manifest name differs from its directory", async () => {
+  const root = tempRoot();
+  try {
+    writePlugin(root, "dir-name", {
+      manifest: goodManifest({ name: "other-name" }),
+      entrySource: `export default function run() { throw new Error("should never run"); }\n`,
+    });
+    const outcome = await runPlugin("dir-name", { root });
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.error.code, "plugin_name_mismatch");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// runner.mjs — timeout coverage regressions
+// ---------------------------------------------------------------------------
+
+test("runPlugin times out an entry module with a hanging top-level await", async () => {
+  const root = tempRoot();
+  try {
+    writePlugin(root, "hanging-import-plugin", {
+      manifest: goodManifest({ name: "hanging-import-plugin" }),
+      entrySource: `await new Promise(() => {});\nexport default function run() { return { ran: true }; }\n`,
+    });
+    const start = Date.now();
+    const outcome = await runPlugin("hanging-import-plugin", { root, timeoutMs: 50 });
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.error.message, /timed out/);
+    assert.ok(Date.now() - start < 2000, "must not hang past the deadline");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runPlugin's ctx.signal reflects the timeout, and a ctx.fetch call after abort rejects immediately", async () => {
+  const root = tempRoot();
+  try {
+    writePlugin(root, "late-fetch-plugin", {
+      manifest: goodManifest({ name: "late-fetch-plugin", fetchHosts: ["allowed.example"] }),
+      entrySource: `
+import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+const resultPath = fileURLToPath(new URL("./result.json", import.meta.url));
+export default function run(ctx) {
+  return new Promise(() => {
+    setTimeout(() => {
+      const abortedAfterTimeout = Boolean(ctx.signal && ctx.signal.aborted);
+      ctx.fetch("https://allowed.example/x").then((fetchResult) => {
+        writeFileSync(resultPath, JSON.stringify({ abortedAfterTimeout, fetchResult }));
+      });
+    }, 100);
+  });
+}
+`,
+    });
+
+    const outcome = await runPlugin("late-fetch-plugin", { root, timeoutMs: 40 });
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.error.message, /timed out/);
+
+    // The plugin schedules its own check to fire AFTER the runner's
+    // deadline, so give it time to run before reading what it observed.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const resultPath = join(root, "plugins", "late-fetch-plugin", "result.json");
+    const written = JSON.parse(readFileSync(resultPath, "utf8"));
+    assert.equal(written.abortedAfterTimeout, true);
+    assert.equal(written.fetchResult.ok, false);
+    assert.equal(written.fetchResult.code, "fetch_aborted");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // index.mjs — listBundledPlugins
 // ---------------------------------------------------------------------------
 
@@ -446,4 +626,34 @@ test("listBundledPlugins returns [] when there is no plugins directory", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// lint coverage — plugins/** must be reachable by both biome and knip
+// ---------------------------------------------------------------------------
+//
+// Regression: plugins/** sat outside both tools' globs, so
+// `npx biome check plugins/example-echo/index.mjs` checked zero files and
+// `npx knip` never scanned it either — a bundled plugin's own code got no
+// lint coverage at all. This pins that a plugins/-matching glob is present
+// in each config, rather than re-running the CLIs (slow, and the exact
+// output shape is the tools' to own).
+
+test("biome.json includes a glob covering plugins/", () => {
+  const biomeConfig = JSON.parse(readFileSync(join(REPO_ROOT, "biome.json"), "utf8"));
+  const includes = biomeConfig?.files?.includes ?? [];
+  assert.ok(
+    includes.some((pattern) => typeof pattern === "string" && pattern.startsWith("plugins/")),
+    `expected biome.json files.includes to cover plugins/, got: ${JSON.stringify(includes)}`
+  );
+});
+
+test("knip.json covers plugins/ in the root workspace's entry or project globs", () => {
+  const knipConfig = JSON.parse(readFileSync(join(REPO_ROOT, "knip.json"), "utf8"));
+  const rootWorkspace = knipConfig?.workspaces?.["."] ?? {};
+  const globs = [...(rootWorkspace.entry ?? []), ...(rootWorkspace.project ?? [])];
+  assert.ok(
+    globs.some((pattern) => typeof pattern === "string" && pattern.startsWith("plugins/")),
+    `expected knip.json's "." workspace entry/project to cover plugins/, got: ${JSON.stringify(globs)}`
+  );
 });

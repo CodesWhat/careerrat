@@ -3,8 +3,14 @@
   "ignoreBinaries": ["pandoc", "soffice", "iconutil"],
   "workspaces": {
     ".": {
-      "entry": ["src/cli/*.mjs", "scripts/*.mjs", "scripts/eval/*.mjs"],
-      "project": ["src/**/*.mjs", "scripts/**/*.mjs", "bin/**/*.mjs", "tests/**/*.mjs"],
+      "entry": ["src/cli/*.mjs", "scripts/*.mjs", "scripts/eval/*.mjs", "plugins/*/index.mjs"],
+      "project": [
+        "src/**/*.mjs",
+        "scripts/**/*.mjs",
+        "bin/**/*.mjs",
+        "tests/**/*.mjs",
+        "plugins/**/*.mjs"
+      ],
       "ignore": [
         "src/core/providers/career-ops/vendor/**",
         "tests/fixtures/career-ops/**",

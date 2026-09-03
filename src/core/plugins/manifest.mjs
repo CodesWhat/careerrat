@@ -6,7 +6,10 @@
 // not an exception, so callers (the runner, listBundledPlugins) can report it
 // plainly instead of crashing.
 
-const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+// Exported so the runner can validate a caller-supplied plugin name against
+// the exact same single-segment grammar before it ever touches a filesystem
+// path — one grammar, not two copies that could drift apart.
+export const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 // The closed set of context slices a plugin may declare it reads. Anything

@@ -519,3 +519,46 @@ test("fetchPublicHttpText allowedHosts is re-checked on a redirect hop", async (
   assert.equal(result.ok, false);
   assert.equal(result.code, "host_not_allowed");
 });
+
+// Regression: allowedHosts must be checked against the URL's own hostname
+// BEFORE resolvePublicHttpTarget issues any resolveHost/DNS call — a
+// disallowed host is refused with zero resolver calls, not just zero
+// fetchImpl calls. Covers both the initial hostname and a redirect hop's.
+test("fetchPublicHttpText allowedHosts rejects the initial host with zero resolver calls", async () => {
+  let resolveCalls = 0;
+  const result = await fetchPublicHttpText("https://blocked.example/jobs", {
+    resolveHost: async () => {
+      resolveCalls += 1;
+      return PUBLIC_ADDRESSES;
+    },
+    allowedHosts: ["allowed.example"],
+    fetchImpl: async () => {
+      throw new Error("must not be called");
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "host_not_allowed");
+  assert.equal(resolveCalls, 0);
+});
+
+test("fetchPublicHttpText allowedHosts rejects a blocked redirect target with zero resolver calls for that hop", async () => {
+  const resolveCallsByHost = [];
+  const result = await fetchPublicHttpText("https://allowed.example/start", {
+    resolveHost: async (host) => {
+      resolveCallsByHost.push(host);
+      return PUBLIC_ADDRESSES;
+    },
+    dispatcherFactory: () => ({ close: async () => {} }),
+    allowedHosts: ["allowed.example"],
+    fetchImpl: async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://blocked.example/next" },
+      }),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "host_not_allowed");
+  // Only the initial (allowed) hop resolves; the blocked redirect target
+  // never reaches resolveHost.
+  assert.deepEqual(resolveCallsByHost, ["allowed.example"]);
+});
