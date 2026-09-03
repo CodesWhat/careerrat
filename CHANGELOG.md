@@ -11,6 +11,9 @@ All notable changes to CareerRat are documented here. This project follows
 - `careerrat export --ats` now prints an ATS parseability score (0-100) with
   fixable issues, such as a missing section heading or unreachable contact
   info, for the submission copy of a tailored resume.
+- The annual-cash worksheet now takes a flat weekly or flat monthly amount as
+  the base pay, alongside the existing hourly wage. Tips, commission, or cash
+  bonuses per shift still layer on top of any one of the three.
 
 ## [0.17.0] - 2026-08-30
 
