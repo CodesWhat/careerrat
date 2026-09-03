@@ -64,7 +64,7 @@ async function closeDevServer(dev) {
 
 test("real Chromium renders the built chat-first workspace without selection glow or alignment drift", {
   skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run the built app visual contract",
-  timeout: 60_000,
+  timeout: 90_000,
 }, async () => {
   assert.equal(
     existsSync(join(PRODUCT_ROOT, "apps", "web", "dist", "index.html")),
@@ -83,11 +83,12 @@ test("real Chromium renders the built chat-first workspace without selection glo
   // the locator first keeps the element name in the error, which is how the
   // 2026-08/09 flake was diagnosed at all.
   //
-  // 10s was too tight for the budget it sat under. This test is render-bound
-  // and runs on a shared 4-vCPU runner, and it intermittently blew the 10s
-  // default waiting on the active thread card while passing in under 3s on an
-  // idle machine. Both numbers move together so the ordering invariant holds.
-  page.setDefaultTimeout(25_000);
+  // 10s was too tight for the budget it sat under, then 25s still flaked
+  // (#271) because the real cause wasn't slowness, it was a missed one-shot
+  // check (see the comment at the return-to-threads wait below). 60s is
+  // headroom for a genuinely loaded runner now that the actual race is
+  // fixed; the test timeout above grew to 90s to stay strictly ahead of it.
+  page.setDefaultTimeout(60_000);
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
@@ -96,12 +97,43 @@ test("real Chromium renders the built chat-first workspace without selection glo
     const baseUrl = `http://127.0.0.1:${dev.server.address().port}`;
     // The workspace intentionally keeps its live-reload EventSource open,
     // so networkidle can never be the readiness signal for this page.
-    await page.goto(`${baseUrl}/app/`, { waitUntil: "domcontentloaded" });
+    //
+    // apps/web/src/App.jsx mounts the real workspace only after POST
+    // /api/onboard/finish resolves. Whenever that response's handoff.reused
+    // is false (src/cli/onboard-route.mjs's workspaceOnboardingHandoff),
+    // which it always is for the brand-new CAREERRAT_HOME this test seeds
+    // per run, App.jsx navigates with `state: { browse: "search" }` and
+    // apps/web/src/chat-first/ChatFirstApp.jsx applies that redirect from a
+    // useEffect that only runs after the first paint, not during it. The
+    // real workspace (thread rail, cards) and the search-browser view it
+    // redirects into share the same `.chat-first-workspace` class, so the
+    // waitFor below is satisfied by either one. The previous one-shot
+    // `if (await returnToThreads.isVisible())` read the DOM once, right
+    // after that shared class appeared, and raced the redirect effect: read
+    // it a tick too early on a loaded runner and the click never fires, so
+    // the app is left showing the browser (no thread cards at all) and the
+    // aria-current wait below then polls a view that was never going to
+    // produce one, timing out no matter how long the budget is (#271).
+    // Waiting on the finish response itself removes the guess: we know from
+    // its own payload whether a redirect is coming, so we wait for the
+    // escape hatch only when one actually is, and `.click()`'s own
+    // auto-retry absorbs however long the redirect effect takes to fire.
+    const [finishResponse] = await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/onboard/finish")),
+      page.goto(`${baseUrl}/app/`, { waitUntil: "domcontentloaded" }),
+    ]);
+    assert.equal(
+      finishResponse.ok(),
+      true,
+      "POST /api/onboard/finish must succeed before the real workspace can mount"
+    );
+    const finishBody = await finishResponse.json();
 
     const workspace = page.locator(".chat-first-workspace");
     await workspace.waitFor({ state: "visible" });
-    const returnToThreads = page.locator('button[aria-label="Return to threads"]');
-    if (await returnToThreads.isVisible()) await returnToThreads.click();
+    if (finishBody?.handoff?.reused === false) {
+      await page.locator('button[aria-label="Return to threads"]').click();
+    }
     await page.locator('.chat-first-thread-card[aria-current="page"]').waitFor();
     await page.locator('.chat-first-composer input[aria-label^="Message "]').waitFor();
 
