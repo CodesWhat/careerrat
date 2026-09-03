@@ -122,6 +122,8 @@ describe("annual cash worksheet", () => {
     expect(emptyAnnualCashWorksheet(90_000)).toEqual({
       hourlyRate: "",
       hoursPerWeek: "",
+      weeklyPay: "",
+      monthlyPay: "",
       cashPerShift: "",
       shiftsPerWeek: "",
       weeksPerYear: "52",
@@ -133,5 +135,160 @@ describe("annual cash worksheet", () => {
     for (const value of [0, -5000, "not-an-amount"]) {
       expect(emptyAnnualCashWorksheet(value).annualOverride).toBe(String(value));
     }
+  });
+
+  it("annualizes a flat weekly amount by 52 weeks when weeks per year is not overridden", () => {
+    expect(calculateAnnualCashWorksheet({ weeklyPay: "800" })).toEqual({
+      annual: 41_600,
+      error: null,
+      formula: "$800/week × 52 weeks",
+      source: "derived",
+    });
+  });
+
+  it("annualizes a flat weekly amount by the worksheet's own weeks per year, not a fixed 52", () => {
+    expect(calculateAnnualCashWorksheet({ weeklyPay: "800", weeksPerYear: "40" })).toEqual({
+      annual: 32_000,
+      error: null,
+      formula: "$800/week × 40 weeks",
+      source: "derived",
+    });
+  });
+
+  it("annualizes a flat monthly amount by 12 months", () => {
+    expect(calculateAnnualCashWorksheet({ monthlyPay: "3500" })).toEqual({
+      annual: 42_000,
+      error: null,
+      formula: "$3,500/month × 12 months",
+      source: "derived",
+    });
+  });
+
+  it("adds tips or commission per shift on top of a flat weekly amount", () => {
+    expect(
+      calculateAnnualCashWorksheet({
+        weeklyPay: "800",
+        cashPerShift: "50",
+        shiftsPerWeek: "3",
+        weeksPerYear: "52",
+      })
+    ).toEqual({
+      annual: 49_400,
+      error: null,
+      formula: "$800/week × 52 weeks + $50/shift × 3 shifts/week × 52 weeks",
+      source: "derived",
+    });
+  });
+
+  it("rejects two base pay shapes supplied at once", () => {
+    expect(
+      calculateAnnualCashWorksheet({
+        hourlyRate: "15",
+        hoursPerWeek: "35",
+        weeklyPay: "800",
+      })
+    ).toEqual({
+      annual: null,
+      error:
+        "Enter pay one way: hourly wage, flat weekly pay, or flat monthly pay, not more than one.",
+      formula: null,
+      source: null,
+    });
+    expect(
+      calculateAnnualCashWorksheet({
+        weeklyPay: "800",
+        monthlyPay: "3500",
+      })
+    ).toEqual({
+      annual: null,
+      error:
+        "Enter pay one way: hourly wage, flat weekly pay, or flat monthly pay, not more than one.",
+      formula: null,
+      source: null,
+    });
+  });
+
+  it("rejects a negative flat weekly or monthly amount", () => {
+    expect(calculateAnnualCashWorksheet({ weeklyPay: "-100" })).toEqual({
+      annual: null,
+      error: "Use non-negative pay amounts and valid weekly or yearly quantities.",
+      formula: null,
+      source: null,
+    });
+    expect(calculateAnnualCashWorksheet({ monthlyPay: "-100" })).toEqual({
+      annual: null,
+      error: "Use non-negative pay amounts and valid weekly or yearly quantities.",
+      formula: null,
+      source: null,
+    });
+  });
+
+  it("annualizes a flat monthly amount by 12 even when weeks per year is zero, since monthly-only pay never uses it", () => {
+    expect(calculateAnnualCashWorksheet({ monthlyPay: "3500", weeksPerYear: "0" })).toEqual({
+      annual: 42_000,
+      error: null,
+      formula: "$3,500/month × 12 months",
+      source: "derived",
+    });
+  });
+
+  it("still requires weeks per year for monthly pay plus shift cash, since shift cash annualizes by weeks", () => {
+    expect(
+      calculateAnnualCashWorksheet({
+        monthlyPay: "3500",
+        cashPerShift: "50",
+        shiftsPerWeek: "3",
+        weeksPerYear: "0",
+      })
+    ).toEqual({
+      annual: null,
+      error: "Use non-negative pay amounts and valid weekly or yearly quantities.",
+      formula: null,
+      source: null,
+    });
+  });
+
+  it("accepts decimal weekly and monthly pay amounts", () => {
+    expect(calculateAnnualCashWorksheet({ weeklyPay: "800.50", weeksPerYear: "52" })).toEqual({
+      annual: 41_626,
+      error: null,
+      formula: "$800.50/week × 52 weeks",
+      source: "derived",
+    });
+    expect(calculateAnnualCashWorksheet({ monthlyPay: "3500.25" })).toEqual({
+      annual: 42_003,
+      error: null,
+      formula: "$3,500.25/month × 12 months",
+      source: "derived",
+    });
+  });
+
+  it("formats a decimal cash-per-shift amount with cents in the formula, not a rounded-off dollar", () => {
+    expect(
+      calculateAnnualCashWorksheet({
+        monthlyPay: "3500",
+        cashPerShift: "0.5",
+        shiftsPerWeek: "21",
+        weeksPerYear: "52",
+      })
+    ).toEqual({
+      annual: 42_546,
+      error: null,
+      formula: "$3,500/month × 12 months + $0.50/shift × 21 shifts/week × 52 weeks",
+      source: "derived",
+    });
+    expect(
+      calculateAnnualCashWorksheet({
+        weeklyPay: "800",
+        cashPerShift: "0.75",
+        shiftsPerWeek: "3",
+        weeksPerYear: "52",
+      })
+    ).toEqual({
+      annual: 41_717,
+      error: null,
+      formula: "$800/week × 52 weeks + $0.75/shift × 3 shifts/week × 52 weeks",
+      source: "derived",
+    });
   });
 });
