@@ -67,12 +67,11 @@ installer creates Start menu and desktop shortcuts and does not need an
 administrator account.
 
 CareerRat owns its workflows and threads, so their state remains
-provider-neutral on Windows. Claude Code 2.1.241 or newer and OpenAI Codex
-0.149.1 or newer are the supported engines for the complete CareerRat product.
-An engine becomes `Ready` only after local availability, authentication, and the
-complete readiness check pass. The packaged runtime does not copy the selected
-CLI's credentials. A failed check produces a clear in-app error instead of a
-silent provider switch.
+provider-neutral on Windows. Claude Code 2.1.241 or newer and OpenAI Codex are
+the supported engines for the complete CareerRat product. An engine becomes `Ready` only after local availability,
+authentication, and the complete readiness check pass. The packaged runtime
+does not copy the selected CLI's credentials. A failed check produces a clear
+in-app error instead of a silent provider switch.
 
 Candidate data, documents, and settings are stored below
 `%APPDATA%\CareerRat`. Relevant context leaves the machine only when the
