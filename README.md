@@ -64,13 +64,10 @@ The current macOS release is a signed and notarized Apple Silicon app for macOS
    offers in-app Claude Code setup and the official OpenAI Codex setup guide.
 
 CareerRat works with [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
-or [OpenAI Codex](https://developers.openai.com/codex/cli/), CareerRat's only
-supported product runtime choices. Install and sign in to either one, then pick
-it in CareerRat. Both use the same CareerRat-owned workflows, skills, and
-durable state. CareerRat invokes the selected installed CLI directly and
-never falls back to or silently switches providers, so it keeps using the
-one you picked. It shows `Ready` once the tool is installed, signed in, and
-passes a quick check.
+or [OpenAI Codex](https://developers.openai.com/codex/cli/). Install and sign
+in to either one, then pick it in CareerRat. CareerRat keeps using the one
+you picked. It never falls back to another tool or switches on its own. It
+shows `Ready` once the tool is installed, signed in, and passes a quick check.
 
 ### Any other platform (npm)
 
