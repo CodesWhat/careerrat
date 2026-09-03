@@ -108,12 +108,13 @@ test("architecture docs describe the exact packaged runtime boundaries", async (
     /generic chat surface exposes only[\s\S]*`company-health`/i,
     /Claude Code 2\.1\.241\s+or newer/i,
     /guarded CareerRat public\s+web MCP/i,
-    /OpenAI Codex 0\.149\.1 or newer[\s\S]{0,100}complete CareerRat product/i,
+    /and OpenAI Codex are the[\s\S]{0,60}complete CareerRat product/i,
     /allowlisted process\s+environment/i,
     /app never silently switches engines/i,
     /only HTML product surface/i,
   ]);
 
+  assert.doesNotMatch(architecture, /Codex\s+\d+\.\d+|Codex on its current release/i);
   assert.doesNotMatch(architecture, /generated tracker\/static .* normal product/i);
   assert.doesNotMatch(architecture, /Hermes Agent|Gemini CLI|OpenCode|GitHub Copilot/i);
 });
