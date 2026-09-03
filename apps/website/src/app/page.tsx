@@ -1,12 +1,4 @@
-import {
-  ArrowRight,
-  ClipboardList,
-  FileUp,
-  LoaderCircle,
-  Lock,
-  Radar,
-  Target,
-} from "lucide-react";
+import { ArrowRight, ClipboardList, FileUp, LoaderCircle, Lock, Radar, Target } from "lucide-react";
 import { Footer } from "@/components/Footer";
 import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
@@ -33,22 +25,22 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
 const features = [
   {
     title: "Rate before you apply",
-    copy: "Every full posting is checked against your location, pay, and fit constraints first. No cover letters for jobs that don't fit.",
+    copy: "Every full posting gets checked against your location, pay, and other must-haves before you write a word. No cover letters for jobs that don't fit.",
     Icon: ClipboardList,
   },
   {
     title: "Aligned, not fabricated",
-    copy: "It reframes your real experience to match the role and refuses to invent anything that isn't yours.",
+    copy: "It shapes your real experience to fit the role, and it never invents anything that isn't yours.",
     Icon: Target,
   },
   {
     title: "Search broadly, verify honestly",
-    copy: "Built-in job-board sources search alongside AI open-web discovery for the roles you set. CareerRat discovers additional specialist boards and employer pages as it learns your search. Every AI lead stays unverified until Evaluate reads the posting.",
+    copy: "Built-in job-board sources search for the roles you set. CareerRat also searches the open web to catch postings other tools miss, and finds specialist boards and employer pages as it learns your search. Every open-web lead stays unverified until Evaluate actually reads the posting.",
     Icon: Radar,
   },
   {
     title: "On your machine",
-    copy: "Your data stays local. Work keeps running in the background as you move between views, and interrupted runs return as a clear retry.",
+    copy: "Your workspace lives on your machine. Only the context a task needs goes to the AI provider you picked, under its terms. It keeps working in the background as you move between views, and if something gets interrupted, you get a clear retry instead of losing your place.",
     Icon: Lock,
   },
 ];
@@ -77,7 +69,11 @@ export default function Home() {
             >
               GitHub
             </a>
-            <TrackedCtaLink className="button button--lime site-nav__cta" href="#get" placement="header">
+            <TrackedCtaLink
+              className="button button--lime site-nav__cta"
+              href="#get"
+              placement="header"
+            >
               Get CareerRat <ArrowRight aria-hidden="true" size={14} strokeWidth={2.2} />
             </TrackedCtaLink>
           </div>
@@ -88,7 +84,11 @@ export default function Home() {
         <section className="hero" id="top" aria-labelledby="hero-title">
           <BrandMark />
           <h1 id="hero-title">Your job hunt, run by a rat.</h1>
-          <p className="hero__copy">CareerRat is a Mac app that turns the AI CLI you already have into a personal recruiter. It rates the jobs worth chasing, applies with your real experience, and tracks what happens.</p>
+          <p className="hero__copy">
+            CareerRat is a Mac app that turns the AI CLI you already have into a personal recruiter.
+            It rates the jobs worth chasing, applies with your real experience, and tracks what
+            happens.
+          </p>
           <div className="button-row">
             <TrackedCtaLink
               className="button button--lime button--large"
@@ -118,18 +118,27 @@ export default function Home() {
             <article className="step-card">
               <span className="step-card__number">02</span>
               <h3>Tell it what you want</h3>
-              <p>Drop your résumé, then answer short questions in plain English, like what would make one job worth applying to before another.</p>
+              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <p>
+                Drop your résumé, then answer short questions in plain English, like what would make one job worth applying to before another.
+              </p>
               <span className="status-pill">ROLES ✓ · GUARDRAILS ✓</span>
             </article>
             <article className="step-card">
               <span className="step-card__number">03</span>
               <h3>It hunts, you decide</h3>
-              <p>Search opens when setup is ready. Built-in job-board sources join AI open-web discovery for the roles you set, while CareerRat discovers additional specialist boards and employer pages for your search. When a saved site is added or first used and login is needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that exact search in the visible app browser; No skips it and keeps searching elsewhere. AI discoveries are clearly unverified until Evaluate reads the full posting for location, office days, pay, and fit. It fills safe application fields only after you review missing answers. Voluntary questions stay blank by default; local Application defaults can choose a decline option when available. CAPTCHAs and Submit stay with you.</p>
+              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <p>
+                Search opens when setup is ready. It looks in built-in job boards, and finds specialist boards and employer pages on its own as it learns. Nothing counts until Evaluate reads the full posting. You review any missing answers before it fills anything, and CAPTCHAs and Submit stay with you.
+              </p>
               <span className="status-pill">SWEEP · 9 CUT · 12 RANKED</span>
             </article>
           </div>
 
-          <div className="chat-demo" aria-label="Example CareerRat conversation">
+          <figure className="chat-demo" aria-labelledby="chat-demo-title">
+            <h3 id="chat-demo-title" className="visually-hidden">
+              Example CareerRat conversation
+            </h3>
             <div className="chat-demo__user">what should the Cyberdyne staff role pay?</div>
             <div className="chat-demo__agent-row">
               <span className="chat-demo__avatar" aria-hidden="true">
@@ -137,23 +146,47 @@ export default function Home() {
               </span>
               <div className="chat-demo__agent">
                 Checking now. I&apos;ll compare the posting against your floor of $210k.
-                <div className="activity-list" aria-label="Agent activity">
-                  <span className="activity-pill activity-pill--running">
+                <ul className="activity-list" aria-label="Agent activity">
+                  <li className="activity-pill activity-pill--running">
                     <LoaderCircle className="activity-spinner" aria-hidden="true" size={13} />
                     Searching the web
-                  </span>
-                  <span className="activity-pill">
+                  </li>
+                  <li className="activity-pill">
                     <FileUp aria-hidden="true" size={13} />
                     Read evidence-bank.md
-                  </span>
-                  <span className="activity-pill">
+                  </li>
+                  <li className="activity-pill">
                     <Radar aria-hidden="true" size={13} />
                     Compared 4 sources
-                  </span>
-                </div>
+                  </li>
+                </ul>
               </div>
             </div>
-            <p className="chat-demo__caption">You watch it read, search, and write as it works.</p>
+            <figcaption className="chat-demo__caption">
+              You watch it read, search, and write as it works.
+            </figcaption>
+          </figure>
+
+          <div className="guardrails-card">
+            <p className="eyebrow">What stays in your hands</p>
+            <ul className="guardrails-list">
+              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <li>
+                When a saved job site is added or first used and a login is needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that exact search in the visible app browser; No skips it and keeps searching elsewhere.
+              </li>
+              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <li>
+                It fills safe application fields for you, but only after you review any missing answers.
+              </li>
+              {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
+              <li>
+                Voluntary questions stay blank by default; local Application defaults can choose a decline option when available.
+              </li>
+              <li>
+                Anything found this way stays unverified until Evaluate reads the full posting for
+                location, office days, pay, and fit.
+              </li>
+            </ul>
           </div>
         </section>
 
@@ -161,7 +194,8 @@ export default function Home() {
           <p className="eyebrow">Their side has agents. Now yours does.</p>
           <h2 id="features-title">An agent for your side of the table.</h2>
           <p className="section__intro">
-            Companies screen you with software. CareerRat aligns your experience to the role, gets you past the ATS, and only spends your time on jobs you could actually get.
+            Companies screen you with software. CareerRat aligns your experience to the role, gets
+            you past the ATS, and only spends your time on jobs you could actually get.
           </p>
           <div className="feature-grid">
             {features.map(({ title, copy, Icon }) => (
@@ -184,7 +218,8 @@ export default function Home() {
               <p className="eyebrow">Get CareerRat</p>
               <h2 id="get-title">One download, and you&apos;re talking.</h2>
               <p className="download-card__copy">
-                Download the app, open it, say hi. Setup is a conversation, not a form. Open source under MIT.
+                Download the app, open it, say hi. Setup is a conversation, not a form. Open source
+                under MIT.
               </p>
               <TrackedCtaLink
                 className="button button--lime"
@@ -195,29 +230,33 @@ export default function Home() {
               >
                 Download for Mac
               </TrackedCtaLink>
-              <p className="download-card__note">Signed and notarized, for Apple Silicon Macs on macOS 12 or newer.</p>
+              <p className="download-card__note">
+                Signed and notarized, for Apple Silicon Macs on macOS 12 or newer.
+              </p>
             </div>
             <div className="engine-card">
               <p className="eyebrow">You&apos;ll need an AI CLI</p>
               <p>
-                Pick Claude Code or OpenAI Codex. Either one runs the same CareerRat-owned workflows and skills. CareerRat invokes it directly and never falls back to another provider.
+                Pick Claude Code (2.1.241 or newer) or OpenAI Codex. Either one runs the same
+                CareerRat-owned workflows and skills. CareerRat invokes it directly and never falls
+                back to another provider.
               </p>
               <p>
-                Automatic picks the right level for each task: Paul stays strong, while web searches and small helpers stay efficient. You can instead choose Faster, Balanced, or Best and set Thinking depth from Low to High. Those controls mean the same thing with Claude Code or OpenAI Codex.
+                Automatic picks the right level for each task: complex judgment stays strong, while
+                web searches and small helpers stay efficient. You can instead choose Faster,
+                Balanced, or Best, and set Thinking depth to Automatic, Low, Medium, or High. Those
+                controls work the same with Claude Code or OpenAI Codex.
               </p>
-              <div className="engine-pills" role="list" aria-label="Detected AI CLI support">
-                <span className="engine-pill" role="listitem">
-                  Claude Code
-                </span>
-                <span className="engine-pill" role="listitem">
-                  OpenAI Codex
-                </span>
-                <span className="engine-pill" role="listitem">
-                  Same CareerRat workflow
-                </span>
-              </div>
+              <ul className="engine-pills" aria-label="Detected AI CLI support">
+                <li className="engine-pill">Claude Code</li>
+                <li className="engine-pill">OpenAI Codex</li>
+                <li className="engine-pill">Same CareerRat workflow</li>
+              </ul>
               <p className="engine-card__note">
-                A runtime appears ready only when it is available, signed in, and passes its readiness check. CareerRat itself costs nothing. Signed Mac updates download in the app and wait for you to choose Restart and install.
+                A runtime appears ready only when it is available, signed in, and passes its
+                readiness check. CareerRat itself costs nothing; your AI provider may have its own
+                plan or usage costs. Signed Mac updates download in the app and wait for you to
+                choose Restart and install.
               </p>
             </div>
           </div>
@@ -229,7 +268,11 @@ export default function Home() {
             <h2 id="final-title">Ready when you are.</h2>
             <p>Download it and start talking.</p>
             <div className="button-row">
-              <TrackedCtaLink className="button button--ink button--large" href={RELEASE_URL} placement="final">
+              <TrackedCtaLink
+                className="button button--ink button--large"
+                href={RELEASE_URL}
+                placement="final"
+              >
                 Get CareerRat
               </TrackedCtaLink>
               <a className="button button--outline button--large" href="#how-it-works">

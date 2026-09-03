@@ -19,6 +19,14 @@ async function listFiles(dir, suffix) {
   return out;
 }
 
+// JSX line-wrapping can move a pinned phrase across lines once the formatter
+// is free to reflow it, so tests that pin a sentence rather than a single
+// line collapse whitespace before matching instead of pinning the source to
+// one line with a formatter suppression comment.
+function normalizeWhitespace(text) {
+  return text.replace(/\s+/g, " ");
+}
+
 test("website hero leads with the CareerRat pitch", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
@@ -53,8 +61,54 @@ test("website leads with the signed Mac app and keeps installation focused on th
   assert.doesNotMatch(page, /Anywhere with npm|brew install|npm install|Node\.js 24/);
 });
 
+test("website privacy card names the local workspace and the provider boundary precisely", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+  const flat = normalizeWhitespace(page);
+
+  assert.match(flat, /Your workspace lives on your machine\./);
+  assert.match(
+    flat,
+    /Only the context a task needs goes to the AI provider you picked, under its terms\./
+  );
+  // The old blanket claim overclaimed privacy: relevant candidate context does
+  // leave the machine, through whichever AI provider the user picked.
+  assert.doesNotMatch(page, /Your data stays local\./);
+});
+
+test("website engine card pins the runtime minimum, thinking-depth choices, cost, and update wording", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+  const flat = normalizeWhitespace(page);
+
+  assert.match(flat, /Pick Claude Code \(2\.1\.241 or newer\) or OpenAI Codex\./);
+  assert.match(flat, /set Thinking depth to Automatic, Low, Medium, or High\./);
+  assert.match(
+    flat,
+    /CareerRat itself costs nothing; your AI provider may have its own plan or usage costs\./
+  );
+  assert.match(flat, /wait for you to choose Restart and install\./);
+});
+
+test("docs index names both start commands, the Node minimum, and leads with the Mac app", async () => {
+  const docsIndex = await readFile("apps/docs/content/docs/index.mdx", "utf8");
+  const flat = normalizeWhitespace(docsIndex);
+
+  assert.match(flat, /careerrat start claude/);
+  assert.match(flat, /careerrat start codex/);
+  assert.match(flat, /Node\.js 24\.15 or newer/);
+
+  const macDownloadIndex = flat.search(/Download the Mac app\./);
+  const forDevelopersIndex = flat.search(/### For developers/);
+  assert.notEqual(macDownloadIndex, -1, "docs index should mention the Mac app download");
+  assert.notEqual(forDevelopersIndex, -1, "docs index should have a For developers heading");
+  assert.ok(
+    macDownloadIndex < forDevelopersIndex,
+    "the Mac app download should read before the For developers section"
+  );
+});
+
 test("website presents Claude Code and Codex as neutral direct runtime choices", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+  const flatPage = normalizeWhitespace(page);
 
   assert.doesNotMatch(
     page,
@@ -63,10 +117,10 @@ test("website presents Claude Code and Codex as neutral direct runtime choices",
   for (const runtime of ["Claude Code", "OpenAI Codex"]) {
     assert.match(page, new RegExp(runtime));
   }
-  assert.match(page, /runs the same CareerRat-owned workflows and skills/i);
+  assert.match(flatPage, /runs the same CareerRat-owned workflows and skills/i);
   assert.match(page, /invokes it directly/i);
-  assert.match(page, /available, signed in, and passes its readiness check/i);
-  assert.match(page, /never falls back to another provider/i);
+  assert.match(flatPage, /available, signed in, and passes its readiness check/i);
+  assert.match(flatPage, /never falls back to another provider/i);
   assert.doesNotMatch(
     page,
     /Gemini CLI|GitHub Copilot|Hermes Agent|OpenCode|Claude Code · full tasks|Codex · chat \+ drafting|first-class|ACP verified|verified per capability|equal, complete/i
@@ -228,16 +282,23 @@ test("public docs explain durable background work without claiming interrupted w
   }
 });
 
-test("website explains the first-run handoff and supervised apply boundary plainly", async () => {
+test("website explains the first-run handoff and keeps step 03 short", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
 
   assert.match(page, /questions in plain English/i);
   assert.match(page, /what would make one job worth applying to before another/i);
   assert.match(page, /Search opens when setup is ready/i);
+  assert.match(page, /CAPTCHAs and Submit stay with you/i);
+});
+
+test("website moves the supervised apply boundary into its own guardrails block", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+
+  assert.match(page, /What stays in your hands/i);
   assert.match(page, /fills safe application fields/i);
   assert.match(page, /Voluntary questions stay blank by default/i);
   assert.match(page, /local Application defaults can choose a decline option when available/i);
-  assert.match(page, /CAPTCHAs and Submit stay with you/i);
+  assert.match(page, /unverified until Evaluate reads the full posting/i);
 });
 
 test("public copy keeps local Application defaults and plain-English onboarding aligned", async () => {

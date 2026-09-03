@@ -15,6 +15,7 @@
       "scripts/**",
       "bin/**",
       "apps/web/src/**",
+      "apps/website/src/**",
       "plugins/**",
       "*.json",
       "!**/package-lock.json",

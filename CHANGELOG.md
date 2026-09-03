@@ -27,6 +27,12 @@ All notable changes to CareerRat are documented here. This project follows
 - `careerrat plugins` lists and verifies the bundled plugins for developers,
   and doctor reports them.
 
+### Changed
+
+- The website's feature cards and how-it-works copy are now shorter, plainer
+  sentences, and the docs Quick start leads with the Mac app download, moving
+  the npm/CLI path into a For developers subsection.
+
 ## [0.17.0] - 2026-08-30
 
 ### Added
