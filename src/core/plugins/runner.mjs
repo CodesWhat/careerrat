@@ -32,8 +32,10 @@ function codedError(message, code) {
 // Returns null when containment holds, or a codedError otherwise — used for
 // the plugin directory, its manifest.json, and its entry file, so a symlink
 // planted at any of those three positions can't walk a plugin's execution
-// outside plugins/.
-function containmentError(candidate, rootReal, label) {
+// outside plugins/. Exported so index.mjs's verifyBundledPlugins can apply
+// the exact same containment check to a plugin's entry file without a second
+// copy of this logic.
+export function containmentError(candidate, rootReal, label) {
   let candidateReal;
   try {
     candidateReal = realpathSync(candidate);

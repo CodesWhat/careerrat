@@ -25,6 +25,7 @@ import {
   recordPluginRun,
   runPlugin,
   validateManifest,
+  verifyBundledPlugins,
 } from "../src/core/plugins/index.mjs";
 import { readActivity } from "../src/core/tracker/activity-log.mjs";
 
@@ -623,6 +624,62 @@ test("listBundledPlugins returns [] when there is no plugins directory", () => {
   const root = tempRoot();
   try {
     assert.deepEqual(listBundledPlugins({ root }), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// index.mjs — verifyBundledPlugins
+// ---------------------------------------------------------------------------
+
+test("verifyBundledPlugins reports a containment error when manifest.json is a symlink escaping the plugins root", () => {
+  const root = tempRoot();
+  const outsideRoot = tempRoot();
+  try {
+    const outsideManifest = join(outsideRoot, "manifest.json");
+    writeFileSync(
+      outsideManifest,
+      JSON.stringify(goodManifest({ name: "escaped-manifest" }), null, 2)
+    );
+
+    const dir = join(root, "plugins", "escaped-manifest");
+    mkdirSync(dir, { recursive: true });
+    symlinkSync(outsideManifest, join(dir, "manifest.json"));
+    writeFileSync(join(dir, "index.mjs"), `export default function run() { return {}; }\n`);
+
+    const verification = verifyBundledPlugins({ root });
+    assert.equal(verification.ok, false);
+    const result = verification.plugins.find((p) => p.name === "escaped-manifest");
+    assert.ok(result, "expected escaped-manifest in verification results");
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.errors.some((e) => /plugin manifest resolves outside the plugins directory/.test(e)),
+      `expected a manifest containment error, got: ${JSON.stringify(result.errors)}`
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("verifyBundledPlugins rejects a manifest whose entry resolves to a directory", () => {
+  const root = tempRoot();
+  try {
+    writePlugin(root, "dir-entry-plugin", {
+      manifest: goodManifest({ name: "dir-entry-plugin", entry: "." }),
+      entrySource: `export default function run() { return {}; }\n`,
+    });
+
+    const verification = verifyBundledPlugins({ root });
+    assert.equal(verification.ok, false);
+    const result = verification.plugins.find((p) => p.name === "dir-entry-plugin");
+    assert.ok(result, "expected dir-entry-plugin in verification results");
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.errors.some((e) => /entry is not a regular file/.test(e)),
+      `expected an entry-not-a-file error, got: ${JSON.stringify(result.errors)}`
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
