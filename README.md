@@ -26,6 +26,7 @@
 
 <h2 align="center">Contents</h2>
 
+- [Documentation](#documentation)
 - [Quick Start](#quick-start)
 - [Recent Updates](#recent-updates)
 - [Why CareerRat](#why-careerrat)
@@ -33,19 +34,42 @@
 - [Supported Integrations](#supported-integrations)
 - [Star History](#star-history)
 - [Built With](#built-with)
+- [For Developers](#for-developers)
 - [Community & Support](#community-support)
 
-<p align="center"><a href="https://careerrat.com/docs"><strong>Read the docs at careerrat.com/docs</strong></a></p>
+<hr>
+
+<h2 align="center" id="documentation">Documentation</h2>
+
+| Resource | Link |
+| --- | --- |
+| Website | [careerrat.com](https://careerrat.com/) |
+| Docs | [careerrat.com/docs](https://careerrat.com/docs) |
+| Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
+| Architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Release process | [`docs/RELEASE.md`](docs/RELEASE.md) |
+| Windows status | [`docs/WINDOWS.md`](docs/WINDOWS.md) |
+| Contributing convention | [`AGENTS.md`](AGENTS.md) |
+| Security policy | [`.github/SECURITY.md`](.github/SECURITY.md) |
+| Issues | [GitHub Issues](https://github.com/CodesWhat/careerrat/issues) |
+| Discussions | [GitHub Discussions](https://github.com/CodesWhat/careerrat/discussions) |
+| Real-time chat | [CodesWhat Discord](https://discord.gg/mWHCPJRzSx) |
 
 <hr>
 
 <h2 align="center" id="quick-start">Quick Start</h2>
 
-CareerRat runs as a Mac app or from any terminal. Either way, it hands the actual
-work to an AI coding assistant you probably already have on your machine, Claude
-Code or OpenAI Codex, and gives that assistant a full recruiter's job to do:
-read the posting, check it against what you want, write your materials, and
-keep score of everything.
+CareerRat runs as a Mac app. It hands the actual work to an AI coding assistant
+you probably already have on your machine, Claude Code or OpenAI Codex, and
+gives that assistant a full recruiter's job to do: read the posting, check it
+against what you want, write your materials, and keep score of everything.
+
+CareerRat needs one AI engine to do the actual work: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
+2.1.241 or newer, or [OpenAI Codex](https://developers.openai.com/codex/cli/)
+(any version). You do not need it before you open the app. If neither is
+installed, CareerRat can install Claude Code from inside the app on first run,
+or point you at the Codex setup guide. CareerRat detects which one is ready on
+your machine and you pick it.
 
 ### Get the Mac app (Apple Silicon)
 
@@ -68,17 +92,6 @@ or [OpenAI Codex](https://developers.openai.com/codex/cli/). Install and sign
 in to either one, then pick it in CareerRat. CareerRat keeps using the one
 you picked. It never falls back to another tool or switches on its own. It
 shows `Ready` once the tool is installed, signed in, and passes a quick check.
-
-### Any other platform (npm)
-
-Needs Node.js 24.15 or newer.
-
-```bash
-npm install -g careerrat
-careerrat start claude
-# or
-careerrat start codex
-```
 
 ### First run
 
@@ -123,41 +136,7 @@ See [Windows status](docs/WINDOWS.md).
 
 CareerRat opens at a designed desktop size of 1280 by 860. The window is
 resizable, maximizable, and supports full screen, with a minimum working size of
-1100 by 680. There is no mobile app or Intel Mac build.
-
-</details>
-
-<details>
-<summary>Prefer the terminal, or building from source?</summary>
-
-Terminal mode requires Node.js 24.15 or newer and launches Claude Code or Codex.
-Both use the same canonical skills and local data as the Mac app.
-
-Useful terminal commands:
-
-```bash
-careerrat next          # show the next useful agent-led workflow
-careerrat doctor        # verify setup, data, skills, and runtime health
-careerrat update        # update an npm installation without touching user data
-careerrat tracker       # write a recovery snapshot and summary
-careerrat tracker-dev   # serve the local browser workspace at localhost:7777
-```
-
-To contribute from source:
-
-```bash
-git clone https://github.com/CodesWhat/careerrat
-cd careerrat
-npm install
-npm run hooks:install
-npm link
-careerrat start claude
-```
-
-The repository convention is in [AGENTS.md](AGENTS.md). Public architecture and
-release documentation live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[docs/RELEASE.md](docs/RELEASE.md). Full setup docs are on
-[careerrat.com/docs](https://careerrat.com/docs).
+1100 by 680. There is no mobile app, no Intel Mac build, and no Linux build.
 
 </details>
 
@@ -440,6 +419,57 @@ threads fold into the same workspace as the rest of your search.
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=fff)](https://www.conventionalcommits.org/)
 [![Keep a Changelog](https://img.shields.io/badge/changelog-Keep%20a%20Changelog-E05735)](https://keepachangelog.com/)
 
+</div>
+
+<hr>
+
+<h2 align="center" id="for-developers">For Developers</h2>
+
+The desktop app is CareerRat's shipping product. The `careerrat` CLI exists to
+make it easier to run and develop the same engine from a terminal; both use the
+same canonical skills and local data.
+
+### Any other platform (npm)
+
+Needs Node.js 24.15 or newer.
+
+```bash
+npm install -g careerrat
+careerrat start claude
+# or
+careerrat start codex
+```
+
+Useful terminal commands:
+
+```bash
+careerrat next          # show the next useful agent-led workflow
+careerrat doctor        # verify setup, data, skills, and runtime health
+careerrat update        # update an npm installation without touching user data
+careerrat tracker       # write a recovery snapshot and summary
+careerrat tracker-dev   # serve the local browser workspace at localhost:7777
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/CodesWhat/careerrat
+cd careerrat
+npm install
+npm run hooks:install
+npm link
+careerrat start claude
+```
+
+The repository convention is in [AGENTS.md](AGENTS.md). Public architecture and
+release documentation live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+[docs/RELEASE.md](docs/RELEASE.md). Full setup docs are on
+[careerrat.com/docs](https://careerrat.com/docs).
+
+<hr>
+
+<div align="center">
+
 <h2 align="center" id="community-support">Community & Support</h2>
 
 Real-time chat and early support: **[CodesWhat Discord](https://discord.gg/mWHCPJRzSx)**
@@ -463,3 +493,4 @@ Private vulnerability reports: [Security policy](.github/SECURITY.md).
 <a href="#careerrat">Back to top</a>
 
 </div>
+</content>
