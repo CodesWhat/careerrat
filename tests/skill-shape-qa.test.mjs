@@ -44,6 +44,7 @@ function makePacketVerdict(overrides = {}) {
     fitReasons: ["Direct RAG production experience", "Customer-facing deployment track record"],
     fitRisks: ["No formal EM title on record"],
     confidence: "high",
+    requirements: [],
     ...overrides,
   };
 }

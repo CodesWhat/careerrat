@@ -7,6 +7,7 @@ import {
   hasReadableJobBody,
   packetPromptFromContext,
 } from "./context.mjs";
+import { deriveFitRisks, normalizeRequirements } from "./requirements.mjs";
 import {
   packetGateAiVerdictSchema,
   validatePacketGateRequest,
@@ -73,6 +74,11 @@ function reviewData({ applicationId, code, reason, ai = { used: false }, source 
     action: "manual",
     fitReasons: [],
     fitRisks: [boundedDisplayText(reason, 72)],
+    // Explicit empty array, not omitted: appPersistEvaluation's
+    // shallowMergeOneLevel merges `evaluation` one level deep, so an omitted
+    // key here would let a prior AI run's requirements table survive under
+    // this deterministic verdict.
+    requirements: [],
     confidence: "low",
     manual: {
       required: true,
@@ -115,6 +121,7 @@ function forcedCutData({ applicationId, reason, source }) {
     action: "cut",
     fitReasons: [],
     fitRisks: [boundedDisplayText(reason, 72)],
+    requirements: [],
     confidence: "high",
     manual: { required: false },
     ai: { used: false },
@@ -191,7 +198,7 @@ function normalizeCompensation(rawComp = {}, profile = {}) {
   };
 }
 
-function normalizeVerdict(verdict, { applicationId, ai, source, profile }) {
+function normalizeVerdict(verdict, { applicationId, ai, source, profile, jdText }) {
   const gate = String(verdict?.gate || "review").toLowerCase();
   const requestedGate = gate === "keep" || gate === "cut" ? gate : "review";
   const rawScore = Number(verdict?.fitScore);
@@ -205,6 +212,18 @@ function normalizeVerdict(verdict, { applicationId, ai, source, profile }) {
     compensation.status !== "clears-floor"
       ? "review"
       : requestedGate;
+  // Requirements table is the source of truth for fitRisks: normalize it
+  // first (clamped enums, deduped, capped, and every jdSignal checked
+  // against the saved JD text — an invented quote is blanked, not the row),
+  // then derive fitRisks from the table's own missing/partial critical/high
+  // rows, reusing the model's own fitRisks copy where it already names a row
+  // and preserving any leftover risk only when the table itself is empty
+  // (see requirements.mjs#normalizeRequirements / #deriveFitRisks).
+  const requirements = normalizeRequirements(verdict?.requirements, { jdText });
+  const derivedFitRisks = deriveFitRisks(
+    requirements,
+    Array.isArray(verdict?.fitRisks) ? verdict.fitRisks : []
+  );
   return {
     appId: applicationId,
     applicationId,
@@ -217,9 +236,8 @@ function normalizeVerdict(verdict, { applicationId, ai, source, profile }) {
     fitReasons: (Array.isArray(verdict?.fitReasons) ? verdict.fitReasons : [])
       .map((value) => boundedDisplayText(value, 80))
       .slice(0, 3),
-    fitRisks: (Array.isArray(verdict?.fitRisks) ? verdict.fitRisks : [])
-      .map((value) => boundedDisplayText(value, 80))
-      .slice(0, 3),
+    fitRisks: derivedFitRisks.map((value) => boundedDisplayText(value, 80)).slice(0, 3),
+    requirements,
     confidence: String(verdict?.confidence || "medium").toLowerCase(),
     manual: { required: safeGate === "review" },
     ai,
@@ -416,6 +434,7 @@ export async function evaluatePacketGate({
             ai: aiResult.body.ai,
             source,
             profile: context.profile,
+            jdText: context.job.body,
           }),
         },
       };

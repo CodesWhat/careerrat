@@ -46,6 +46,10 @@ function typedGateVerdict({ gate = "keep" } = {}) {
     fitReasons: ["JD centers on production AI workflow delivery"],
     fitRisks: gate === "keep" ? [] : ["Confirm customer-facing scope"],
     confidence: "high",
+    // Required by packetGateAiVerdictSchema; empty means deriveFitRisks has
+    // nothing to align against, so fitRisks above passes through unchanged
+    // (see src/core/packet/requirements.mjs).
+    requirements: [],
   };
 }
 
