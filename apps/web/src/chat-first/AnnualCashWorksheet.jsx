@@ -10,6 +10,8 @@ import "./annual-cash-worksheet.css";
 const INPUTS = [
   { id: "hourlyRate", label: "Hourly wage", step: "0.01", placeholder: "15" },
   { id: "hoursPerWeek", label: "Paid hours per week", step: "0.5", placeholder: "35" },
+  { id: "weeklyPay", label: "Flat weekly pay", step: "1", placeholder: "800" },
+  { id: "monthlyPay", label: "Flat monthly pay", step: "1", placeholder: "3500" },
   {
     id: "cashPerShift",
     label: "Expected tips, commission, or cash bonuses per shift",
