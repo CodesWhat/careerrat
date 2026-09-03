@@ -24,6 +24,8 @@ All notable changes to CareerRat are documented here. This project follows
   the base pay, alongside the existing hourly wage. Tips, commission, or cash
   bonuses per shift still layer on top of any one of the three.
 - Requirements table from the evaluate verdict shows in the chat verdict card and the This job panel, collapsed by default.
+- `careerrat plugins` lists and verifies the bundled plugins for developers,
+  and doctor reports them.
 
 ### Changed
 

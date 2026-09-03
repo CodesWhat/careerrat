@@ -97,6 +97,7 @@ const CLIS = {
   analytics: "src/cli/analytics.mjs",
   evidence: "src/cli/evidence.mjs",
   gate: "src/cli/gate.mjs",
+  plugins: "src/cli/plugins.mjs",
   learnings: "src/cli/learnings.mjs",
   "status-map": "src/cli/status-map.mjs",
   export: "src/cli/export.mjs",
@@ -729,6 +730,7 @@ Commands:
   research    Read/record web-research artifacts
   health      Record the company-health skill's role-scoped companyHealth rating
   gate        Safely update gate data such as comp floors and exclusions
+  plugins     List/verify the bundled plugin layer (read-only; --help for options)
   learnings   Read/append per-role-family learnings
   stories     Read/validate/add STAR+R interview stories
   activity    Read/append/prune the local app Activity Pulse feed
