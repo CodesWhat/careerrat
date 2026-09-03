@@ -301,6 +301,10 @@ test("detectInstalledRuntimes finds multiple CLIs outside the inherited PATH", (
       env: { PATH: "", CAREERRAT_RUNTIME_EXTRA_PATHS: brewDir },
       platform: "darwin",
       homeDir,
+      // Replaces the hardcoded default install dirs (/opt/homebrew/bin and
+      // friends) so this test can't see whatever CLIs are really installed
+      // on the machine running it — only the fake home's .local/bin.
+      searchDirs: [join(homeDir, ".local", "bin")],
     });
     assert.equal(inventory.find(({ id }) => id === "claude").path, claudePath);
     assert.equal(inventory.find(({ id }) => id === "codex").path, codexPath);
@@ -330,6 +334,9 @@ test("detectInstalledRuntimes finds Antigravity by its agy binary", () => {
       env: { PATH: binDir },
       platform: "darwin",
       homeDir: join(root, "home"),
+      // Replaces the hardcoded default install dirs so a real CLI on the
+      // machine running this test can't be picked up as agy.
+      searchDirs: [],
     });
     const antigravity = inventory.find(({ id }) => id === "antigravity");
     assert.equal(antigravity.available, true);
@@ -351,6 +358,10 @@ test("detection publishes declared adapters as unverified until readiness runs",
       env: { PATH: binDir },
       platform: "darwin",
       homeDir: join(root, "home"),
+      // Replaces the hardcoded default install dirs so a real gemini (or
+      // any other CLI) on the machine running this test can't leak in and
+      // flip an "unavailable" assertion below.
+      searchDirs: [],
     });
     const byId = Object.fromEntries(inventory.map((runtime) => [runtime.id, runtime]));
     assert.deepEqual(byId.claude.capabilities, {
@@ -370,6 +381,47 @@ test("detection publishes declared adapters as unverified until readiness runs",
     assert.deepEqual(byId.hermes.capabilities, byId.codex.capabilities);
     assert.equal(byId.hermes.capabilityTier, "detected_unverified");
     assert.equal(byId.gemini.capabilityTier, "unavailable");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression for a real machine's installed CLIs leaking into detection
+// through the hardcoded default install dirs (/opt/homebrew/bin and
+// friends), which broke this suite the day a real `gemini` binary showed up
+// there. Deterministic: builds fake `gemini`/`codex` executables in a temp
+// dir and proves searchDirs both finds them there and, pointed at a
+// different empty dir, finds nothing — never touches the real machine's
+// PATH or install locations.
+test("detectInstalledRuntimes: searchDirs controls what a default-directory scan can see, independent of the real machine", () => {
+  const root = tempRoot();
+  const homeDir = join(root, "home");
+  const populatedSearchDir = join(root, "populated-search-dir");
+  const emptySearchDir = join(root, "empty-search-dir");
+  const geminiPath = join(populatedSearchDir, "gemini");
+  const codexPath = join(populatedSearchDir, "codex");
+  executable(geminiPath);
+  executable(codexPath);
+  mkdirSync(emptySearchDir, { recursive: true });
+  try {
+    const found = detectInstalledRuntimes({
+      env: { PATH: "" },
+      platform: "darwin",
+      homeDir,
+      searchDirs: [populatedSearchDir],
+    });
+    assert.equal(found.find(({ id }) => id === "gemini").path, geminiPath);
+    assert.equal(found.find(({ id }) => id === "codex").path, codexPath);
+
+    const notFound = detectInstalledRuntimes({
+      env: { PATH: "" },
+      platform: "darwin",
+      homeDir,
+      searchDirs: [emptySearchDir],
+    });
+    for (const runtime of notFound) {
+      assert.equal(runtime.available, false, `${runtime.id} should not be found`);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

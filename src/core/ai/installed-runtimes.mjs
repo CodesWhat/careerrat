@@ -318,15 +318,35 @@ function addUnique(target, values) {
   }
 }
 
+// Overriding the hardcoded default install directories (below) lets tests
+// isolate detection from whatever CLIs happen to be installed on the
+// machine running them. `searchDirs` is the direct option; unset, it falls
+// back to the colon-separated CAREERRAT_RUNTIME_SEARCH_DIRS env var. Either
+// form REPLACES the defaults outright rather than adding to them — PATH and
+// CAREERRAT_RUNTIME_EXTRA_PATHS are unaffected either way. Production
+// behaviour with neither set is unchanged.
 export function runtimeSearchDirectories({
   env = process.env,
   platform = process.platform,
   homeDir = homedir(),
+  searchDirs,
 } = {}) {
   const separator = platform === "win32" ? ";" : delimiter;
   const dirs = [];
   addUnique(dirs, splitPaths(env.PATH, separator));
   addUnique(dirs, splitPaths(env.CAREERRAT_RUNTIME_EXTRA_PATHS, separator));
+
+  const defaultDirsOverride =
+    searchDirs !== undefined ? searchDirs : env.CAREERRAT_RUNTIME_SEARCH_DIRS;
+  if (defaultDirsOverride !== undefined) {
+    addUnique(
+      dirs,
+      Array.isArray(defaultDirsOverride)
+        ? defaultDirsOverride.filter(Boolean)
+        : splitPaths(defaultDirsOverride, separator)
+    );
+    return dirs;
+  }
 
   if (platform === "win32") {
     addUnique(dirs, [
@@ -361,9 +381,9 @@ function executableExtensions({ env, platform }) {
 
 export function findInstalledExecutable(
   binaries,
-  { env = process.env, platform = process.platform, homeDir = homedir() } = {}
+  { env = process.env, platform = process.platform, homeDir = homedir(), searchDirs } = {}
 ) {
-  const dirs = runtimeSearchDirectories({ env, platform, homeDir });
+  const dirs = runtimeSearchDirectories({ env, platform, homeDir, searchDirs });
   const extensions = executableExtensions({ env, platform });
   for (const dir of dirs) {
     for (const binary of binaries) {
