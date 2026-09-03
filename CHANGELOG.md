@@ -11,6 +11,11 @@ All notable changes to CareerRat are documented here. This project follows
 - Completed sections in the What Paul knows panel collapse to a single line
   with a Done mark; open one with its chevron to see or edit the details.
 
+### Fixed
+
+- The desktop update checker drops settings keys left over from older versions
+  instead of carrying them forward.
+
 ## [0.18.0] - 2026-09-03
 
 ### Added
