@@ -167,7 +167,7 @@ export function normalizeAtsText(text) {
  * @param {string} line
  * @returns {string[]}
  */
-export function splitPipeRow(line) {
+function splitPipeRow(line) {
   const s = line.trim();
   const inner = s.startsWith("|") ? s.slice(1) : s;
   const cells = inner.endsWith("|") ? inner.slice(0, -1).split("|") : inner.split("|");
@@ -180,7 +180,7 @@ export function splitPipeRow(line) {
  * @param {string[]} cells
  * @returns {boolean}
  */
-export function isPipeTableDelimRow(cells) {
+function isPipeTableDelimRow(cells) {
   return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
 }
 
