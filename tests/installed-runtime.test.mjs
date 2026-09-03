@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
@@ -389,27 +389,37 @@ test("detection publishes declared adapters as unverified until readiness runs",
 // Regression for a real machine's installed CLIs leaking into detection
 // through the hardcoded default install dirs (/opt/homebrew/bin and
 // friends), which broke this suite the day a real `gemini` binary showed up
-// there. Skips gracefully when neither CLI is present, so CI images without
-// them still pass.
-test("detectInstalledRuntimes: searchDirs pointed at an empty dir plus empty PATH finds nothing, even when real CLIs exist on this machine", (t) => {
-  const geminiOnMachine = spawnSync("which", ["gemini"]).status === 0;
-  const codexOnMachine = spawnSync("which", ["codex"]).status === 0;
-  if (!geminiOnMachine && !codexOnMachine) {
-    t.skip("neither gemini nor codex is installed on this machine; nothing to isolate against");
-    return;
-  }
+// there. Deterministic: builds fake `gemini`/`codex` executables in a temp
+// dir and proves searchDirs both finds them there and, pointed at a
+// different empty dir, finds nothing — never touches the real machine's
+// PATH or install locations.
+test("detectInstalledRuntimes: searchDirs controls what a default-directory scan can see, independent of the real machine", () => {
   const root = tempRoot();
   const homeDir = join(root, "home");
+  const populatedSearchDir = join(root, "populated-search-dir");
   const emptySearchDir = join(root, "empty-search-dir");
+  const geminiPath = join(populatedSearchDir, "gemini");
+  const codexPath = join(populatedSearchDir, "codex");
+  executable(geminiPath);
+  executable(codexPath);
   mkdirSync(emptySearchDir, { recursive: true });
   try {
-    const inventory = detectInstalledRuntimes({
+    const found = detectInstalledRuntimes({
+      env: { PATH: "" },
+      platform: "darwin",
+      homeDir,
+      searchDirs: [populatedSearchDir],
+    });
+    assert.equal(found.find(({ id }) => id === "gemini").path, geminiPath);
+    assert.equal(found.find(({ id }) => id === "codex").path, codexPath);
+
+    const notFound = detectInstalledRuntimes({
       env: { PATH: "" },
       platform: "darwin",
       homeDir,
       searchDirs: [emptySearchDir],
     });
-    for (const runtime of inventory) {
+    for (const runtime of notFound) {
       assert.equal(runtime.available, false, `${runtime.id} should not be found`);
     }
   } finally {
