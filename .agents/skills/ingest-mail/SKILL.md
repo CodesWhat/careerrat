@@ -56,19 +56,25 @@ careerrat automation status --json
 ```
 
 Inspect `capabilities.mail_access` for the requested platform. `allowed: true`
-means all three conditions are simultaneously true: the `mail_access` capability
-global switch is on, that mail provider's per-capability switch is on, and that
-provider's one-time ToS consent is recorded. This is the three-part AND from
-`mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
+means three switches are simultaneously on: the `mail_access` capability
+global switch, that mail provider's per-capability switch, and that provider's
+one-time ToS consent. And either automation is in the "advanced" setup mode
+or the capability has a contextual scoped grant for that provider. This is the
+predicate from `mayRun()` in `src/core/automation/consent.mjs`; never
+re-derive it in prose.
 
 If `mail_access` is not allowed, stop before opening a browser and show the exact
 opt-in steps:
 
-1. Read the provider's terms of service yourself.
-2. `careerrat automation consent <gmail|outlook> --write`
-3. `careerrat automation enable mail_access --write`
-4. `careerrat automation enable mail_access <gmail|outlook> --write`
-5. `careerrat automation status --json`
+1. `careerrat automation mode advanced --write`
+2. Read the provider's terms of service yourself.
+3. `careerrat automation consent <gmail|outlook> --write`
+4. `careerrat automation enable mail_access --write`
+5. `careerrat automation enable mail_access <gmail|outlook> --write`
+6. `careerrat automation status --json`
+
+A contextual scoped grant given in the app is an alternative to step 1: it
+authorizes this capability for that provider without switching to advanced mode.
 
 If allowed, use the session browser. Read only job-search/recruiting messages in
 the resolved window from STEP 2; do not browse personal mail outside that scope.
