@@ -26,6 +26,7 @@ export const packetGateAiVerdictSchema = {
     "fitReasons",
     "fitRisks",
     "confidence",
+    "requirements",
   ],
   additionalProperties: false,
   properties: {
@@ -71,9 +72,13 @@ export const packetGateAiVerdictSchema = {
     fitReasons: { type: "array", maxItems: 3, items: { type: "string", maxLength: 80 } },
     fitRisks: { type: "array", maxItems: 3, items: { type: "string", maxLength: 80 } },
     confidence: { type: "string", enum: ["low", "medium", "high"] },
-    // Optional — absent on older verdicts, which must still validate.
-    // Evidence-tiered requirements table; fitRisks is derived from it (see
-    // deriveFitRisks in ../requirements.mjs).
+    // Required on every live completion so a legacy-shaped model reply can't
+    // silently validate with an empty table (an explicit `[]` is fine; an
+    // absent key is not). Persisted verdicts from before this field existed
+    // still read fine — config/tracker.schema.json keeps `requirements`
+    // optional on the read path, only this live-completion schema requires
+    // it. Evidence-tiered requirements table; fitRisks is derived from it
+    // (see deriveFitRisks in ../requirements.mjs).
     requirements: {
       type: "array",
       maxItems: 20,
@@ -111,12 +116,18 @@ export function validatePacketGateVerdictQuality(verdict = {}) {
     ...(Array.isArray(verdict.fitRisks)
       ? verdict.fitRisks.map((value, index) => [`fitRisks[${index}]`, value])
       : []),
+    // requirement and jdSignal are excluded here: both are supposed to be
+    // verbatim JD text, which routinely contains a "?" (a JD question like
+    // "Do you hold an active X certification?") or an ordinary word the
+    // residue pattern also flags (e.g. "correction"). Checking the model's
+    // own drafting copy for residue makes sense; checking a quoted source
+    // phrase for the same pattern produces false positives that burn a
+    // retry. jdSignal's authenticity is enforced separately, by verifying it
+    // actually occurs in the saved JD (see verifyJdSignal in
+    // ../requirements.mjs), not by this residue check. note is the model's
+    // own commentary, so it stays in scope.
     ...(Array.isArray(verdict.requirements)
-      ? verdict.requirements.flatMap((row, index) => [
-          [`requirements[${index}].requirement`, row?.requirement],
-          [`requirements[${index}].jdSignal`, row?.jdSignal],
-          [`requirements[${index}].note`, row?.note],
-        ])
+      ? verdict.requirements.flatMap((row, index) => [[`requirements[${index}].note`, row?.note]])
       : []),
   ];
   return entries

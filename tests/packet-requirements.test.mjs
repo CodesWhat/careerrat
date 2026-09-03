@@ -14,6 +14,11 @@ import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
 import { evaluatePacketGate } from "../src/core/packet/gate.mjs";
 import { deriveFitRisks, normalizeRequirements } from "../src/core/packet/requirements.mjs";
+import {
+  packetGateAiVerdictSchema,
+  validatePacketGateVerdictQuality,
+} from "../src/core/packet/schemas/packet-schemas.mjs";
+import { validate } from "../src/core/profile/schema-validator.mjs";
 
 // ---------------------------------------------------------------------------
 // normalizeRequirements
@@ -111,6 +116,45 @@ test("normalizeRequirements: never throws on garbage input", () => {
   }
 });
 
+test("normalizeRequirements: jdText option keeps a jdSignal that matches under whitespace/case folding", () => {
+  const jdText = "We need someone with   5+ Years of\nProduction   Kubernetes required.";
+  const rows = normalizeRequirements(
+    [
+      {
+        requirement: "5+ years production Kubernetes",
+        jdSignal: "5+ years of production kubernetes required.",
+      },
+    ],
+    { jdText }
+  );
+  assert.equal(rows[0].jdSignal, "5+ years of production kubernetes required.");
+});
+
+test("normalizeRequirements: jdText option blanks an invented jdSignal but keeps the row", () => {
+  const jdText = "Own the Kubernetes platform. 5+ years of production Kubernetes required.";
+  const rows = normalizeRequirements(
+    [
+      {
+        requirement: "5+ years production Kubernetes",
+        importance: "critical",
+        match: "missing",
+        jdSignal: "Must relocate to the Austin office within 30 days.",
+      },
+    ],
+    { jdText }
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].requirement, "5+ years production Kubernetes");
+  assert.equal(rows[0].jdSignal, "");
+});
+
+test("normalizeRequirements: no jdText option means no jdSignal check runs", () => {
+  const rows = normalizeRequirements([
+    { requirement: "Some requirement", jdSignal: "A phrase that appears nowhere in particular" },
+  ]);
+  assert.equal(rows[0].jdSignal, "A phrase that appears nowhere in particular");
+});
+
 // ---------------------------------------------------------------------------
 // deriveFitRisks
 // ---------------------------------------------------------------------------
@@ -164,15 +208,15 @@ test("deriveFitRisks: never names a strong/na or low-importance row", () => {
   assert.deepEqual(risks, []);
 });
 
-test("deriveFitRisks: appends an uncovered existing risk at the end instead of dropping it", () => {
+test("deriveFitRisks: with a nonempty table, drops an existing risk that names nothing in it", () => {
+  // One qualifying row plus a model risk about something the table never
+  // mentions: the table is the grounded source of truth once it's nonempty,
+  // so the ungrounded risk is dropped instead of appended.
   const requirements = normalizeRequirements([
     { requirement: "On-call rotation", importance: "critical", match: "missing", note: "None." },
   ]);
   const risks = deriveFitRisks(requirements, ["Travel is 50%, candidate prefers under 10%"]);
-  assert.deepEqual(risks, [
-    "On-call rotation is missing: None.",
-    "Travel is 50%, candidate prefers under 10%",
-  ]);
+  assert.deepEqual(risks, ["On-call rotation is missing: None."]);
 });
 
 test("deriveFitRisks: each existing risk string is consumed at most once", () => {
@@ -190,6 +234,29 @@ test("deriveFitRisks: each existing risk string is consumed at most once", () =>
   assert.match(risks[1], /^Docker is missing/);
 });
 
+test("deriveFitRisks: stable-sorts gaps critical-before-high, missing-before-partial, so a later cap to 3 keeps the most severe", () => {
+  const requirements = normalizeRequirements([
+    { requirement: "Req1 high partial", importance: "high", match: "partial" },
+    { requirement: "Req2 high missing", importance: "high", match: "missing" },
+    { requirement: "Req3 critical partial", importance: "critical", match: "partial" },
+    // Most severe gap (critical + missing), listed last by the model.
+    { requirement: "Req4 critical missing", importance: "critical", match: "missing" },
+  ]);
+  const risks = deriveFitRisks(requirements, []);
+  assert.equal(risks.length, 4);
+  // Sorted order: critical/missing, critical/partial, high/missing, high/partial.
+  assert.match(risks[0], /^Req4 critical missing is missing/);
+  assert.match(risks[1], /^Req3 critical partial is partial/);
+  assert.match(risks[2], /^Req2 high missing is missing/);
+  assert.match(risks[3], /^Req1 high partial is partial/);
+
+  // Mirrors the cap gate.mjs#normalizeVerdict applies downstream: the
+  // critical/missing row survives even though the model listed it last.
+  const capped = risks.slice(0, 3);
+  assert.ok(capped.some((risk) => risk.startsWith("Req4 critical missing")));
+  assert.ok(!capped.some((risk) => risk.startsWith("Req1 high partial")));
+});
+
 test("deriveFitRisks: empty requirements table returns existing risks unchanged", () => {
   const risks = deriveFitRisks([], ["Some prior risk copy"]);
   assert.deepEqual(risks, ["Some prior risk copy"]);
@@ -199,6 +266,121 @@ test("deriveFitRisks: never throws on garbage input", () => {
   assert.doesNotThrow(() => deriveFitRisks(null, null));
   assert.doesNotThrow(() => deriveFitRisks("not an array", "also not an array"));
   assert.deepEqual(deriveFitRisks(null, null), []);
+});
+
+// ---------------------------------------------------------------------------
+// packetGateAiVerdictSchema / validatePacketGateVerdictQuality
+// ---------------------------------------------------------------------------
+
+function validVerdictShape(overrides = {}) {
+  return {
+    gate: "review",
+    fitScore: 50,
+    fitSummary: "Fit needs review.",
+    compensation: {
+      status: "unknown",
+      currency: null,
+      minBase: null,
+      maxBase: null,
+      minAnnualEarnings: null,
+      maxAnnualEarnings: null,
+      basis: null,
+      source: "unknown",
+      summary: "Compensation not posted.",
+    },
+    action: "manual",
+    fitReasons: [],
+    fitRisks: [],
+    confidence: "medium",
+    requirements: [],
+    ...overrides,
+  };
+}
+
+test("packetGateAiVerdictSchema: a verdict without requirements fails live validation", () => {
+  const { requirements, ...legacyShaped } = validVerdictShape();
+  const { valid, errors } = validate(legacyShaped, packetGateAiVerdictSchema);
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => /requirements/.test(e.message) || e.path.includes("requirements")));
+});
+
+test("packetGateAiVerdictSchema: a verdict with an explicit empty requirements array validates", () => {
+  const { valid } = validate(validVerdictShape(), packetGateAiVerdictSchema);
+  assert.equal(valid, true);
+});
+
+test("config/tracker.schema.json still accepts a persisted evaluation without a requirements key", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { fileURLToPath } = await import("node:url");
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const schema = JSON.parse(await readFile(`${root}/config/tracker.schema.json`, "utf8"));
+
+  const tracker = {
+    applications: [
+      {
+        id: "app-legacy-eval",
+        company: "Acme",
+        role: "Platform Engineer",
+        status: "review",
+        evaluation: {
+          gate: "review",
+          fitScore: 50,
+          fitBucket: "med",
+          fitSummary: "Needs review.",
+          fitReasons: [],
+          fitRisks: [],
+          confidence: "medium",
+          evaluatedAt: "2026-01-01T00:00:00.000Z",
+          // no `requirements` key at all — pre-existing verdict shape.
+        },
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
+  const { valid, errors } = validate(tracker, schema);
+  assert.equal(
+    valid,
+    true,
+    `expected a legacy evaluation (no requirements key) to validate, got: ${errors
+      .map((e) => `${e.path}: ${e.message}`)
+      .join("; ")}`
+  );
+});
+
+test("validatePacketGateVerdictQuality: a verbatim JD question in jdSignal does not fail residue checks", () => {
+  const verdict = validVerdictShape({
+    requirements: [
+      {
+        requirement: "Active correction officer certification",
+        importance: "critical",
+        evidence: "stated",
+        jdSignal: "Do you hold an active correction officer certification?",
+        match: "missing",
+        note: "No certification on record.",
+      },
+    ],
+  });
+  const errors = validatePacketGateVerdictQuality(verdict);
+  assert.deepEqual(errors, []);
+});
+
+test("validatePacketGateVerdictQuality: still flags drafting residue in a requirements note", () => {
+  const verdict = validVerdictShape({
+    requirements: [
+      {
+        requirement: "Active correction officer certification",
+        importance: "critical",
+        evidence: "stated",
+        jdSignal: "Certification required.",
+        match: "missing",
+        note: "Oops, let me rephrase that note.",
+      },
+    ],
+  });
+  const errors = validatePacketGateVerdictQuality(verdict);
+  assert.ok(errors.some((e) => e.path === "requirements[0].note"));
 });
 
 // ---------------------------------------------------------------------------
@@ -400,4 +582,34 @@ test("evaluatePacketGate: an old verdict without a requirements field still pars
   // With no table to align against, the model's own fitRisks copy survives
   // untouched (appended, nothing silently dropped).
   assert.deepEqual(evaluation.fitRisks, ["No direct Kubernetes production experience on record"]);
+});
+
+test("evaluatePacketGate: blanks a jdSignal that doesn't occur in the saved JD, keeps the row", async () => {
+  const repoRoot = tempRepo();
+  seedApp(repoRoot);
+
+  // seedApp's JD body is "Own the Kubernetes platform. 5+ years of
+  // production Kubernetes required." — this jdSignal quotes a phrase that
+  // never appears in it.
+  const verdict = fixtureVerdictWithRequirements();
+  verdict.requirements[0].jdSignal = "Must hold an active CPA license.";
+
+  const result = await evaluatePacketGate({
+    repoRoot,
+    body: { applicationId: "app-requirements" },
+    runAI: async () => ({
+      body: { ok: true, ai: { used: true, model: "test-model" }, data: verdict },
+    }),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  const evaluation = result.body.data;
+  assert.equal(evaluation.requirements[0].requirement, "5+ years production Kubernetes");
+  assert.equal(evaluation.requirements[0].jdSignal, "");
+  // The row survives with a blanked jdSignal; the derived fitRisk (grounded
+  // in requirement/importance/match/note, not jdSignal) is unaffected.
+  assert.deepEqual(evaluation.fitRisks, [
+    "5+ years production Kubernetes is missing: No Kubernetes experience on record.",
+  ]);
 });

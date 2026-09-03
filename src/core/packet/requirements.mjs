@@ -21,6 +21,12 @@ const NOTE_MAX_CHARS = 200;
 const GAP_MATCH_VALUES = new Set(["missing", "partial"]);
 const HIGH_IMPORTANCE_VALUES = new Set(["critical", "high"]);
 
+// Sort rank for the pre-cap ordering: critical before high, missing before
+// partial. Lower rank sorts first, so the most severe gaps survive a
+// downstream slice(0, 3) even when the model listed them last.
+const IMPORTANCE_RANK = { critical: 0, high: 1 };
+const MATCH_RANK = { missing: 0, partial: 1 };
+
 function truncate(value, maxLength) {
   const text = String(value ?? "").trim();
   if (!text) return "";
@@ -36,14 +42,41 @@ function clampEnum(value, allowed, fallback) {
   return allowed.has(normalized) ? normalized : fallback;
 }
 
-// normalizeRequirements(raw) — accepts anything the model returned for
-// `requirements` and produces a clean, bounded array. Drops rows without a
-// usable requirement string, clamps every enum to its allowed set, truncates
-// jdSignal/note, dedupes by lowercased requirement (first occurrence wins),
-// and caps at MAX_ROWS. Never throws.
-export function normalizeRequirements(raw) {
+// collapseWhitespace(value) — whitespace-collapsed, case-insensitive form
+// used to compare a jdSignal against the saved JD text without caring about
+// line wraps or incidental spacing differences.
+function collapseWhitespace(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+// verifyJdSignal(signal, collapsedJdText) — when a JD text was supplied,
+// blank a jdSignal that doesn't actually occur in it (whitespace-collapsed,
+// case-insensitive substring). An invented signal is dropped, not the row:
+// the requirement stays, only the (wrong) quoted JD phrase is cleared. With
+// no JD text supplied, the signal passes through unchecked.
+function verifyJdSignal(signal, collapsedJdText) {
+  if (!signal) return signal;
+  if (!collapsedJdText) return signal;
+  return collapsedJdText.includes(collapseWhitespace(signal)) ? signal : "";
+}
+
+// normalizeRequirements(raw, options) — accepts anything the model returned
+// for `requirements` and produces a clean, bounded array. Drops rows without
+// a usable requirement string, clamps every enum to its allowed set,
+// truncates jdSignal/note, dedupes by lowercased requirement (first
+// occurrence wins), and caps at MAX_ROWS. Never throws.
+//
+// options.jdText — when provided, every row's jdSignal is checked against it
+// (see verifyJdSignal) and blanked if it doesn't occur in the JD; the row
+// itself is always kept. Omitted or empty means no check runs.
+export function normalizeRequirements(raw, options = {}) {
   try {
     if (!Array.isArray(raw)) return [];
+    const jdText = typeof options?.jdText === "string" ? options.jdText : "";
+    const collapsedJdText = jdText ? collapseWhitespace(jdText) : "";
     const seen = new Set();
     const rows = [];
     for (const entry of raw) {
@@ -55,11 +88,15 @@ export function normalizeRequirements(raw) {
       const key = requirement.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
+      const jdSignal = verifyJdSignal(
+        truncate(entry.jdSignal, JD_SIGNAL_MAX_CHARS),
+        collapsedJdText
+      );
       rows.push({
         requirement,
         importance: clampEnum(entry.importance, IMPORTANCE_VALUES, "meaningful"),
         evidence: clampEnum(entry.evidence, EVIDENCE_VALUES, "inferred"),
-        jdSignal: truncate(entry.jdSignal, JD_SIGNAL_MAX_CHARS),
+        jdSignal,
         match: clampEnum(entry.match, MATCH_VALUES, "na"),
         note: truncate(entry.note, NOTE_MAX_CHARS),
       });
@@ -72,19 +109,34 @@ export function normalizeRequirements(raw) {
 
 // deriveFitRisks(requirements, existingFitRisks) — aligns fitRisks to the
 // requirements table. `requirements` is assumed already normalized (a
-// non-array degrades to no rows, never a throw). For every row whose match is
-// missing/partial and whose importance is critical/high: reuse an existing
-// fitRisk string that already names it (case-insensitive substring match on
-// the requirement text, each existing string consumed at most once), or else
-// synthesize `"<requirement> is <missing|partial>: <note>"`. Any existing
-// risk string that never matched a qualifying row is appended at the end
-// unchanged, so no prior information is silently dropped.
+// non-array degrades to no rows, never a throw). Qualifying gap rows (match
+// missing/partial, importance critical/high) are stable-sorted critical
+// before high, then missing before partial, so a downstream cap to 3 always
+// keeps the most severe gaps regardless of the model's own ordering. For
+// each, in that order: reuse an existing fitRisk string that already names it
+// (case-insensitive substring match on the requirement text, each existing
+// string consumed at most once), or else synthesize
+// `"<requirement> is <missing|partial>: <note>"`.
+//
+// With a nonempty table, any existing risk string that never matched a
+// qualifying row is dropped — the table is the grounded source of truth, so
+// an ungrounded model risk doesn't survive alongside it. With an empty table
+// (legacy verdict, or normalization producing no rows), there is nothing to
+// ground against, so the existing risks pass through unchanged instead.
 export function deriveFitRisks(requirements, existingFitRisks) {
   try {
     const rows = Array.isArray(requirements) ? requirements : [];
-    const gapRows = rows.filter(
-      (row) => row && GAP_MATCH_VALUES.has(row.match) && HIGH_IMPORTANCE_VALUES.has(row.importance)
-    );
+    const gapRows = rows
+      .filter(
+        (row) =>
+          row && GAP_MATCH_VALUES.has(row.match) && HIGH_IMPORTANCE_VALUES.has(row.importance)
+      )
+      .slice()
+      .sort(
+        (a, b) =>
+          IMPORTANCE_RANK[a.importance] - IMPORTANCE_RANK[b.importance] ||
+          MATCH_RANK[a.match] - MATCH_RANK[b.match]
+      );
     const existing = Array.isArray(existingFitRisks)
       ? existingFitRisks.filter((value) => typeof value === "string" && value.trim())
       : [];
@@ -108,9 +160,14 @@ export function deriveFitRisks(requirements, existingFitRisks) {
       result.push(`${row.requirement} is ${row.match}${note ? `: ${note}` : ""}`);
     }
 
-    existing.forEach((risk, index) => {
-      if (!usedExistingIndexes.has(index)) result.push(risk);
-    });
+    // Only pass through leftover model risks when the table itself is
+    // empty — a nonempty table is the grounded source of truth, so an
+    // existing risk that names nothing in it is dropped, not appended.
+    if (rows.length === 0) {
+      existing.forEach((risk, index) => {
+        if (!usedExistingIndexes.has(index)) result.push(risk);
+      });
+    }
 
     return result;
   } catch {

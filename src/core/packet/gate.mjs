@@ -198,7 +198,7 @@ function normalizeCompensation(rawComp = {}, profile = {}) {
   };
 }
 
-function normalizeVerdict(verdict, { applicationId, ai, source, profile }) {
+function normalizeVerdict(verdict, { applicationId, ai, source, profile, jdText }) {
   const gate = String(verdict?.gate || "review").toLowerCase();
   const requestedGate = gate === "keep" || gate === "cut" ? gate : "review";
   const rawScore = Number(verdict?.fitScore);
@@ -213,11 +213,13 @@ function normalizeVerdict(verdict, { applicationId, ai, source, profile }) {
       ? "review"
       : requestedGate;
   // Requirements table is the source of truth for fitRisks: normalize it
-  // first (clamped enums, deduped, capped), then derive fitRisks from the
-  // table's own missing/partial critical/high rows, reusing the model's own
-  // fitRisks copy where it already names a row and preserving any leftover
-  // risk the table didn't cover (see requirements.mjs#deriveFitRisks).
-  const requirements = normalizeRequirements(verdict?.requirements);
+  // first (clamped enums, deduped, capped, and every jdSignal checked
+  // against the saved JD text — an invented quote is blanked, not the row),
+  // then derive fitRisks from the table's own missing/partial critical/high
+  // rows, reusing the model's own fitRisks copy where it already names a row
+  // and preserving any leftover risk only when the table itself is empty
+  // (see requirements.mjs#normalizeRequirements / #deriveFitRisks).
+  const requirements = normalizeRequirements(verdict?.requirements, { jdText });
   const derivedFitRisks = deriveFitRisks(
     requirements,
     Array.isArray(verdict?.fitRisks) ? verdict.fitRisks : []
@@ -432,6 +434,7 @@ export async function evaluatePacketGate({
             ai: aiResult.body.ai,
             source,
             profile: context.profile,
+            jdText: context.job.body,
           }),
         },
       };
