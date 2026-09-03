@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { scoreAtsParseability } from "../core/documents/ats-parseability.mjs";
 import { detectDocxCapability, exportArtifact } from "../core/documents/export.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
@@ -36,6 +37,7 @@ if (!inputArg) {
 const wantPdf = args.includes("--pdf");
 const wantDocx = args.includes("--docx");
 const wantAts = args.includes("--ats");
+const wantJson = args.includes("--json");
 const formats = [];
 if (wantPdf) formats.push("pdf");
 if (wantDocx) formats.push("docx");
@@ -86,7 +88,7 @@ const title = titleArg || inputBase.replace(/[-_]/g, " ");
 
 // --- If docx, report which tool will be used ---
 
-if (formats.includes("docx")) {
+if (formats.includes("docx") && !wantJson) {
   const cap = detectDocxCapability();
   console.log(`DOCX tool: ${cap.label}`);
 }
@@ -104,13 +106,43 @@ try {
   process.exit(1);
 }
 
+// --- ATS parseability score (the --ats copy is the one that goes through an
+// ATS parser, so that's when the score is relevant) ---
+
+const atsResult = wantAts ? scoreAtsParseability(markdown) : null;
+
 // --- Report results ---
 
-if (result.pdf) {
-  console.log(`PDF  → ${result.pdf}`);
-}
-if (result.docx) {
-  console.log(`DOCX → ${result.docx}  (${result.docxLabel})`);
+if (wantJson) {
+  console.log(
+    JSON.stringify(
+      {
+        pdf: result.pdf || null,
+        docx: result.docx || null,
+        docxLabel: result.docxLabel || null,
+        ats: atsResult,
+      },
+      null,
+      2
+    )
+  );
+} else {
+  if (result.pdf) {
+    console.log(`PDF  → ${result.pdf}`);
+  }
+  if (result.docx) {
+    console.log(`DOCX → ${result.docx}  (${result.docxLabel})`);
+  }
+  if (atsResult) {
+    console.log(`\nATS parseability: ${atsResult.score}/100`);
+    if (atsResult.findings.length === 0) {
+      console.log("  No issues found.");
+    } else {
+      for (const finding of atsResult.findings) {
+        console.log(`  [${finding.severity}] ${finding.message} Fix: ${finding.fix}`);
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,14 +157,16 @@ Options:
   --pdf          Render to PDF (default when no format flag given)
   --docx         Render to DOCX (pandoc → soffice → built-in OOXML fallback)
   --ats          PDF: use a standard ATS-safe font stack (Arial/Helvetica/Courier),
-                 no embedded Geist, for the copy that goes through an ATS parser
+                 no embedded Geist, for the copy that goes through an ATS parser.
+                 Also prints an ATS parseability score (0-100) with fixable issues.
   --out <base>   Output path/basename without extension (default: alongside input)
   --title "..."  Document title (default: input filename stem)
+  --json         Machine-readable result on stdout (includes the ATS score with --ats)
   --help         Show this message
 
 Examples:
   careerrat export workspace/tailored/Acme-Engineer.md --pdf
-  careerrat export workspace/tailored/Acme-Engineer.md --pdf --ats   # ATS submission copy
+  careerrat export workspace/tailored/Acme-Engineer.md --pdf --ats   # ATS submission copy + score
   careerrat export workspace/tailored/Acme-Engineer.md --pdf --docx
   careerrat export workspace/interview-prep/acme-engineer.md --pdf --out /tmp/packet
 

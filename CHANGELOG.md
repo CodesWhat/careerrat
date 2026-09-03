@@ -11,6 +11,9 @@ All notable changes to CareerRat are documented here. This project follows
 - Candidate setup and Profile now include an annual-cash worksheet for hourly
   and tipped or shift-based compensation. CareerRat keeps the original pay
   inputs while deriving a comparable annual floor for search and evaluation.
+- `careerrat export --ats` now prints an ATS parseability score (0-100) with
+  fixable issues, such as a missing section heading or unreachable contact
+  info, for the submission copy of a tailored resume.
 
 ### Changed
 
