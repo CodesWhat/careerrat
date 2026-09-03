@@ -8,6 +8,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- `careerrat doctor` now flags candidate files (profile, targeting, evidence,
+  honesty, form defaults) that still carry unedited template content, reporting
+  the file, key, and matched marker without printing the candidate's real data.
+  A file it could not read is reported as unchecked, never as clean.
 - `careerrat export --ats` now prints an ATS parseability score (0-100) with
   fixable issues, such as a missing section heading or unreachable contact
   info, for the submission copy of a tailored resume.
