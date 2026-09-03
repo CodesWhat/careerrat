@@ -1631,6 +1631,7 @@ export function FirstRunController({
       }))}
       error={engineError}
       guidedSetup={guidedSetup}
+      guidedSetupAvailable={runtimeState?.guidedSetupAvailable === true}
       messages={messages}
       knowledge={knowledge.items}
       progress={knowledge.progress}

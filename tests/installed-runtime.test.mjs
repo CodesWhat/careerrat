@@ -29,6 +29,7 @@ import {
   installedRuntimeCapabilities,
   installedRuntimeExecutionIdentity,
   installedRuntimeSignInCommand,
+  isInstalledRuntimeBelowVersionBoundary,
   materializeIsolatedSkillCwd,
   ONE_SHOT_RUNTIME_TIMEOUT_MS,
   parseCustomCommandString,
@@ -1500,7 +1501,204 @@ test("Claude below the tool boundary version reports update_required, not ready"
     probeMessage: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
     capabilityReason: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
   });
-  assert.deepEqual(calls, [["--version"], ["auth", "status"]]);
+  // A conclusive below-boundary version now short-circuits before the auth
+  // probe ever runs: there is no scenario where auth or completion state
+  // could change the outcome once the version gap is conclusively known.
+  assert.deepEqual(calls, [["--version"]]);
+});
+
+test("probeInstalledRuntime returns update_required for a signed-out old Claude, not authentication_required", async () => {
+  // The auth probe would report signed-out if it ran, but a conclusive
+  // below-boundary version must win before that probe is ever reached.
+  let authProbeCalled = false;
+  const result = await probeInstalledRuntime(
+    { id: "claude", path: "/safe/claude", available: true },
+    {
+      spawnSyncImpl(_path, args) {
+        if (args[0] === "--version") {
+          return { status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" };
+        }
+        authProbeCalled = true;
+        return { status: 1, stdout: "", stderr: "not logged in" };
+      },
+    }
+  );
+  assert.equal(result.status, "update_required");
+  assert.equal(result.ready, false);
+  assert.equal(authProbeCalled, false);
+});
+
+test("probeInstalledRuntime returns update_required for an old Claude whose completion smoke fails", async () => {
+  let completionProbeCalled = false;
+  const result = await probeInstalledRuntimeCore(
+    { id: "claude", path: "/safe/claude", available: true },
+    {
+      spawnSyncImpl(_path, args) {
+        return args[0] === "--version"
+          ? { status: 0, stdout: "2.1.200 (Claude Code)", stderr: "" }
+          : { status: 0, stdout: "signed in", stderr: "" };
+      },
+      completionProbeImpl: async () => {
+        completionProbeCalled = true;
+        return { ok: false, action: "retry", actionLabel: "Try again" };
+      },
+    }
+  );
+  assert.equal(result.status, "update_required");
+  assert.equal(result.ready, false);
+  assert.equal(completionProbeCalled, false);
+});
+
+test("probeInstalledRuntime never reports update_required for an unknown Claude version", async () => {
+  const result = await probeInstalledRuntime(
+    { id: "claude", path: "/safe/claude", available: true },
+    {
+      spawnSyncImpl(_path, args) {
+        // Malformed --version output: no parseable semantic version at all.
+        return args[0] === "--version"
+          ? { status: 0, stdout: "Claude Code (build unknown)", stderr: "" }
+          : { status: 0, stdout: "signed in", stderr: "" };
+      },
+    }
+  );
+  assert.notEqual(result.status, "update_required");
+  assert.equal(result.status, "ready");
+  assert.equal(result.ready, true);
+  assert.equal(result.version, undefined);
+  assert.equal(
+    result.capabilityReason,
+    "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs."
+  );
+});
+
+// A minimal fake child for the version-boundary probe: emits stdout then
+// closes on its own, with no dependency on stdin being written or ended
+// (the boundary probe never touches the child's stdin at all).
+function versionProbeChild({ stdout = "", status = 0 } = {}) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  queueMicrotask(() => {
+    if (stdout) child.stdout.emit("data", Buffer.from(stdout, "utf8"));
+    queueMicrotask(() => child.emit("close", status, null));
+  });
+  return child;
+}
+
+test("isInstalledRuntimeBelowVersionBoundary is tri-state and fails closed on anything but a clean below-boundary read", async () => {
+  const claudeRuntime = { id: "claude", path: "/safe/claude" };
+
+  const below = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => versionProbeChild({ stdout: "2.1.200 (Claude Code)" }),
+  });
+  assert.equal(below, "below");
+
+  const atBoundary = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => versionProbeChild({ stdout: "2.1.241 (Claude Code)" }),
+  });
+  assert.equal(atBoundary, "at_or_above");
+
+  const aboveBoundary = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => versionProbeChild({ stdout: "3.0.0 (Claude Code)" }),
+  });
+  assert.equal(aboveBoundary, "at_or_above");
+
+  const nonzeroExit = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => versionProbeChild({ stdout: "2.1.200 (Claude Code)", status: 1 }),
+  });
+  assert.equal(nonzeroExit, "indeterminate");
+
+  const emptyOutput = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => versionProbeChild({ stdout: "" }),
+  });
+  assert.equal(emptyOutput, "indeterminate");
+
+  const malformedOutput = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => versionProbeChild({ stdout: "Claude Code (dev build)" }),
+  });
+  assert.equal(malformedOutput, "indeterminate");
+
+  const multiVersionOutput = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => versionProbeChild({ stdout: "2.1.200 (Claude Code, node 20.11.0)" }),
+  });
+  assert.equal(multiVersionOutput, "indeterminate");
+
+  const spawnFailure = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => {
+      throw new Error("ENOENT: no such file");
+    },
+  });
+  assert.equal(spawnFailure, "indeterminate");
+
+  let spawned = false;
+  const alreadyAborted = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    signal: AbortSignal.abort(),
+    spawnImpl: () => {
+      spawned = true;
+      return versionProbeChild({ stdout: "" });
+    },
+  });
+  assert.equal(alreadyAborted, "indeterminate");
+  assert.equal(spawned, false);
+
+  const noRuntimePath = await isInstalledRuntimeBelowVersionBoundary(
+    { id: "claude", path: null },
+    { platform: "darwin" }
+  );
+  assert.equal(noRuntimePath, "at_or_above");
+
+  const unsupportedRuntime = await isInstalledRuntimeBelowVersionBoundary(
+    { id: "codex", path: "/safe/codex" },
+    { platform: "darwin" }
+  );
+  assert.equal(unsupportedRuntime, "at_or_above");
+});
+
+test("isInstalledRuntimeBelowVersionBoundary times out a hanging probe instead of blocking", async () => {
+  const claudeRuntime = { id: "claude", path: "/safe/claude" };
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const result = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    timeoutMs: 20,
+    spawnImpl: () => child,
+    treeKillImpl: () => ({ status: 0 }),
+  });
+  assert.equal(result, "indeterminate");
+});
+
+test("isInstalledRuntimeBelowVersionBoundary escalates to SIGKILL when the probed CLI ignores SIGTERM", async () => {
+  const claudeRuntime = { id: "claude", path: "/safe/claude" };
+  const signals = [];
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = (signal) => {
+    signals.push(signal);
+    if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null, "SIGKILL"));
+  };
+  const controller = new AbortController();
+  const pending = isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    signal: controller.signal,
+    spawnImpl: () => child,
+  });
+  controller.abort();
+  const result = await pending;
+  assert.equal(result, "indeterminate");
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });
 
 test("Codex readiness depends on authentication rather than a complete-workflow version floor", async () => {

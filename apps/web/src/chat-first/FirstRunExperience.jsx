@@ -92,6 +92,17 @@ function RetryControl({ onRetrySearch, onRetryCompany, submitting }) {
   );
 }
 
+function guidedUpdateStatusMessage(status) {
+  return (
+    {
+      installing: "CareerRat is installing the update. You can stay on this screen.",
+      failed: "CareerRat couldn't finish the update. Nothing in your setup was lost.",
+      cancelled: "Update stopped. Nothing in your setup was lost.",
+      unavailable: "In-app update isn't available here. Use the setup guide instead.",
+    }[status] || null
+  );
+}
+
 function DetectedEngine({
   engine,
   submitting,
@@ -99,6 +110,8 @@ function DetectedEngine({
   onRetryEngine,
   onStartEngineSignIn,
   onStartGuidedSetup,
+  guidedSetup,
+  guidedSetupAvailable,
 }) {
   const selectable = engineSelectable(engine);
   const presentation = runtimePresentation(engine);
@@ -106,6 +119,13 @@ function DetectedEngine({
     presentation.state === "auth_required" && engine.action === "start_sign_in";
   const canRetry = engine.detected === true && engine.ready !== true;
   const needsUpdate = presentation.state === "update_required";
+  const engineGuidedSetup = guidedSetup?.runtimeId === engine.id ? guidedSetup : null;
+  const guidedStatus = engineGuidedSetup?.status || null;
+  const guidedInstalling = guidedStatus === "installing";
+  const canGuidedUpdate =
+    needsUpdate && guidedSetupAvailable === true && guidedStatus !== "unavailable";
+  const showExternalUpdateLink = needsUpdate && !canGuidedUpdate && Boolean(engine.installUrl);
+  const guidedStatusMessage = engineGuidedSetup ? guidedUpdateStatusMessage(guidedStatus) : null;
   const hasActions = canCompleteSetup || canRetry || needsUpdate;
   const className = `cf-first-run__engine-choice${engine.selected ? " is-selected" : ""}`;
   const content = (
@@ -121,6 +141,9 @@ function DetectedEngine({
         <span className="cf-first-run__engine-description">{engineDescription(engine)}</span>
         {engine.capabilityReason && engine.capabilityReason !== engine.probeMessage ? (
           <span className="cf-first-run__engine-capability">{engine.capabilityReason}</span>
+        ) : null}
+        {guidedStatusMessage ? (
+          <span className="cf-first-run__engine-capability">{guidedStatusMessage}</span>
         ) : null}
       </span>
       <span className="cf-first-run__engine-status">{engineStatus(engine).toUpperCase()}</span>
@@ -146,15 +169,24 @@ function DetectedEngine({
       {content}
       {hasActions ? (
         <span className="cf-first-run__engine-actions">
-          {needsUpdate ? (
+          {canGuidedUpdate ? (
             <button
               className="cf-first-run__engine-action"
               type="button"
-              disabled={submitting}
+              disabled={submitting || guidedInstalling}
               onClick={() => onStartGuidedSetup?.(engine.id)}
             >
-              Update {engine.name || "Claude Code"}
+              {guidedInstalling ? "Updating…" : `Update ${engine.name || "Claude Code"}`}
             </button>
+          ) : showExternalUpdateLink ? (
+            <a
+              className="cf-first-run__engine-action"
+              href={engine.installUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open {engine.name || "Claude Code"} setup guide
+            </a>
           ) : null}
           {canCompleteSetup ? (
             <button
@@ -404,6 +436,7 @@ export function EngineSelection({
   onStartEngineSignIn,
   onOpenSettings,
   guidedSetup,
+  guidedSetupAvailable,
   hostedInterest,
   onHostedInterestStart,
   onHostedInterestChange,
@@ -468,6 +501,8 @@ export function EngineSelection({
                 onRetryEngine={onRetryEngine}
                 onStartEngineSignIn={onStartEngineSignIn}
                 onStartGuidedSetup={onStartGuidedSetup}
+                guidedSetup={guidedSetup}
+                guidedSetupAvailable={guidedSetupAvailable}
               />
             ))
           ) : (

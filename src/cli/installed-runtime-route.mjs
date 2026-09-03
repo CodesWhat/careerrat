@@ -113,6 +113,7 @@ export async function inspectInstalledRuntimeState({
   probeImpl = probeInstalledRuntime,
   autoSelect = true,
   forceCompletionProbeFor = null,
+  platform = process.platform,
 } = {}) {
   const runtimes = await Promise.all(
     detectImpl({ env }).map(async (runtime) => {
@@ -209,6 +210,12 @@ export async function inspectInstalledRuntimeState({
     selectedId,
     providerFallback: effectiveSelection.providerFallback,
     providerFallbackAllowed,
+    // Mirrors the exact gate the guided-setup route itself enforces
+    // (env.CAREERRAT_DESKTOP_CLI_ONLY === "1" && platform === "darwin"), so
+    // the picker can decide up front whether to show the in-app Update
+    // button or the external install link instead of discovering it only
+    // after a 409 from a click.
+    guidedSetupAvailable: env.CAREERRAT_DESKTOP_CLI_ONLY === "1" && platform === "darwin",
     runtimes: [
       ...runtimes.map((runtime) => ({
         ...runtime,
@@ -239,6 +246,7 @@ export function mountInstalledRuntimeRoutes({
       probeImpl,
       autoSelect,
       forceCompletionProbeFor,
+      platform,
     });
 
   addRoute("GET", "/api/settings/ai-preferences", (_req, res) => {
@@ -459,18 +467,10 @@ export function mountInstalledRuntimeRoutes({
       });
       return;
     }
-    const runtime = detectImpl({ env }).find(({ id }) => id === runtimeId);
-    if (runtime?.available) {
-      const belowVersionBoundary = await belowBoundaryImpl(runtime, { env, platform });
-      if (!belowVersionBoundary) {
-        sendJson(res, 409, {
-          ok: false,
-          code: "RUNTIME_ALREADY_INSTALLED",
-          error: "Claude Code is already installed. Sign in instead.",
-        });
-        return;
-      }
-    }
+    // The abort controller and close handler are registered before any
+    // probing or installer launch, not after: a disconnect that lands while
+    // the version-boundary probe is still in flight must be observed before
+    // the code below ever decides whether to run the native installer.
     let closed = false;
     let started = false;
     let heartbeat = null;
@@ -480,6 +480,37 @@ export function mountInstalledRuntimeRoutes({
       closed = true;
       controller.abort();
     });
+
+    const runtime = detectImpl({ env }).find(({ id }) => id === runtimeId);
+    if (runtime?.available) {
+      const versionBoundaryState = await belowBoundaryImpl(runtime, {
+        env,
+        platform,
+        signal: controller.signal,
+      });
+      if (closed || controller.signal.aborted) return;
+      if (versionBoundaryState === "at_or_above") {
+        sendJson(res, 409, {
+          ok: false,
+          code: "RUNTIME_ALREADY_INSTALLED",
+          error: "Claude Code is already installed. Sign in instead.",
+        });
+        return;
+      }
+      if (versionBoundaryState !== "below") {
+        sendJson(res, 409, {
+          ok: false,
+          code: "RUNTIME_VERSION_INDETERMINATE",
+          error:
+            "CareerRat couldn't tell what version of Claude Code is installed. Check the install and try again.",
+        });
+        return;
+      }
+    }
+    // Authorization only ever reaches here for a conclusive below-boundary
+    // probe (or no existing installation at all). Still refuse to launch the
+    // installer if the request already disconnected while we were deciding.
+    if (closed || controller.signal.aborted) return;
 
     function emit(payload) {
       if (closed || !started) return;

@@ -721,6 +721,97 @@ describe("ProfileSettings", () => {
     expect(onBrowserProviderChange).toHaveBeenCalledWith("playwright");
   });
 
+  it("offers a guided update action for an old Claude when the in-app installer is available", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onGuidedUpdateEngine = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Maya",
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      engine: {
+        name: "Claude Code",
+        connected: false,
+        guidedSetupAvailable: true,
+        choices: [
+          {
+            id: "claude",
+            name: "Claude Code",
+            supported: true,
+            available: true,
+            ready: false,
+            status: "update_required",
+            action: "retry",
+            actionLabel: "Check again",
+            version: "2.1.200",
+            minimumVersion: "2.1.241",
+            probeMessage: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+            installUrl: "https://code.claude.com/docs/en/quickstart",
+          },
+        ],
+      },
+      enginePickerOpen: true,
+      onGuidedUpdateEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+
+    expect(html).toContain(">Update<");
+    expect(html).not.toContain(">Check again<");
+
+    findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Update"
+    ).props.onClick();
+    expect(onGuidedUpdateEngine).toHaveBeenCalledWith("claude");
+  });
+
+  it("falls back to the external setup guide link when Settings has no in-app guided update", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const onGuidedUpdateEngine = vi.fn();
+    const tree = ProfileSettings({
+      agentName: "Maya",
+      activeTab: "settings",
+      permissions: PERMISSIONS,
+      engine: {
+        name: "Claude Code",
+        connected: false,
+        guidedSetupAvailable: false,
+        choices: [
+          {
+            id: "claude",
+            name: "Claude Code",
+            supported: true,
+            available: true,
+            ready: false,
+            status: "update_required",
+            action: "retry",
+            actionLabel: "Check again",
+            version: "2.1.200",
+            minimumVersion: "2.1.241",
+            probeMessage: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+            installUrl: "https://code.claude.com/docs/en/quickstart",
+          },
+        ],
+      },
+      enginePickerOpen: true,
+      onGuidedUpdateEngine,
+    });
+    const html = renderToStaticMarkup(tree);
+    const updateButton = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Update"
+    );
+    const externalLink = findElement(
+      tree,
+      (node) =>
+        node.type === "a" && node.props.href === "https://code.claude.com/docs/en/quickstart"
+    );
+
+    expect(updateButton).toBeNull();
+    expect(externalLink).not.toBeNull();
+    expect(html).toContain("Open setup guide");
+    expect(onGuidedUpdateEngine).not.toHaveBeenCalled();
+  });
+
   it("shows Playwright readiness without exposing profile paths or blanket sign-in setup", async () => {
     const { ProfileSettings } = await loadProfile();
     const html = renderToStaticMarkup(

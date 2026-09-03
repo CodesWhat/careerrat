@@ -555,6 +555,7 @@ describe("FirstRunExperience", () => {
             "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
         },
       ],
+      guidedSetupAvailable: true,
       onChooseEngine: onSelectEngine,
       onStartGuidedSetup,
     });
@@ -583,6 +584,57 @@ describe("FirstRunExperience", () => {
     updateButton.props.onClick();
     expect(onStartGuidedSetup).toHaveBeenCalledWith("claude");
     expect(onSelectEngine).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the external setup guide link when in-app guided update is unavailable", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onStartGuidedSetup = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          supported: true,
+          detected: true,
+          ready: false,
+          selectable: false,
+          selected: false,
+          status: "update_required",
+          action: "retry",
+          actionLabel: "Check again",
+          version: "2.1.200",
+          minimumVersion: "2.1.241",
+          capabilityTier: "chat_drafting",
+          capabilities: { completion: true, taskTools: false },
+          probeMessage: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+          capabilityReason:
+            "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+          installUrl: "https://code.claude.com/docs/en/quickstart",
+        },
+      ],
+      guidedSetupAvailable: false,
+      onStartGuidedSetup,
+    });
+    const runtime = findElement(
+      tree,
+      (node) => node.type?.name === "DetectedEngine" && node.props.engine.id === "claude"
+    );
+    const runtimeView = runtime.type(runtime.props);
+    const updateButton = findElement(
+      runtimeView,
+      (node) => node.type === "button" && textOf(node) === "Update Claude Code"
+    );
+    const externalLink = findElement(
+      runtimeView,
+      (node) =>
+        node.type === "a" && node.props.href === "https://code.claude.com/docs/en/quickstart"
+    );
+
+    expect(updateButton).toBeNull();
+    expect(externalLink).not.toBeNull();
+    expect(externalLink.props.target).toBe("_blank");
+    expect(onStartGuidedSetup).not.toHaveBeenCalled();
   });
 
   it("does not expose internal capability tiers for a supported ready runtime", async () => {

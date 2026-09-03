@@ -214,6 +214,37 @@ test("inventory auto-selects the sole verified full-workflow CLI", async () => {
   );
 });
 
+test("inventory exposes guidedSetupAvailable, matching exactly the guided-setup route's own gate", async () => {
+  const probes = { claude: readyProbe(), codex: readyProbe() };
+
+  const packagedMac = boot({
+    inventory: INVENTORY,
+    probes,
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+  });
+  const packagedMacResponse = await request(packagedMac, "GET", "/api/settings/ai-runtimes");
+  assert.equal(packagedMacResponse.body.guidedSetupAvailable, true);
+
+  const browserDev = boot({
+    inventory: INVENTORY,
+    probes,
+    env: {},
+    platform: "darwin",
+  });
+  const browserDevResponse = await request(browserDev, "GET", "/api/settings/ai-runtimes");
+  assert.equal(browserDevResponse.body.guidedSetupAvailable, false);
+
+  const packagedLinux = boot({
+    inventory: INVENTORY,
+    probes,
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "linux",
+  });
+  const packagedLinuxResponse = await request(packagedLinux, "GET", "/api/settings/ai-runtimes");
+  assert.equal(packagedLinuxResponse.body.guidedSetupAvailable, false);
+});
+
 test("a signed-in CLI without a usable completion stays unselected with a plain retry action", async () => {
   const probeCalls = [];
   const failedProbe = {
@@ -950,7 +981,7 @@ test("guided setup rejects unsupported, installed, and non-desktop requests", as
     probes: {},
     platform: "darwin",
     startGuidedSetupImpl: (runtimeId) => started.push(runtimeId),
-    belowBoundaryImpl: async () => false,
+    belowBoundaryImpl: async () => "at_or_above",
   };
   const unsupported = boot({
     ...options,
@@ -1012,7 +1043,7 @@ test("guided setup lets an in-place update run for a below-boundary Claude but s
     },
     belowBoundaryImpl: async (runtime, options) => {
       boundaryCalls.push({ runtimeId: runtime.id, ...options });
-      return true;
+      return "below";
     },
   });
   const updateResponse = await requestStream(
@@ -1043,7 +1074,7 @@ test("guided setup lets an in-place update run for a below-boundary Claude but s
     env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
     platform: "darwin",
     startGuidedSetupImpl: (runtimeId) => started.push(runtimeId),
-    belowBoundaryImpl: async () => false,
+    belowBoundaryImpl: async () => "at_or_above",
   });
   const refusedResponse = await request(
     atBoundary,
@@ -1054,6 +1085,82 @@ test("guided setup lets an in-place update run for a below-boundary Claude but s
   assert.equal(refusedResponse.status, 409);
   assert.equal(refusedResponse.body.code, "RUNTIME_ALREADY_INSTALLED");
   assert.deepEqual(started, ["claude"]);
+});
+
+test("guided setup refuses an indeterminate version probe instead of guessing", async () => {
+  const started = [];
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    startGuidedSetupImpl: (runtimeId) => started.push(runtimeId),
+    belowBoundaryImpl: async () => "indeterminate",
+  });
+  const response = await request(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "RUNTIME_VERSION_INDETERMINATE");
+  assert.deepEqual(started, []);
+});
+
+test("guided setup never launches the installer if the request disconnects while the boundary probe is in flight", async () => {
+  const repoRoot = root();
+  const routes = new Map();
+  const started = [];
+  const probeGate = deferred();
+  let capturedSignal = null;
+  mountInstalledRuntimeRoutes({
+    addRoute: (method, path, handler) => routes.set(`${method} ${path}`, handler),
+    repoRoot,
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    detectImpl: () => INVENTORY,
+    probeImpl: () => readyProbe(),
+    startGuidedSetupImpl: (runtimeId) => {
+      started.push(runtimeId);
+      return Promise.resolve({ runtimeId, installCommand: "curl -fsSL https://x | bash" });
+    },
+    belowBoundaryImpl: async (_runtime, options) => {
+      capturedSignal = options.signal;
+      await probeGate.promise;
+      return "below";
+    },
+    platform: "darwin",
+  });
+
+  const req = Readable.from([Buffer.from(JSON.stringify({ runtimeId: "claude" }))]);
+  req.headers = { "content-type": "application/json" };
+  let closeHandler = null;
+  const res = {
+    on(event, handler) {
+      if (event === "close") closeHandler = handler;
+      return this;
+    },
+    writeHead() {
+      return this;
+    },
+    flushHeaders() {},
+    write() {
+      return true;
+    },
+    end() {},
+  };
+  const handler = routes.get("POST /api/settings/ai-runtime/guided-setup");
+  const pending = handler(req, res);
+
+  // Give the route a turn to reach the boundary probe and register the close
+  // handler before the probe settles, exactly like a real disconnect racing
+  // an in-flight version check. readJsonBodyCapped awaits the request body
+  // stream first, so this needs a real macrotask, not just microtasks.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(closeHandler, "close handler must be registered before the probe settles");
+  closeHandler();
+  probeGate.resolve();
+  await pending;
+
+  assert.equal(capturedSignal?.aborted, true);
+  assert.deepEqual(started, []);
 });
 
 test("selection rejects an unavailable or unauthenticated runtime with an actionable code", async () => {

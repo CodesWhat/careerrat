@@ -29,6 +29,7 @@ function buildSettingsModel(input = {}) {
     engine: {
       ...model.engine,
       choices: firstRunRuntimeChoices(input.runtimes),
+      guidedSetupAvailable: input.runtimes?.guidedSetupAvailable === true,
     },
   };
 }
@@ -229,6 +230,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [draftStorageWarning, setDraftStorageWarning] = useState(null);
   const [enginePickerBusy, setEnginePickerBusy] = useState(false);
   const [engineSignInId, setEngineSignInId] = useState(null);
+  const [guidedSetup, setGuidedSetup] = useState(null);
   const [sourceDialogBusy, setSourceDialogBusy] = useState(false);
   const [sourceDraftState, setSourceDraftState] = useState({ contextId: null, value: "" });
   const [browserProviderBusy, setBrowserProviderBusy] = useState(false);
@@ -704,6 +706,43 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     }
   }
 
+  // Returning users hit "Update needed" from Settings, not the first-run
+  // picker, so Settings needs its own guided-update path rather than only a
+  // "Check again" retry that can never clear the boundary on its own.
+  // Mirrors FirstRunController's startGuidedSetup outcome mapping so the
+  // same installing/failed/cancelled/unavailable states show up here too.
+  async function guidedUpdateEngine(runtimeId) {
+    setEnginePickerBusy(true);
+    setError(null);
+    setGuidedSetup({ runtimeId, status: "installing" });
+    try {
+      await api.startInstalledAiRuntimeGuidedSetup(runtimeId, { onEvent() {} });
+      await load();
+      setGuidedSetup({ runtimeId, status: "installed" });
+    } catch (cause) {
+      const code = String(cause?.code || cause?.body?.code || "").toUpperCase();
+      if (code === "RUNTIME_ALREADY_INSTALLED") {
+        try {
+          await load();
+        } finally {
+          setGuidedSetup({ runtimeId, status: "installed" });
+        }
+      } else {
+        const status =
+          code === "RUNTIME_GUIDED_SETUP_CANCELLED"
+            ? "cancelled"
+            : ["RUNTIME_GUIDED_SETUP_UNAVAILABLE", "RUNTIME_GUIDED_SETUP_UNSUPPORTED"].includes(
+                  code
+                )
+              ? "unavailable"
+              : "failed";
+        setGuidedSetup({ runtimeId, status });
+      }
+    } finally {
+      setEnginePickerBusy(false);
+    }
+  }
+
   function addSource() {
     setSourceDialogOpen(true);
   }
@@ -786,10 +825,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         enginePickerOpen={enginePickerOpen}
         enginePickerBusy={enginePickerBusy}
         engineSignInId={engineSignInId}
+        guidedSetup={guidedSetup}
         onCloseEnginePicker={() => setEnginePickerOpen(false)}
         onSelectEngine={selectEngine}
         onConnectEngine={connectEngine}
         onRetryEngine={retryEngine}
+        onGuidedUpdateEngine={guidedUpdateEngine}
         onRefreshEngines={() =>
           updateRuntime(
             () => Promise.resolve(),

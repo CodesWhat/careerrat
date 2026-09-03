@@ -589,6 +589,32 @@ function versionAtLeast(value, floor) {
   return true;
 }
 
+// Authorization-grade version parsing: unlike parseVersion (first match,
+// used for informational display), this refuses to guess when the probe
+// output contains zero or more than one semantic-version-shaped substring.
+// A boundary decision that unlocks the native installer must never be made
+// from an arbitrary, possibly-unrelated number in combined stdout/stderr.
+function parseUnambiguousVersion(value) {
+  const matches = String(value || "").match(/\b\d+\.\d+\.\d+\b/g);
+  return matches && matches.length === 1 ? matches[0] : null;
+}
+
+// Tri-state classification for a completed version probe against a
+// minimum boundary version. "below" and "at_or_above" both require a clean
+// status-0 exit with exactly one unambiguous version in the combined
+// output; anything else (nonzero exit, timeout, spawn failure, cancellation,
+// empty or multi-version output) is "indeterminate" and must never be
+// treated as authorization to run the native installer or to block a
+// working runtime.
+function classifyRuntimeVersionBoundary(result, minimumBoundaryVersion) {
+  if (!minimumBoundaryVersion) return "at_or_above";
+  if (result?.status !== 0 || result.error || result.signal) return "indeterminate";
+  const combined = `${result.stdout || ""}\n${result.stderr || ""}`;
+  const version = parseUnambiguousVersion(combined);
+  if (!version) return "indeterminate";
+  return versionAtLeast(combined, minimumBoundaryVersion) ? "at_or_above" : "below";
+}
+
 const MAX_RUNTIME_PROBE_BYTES = 64 * 1024;
 const COMPLETION_SMOKE_RECEIPT = "CAREERRAT_COMPLETION_READY";
 const COMPLETION_SMOKE_TIMEOUT_MS = 30_000;
@@ -956,11 +982,18 @@ export async function probeInstalledRuntimeCompletion({
   }
 }
 
-async function runInstalledRuntimeProbe(
+// Shared async child-process probe: bounded output (MAX_RUNTIME_PROBE_BYTES),
+// abort-signal propagation, and SIGTERM-then-SIGKILL escalation via
+// scheduleRuntimeProcessKill. Platform-agnostic: killRuntimeProcess (inside
+// scheduleRuntimeProcessKill) already branches on win32 vs POSIX signal
+// delivery, so this same implementation is safe for any caller that cannot
+// tolerate a synchronous spawn blocking its process (for example a probe run
+// from Electron's main/local-server process).
+function runInstalledRuntimeProbeAsync(
   invocation,
+  options,
   {
     spawnImpl = spawn,
-    spawnSyncImpl = spawnSync,
     treeKillImpl = spawnSync,
     env = process.env,
     platform = process.platform,
@@ -969,33 +1002,13 @@ async function runInstalledRuntimeProbe(
     beforeSpawn,
   } = {}
 ) {
-  const options = {
-    shell: false,
-    windowsHide: true,
-    ...invocation.options,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  };
-  if (platform !== "win32") {
-    beforeSpawn?.();
-    try {
-      return spawnSyncImpl(invocation.command, invocation.args, {
-        ...options,
-        encoding: "utf8",
-        timeout: timeoutMs,
-      });
-    } catch {
-      return null;
-    }
-  }
-
   if (signal?.aborted) {
-    return {
+    return Promise.resolve({
       status: null,
       stdout: "",
       stderr: "",
       error: runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED"),
-    };
+    });
   }
 
   return new Promise((resolve) => {
@@ -1083,6 +1096,50 @@ async function runInstalledRuntimeProbe(
   });
 }
 
+async function runInstalledRuntimeProbe(
+  invocation,
+  {
+    spawnImpl = spawn,
+    spawnSyncImpl = spawnSync,
+    treeKillImpl = spawnSync,
+    env = process.env,
+    platform = process.platform,
+    timeoutMs = 5000,
+    signal,
+    beforeSpawn,
+  } = {}
+) {
+  const options = {
+    shell: false,
+    windowsHide: true,
+    ...invocation.options,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+  if (platform !== "win32") {
+    beforeSpawn?.();
+    try {
+      return spawnSyncImpl(invocation.command, invocation.args, {
+        ...options,
+        encoding: "utf8",
+        timeout: timeoutMs,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  return runInstalledRuntimeProbeAsync(invocation, options, {
+    spawnImpl,
+    treeKillImpl,
+    env,
+    platform,
+    timeoutMs,
+    signal,
+    beforeSpawn,
+  });
+}
+
 async function assertInstalledRuntimeBoundaryVersion(
   runtime,
   {
@@ -1141,39 +1198,50 @@ async function assertInstalledRuntimeBoundaryVersion(
 // only runs the cheap --version check and skips the auth and completion
 // probes entirely, since it never needs to know anything beyond the version
 // gap to make that call.
+//
+// Authorization is tri-state, not boolean, and fails closed: "below" is the
+// only result that may ever authorize running the native installer.
+// "at_or_above" and "indeterminate" (nonzero exit, timeout, spawn failure,
+// cancellation, or unparseable/ambiguous output) must both refuse. The probe
+// itself always runs through the async, abort-aware, SIGTERM-then-SIGKILL
+// path (runInstalledRuntimeProbeAsync) regardless of platform, because this
+// function is called from Electron's main/local-server process and a
+// synchronous spawn there can block the whole app if the child ignores
+// SIGTERM.
 export async function isInstalledRuntimeBelowVersionBoundary(
   runtime,
   {
     spawnImpl = spawn,
-    spawnSyncImpl = spawnSync,
     treeKillImpl = spawnSync,
     env = process.env,
     platform = process.platform,
     timeoutMs = 5000,
+    signal,
   } = {}
 ) {
   const definition = installedRuntimeDefinition(runtime?.id);
-  if (!definition?.minimumBoundaryVersion || !runtime?.path) return false;
+  if (!definition?.minimumBoundaryVersion || !runtime?.path) return "at_or_above";
   const childEnv = buildInstalledRuntimeChildEnv({ env });
   const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
     env: childEnv,
     platform,
   });
-  const result = await runInstalledRuntimeProbe(versionInvocation, {
+  const options = {
+    shell: false,
+    windowsHide: true,
+    ...versionInvocation.options,
+    env: childEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+  const result = await runInstalledRuntimeProbeAsync(versionInvocation, options, {
     spawnImpl,
-    spawnSyncImpl,
     treeKillImpl,
     env: childEnv,
     platform,
     timeoutMs,
+    signal,
   });
-  return (
-    result?.status !== 0 ||
-    !versionAtLeast(
-      `${result?.stdout || ""}\n${result?.stderr || ""}`,
-      definition.minimumBoundaryVersion
-    )
-  );
+  return classifyRuntimeVersionBoundary(result, definition.minimumBoundaryVersion);
 }
 
 export async function probeInstalledRuntime(
@@ -1200,6 +1268,7 @@ export async function probeInstalledRuntime(
   let runtimeVersion = null;
   let capabilityOverrides = {};
   let capabilityReason = null;
+  let versionBoundaryState = "at_or_above";
 
   if (definition.supported === true || definition.minimumBoundaryVersion) {
     const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
@@ -1214,14 +1283,11 @@ export async function probeInstalledRuntime(
       platform,
       timeoutMs,
     });
-    if (
-      definition.minimumBoundaryVersion &&
-      (versionResult?.status !== 0 ||
-        !versionAtLeast(
-          `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
-          definition.minimumBoundaryVersion
-        ))
-    ) {
+    versionBoundaryState = classifyRuntimeVersionBoundary(
+      versionResult,
+      definition.minimumBoundaryVersion
+    );
+    if (definition.minimumBoundaryVersion && versionBoundaryState !== "at_or_above") {
       capabilityOverrides = {
         exactRead: false,
         publicWeb: false,
@@ -1231,6 +1297,30 @@ export async function probeInstalledRuntime(
     runtimeVersion = parseVersion(
       `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`
     )?.join(".");
+  }
+
+  // A conclusive below-boundary version blocks the runtime before the auth
+  // and completion probes ever run: no amount of successful sign-in or
+  // completion smoke changes the fact that the tool boundary isn't met, and
+  // running those probes anyway used to let a signed-out or completion-
+  // failing old install mask update_required behind authentication_required
+  // or completion_probe_failed. An indeterminate version never reaches this
+  // branch, so it always falls through to the existing non-installer states.
+  if (definition.minimumBoundaryVersion && versionBoundaryState === "below") {
+    const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
+      capabilityEvidence: capabilityEvidenceForProbe(definition, capabilityOverrides),
+    }).capabilities;
+    return {
+      status: "update_required",
+      ready: false,
+      action: "retry",
+      actionLabel: "Check again",
+      version: runtimeVersion,
+      minimumVersion: definition.minimumBoundaryVersion,
+      capabilities: runtimeCapabilities,
+      probeMessage: capabilityReason,
+      capabilityReason,
+    };
   }
 
   if (definition.protocol === "acp") {
@@ -1337,19 +1427,13 @@ export async function probeInstalledRuntime(
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       capabilityEvidence: capabilityEvidenceForProbe(definition, capabilityOverrides),
     }).capabilities;
-    if (capabilityReason) {
-      return {
-        status: "update_required",
-        ready: false,
-        action: "retry",
-        actionLabel: "Check again",
-        version: runtimeVersion,
-        minimumVersion: definition.minimumBoundaryVersion,
-        capabilities: runtimeCapabilities,
-        probeMessage: capabilityReason,
-        capabilityReason,
-      };
-    }
+    // A conclusive below-boundary version already returned update_required
+    // above, before this auth/completion probe ever ran. Any capabilityReason
+    // reaching this point comes from an indeterminate version probe, which
+    // never earns update_required. It stays a soft, advisory warning on an
+    // otherwise-ready runtime, exactly as it did before the boundary gate
+    // existed, since offering the installer with no conclusive basis is the
+    // fail-open bug this fix closes.
     return {
       status: definition.authProbe.launchOnly ? "ready_unverified" : "ready",
       ready: true,
