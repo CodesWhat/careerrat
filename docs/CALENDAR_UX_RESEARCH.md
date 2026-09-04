@@ -7,8 +7,9 @@ below made `/calendar`. Commit `16a66b06` ("feat(web)!: replace the app with the
 `CalendarNextPage.jsx` along with the rest of the page-based UI. The chat-first workspace now supplies Schedule
 through `apps/web/src/chat-first/WorkspaceBrowser.jsx`'s Schedule panel. One correction to the analysis below:
 it says the page renders `event.export` and `event.done` per event; the chat-first Schedule panel only reads
-`event.export` to gate one shared "Add to calendar" action for the whole list, and it does not render an
-`event.done` state at all.
+`event.export` to gate one shared "Add to calendar" action, and that shared action exports only the first
+exportable event in the list, not the whole list. It does not render an `event.done` state at all. Per-event
+export selection remains an unresolved gap.
 
 The research below is otherwise historical: it describes routes and components that no longer exist. Read it
 for the reasoning, not as a description of the running app.
