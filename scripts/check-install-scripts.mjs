@@ -9,7 +9,7 @@
 // "Has install scripts" is decided the same way npm's own `install-scripts`
 // command decides it for a registry dependency: package-lock.json's
 // `hasInstallScript` flag, which npm sets from preinstall/install/postinstall
-// (verified against this tree — `npm install-scripts ls` and the lockfile's
+// (verified against this tree: `npm install-scripts ls` and the lockfile's
 // flag agree on every registry package here; the extra `prepare`-script
 // entries `ls` also reports only matter for non-registry sources, and this
 // repo has none).
@@ -114,14 +114,14 @@ function main() {
   if (staleKeys.length > 0) {
     console.error("");
     console.error(
-      "Stale keys (no matching name@version in package-lock.json — the dependency moved, prune or update the key):"
+      "Stale keys (no matching name@version in package-lock.json; the dependency moved, so prune or update the key):"
     );
     for (const key of staleKeys) console.error(`  - ${key}`);
   }
   if (uncovered.length > 0) {
     console.error("");
     console.error(
-      "Uncovered packages (install script found in package-lock.json, no allowScripts entry — review with npm install-scripts ls):"
+      "Uncovered packages (install script found in package-lock.json, no allowScripts entry; review with npm install-scripts ls):"
     );
     for (const entry of uncovered) console.error(`  - ${entry}`);
   }
