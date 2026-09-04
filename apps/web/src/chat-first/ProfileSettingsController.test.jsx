@@ -1339,6 +1339,86 @@ describe("ProfileSettingsController AI preferences", () => {
       reasoning: "high",
     });
   });
+
+  it("keeps a preference saved mid-flight instead of letting the initial mount hydration overwrite it", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    let resolveMountPreferences;
+    // The initial mount fetch itself: deferred, so this test can land a
+    // save while it's still in flight and control exactly when its (now
+    // stale) snapshot arrives.
+    api.getAiPreferences.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMountPreferences = resolve;
+        })
+    );
+
+    const view = renderController(module, api);
+    await flushEffects();
+    // The mount Promise.all is still pending on getAiPreferences here; the
+    // save below lands and bumps the revision before that snapshot commits.
+    await settingsProps(view).onAiPreferenceChange("quality", "best");
+
+    let latest = renderController(module, api);
+    expect(settingsProps(latest).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    // The mount fetch's own (now stale) snapshot finally resolves, still
+    // carrying the pre-save default.
+    resolveMountPreferences({
+      quality: "automatic",
+      reasoning: "automatic",
+      source: "default",
+      updatedAt: null,
+    });
+    await flushEffects();
+
+    latest = renderController(module, api);
+    // A stale-mount-wins bug would revert this to "automatic" here.
+    expect(settingsProps(latest).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    await settingsProps(latest).onAiPreferenceChange("reasoning", "high");
+
+    // And a stale settingsPartsRef would post "automatic" here too.
+    expect(api.saveAiPreferences).toHaveBeenLastCalledWith({
+      quality: "best",
+      reasoning: "high",
+    });
+  });
+
+  it("disables the AI preference controls until initial hydration completes", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    let resolveMountPreferences;
+    api.getAiPreferences.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMountPreferences = resolve;
+        })
+    );
+
+    const view = renderController(module, api);
+    await flushEffects();
+
+    expect(settingsProps(view).aiPreferencesBusy).toBe(true);
+
+    resolveMountPreferences({
+      quality: "automatic",
+      reasoning: "automatic",
+      source: "default",
+      updatedAt: null,
+    });
+    await flushEffects();
+
+    const settled = renderController(module, api);
+    expect(settingsProps(settled).aiPreferencesBusy).toBe(false);
+  });
 });
 
 describe("ProfileSettingsController guided update", () => {

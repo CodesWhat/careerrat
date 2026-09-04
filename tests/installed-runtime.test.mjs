@@ -147,6 +147,33 @@ function writeDescendantWrapperScript(wrapperPath) {
 // handler exists and kill the "resistant" descendant for the wrong reason,
 // making the test pass whether or not the settle-before-cleanup fix is
 // present.
+// A third variant for the normal-completion race: the leader spawns a
+// same-group descendant (stdio 'ignore', so the leader's own "close" event
+// is never held open waiting on inherited pipes) that ignores SIGTERM, then
+// exits 0 on its own without ever being signaled. This is the shape a
+// status-0 close confirmation has to handle: bash finished successfully, but
+// a detached descendant it forked is still alive underneath it.
+function writeNormalExitDescendantWrapperScript(wrapperPath) {
+  writeFileSync(
+    wrapperPath,
+    [
+      "import('node:child_process').then(({ spawn }) => {",
+      "  const child = spawn(",
+      "    process.execPath,",
+      "    ['-e', \"process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\"],",
+      "    { stdio: 'ignore' }",
+      "  );",
+      "  import('node:fs').then(({ writeFileSync }) => {",
+      "    writeFileSync(process.argv[2], String(child.pid));",
+      "    process.exit(0);",
+      "  });",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+}
+
 function writeExitingLeaderDescendantWrapperScript(wrapperPath) {
   writeFileSync(
     wrapperPath,
@@ -181,20 +208,21 @@ async function waitForFileContent(path, { timeoutMs = 2000, intervalMs = 20 } = 
   throw new Error(`timed out waiting for ${path}`);
 }
 
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function waitUntilProcessDead(pid, { timeoutMs = 2000, intervalMs = 20 } = {}) {
-  const isAlive = () => {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  };
   const deadline = Date.now() + timeoutMs;
-  while (isAlive() && Date.now() < deadline) {
+  while (isProcessAlive(pid) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  return !isAlive();
+  return !isProcessAlive(pid);
 }
 
 const VERIFIED_CAPABILITIES = Object.freeze({
@@ -2627,6 +2655,40 @@ test("guided Claude setup timeout does not release the lock early when bash exit
       await waitUntilProcessDead(grandchildPid),
       true,
       "the installer's descendant must not survive a timeout, even though bash exited first"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("guided Claude setup on a status-0 close waits for confirmed process-group death, killing a surviving descendant, before resolving", async () => {
+  const root = tempRoot();
+  const wrapperPath = join(root, "wrapper.mjs");
+  const pidFilePath = join(root, "grandchild.pid");
+  writeNormalExitDescendantWrapperScript(wrapperPath);
+
+  try {
+    const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+      platform: "darwin",
+      groupDeathTimeoutMs: 300,
+      groupDeathPollIntervalMs: 20,
+      spawnImpl: (_command, _args, options) =>
+        spawn(process.execPath, [wrapperPath, pidFilePath], options),
+    });
+
+    const grandchildPid = Number(await waitForFileContent(pidFilePath));
+    assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+    const result = await resultPromise;
+
+    assert.equal(result.ok, true);
+    // The descendant ignores SIGTERM, so if this resolved before the
+    // group-death confirmation (and its SIGKILL escalation) ran to
+    // completion, it would still be alive right here.
+    assert.equal(
+      isProcessAlive(grandchildPid),
+      false,
+      "the descendant must already be dead by the time a status-0 close resolves"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

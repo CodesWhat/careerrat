@@ -203,6 +203,22 @@ function sourceDraftKey(context) {
   return storedDraftKey(SOURCE_DRAFT_PREFIX, context);
 }
 
+// Module-level rather than defined inside the component: it only ever
+// closes over the two refs a caller hands it explicitly, so it has no
+// per-render captures for the effect below's exhaustive-deps check to flag,
+// and both load() and the mount effect route their merge through this one
+// place instead of drifting out of sync with each other.
+function mergeAiPreferencesRevisionAware(
+  aiPreferencesRevisionRef,
+  settingsPartsRef,
+  revisionAtRequest,
+  fetchedAiPreferences
+) {
+  return aiPreferencesRevisionRef.current !== revisionAtRequest
+    ? (settingsPartsRef.current.aiPreferences ?? fetchedAiPreferences)
+    : fetchedAiPreferences;
+}
+
 function settingsLocationUrl(location) {
   return `${location?.pathname || "/settings"}${location?.search || ""}`;
 }
@@ -237,6 +253,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [publicSyncBusy, setPublicSyncBusy] = useState(false);
   const [aiPreferencesBusy, setAiPreferencesBusy] = useState(false);
   const [aiPreferencesStatus, setAiPreferencesStatus] = useState("");
+  const [initialHydrationComplete, setInitialHydrationComplete] = useState(false);
   const [editorDraftState, setEditorDraftState] = useState({ contextId: null, values: {} });
   const [editorBusy, setEditorBusy] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(null);
@@ -420,20 +437,23 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     navigateForeground({ tab: "settings", panel: open ? "technical" : null }, { replace: !open });
   }
 
+  // aiPreferencesRevisionRef guards against a stale request clobbering a
+  // preference save that lands while it's in flight: changeAiPreference
+  // bumps the revision on every successful save, and both the initial mount
+  // fetch and load() record the revision at request start. If the revision
+  // has moved by the time their own Promise.all resolves, a save landed
+  // mid-flight, and its aiPreferences (already the newest value in
+  // settingsPartsRef.current) is merged over that snapshot's, so a slow
+  // post-install refresh, a slow load(), or the initial mount fetch can
+  // never revert what the user just saved. Both call sites route through
+  // mergeAiPreferencesRevisionAware (above) so neither can drift out of
+  // sync with the other.
+
   // preFetchedRuntimes lets a caller that already fetched the runtime
   // inventory (refreshRuntimesAfterInstall's targeted post-install refresh)
   // hand it straight to load() instead of load() re-running the same
   // executable-discovery and version/auth probe work a second time. load()
   // only fetches its own copy when no fresh inventory was handed in.
-  //
-  // aiPreferencesRevisionRef guards against a stale load() clobbering a
-  // preference save that lands while it's in flight: changeAiPreference
-  // bumps the revision on every successful save, and load() records the
-  // revision at request start. If the revision has moved by the time
-  // load()'s own Promise.all resolves, a save landed mid-flight, and its
-  // aiPreferences (already the newest value in settingsPartsRef.current) is
-  // merged over this snapshot's, so a slow post-install refresh (or the
-  // initial mount fetch) can never revert what the user just saved.
   async function load(preFetchedRuntimes) {
     const revisionAtRequest = aiPreferencesRevisionRef.current;
     const [onboard, runtimes, automation, sources, aiPreferences] = await Promise.all([
@@ -448,10 +468,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       runtimes,
       automation,
       sources,
-      aiPreferences:
-        aiPreferencesRevisionRef.current !== revisionAtRequest
-          ? (settingsPartsRef.current.aiPreferences ?? aiPreferences)
-          : aiPreferences,
+      aiPreferences: mergeAiPreferencesRevisionAware(
+        aiPreferencesRevisionRef,
+        settingsPartsRef,
+        revisionAtRequest,
+        aiPreferences
+      ),
     };
     settingsPartsRef.current = next;
     setModel(buildSettingsModel(next));
@@ -461,6 +483,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
 
   useEffect(() => {
     let cancelled = false;
+    const revisionAtRequest = aiPreferencesRevisionRef.current;
     Promise.all([
       api.getOnboardState(),
       api.getInstalledAiRuntimes(),
@@ -470,7 +493,18 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     ])
       .then(([onboard, runtimes, automation, sources, aiPreferences]) => {
         if (cancelled) return;
-        const next = { onboard, runtimes, automation, sources, aiPreferences };
+        const next = {
+          onboard,
+          runtimes,
+          automation,
+          sources,
+          aiPreferences: mergeAiPreferencesRevisionAware(
+            aiPreferencesRevisionRef,
+            settingsPartsRef,
+            revisionAtRequest,
+            aiPreferences
+          ),
+        };
         settingsPartsRef.current = next;
         setModel(buildSettingsModel(next));
       })
@@ -480,6 +514,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
             profileSettingsErrorMessage(cause, "CareerRat couldn't load Settings. Try again.")
           );
         }
+      })
+      .finally(() => {
+        if (!cancelled) setInitialHydrationComplete(true);
       });
     return () => {
       cancelled = true;
@@ -878,7 +915,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onEditSection={editSection}
         onOpenFiles={() => requestNavigation("/", { state: { browse: "files" } })}
         onPermissionChange={changePermission}
-        aiPreferencesBusy={aiPreferencesBusy}
+        aiPreferencesBusy={aiPreferencesBusy || !initialHydrationComplete}
         aiPreferencesStatus={aiPreferencesStatus}
         onAiPreferenceChange={changeAiPreference}
         publicSyncBusy={publicSyncBusy}

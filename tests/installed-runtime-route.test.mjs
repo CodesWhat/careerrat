@@ -11,7 +11,10 @@ import {
   inspectInstalledRuntimeState,
   mountInstalledRuntimeRoutes,
 } from "../src/cli/installed-runtime-route.mjs";
-import { writeGuidedSetupOwnership } from "../src/core/ai/guided-setup-ownership.mjs";
+import {
+  reserveGuidedSetupOwnership,
+  writeGuidedSetupOwnership,
+} from "../src/core/ai/guided-setup-ownership.mjs";
 import {
   INSTALLED_RUNTIME_DEFINITIONS,
   isInstalledRuntimeBelowVersionBoundary,
@@ -1586,6 +1589,259 @@ test("graceful shutdown aborts an active installer and confirms its process grou
     true,
     "graceful shutdown must not leave the installer's descendant running"
   );
+});
+
+test("a request admitted once shutdown has been flagged is refused with 503 and never reaches the installer", async () => {
+  const started = [];
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    belowBoundaryImpl: async () => "below",
+    startGuidedSetupImpl: async (runtimeId, { onStart }) => {
+      started.push(runtimeId);
+      onStart();
+      return { runtimeId, installCommand: "curl -fsSL https://claude.ai/install.sh | bash" };
+    },
+  });
+
+  // Nothing is in flight, so this only sets the permanent flag: the guided
+  // -setup route checks it both right after body parsing and again
+  // immediately before admission.
+  await server.shutdownGuidedSetups();
+
+  const response = await request(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.body.code, "RUNTIME_GUIDED_SETUP_SHUTTING_DOWN");
+  assert.deepEqual(started, [], "the installer must never run once shutdown has been flagged");
+});
+
+test("shutdownGuidedSetups returns within its own bound even when a descendant's death is never confirmed", async () => {
+  const setupRoot = root();
+  const wrapperPath = join(setupRoot, "wrapper.mjs");
+  writeAsymmetricInstallerWrapperScript(wrapperPath);
+  const pidFilePath = join(setupRoot, "grandchild.pid");
+
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    belowBoundaryImpl: async () => "below",
+    startGuidedSetupImpl: (runtimeId, options) =>
+      startInstalledRuntimeGuidedSetup(runtimeId, {
+        ...options,
+        // An internal bound well past shutdownGuidedSetups's own (much
+        // smaller) bound below, and an isGroupAliveImpl that always reports
+        // alive: this request's own promise stays pending long after
+        // shutdownGuidedSetups has already returned, simulating a
+        // descendant whose death can never be confirmed.
+        groupDeathTimeoutMs: 300,
+        groupDeathPollIntervalMs: 10,
+        isGroupAliveImpl: () => true,
+        spawnImpl: (_command, _args, spawnOptions) =>
+          spawn(process.execPath, [wrapperPath, pidFilePath], spawnOptions),
+      }),
+  });
+
+  function guidedSetupHarness() {
+    const res = {
+      on() {
+        return this;
+      },
+      writeHead() {
+        return this;
+      },
+      flushHeaders() {},
+      write() {
+        return true;
+      },
+      end() {},
+    };
+    const req = Readable.from([Buffer.from(JSON.stringify({ runtimeId: "claude" }))]);
+    req.headers = { "content-type": "application/json" };
+    const handler = server.routes.get("POST /api/settings/ai-runtime/guided-setup");
+    return handler(req, res);
+  }
+
+  const pending = guidedSetupHarness();
+  const grandchildPid = Number(await waitForFileContent(pidFilePath));
+  assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+  const startedAt = Date.now();
+  await server.shutdownGuidedSetups({ timeoutMs: 60 });
+  const elapsed = Date.now() - startedAt;
+  assert.ok(
+    elapsed < 200,
+    `shutdownGuidedSetups must return within its own bound regardless of the installer's own confirmation timeout, took ${elapsed}ms`
+  );
+
+  // The real SIGKILL was still dispatched underneath the faked liveness
+  // check above, so the descendant actually dies; confirm that for real
+  // (independent of the fake) and let the underlying request settle on its
+  // own STOP_UNCONFIRMED bound afterward, so nothing leaks past this test.
+  assert.equal(await waitUntilProcessDead(grandchildPid, { timeoutMs: 2000 }), true);
+  await pending;
+});
+
+test("two guided-setup admissions on separate mounts race the durable reservation, and the second is refused", async () => {
+  const repoRoot = root();
+  const env = { CAREERRAT_DESKTOP_CLI_ONLY: "1" };
+  const gate = deferred();
+  const started = [];
+
+  const mountA = boot({
+    repoRoot,
+    inventory: INVENTORY,
+    probes: {},
+    env,
+    platform: "darwin",
+    belowBoundaryImpl: async () => {
+      // Held here, after mountA's own reservation has already been written
+      // (reservation happens before probing), so mountB's admission below
+      // races an existing, pid-less record rather than an empty one.
+      await gate.promise;
+      return "below";
+    },
+    startGuidedSetupImpl: async (runtimeId, { onStart }) => {
+      started.push(`A:${runtimeId}`);
+      onStart();
+      return { runtimeId, installCommand: "curl -fsSL https://claude.ai/install.sh | bash" };
+    },
+  });
+
+  const mountB = boot({
+    repoRoot,
+    inventory: INVENTORY,
+    probes: {},
+    env,
+    platform: "darwin",
+    belowBoundaryImpl: async () => "below",
+    startGuidedSetupImpl: async () => {
+      throw new Error("mountB must never reach the installer while mountA's reservation is live");
+    },
+  });
+
+  const first = requestStream(mountA, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  // Give mountA's handler a turn to reach and pass its own reservation
+  // before mountB races it.
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const second = await request(mountB, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  assert.equal(second.status, 409);
+  assert.equal(second.body.code, "RUNTIME_GUIDED_SETUP_IN_PROGRESS");
+
+  gate.resolve();
+  const firstResponse = await first;
+  assert.equal(firstResponse.status, 200);
+  assert.deepEqual(started, ["A:claude"]);
+});
+
+test("a pid-less reservation older than the stale bound is reclaimed, but a fresh one still blocks admission", async () => {
+  const repoRoot = root();
+  const env = { CAREERRAT_DESKTOP_CLI_ONLY: "1" };
+
+  // Fresh: a crash between admission and spawn just happened; nothing
+  // should reclaim this yet.
+  writeGuidedSetupOwnership({ repoRoot, env, runtimeId: "claude", pid: null });
+  let reservation = reserveGuidedSetupOwnership({
+    repoRoot,
+    env,
+    platform: "darwin",
+    runtimeId: "claude",
+  });
+  assert.ok(reservation.error, "a fresh pid-less reservation must still block admission");
+  assert.equal(reservation.error.code, "RUNTIME_GUIDED_SETUP_IN_PROGRESS");
+
+  // Older than the stale bound: no installer legitimately runs that long
+  // without ever reaching spawn, so this must be reclaimed.
+  writeGuidedSetupOwnership({
+    repoRoot,
+    env,
+    runtimeId: "claude",
+    pid: null,
+    startedAt: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
+  });
+  reservation = reserveGuidedSetupOwnership({
+    repoRoot,
+    env,
+    platform: "darwin",
+    runtimeId: "claude",
+  });
+  assert.ok(reservation.generation, "a stale pid-less reservation must be reclaimed");
+});
+
+test("a live process occupying a reused process-group id with no verifiable identity is reclaimed only once stale", async () => {
+  const repoRoot = root();
+  const env = { CAREERRAT_DESKTOP_CLI_ONLY: "1" };
+  const lockFile = userPath({ repoRoot, env }, ".internal/ai-runtime-guided-setup.lock.json");
+
+  // A real, detached, long-lived process standing in for an unrelated
+  // process the OS has since handed the original installer's reused
+  // process-group id: its own pid is also its process-group id (detached),
+  // matching what process.kill(-pid, 0) checks.
+  const unrelated = spawn(
+    process.execPath,
+    ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"],
+    { detached: true, stdio: "ignore" }
+  );
+  await new Promise((resolve) => unrelated.once("spawn", resolve));
+
+  function writeRawRecord(startedAt) {
+    mkdirSync(dirname(lockFile), { recursive: true });
+    writeFileSync(
+      lockFile,
+      JSON.stringify({
+        runtimeId: "claude",
+        pid: unrelated.pid,
+        generation: "reused-pgid-generation",
+        // No captured identity: simulates a record this fix predates (or
+        // one written where `ps` couldn't run), so admission can't tell
+        // this live pid apart from the real installer by identity alone
+        // and has to fall back to the stale bound instead.
+        pidStartedAt: null,
+        startedAt,
+      }),
+      "utf8"
+    );
+  }
+
+  try {
+    writeRawRecord(new Date().toISOString());
+    let reservation = reserveGuidedSetupOwnership({
+      repoRoot,
+      env,
+      platform: "darwin",
+      runtimeId: "claude",
+    });
+    assert.ok(reservation.error, "a fresh record on a live pid must still block admission");
+    assert.equal(reservation.error.code, "RUNTIME_GUIDED_SETUP_IN_PROGRESS");
+
+    writeRawRecord(new Date(Date.now() - 31 * 60 * 1000).toISOString());
+    reservation = reserveGuidedSetupOwnership({
+      repoRoot,
+      env,
+      platform: "darwin",
+      runtimeId: "claude",
+    });
+    assert.ok(
+      reservation.generation,
+      "a stale record on a reused process-group id must be reclaimed"
+    );
+  } finally {
+    try {
+      process.kill(-unrelated.pid, "SIGKILL");
+    } catch {
+      // Already dead by the time cleanup runs.
+    }
+  }
 });
 
 test("selection rejects an unavailable or unauthenticated runtime with an actionable code", async () => {

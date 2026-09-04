@@ -1,8 +1,8 @@
 import { loadAIPreferences, writeAIPreferences } from "../core/ai/ai-preferences.mjs";
 import {
-  admitGuidedSetupOwnership,
   clearGuidedSetupOwnership,
-  writeGuidedSetupOwnership,
+  confirmGuidedSetupOwnershipPid,
+  reserveGuidedSetupOwnership,
 } from "../core/ai/guided-setup-ownership.mjs";
 import {
   CLAUDE_NATIVE_INSTALL_COMMAND,
@@ -273,8 +273,19 @@ export function mountInstalledRuntimeRoutes({
   // cleaned up when a request's own promise settles regardless of how it
   // settled.
   const activeGuidedSetupControllers = new Map();
+  // Permanent once set (shutdown never reverses): the guided-setup route
+  // checks this both right after body parsing and again immediately before
+  // admission, so a request that was still reading its body, or that races
+  // shutdownGuidedSetups on the same tick, is refused instead of being
+  // admitted after the snapshot below is taken. Without this, such a
+  // request would register in activeGuidedSetupControllers after
+  // shutdownGuidedSetups has already returned, and the caller's own
+  // server.close() would then have to wait out that missed request's full
+  // installer timeout (up to 10 minutes) instead of the bound below.
+  let shuttingDown = false;
 
   async function shutdownGuidedSetups({ timeoutMs = GUIDED_SETUP_SHUTDOWN_TIMEOUT_MS } = {}) {
+    shuttingDown = true;
     const pending = [...activeGuidedSetupControllers.values()];
     if (pending.length === 0) return;
     for (const { controller } of pending) controller.abort();
@@ -488,6 +499,19 @@ export function mountInstalledRuntimeRoutes({
       sendJson(res, error.status || 400, { ok: false, error: error.message });
       return;
     }
+    // Checked immediately after the async body read, since shutdown can
+    // start while this request was still parsing: a request admitted after
+    // that point would never be aborted by shutdownGuidedSetups's own
+    // snapshot and could stall the caller's server.close() behind its full
+    // installer timeout.
+    if (shuttingDown) {
+      sendJson(res, 503, {
+        ok: false,
+        code: "RUNTIME_GUIDED_SETUP_SHUTTING_DOWN",
+        error: "CareerRat is shutting down. Try Claude Code setup again after it restarts.",
+      });
+      return;
+    }
     if (env.CAREERRAT_DESKTOP_CLI_ONLY !== "1" || platform !== "darwin") {
       sendJson(res, 409, {
         ok: false,
@@ -521,28 +545,41 @@ export function mountInstalledRuntimeRoutes({
       });
       return;
     }
-    // The Set above only ever sees this mount's own requests. A previous
-    // mount's installer (crashed, or a normal app relaunch) can still be
-    // alive underneath a fresh, empty Set. The durable ownership record is
-    // what catches that case, and reclaims it once the recorded process
-    // group is confirmed dead.
-    const ownershipError = admitGuidedSetupOwnership({ repoRoot, env, platform });
-    if (ownershipError) {
-      sendJson(res, 409, {
+    // Checked again immediately before admission: shutdown could have
+    // started while the checks above were running.
+    if (shuttingDown) {
+      sendJson(res, 503, {
         ok: false,
-        code: ownershipError.code,
-        error: ownershipError.message,
+        code: "RUNTIME_GUIDED_SETUP_SHUTTING_DOWN",
+        error: "CareerRat is shutting down. Try Claude Code setup again after it restarts.",
       });
       return;
     }
+    // The Set above only ever sees this mount's own requests. A previous
+    // mount's installer (crashed, or a normal app relaunch) can still be
+    // alive underneath a fresh, empty Set. The durable ownership record is
+    // what catches that case: reserved exclusively right here, before any
+    // probing or spawn, so a crash after this point but before the pid is
+    // confirmed still leaves a durable (if pid-less) claim behind instead of
+    // nothing, and reclaimed once the recorded process group (or a pid-less
+    // reservation) is confirmed dead or stale.
+    const reservation = reserveGuidedSetupOwnership({ repoRoot, env, platform, runtimeId });
+    if (reservation.error) {
+      sendJson(res, 409, {
+        ok: false,
+        code: reservation.error.code,
+        error: reservation.error.message,
+      });
+      return;
+    }
+    const ownedGeneration = reservation.generation;
     activeGuidedSetups.add(runtimeId);
-    // `lockRetained` and `ownedPid` govern the finally block at the very
-    // bottom: a settle that couldn't confirm the installer's process group
-    // actually died must keep both the in-memory Set entry and the durable
-    // ownership record, rather than releasing a lock over a group that may
-    // still be running.
+    // `lockRetained` governs the finally block at the very bottom: a settle
+    // that couldn't confirm the installer's process group actually died
+    // must keep both the in-memory Set entry and the durable ownership
+    // record, rather than releasing a lock over a group that may still be
+    // running.
     let lockRetained = false;
-    let ownedPid = null;
     const controller = new AbortController();
     let resolveControllerDone;
     const controllerDone = new Promise((resolve) => {
@@ -632,11 +669,19 @@ export function mountInstalledRuntimeRoutes({
             startStream();
             // Real installer runs report the process-group leader's pid;
             // fakes/doubles used elsewhere in tests call onStart with no
-            // argument, which correctly skips writing a durable record for
-            // a process that was never actually spawned.
+            // argument, which correctly skips confirming a pid for a
+            // process that was never actually spawned. The reservation
+            // already exists (from before startGuidedSetupImpl was called
+            // above); this only ever rewrites it, keyed to the same
+            // generation, from pid-less to running.
             if (Number.isSafeInteger(info?.pid) && info.pid > 0) {
-              writeGuidedSetupOwnership({ repoRoot, env, runtimeId, pid: info.pid });
-              ownedPid = info.pid;
+              confirmGuidedSetupOwnershipPid({
+                repoRoot,
+                env,
+                platform,
+                generation: ownedGeneration,
+                pid: info.pid,
+              });
             }
           },
           onOutput(message) {
@@ -673,7 +718,7 @@ export function mountInstalledRuntimeRoutes({
     } finally {
       if (!lockRetained) {
         activeGuidedSetups.delete(runtimeId);
-        if (ownedPid !== null) clearGuidedSetupOwnership({ repoRoot, env, pid: ownedPid });
+        clearGuidedSetupOwnership({ repoRoot, env, generation: ownedGeneration });
       }
       const tracked = activeGuidedSetupControllers.get(runtimeId);
       if (tracked?.controller === controller) activeGuidedSetupControllers.delete(runtimeId);

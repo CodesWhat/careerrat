@@ -2285,13 +2285,64 @@ export async function startInstalledRuntimeGuidedSetup(
       if (stopError) return;
       fail("CareerRat could not start the in-app installer.", { cause: error });
     });
+    // A status-0 close only means bash itself exited; a detached descendant
+    // it forked with its own redirected stdio can outlive it in the same
+    // process group. Confirm the whole group is actually dead before
+    // resolving, the same bound stop() above waits on, so a caller can't
+    // start a concurrent installer against a "successful" run that's still
+    // holding the group open. If the group survives the wait, escalate
+    // (SIGTERM then, after scheduleRuntimeProcessKill's grace period,
+    // SIGKILL) and confirm once more; only reject with
+    // RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED (retaining the caller's lock) if
+    // it is still alive after that.
+    const confirmNormalCompletionGroupDeath = () => {
+      const pid = child.pid;
+      waitForProcessGroupDeath(pid, {
+        platform,
+        timeoutMs: groupDeathTimeoutMs,
+        intervalMs: groupDeathPollIntervalMs,
+        isAliveImpl: isGroupAliveImpl,
+      }).then((confirmedDead) => {
+        if (confirmedDead) {
+          finish();
+          return;
+        }
+        forceKillTimer = scheduleRuntimeProcessKill(
+          child,
+          () => {
+            waitForProcessGroupDeath(pid, {
+              platform,
+              timeoutMs: groupDeathTimeoutMs,
+              intervalMs: groupDeathPollIntervalMs,
+              isAliveImpl: isGroupAliveImpl,
+            }).then((confirmedDeadAfterKill) => {
+              if (confirmedDeadAfterKill) {
+                finish();
+                return;
+              }
+              finish(
+                runtimeError(
+                  "CareerRat could not confirm the Claude Code installer stopped. It may still be running.",
+                  "RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED"
+                )
+              );
+            });
+          },
+          {
+            platform,
+            env,
+            spawnSyncImpl: treeKillImpl,
+          }
+        );
+      });
+    };
     child.once("close", (status, closeSignal) => {
       // Same race as the error handler above: bash can exit before a
       // resistant descendant it forked, so a pending stop must wait for the
       // scheduled group SIGKILL rather than settling here.
       if (stopError) return;
       if (status === 0) {
-        finish();
+        confirmNormalCompletionGroupDeath();
         return;
       }
       fail("The Claude Code installer did not finish successfully.", {

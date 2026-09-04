@@ -87,3 +87,66 @@ test("desktop shutdown settles app-owned work before browser and server teardown
     "server:close",
   ]);
 });
+
+test("desktop shutdown does not re-enter when a repeated quit event fires while cleanup is already running", async () => {
+  const lifecycle = await import("../apps/desktop/desktop-lifecycle.mjs").catch(() => null);
+  assert.equal(typeof lifecycle?.shutdownDesktopRuntime, "function");
+
+  const calls = [];
+  const active = {
+    stopWatching() {
+      calls.push("watching:stop");
+    },
+    closeClients() {
+      calls.push("clients:close");
+    },
+    async shutdownSourcingWorkers() {
+      await Promise.resolve();
+    },
+    async shutdownIntake() {
+      await Promise.resolve();
+    },
+    async shutdownAiWebSearch() {
+      await Promise.resolve();
+    },
+    async shutdownResumeExtractions() {
+      await Promise.resolve();
+    },
+    async shutdownAppOperations() {
+      await Promise.resolve();
+    },
+    chatRuntime: {
+      async shutdown() {},
+    },
+    stopRuntimeSignIns() {
+      calls.push("sign-ins:stop");
+    },
+    async shutdownGuidedSetups() {
+      await Promise.resolve();
+    },
+    browserSessionManager: {
+      async shutdown() {},
+    },
+    server: {
+      close(callback) {
+        calls.push("server:close");
+        callback();
+      },
+    },
+  };
+
+  // Two quit events landing before the first has finished tearing down:
+  // both must resolve, but the side-effecting steps must only run once.
+  const first = lifecycle.shutdownDesktopRuntime(active);
+  const second = lifecycle.shutdownDesktopRuntime(active);
+  await Promise.all([first, second]);
+
+  assert.equal(calls.filter((call) => call === "watching:stop").length, 1);
+  assert.equal(calls.filter((call) => call === "sign-ins:stop").length, 1);
+  assert.equal(calls.filter((call) => call === "server:close").length, 1);
+
+  // A later call against the same, already-fully-shut-down runtime must
+  // also be a no-op rather than tearing it down a second time.
+  await lifecycle.shutdownDesktopRuntime(active);
+  assert.equal(calls.filter((call) => call === "server:close").length, 1);
+});
