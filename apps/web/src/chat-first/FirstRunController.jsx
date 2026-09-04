@@ -15,6 +15,7 @@ import {
 } from "../onboarding/onboardingSetup.js";
 import { calculateAnnualCashWorksheet } from "./annual-cash-worksheet.js";
 import { firstRunApi } from "./api.js";
+import { BootScreen } from "./BootScreen.jsx";
 import { createWorkspaceRequestId } from "./chat-first-app-controller.js";
 import {
   clearCompanyDiscoveryOperation,
@@ -36,6 +37,7 @@ import {
   runtimeSelectionReady,
 } from "./first-run-controller.js";
 import { profileSettingsRoute } from "./profile-settings-controller.js";
+import { useMinimumBootScreen } from "./use-boot-screen.js";
 
 const INTERVIEW_SKILL = "ingest-profile";
 const PROFILE_BLOCK_KINDS = new Set(["authorization", "candidate_patch", "evidence_claim"]);
@@ -315,6 +317,20 @@ export function FirstRunController({
   const [resumeUploadingName, setResumeUploadingName] = useState("");
   const [editingKnowledgeSection, setEditingKnowledgeSection] = useState(null);
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
+  const [expandedKnowledgeSections, setExpandedKnowledgeSections] = useState({});
+  // True from mount until the startup probe (onboard state plus installed
+  // runtimes) has settled one way or the other, so the boot screen never
+  // depends on which branch that probe took. When App already loaded a state
+  // that stops at the voluntary-defaults choice, that choice is the first
+  // frame; the runtime probe is skipped on that path anyway.
+  // A preloaded workspace that only needs the voluntary-defaults confirmation
+  // never probes engines on mount, so it must never show the boot screen:
+  // flipping the flag on and back off would flash the prompt, then the boot
+  // screen, then the prompt again.
+  const bootProbeSkipped = Boolean(
+    initialOnboardState && setupNeedsVoluntaryDefaults(initialOnboardState)
+  );
+  const [bootProbePending, setBootProbePending] = useState(!bootProbeSkipped);
   const [engineError, setEngineError] = useState(null);
   const [firstSearchRetryAvailable, setFirstSearchRetryAvailable] = useState(false);
   const [companyOperation, setCompanyOperation] = useState(null);
@@ -468,6 +484,7 @@ export function FirstRunController({
 
   useEffect(() => {
     let cancelled = false;
+    if (!bootProbeSkipped) setBootProbePending(true);
     void (async () => {
       try {
         await api.initOnboard();
@@ -492,12 +509,14 @@ export function FirstRunController({
       } catch (error) {
         if (cancelled) return;
         setEngineError(firstRunErrorMessage(error, "CareerRat couldn't start setup. Try again."));
+      } finally {
+        if (!cancelled) setBootProbePending(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [advanceOnboard, api, initialOnboardState, updateMessages]);
+  }, [advanceOnboard, api, bootProbeSkipped, initialOnboardState, updateMessages]);
 
   useEffect(() => {
     const id = readCompanyDiscoveryOperationId(operationStorage);
@@ -1564,9 +1583,38 @@ export function FirstRunController({
     (candidate) => candidate.id === runtimeState?.selectedId
   );
   const knowledge = buildFirstRunKnowledge(onboardState, runtime);
+  const completeKnowledgeSectionIds = knowledge.items
+    .filter((item) => item.status === "complete")
+    .map((item) => item.id)
+    .join(",");
+  // A section only carries a manually-toggled expanded flag while it is
+  // complete. Drop the flag the moment it leaves "complete" so a later
+  // re-completion starts collapsed again instead of remembering stale state.
+  useEffect(() => {
+    const stillComplete = new Set(
+      completeKnowledgeSectionIds ? completeKnowledgeSectionIds.split(",") : []
+    );
+    setExpandedKnowledgeSections((current) => {
+      let changed = false;
+      const next = {};
+      for (const [sectionId, expanded] of Object.entries(current)) {
+        if (expanded && stillComplete.has(sectionId)) next[sectionId] = true;
+        else changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [completeKnowledgeSectionIds]);
   const configuredAgentName = firstRunAgentName(onboardState, agentName);
   const voluntaryDefaultsRequired = setupNeedsVoluntaryDefaults(onboardState);
+  // The engine picker's "Let's get CareerRat ready." heading is only correct
+  // once the startup probe has actually come back empty. Until it settles
+  // (success, the voluntary-defaults branch, or an error that the picker then
+  // shows), render the same boot screen App uses during its gate check so the
+  // two never look like two different flashes.
+  const showBootScreen = useMinimumBootScreen(bootProbePending);
   const openSettings = () => navigate(profileSettingsRoute({ tab: "settings", panel: "engine" }));
+
+  if (showBootScreen) return <BootScreen />;
 
   const companyReview =
     companyReviewOpen && companyProposalBatch ? (
@@ -1588,6 +1636,7 @@ export function FirstRunController({
       }))}
       error={engineError}
       guidedSetup={guidedSetup}
+      guidedSetupAvailable={runtimeState?.guidedSetupAvailable === true}
       messages={messages}
       knowledge={knowledge.items}
       progress={knowledge.progress}
@@ -1597,6 +1646,7 @@ export function FirstRunController({
       resumeUploadingName={resumeUploadingName}
       editingKnowledgeSection={editingKnowledgeSection}
       knowledgeSaving={knowledgeSaving}
+      expandedKnowledgeSections={expandedKnowledgeSections}
       voluntaryDefaultsRequired={voluntaryDefaultsRequired}
       onChooseEngine={chooseEngine}
       onStartInterview={startInterview}
@@ -1636,6 +1686,12 @@ export function FirstRunController({
         setEditingKnowledgeSection(item);
       }}
       onCancelKnowledgeEdit={() => setEditingKnowledgeSection(null)}
+      onToggleKnowledgeSection={(sectionId) =>
+        setExpandedKnowledgeSections((current) => ({
+          ...current,
+          [sectionId]: !current[sectionId],
+        }))
+      }
       onResumeFile={handleResumeFile}
       onSaveKnowledgeSection={commitKnowledgeSection}
       onDraftChange={setDraft}

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { BootScreen } from "./chat-first/BootScreen.jsx";
 import { ChatFirstApp } from "./chat-first/ChatFirstApp.jsx";
 import { DashboardProvider } from "./chat-first/dashboard-context.jsx";
 import { FirstRunController } from "./chat-first/FirstRunController.jsx";
 import { ProfileSettingsController } from "./chat-first/ProfileSettingsController.jsx";
+import { useMinimumBootScreen } from "./chat-first/use-boot-screen.js";
 import { finishOnboarding, getOnboardState } from "./lib/api.js";
 import { setupCanRelease } from "./onboarding/onboardingSetup.js";
 
@@ -55,7 +57,8 @@ export function App() {
     };
   }, [gate.forPath, gate.status, location.pathname, navigate, ungated]);
 
-  if (!ungated && gate.status === "checking") return null;
+  const showBootScreen = useMinimumBootScreen(!ungated && gate.status === "checking");
+  if (showBootScreen) return <BootScreen />;
   if (!ungated && gate.status === "blocked") {
     return (
       <FirstRunController

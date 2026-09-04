@@ -1,6 +1,6 @@
 import { AnnualCashWorksheet } from "./AnnualCashWorksheet.jsx";
 import { cleanAgentCopy } from "./agent-copy.js";
-import { SendUpIcon } from "./chat-first-icons.jsx";
+import { CheckIcon, ChevronDownIcon, SendUpIcon } from "./chat-first-icons.jsx";
 import {
   isFirstRunExtractedFact,
   runtimeIsSupported,
@@ -58,6 +58,16 @@ function engineDescription(engine) {
   const presentation = runtimePresentation(engine);
   if (presentation.state === "auth_required")
     return "Detected on this computer. Sign in before CareerRat can use it.";
+  if (presentation.state === "update_required") {
+    const name = engine.name || "This AI CLI";
+    const installed = engine.version
+      ? `${name} ${engine.version} is installed.`
+      : `${name} is installed.`;
+    const minimum = engine.minimumVersion
+      ? ` CareerRat needs ${engine.minimumVersion} or newer.`
+      : "";
+    return `${installed}${minimum}`;
+  }
   if (presentation.state === "ready")
     return `Ready to run the complete CareerRat workflow with ${engine.name || "this AI CLI"}.`;
   if (engine?.probeMessage) return engine.probeMessage;
@@ -82,19 +92,41 @@ function RetryControl({ onRetrySearch, onRetryCompany, submitting }) {
   );
 }
 
+function guidedUpdateStatusMessage(status) {
+  return (
+    {
+      installing: "CareerRat is installing the update. You can stay on this screen.",
+      failed: "CareerRat couldn't finish the update. Nothing in your setup was lost.",
+      cancelled: "Update stopped. Nothing in your setup was lost.",
+      unavailable: "In-app update isn't available here. Use the setup guide instead.",
+    }[status] || null
+  );
+}
+
 function DetectedEngine({
   engine,
   submitting,
   onChooseEngine,
   onRetryEngine,
   onStartEngineSignIn,
+  onStartGuidedSetup,
+  guidedSetup,
+  guidedSetupAvailable,
 }) {
   const selectable = engineSelectable(engine);
   const presentation = runtimePresentation(engine);
   const canCompleteSetup =
     presentation.state === "auth_required" && engine.action === "start_sign_in";
   const canRetry = engine.detected === true && engine.ready !== true;
-  const hasActions = canCompleteSetup || canRetry;
+  const needsUpdate = presentation.state === "update_required";
+  const engineGuidedSetup = guidedSetup?.runtimeId === engine.id ? guidedSetup : null;
+  const guidedStatus = engineGuidedSetup?.status || null;
+  const guidedInstalling = guidedStatus === "installing";
+  const canGuidedUpdate =
+    needsUpdate && guidedSetupAvailable === true && guidedStatus !== "unavailable";
+  const showExternalUpdateLink = needsUpdate && !canGuidedUpdate && Boolean(engine.installUrl);
+  const guidedStatusMessage = engineGuidedSetup ? guidedUpdateStatusMessage(guidedStatus) : null;
+  const hasActions = canCompleteSetup || canRetry || needsUpdate;
   const className = `cf-first-run__engine-choice${engine.selected ? " is-selected" : ""}`;
   const content = (
     <>
@@ -109,6 +141,9 @@ function DetectedEngine({
         <span className="cf-first-run__engine-description">{engineDescription(engine)}</span>
         {engine.capabilityReason && engine.capabilityReason !== engine.probeMessage ? (
           <span className="cf-first-run__engine-capability">{engine.capabilityReason}</span>
+        ) : null}
+        {guidedStatusMessage ? (
+          <span className="cf-first-run__engine-capability">{guidedStatusMessage}</span>
         ) : null}
       </span>
       <span className="cf-first-run__engine-status">{engineStatus(engine).toUpperCase()}</span>
@@ -134,6 +169,25 @@ function DetectedEngine({
       {content}
       {hasActions ? (
         <span className="cf-first-run__engine-actions">
+          {canGuidedUpdate ? (
+            <button
+              className="cf-first-run__engine-action"
+              type="button"
+              disabled={submitting || guidedInstalling}
+              onClick={() => onStartGuidedSetup?.(engine.id)}
+            >
+              {guidedInstalling ? "Updating…" : `Update ${engine.name || "Claude Code"}`}
+            </button>
+          ) : showExternalUpdateLink ? (
+            <a
+              className="cf-first-run__engine-action"
+              href={engine.installUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open {engine.name || "Claude Code"} setup guide
+            </a>
+          ) : null}
           {canCompleteSetup ? (
             <button
               className="cf-first-run__engine-action"
@@ -382,6 +436,7 @@ export function EngineSelection({
   onStartEngineSignIn,
   onOpenSettings,
   guidedSetup,
+  guidedSetupAvailable,
   hostedInterest,
   onHostedInterestStart,
   onHostedInterestChange,
@@ -445,6 +500,9 @@ export function EngineSelection({
                 onChooseEngine={onChooseEngine}
                 onRetryEngine={onRetryEngine}
                 onStartEngineSignIn={onStartEngineSignIn}
+                onStartGuidedSetup={onStartGuidedSetup}
+                guidedSetup={guidedSetup}
+                guidedSetupAvailable={guidedSetupAvailable}
               />
             ))
           ) : (
@@ -639,7 +697,85 @@ function TranscriptMessage({
   });
 }
 
-function KnowledgePanel({ agentName, knowledge = [], progress = {}, onEditSection, onResumeFile }) {
+function CompleteKnowledgeCard({
+  item,
+  isEditing,
+  isExpanded,
+  onToggle,
+  onEditSection,
+  onResumeFile,
+}) {
+  const lines = safeArray(item.lines);
+  const expanded = isEditing || isExpanded;
+  const bodyId = `cf-first-run-knowledge-body-${item.id}`;
+  return (
+    <article
+      className={`cf-first-run__knowledge-card cf-first-run__knowledge-card--complete${
+        expanded ? "" : " cf-first-run__knowledge-card--collapsed"
+      }`}
+    >
+      <button
+        type="button"
+        className="cf-first-run__knowledge-card-toggle"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={() => onToggle?.(item.id)}
+      >
+        <span className="cf-first-run__knowledge-check" aria-hidden="true">
+          <CheckIcon />
+        </span>
+        <span className="cf-first-run__knowledge-card-title">{item.label || "PROFILE DETAIL"}</span>
+        <span className="cf-first-run__knowledge-done">Done</span>
+        <ChevronDownIcon
+          className={`cf-first-run__knowledge-chevron${expanded ? " cf-first-run__knowledge-chevron--open" : ""}`}
+        />
+      </button>
+      {expanded ? (
+        <div id={bodyId} className="cf-first-run__knowledge-card-body">
+          <div className="cf-first-run__knowledge-card-actions">
+            {item.id === "resume" ? (
+              <label className="cf-first-run__file-action">
+                Drop resume
+                <input
+                  type="file"
+                  accept={RESUME_ACCEPT}
+                  onChange={(event) => {
+                    const file = firstFile(event.target.files);
+                    if (file) onResumeFile?.(file);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            ) : null}
+            {item.editor ? (
+              <button type="button" onClick={() => onEditSection?.(item)}>
+                Edit
+              </button>
+            ) : null}
+          </div>
+          {lines.length > 0 ? (
+            <div className="cf-first-run__knowledge-lines">
+              {lines.map((line) => (
+                <span key={String(line)}>✓ {line}</span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function KnowledgePanel({
+  agentName,
+  knowledge = [],
+  progress = {},
+  onEditSection,
+  onResumeFile,
+  expandedSections = {},
+  onToggleSection,
+  editingSectionId = null,
+}) {
   const current = progressValues(progress);
   return (
     <aside className="cf-first-run__knowledge" aria-label={`What ${agentName} knows`}>
@@ -664,6 +800,19 @@ function KnowledgePanel({ agentName, knowledge = [], progress = {}, onEditSectio
       <div className="cf-first-run__knowledge-cards">
         {safeArray(knowledge).length > 0 ? (
           knowledge.map((item) => {
+            if (item.status === "complete") {
+              return (
+                <CompleteKnowledgeCard
+                  key={item.id}
+                  item={item}
+                  isEditing={editingSectionId === item.id}
+                  isExpanded={Boolean(expandedSections?.[item.id])}
+                  onToggle={onToggleSection}
+                  onEditSection={onEditSection}
+                  onResumeFile={onResumeFile}
+                />
+              );
+            }
             const lines = safeArray(item.lines);
             return (
               <article
@@ -697,10 +846,7 @@ function KnowledgePanel({ agentName, knowledge = [], progress = {}, onEditSectio
                 {lines.length > 0 ? (
                   <div className="cf-first-run__knowledge-lines">
                     {lines.map((line) => (
-                      <span key={String(line)}>
-                        {item.status === "complete" ? "✓ " : ""}
-                        {line}
-                      </span>
+                      <span key={String(line)}>{line}</span>
                     ))}
                   </div>
                 ) : item.status === "active" ? (
@@ -934,10 +1080,12 @@ export function FirstRunChat({
   resumeUploadingName = "",
   editingKnowledgeSection = null,
   knowledgeSaving = false,
+  expandedKnowledgeSections = {},
   onChooseOption,
   onEditKnowledgeSection,
   onCancelKnowledgeEdit,
   onSaveKnowledgeSection,
+  onToggleKnowledgeSection,
   onResumeFile,
   onDraftChange,
   onRetrySearch,
@@ -1045,6 +1193,9 @@ export function FirstRunChat({
         progress={progress}
         onEditSection={onEditKnowledgeSection}
         onResumeFile={onResumeFile}
+        expandedSections={expandedKnowledgeSections}
+        onToggleSection={onToggleKnowledgeSection}
+        editingSectionId={editingKnowledgeSection?.id ?? null}
       />
       {editingKnowledgeSection ? (
         <KnowledgeSectionEditor

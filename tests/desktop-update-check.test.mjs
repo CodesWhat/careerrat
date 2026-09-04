@@ -5,6 +5,7 @@ import {
   CHECK_INTERVAL_MS,
   createDesktopUpdateController,
   DEFAULT_STATE,
+  IN_FLIGHT_RETRY_MS,
   nextUpdateCheckDelay,
   updaterErrorCopy,
 } from "../apps/desktop/update-check.mjs";
@@ -54,6 +55,7 @@ describe("desktop updater controller", () => {
 
     assert.equal(updater.autoDownload, true);
     assert.equal(updater.autoInstallOnAppQuit, false);
+    assert.equal(updater.autoRunAppAfterInstall, true);
     assert.equal(updater.allowPrerelease, false);
     assert.equal(updater.allowDowngrade, false);
   });
@@ -120,6 +122,30 @@ describe("desktop updater controller", () => {
     assert.equal(writes.at(-1).lastCheckedAt, Date.parse("2026-08-26T20:00:00Z"));
   });
 
+  it("drops retired state keys on the next persist", () => {
+    const operation = { phase: "ready", version: "0.16.4" };
+    const { controller, writes } = makeController({
+      persisted: {
+        enabled: false,
+        lastCheckedAt: "2026-08-25T20:00:00Z",
+        skippedVersion: "0.16.3",
+        operation,
+        latestVersion: "0.16.4",
+        latestReleaseUrl: "https://example.com/release",
+        latestDmgUrl: "https://example.com/careerrat.dmg",
+      },
+    });
+
+    controller.setEnabled(false);
+
+    assert.deepEqual(writes.at(-1), {
+      enabled: false,
+      lastCheckedAt: "2026-08-25T20:00:00Z",
+      skippedVersion: "0.16.3",
+      operation,
+    });
+  });
+
   it("only installs after update-downloaded and uses the v6 positional API", () => {
     const { controller, updater } = makeController();
 
@@ -141,6 +167,24 @@ describe("desktop updater controller", () => {
     assert.equal(state.manual, false);
     assert.equal(writes.at(-1).skippedVersion, "0.16.4");
     assert.equal(controller.install(), true);
+  });
+
+  it("keeps a staged download instead of starting a routine check", async () => {
+    const { controller, updater } = makeController();
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "ready");
+
+    const callsBefore = updater.checkCalls;
+
+    await controller.checkNow();
+    await controller.checkNow({ manual: true });
+
+    assert.equal(updater.checkCalls, callsBefore);
+    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.getState().notify, true);
+
+    await controller.checkNow({ force: true });
+    assert.equal(updater.checkCalls, callsBefore + 1);
   });
 
   it("rechecks a downloaded update after restart before offering installation", async () => {
@@ -234,6 +278,98 @@ describe("desktop updater controller", () => {
     assert.equal(controller.getState().phase, "current");
     assert.equal(controller.getState().version, "0.16.3");
   });
+
+  it("refuses to start a second check while one is in flight", async () => {
+    const { controller, updater } = makeController();
+
+    updater.emit("checking-for-update");
+    const state = await controller.checkNow({ manual: true });
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state.phase, "checking");
+
+    updater.emit("update-available", { version: "0.16.4" });
+    const state2 = await controller.checkNow({ manual: true });
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state2.phase, "downloading");
+  });
+
+  it("latches an accepted install so late updater events cannot revoke it", async () => {
+    const { controller, updater } = makeController();
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.acceptInstall(), true);
+
+    updater.emit("checking-for-update");
+    assert.equal(controller.getState().phase, "ready");
+
+    updater.emit("update-available", { version: "0.16.5" });
+    assert.equal(controller.getState().phase, "ready");
+
+    updater.emit("error", new Error("network blip"));
+    assert.equal(controller.getState().phase, "ready");
+
+    updater.emit("update-cancelled");
+    assert.equal(controller.getState().phase, "ready");
+
+    const state = await controller.checkNow({ force: true });
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state.phase, "ready");
+
+    assert.equal(controller.install(), true);
+    assert.deepEqual(updater.installCalls, [[false, true]]);
+  });
+
+  it("does not accept an install that is not ready", () => {
+    const { controller, updater } = makeController();
+    updater.emit("checking-for-update");
+    assert.equal(controller.getState().phase, "checking");
+    assert.equal(controller.acceptInstall(), false);
+    assert.equal(controller.install(), false);
+
+    updater.emit("update-not-available", { version: "0.16.3" });
+    assert.equal(controller.getState().phase, "current");
+    assert.equal(controller.acceptInstall(), false);
+    assert.equal(controller.install(), false);
+  });
+
+  it("accepts an install only once", () => {
+    const { controller, updater } = makeController();
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "ready");
+
+    assert.equal(controller.acceptInstall(), true);
+    assert.equal(controller.acceptInstall(), false);
+    assert.equal(controller.acceptInstall(), false);
+
+    assert.equal(controller.install(), true);
+    assert.deepEqual(updater.installCalls, [[false, true]]);
+  });
+
+  it("promotes a coalesced manual check so its result stays visible", async () => {
+    const { controller, updater } = makeController();
+
+    updater.emit("checking-for-update");
+    const state = await controller.checkNow({ manual: true });
+
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state.manual, true);
+    assert.equal(state.phase, "checking");
+
+    updater.emit("update-not-available", { version: "0.16.3" });
+    assert.equal(controller.getState().manual, true);
+    assert.equal(controller.getState().phase, "current");
+  });
+
+  it("keeps a coalesced background check non-manual", async () => {
+    const { controller, updater } = makeController();
+
+    updater.emit("checking-for-update");
+    const state = await controller.checkNow();
+
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state.manual, false);
+    assert.equal(controller.getState().manual, false);
+  });
 });
 
 describe("updater error copy", () => {
@@ -254,5 +390,30 @@ describe("next update check delay", () => {
       nextUpdateCheckDelay({ lastCheckedAt: now - 1000, now }),
       CHECK_INTERVAL_MS - 1000
     );
+  });
+
+  it("re-arms an overdue in-flight check with a retry delay instead of zero", () => {
+    const now = Date.parse("2026-08-26T20:00:00Z");
+    const pastDue = now - CHECK_INTERVAL_MS - 1;
+    assert.equal(
+      nextUpdateCheckDelay({ lastCheckedAt: pastDue, now, phase: "checking" }),
+      IN_FLIGHT_RETRY_MS
+    );
+    assert.equal(
+      nextUpdateCheckDelay({ lastCheckedAt: pastDue, now, phase: "downloading" }),
+      IN_FLIGHT_RETRY_MS
+    );
+    assert.equal(
+      nextUpdateCheckDelay({ lastCheckedAt: now - 1000, now, phase: "checking" }),
+      CHECK_INTERVAL_MS - 1000
+    );
+  });
+
+  it("does not re-arm while a downloaded update is staged", () => {
+    const now = Date.parse("2026-08-26T20:00:00Z");
+    const pastDue = now - CHECK_INTERVAL_MS - 1;
+    assert.equal(nextUpdateCheckDelay({ lastCheckedAt: pastDue, now }), 0);
+    assert.equal(nextUpdateCheckDelay({ lastCheckedAt: pastDue, now, phase: "ready" }), null);
+    assert.equal(nextUpdateCheckDelay({ lastCheckedAt: pastDue, now, phase: "current" }), 0);
   });
 });

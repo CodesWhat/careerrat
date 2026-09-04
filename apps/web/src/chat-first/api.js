@@ -113,6 +113,7 @@ export const profileSettingsApi = Object.freeze({
   getInstalledAiRuntimes,
   getOnboardState,
   getSourceMaintenance,
+  startInstalledAiRuntimeGuidedSetup,
   startInstalledAiRuntimeSignIn,
   probeInstalledAiRuntime,
   runWorkspaceIntent,

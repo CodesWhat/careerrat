@@ -528,6 +528,115 @@ describe("FirstRunExperience", () => {
     expect(onSelectEngine).not.toHaveBeenCalled();
   });
 
+  it("shows a below-boundary Claude as needing an update, never as ready, with an in-app update path", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onSelectEngine = vi.fn();
+    const onStartGuidedSetup = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          supported: true,
+          detected: true,
+          ready: false,
+          selectable: false,
+          selected: false,
+          status: "update_required",
+          action: "retry",
+          actionLabel: "Check again",
+          version: "2.1.200",
+          minimumVersion: "2.1.241",
+          capabilityTier: "chat_drafting",
+          capabilities: { completion: true, taskTools: false },
+          probeMessage: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+          capabilityReason:
+            "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+        },
+      ],
+      guidedSetupAvailable: true,
+      onChooseEngine: onSelectEngine,
+      onStartGuidedSetup,
+    });
+    const html = renderToStaticMarkup(tree);
+    const runtime = findElement(
+      tree,
+      (node) => node.type?.name === "DetectedEngine" && node.props.engine.id === "claude"
+    );
+    const runtimeView = runtime.type(runtime.props);
+    const updateButton = findElement(
+      runtimeView,
+      (node) => node.type === "button" && textOf(node) === "Update Claude Code"
+    );
+    const checkAgainButton = findElement(
+      runtimeView,
+      (node) => node.type === "button" && textOf(node) === "Check again"
+    );
+
+    expect(runtimeView.type).toBe("article");
+    expect(html).not.toContain(">READY<");
+    expect(html).toContain(">UPDATE NEEDED<");
+    expect(html).toContain("Claude Code 2.1.200 is installed. CareerRat needs 2.1.241 or newer.");
+    expect(updateButton).not.toBeNull();
+    expect(checkAgainButton).not.toBeNull();
+
+    updateButton.props.onClick();
+    expect(onStartGuidedSetup).toHaveBeenCalledWith("claude");
+    expect(onSelectEngine).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the external setup guide link when in-app guided update is unavailable", async () => {
+    const { FirstRunExperience } = await loadFirstRun();
+    const onStartGuidedSetup = vi.fn();
+    const tree = FirstRunExperience({
+      stage: "engine",
+      engines: [
+        {
+          id: "claude",
+          name: "Claude Code",
+          supported: true,
+          detected: true,
+          ready: false,
+          selectable: false,
+          selected: false,
+          status: "update_required",
+          action: "retry",
+          actionLabel: "Check again",
+          version: "2.1.200",
+          minimumVersion: "2.1.241",
+          capabilityTier: "chat_drafting",
+          capabilities: { completion: true, taskTools: false },
+          probeMessage: "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+          capabilityReason:
+            "Update Claude Code to 2.1.241 or newer for secure CareerRat tool runs.",
+          installUrl: "https://code.claude.com/docs/en/quickstart",
+        },
+      ],
+      guidedSetupAvailable: false,
+      onStartGuidedSetup,
+    });
+    const runtime = findElement(
+      tree,
+      (node) => node.type?.name === "DetectedEngine" && node.props.engine.id === "claude"
+    );
+    const runtimeView = runtime.type(runtime.props);
+    const updateButton = findElement(
+      runtimeView,
+      (node) => node.type === "button" && textOf(node) === "Update Claude Code"
+    );
+    const externalLink = findElement(
+      runtimeView,
+      (node) =>
+        node.type === "a" && node.props.href === "https://code.claude.com/docs/en/quickstart"
+    );
+
+    expect(updateButton).toBeNull();
+    expect(externalLink).not.toBeNull();
+    expect(externalLink.props.target).toBe("_blank");
+    expect(onStartGuidedSetup).not.toHaveBeenCalled();
+  });
+
   it("does not expose internal capability tiers for a supported ready runtime", async () => {
     const { FirstRunExperience } = await loadFirstRun();
     const tree = FirstRunExperience({
@@ -733,6 +842,9 @@ describe("FirstRunExperience", () => {
           },
           { id: "comp", label: "COMPENSATION", status: "active", lines: [] },
         ]}
+        // Complete sections collapse by default now, so "targets" is opened
+        // explicitly to assert its body content still renders correctly.
+        expandedKnowledgeSections={{ targets: true }}
         progress={{ completed: 1, total: 6 }}
         draft=""
       />
@@ -778,18 +890,159 @@ describe("FirstRunExperience", () => {
       knowledge: [roles, quickFacts, { id: "evidence", label: "EVIDENCE", status: "pending" }],
       progress: { completed: 1, total: 3 },
       onEditKnowledgeSection,
+      // "roles" is complete, so it collapses by default. Expand it up front
+      // (the same state a header click leaves behind) so its Edit action and
+      // checked lines are part of what this test can see.
+      expandedKnowledgeSections: { roles: true },
     });
     const panelElement = tree.props.children[2];
     const panel = panelElement.type(panelElement.props);
     const panelHtml = renderToStaticMarkup(panel);
-    const edits = findElements(panel, (node) => node.type === "button" && textOf(node) === "Edit");
+    // quickFacts is "populated", so it stays inline and reachable by the
+    // plain element-tree walk. "roles" is "complete", so it renders through
+    // the collapsible CompleteKnowledgeCard component and has to be invoked
+    // directly to reach its (already-expanded) Edit button.
+    const quickFactsEdit = findElement(
+      panel,
+      (node) => node.type === "button" && textOf(node) === "Edit"
+    );
+    const rolesCardElement = findElement(panel, (node) => node.props?.item?.id === "roles");
+    const rolesTree = rolesCardElement.type(rolesCardElement.props);
+    const rolesEdit = findElement(
+      rolesTree,
+      (node) => node.type === "button" && textOf(node) === "Edit"
+    );
 
-    expect(edits).toHaveLength(2);
     expect(panelHtml).toContain("✓ Staff Engineer");
     expect(panelHtml).not.toContain("✓ NYC");
-    edits[0].props.onClick();
-    edits[1].props.onClick();
-    expect(onEditKnowledgeSection.mock.calls).toEqual([[roles], [quickFacts]]);
+    quickFactsEdit.props.onClick();
+    rolesEdit.props.onClick();
+    expect(onEditKnowledgeSection.mock.calls).toEqual([[quickFacts], [roles]]);
+  });
+
+  it("renders a complete knowledge section collapsed with a Done pill and no visible body", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      <FirstRunChat
+        agentName="Paul"
+        messages={[]}
+        knowledge={[
+          {
+            id: "engine",
+            label: "ENGINE",
+            status: "complete",
+            lines: ["Claude Code · ready"],
+            editor: { fields: [] },
+          },
+        ]}
+        progress={{ completed: 1, total: 6 }}
+      />
+    );
+
+    expect(html).toContain("ENGINE");
+    expect(html).toContain('<span class="cf-first-run__knowledge-done">Done</span>');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("Claude Code · ready");
+    expect(html).not.toContain(">Edit<");
+  });
+
+  it("renders a complete knowledge section expanded while its editor is open", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const engine = {
+      id: "engine",
+      label: "ENGINE",
+      status: "complete",
+      lines: ["Claude Code · ready"],
+      editor: { fields: [] },
+    };
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [],
+      knowledge: [engine],
+      progress: { completed: 1, total: 6 },
+      editingKnowledgeSection: engine,
+      expandedKnowledgeSections: {},
+    });
+    const panel = tree.props.children[2];
+    const html = renderToStaticMarkup(panel);
+
+    expect(panel.props.editingSectionId).toBe("engine");
+    expect(panel.props.expandedSections).toEqual({});
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("Claude Code · ready");
+    expect(html).toContain(">Edit<");
+  });
+
+  it("clicking the header toggles the section and reveals the Edit action once expanded", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const onToggleKnowledgeSection = vi.fn();
+    const engine = {
+      id: "engine",
+      label: "ENGINE",
+      status: "complete",
+      lines: ["Claude Code · ready"],
+      editor: { fields: [] },
+    };
+    const tree = FirstRunChat({
+      agentName: "Paul",
+      messages: [],
+      knowledge: [engine],
+      progress: { completed: 1, total: 6 },
+      onToggleKnowledgeSection,
+    });
+    const panelElement = tree.props.children[2];
+    const panel = panelElement.type(panelElement.props);
+    const engineCardElement = findElement(panel, (node) => node.props?.item?.id === "engine");
+    const engineTree = engineCardElement.type(engineCardElement.props);
+    const toggle = findElement(
+      engineTree,
+      (node) =>
+        node.type === "button" && node.props.className === "cf-first-run__knowledge-card-toggle"
+    );
+    toggle.props.onClick();
+    expect(onToggleKnowledgeSection).toHaveBeenCalledWith("engine");
+
+    // The click above only hands the section id to the controller, which owns
+    // expandedKnowledgeSections and re-renders. Render that resulting state
+    // directly to confirm the body (lines, Edit action, open chevron) shows
+    // once expanded.
+    const expandedHtml = renderToStaticMarkup(
+      <FirstRunChat
+        agentName="Paul"
+        messages={[]}
+        knowledge={[engine]}
+        progress={{ completed: 1, total: 6 }}
+        expandedKnowledgeSections={{ engine: true }}
+      />
+    );
+    expect(expandedHtml).toContain("Claude Code · ready");
+    expect(expandedHtml).toContain(">Edit<");
+    expect(expandedHtml).toContain('aria-expanded="true"');
+    expect(expandedHtml).toContain("cf-first-run__knowledge-chevron--open");
+  });
+
+  it("renders an incomplete section expanded with no Done pill and no toggle", async () => {
+    const { FirstRunChat } = await loadFirstRun();
+    const html = renderToStaticMarkup(
+      <FirstRunChat
+        agentName="Paul"
+        messages={[]}
+        knowledge={[
+          {
+            id: "comp",
+            label: "COMPENSATION",
+            status: "populated",
+            lines: ["$210K floor"],
+            editor: { fields: [] },
+          },
+        ]}
+        progress={{ completed: 0, total: 6 }}
+      />
+    );
+
+    expect(html).toContain("$210K floor");
+    expect(html).not.toContain("cf-first-run__knowledge-done");
+    expect(html).not.toContain("aria-expanded");
   });
 
   it("keeps explicit non-profile confirmation choices visible", async () => {

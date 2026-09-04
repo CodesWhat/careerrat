@@ -112,6 +112,7 @@ function createApi() {
       enabled = nextEnabled;
       return { ok: true };
     }),
+    startInstalledAiRuntimeGuidedSetup: vi.fn().mockResolvedValue({ ok: true }),
   };
 }
 
@@ -1226,6 +1227,317 @@ describe("ProfileSettingsController AI preferences", () => {
       "CareerRat couldn't save that AI setting. Choose one of the options and try again."
     );
     expect(settingsProps(view).aiPreferences.quality).toBe("automatic");
+  });
+
+  it("keeps a saved preference through a post-install refresh instead of letting a later save roll it back", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    // The post-install refresh's own load() fails on an unrelated request
+    // (automation settings), the same shape as the "guided update" describe
+    // block below: settingsPartsRef must already carry the saved
+    // aiPreferences by then, since load() never gets a chance to refresh it.
+    api.getAutomationSettings
+      .mockResolvedValueOnce({ capabilities: [] })
+      .mockRejectedValueOnce(new Error("automation settings unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+
+    let view = renderController(module, api);
+    await settingsProps(view).onAiPreferenceChange("quality", "best");
+
+    view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    await settingsProps(view).onGuidedUpdateEngine("claude");
+
+    view = renderController(module, api);
+    await settingsProps(view).onAiPreferenceChange("reasoning", "high");
+
+    // A stale settingsPartsRef would post the pre-guided-update "automatic"
+    // quality here, silently reverting the earlier save.
+    expect(api.saveAiPreferences).toHaveBeenLastCalledWith({
+      quality: "best",
+      reasoning: "high",
+    });
+  });
+
+  it("keeps a preference saved mid-flight instead of letting a slower, earlier-started load overwrite it", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    let resolvePostInstallPreferences;
+    api.getAiPreferences
+      // The initial mount fetch: resolves immediately, same as every other test here.
+      .mockResolvedValueOnce({
+        quality: "automatic",
+        reasoning: "automatic",
+        source: "default",
+        updatedAt: null,
+      })
+      // refreshRuntimesAfterInstall's own load() call: deferred, so this test
+      // can land a save while it's still in flight and control exactly when
+      // its (now stale) snapshot arrives.
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolvePostInstallPreferences = resolve;
+          })
+      );
+    api.getInstalledAiRuntimes.mockResolvedValue({
+      runtimes: [
+        { id: "claude", name: "Claude Code", supported: true, available: true, ready: true },
+      ],
+      guidedSetupAvailable: true,
+    });
+
+    renderController(module, api);
+    await flushEffects();
+
+    let view = renderController(module, api);
+    const guidedUpdate = settingsProps(view).onGuidedUpdateEngine("claude");
+    // Let refreshRuntimesAfterInstall run far enough to call load(), which
+    // calls getAiPreferences a second time and blocks on the deferred
+    // promise above, before the save below races it.
+    await flushEffects();
+
+    view = renderController(module, api);
+    await settingsProps(view).onAiPreferenceChange("quality", "best");
+
+    view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    // The post-install load's own (now stale) fetch finally resolves, still
+    // carrying the pre-save value.
+    resolvePostInstallPreferences({
+      quality: "automatic",
+      reasoning: "automatic",
+      source: "default",
+      updatedAt: null,
+    });
+    await guidedUpdate;
+    await flushEffects();
+
+    view = renderController(module, api);
+    // A stale-load-wins bug would revert this to "automatic" here.
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    await settingsProps(view).onAiPreferenceChange("reasoning", "high");
+
+    // And a stale settingsPartsRef would post "automatic" here too, since
+    // changeAiPreference merges the next save on top of model.aiPreferences.
+    expect(api.saveAiPreferences).toHaveBeenLastCalledWith({
+      quality: "best",
+      reasoning: "high",
+    });
+  });
+
+  it("keeps a preference saved mid-flight instead of letting the initial mount hydration overwrite it", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    let resolveMountPreferences;
+    // The initial mount fetch itself: deferred, so this test can land a
+    // save while it's still in flight and control exactly when its (now
+    // stale) snapshot arrives.
+    api.getAiPreferences.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMountPreferences = resolve;
+        })
+    );
+
+    const view = renderController(module, api);
+    await flushEffects();
+    // The mount Promise.all is still pending on getAiPreferences here; the
+    // save below lands and bumps the revision before that snapshot commits.
+    await settingsProps(view).onAiPreferenceChange("quality", "best");
+
+    let latest = renderController(module, api);
+    expect(settingsProps(latest).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    // The mount fetch's own (now stale) snapshot finally resolves, still
+    // carrying the pre-save default.
+    resolveMountPreferences({
+      quality: "automatic",
+      reasoning: "automatic",
+      source: "default",
+      updatedAt: null,
+    });
+    await flushEffects();
+
+    latest = renderController(module, api);
+    // A stale-mount-wins bug would revert this to "automatic" here.
+    expect(settingsProps(latest).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    await settingsProps(latest).onAiPreferenceChange("reasoning", "high");
+
+    // And a stale settingsPartsRef would post "automatic" here too.
+    expect(api.saveAiPreferences).toHaveBeenLastCalledWith({
+      quality: "best",
+      reasoning: "high",
+    });
+  });
+
+  it("disables the AI preference controls until initial hydration completes", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    let resolveMountPreferences;
+    api.getAiPreferences.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMountPreferences = resolve;
+        })
+    );
+
+    const view = renderController(module, api);
+    await flushEffects();
+
+    expect(settingsProps(view).aiPreferencesBusy).toBe(true);
+
+    resolveMountPreferences({
+      quality: "automatic",
+      reasoning: "automatic",
+      source: "default",
+      updatedAt: null,
+    });
+    await flushEffects();
+
+    const settled = renderController(module, api);
+    expect(settingsProps(settled).aiPreferencesBusy).toBe(false);
+  });
+
+  it("hydrates AI preferences from the initial mount fetch even when an unrelated Settings request fails, and does not overwrite the unhydrated sibling preference on save", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAiPreferences.mockResolvedValue({
+      quality: "balanced",
+      reasoning: "medium",
+      source: "saved",
+      updatedAt: "2026-08-27T15:00:00.000Z",
+    });
+    // The mount effect's own automation-settings request fails; a single
+    // Promise.all here would previously have discarded the AI preferences
+    // this same mount fetch already fulfilled.
+    api.getAutomationSettings.mockRejectedValueOnce(new Error("automation settings unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+
+    const view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "balanced",
+      reasoning: "medium",
+    });
+    expect(settingsProps(view).aiPreferencesBusy).toBe(false);
+
+    await settingsProps(view).onAiPreferenceChange("reasoning", "high");
+
+    // A pre-fix bug (Promise.all discarding the whole mount fetch on any
+    // single failure, while still enabling the controls) would have left
+    // aiPreferences at EMPTY_MODEL's "automatic" default here, so this save
+    // would silently post "automatic" quality over the candidate's real
+    // saved "balanced" choice.
+    expect(api.saveAiPreferences).toHaveBeenLastCalledWith({
+      quality: "balanced",
+      reasoning: "high",
+    });
+  });
+
+  it("keeps the AI preference controls disabled, with an error, when their own mount fetch fails even though the rest of hydration completes", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAiPreferences.mockRejectedValue(new Error("ai preferences unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+
+    const view = renderController(module, api);
+    expect(settingsProps(view).aiPreferencesBusy).toBe(true);
+    expect(controllerAlertText(view)).toBeTruthy();
+  });
+});
+
+describe("ProfileSettingsController guided update", () => {
+  it("reports the installed result even when an unrelated Settings request fails during the post-install refresh, without re-fetching the inventory it already has", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getInstalledAiRuntimes
+      .mockResolvedValueOnce({ runtimes: [], guidedSetupAvailable: true })
+      .mockResolvedValueOnce({
+        runtimes: [
+          { id: "claude", name: "Claude Code", supported: true, available: true, ready: true },
+        ],
+        guidedSetupAvailable: true,
+      });
+    // The post-install load() bundles automation settings, sources,
+    // onboarding, and AI preferences in one Promise.all alongside runtimes.
+    // A failure in any of those must never turn a successful installer run
+    // into a reported failure.
+    api.getAutomationSettings
+      .mockResolvedValueOnce({ capabilities: [] })
+      .mockRejectedValueOnce(new Error("automation settings unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+
+    await props.onGuidedUpdateEngine("claude");
+
+    const view = renderController(module, api);
+    props = settingsProps(view);
+
+    expect.soft(props.guidedSetup).toEqual({ runtimeId: "claude", status: "installed" });
+    expect.soft(props.enginePickerBusy).toBe(false);
+    expect.soft(controllerAlertText(view)).toBe(null);
+    // Only the mount's initial load and refreshRuntimesAfterInstall's own
+    // targeted fetch: load()'s own inventory request is skipped since it
+    // was handed that already-fetched inventory directly.
+    expect.soft(api.getInstalledAiRuntimes).toHaveBeenCalledTimes(2);
+    // The rendered runtime state reflects the second (post-install) fetch,
+    // not the empty inventory the mount started with.
+    expect.soft(props.engine.choices.find((choice) => choice.id === "claude")).toMatchObject({
+      id: "claude",
+      ready: true,
+    });
+  });
+
+  it("reports the installed result even when the runtime-inventory refresh itself fails after a successful install", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getInstalledAiRuntimes
+      .mockResolvedValueOnce({ runtimes: [], guidedSetupAvailable: true })
+      .mockRejectedValueOnce(new Error("runtime inventory unavailable"))
+      .mockResolvedValueOnce({
+        runtimes: [{ id: "claude", name: "Claude Code", available: true, ready: true }],
+        guidedSetupAvailable: true,
+      });
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+
+    await props.onGuidedUpdateEngine("claude");
+
+    const view = renderController(module, api);
+    props = settingsProps(view);
+
+    expect.soft(props.guidedSetup).toEqual({ runtimeId: "claude", status: "installed" });
+    expect.soft(props.enginePickerBusy).toBe(false);
+    expect.soft(controllerAlertText(view)).toBe(null);
   });
 });
 

@@ -1,4 +1,7 @@
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// Retry spacing for a scheduler tick that lands while a check or download is
+// still in flight.
+export const IN_FLIGHT_RETRY_MS = 10 * 60 * 1000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const SHARED_UPDATE_STAGING_ID = "00000000-0000-5000-8000-000000000000";
 const WINDOWS_STATUS_URL = "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md";
@@ -27,8 +30,17 @@ export function nextUpdateCheckDelay({
   initialDelayMs = 0,
   intervalMs = CHECK_INTERVAL_MS,
   maxDelayMs = MAX_TIMER_DELAY_MS,
+  phase = null,
 } = {}) {
   if (!enabled) return null;
+  // A downloaded update is staged until it is installed. checkNow is a no-op
+  // in that state and leaves lastCheckedAt alone, so re-arming from an
+  // expired timestamp would spin the timer at zero delay.
+  if (phase === "ready") return null;
+  // A check or download still in flight past its deadline (long sleep, a
+  // stalled transfer) also coalesces without touching lastCheckedAt. Re-arm
+  // with a retry delay instead of zero so the scheduler cannot spin.
+  const inFlight = phase === "checking" || phase === "downloading";
   if (
     lastCheckedAt === null ||
     lastCheckedAt === undefined ||
@@ -37,8 +49,9 @@ export function nextUpdateCheckDelay({
     return Math.min(maxDelayMs, Math.max(0, initialDelayMs));
   }
   const checkedAt = new Date(lastCheckedAt).getTime();
-  if (!Number.isFinite(checkedAt)) return 0;
-  return Math.min(maxDelayMs, Math.max(0, checkedAt + intervalMs - now));
+  if (!Number.isFinite(checkedAt)) return inFlight ? IN_FLIGHT_RETRY_MS : 0;
+  const due = Math.max(0, checkedAt + intervalMs - now);
+  return Math.min(maxDelayMs, inFlight ? Math.max(due, IN_FLIGHT_RETRY_MS) : due);
 }
 
 export function updaterErrorCopy(error) {
@@ -110,8 +123,14 @@ export function createDesktopUpdateController({
   }
 
   const supported = Boolean(selfUpdateSupported);
-  let saved = { ...DEFAULT_STATE, ...persisted };
-  const recoveredOperation = savedOperation(saved.operation);
+  let installAccepted = false;
+  let saved = {
+    enabled: persisted.enabled ?? DEFAULT_STATE.enabled,
+    lastCheckedAt: persisted.lastCheckedAt ?? DEFAULT_STATE.lastCheckedAt,
+    skippedVersion: persisted.skippedVersion ?? DEFAULT_STATE.skippedVersion,
+    operation: savedOperation(persisted.operation),
+  };
+  const recoveredOperation = saved.operation;
   let startupCheckPending = supported && recoveredOperation?.phase === "ready";
   const interrupted =
     supported &&
@@ -150,6 +169,10 @@ export function createDesktopUpdateController({
 
   updater.autoDownload = true;
   updater.autoInstallOnAppQuit = false;
+  // The install handoff in main.mjs waits for Electron's before-quit-for-update,
+  // which the native updater only emits on this path when it relaunches the
+  // app itself. Pin it rather than relying on the library default.
+  updater.autoRunAppAfterInstall = true;
   updater.allowPrerelease = false;
   updater.allowDowngrade = false;
   // electron-updater 6.8.9 applies requestHeaders after its generated staging
@@ -257,12 +280,35 @@ export function createDesktopUpdateController({
     error: fail,
   };
 
-  for (const [event, handler] of Object.entries(handlers))
-    updater.on(event, handler);
+  const boundHandlers = {};
+  for (const [event, handler] of Object.entries(handlers)) {
+    boundHandlers[event] = (...args) => {
+      if (installAccepted) {
+        log(event);
+        return undefined;
+      }
+      return handler(...args);
+    };
+    updater.on(event, boundHandlers[event]);
+  }
 
   async function checkNow({ manual = false, force = false } = {}) {
     if (!supported) return setRuntime({ manual: Boolean(manual) });
     if (!manual && !force && !saved.enabled) return getState();
+    if (installAccepted) return getState();
+    // A downloaded update stays staged until it is installed. A routine
+    // check (timer, menu) must not replace it with a fresh check that can
+    // fail offline and leave the staged download uninstallable.
+    if (!force && runtime.phase === "ready") return getState();
+    if (
+      !force &&
+      (runtime.phase === "checking" || runtime.phase === "downloading")
+    ) {
+      // Coalesce onto the check already running. A manual request still has
+      // to see the outcome, so promote the in-flight operation to manual
+      // instead of starting a second native check.
+      return manual && !runtime.manual ? setRuntime({ manual: true }) : getState();
+    }
 
     saved = { ...saved, lastCheckedAt: now() };
     persist(saved);
@@ -302,6 +348,14 @@ export function createDesktopUpdateController({
     });
   }
 
+  function acceptInstall() {
+    // One-shot: the first acceptance owns the quit-and-install sequence. A
+    // repeat request during teardown must not trigger a second app quit.
+    if (!supported || installAccepted || runtime.phase !== "ready") return false;
+    installAccepted = true;
+    return true;
+  }
+
   function install() {
     if (!supported || runtime.phase !== "ready") return false;
     updater.quitAndInstall(false, true);
@@ -309,11 +363,12 @@ export function createDesktopUpdateController({
   }
 
   function destroy() {
-    for (const [event, handler] of Object.entries(handlers))
+    for (const [event, handler] of Object.entries(boundHandlers))
       updater.removeListener(event, handler);
   }
 
   return {
+    acceptInstall,
     checkNow,
     destroy,
     getState,

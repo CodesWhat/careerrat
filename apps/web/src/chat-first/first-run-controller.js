@@ -24,6 +24,7 @@ const RUNTIME_PRESENTATION_LABELS = {
   ready: "Ready",
   auth_required: "Auth required",
   check_failed: "Needs a retry",
+  update_required: "Update needed",
   unavailable: "Unavailable",
 };
 
@@ -54,6 +55,12 @@ export function runtimePresentation(runtime = {}) {
     return {
       state: "check_failed",
       label: RUNTIME_PRESENTATION_LABELS.check_failed,
+    };
+  }
+  if (status === "update_required") {
+    return {
+      state: "update_required",
+      label: RUNTIME_PRESENTATION_LABELS.update_required,
     };
   }
 
@@ -118,6 +125,8 @@ export function firstRunRuntimeChoices(state) {
         probeMessage: runtime.probeMessage || null,
         installUrl: runtime.installUrl || null,
         capabilityReason: runtime.capabilityReason || null,
+        version: runtime.version || null,
+        minimumVersion: runtime.minimumVersion || null,
       };
     })
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));

@@ -4,6 +4,31 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-09-03
+
+### Changed
+
+- Completed sections in the What Paul knows panel collapse to a single line
+  with a Done mark; open one with its chevron to see or edit the details.
+
+### Fixed
+
+- The desktop update checker drops settings keys left over from older versions
+  instead of carrying them forward.
+- Starting the app no longer flashes the first-run setup screen before the
+  chat loads; a short boot screen shows while CareerRat checks your
+  workspace and engine.
+- A Claude Code older than 2.1.241 can no longer be picked as the engine; the
+  picker shows Update needed with the installed and required versions and an
+  Update Claude Code button that runs the installer from inside the app.
+- A workspace that only needs the voluntary self-identification confirmation
+  no longer flashes the boot screen over that prompt on start.
+- Restart and install can no longer be cancelled by an update check that
+  runs during shutdown: accepting the install locks the downloaded update in
+  place, a routine check never replaces a downloaded update or stacks on one
+  in flight, the scheduled check is disarmed before teardown, and a quit that
+  stalls now ends the app instead of hanging it with its runtime torn down.
+
 ## [0.18.0] - 2026-09-03
 
 ### Added

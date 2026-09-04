@@ -1,0 +1,47 @@
+.cf-boot-screen {
+  display: flex;
+  width: 100%;
+  height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font);
+  -webkit-app-region: drag;
+}
+
+.cf-boot-screen__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--g-6);
+}
+
+.cf-boot-screen__mark {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--r-chip);
+  animation: cf-boot-screen-bob 2.4s ease-in-out infinite;
+}
+
+.cf-boot-screen__status {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-sm);
+}
+
+@keyframes cf-boot-screen-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-boot-screen__mark {
+    animation: none;
+  }
+}

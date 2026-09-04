@@ -46,6 +46,11 @@ test("desktop shutdown settles app-owned work before browser and server teardown
     stopRuntimeSignIns() {
       calls.push("sign-ins:stop");
     },
+    async shutdownGuidedSetups() {
+      calls.push("guided-setups:start");
+      await Promise.resolve();
+      calls.push("guided-setups:end");
+    },
     browserSessionManager: {
       async shutdown() {
         calls.push("browser:shutdown");
@@ -55,6 +60,12 @@ test("desktop shutdown settles app-owned work before browser and server teardown
       close(callback) {
         calls.push("server:close");
         callback();
+      },
+      closeIdleConnections() {
+        calls.push("server:closeIdleConnections");
+      },
+      closeAllConnections() {
+        calls.push("server:closeAllConnections");
       },
     },
   };
@@ -76,7 +87,112 @@ test("desktop shutdown settles app-owned work before browser and server teardown
     "app-operations:end",
     "chat:shutdown",
     "sign-ins:stop",
+    "guided-setups:start",
+    "guided-setups:end",
     "browser:shutdown",
     "server:close",
+    "server:closeIdleConnections",
+    "server:closeAllConnections",
   ]);
+});
+
+test("desktop shutdown drops open sockets so server.close can settle even without the optional close helpers", async () => {
+  const lifecycle = await import("../apps/desktop/desktop-lifecycle.mjs").catch(() => null);
+  assert.equal(typeof lifecycle?.shutdownDesktopRuntime, "function");
+
+  const calls = [];
+  const active = {
+    stopWatching() {},
+    closeClients() {},
+    async shutdownSourcingWorkers() {},
+    async shutdownIntake() {},
+    async shutdownAiWebSearch() {},
+    async shutdownResumeExtractions() {},
+    async shutdownAppOperations() {},
+    chatRuntime: {
+      async shutdown() {},
+    },
+    stopRuntimeSignIns() {},
+    async shutdownGuidedSetups() {},
+    browserSessionManager: {
+      async shutdown() {},
+    },
+    // A fake server without closeIdleConnections/closeAllConnections: the
+    // real electron-updater server in tests lacks them too, and the source
+    // calls them as optional so their absence must not stop shutdown from
+    // settling.
+    server: {
+      close(callback) {
+        calls.push("server:close");
+        callback();
+      },
+    },
+  };
+
+  await lifecycle.shutdownDesktopRuntime(active);
+
+  assert.deepEqual(calls, ["server:close"]);
+});
+
+test("desktop shutdown does not re-enter when a repeated quit event fires while cleanup is already running", async () => {
+  const lifecycle = await import("../apps/desktop/desktop-lifecycle.mjs").catch(() => null);
+  assert.equal(typeof lifecycle?.shutdownDesktopRuntime, "function");
+
+  const calls = [];
+  const active = {
+    stopWatching() {
+      calls.push("watching:stop");
+    },
+    closeClients() {
+      calls.push("clients:close");
+    },
+    async shutdownSourcingWorkers() {
+      await Promise.resolve();
+    },
+    async shutdownIntake() {
+      await Promise.resolve();
+    },
+    async shutdownAiWebSearch() {
+      await Promise.resolve();
+    },
+    async shutdownResumeExtractions() {
+      await Promise.resolve();
+    },
+    async shutdownAppOperations() {
+      await Promise.resolve();
+    },
+    chatRuntime: {
+      async shutdown() {},
+    },
+    stopRuntimeSignIns() {
+      calls.push("sign-ins:stop");
+    },
+    async shutdownGuidedSetups() {
+      await Promise.resolve();
+    },
+    browserSessionManager: {
+      async shutdown() {},
+    },
+    server: {
+      close(callback) {
+        calls.push("server:close");
+        callback();
+      },
+    },
+  };
+
+  // Two quit events landing before the first has finished tearing down:
+  // both must resolve, but the side-effecting steps must only run once.
+  const first = lifecycle.shutdownDesktopRuntime(active);
+  const second = lifecycle.shutdownDesktopRuntime(active);
+  await Promise.all([first, second]);
+
+  assert.equal(calls.filter((call) => call === "watching:stop").length, 1);
+  assert.equal(calls.filter((call) => call === "sign-ins:stop").length, 1);
+  assert.equal(calls.filter((call) => call === "server:close").length, 1);
+
+  // A later call against the same, already-fully-shut-down runtime must
+  // also be a no-op rather than tearing it down a second time.
+  await lifecycle.shutdownDesktopRuntime(active);
+  assert.equal(calls.filter((call) => call === "server:close").length, 1);
 });

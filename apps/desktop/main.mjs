@@ -21,6 +21,7 @@
 
 import {
   app,
+  autoUpdater as nativeUpdater,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -205,6 +206,18 @@ let pdfRenderer = null;
 let win = null;
 let shuttingDown = false;
 let installUpdateAfterShutdown = false;
+// Set when Electron's native updater announces it is about to quit for the
+// install (before-quit-for-update): from then on a before-quit is the
+// updater's own and must be allowed through. Until then a repeat quit is
+// held so it cannot exit the process underneath a Squirrel transfer that is
+// still in progress.
+let installHandoffStarted = false;
+// Bounds for the two waits a quit can get stuck in: runtime teardown (guided
+// setup cleanup alone is bounded at 8s) and the native install handoff.
+// Both end in a nonzero exit so the next launch reconciles the downloaded
+// update instead of leaving an unquittable app with its runtime torn down.
+const SHUTDOWN_DEADLINE_MS = 30_000;
+const INSTALL_HANDOFF_WATCHDOG_MS = 5 * 60_000;
 
 // Desktop update state. The native updater lives in the main process; the
 // renderer only receives typed progress and actions through the preload.
@@ -278,7 +291,31 @@ async function boot() {
   return { url, route };
 }
 
-async function shutdown() {
+// Runtime teardown raced against SHUTDOWN_DEADLINE_MS, so a stuck request,
+// server close or renderer teardown cannot leave an unquittable app.
+function shutdown() {
+  let deadline = null;
+  return Promise.race([
+    teardown(),
+    new Promise((_, reject) => {
+      deadline = setTimeout(
+        () => reject(new Error(`teardown exceeded ${SHUTDOWN_DEADLINE_MS}ms`)),
+        SHUTDOWN_DEADLINE_MS
+      );
+      deadline.unref?.();
+    }),
+  ]).finally(() => clearTimeout(deadline));
+}
+
+async function teardown() {
+  // Disarm the update timer first: runtime teardown below can take several
+  // seconds (guided-setup cleanup is bounded at 8s), and a check firing in
+  // that window would flip a ready update back to "checking", so the
+  // Restart-and-install path would exit without installing.
+  if (updateCheckTimer) {
+    clearTimeout(updateCheckTimer);
+    updateCheckTimer = null;
+  }
   const active = dev;
   dev = null;
   if (active) await shutdownDesktopRuntime(active);
@@ -288,11 +325,6 @@ async function shutdown() {
   delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
   delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
   if (activePdfRenderer) await activePdfRenderer.close();
-
-  if (updateCheckTimer) {
-    clearTimeout(updateCheckTimer);
-    updateCheckTimer = null;
-  }
 }
 
 function openExternalIfAllowed(target, baseUrl) {
@@ -434,7 +466,7 @@ function registerUpdateCheckHandlers() {
   ipcMain.handle(UPDATE_IPC.checkNow, () => runManualUpdateCheck());
 
   ipcMain.handle(UPDATE_IPC.restartAndInstall, () => {
-    if (updateController.getState().phase !== "ready") return { accepted: false };
+    if (!updateController.acceptInstall()) return { accepted: false };
     installUpdateAfterShutdown = true;
     app.quit();
     return { accepted: true };
@@ -515,8 +547,10 @@ function installApplicationMenu() {
 function scheduleNextUpdateCheck() {
   if (updateCheckTimer) clearTimeout(updateCheckTimer);
   updateCheckTimer = null;
+  if (shuttingDown) return;
   if (!updateController?.getState().supported) return;
   const delay = nextUpdateCheckDelay({
+    phase: updateController.getState().phase,
     enabled: updateState.enabled,
     lastCheckedAt: updateState.lastCheckedAt,
     initialDelayMs: UPDATE_CHECK_INITIAL_DELAY_MS,
@@ -538,6 +572,7 @@ function scheduleNextUpdateCheck() {
 
 async function runManualUpdateCheck() {
   try {
+    if (shuttingDown) return updateController.getState();
     return await updateController.checkNow({ manual: true });
   } finally {
     scheduleNextUpdateCheck();
@@ -731,6 +766,7 @@ app.whenReady().then(async () => {
       createController: createDesktopUpdateController,
       requestInstall(controller) {
         updateController = controller;
+        if (!controller.acceptInstall()) return false;
         installUpdateAfterShutdown = true;
         app.quit();
         return true;
@@ -857,8 +893,45 @@ app.on("window-all-closed", () => {
 // server teardown. Closing the last window on
 // darwin does NOT reach here (see window-all-closed above); the app and its
 // server stay alive in the dock until an actual quit.
+// Hands the quit to the native installer. Used by both shutdown outcomes so
+// the handoff signal, the error path and the watchdog are always registered
+// before install() runs. installHandoffStarted is set only by the native
+// updater's own before-quit-for-update, never here.
+function handOffToInstaller() {
+  try {
+    nativeUpdater.once("before-quit-for-update", () => {
+      installHandoffStarted = true;
+    });
+    autoUpdater.once("error", (error) => {
+      log(`update install failed: ${error?.message || error}`);
+      app.exit(1);
+    });
+    if (!updateController?.install()) {
+      app.exit(1);
+      return;
+    }
+    // The native handoff after quitAndInstall is asynchronous, and the
+    // controller ignores updater events once an install is accepted. A
+    // handoff that neither quits nor errors gets a bounded watchdog so the
+    // next launch's startup reconciliation can retry the downloaded update.
+    setTimeout(() => {
+      log("update install handoff did not quit in time");
+      app.exit(1);
+    }, INSTALL_HANDOFF_WATCHDOG_MS).unref?.();
+  } catch (error) {
+    log(`update install failed: ${error?.message || error}`);
+    app.exit(1);
+  }
+}
+
 app.on("before-quit", (event) => {
-  if (shuttingDown) return;
+  // A repeat quit (Cmd+Q again, a second restart request) while teardown is
+  // in flight must not let Electron exit underneath the pending install. Once
+  // the installer has been handed the quit, its own before-quit goes through.
+  if (shuttingDown) {
+    if (!installHandoffStarted) event.preventDefault();
+    return;
+  }
   shuttingDown = true;
   event.preventDefault();
   shutdown().then(
@@ -867,15 +940,17 @@ app.on("before-quit", (event) => {
         app.exit(0);
         return;
       }
-      try {
-        if (!updateController?.install()) app.exit(1);
-      } catch (error) {
-        log(`update install failed: ${error?.message || error}`);
-        app.exit(1);
-      }
+      handOffToInstaller();
     },
     (error) => {
       log(`shutdown failed: ${error?.message || error}`);
+      // The runtime is down either way. If the user asked for the update,
+      // still hand the quit to the installer instead of discarding a staged
+      // download because teardown overran its deadline.
+      if (installUpdateAfterShutdown) {
+        handOffToInstaller();
+        return;
+      }
       app.exit(1);
     }
   );
