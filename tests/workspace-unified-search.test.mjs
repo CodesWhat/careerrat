@@ -13,6 +13,7 @@ import {
 } from "../src/core/db/verbs/search-executions.mjs";
 import {
   sourcingRunComplete,
+  sourcingRunFail,
   sourcingRunGet,
   sourcingRunStart,
 } from "../src/core/db/verbs/sourcing-runs.mjs";
@@ -470,6 +471,93 @@ test("unified execution persists a bounded receipt while the AI child keeps full
   assert.equal(child.summary.offers.length, 120);
   assert.equal(child.summary.sources.length, 120);
   assert.equal(child.summary.queryResults.length, 120);
+  await runtime.shutdownSourcingWorkers();
+});
+
+test("a failed AI-web child's failedIds/failedOffers survive compaction into the durable parent execution, reloaded from SQLite (CR-29 round 8)", async () => {
+  // compactSearchExecutionReceipt (the parent's `summary` compaction) and
+  // search-executions.mjs's own error normalization both used to drop
+  // `failed`/`failedIds`/`failedOffers` on the floor, even though the
+  // child's own sourcing-run record already kept them (sourcing-runs.mjs's
+  // normalizeError). Reloading the parent execution after a failed AI-web
+  // lane had no way to name which postings never made it into the DB.
+  const repoRoot = tempRepo();
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startManualSearchImpl: async ({ searchExecutionId }) => ({
+      ok: true,
+      run: sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "manual-search",
+        inputFingerprint: searchExecutionId,
+        metadata: { searchExecutionId },
+      }).run,
+    }),
+    runSearchInBackgroundImpl: async ({ runId }) => ({
+      id: runId,
+      purpose: "manual-search",
+      status: "completed",
+      summary: { scanned: 2, presented: 1 },
+    }),
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
+  });
+
+  const failedIds = ["sourced-acme-conflict-recovery"];
+  const failedOffers = [
+    { id: "sourced-acme-conflict-recovery", url: "https://jobs.example.test/acme/recovery" },
+  ];
+  runtime.registerAiWebSearchStarter({
+    isAvailable: () => true,
+    start: async ({ searchExecutionId, onStarted }) => {
+      const started = sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "ai-web-search",
+        inputFingerprint: searchExecutionId,
+        metadata: { searchExecutionId },
+      }).run;
+      onStarted?.(started);
+      const error = {
+        code: "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED",
+        message: "Failed to persist 1 job description artifact(s).",
+        failedIds,
+        failedOffers,
+      };
+      const failed = sourcingRunFail({ repoRoot, env: {}, id: started.id, error }).run;
+      return {
+        ok: false,
+        run: failed,
+        error: failed.error,
+        value: { failed: 1, failedIds, failedOffers },
+      };
+    },
+  });
+
+  await runtime.executeIntent({
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: { purpose: "manual-search", searchExecutionId: "search-failed-recovery" },
+    },
+  });
+  await runtime.waitForUnifiedSearch("search-failed-recovery");
+
+  // Reload straight from SQLite (not the in-memory coordination promise's
+  // own return value) to prove the fields survive the actual DB round trip.
+  const reloaded = searchExecutionGet({
+    repoRoot,
+    env: {},
+    id: "search-failed-recovery",
+  }).execution;
+
+  assert.equal(reloaded.lanes.aiWeb.status, "failed");
+  assert.equal(reloaded.lanes.aiWeb.summary.failed, 1);
+  assert.deepEqual(reloaded.lanes.aiWeb.summary.failedIds, failedIds);
+  assert.deepEqual(reloaded.lanes.aiWeb.summary.failedOffers, failedOffers);
+  assert.deepEqual(reloaded.lanes.aiWeb.error.failedIds, failedIds);
+  assert.deepEqual(reloaded.lanes.aiWeb.error.failedOffers, failedOffers);
   await runtime.shutdownSourcingWorkers();
 });
 

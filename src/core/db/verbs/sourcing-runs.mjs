@@ -135,8 +135,16 @@ function normalizeError(error) {
       "queryResults",
       "sources",
       "errors",
+      // "conflictOffers" (CR-29 round 8): the same bounded per-offer shape
+      // as failedOffers, but for identity conflicts — a bridge offer
+      // spanning more than one distinct owner, rejected outright rather
+      // than a write failure. See captureAndPersistOffersIfDb.
+      "conflictOffers",
     ]) {
       if (Array.isArray(error[key])) result[key] = clone(error[key]);
+    }
+    if (Number.isFinite(Number(error.conflicts))) {
+      result.conflicts = Number(error.conflicts);
     }
     return result;
   }

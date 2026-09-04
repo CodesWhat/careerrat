@@ -205,16 +205,35 @@ export function mountSearchRoutes({
           };
         }
         if (!allSelectedPromptsFailed) {
+          // Identity conflicts (CR-29 round 8) settle a run as not-clean the
+          // same way an artifact-write failure does (see result.ok above),
+          // but a conflict is neither written nor a genuine duplicate — the
+          // message and code below distinguish it from an ordinary write
+          // failure so a caller (and its retry copy) points at the right
+          // remediation.
+          const failedCount = Number(result.failed || 0);
+          const conflictCount = Number(result.conflicts || 0);
+          const message =
+            conflictCount > 0
+              ? failedCount > 0
+                ? `Failed to persist ${failedCount} job description artifact(s) and found ${conflictCount} identity conflict(s) that could not be reconciled.`
+                : `Found ${conflictCount} identity conflict(s) that could not be reconciled.`
+              : `Failed to persist ${failedCount} job description artifact(s).`;
           return {
             settlement: {
               status: "failed",
               error: {
-                code: "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED",
-                message: `Failed to persist ${result.failed} job description artifact(s).`,
+                code:
+                  failedCount > 0
+                    ? "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED"
+                    : "AI_WEB_SEARCH_IDENTITY_CONFLICT",
+                message,
                 action: "retry-failed",
                 failedPromptIds,
                 failedIds: result.failedIds || [],
                 failedOffers: result.failedOffers || [],
+                conflicts: conflictCount,
+                conflictOffers: result.conflictOffers || [],
                 queryResults: result.queryResults || [],
                 sources: result.sources || [],
                 errors: result.errors || [],

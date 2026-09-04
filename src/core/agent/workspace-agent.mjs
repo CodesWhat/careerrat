@@ -2463,11 +2463,29 @@ function compactSearchExecutionReceipt(summary) {
     "failedPromptCount",
     "warningCount",
     "captureFailureCount",
+    "failed",
   ];
   const receipt = {};
   for (const key of numericKeys) {
     const value = Number(summary[key]);
     if (Number.isFinite(value)) receipt[key] = value;
+  }
+  // Bounded failed-offer recovery detail (CR-29 round 8): a durable parent
+  // search execution used to drop `failedIds`/`failedOffers` entirely when
+  // compacting the child's raw result into its own `summary`, even though
+  // the child's own sourcing-run record (sourcing-runs.mjs's normalizeError)
+  // already keeps them. Reloading the parent execution after a failed AI-web
+  // lane then had no way to name which postings never made it into the DB —
+  // only a count. Capped at 50, same bound sourced-persistence.mjs's own
+  // failedOffers uses.
+  if (Array.isArray(summary.failedIds)) {
+    receipt.failedIds = summary.failedIds.slice(0, 50).map((id) => String(id));
+  }
+  if (Array.isArray(summary.failedOffers)) {
+    receipt.failedOffers = summary.failedOffers.slice(0, 50).map((offer) => ({
+      id: offer?.id != null ? String(offer.id) : null,
+      url: offer?.url ? String(offer.url).slice(0, 500) : null,
+    }));
   }
   const arrayCounts = {
     offers: "offerCount",

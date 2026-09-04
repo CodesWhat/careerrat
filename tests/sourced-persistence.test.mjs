@@ -508,6 +508,83 @@ test("a same-batch bridge offer spanning two legitimate postings is rejected as 
   }
 });
 
+test("a bridge offer spanning one accepted in-memory offer AND one already-persisted row is a conflict, not a persisted-duplicate shortcut (CR-29 round 8)", () => {
+  // Round 7 closed the same-batch (accepted vs. accepted) and stored-row
+  // (persisted vs. persisted) bridge cases, but reconcileOffersBeforeCapture
+  // still took a shortcut the moment ANY of a bridge's matching keys
+  // resolved to an already-PERSISTED row — without checking whether the
+  // bridge ALSO matched an offer just accepted earlier in this same batch.
+  // That let a bridge carrying one identity from an in-memory offer and one
+  // from a persisted row attach the in-memory offer's identity onto the
+  // persisted row's aliasKeys, after which the in-memory offer got rejected
+  // as "that persisted row's duplicate" at the final upsert — silently
+  // losing a legitimate new posting and poisoning an unrelated stored row.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const postingP = offer({
+    title: "Persisted Engineer",
+    url: "https://jobs.example.test/acme/persisted-engineer",
+    reqId: "req-persisted",
+    rawText: "Body content for the already-persisted posting.",
+  });
+  const first = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [postingP],
+    dedupeCanonical: true,
+  });
+  assert.equal(first.persistedRows, 1, "posting P must be persisted before the bridge batch runs");
+  const beforeP = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data))[0];
+
+  const postingA = offer({
+    title: "Accepted Engineer",
+    url: "https://jobs.example.test/acme/accepted-engineer",
+    reqId: "req-accepted",
+    rawText: "Body content for the offer accepted this batch.",
+  });
+  // Carries posting A's URL (matches A's in-memory url: key this batch) AND
+  // posting P's explicit reqId (matches P's already-persisted req: key).
+  const bridge = offer({
+    title: "Bridge Role",
+    url: postingA.url,
+    reqId: postingP.reqId,
+    rawText: "Body content for the mixed bridge offer.",
+  });
+
+  const result = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [postingA, bridge],
+    dedupeCanonical: true,
+  });
+
+  assert.equal(result.persistedRows, 1, "posting A must still persist");
+  assert.equal(result.conflicts, 1, "the mixed bridge offer must be counted as a conflict");
+  assert.equal(result.conflictOffers.length, 1);
+  assert.equal(result.conflictOffers[0].url, bridge.url);
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(rows.length, 2, "the bridge offer must not persist as a third row");
+
+  const afterP = rows.find((row) => row.role === "Persisted Engineer");
+  assert.deepEqual(
+    afterP,
+    beforeP,
+    "the already-persisted posting must remain byte-for-byte unchanged, including its aliasKeys"
+  );
+  const afterA = rows.find((row) => row.role === "Accepted Engineer");
+  assert.deepEqual(
+    afterA?.aliasKeys || [],
+    [],
+    "the accepted posting must not absorb the bridge offer's other identity either"
+  );
+});
+
 test("writeCanonicalCapturedJob writes through a private temp file and renames atomically, cleaning up the temp file on failure (CR-29 round 7)", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });

@@ -566,16 +566,26 @@ function reconcileOffersBeforeCapture({ repoRoot, env, offers, dedupeCanonical }
   for (const offer of offers) {
     const matchingKeys = postingIdentityKeys(offer).filter((key) => seenPostingKeys.has(key));
     if (matchingKeys.length) {
-      // Inspect EVERY matching key, not just the first (CR-29 round 5):
-      // a key seenPostingKeys knows about but acceptedIndex doesn't must
-      // belong to an already-PERSISTED row (acceptedIndex only ever gains
-      // keys as this batch accepts offers), so persisted ownership wins
-      // over an in-memory match — merging this offer's other identities
-      // onto an in-batch offer's aliasKeys instead would let a row insert
-      // that duplicates the persisted row's own identity, since the final
-      // upsert only merges onto the target ITS OWN keys can find.
-      const persistedMatch = matchingKeys.find((key) => !acceptedIndex.has(key));
-      if (persistedMatch) {
+      // Partition matches by which kind of owner they belong to (CR-29
+      // round 8): a key acceptedIndex already knows about belongs to an
+      // offer accepted EARLIER THIS BATCH; any other matching key
+      // (seenPostingKeys knows it, acceptedIndex doesn't) belongs to an
+      // already-PERSISTED row. A bridge offer carrying one identity from
+      // EACH kind used to take the persisted-match shortcut below the
+      // moment it found ANY persisted key, without ever checking whether it
+      // also matched an in-batch offer — silently attaching that offer's
+      // identity onto the persisted row (poisoning its aliases) while the
+      // in-batch offer it actually belonged to went on to be rejected as
+      // that same persisted row's "duplicate" at the final upsert. Treat
+      // ANY offer whose matches span both kinds as a conflict, before ever
+      // reaching the persisted-duplicate or same-batch-merge paths below.
+      const persistedKeys = matchingKeys.filter((key) => !acceptedIndex.has(key));
+      const acceptedKeys = matchingKeys.filter((key) => acceptedIndex.has(key));
+      if (persistedKeys.length && acceptedKeys.length) {
+        conflicts.push(offer);
+        continue;
+      }
+      if (persistedKeys.length) {
         persistedDuplicates.push(offer);
         continue;
       }
@@ -755,12 +765,20 @@ export function captureAndPersistOffersIfDb({
     .filter(Boolean)
     .slice(0, 50);
   const conflicts = reconciled.conflicts.length + (persisted?.conflicts || 0);
+  // Combines BOTH conflict sources (CR-29 round 8): reconciled.conflicts is
+  // the in-memory, pre-DB bridge rejections (offer objects already), while
+  // persisted?.conflictOffers is sourcedUpsertBatch's own sample of
+  // conflicts it rejected INSIDE the DB transaction (a stored-row multi-
+  // owner ambiguity, sourced.mjs's storedPostingIndex/computeIdentityAliasMerge)
+  // — reporting only the first left a caller with a `conflicts` count that
+  // had nothing behind it whenever every conflict was DB-level.
+  const conflictOffers = [...reconciled.conflicts, ...(persisted?.conflictOffers || [])];
   return {
     ok: failed === 0,
     persistedRows: (persisted?.created || 0) + (persisted?.updated || 0),
     duplicates: reconciled.duplicates + (persisted?.duplicates || 0),
     conflicts,
-    conflictOffers: reconciled.conflicts,
+    conflictOffers,
     failed,
     failedIds,
     failedOffers,

@@ -2320,6 +2320,123 @@ test("a JD artifact-write failure during a DB-mode scan marks the run failed, ke
   }
 });
 
+test("a scan offer bridging two already-persisted rows that share one identity key settles the run as an identity conflict, not a duplicate, and blocks the source watermark (CR-29 round 8)", async () => {
+  // Two rows that predate a canonicalization fix can already share one
+  // identity key in the DB (see tests/db-verbs.test.mjs's storedPostingIndex
+  // regression) — here, a Greenhouse requisition id both rows picked up as
+  // an ALIAS from an earlier merge, not their own URL. That asymmetry
+  // matters for this end-to-end path: filterAndDedupeOffers's own same-run
+  // dedupe (seenReqIds) only ever sees a row's OWN url-derived id, never its
+  // aliasKeys, so a fresh capture of that same Greenhouse posting sails
+  // through scanning and only meets the ambiguity once it reaches
+  // captureAndPersistOffersIfDb's DB-transaction reconciliation. Before this
+  // fix, captureAndPersistOffersIfDb's own production callers (this file,
+  // scripts/scan-sourced.mjs) didn't even look at `conflicts` — the bridge
+  // offer got folded straight into the ordinary duplicate count, the run
+  // settled "ok", and the source watermark advanced with no durable signal
+  // that reconciliation actually refused to persist anything for it.
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourcedUpsertBatch({
+      repoRoot,
+      rows: [
+        {
+          id: "sourced-legacy-conflict-owner-a",
+          company: "Legacy Corp A",
+          role: "Legacy Role A",
+          link: "https://jobs.example.test/legacy-corp-a/role",
+          fitScore: 70,
+          aliasKeys: ["req:greenhouse:9999999"],
+        },
+        {
+          id: "sourced-legacy-conflict-owner-b",
+          company: "Legacy Corp B",
+          role: "Legacy Role B",
+          link: "https://jobs.example.test/legacy-corp-b/role",
+          fitScore: 70,
+          aliasKeys: ["req:greenhouse:9999999"],
+        },
+      ],
+    });
+
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: [], negative: [] },
+        location_filter: null,
+        tracked_companies: [],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "HiringCafe",
+            source_type: "url-query",
+            label: "Bridge Conflict",
+            query: "Bridge Conflict",
+            enabled: true,
+            recency: { mode: "since-last-run", safetyMinutes: 30 },
+            searchState: { sortBy: "date" },
+          },
+        ],
+      },
+    });
+
+    const before = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(before.searches[0].recency.lastRunAt, undefined);
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => ({
+        offers: [
+          {
+            company: "Bridge Co",
+            title: "Bridge Role",
+            url: "https://boards.greenhouse.io/bridgeco/jobs/9999999",
+            location: "Remote",
+            bodyText: "Body for the identity-conflict regression.",
+            source: "hiringcafe-browser",
+            sourceProvider: "hiringcafe",
+          },
+        ],
+        errors: [],
+        needsLogin: null,
+      }),
+      hydrateOfferImpl: async (offer) => offer,
+    });
+
+    assert.equal(summary.ok, false);
+    assert.equal(summary.new, 0, "the ambiguous bridge must not persist as a new row");
+    assert.equal(summary.duplicates, 0, "a conflict must not be reported as an ordinary duplicate");
+    assert.equal(summary.conflicts, 1);
+    assert.equal(summary.conflictOffers.length, 1);
+    assert.equal(summary.conflictOffers[0].company, "Bridge Co");
+    assert.equal(
+      summary.conflictOffers[0].url,
+      "https://boards.greenhouse.io/bridgeco/jobs/9999999"
+    );
+
+    const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+    assert.equal(rows.length, 2, "only the two pre-seeded legacy rows may exist");
+
+    const after = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(
+      after.searches[0].recency.lastRunAt,
+      undefined,
+      "a run settling with an identity conflict must not advance the source watermark"
+    );
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // CLI exit code + summary-mode failure sample (CR-29 round 7): the CLI used
 // to exit 0 and (in --summary mode) print nothing at all about a batch with

@@ -2572,7 +2572,25 @@ export async function runAiWebSearch({
   const persistedOffers = persisted?.offers || [];
   const persistedFailed = persisted?.failed || 0;
   const persistedFailedIds = persisted?.failedIds || [];
-  duplicates += Math.max(0, survivors.length - persistedOffers.length - persistedFailed);
+  // Identity conflicts (CR-29 round 8): captureAndPersistOffersIfDb already
+  // separates a bridge offer spanning more than one distinct owner from an
+  // ordinary duplicate — it's rejected outright, persisted nowhere, merged
+  // onto neither owner. Folding it into `duplicates` here (as the old
+  // subtraction did, by omission) reported a dangerous multi-owner bridge as
+  // routine dedupe, with no durable signal that reconciliation refused it.
+  const persistedConflicts = persisted?.conflicts || 0;
+  duplicates += Math.max(
+    0,
+    survivors.length - persistedOffers.length - persistedFailed - persistedConflicts
+  );
+  // Bounded, sanitized sample (company/title/url only, cap 10) of the
+  // rejected conflict offers — enough to point a caller at what needs
+  // manual reconciliation without the summary carrying full offer bodies.
+  const conflictOffers = (persisted?.conflictOffers || []).slice(0, 10).map((offer) => ({
+    company: offer?.company || null,
+    title: offer?.title || null,
+    url: offer?.url || null,
+  }));
 
   return {
     searched: selected.length,
@@ -2591,10 +2609,12 @@ export async function runAiWebSearch({
     fetchedPostingDecisions,
     partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
     unreadable: captureFailures.length,
-    ok: persistedFailed === 0,
+    ok: persistedFailed === 0 && persistedConflicts === 0,
     failed: persistedFailed,
     failedIds: persistedFailedIds,
     failedOffers: persisted?.failedOffers || [],
+    conflicts: persistedConflicts,
+    conflictOffers,
     errors: promptErrors,
     warnings,
     validationFailures,

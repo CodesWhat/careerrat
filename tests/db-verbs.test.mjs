@@ -1648,6 +1648,78 @@ test("mergeDuplicateIdentityAlias rejects an offer whose identities resolve to M
   );
 });
 
+test("storedPostingIndex resolves EVERY distinct owner a shared identity key maps to, not just the last one indexed (CR-29 round 8)", () => {
+  // A key derivation fix can make two rows that were previously indexed
+  // under DIFFERENT keys canonicalize to the SAME key going forward — two
+  // legacy Workday rows captured before a requisition-key fix, for
+  // instance. storedPostingIndex used to map each key straight to a single
+  // owning entry, so the SECOND row's scan silently overwrote the FIRST
+  // row's ownership of that key in the index. A bridge offer touching that
+  // key then resolved to exactly one owner and could be merged onto it,
+  // instead of being recognized as ambiguous across both legacy rows.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  // No dedupeCanonical here (matches the round-6 conflict seed above): this
+  // simulates two rows a prior, pre-fix canonicalization already let land
+  // as distinct rows sharing one identity key, not today's dedupe path.
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-legacy-owner-a",
+        company: "Acme",
+        role: "Legacy Role A",
+        link: "https://jobs.example.test/acme/legacy-a",
+        fitScore: 70,
+        aliasKeys: ["req:legacy-shared-req"],
+      },
+      {
+        id: "sourced-legacy-owner-b",
+        company: "Acme",
+        role: "Legacy Role B",
+        link: "https://jobs.example.test/acme/legacy-b",
+        fitScore: 70,
+        aliasKeys: ["req:legacy-shared-req"],
+      },
+    ],
+  });
+  const beforeA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-legacy-owner-a").data
+  );
+  const beforeB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-legacy-owner-b").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+
+  const result = sourcedMergeIdentityAlias({
+    repoRoot,
+    offer: {
+      company: "Acme",
+      title: "Bridge Role",
+      url: "https://jobs.example.test/acme/legacy-bridge",
+      reqId: "legacy-shared-req",
+    },
+  });
+
+  assert.equal(result.merged, false);
+  assert.equal(result.conflict, true, "a key shared by two distinct legacy rows must conflict");
+
+  const afterA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-legacy-owner-a").data
+  );
+  const afterB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-legacy-owner-b").data
+  );
+  assert.deepEqual(afterA, beforeA, "neither legacy owner may be mutated by the ambiguous bridge");
+  assert.deepEqual(afterB, beforeB, "neither legacy owner may be mutated by the ambiguous bridge");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeMeta,
+    "a rejected conflict must not bump meta"
+  );
+});
+
 test("mergeDuplicateIdentityAlias never attaches an unseen alias without company+role corroboration (CR-29 round 6)", () => {
   // A single-owner match on one shared key is not proof the offer describes
   // the SAME posting as the row it matched. Before attaching a NEW identity

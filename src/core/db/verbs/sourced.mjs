@@ -29,23 +29,38 @@ function applicationNote(value) {
     .join("");
 }
 
-// Index every applications[]/sourced[] identity key back to the row it came
-// from (table + id + the row itself), not just a flat membership Set, so a
-// duplicate hit during canonical dedupe can locate and patch the canonical
-// row's aliasKeys[], not merely detect the collision. `ownerKey` is the
-// de-duplication handle computeIdentityAliasMerge's matchingOwners() uses to
-// tell "two keys, same owner" from "two keys, two owners" — a plain
+// Index every applications[]/sourced[] identity key back to the row(s) it
+// came from (table + id + the row itself), not just a flat membership Set,
+// so a duplicate hit during canonical dedupe can locate and patch the
+// canonical row's aliasKeys[], not merely detect the collision. `ownerKey` is
+// the de-duplication handle computeIdentityAliasMerge's matchingOwners() uses
+// to tell "two keys, same owner" from "two keys, two owners" — a plain
 // `${table}:${id}` string here, but any caller building its OWN index (e.g.
 // sourced-persistence.mjs's in-memory reconciliation, which has no table/id
 // to key on) can use anything with the same identity semantics, including
 // the owned object itself.
+//
+// Each key maps to a SET of owning entries, not a single entry (CR-29 round
+// 8): two rows that predate a canonicalization change can legitimately hold
+// keys that now collide (e.g. two Workday rows whose reqId only became
+// identical once the key derivation was fixed). Mapping a key straight to
+// whichever row's scan happened to run LAST silently hid the earlier owner
+// from matchingOwners() below — a bridge offer touching that key then looked
+// like it had exactly one owner and could get merged onto it, instead of
+// being recognized as ambiguous across both.
+function addPostingIndexEntry(index, key, entryRef) {
+  const owners = index.get(key);
+  if (owners) owners.add(entryRef);
+  else index.set(key, new Set([entryRef]));
+}
+
 function storedPostingIndex(db) {
   const index = new Map();
   for (const table of ["applications", "sourced"]) {
     for (const entry of db.prepare(`SELECT id, data FROM ${table}`).all()) {
       const row = JSON.parse(entry.data);
       const entryRef = { table, id: entry.id, row, ownerKey: `${table}:${entry.id}` };
-      for (const key of identityKeysWithAliases(row)) index.set(key, entryRef);
+      for (const key of identityKeysWithAliases(row)) addPostingIndexEntry(index, key, entryRef);
     }
   }
   return index;
@@ -103,11 +118,24 @@ function corroboratesSamePosting(row, duplicate) {
 // identity, since the SAME owner is indexed once per identity key it holds
 // and must collapse back to one hit here regardless of which of its keys
 // matched.
+// A key's stored value is a Set of owning entries for storedPostingIndex
+// (CR-29 round 8, see addPostingIndexEntry above), but sourced-persistence.mjs's
+// in-memory acceptedIndex — the OTHER index this shared function runs
+// over — still maps a key straight to its single owning entry, since an
+// accepted-offers batch never lets two DIFFERENT in-memory owners claim the
+// same key (a conflict rejects the merge before that could happen). Normalize
+// both shapes to an array here rather than force the in-memory index to carry
+// Sets it has no use for.
+function ownersAtKey(index, key) {
+  const value = index.get(key);
+  if (!value) return [];
+  return value instanceof Set ? [...value] : [value];
+}
+
 function matchingOwners(index, duplicate) {
   const owners = new Map();
   for (const key of identityKeysWithAliases(duplicate)) {
-    const entry = index.get(key);
-    if (entry) owners.set(entry.ownerKey, entry);
+    for (const entry of ownersAtKey(index, key)) owners.set(entry.ownerKey, entry);
   }
   return [...owners.values()];
 }
@@ -170,7 +198,7 @@ function mergeDuplicateIdentityAlias(db, index, duplicate) {
   if (conflict || !entry || !additions.length) return { additions: [], conflict };
   entry.row = { ...entry.row, aliasKeys: [...rowAliasKeys(entry.row), ...additions] };
   putRow(db, entry.table, entry.id, entry.row);
-  for (const key of additions) index.set(key, entry);
+  for (const key of additions) addPostingIndexEntry(index, key, entry);
   return { additions, conflict: false };
 }
 
@@ -178,6 +206,21 @@ const ACTIVE_SOURCED_STATUSES = new Set(["sourced", "prospect", "saved", "gated"
 
 function isActiveSourcedStatus(value) {
   return ACTIVE_SOURCED_STATUSES.has(String(value || "sourced").toLowerCase());
+}
+
+const CONFLICT_OFFER_SAMPLE_LIMIT = 10;
+
+// Bounded, sanitized sample of a rejected conflict's source (an offer shape
+// — company/title/url — or a sourced[] row shape — company/role/link) for
+// sourcedUpsertBatch's `conflictOffers` (CR-29 round 8): enough for a caller
+// to point a human at what needs manual reconciliation, without the return
+// value carrying a full offer/row body.
+function conflictOfferSample(source = {}) {
+  return {
+    company: source.company || null,
+    title: source.title || source.role || null,
+    url: source.url || source.link || null,
+  };
 }
 
 // sourcedUpsertBatch({rows, duplicateOffers}) — one sweep's worth of sourced
@@ -233,13 +276,24 @@ export function sourcedUpsertBatch({
     let aliasesMerged = false;
     const acceptedIds = [];
     const failedIds = [];
+    // Bounded sample of the actual rejected offers/rows, not just a count
+    // (CR-29 round 8): mergeDuplicateIdentityAlias already told the caller
+    // ONE of its identities was ambiguous, but until now this verb only
+    // counted that as `conflicts++` — a caller further up the chain (scan
+    // and AI-search summaries) had a total with nothing to point a human at.
+    const conflictOffers = [];
     const postingIndex = dedupeCanonical || hasDuplicateOffers ? storedPostingIndex(db) : null;
     const seenPostingKeys = postingIndex ? new Set(postingIndex.keys()) : null;
     if (hasDuplicateOffers) {
       for (const offer of duplicateOffers) {
         duplicates++;
         const { additions, conflict } = mergeDuplicateIdentityAlias(db, postingIndex, offer);
-        if (conflict) conflicts++;
+        if (conflict) {
+          conflicts++;
+          if (conflictOffers.length < CONFLICT_OFFER_SAMPLE_LIMIT) {
+            conflictOffers.push(conflictOfferSample(offer));
+          }
+        }
         if (additions.length) {
           aliasesMerged = true;
           for (const key of additions) seenPostingKeys.add(key);
@@ -255,7 +309,12 @@ export function sourcedUpsertBatch({
       if (seenPostingKeys && identityKeysWithAliases(row).some((key) => seenPostingKeys.has(key))) {
         duplicates++;
         const { additions, conflict } = mergeDuplicateIdentityAlias(db, postingIndex, row);
-        if (conflict) conflicts++;
+        if (conflict) {
+          conflicts++;
+          if (conflictOffers.length < CONFLICT_OFFER_SAMPLE_LIMIT) {
+            conflictOffers.push(conflictOfferSample(row));
+          }
+        }
         if (additions.length) {
           aliasesMerged = true;
           for (const key of additions) seenPostingKeys.add(key);
@@ -284,6 +343,7 @@ export function sourcedUpsertBatch({
         updated,
         duplicates,
         conflicts,
+        conflictOffers,
         failed,
         acceptedIds,
         failedIds,
@@ -304,6 +364,7 @@ export function sourcedUpsertBatch({
       updated,
       duplicates,
       conflicts,
+      conflictOffers,
       failed,
       acceptedIds,
       failedIds,

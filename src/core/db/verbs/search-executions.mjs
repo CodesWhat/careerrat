@@ -43,11 +43,29 @@ function byId(db, id) {
   return parse(db.prepare("SELECT data FROM search_executions WHERE id = ?").get(id));
 }
 
+function normalizedIdList(value) {
+  return Array.isArray(value) ? value.slice(0, 50).map((id) => String(id)) : undefined;
+}
+
 function normalizedError(error) {
   if (!error) return null;
+  const failedIds = normalizedIdList(error.failedIds);
+  const failedOffers = Array.isArray(error.failedOffers)
+    ? error.failedOffers.slice(0, 50).map((offer) => ({
+        id: offer?.id != null ? String(offer.id) : null,
+        url: offer?.url ? String(offer.url).slice(0, 500) : null,
+      }))
+    : undefined;
   return {
     ...(error.code ? { code: String(error.code).slice(0, 120) } : {}),
     message: String(error.message || error).slice(0, 1000),
+    // Bounded failed-offer recovery detail (CR-29 round 8): kept through
+    // this normalization the same way sourcing-runs.mjs's own
+    // normalizeError already keeps `failedIds`/`failedOffers` on the child
+    // run, so a reload of the durable PARENT search execution can still
+    // name which postings never made it into the DB after a failed lane.
+    ...(failedIds ? { failedIds } : {}),
+    ...(failedOffers ? { failedOffers } : {}),
   };
 }
 
