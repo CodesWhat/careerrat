@@ -20,6 +20,8 @@ import {
   readDiscoverySkips,
   readSetupState,
 } from "../core/agent-guidance.mjs";
+import { detectInstalledRuntimes } from "../core/ai/installed-runtimes.mjs";
+import { loadInstalledRuntimeSelection } from "../core/ai/runtime-selection.mjs";
 import { automationStatus, loadAutomation } from "../core/automation/consent.mjs";
 import { detectSession } from "../core/automation/session.mjs";
 import { sourceConfigGet } from "../core/db/verbs.mjs";
@@ -175,6 +177,19 @@ const modes = loadModes({ root });
 const automationData = loadAutomation({ root }).data;
 const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 
+// Installed AI CLI runtimes (claude, codex, gemini, ...). Detection only —
+// no live probe, matching doctor's fast-by-default posture: this never
+// spawns any of the detected binaries, it only checks what's on disk, via
+// the same registry/detector the desktop app's runtime picker uses
+// (installed-runtimes.mjs's detectInstalledRuntimes). Version and whether
+// the version-boundary probe passed are only ever known for the currently
+// selected runtime, and only when its cached verification still matches the
+// binary found on disk right now (installed-runtimes.mjs only ever writes
+// that cache after a real probe has passed) — never from a fresh probe run
+// here.
+const installedRuntimes = detectInstalledRuntimes({ env: process.env });
+const runtimeSelection = loadInstalledRuntimeSelection(pathCtx);
+
 // Bundled plugins (plugins/<name>/). Informational: a plugin needing a
 // consent capability is unaffected by this block, that's the automation
 // block above. An invalid bundled manifest IS a defect in the shipped
@@ -264,6 +279,17 @@ const result = {
     presence: sessionBrowser.presence.status,
     detail: sessionBrowser.presence.detail,
   },
+  installedRuntimes: installedRuntimes.map((runtime) => {
+    const verification = installedRuntimeCachedVerification(runtime, runtimeSelection);
+    return {
+      id: runtime.id,
+      name: runtime.name,
+      status: installedRuntimeStatusLabel(runtime),
+      version: verification?.version ?? null,
+      boundaryProbePassed: Boolean(verification),
+      boundaryProbeCheckedAt: verification?.checkedAt ?? null,
+    };
+  }),
   plugins: {
     bundled: pluginVerification.plugins.length,
     runnable: pluginVerification.plugins.length - invalidPlugins.length,
@@ -405,6 +431,10 @@ if (!automation.exists) {
   );
   console.log("");
 }
+
+console.log("Installed AI runtimes:");
+printInstalledRuntimes(installedRuntimes, runtimeSelection);
+console.log("");
 
 {
   const runnable = pluginVerification.plugins.length - invalidPlugins.length;
@@ -663,4 +693,52 @@ function printDiscoveryPipeline(searches, companies, discoverySkips = []) {
 
 function printAgentGuidance(guidance) {
   for (const line of formatAgentGuidanceLines(guidance)) console.log(line);
+}
+
+function installedRuntimeStatusLabel(runtime) {
+  if (!runtime.available) return "not installed";
+  return runtime.supported ? "supported engine" : "diagnostics only";
+}
+
+// Cached verification is only ever trustworthy for the runtime it was
+// written for, and only while it still matches the exact binary
+// detectInstalledRuntimes just found on disk — a different path or a
+// changed binaryFingerprint means the cached probe no longer describes
+// what's actually installed, so it's treated as unknown rather than stale.
+function installedRuntimeCachedVerification(runtime, selection) {
+  const verification = selection?.verification;
+  if (
+    !verification ||
+    selection.runtimeId !== runtime.id ||
+    !runtime.realPath ||
+    !runtime.binaryFingerprint ||
+    verification.realPath !== runtime.realPath ||
+    verification.binaryFingerprint !== runtime.binaryFingerprint.toLowerCase()
+  ) {
+    return null;
+  }
+  return verification;
+}
+
+function printInstalledRuntimes(runtimes, selection) {
+  for (const runtime of runtimes) {
+    if (!runtime.available) {
+      console.log(`- ${runtime.id} (${runtime.name}): not installed.`);
+      continue;
+    }
+    if (!runtime.supported) {
+      console.log(
+        `- ${runtime.id} (${runtime.name}): diagnostics only, installed - not a supported CareerRat engine yet.`
+      );
+      continue;
+    }
+    const verification = installedRuntimeCachedVerification(runtime, selection);
+    const versionText = verification ? `v${verification.version}` : "version unknown";
+    const boundaryText = verification
+      ? `boundary probe passed (checked ${verification.checkedAt})`
+      : "boundary probe not yet run";
+    console.log(
+      `- ${runtime.id} (${runtime.name}): supported engine, installed ${versionText}, ${boundaryText}.`
+    );
+  }
 }
