@@ -7,12 +7,15 @@ import { createHash } from "node:crypto";
 import {
   accessSync,
   chmodSync,
+  closeSync,
   constants,
   copyFileSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -661,6 +664,37 @@ const COMPLETION_SMOKE_SCHEMA = Object.freeze({
   required: ["receipt"],
 });
 
+// Discovery only checks the executable bit (X_OK), which an executable FIFO
+// or other special file passes just as a real binary does. Fingerprinting is
+// the first place that would actually read that path's content, so it's the
+// place a FIFO with no writer would block forever on a plain readFileSync.
+// O_NONBLOCK makes the open itself return immediately instead of waiting for
+// a writer to connect; fstat-ing the resulting descriptor then proves what
+// was actually opened before any bytes are read. Returns null (never
+// throws) for anything that isn't a regular file, so callers treat a FIFO,
+// directory, or device the same as an unreadable path: unknown identity, not
+// a hang and not a fabricated fingerprint.
+function readRegularFileBytes(path) {
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK || 0));
+  } catch {
+    return null;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return null;
+    return readFileSync(fd);
+  } catch {
+    return null;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      // fd already invalid; nothing left to release.
+    }
+  }
+}
+
 function runtimeBinaryFingerprint(
   path,
   {
@@ -698,7 +732,9 @@ function runtimeBinaryFingerprint(
       }
       return hash.digest("hex");
     }
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
+    const bytes = readRegularFileBytes(path);
+    if (bytes === null) return null;
+    return createHash("sha256").update(bytes).digest("hex");
   } catch {
     return null;
   }

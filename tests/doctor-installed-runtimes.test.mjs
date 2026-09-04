@@ -620,6 +620,80 @@ test("doctor does not read the binary content of an unselected runtime", (t) => 
   }
 });
 
+// Codex adversarial finding (round 7): the previous FIFO regression only
+// covers an unselected runtime, which fingerprintId already skips reading
+// regardless of file type. The cached *selected* runtime's binary is the
+// one detection is asked to fingerprint, and discovery's executable-bit
+// check (X_OK) passes for a FIFO exactly the same as for a real binary — so
+// replacing the selected launcher path with an executable FIFO that has no
+// writer connected used to block a normal (non guidance-only) Doctor run
+// forever the moment it tried to read the file for hashing. Both
+// fingerprinting call sites doctor.mjs's normal path can reach —
+// detectInstalledRuntimes and installedRuntimeExecutionIdentity — share the
+// one runtimeBinaryFingerprint helper, so this proves the fix at the one
+// place it lives: open nonblocking, fstat the descriptor, and refuse to
+// read anything that isn't a regular file.
+test("doctor completes within a bounded timeout and reports an executable FIFO selected runtime as unverified", (t) => {
+  if (process.platform === "win32") {
+    t.skip("mkfifo is POSIX-only");
+    return;
+  }
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  try {
+    const claudeFifo = join(registry, "claude");
+    const mkfifoResult = spawnSync("mkfifo", [claudeFifo]);
+    if (mkfifoResult.status !== 0) {
+      t.skip("mkfifo unavailable on this host");
+      return;
+    }
+    chmodSync(claudeFifo, 0o755);
+
+    // A cached selection pointing at the FIFO. Its fingerprint can never be
+    // confirmed (the FIFO is never read), so this also proves the mismatch
+    // is reported as unknown rather than treated as still current.
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        path: claudeFifo,
+        realPath: realpathSync(claudeFifo),
+        version: "9.9.9",
+        binaryFingerprint: "a".repeat(64),
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        checkedAt: new Date().toISOString(),
+      },
+    });
+
+    const result = spawnSync(process.execPath, [join(ROOT, "src/cli/doctor.mjs"), "--json"], {
+      cwd: ROOT,
+      env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
+      encoding: "utf8",
+      timeout: 5000,
+    });
+
+    assert.equal(
+      result.signal,
+      null,
+      "doctor must not hang reading the selected runtime's binary content"
+    );
+    assert.ok(result.stdout, result.stderr || "doctor produced no stdout");
+    const data = JSON.parse(result.stdout);
+    const claude = data.installedRuntimes.find((r) => r.id === "claude");
+    assert.ok(claude, "expected a claude entry in installedRuntimes");
+    assert.equal(claude.status, "supported engine");
+    assert.equal(claude.version, null, "an executable FIFO must never verify as a known version");
+    assert.equal(claude.boundaryProbePassed, false);
+    assert.equal(claude.boundaryProbeCheckedAt, null);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+  }
+});
+
 // Codex next-steps: detection never spawns a candidate binary, it only
 // checks what's on disk. A fake binary that WOULD prove itself if executed
 // (by writing a marker file) makes that assertion concrete instead of just
