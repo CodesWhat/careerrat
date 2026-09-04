@@ -268,17 +268,32 @@ test("doctor reports an unknown cache, never a stale version, when the cached ve
 // launcher path to match too. Two PATH aliases that both resolve (via
 // realpath) to the identical binary must not let Doctor report a passed
 // cache the router would reject.
+//
+// Codex adversarial finding (round 5): a passed cache here would only ever
+// be wrong in a way that matters if it also let the mismatched-path binary
+// get executed. The binary is side-effecting (it writes a marker file when
+// run) so this proves that too, not just the reported status fields — if
+// the path comparison in doctor.mjs's nonExecutingIdentityMatchesCache ever
+// moves after the version spawn, the marker starts appearing.
 test("doctor treats a cached verification as stale when the detected launcher path is a different alias of the same binary", () => {
   const home = tempHome();
   const targetDir = tempFakeRegistry();
   const registryA = tempFakeRegistry();
   const registryB = tempFakeRegistry();
+  const markerDir = mkdtempSync(join(tmpdir(), "careerrat-doctor-path-alias-no-exec-"));
+  const markerFile = join(markerDir, "executed.marker");
   try {
     // One real binary. Two PATH aliases (symlinks in two different
     // directories) both resolve it via realpath to the identical file, so
     // realPath and binaryFingerprint are indistinguishable between them —
-    // only the launcher path detection actually finds differs.
-    const targetPath = writeFakeBinary(targetDir, "claude-real");
+    // only the launcher path detection actually finds differs. It writes a
+    // marker file if run, so a doctor run that invokes it (instead of
+    // treating the path mismatch as disqualifying) is provable.
+    const targetPath = writeFakeBinary(
+      targetDir,
+      "claude-real",
+      `#!/bin/sh\necho executed > "${markerFile}"\necho fake\n`
+    );
     const realPath = realpathSync(targetPath);
     const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
     const claudePathA = join(registryA, "claude");
@@ -312,11 +327,17 @@ test("doctor treats a cached verification as stale when the detected launcher pa
     assert.equal(claude.version, null, "a different launcher path must invalidate the cache");
     assert.equal(claude.boundaryProbePassed, false);
     assert.equal(claude.boundaryProbeCheckedAt, null);
+    assert.equal(
+      existsSync(markerFile),
+      false,
+      "doctor must never execute a binary whose launcher path mismatches the cache"
+    );
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(targetDir, { recursive: true, force: true });
     rmSync(registryA, { recursive: true, force: true });
     rmSync(registryB, { recursive: true, force: true });
+    rmSync(markerDir, { recursive: true, force: true });
   }
 });
 
@@ -475,11 +496,22 @@ test("doctor --json reports an indeterminate cached boundary probe as unknown, n
 // check requires BOTH to match, not just content. Fabricating a mismatched
 // realPath (rather than physically relocating the binary) isolates that one
 // field.
+//
+// Codex adversarial finding (round 5): the binary is side-effecting (it
+// writes a marker file when run) so a doctor run that skips straight to the
+// version spawn without checking realPath first is provable, not just
+// assumed from the reported fields staying null.
 test("doctor --json treats a cached verification as stale when only realPath has changed, even with a matching fingerprint", () => {
   const home = tempHome();
   const registry = tempFakeRegistry();
+  const markerDir = mkdtempSync(join(tmpdir(), "careerrat-doctor-realpath-mismatch-no-exec-"));
+  const markerFile = join(markerDir, "executed.marker");
   try {
-    const claudePath = writeFakeBinary(registry, "claude");
+    const claudePath = writeFakeBinary(
+      registry,
+      "claude",
+      `#!/bin/sh\necho executed > "${markerFile}"\necho fake\n`
+    );
     const realPath = realpathSync(claudePath);
     const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
     writeInstalledRuntimeSelection({
@@ -507,9 +539,15 @@ test("doctor --json treats a cached verification as stale when only realPath has
     assert.equal(claude.version, null);
     assert.equal(claude.boundaryProbePassed, false);
     assert.equal(claude.boundaryProbeCheckedAt, null);
+    assert.equal(
+      existsSync(markerFile),
+      false,
+      "doctor must never execute a binary whose realPath mismatches the cache"
+    );
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(registry, { recursive: true, force: true });
+    rmSync(markerDir, { recursive: true, force: true });
   }
 });
 

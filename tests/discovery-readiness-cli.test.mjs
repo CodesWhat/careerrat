@@ -6,12 +6,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourceConfigPut } from "../src/core/db/verbs.mjs";
 
@@ -630,6 +632,15 @@ test("CLI output lines that mention flags use ASCII hyphen separators", () => {
 // forever with no writer connected. If next ever stops passing
 // --guidance-only, this hangs until spawnSync's timeout kills it instead of
 // completing.
+//
+// Codex adversarial finding (round 5): a fresh test home has no cached
+// runtime verification, so without a cache in place doctor never fingerprints
+// anything regardless of --guidance-only (runtimeFingerprintId only gets set
+// when a cached selection exists) — the regression passed even with the flag
+// removed from next.mjs. A cached Claude selection pointing at the FIFO
+// forces doctor to actually attempt to fingerprint it once --guidance-only
+// no longer skips detection, so removing the flag now hangs this test until
+// spawnSync's timeout instead of passing silently.
 test("careerrat next runs doctor with --guidance-only and never hangs reading a detected runtime binary", (t) => {
   if (process.platform === "win32") {
     t.skip("mkfifo is POSIX-only");
@@ -645,6 +656,25 @@ test("careerrat next runs doctor with --guidance-only and never hangs reading a 
       return;
     }
     chmodSync(claudeFifo, 0o755);
+
+    // A valid cached Claude selection pointing at the FIFO, so
+    // detectInstalledRuntimes is asked to fingerprint "claude" the moment
+    // --guidance-only stops short-circuiting detection entirely.
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        path: claudeFifo,
+        realPath: realpathSync(claudeFifo),
+        version: "9.9.9",
+        binaryFingerprint: "a".repeat(64),
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        checkedAt: new Date().toISOString(),
+      },
+    });
 
     const result = spawnSync(process.execPath, [join(ROOT, "src/cli/next.mjs"), "--json"], {
       cwd: ROOT,
