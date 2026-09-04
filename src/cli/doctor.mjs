@@ -214,11 +214,20 @@ const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 // verification to validate in the first place. detectInstalledRuntimes's
 // fingerprintId option makes every other detected executable skip the read
 // entirely, and the version check below is scoped to that same one runtime.
+// deferSelectedFingerprint additionally skips hashing the selected runtime
+// itself here: that single hash happens below, at the execution boundary,
+// immediately before the `--version` spawn it gates — not here during
+// discovery, where a hash would sit unused across a window a same-path
+// replacement could exploit before the spawn ever runs.
 const runtimeSelection = guidanceOnly ? null : loadInstalledRuntimeSelection(pathCtx);
 const runtimeFingerprintId = runtimeSelection?.verification ? runtimeSelection.runtimeId : null;
 const installedRuntimes = guidanceOnly
   ? []
-  : detectInstalledRuntimes({ env: process.env, fingerprintId: runtimeFingerprintId });
+  : detectInstalledRuntimes({
+      env: process.env,
+      fingerprintId: runtimeFingerprintId,
+      deferSelectedFingerprint: true,
+    });
 
 // Live version of the selected runtime, established fresh (not read from
 // the cache) so a cached verification can be compared against what's
@@ -238,28 +247,29 @@ const selectedRuntimeForVerification =
 // file ever compares it against the cache, so an in-place replacement or a
 // PATH-shadowed executable would run under the user's account even though
 // Doctor goes on to report the cache as stale. Detection already resolved
-// path, realPath, and binaryFingerprint without executing anything, so
-// those non-executing fields are checked against the cached verification
-// first; the live --version spawn only happens once they already agree.
+// path and realPath without executing or hashing anything (the fingerprint
+// itself is deferred above), so those two non-executing fields are checked
+// against the cached verification first; the live --version spawn only
+// happens once they already agree, and even then only after
+// installedRuntimeExecutionIdentity has hashed the binary itself, right
+// there, and confirmed that fresh digest still matches the cached
+// fingerprint passed in as expectedFingerprint below. A same-path
+// replacement made at any point before that hash runs is caught there
+// instead of being handed to `--version` on trust.
 const cachedRuntimeVerification = runtimeFingerprintId ? runtimeSelection.verification : null;
-const nonExecutingIdentityMatchesCache = Boolean(
+const nonExecutingPathMatchesCache = Boolean(
   selectedRuntimeForVerification &&
     cachedRuntimeVerification &&
     selectedRuntimeForVerification.path === cachedRuntimeVerification.path &&
-    selectedRuntimeForVerification.realPath === cachedRuntimeVerification.realPath &&
-    selectedRuntimeForVerification.binaryFingerprint === cachedRuntimeVerification.binaryFingerprint
+    selectedRuntimeForVerification.realPath === cachedRuntimeVerification.realPath
 );
-// Detection (above) already fingerprinted this exact path once to build
-// nonExecutingIdentityMatchesCache — handing it back in as
-// precomputedFingerprint lets the identity helper reuse that hash instead
-// of reading and hashing the same (possibly hundreds-of-MB) binary again.
-const selectedRuntimeCurrentIdentity = nonExecutingIdentityMatchesCache
+const selectedRuntimeCurrentIdentity = nonExecutingPathMatchesCache
   ? installedRuntimeExecutionIdentity(selectedRuntimeForVerification, {
       env: process.env,
-      precomputedFingerprint: {
-        path: selectedRuntimeForVerification.path,
-        realPath: selectedRuntimeForVerification.realPath,
-        binaryFingerprint: selectedRuntimeForVerification.binaryFingerprint,
+      expectedFingerprint: {
+        path: cachedRuntimeVerification.path,
+        realPath: cachedRuntimeVerification.realPath,
+        binaryFingerprint: cachedRuntimeVerification.binaryFingerprint,
       },
     })
   : null;

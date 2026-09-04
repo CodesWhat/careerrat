@@ -31,7 +31,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { INSTALLED_RUNTIME_DEFINITIONS } from "../src/core/ai/installed-runtimes.mjs";
+import {
+  detectInstalledRuntimes,
+  INSTALLED_RUNTIME_DEFINITIONS,
+  installedRuntimeExecutionIdentity,
+} from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -886,6 +890,81 @@ test("doctor never executes a replacement binary whose identity mismatches the c
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+    rmSync(markerDir, { recursive: true, force: true });
+  }
+});
+
+// Codex adversarial finding (round 10): the round 9 optimization above
+// (detectInstalledRuntimes with fingerprintId, handed straight into
+// installedRuntimeExecutionIdentity as a reused precomputed fingerprint)
+// reopened exactly the race that fix was meant to close. Detection hashed
+// the selected binary once during inventory discovery; the identity check
+// then trusted that digest instead of reading the file again immediately
+// before the `--version` spawn. A same-path replacement landing in the
+// window between those two moments left the reused digest matching bytes
+// that no longer existed at that path, so the replacement ran under the
+// user's account before Doctor ever got a chance to notice.
+//
+// The fix moves the one hash entirely to the execution boundary:
+// detectInstalledRuntimes defers hashing the selected runtime
+// (deferSelectedFingerprint), and installedRuntimeExecutionIdentity hashes
+// fresh, right there, immediately before it would spawn `--version` —
+// refusing to spawn at all when that fresh digest disagrees with
+// expectedFingerprint. This reproduces the race directly by replacing the
+// binary at the exact same launcher path in the window between the
+// detection call and the identity call, mirroring doctor.mjs's own
+// sequence, and asserts the replacement's marker is never written.
+test("installedRuntimeExecutionIdentity refuses to spawn a replacement binary swapped in after detection", () => {
+  const registry = tempFakeRegistry();
+  const markerDir = mkdtempSync(join(tmpdir(), "careerrat-doctor-toctou-no-exec-"));
+  const markerFile = join(markerDir, "executed.marker");
+  try {
+    const claudePath = writeVersionedFakeBinary(registry, "claude", "9.9.9");
+    const realPath = realpathSync(claudePath);
+    const originalDigest = createHash("sha256").update(readFileSync(claudePath)).digest("hex");
+
+    // Mirrors doctor.mjs's own detection call exactly: fingerprintId scopes
+    // hashing to the selected runtime, deferSelectedFingerprint skips even
+    // that hash here.
+    const inventory = detectInstalledRuntimes({
+      env: fakeRegistryEnv(registry),
+      fingerprintId: "claude",
+      deferSelectedFingerprint: true,
+    });
+    const claude = inventory.find((r) => r.id === "claude");
+    assert.ok(claude?.available);
+    assert.equal(
+      claude.binaryFingerprint,
+      null,
+      "detection must defer hashing the selected binary to the execution boundary"
+    );
+
+    // A cached verification from an earlier, honest Doctor run: it recorded
+    // the original digest for this exact path/realPath.
+    const expectedFingerprint = { path: claudePath, realPath, binaryFingerprint: originalDigest };
+
+    // Simulate an atomic same-path replacement landing in the window
+    // between the detection call above and the identity check below —
+    // exactly the race window round 9's reused digest left open.
+    writeFakeBinary(registry, "claude", `#!/bin/sh\necho executed > "${markerFile}"\necho 9.9.9\n`);
+
+    const identity = installedRuntimeExecutionIdentity(claude, {
+      env: fakeRegistryEnv(registry),
+      expectedFingerprint,
+    });
+
+    assert.equal(
+      identity,
+      null,
+      "a binary replaced after detection must come back as an unverified identity"
+    );
+    assert.equal(
+      existsSync(markerFile),
+      false,
+      "installedRuntimeExecutionIdentity must never spawn a binary swapped in after detection"
+    );
+  } finally {
     rmSync(registry, { recursive: true, force: true });
     rmSync(markerDir, { recursive: true, force: true });
   }

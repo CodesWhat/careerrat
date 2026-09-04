@@ -529,13 +529,22 @@ test("detectInstalledRuntimes with fingerprintId only hashes the matching runtim
 // runtime once, then handed the same runtime straight to
 // installedRuntimeExecutionIdentity, which used to hash the identical file
 // again from scratch — roughly double the read/hash cost of every cached
-// Doctor run for whatever CLI happens to be selected. This proves the fix
-// (installedRuntimeExecutionIdentity's precomputedFingerprint option) at the
-// unit level, mirroring doctor.mjs's exact call sequence, with a counting
-// wrapper around the real fingerprint implementation injected through the
-// existing runtimeBinaryFingerprintImpl override point rather than
-// monkeypatching the module.
-test("detectInstalledRuntimes and installedRuntimeExecutionIdentity fingerprint a cached selected runtime exactly once", () => {
+// Doctor run for whatever CLI happens to be selected.
+//
+// Round 10 found that the first fix (installedRuntimeExecutionIdentity
+// reusing a fingerprint detection computed moments earlier) reopened a
+// pre-execution identity race: a same-path replacement between detection's
+// hash and the later `--version` spawn would leave that reused digest
+// stale, authorizing the replacement to run unverified. The single hash is
+// still exactly one per Doctor run, but it now lives entirely at the
+// execution boundary — detection defers it (deferSelectedFingerprint), and
+// installedRuntimeExecutionIdentity hashes fresh right before it would
+// spawn `--version`, comparing that digest against expectedFingerprint
+// before ever reaching the spawn. This proves the count and the boundary
+// with a counting wrapper around the real fingerprint implementation
+// injected through the existing runtimeBinaryFingerprintImpl override
+// point rather than monkeypatching the module.
+test("detectInstalledRuntimes defers the selected runtime's hash to installedRuntimeExecutionIdentity, which fingerprints it exactly once", () => {
   const root = tempRoot();
   const claudePath = join(root, "claude");
   executable(claudePath);
@@ -551,30 +560,36 @@ test("detectInstalledRuntimes and installedRuntimeExecutionIdentity fingerprint 
       homeDir: root,
       searchDirs: [root],
       fingerprintId: "claude",
+      deferSelectedFingerprint: true,
       runtimeBinaryFingerprintImpl: countingFingerprintImpl,
     });
     const claude = inventory.find(({ id }) => id === "claude");
-    assert.match(claude.binaryFingerprint, /^[a-f0-9]{64}$/);
-    assert.equal(fingerprintCalls, 1, "detection itself must hash the selected binary once");
+    assert.equal(claude.binaryFingerprint, null, "detection must defer the selected binary's hash");
+    assert.equal(
+      fingerprintCalls,
+      0,
+      "detection itself must not hash the deferred selected binary"
+    );
 
+    const expectedFingerprint = createHash("sha256").update(readFileSync(claudePath)).digest("hex");
     const identity = installedRuntimeExecutionIdentity(
       { ...claude, version: "2.1.241" },
       {
         platform: "darwin",
         runtimeBinaryFingerprintImpl: countingFingerprintImpl,
-        precomputedFingerprint: {
+        expectedFingerprint: {
           path: claude.path,
           realPath: claude.realPath,
-          binaryFingerprint: claude.binaryFingerprint,
+          binaryFingerprint: expectedFingerprint,
         },
       }
     );
     assert.ok(identity, "expected a resolved execution identity");
-    assert.equal(identity.binaryFingerprint, claude.binaryFingerprint);
+    assert.equal(identity.binaryFingerprint, expectedFingerprint);
     assert.equal(
       fingerprintCalls,
       1,
-      "a cached selected runtime must be fingerprinted once per Doctor run, not twice"
+      "a cached selected runtime must be fingerprinted exactly once per Doctor run, at the execution boundary"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

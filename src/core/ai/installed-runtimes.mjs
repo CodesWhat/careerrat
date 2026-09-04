@@ -424,14 +424,25 @@ export function findInstalledExecutable(
 // and SHA-256 hashing a full binary is not cheap across hundreds of MB of
 // installed CLIs, so a caller that only cares about one runtime's cached
 // verification should never pay for the others.
+//
+// `deferSelectedFingerprint` additionally skips hashing the `fingerprintId`
+// match itself. Doctor's normal path needs that runtime's content verified
+// exactly once, immediately before the version spawn it's about to
+// authorize — not once here during inventory discovery and reused later,
+// which leaves a window between the two reads for a same-path replacement
+// to swap in unverified bytes. installedRuntimeExecutionIdentity's
+// `expectedFingerprint` option is where that single hash now happens.
 export function detectInstalledRuntimes(options = {}) {
   const restrictFingerprint = Object.hasOwn(options, "fingerprintId");
   const fingerprintId = options.fingerprintId ?? null;
+  const deferSelectedFingerprint = options.deferSelectedFingerprint === true;
   const fingerprintImpl = options.runtimeBinaryFingerprintImpl ?? runtimeBinaryFingerprint;
   return INSTALLED_RUNTIME_DEFINITIONS.map((definition) => {
     const path = findInstalledExecutable(definition.binaries, options);
     const realPath = path ? existingCanonicalPath(path) : null;
-    const shouldFingerprint = !restrictFingerprint || definition.id === fingerprintId;
+    const isSelectedMatch = restrictFingerprint && definition.id === fingerprintId;
+    const shouldFingerprint =
+      (!restrictFingerprint || isSelectedMatch) && !(isSelectedMatch && deferSelectedFingerprint);
     const binaryFingerprint =
       realPath && shouldFingerprint ? fingerprintImpl(realPath, options) : null;
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
@@ -752,15 +763,17 @@ export function installedRuntimeExecutionIdentity(
     runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
     runtimeBinaryFingerprintImpl = runtimeBinaryFingerprint,
     requireCurrentExecutable = false,
-    // A caller that just fingerprinted this exact path moments ago (Doctor,
-    // via detectInstalledRuntimes with a fingerprintId) can pass that result
-    // back in here instead of paying for a second full-file hash: reused
-    // only when requireCurrentExecutable is off (that path always demands a
-    // fresh read, by design) and only when the path this call resolves to
-    // right now still matches what the caller fingerprinted — a mismatch
-    // means the target moved since detection ran, so it falls back to
-    // hashing it fresh rather than trusting stale data.
-    precomputedFingerprint = null,
+    // A fingerprint the caller already trusts for this exact runtime
+    // (Doctor's cached verification, say). When supplied, it is never
+    // reused in place of hashing — the fresh hash below always runs first —
+    // it is only ever a comparison target: if the digest just read from
+    // disk right now doesn't match it (or path/realPath moved), this
+    // returns null (unverified identity) before ever reaching the
+    // `--version` spawn below. That closes the window a reused,
+    // already-stale digest would leave open: a same-path replacement
+    // between whenever expectedFingerprint was established and this call
+    // must be caught here, not authorized to run.
+    expectedFingerprint = null,
   } = {}
 ) {
   const path = String(runtime?.path || "").trim();
@@ -768,17 +781,20 @@ export function installedRuntimeExecutionIdentity(
   const currentRealPath = existingCanonicalPath(path);
   const realPath =
     currentRealPath || (requireCurrentExecutable ? "" : String(runtime?.realPath || "").trim());
-  const canReusePrecomputedFingerprint =
-    !requireCurrentExecutable &&
-    Boolean(currentRealPath) &&
-    String(precomputedFingerprint?.path || "").trim() === path &&
-    String(precomputedFingerprint?.realPath || "").trim() === currentRealPath &&
-    /^[a-f0-9]{64}$/.test(String(precomputedFingerprint?.binaryFingerprint || ""));
-  const resolvedFingerprint = canReusePrecomputedFingerprint
-    ? String(precomputedFingerprint.binaryFingerprint).trim().toLowerCase()
-    : currentRealPath
-      ? runtimeBinaryFingerprintImpl(currentRealPath, { env, platform, runtimeIdentityFilesImpl })
-      : null;
+  const resolvedFingerprint = currentRealPath
+    ? runtimeBinaryFingerprintImpl(currentRealPath, { env, platform, runtimeIdentityFilesImpl })
+    : null;
+  if (expectedFingerprint) {
+    const expectedFingerprintMatches =
+      Boolean(currentRealPath) &&
+      String(expectedFingerprint.path || "").trim() === path &&
+      String(expectedFingerprint.realPath || "").trim() === currentRealPath &&
+      /^[a-f0-9]{64}$/.test(String(resolvedFingerprint || "")) &&
+      String(expectedFingerprint.binaryFingerprint || "")
+        .trim()
+        .toLowerCase() === resolvedFingerprint;
+    if (!expectedFingerprintMatches) return null;
+  }
   const requiresResolvedChain = platform === "win32" && /\.(?:bat|cmd)$/i.test(String(realPath));
   const binaryFingerprint =
     resolvedFingerprint ||
