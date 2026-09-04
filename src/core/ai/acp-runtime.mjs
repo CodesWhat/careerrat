@@ -92,23 +92,49 @@ function credentialSuffixed(base) {
   return /_(KEY|SECRET|CREDENTIAL|CREDENTIALS)$/.test(base) ? base : `${base}_API_KEY`;
 }
 
-// Candidate variable names for a credential method, most specific first: any
-// name the agent spelled out, then the method id, then the provider it names in
-// _meta, then the runtime id. `gemini-api-key` resolves to GEMINI_API_KEY,
-// which is the variable the CLI itself reads.
-function credentialEnvironmentKeys(method, runtimeId) {
-  const spelled = [...authMethodText(method).matchAll(ENV_NAME_PATTERN)].map(([name]) => name);
-  const derived = [
-    environmentName(method?.id),
-    environmentName(method?._meta?.["api-key"]?.provider),
-    environmentName(runtimeId),
-  ].map(credentialSuffixed);
-  return [...new Set([...spelled, ...derived].filter(Boolean))];
-}
-
 function environmentKeySet(env, name) {
   const value = env?.[name];
   return typeof value === "string" && value.trim() !== "";
+}
+
+// Registry-owned per-method requirements, not inferred from a provider name:
+// the exact variables an ACP method's own CLI reads. A provider-name guess
+// previously mapped Gemini's `_meta['api-key'].provider === 'google'` to
+// GOOGLE_API_KEY for `gemini-api-key`, but Gemini CLI 0.58 reserves
+// GOOGLE_API_KEY for `vertex-ai` and reads GEMINI_API_KEY for
+// `gemini-api-key`; a valid Vertex setup was selecting the wrong method and
+// failing. Each entry lists alternative requirement groups (OR of ANDs): the
+// method is satisfied once every variable in at least one group is set.
+const ACP_METHOD_CREDENTIAL_REQUIREMENTS = Object.freeze({
+  "gemini-api-key": Object.freeze([Object.freeze(["GEMINI_API_KEY"])]),
+  "vertex-ai": Object.freeze([
+    Object.freeze(["GOOGLE_API_KEY"]),
+    Object.freeze(["GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"]),
+  ]),
+});
+
+// Candidate requirement groups for a credential method. A method with a
+// registry entry above uses it exactly; anything else falls back to
+// evidence-derived single-variable groups, most specific first: any name the
+// agent spelled out, then the method id, then the runtime id. `fixture-api-key`
+// resolves to FIXTURE_API_KEY this way, which is the variable a CLI without a
+// registry entry is most likely to read.
+function credentialRequirementGroups(method, runtimeId) {
+  const explicit = ACP_METHOD_CREDENTIAL_REQUIREMENTS[method?.id];
+  if (explicit) return explicit;
+  const spelled = [...authMethodText(method).matchAll(ENV_NAME_PATTERN)].map(([name]) => name);
+  const derived = [environmentName(method?.id), environmentName(runtimeId)].map(credentialSuffixed);
+  return [...new Set([...spelled, ...derived].filter(Boolean))].map((name) => [name]);
+}
+
+function credentialEnvironmentKeys(method, runtimeId) {
+  return [...new Set(credentialRequirementGroups(method, runtimeId).flat())];
+}
+
+function credentialSatisfied(env, method, runtimeId) {
+  return credentialRequirementGroups(method, runtimeId).some((group) =>
+    group.every((name) => environmentKeySet(env, name))
+  );
 }
 
 // Preference order: a credential method the environment already satisfies, then
@@ -145,7 +171,7 @@ export function selectAcpAuthMethod({
       method,
       credential,
       environmentKeys,
-      satisfied: environmentKeys.some((name) => environmentKeySet(env, name)),
+      satisfied: credential && credentialSatisfied(env, method, runtimeId),
       interactive: isInteractiveAuthMethod(method),
     };
   });
@@ -506,27 +532,44 @@ async function executeAcpRuntime({
         });
         initialization = initialized;
         const authMethods = Array.isArray(initialized?.authMethods) ? initialized.authMethods : [];
-        // An agent can hold its key on disk as well as in the environment, and
-        // the protocol never says which. So the unsatisfied credential method is
-        // still attempted, and only the agent's own refusal is turned into the
-        // advice, which keeps a working on-disk setup working.
+        // An agent can hold its key on disk, in the environment, or in a
+        // cached sign-in the protocol never exposes, so the first session is
+        // requested with whatever state the runtime already has. Only the
+        // agent's own -32000 (auth required) response means CareerRat has to
+        // pick a method and authenticate; a probe that would already succeed
+        // on a cached login never calls authenticate at all, so a working
+        // sign-in is never swapped out from under a headless run.
         let credentialKeys = [];
         const withCredentialAdvice = async (run) => {
-          if (!credentialKeys.length) return run();
           try {
             return await run();
           } catch (error) {
-            // A rejected ACP request carries the numeric JSON-RPC code; only a
-            // CareerRat runtime code (a string) is already the right answer.
-            if (typeof error?.code === "string") throw error;
-            throw runtimeError(
-              `${runtime.name || runtime.id} needs an API key before CareerRat can use it. Set ${credentialKeys[0]}, then check again.`,
-              "RUNTIME_AUTH_REQUIRED",
-              { runtimeId: runtime.id, authEnvironmentKeys: credentialKeys, cause: error }
-            );
+            // A rejected ACP request carries the numeric JSON-RPC code; only
+            // -32000 means authentication is required. Every other failure
+            // (bad params, an internal error, cancellation, ...) passes
+            // through unchanged, with its own code and message, so it is
+            // never masked as a credential problem.
+            if (error?.code !== -32000) throw error;
+            const message = credentialKeys.length
+              ? `${runtime.name || runtime.id} needs an API key before CareerRat can use it. Set ${credentialKeys[0]}, then check again.`
+              : `${runtime.name || runtime.id} needs authentication before CareerRat can use it. Check its sign-in status, then try again.`;
+            throw runtimeError(message, "RUNTIME_AUTH_REQUIRED", {
+              runtimeId: runtime.id,
+              authEnvironmentKeys: credentialKeys,
+              cause: error,
+            });
           }
         };
-        if (authMethods.length) {
+        const requestSession = () =>
+          context.request(acp.methods.agent.session.new, {
+            cwd,
+            mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
+          });
+        let session;
+        try {
+          session = await requestSession();
+        } catch (error) {
+          if (error?.code !== -32000) throw error;
           const selection = selectAcpAuthMethod({
             authMethods,
             env,
@@ -546,13 +589,8 @@ async function executeAcpRuntime({
               { runtimeId: runtime.id }
             );
           }
+          session = await withCredentialAdvice(requestSession);
         }
-        const session = await withCredentialAdvice(() =>
-          context.request(acp.methods.agent.session.new, {
-            cwd,
-            mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
-          })
-        );
         sessionId = session.sessionId;
         if (probeOnly) return { stopReason: "probe_complete" };
         return context.request(acp.methods.agent.session.prompt, {
