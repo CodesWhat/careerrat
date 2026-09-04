@@ -255,7 +255,21 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
   let staleKeyTree;
   try {
     const actualMode = nodeModulesPresent && !lockOnly;
-    tree = actualMode ? await arb.loadActual() : await arb.loadVirtual();
+    // { forceActual: true } (option read off the installed @npmcli/arborist
+    // 10.0.2 source, lib/arborist/load-actual.js lines 96 and 125-126:
+    // "if forceActual is set, don't even try the hidden lockfile") makes
+    // loadActual() do a genuine disk rescan instead of rebuilding the actual
+    // tree from node_modules/.package-lock.json, npm's own "hidden
+    // lockfile". Without it, the hidden lockfile — which carries no script
+    // bodies and no `hasInstallScript` at all — silently stands in for a
+    // real scan, so an installed Git dependency whose only install-relevant
+    // script is `prepare` reads as scriptless on the "actual" node too, not
+    // just on the virtual node. That collapsed the union fallback below
+    // (liveStaleKeyNodes) back to the same blind spot it exists to close:
+    // both trees would report no script for a live, approved prepare-only
+    // dependency, and the checker would falsely stale it. Codex review
+    // /tmp/codex-305-r10.md (finding 1).
+    tree = actualMode ? await arb.loadActual({ forceActual: true }) : await arb.loadVirtual();
     // Stale-key matching always runs against the lockfile's virtual tree, not
     // whichever tree `tree` above ended up being. In actual mode, `loadActual`
     // only reflects what's really on disk, and a platform-specific optional
@@ -334,6 +348,15 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
   // virtual-node path (and its own node.path-based disk fallback below)
   // working exactly as before, while still catching the prepare-only case
   // the virtual node alone cannot see.
+  //
+  // Update (Codex review /tmp/codex-305-r10.md, finding 1): `tree` above now
+  // loads with `{ forceActual: true }`, so this fallback's "actual node" is
+  // a genuine disk rescan rather than a hidden-lockfile rebuild — the
+  // fsevents false-stale this comment describes can no longer happen from
+  // a missing `hasInstallScript` on the hidden lockfile. The union (fallback
+  // only when the virtual node is empty) stays as-is rather than reverting
+  // to a straight swap: it's still the narrower change, and it still costs
+  // nothing when the virtual node already found a script.
   const liveStaleKeyNodes = [];
   for (const node of staleKeyNodes) {
     let scripts = await getInstallScripts(node);

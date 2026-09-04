@@ -998,6 +998,82 @@ test("[codex-305-r9] a prepare-only Git dependency's approval is not falsely rep
   }
 });
 
+test("[codex-305-r10] a prepare-only Git dependency's approval stays live behind a hidden lockfile with no script data", async () => {
+  // Regression for the tenth adversarial review (/tmp/codex-305-r10.md,
+  // finding 1). The r9 fixture above proved the virtual-node fallback works,
+  // but it never wrote node_modules/.package-lock.json, npm's own "hidden
+  // lockfile", which is what a real `npm ci` leaves behind and what CI
+  // actually runs against. When that file is present and looks current,
+  // arborist's loadActual() reconstructs the "actual" tree from it instead
+  // of rescanning disk — and the hidden lockfile's `packages` entries carry
+  // no `scripts` field and never set `hasInstallScript` for a prepare-only
+  // script (same gap the virtual tree has). Before this fix, the union
+  // fallback in check-install-scripts.mjs read its "live" scripts off that
+  // same hidden-lockfile-backed node, found nothing, and falsely staled the
+  // approval below. `{ forceActual: true }` makes loadActual() skip the
+  // hidden lockfile and rescan disk for real, so this must still resolve
+  // live.
+  const root = makeFixtureRoot();
+  try {
+    const sha = "def4567890abc123def4567890abc123def4567";
+    const shortSha = sha.slice(0, 7);
+    writeManifests(root, {
+      rootExtra: {
+        dependencies: { "prepare-only-git-dep": `github:user/prepare-only-git-dep#${sha}` },
+      },
+      packages: {
+        "node_modules/prepare-only-git-dep": {
+          version: "1.0.0",
+          resolved: `git+ssh://git@github.com/user/prepare-only-git-dep.git#${sha}`,
+        },
+      },
+    });
+    writeInstalledPackage(root, "node_modules/prepare-only-git-dep", {
+      name: "prepare-only-git-dep",
+      version: "1.0.0",
+      scripts: { prepare: "tsc" },
+    });
+
+    // The hidden lockfile itself: same shape npm writes (a "packages" map
+    // keyed by node_modules-relative path), but with no `scripts` and no
+    // `hasInstallScript` on the Git dependency's entry, mirroring what a
+    // real npm 12 install produces for a prepare-only Git dependency.
+    // Written last so its mtime is newer than the directories it describes,
+    // which is what makes arborist's own "is the hidden lockfile still
+    // current" check (assertNoNewer, shrinkwrap.js) accept it instead of
+    // discarding it and falling back to a real scan on its own.
+    writeFileSync(
+      join(root, "node_modules/.package-lock.json"),
+      JSON.stringify(
+        {
+          name: "fixture-root",
+          version: "1.0.0",
+          lockfileVersion: 3,
+          packages: {
+            "": { name: "fixture-root", version: "1.0.0" },
+            "node_modules/prepare-only-git-dep": {
+              version: "1.0.0",
+              resolved: `git+ssh://git@github.com/user/prepare-only-git-dep.git#${sha}`,
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    const result = await checkInstallScripts({
+      allowScripts: { [`github:user/prepare-only-git-dep#${shortSha}`]: true },
+      root,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.staleKeys, []);
+    assert.deepEqual(result.uncovered, []);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Stale-key matching under omit-lockfile-registry-resolved. [codex-305-r5]
 // ---------------------------------------------------------------------------

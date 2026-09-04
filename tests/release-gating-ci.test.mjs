@@ -10,14 +10,140 @@ import {
   writeFileSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import YAML from "yaml";
 
 async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
+}
+
+const require = createRequire(import.meta.url);
+
+// npm's own boolean-flag type shapes (@npmcli/config's Definition.type):
+// either the bare `Boolean` constructor, or an array whose only non-`null`
+// member is `Boolean` (npm uses `null` in a type array to mean "also
+// accepts being unset", e.g. `workspaces`'s `[null, Boolean]` — still a
+// standalone flag, not a value-taking one). Anything else in the type
+// (String, Number, Array, an enumerated set of string literals like
+// `install-strategy`'s `['hoisted', 'nested', 'shallow', 'linked']`, ...)
+// means the option consumes a value. Verified against the pinned npm
+// 12.0.2's own node_modules/@npmcli/config/lib/definitions/definitions.js:
+// `foreground-scripts: { type: Boolean }` (pure), `workspaces: { type:
+// [null, Boolean] }` (pure, confirmed boolean-only in practice: `npm test
+// --workspaces` never consumes a following token as its value), `omit:
+// { type: [Array, 'dev', 'optional', 'peer'] }` (value-taking).
+function isPureBooleanOptionType(type) {
+  if (type === Boolean || type === null) return true;
+  if (Array.isArray(type)) return type.every((t) => t === Boolean || t === null);
+  return false;
+}
+
+// Corepack's own default cache location (sources/folderUtils.ts,
+// getCorepackHomeFolder/getInstallFolder in the installed corepack CLI):
+// $COREPACK_HOME, else a platform cache root ($XDG_CACHE_HOME or
+// %LOCALAPPDATA% or ~/.cache, ~/AppData/Local on win32) joined with
+// "node/corepack", then versioned install folder "v1". This is where the
+// "Activate the repository-pinned npm release" step (STEP_NAMES.activate)
+// actually leaves the pinned npm release on every dependency job's runner
+// once `corepack enable npm` + the first `npm --version` call have
+// activated it — npm itself is never a dependency of this repo, so this is
+// the only place "the pinned npm" exists on disk in CI.
+function corepackNpmDefinitionsPath(npmVersion) {
+  const cacheRoot =
+    process.env.COREPACK_HOME ??
+    join(
+      process.env.XDG_CACHE_HOME ??
+        process.env.LOCALAPPDATA ??
+        join(homedir(), process.platform === "win32" ? "AppData/Local" : ".cache"),
+      "node/corepack"
+    );
+  return join(
+    cacheRoot,
+    "v1/npm",
+    npmVersion,
+    "node_modules/@npmcli/config/lib/definitions/definitions.js"
+  );
+}
+
+// Reads the exact pinned npm version off package.json's `packageManager`
+// field (the same field the workflow's own activation step reads and
+// verifies against, EXPECTED_NPM in ci-verify.yml) rather than trusting
+// whatever `npm --version` happens to resolve to on this machine.
+function pinnedNpmVersion() {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const match = /^npm@(\d+\.\d+\.\d+)$/.exec(pkg.packageManager ?? "");
+  if (!match) {
+    throw new Error(
+      `release-gating-ci.test.mjs: package.json's packageManager ("${pkg.packageManager}") must ` +
+        "pin an exact npm version (npm@X.Y.Z) to locate its option definitions"
+    );
+  }
+  return match[1];
+}
+
+// Locates npm's real @npmcli/config option definitions and returns the set
+// of `--flag`/`-shortFlag` tokens that consume a separate value token, per
+// isPureBooleanOptionType above. Tries, in order: a real node_modules/npm
+// (if npm is ever added as a project dependency), a hoisted
+// node_modules/@npmcli/config (if some other devDependency ever pulls it
+// in as a sibling package), then corepack's own install cache for the
+// exact pinned version (the actual case in this repo today — see
+// corepackNpmDefinitionsPath above). Throws instead of silently falling
+// back to a partial list when none resolve: a partial, hand-maintained set
+// is the exact bug this replaces (Codex review /tmp/codex-305-r10.md,
+// finding 2), so a missing pinned npm must fail this test loudly rather
+// than quietly re-introduce it.
+function loadNpmValueTakingFlags() {
+  const npmVersion = pinnedNpmVersion();
+  const attempts = [
+    () =>
+      require.resolve("npm/node_modules/@npmcli/config/lib/definitions/definitions.js", {
+        paths: [fileURLToPath(new URL("..", import.meta.url))],
+      }),
+    () =>
+      require.resolve("@npmcli/config/lib/definitions/definitions.js", {
+        paths: [fileURLToPath(new URL("..", import.meta.url))],
+      }),
+    () => {
+      const p = corepackNpmDefinitionsPath(npmVersion);
+      if (!existsSync(p)) {
+        throw new Error(`no corepack-cached npm@${npmVersion} at ${p}`);
+      }
+      return p;
+    },
+  ];
+
+  const errors = [];
+  for (const attempt of attempts) {
+    try {
+      const definitionsPath = attempt();
+      const definitions = require(definitionsPath);
+      const flags = new Set();
+      for (const [key, def] of Object.entries(definitions)) {
+        if (isPureBooleanOptionType(def.type)) continue;
+        flags.add(`--${key}`);
+        for (const short of [].concat(def.short ?? [])) {
+          flags.add(`-${short}`);
+        }
+      }
+      if (flags.size === 0) {
+        throw new Error(`${definitionsPath} loaded but produced no value-taking options`);
+      }
+      return flags;
+    } catch (err) {
+      errors.push(err.message);
+    }
+  }
+  throw new Error(
+    `release-gating-ci.test.mjs: could not load npm@${npmVersion}'s own option definitions from ` +
+      `node_modules/npm, a hoisted @npmcli/config, or corepack's install cache; refusing to fall ` +
+      `back to a hand-maintained partial list. Tried:\n  ${errors.join("\n  ")}`
+  );
 }
 
 async function loadWorkflow() {
@@ -198,22 +324,28 @@ const LEADING_PREFIX_PATTERN = /^(?:(?:env|command|corepack)\s+|[A-Za-z_][A-Za-z
 // their value as a SEPARATE token (`npm --prefix . ci`, `npm --workspace
 // apps/web ci`), not just attached via `=` (`--prefix=.`). A regex matching
 // only `--key=value` flags never consumes the separate value token, so it
-// never reaches `ci` and misses the invocation entirely. This set is not
-// exhaustive — only the npm global options plausible in a CI install step —
-// each maps to "the next token is this option's value, not part of the
-// subcommand". Any option not in this set is treated as a standalone
-// boolean flag (`--foreground-scripts`), matching npm's own default.
-const NPM_VALUE_OPTIONS = new Set([
-  "-C",
-  "--prefix",
-  "-w",
-  "--workspace",
-  "--userconfig",
-  "--globalconfig",
-  "--registry",
-  "--cache",
-  "--loglevel",
-]);
+// never reaches `ci` and misses the invocation entirely.
+//
+// Codex review /tmp/codex-305-r10.md (finding 2): the nine-entry hand list
+// that used to live here only covered the options this repo's workflow
+// happened to use. Any other npm 12 global option that takes a
+// separate-token value hid an unguarded `npm ci` just as completely:
+// `npm --omit dev ci` walks the option-token loop, doesn't recognize
+// `--omit` as value-taking, so the loop stops at "dev" (no leading `-`),
+// and the trailing check compares "dev" against "ci" instead of ever
+// reaching the real `ci` token. `npm --install-strategy hoisted ci`,
+// `npm --location project ci`, and `npm --allow-git root ci` are the same
+// evasion shape. A hand list can't be complete by construction; it can
+// only be complete by accident until the next option that isn't on it.
+//
+// Fix: load the *real* value-taking option set from the pinned npm's own
+// @npmcli/config definitions (npm's own source of truth for which options
+// take a value, `type` !== a purely-boolean shape) instead of
+// hand-listing it, so a future npm option is covered automatically the
+// next time the pin moves. See loadNpmValueTakingFlags below for where
+// "the pinned npm" is actually found on disk (it's never a project
+// dependency here) and the deliberate hard failure when it can't be.
+const NPM_VALUE_OPTIONS = loadNpmValueTakingFlags();
 
 function stripBashComments(run) {
   return run
@@ -559,6 +691,12 @@ test("negative case: an extra npm ci inserted before the activation step defeats
 // never reassembled. `npm run ci` (an unrelated subcommand, not tested in
 // this loop) must keep failing to match; isExecutableNpmCiSegment's own unit
 // shape guarantees that, since "run" never starts with `-`.
+//
+// Codex review /tmp/codex-305-r10.md (finding 2): the four cases below are
+// the same separate-valued-option evasion, but for options the old
+// nine-entry hand list didn't cover at all (`--omit`, `--install-strategy`,
+// `--location`, `--allow-git`), proving the dynamically-loaded flag set
+// (loadNpmValueTakingFlags) actually closes the gap a hand list can't.
 for (const [label, run] of [
   ["corepack npm ci", "corepack npm ci"],
   ["command npm ci", "command npm ci"],
@@ -568,6 +706,10 @@ for (const [label, run] of [
   ["npm --prefix . ci", "npm --prefix . ci"],
   ["npm --workspace apps/web ci", "npm --workspace apps/web ci"],
   ["a backslash line continuation", "npm \\\n  ci"],
+  ["npm --omit dev ci", "npm --omit dev ci"],
+  ["npm --install-strategy hoisted ci", "npm --install-strategy hoisted ci"],
+  ["npm --location project ci", "npm --location project ci"],
+  ["npm --allow-git root ci", "npm --allow-git root ci"],
 ]) {
   test(`negative case: a new job running "${label}" is caught by dynamic discovery`, async () => {
     const workflow = await loadWorkflow();
@@ -586,6 +728,26 @@ for (const [label, run] of [
     assert.throws(() => assertAllNpmCiJobsAreGated(mutated));
   });
 }
+
+test("[codex-305-r10] isExecutableNpmCiSegment recognizes every dynamically-loaded value-taking npm option, and still rejects npm run ci", () => {
+  // Direct unit-level check on the segment matcher itself (the workflow-level
+  // loop above only ever exercises it indirectly, through YAML fixtures).
+  // The four new forms prove loadNpmValueTakingFlags actually replaced the
+  // old nine-entry hand list rather than just adding to it: none of `--omit`,
+  // `--install-strategy`, `--location`, or `--allow-git` were in that list.
+  // `npm run ci` is kept as a direct, permanent negative case per the tenth
+  // review's fix note ("keep the npm run ci negative case") since it was
+  // previously only guaranteed by the function's shape, never asserted.
+  for (const run of [
+    "npm --omit dev ci",
+    "npm --install-strategy hoisted ci",
+    "npm --location project ci",
+    "npm --allow-git root ci",
+  ]) {
+    assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
+  }
+  assert.equal(isExecutableNpmCiSegment("npm run ci"), false);
+});
 
 test("hostile fixture: a node_modules/.bin/node shim cannot intercept the checker step's trusted, absolute-path node invocation", () => {
   // Codex review /tmp/codex-305-r6.md (finding 1): proves the mechanism,
