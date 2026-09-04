@@ -6,12 +6,17 @@ description: Upstream projects list ten CLIs. CareerRat lists two. Here's the ba
 CareerRat's own runtime registry detects eleven AI CLIs: Claude Code, Codex,
 Gemini CLI, OpenCode, GitHub Copilot CLI, Qwen Code, Antigravity, Hermes
 Agent, Amp, Goose, and Droid. Only two, Claude Code and Codex, are supported.
-That gap looks like an oversight until you look at what "supported" checks.
+That gap looks like an oversight until you look at what "supported" means,
+and what else CareerRat checks before it will actually use a CLI.
 
 Other agent-CLI compatibility lists usually mean "can read a markdown file and
-run bare." CareerRat's `supported` flag means something stricter: the CLI has
-to accept a CareerRat-authored non-interactive permission boundary and prove,
-live, that it ran inside it. Four gates enforce that.
+run bare." CareerRat's `supported` flag means something stricter, but it is a
+static design decision, not a live check. It marks a CLI that CareerRat has
+built an accepted adapter and a non-interactive permission boundary for.
+Claude Code and Codex stay `supported` even if the CLI is not installed, the
+user is not signed in, the installed version is below CareerRat's version
+floor, or the completion probe fails. Four checks decide whether a supported
+CLI is actually usable right now.
 
 ## The four gates
 
@@ -36,8 +41,11 @@ CareerRat constructs it per call.
 it runs a smoke test: ask the CLI, inside that same sandbox, to return one
 exact JSON object matching a fixed schema (`COMPLETION_SMOKE_SCHEMA`) with a
 single `receipt` field and nothing else. The probe requests no tools and
-touches no files, so an exact match proves the CLI can complete a bounded,
-structured request under the configured sandbox. It doesn't independently
+reads no candidate or workspace files. CareerRat does create a temporary
+schema file and a scratch working directory to run the probe itself, but
+the CLI never sees anything that belongs to the candidate. An exact match
+proves the CLI can complete a bounded, structured request under the
+configured sandbox. It doesn't independently
 exercise every deny rule; a CLI that accepted the sandbox flags but quietly
 ignored them could still pass.
 
@@ -50,32 +58,46 @@ this check; it's enforced right before a workflow runs, not on every process
 CareerRat spawns.
 
 A CLI clears "supported" by being listed as one in the registry, a static
-allowlist that doesn't get re-checked per request. Passing the boundary and
-the completion receipt makes it ready, and that readiness is cached: a
-successful completion receipt is trusted for 24 hours, and persisted
-capability evidence is reused as long as the executable's identity still
-matches. The binary fingerprint is the one gate CareerRat repeats every
-time, immediately before each workflow execution.
+allowlist that doesn't get re-checked per request. Readiness is different:
+the CLI has to be installed, meet the applicable version floor, be signed
+in, and return a passing completion receipt, all four together. Only the
+completion receipt is cached, for 24 hours; the version and sign-in checks
+run every time and are never skipped just because a cached receipt exists.
+Running a real workflow reapplies more checks on top of that: normal AI
+routing rechecks `supported`, every runner validates the runtime's
+capabilities before it will spawn anything, the permission boundary is
+rebuilt for that call, tool-bearing runs repeat the version-floor check,
+and the binary fingerprint (the executable's identity) is checked
+immediately before the workflow runs.
 
 ## The other nine
 
-The rest of the registry exists for diagnostics, not workflows. Gemini CLI,
-OpenCode, GitHub Copilot CLI, and Hermes Agent have a real ACP transport
-wired in, built for future acceptance testing. Today CareerRat only uses it
-to detect them: settings shows each as `detected_unverified` and never runs
-the readiness probe against them, so there's no probed readiness state to
-see yet. Their `acceptedCapabilities` is set to the no-workflow capability
-set, but that's policy metadata describing what a runtime would be allowed
-to do, not the reason these four are excluded today. What actually keeps
-every one of the nine out of real work is the same `supported: false` flag
-from the registry. Qwen Code, Antigravity, Amp, Goose, and Droid have no
-protocol adapter at all. Asking CareerRat to run work through any
-unsupported runtime is rejected before an invocation is ever built: the
-settings route returns `RUNTIME_NOT_SUPPORTED`, and a direct call returns
-`RUNTIME_COMPLETION_UNSUPPORTED`.
+The rest of the registry exists for diagnostics, not workflows. Detecting a
+CLI is filesystem-based: CareerRat looks for the CLI's installed executable
+on disk and never calls out over ACP to find it. Gemini CLI, OpenCode,
+GitHub Copilot CLI, and Hermes Agent do have a real ACP transport wired in,
+built for future acceptance testing, but CareerRat doesn't use it yet:
+settings shows each of the four as `detected_unverified` and never runs the
+readiness probe against them, so there's no probed readiness state to see.
+Their `acceptedCapabilities` is set to the no-workflow capability set, but
+that's policy metadata describing what a runtime would be allowed to do,
+not the reason these four are excluded today. What actually keeps every one
+of the nine out of real work, on the settings route and CareerRat's normal
+AI routing, is the same `supported: false` flag from the registry. Qwen
+Code, Antigravity, Amp, Goose, and Droid have no protocol adapter at all.
+Asking CareerRat to run work through any unsupported runtime on those two
+paths is rejected before an invocation is ever built: the settings route
+returns `RUNTIME_NOT_SUPPORTED`, and normal AI routing returns
+`RUNTIME_COMPLETION_UNSUPPORTED`. That guarantee covers those two paths, not
+every way CareerRat's own code can call a runtime; the lower-level runner
+functions don't check `supported` themselves.
 
 Building the four gates for a new engine is real, deliberate work: a
-permission boundary mapped onto that CLI's actual sandbox flags, proven by a
-completion receipt loop. A CLI that can read a markdown wrapper and be
-spawned bare is a different, weaker claim. CareerRat's docs try not to blur
-the two.
+permission boundary mapped onto that CLI's actual sandbox flags, plus a
+completion receipt loop that verifies the CLI can complete a bounded,
+structured request using the configured invocation. The permission boundary
+itself is established by the adapter implementation and its acceptance
+tests, not by the receipt; the receipt shows the CLI can finish a scoped
+task, not that it honors every sandbox flag. A CLI that can read a markdown
+wrapper and be spawned bare is a different, weaker claim. CareerRat's docs
+try not to blur the two.
