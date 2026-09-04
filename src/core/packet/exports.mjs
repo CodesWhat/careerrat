@@ -401,11 +401,24 @@ export async function exportPacketArtifacts({
       [...SUPPORTED_EXPORT_FORMATS].map((format) => app.artifacts?.[outputKey(kind, format)])
     )
     .filter((value) => typeof value === "string" && value.trim());
+  // The packet manifest is just as live and readable as the document
+  // artifacts above, and sourceEntries() never picks it up (its key doesn't
+  // end in "Source"). Without reserving it, a caller-supplied outBase whose
+  // stem happens to collide with the manifest's own filename (this call's
+  // sources.packetManifest, or the one already registered on the
+  // application row when this call omits it) would get renamed over,
+  // leaving the manifest gone while the application row's pointer still
+  // referenced it.
+  const packetManifestPaths = [
+    sources.packetManifest,
+    packetSourcesFromApp(app).packetManifest,
+  ].filter((value) => typeof value === "string" && value.trim());
   const reservedIdentities = new Set(
     [...sourceEntries(sources), ...sourceEntries(packetSourcesFromApp(app))]
       .map(([, storedPath]) => storedPath)
       .concat(plainArtifactPaths)
       .concat(omittedKindFormatPaths)
+      .concat(packetManifestPaths)
       .map((storedPath) => resolveWorkspacePath(workspaceDir, storedPath))
       .filter(Boolean)
       .map(canonicalIdentity)

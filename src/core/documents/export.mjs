@@ -1710,60 +1710,117 @@ function parseMdBlocks(markdown) {
 }
 
 /**
+ * Build an escape-aware prefix-sum array over `text`: `ps[i]` is the running
+ * total of +1 for every unescaped `(` and -1 for every unescaped `)` in
+ * `text[0, i)`. A backslash and the character it escapes are walked as one
+ * unit contributing 0 to the sum (mirroring matchLinkAt's own escape
+ * handling exactly), so `ps` never counts an escaped paren as a real
+ * delimiter.
+ *
+ * For any index `p` where `text[p] === "("`, the local "depth relative to a
+ * fresh scan starting at p" at later index `k` is exactly `ps[k + 1] -
+ * ps[p]`, a plain algebraic identity since both sides accumulate the same
+ * per-character deltas. That depth first returns to 0 at the smallest `m >
+ * p` with `ps[m] === ps[p]`, i.e. the destination's matching close
+ * parenthesis is a pure prefix-sum lookup rather than a fresh rescan.
+ *
+ * @param {string} text
+ * @returns {Int32Array} length `text.length + 1`
+ */
+function parenDeltaPrefixSums(text) {
+  const n = text.length;
+  const ps = new Int32Array(n + 1);
+  let i = 0;
+  while (i < n) {
+    const ch = text[i];
+    if (ch === "\\" && i + 1 < n) {
+      ps[i + 1] = ps[i];
+      ps[i + 2] = ps[i];
+      i += 2;
+      continue;
+    }
+    ps[i + 1] = ps[i] + (ch === "(" ? 1 : ch === ")" ? -1 : 0);
+    i += 1;
+  }
+  return ps;
+}
+
+/**
+ * For every index `i` in `ps`, find the nearest later index `i' > i` with
+ * `ps[i'] === ps[i]`, or -1 if there isn't one. One backward pass with a
+ * value-to-most-recent-index bucket array gives every position's answer in
+ * O(1) amortized. Paired with parenDeltaPrefixSums, this turns "does this
+ * `(` have a matching `)` before EOF, and where" into a single array lookup
+ * instead of a scan to the end of the text, so a paragraph with many
+ * unterminated destinations stays linear instead of quadratic.
+ *
+ * @param {Int32Array} ps
+ * @returns {Int32Array} length `ps.length`
+ */
+function nextEqualPrefixSum(ps) {
+  const n = ps.length;
+  const next = new Int32Array(n).fill(-1);
+  // ps values range over [-(n - 1), n - 1]; offset by n so every value maps
+  // to a non-negative bucket index.
+  const lastSeenAt = new Int32Array(2 * n + 1).fill(-1);
+  for (let i = n - 1; i >= 0; i--) {
+    const bucket = ps[i] + n;
+    next[i] = lastSeenAt[bucket];
+    lastSeenAt[bucket] = i;
+  }
+  return next;
+}
+
+/**
  * Find a `[text](destination)` link anchored exactly at `text[start]`
- * (caller guarantees `text[start] === "["`), scanning the destination with
- * a balanced-parenthesis, backslash-escape-aware walk so a destination
- * containing `(...)` groups (or an escaped paren) is captured whole instead
- * of truncating at the first `)`.
+ * (caller guarantees `text[start] === "["`), resolving the destination's
+ * escape-aware balanced-parenthesis span so a destination containing
+ * `(...)` groups (or an escaped paren) is captured whole instead of
+ * truncating at the first `)`.
  *
  * `nextCloseBracket` is a precomputed, index-by-index lookup of the next
- * `]` at or after a given position (or -1). Without it, finding the close
- * bracket for a `[` with no real link is an O(remaining length) scan, and
- * many literal, unpaired `[` characters before the same distant `]` (or
- * before none at all) turn that into O(n^2) across the whole call.
+ * `]` at or after a given position (or -1); without it, finding the close
+ * bracket for a `[` with no real link is an O(remaining length) scan.
+ * `nextEqualParenDelta` (see parenDeltaPrefixSums and nextEqualPrefixSum)
+ * locates the destination's matching close parenthesis, or confirms there
+ * isn't one, in O(1) rather than rescanning the rest of the text for every
+ * candidate `(` -- the fix for the case that used to make many unterminated
+ * links quadratic.
  *
  * @param {string} text
  * @param {number} start
  * @param {Int32Array} nextCloseBracket
+ * @param {Int32Array} nextEqualParenDelta
  * @returns {{length: number, text: string, href: string}|null}
  */
-function matchLinkAt(text, start, nextCloseBracket) {
+function matchLinkAt(text, start, nextCloseBracket, nextEqualParenDelta) {
   const closeBracket = nextCloseBracket[start + 1];
   if (closeBracket === -1 || text[closeBracket + 1] !== "(") return null;
 
-  let depth = 0;
+  const scanStart = closeBracket + 1;
+  const matchEnd = nextEqualParenDelta[scanStart];
+  if (matchEnd === -1) return null;
+
+  // matchEnd - 1 is guaranteed to be the destination's real, unescaped
+  // closing parenthesis (parenDelta only transitions to a repeated value at
+  // a genuine unescaped delimiter), so the outer "(" at scanStart and the
+  // outer ")" at matchEnd - 1 are excluded from href the same way the old
+  // depth-tracking loop excluded them; every other character, including a
+  // nested "(" or ")", is literal destination text once escapes resolve.
   let href = "";
-  let matched = false;
-  let j = closeBracket + 1;
-  for (; j < text.length; j++) {
+  for (let j = scanStart; j < matchEnd; j++) {
     const ch = text[j];
-    if (ch === "\\" && j + 1 < text.length) {
+    if (ch === "\\" && j + 1 < matchEnd) {
       href += text[j + 1];
       j++;
       continue;
     }
-    if (ch === "(") {
-      depth++;
-      if (depth > 1) href += ch;
-      continue;
-    }
-    if (ch === ")") {
-      depth--;
-      if (depth === 0) {
-        matched = true;
-        j++;
-        break;
-      }
-      href += ch;
-      continue;
-    }
+    if (j === scanStart || j === matchEnd - 1) continue;
     href += ch;
   }
 
-  if (!matched) return null;
-
   return {
-    length: j - start,
+    length: matchEnd - start,
     text: text.slice(start + 1, closeBracket),
     href,
   };
@@ -1838,6 +1895,11 @@ function parseRuns(text) {
   for (let k = n - 1; k >= 0; k--) {
     nextCloseBracket[k] = text[k] === "]" ? k : nextCloseBracket[k + 1];
   }
+  // Same idea for a link destination's matching close parenthesis: resolve
+  // every position's answer once, up front, instead of letting matchLinkAt
+  // rescan the remaining text for each candidate "(" it's asked about.
+  const parenDelta = parenDeltaPrefixSums(text);
+  const nextEqualParenDelta = nextEqualPrefixSum(parenDelta);
 
   let plainStart = 0;
   let i = 0;
@@ -1917,7 +1979,7 @@ function parseRuns(text) {
     }
 
     if (ch === "[") {
-      const link = matchLinkAt(text, i, nextCloseBracket);
+      const link = matchLinkAt(text, i, nextCloseBracket, nextEqualParenDelta);
       if (link) {
         flushPlain(i);
         // The destination stays opaque, but the visible label can itself

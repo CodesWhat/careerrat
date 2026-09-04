@@ -392,3 +392,52 @@ test("renderResumeText parses a paragraph with many inline constructs, at scale,
   assert.match(text, /status page \(https:\/\/example\.com\/status\)/);
   assert.ok(elapsedMs < 500, `expected parsing to finish well under a second, took ${elapsedMs}ms`);
 });
+
+// ---------------------------------------------------------------------------
+// matchLinkAt scaling: a link destination that never finds its closing ")"
+// used to rescan from that "(" all the way to end of text on every attempt.
+// Many such attempts in one paragraph made that O(n^2): each of m
+// unterminated destinations rescanned the remaining ~n characters. The fix
+// (parenDeltaPrefixSums/nextEqualPrefixSum) resolves "does this destination
+// ever close, and where" as an O(1) lookup instead.
+// ---------------------------------------------------------------------------
+
+test("renderResumeText resolves a malformed-link paragraph with unterminated destinations, at scale, well under a second", () => {
+  // Every unit opens a real "[label](" but the destination never closes —
+  // there is no ")" anywhere in the whole 256 KB paragraph — so a naive
+  // rescan-to-EOF on each one would be quadratic.
+  const unit =
+    "Built cross-region payments and cited a broken reference [see docs](internal link that never closes for detail. ";
+  const repeats = Math.ceil((256 * 1024) / unit.length);
+  const md = unit.repeat(repeats);
+  assert.ok(md.length >= 256 * 1024);
+  assert.equal(md.includes(")"), false, "the destination must never close in this fixture");
+
+  const start = Date.now();
+  const text = renderResumeText(md);
+  const elapsedMs = Date.now() - start;
+
+  assert.ok(
+    text.includes("[see docs](internal"),
+    "an unresolved link with no closing paren stays literal text"
+  );
+  assert.ok(elapsedMs < 500, `expected parsing to finish well under a second, took ${elapsedMs}ms`);
+});
+
+test("renderResumeText resolves many unterminated links in one paragraph, at scale, well under a second", () => {
+  // A dense run of minimal "[a](b" fragments with no closing paren at all —
+  // pure volume of never-closing destinations, rather than realistic prose,
+  // stressing the same rescan-to-EOF path from a different angle.
+  const unit = "[a](b ";
+  const repeats = Math.ceil((256 * 1024) / unit.length);
+  const md = unit.repeat(repeats);
+  assert.ok(md.length >= 256 * 1024);
+  assert.equal(md.includes(")"), false, "the destination must never close in this fixture");
+
+  const start = Date.now();
+  const text = renderResumeText(md);
+  const elapsedMs = Date.now() - start;
+
+  assert.ok(text.includes("[a](b"), "an unresolved link with no closing paren stays literal text");
+  assert.ok(elapsedMs < 500, `expected parsing to finish well under a second, took ${elapsedMs}ms`);
+});
