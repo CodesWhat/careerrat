@@ -849,6 +849,14 @@ export function installedRuntimeExecutionIdentity(
             ...invocation.args,
             "--timeout-ms",
             String(probeTimeoutMs),
+            // The helper's own spawn needs the same windowsVerbatimArguments
+            // guarantee runtimeProcessInvocation just computed: without it,
+            // Node re-quotes the already cmd-escaped `/c "..."` payload above
+            // a second time before cmd.exe ever sees it (see
+            // runtime-probe-helper.mjs's own header comment).
+            ...(invocation.options?.windowsVerbatimArguments
+              ? ["--windows-verbatim-arguments"]
+              : []),
           ],
           {
             env: childEnv,

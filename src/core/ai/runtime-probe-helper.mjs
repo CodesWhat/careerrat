@@ -19,9 +19,15 @@
 // exit before it reports back. The parent's spawnSync just waits for this
 // whole thing to finish and reads the JSON result off this process's stdout.
 //
-// Protocol: argv is [exe, ...args, "--timeout-ms", ms]. Exactly one JSON
-// object is written to this process's own stdout before it exits, of the
-// shape { stdout, stderr, status, timedOut }.
+// Protocol: argv is [exe, ...args, "--timeout-ms", ms], optionally followed
+// by a trailing "--windows-verbatim-arguments" flag. That flag mirrors
+// runtimeProcessInvocation's own windowsVerbatimArguments option: it's set
+// for .cmd/.bat runtimes whose args are already cmd-escaped into a single
+// `/c "..."` payload, and it has to reach this process's own spawn call
+// below or Node re-quotes that already-escaped payload a second time,
+// corrupting it before cmd.exe ever sees it. Exactly one JSON object is
+// written to this process's own stdout before it exits, of the shape
+// { stdout, stderr, status, timedOut }.
 //
 // The kill primitive (killProcessTreeByPid) already branches on platform, so
 // this file's own logic never needs to: it's exercised identically by the
@@ -29,86 +35,119 @@
 // resistant fake runtime and expects the same tree-confirmed-gone behavior,
 // just through SIGKILL on a process group instead of taskkill /T /F.
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { killProcessTreeByPid } from "./runtime-process.mjs";
 
 const MAX_PROBE_BYTES = 64 * 1024;
 
+const WINDOWS_VERBATIM_FLAG = "--windows-verbatim-arguments";
+
 function parseArgv(argv) {
-  const flagIndex = argv.lastIndexOf("--timeout-ms");
-  if (flagIndex < 1 || flagIndex !== argv.length - 2) return null;
+  let end = argv.length;
+  let windowsVerbatimArguments = false;
+  if (argv[end - 1] === WINDOWS_VERBATIM_FLAG) {
+    windowsVerbatimArguments = true;
+    end -= 1;
+  }
+  const flagIndex = argv.lastIndexOf("--timeout-ms", end - 1);
+  if (flagIndex < 1 || flagIndex !== end - 2) return null;
   const timeoutMs = Number(argv[flagIndex + 1]);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return null;
-  return { exe: argv[0], args: argv.slice(1, flagIndex), timeoutMs };
+  return { exe: argv[0], args: argv.slice(1, flagIndex), timeoutMs, windowsVerbatimArguments };
 }
 
 function report(payload) {
   process.stdout.write(JSON.stringify(payload));
 }
 
-function main() {
+// Exported so tests can drive the actual spawn-and-report logic directly,
+// with a stubbed spawnImpl, instead of only ever exercising it through a
+// real child process's argv and stdout. That's what proves
+// windowsVerbatimArguments reaches this function's own spawn call, not just
+// that it survives argv parsing.
+export function runProbe(
+  { exe, args, timeoutMs, windowsVerbatimArguments = false },
+  { spawnImpl = spawn } = {}
+) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawnImpl(exe, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        // Mirrors the async probe path in installed-runtimes.mjs: a detached
+        // child becomes its own process-group leader on POSIX (pgid === pid),
+        // which is what lets killProcessTreeByPid's group SIGKILL below reach
+        // a descendant the runtime forks. Windows has no such distinction;
+        // detached is a no-op there and the tree kill goes through taskkill
+        // /t against the root pid instead.
+        detached: process.platform !== "win32",
+        windowsHide: true,
+        // The caller (installedRuntimeExecutionIdentity, via
+        // runtimeProcessInvocation) already cmd-escaped its `/c "..."`
+        // payload for .cmd/.bat runtimes. Without this, Node's own argument
+        // quoting re-escapes that payload a second time before handing it to
+        // CreateProcess, corrupting it. A no-op everywhere else.
+        windowsVerbatimArguments,
+      });
+    } catch {
+      resolve({ stdout: "", stderr: "", status: null, timedOut: false });
+      return;
+    }
+
+    let stdout = "";
+    let stderr = "";
+    let outputBytes = 0;
+    let settled = false;
+    let timedOut = false;
+    let timer = null;
+
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ stdout, stderr, status, timedOut });
+    };
+
+    child.stdout?.on("data", (chunk) => {
+      outputBytes += chunk.length;
+      if (outputBytes <= MAX_PROBE_BYTES) stdout += chunk.toString("utf8");
+    });
+    child.stderr?.on("data", (chunk) => {
+      outputBytes += chunk.length;
+      if (outputBytes <= MAX_PROBE_BYTES) stderr += chunk.toString("utf8");
+    });
+    child.on("error", () => finish(null));
+    // Fires once the root process itself has exited, whether that's the
+    // runtime finishing on its own or the tree kill below reaching it. This is
+    // the "confirmed exit" the parent process is relying on before it trusts
+    // timedOut in the reported payload.
+    child.on("close", (status) => finish(status));
+
+    timer = setTimeout(
+      () => {
+        timedOut = true;
+        killProcessTreeByPid(child.pid);
+      },
+      Math.max(1, timeoutMs)
+    );
+    timer.unref?.();
+  });
+}
+
+async function main() {
   const parsed = parseArgv(process.argv.slice(2));
   if (!parsed) {
     report({ stdout: "", stderr: "", status: null, timedOut: false });
     process.exitCode = 1;
     return;
   }
-  const { exe, args, timeoutMs } = parsed;
-
-  let child;
-  try {
-    child = spawn(exe, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      // Mirrors the async probe path in installed-runtimes.mjs: a detached
-      // child becomes its own process-group leader on POSIX (pgid === pid),
-      // which is what lets killProcessTreeByPid's group SIGKILL below reach
-      // a descendant the runtime forks. Windows has no such distinction;
-      // detached is a no-op there and the tree kill goes through taskkill
-      // /t against the root pid instead.
-      detached: process.platform !== "win32",
-      windowsHide: true,
-    });
-  } catch {
-    report({ stdout: "", stderr: "", status: null, timedOut: false });
-    return;
-  }
-
-  let stdout = "";
-  let stderr = "";
-  let outputBytes = 0;
-  let settled = false;
-  let timedOut = false;
-  let timer = null;
-
-  const finish = (status) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    report({ stdout, stderr, status, timedOut });
-  };
-
-  child.stdout?.on("data", (chunk) => {
-    outputBytes += chunk.length;
-    if (outputBytes <= MAX_PROBE_BYTES) stdout += chunk.toString("utf8");
-  });
-  child.stderr?.on("data", (chunk) => {
-    outputBytes += chunk.length;
-    if (outputBytes <= MAX_PROBE_BYTES) stderr += chunk.toString("utf8");
-  });
-  child.on("error", () => finish(null));
-  // Fires once the root process itself has exited, whether that's the
-  // runtime finishing on its own or the tree kill below reaching it. This is
-  // the "confirmed exit" the parent process is relying on before it trusts
-  // timedOut in the reported payload.
-  child.on("close", (status) => finish(status));
-
-  timer = setTimeout(
-    () => {
-      timedOut = true;
-      killProcessTreeByPid(child.pid);
-    },
-    Math.max(1, timeoutMs)
-  );
-  timer.unref?.();
+  report(await runProbe(parsed));
 }
 
-main();
+// Guarded so importing this module for its runProbe export (the test suite
+// does exactly that, to drive the spawn-and-report logic directly with a
+// stubbed spawnImpl) never also runs the CLI entrypoint against the
+// importer's own argv.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

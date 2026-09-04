@@ -46,6 +46,7 @@ import {
   stopInstalledRuntimeSignIns,
   supportsInstalledRuntimeStreaming,
 } from "../src/core/ai/installed-runtimes.mjs";
+import { runProbe } from "../src/core/ai/runtime-probe-helper.mjs";
 import {
   resolveWindowsCommandInterpreter,
   runtimeProcessIdentityFiles,
@@ -1519,7 +1520,12 @@ test("Windows execution identity spawns the version probe through the same resol
     // decoy and never a bare "cmd.exe" left for Windows to resolve itself.
     assert.equal(calls[0].args[1], expectedInterpreter);
     assert.deepEqual(calls[0].args.slice(2, 6), ["/d", "/s", "/v:off", "/c"]);
-    assert.equal(calls[0].args.at(-2), "--timeout-ms");
+    assert.equal(calls[0].args.at(-3), "--timeout-ms");
+    // The invocation's windowsVerbatimArguments guarantee (this .cmd shim
+    // routes through cmd.exe with an already-escaped `/c "..."` payload) has
+    // to reach the helper subprocess's own argv, or its spawn re-quotes that
+    // payload a second time and corrupts it.
+    assert.equal(calls[0].args.at(-1), "--windows-verbatim-arguments");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1628,6 +1634,105 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
       () => process.kill(sleepPid, 0),
       /ESRCH/,
       "the sleep descendant must not survive the helper's timeout cleanup"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Codex round 13 review: runtimeProcessInvocation returns
+// windowsVerbatimArguments: true for .cmd/.bat runtimes because their args
+// are already folded into one cmd-escaped `/c "..."` payload, but that
+// option lived only on the invocation object; nothing carried it into
+// runtime-probe-helper.mjs's own spawn call. Exercising this through argv
+// and stdout alone can't prove the flag reaches spawn's options, only that
+// it survives parsing, so runProbe is exported and called directly here with
+// a stubbed spawnImpl to inspect the exact options object it receives.
+test("runtime-probe-helper.mjs's runProbe forwards windowsVerbatimArguments to its own spawn call", async () => {
+  const calls = [];
+  const fakeChild = new EventEmitter();
+  fakeChild.stdout = new EventEmitter();
+  fakeChild.stderr = new EventEmitter();
+  const spawnImpl = (exe, args, options) => {
+    calls.push({ exe, args, options });
+    queueMicrotask(() => fakeChild.emit("close", 0));
+    return fakeChild;
+  };
+
+  const verbatimResult = await runProbe(
+    { exe: "codex.cmd", args: ["--version"], timeoutMs: 5_000, windowsVerbatimArguments: true },
+    { spawnImpl }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].exe, "codex.cmd");
+  assert.deepEqual(calls[0].args, ["--version"]);
+  assert.equal(calls[0].options.windowsVerbatimArguments, true);
+  assert.equal(verbatimResult.status, 0);
+  assert.equal(verbatimResult.timedOut, false);
+
+  const defaultResult = await runProbe(
+    { exe: "codex", args: ["--version"], timeoutMs: 5_000 },
+    { spawnImpl }
+  );
+  assert.equal(calls.length, 2);
+  assert.equal(
+    calls[1].options.windowsVerbatimArguments,
+    false,
+    "the flag must never default to on for a caller that never asked for it"
+  );
+  assert.equal(defaultResult.status, 0);
+});
+
+// Codex round 13 review: the genuine, unstubbed proof. A real .cmd shim
+// sitting in a directory whose name has both a space and a shell
+// metacharacter, run all the way through the actual helper subprocess (real
+// spawn, real cmd.exe), must still report its version output byte-for-byte.
+// Without windowsVerbatimArguments reaching the helper's spawn, Node
+// re-quotes runtimeProcessInvocation's already-escaped `/c "..."` payload a
+// second time and cmd.exe never sees the intended command line.
+test("runtime-probe-helper.mjs runs a real .cmd shim through a spaced, metacharacter path on Windows intact", (t) => {
+  if (process.platform !== "win32") {
+    t.skip("exercises real cmd.exe argument quoting; only meaningful on win32");
+    return;
+  }
+  const root = tempRoot();
+  const wrapperDir = join(root, "Program Files (x86) & Co");
+  mkdirSync(wrapperDir, { recursive: true });
+  const wrapper = join(wrapperDir, "myshim.cmd");
+  const expectedVersion = "myshim-cli 9.9.9";
+  writeFileSync(wrapper, `@echo off\r\necho ${expectedVersion}\r\n`);
+
+  const helperPath = fileURLToPath(
+    new URL("../src/core/ai/runtime-probe-helper.mjs", import.meta.url)
+  );
+
+  try {
+    const invocation = runtimeProcessInvocation(wrapper, ["--version"], {
+      platform: "win32",
+      env: process.env,
+      resolveInterpreter: () => resolveWindowsCommandInterpreter({ env: process.env }),
+    });
+    assert.equal(invocation.options.windowsVerbatimArguments, true);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        helperPath,
+        invocation.command,
+        ...invocation.args,
+        "--timeout-ms",
+        "5000",
+        "--windows-verbatim-arguments",
+      ],
+      { encoding: "utf8", timeout: 10_000 }
+    );
+    assert.equal(result.status, 0, result.stderr || "the helper must exit 0");
+    const reported = JSON.parse(result.stdout);
+    assert.equal(reported.status, 0);
+    assert.equal(reported.timedOut, false);
+    assert.ok(
+      reported.stdout.includes(expectedVersion),
+      `expected the shim's version output intact, got: ${reported.stdout}`
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
