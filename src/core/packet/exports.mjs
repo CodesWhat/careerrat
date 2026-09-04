@@ -423,10 +423,35 @@ export async function exportPacketArtifacts({
       .filter(Boolean)
       .map(canonicalIdentity)
   );
-  const isReserved = (base) =>
+  // A candidate flagged by reservedIdentities is always unavailable. But an
+  // unreserved candidate can still collide with a file already sitting on
+  // disk that none of the reservations above know about at all: an
+  // unregistered sibling left by hand, an imported file, or anything else
+  // this export process has no record of (e.g. a hand-placed
+  // workspace/tailored/resume.txt next to a resume.md source). Such a file
+  // is only safe to replace when it is *this application's own* previously
+  // registered artifact for the exact kind+format being produced right
+  // now: the application row's outputKey(kind, format) pointer
+  // already resolves to this candidate path, so this run is a same-owner
+  // re-export overwriting its own prior output. Anything else found at the
+  // candidate path is unavailable, exactly like a reserved identity, and
+  // distinctOutBase must move on to the next suffix instead of clobbering
+  // it.
+  const registeredDestination = (kind, format) => {
+    const storedPath = app.artifacts?.[outputKey(kind, format)];
+    if (typeof storedPath !== "string" || !storedPath.trim()) return null;
+    const abs = resolveWorkspacePath(workspaceDir, storedPath);
+    return abs ? canonicalIdentity(abs) : null;
+  };
+  const isUnavailable = (base, kind) =>
     selectedFormats.some((format) => {
       const ext = FORMAT_EXTENSION[format];
-      return ext ? reservedIdentities.has(canonicalIdentity(`${base}${ext}`)) : false;
+      if (!ext) return false;
+      const candidatePath = `${base}${ext}`;
+      const identity = canonicalIdentity(candidatePath);
+      if (reservedIdentities.has(identity)) return true;
+      if (!existsSync(candidatePath)) return false;
+      return identity !== registeredDestination(kind, format);
     });
   const reserve = (base) => {
     for (const format of selectedFormats) {
@@ -434,12 +459,12 @@ export async function exportPacketArtifacts({
       if (ext) reservedIdentities.add(canonicalIdentity(`${base}${ext}`));
     }
   };
-  const distinctOutBase = (base) => {
+  const distinctOutBase = (base, kind) => {
     let candidate = base;
-    if (isReserved(candidate)) {
+    if (isUnavailable(candidate, kind)) {
       candidate = `${base}-export`;
       let suffix = 2;
-      while (isReserved(candidate)) {
+      while (isUnavailable(candidate, kind)) {
         candidate = `${base}-export-${suffix}`;
         suffix += 1;
       }
@@ -465,7 +490,7 @@ export async function exportPacketArtifacts({
     // outBase instead of collapsing to an empty (and therefore relative,
     // process.cwd()-anchored) base.
     const sourceExt = extname(full);
-    const outBase = distinctOutBase(sourceExt ? full.slice(0, -sourceExt.length) : full);
+    const outBase = distinctOutBase(sourceExt ? full.slice(0, -sourceExt.length) : full, kind);
     const result = await exportArtifact({
       markdown,
       outBase,

@@ -698,6 +698,175 @@ test("exportPacketArtifacts picks a distinct output base instead of overwriting 
   );
 });
 
+test("a text export does not overwrite an unrelated pre-existing .txt sibling of its markdown source", async () => {
+  // Codex round-9 finding: exportPacketArtifacts only reserved identities
+  // it already knew about (registered sources, plain-key artifacts, other
+  // kinds' formats, the manifest). An unrelated file that happens to
+  // already sit at the computed destination -- a hand-placed
+  // workspace/tailored/resume.txt sitting next to resume.md, never
+  // registered on the application at all -- was invisible to that
+  // reservation set, so the confined text writer's atomic rename silently
+  // replaced it. It must be treated as unavailable and the exporter must
+  // pick a distinct suffix instead.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/acme-resume.md",
+    "# Acme Staff Engineer\n\nEvidence-backed resume body.\n"
+  );
+  const siblingContent = "a manually maintained plain-text resume, unrelated to this export\n";
+  const siblingPath = writeWorkspaceFile(repoRoot, "tailored/acme-resume.txt", siblingContent);
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/acme-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  seedApp(repoRoot, { resumeSource, packetManifest });
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(
+    readFileSync(join(repoRoot, siblingPath), "utf8"),
+    siblingContent,
+    "the unrelated sibling .txt file survives byte-for-byte"
+  );
+
+  assert.equal(calls.length, 1);
+  assert.notEqual(
+    `${calls[0].outBase}.txt`,
+    join(repoRoot, siblingPath),
+    "the export lands on a suffixed destination, not the sibling's path"
+  );
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+  assert.notEqual(
+    artifacts.resumeText,
+    siblingPath,
+    "the exported text artifact is not the unrelated sibling"
+  );
+});
+
+test("a same-owner re-export reuses its own registered destination and overwrites it", async () => {
+  // The other side of the fix above: a destination is only available for
+  // reuse when it is this application's own registered prior export for
+  // the same kind and format. A same-owner re-export (e.g. a candidate
+  // regenerating the same resume text a second time) must still land on
+  // and overwrite its own prior output rather than getting suffixed away
+  // from it forever.
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  const priorOutBase = sources.resumeSource.replace(/\.md$/, "").replace(/^workspace\//, "");
+  const priorResumeText = writeWorkspaceFile(
+    repoRoot,
+    `${priorOutBase}.txt`,
+    "stale text from a prior export run\n"
+  );
+  seedApp(repoRoot, { ...sources, resumeText: priorResumeText });
+
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(
+    `${calls[0].outBase}.txt`,
+    join(repoRoot, priorResumeText),
+    "the re-export reuses its own registered destination rather than picking a suffix"
+  );
+  assert.equal(
+    readFileSync(join(repoRoot, priorResumeText), "utf8"),
+    "fake packet plain text\n",
+    "the registered destination is overwritten with the fresh export"
+  );
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.equal(artifacts.resumeText, priorResumeText);
+});
+
+test("an unrelated application's registered artifact at the computed destination survives", async () => {
+  // The reuse exception is scoped per application: an existing file at
+  // the computed destination that belongs to a different application's
+  // registered export is exactly as unowned, from this application's
+  // perspective, as any other stranger's file, and must not be replaced.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-resume.md",
+    "# Acme Staff Engineer\n\nEvidence-backed resume body.\n"
+  );
+  const otherContent = "another application's own registered plain-text resume\n";
+  const otherResumeText = writeWorkspaceFile(repoRoot, "tailored/shared-resume.txt", otherContent);
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeSource, packetManifest },
+    },
+    {
+      id: "app-other",
+      company: "Globex",
+      role: "Principal Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeText: otherResumeText },
+    },
+  ]);
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(
+    readFileSync(join(repoRoot, otherResumeText), "utf8"),
+    otherContent,
+    "the other application's registered artifact survives byte-for-byte"
+  );
+
+  assert.equal(calls.length, 1);
+  assert.notEqual(
+    `${calls[0].outBase}.txt`,
+    join(repoRoot, otherResumeText),
+    "app-export's export lands on a suffixed destination, not app-other's file"
+  );
+
+  const artifacts = readApp(repoRoot, "app-export").artifacts;
+  assert.notEqual(artifacts.resumeText, otherResumeText);
+});
+
 test("a text-only regeneration clears a prior resumePdf so apply cannot still select it", async () => {
   // Regression for a round-four finding: exportPacketArtifacts used to
   // merge a run's artifacts onto the prior manifest/app-row artifacts
