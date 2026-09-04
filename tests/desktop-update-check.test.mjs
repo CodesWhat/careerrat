@@ -359,20 +359,20 @@ describe("desktop updater controller", () => {
     assert.equal(controller.acceptInstall(), true);
 
     updater.emit("checking-for-update");
-    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.getState().phase, "installing");
 
     updater.emit("update-available", { version: "0.16.5" });
-    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.getState().phase, "installing");
 
     updater.emit("error", new Error("network blip"));
-    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.getState().phase, "installing");
 
     updater.emit("update-cancelled");
-    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.getState().phase, "installing");
 
     const state = await controller.checkNow({ force: true });
     assert.equal(updater.checkCalls, 0);
-    assert.equal(state.phase, "ready");
+    assert.equal(state.phase, "installing");
 
     assert.equal(controller.install(), true);
     assert.deepEqual(updater.installCalls, [[false, true]]);
