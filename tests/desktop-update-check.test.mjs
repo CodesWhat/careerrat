@@ -230,7 +230,7 @@ describe("desktop updater controller", () => {
   });
 
   it("recovers from a skipped startup reconciliation once updates are re-enabled", async () => {
-    const { controller, updater } = makeController({
+    const { controller, updater, writes } = makeController({
       persisted: {
         ...DEFAULT_STATE,
         enabled: false,
@@ -244,10 +244,25 @@ describe("desktop updater controller", () => {
     assert.equal(updater.checkCalls, 0);
     assert.notEqual(state.phase, "checking");
 
+    controller.setEnabled(true);
+
+    // The persisted ready marker must survive a skipped startup
+    // reconciliation and re-enabling; only the enabled flag should change.
+    const savedAfterEnable = writes.at(-1);
+    assert.deepEqual(savedAfterEnable.operation, { phase: "ready", version: "0.16.4" });
+    assert.equal(savedAfterEnable.enabled, true);
+
+    // A restart from that persisted state must still treat the ready update
+    // as pending reconciliation, proving the marker wasn't silently dropped.
+    const { controller: restarted, updater: restartedUpdater } = makeController({
+      persisted: savedAfterEnable,
+    });
+    assert.equal(restarted.needsStartupCheck(), true);
+    assert.equal(restartedUpdater.checkCalls, 0);
+
     // Before the fix, the leftover synthetic `checking` phase made this
     // manual check coalesce onto the abandoned reconciliation instead of
     // invoking the updater, so checkCalls stayed at 0 forever.
-    controller.setEnabled(true);
     const manualState = await controller.checkNow({ manual: true });
 
     assert.equal(updater.checkCalls, 1);
