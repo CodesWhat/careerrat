@@ -174,6 +174,33 @@ function writeNormalExitDescendantWrapperScript(wrapperPath) {
   );
 }
 
+// A fourth variant, for the nonzero-close race: the leader spawns a
+// same-group descendant that ignores SIGTERM, then exits 1 on its own,
+// the same shape a failed `curl | bash` run with a resistant redirected
+// background helper takes. This is what proves a nonzero close still waits
+// for confirmed group death, exactly like a status-0 close, instead of
+// rejecting the instant bash itself exits.
+function writeFailingExitDescendantWrapperScript(wrapperPath) {
+  writeFileSync(
+    wrapperPath,
+    [
+      "import('node:child_process').then(({ spawn }) => {",
+      "  const child = spawn(",
+      "    process.execPath,",
+      "    ['-e', \"process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\"],",
+      "    { stdio: 'ignore' }",
+      "  );",
+      "  import('node:fs').then(({ writeFileSync }) => {",
+      "    writeFileSync(process.argv[2], String(child.pid));",
+      "    process.exit(1);",
+      "  });",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+}
+
 function writeExitingLeaderDescendantWrapperScript(wrapperPath) {
   writeFileSync(
     wrapperPath,
@@ -2689,6 +2716,44 @@ test("guided Claude setup on a status-0 close waits for confirmed process-group 
       isProcessAlive(grandchildPid),
       false,
       "the descendant must already be dead by the time a status-0 close resolves"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("guided Claude setup on a nonzero close still waits for confirmed process-group death, killing a surviving descendant, before rejecting with the original installer error", async () => {
+  const root = tempRoot();
+  const wrapperPath = join(root, "wrapper.mjs");
+  const pidFilePath = join(root, "grandchild.pid");
+  writeFailingExitDescendantWrapperScript(wrapperPath);
+
+  try {
+    const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+      platform: "darwin",
+      groupDeathTimeoutMs: 300,
+      groupDeathPollIntervalMs: 20,
+      spawnImpl: (_command, _args, options) =>
+        spawn(process.execPath, [wrapperPath, pidFilePath], options),
+    });
+
+    const grandchildPid = Number(await waitForFileContent(pidFilePath));
+    assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+    await assert.rejects(
+      resultPromise,
+      (error) =>
+        error.code === "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED" &&
+        error.status === 1 &&
+        error.message === "The Claude Code installer did not finish successfully."
+    );
+    // The descendant ignores SIGTERM, so if this rejected before the
+    // group-death confirmation (and its SIGKILL escalation) ran to
+    // completion, it would still be alive right here.
+    assert.equal(
+      isProcessAlive(grandchildPid),
+      false,
+      "the descendant must already be dead by the time a nonzero close rejects"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

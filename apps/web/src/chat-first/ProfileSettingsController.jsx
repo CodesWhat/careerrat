@@ -254,6 +254,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [aiPreferencesBusy, setAiPreferencesBusy] = useState(false);
   const [aiPreferencesStatus, setAiPreferencesStatus] = useState("");
   const [initialHydrationComplete, setInitialHydrationComplete] = useState(false);
+  // Set when the mount effect's own getAiPreferences call rejects, so the
+  // AI preference controls stay disabled even after the rest of hydration
+  // completes: see the mount useEffect below for why enabling them over an
+  // unhydrated default is unsafe.
+  const [aiPreferencesHydrationFailed, setAiPreferencesHydrationFailed] = useState(false);
   const [editorDraftState, setEditorDraftState] = useState({ contextId: null, values: {} });
   const [editorBusy, setEditorBusy] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(null);
@@ -484,37 +489,70 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   useEffect(() => {
     let cancelled = false;
     const revisionAtRequest = aiPreferencesRevisionRef.current;
-    Promise.all([
+    // allSettled, not all: an unrelated Settings request rejecting must
+    // never discard the other fields this same mount fetch already
+    // fulfilled. A single Promise.all here previously meant one failed
+    // request (say, automation settings) threw away a successfully
+    // hydrated aiPreferences too, and the finally below still flipped
+    // initialHydrationComplete, enabling the AI preference controls over
+    // EMPTY_MODEL's "automatic" defaults instead of the candidate's real
+    // saved values; the next preference change would then post that
+    // default over the unhydrated sibling field, silently overwriting it.
+    Promise.allSettled([
       api.getOnboardState(),
       api.getInstalledAiRuntimes(),
       api.getAutomationSettings(),
       api.getSourceMaintenance(),
       api.getAiPreferences(),
     ])
-      .then(([onboard, runtimes, automation, sources, aiPreferences]) => {
-        if (cancelled) return;
-        const next = {
-          onboard,
-          runtimes,
-          automation,
-          sources,
-          aiPreferences: mergeAiPreferencesRevisionAware(
-            aiPreferencesRevisionRef,
-            settingsPartsRef,
-            revisionAtRequest,
-            aiPreferences
-          ),
-        };
-        settingsPartsRef.current = next;
-        setModel(buildSettingsModel(next));
-      })
-      .catch((cause) => {
-        if (!cancelled) {
-          setError(
-            profileSettingsErrorMessage(cause, "CareerRat couldn't load Settings. Try again.")
-          );
+      .then(
+        ([onboardResult, runtimesResult, automationResult, sourcesResult, aiPreferencesResult]) => {
+          if (cancelled) return;
+          const current = settingsPartsRef.current;
+          const next = {
+            onboard: onboardResult.status === "fulfilled" ? onboardResult.value : current.onboard,
+            runtimes:
+              runtimesResult.status === "fulfilled" ? runtimesResult.value : current.runtimes,
+            automation:
+              automationResult.status === "fulfilled" ? automationResult.value : current.automation,
+            sources: sourcesResult.status === "fulfilled" ? sourcesResult.value : current.sources,
+            aiPreferences:
+              aiPreferencesResult.status === "fulfilled"
+                ? mergeAiPreferencesRevisionAware(
+                    aiPreferencesRevisionRef,
+                    settingsPartsRef,
+                    revisionAtRequest,
+                    aiPreferencesResult.value
+                  )
+                : current.aiPreferences,
+          };
+          settingsPartsRef.current = next;
+          setModel(buildSettingsModel(next));
+          const failure = [
+            onboardResult,
+            runtimesResult,
+            automationResult,
+            sourcesResult,
+            aiPreferencesResult,
+          ].find((result) => result.status === "rejected");
+          if (failure) {
+            setError(
+              profileSettingsErrorMessage(
+                failure.reason,
+                "CareerRat couldn't load Settings. Try again."
+              )
+            );
+          }
+          // The AI preference controls stay disabled (see aiPreferencesBusy
+          // below) whenever their own fetch failed, even though hydration as a
+          // whole otherwise completed: enabling them would let the next change
+          // post EMPTY_MODEL's defaults over whatever the candidate actually
+          // has saved.
+          if (aiPreferencesResult.status !== "fulfilled") {
+            setAiPreferencesHydrationFailed(true);
+          }
         }
-      })
+      )
       .finally(() => {
         if (!cancelled) setInitialHydrationComplete(true);
       });
@@ -915,7 +953,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onEditSection={editSection}
         onOpenFiles={() => requestNavigation("/", { state: { browse: "files" } })}
         onPermissionChange={changePermission}
-        aiPreferencesBusy={aiPreferencesBusy || !initialHydrationComplete}
+        aiPreferencesBusy={
+          aiPreferencesBusy || !initialHydrationComplete || aiPreferencesHydrationFailed
+        }
         aiPreferencesStatus={aiPreferencesStatus}
         onAiPreferenceChange={changeAiPreference}
         publicSyncBusy={publicSyncBusy}

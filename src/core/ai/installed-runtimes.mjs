@@ -2285,17 +2285,20 @@ export async function startInstalledRuntimeGuidedSetup(
       if (stopError) return;
       fail("CareerRat could not start the in-app installer.", { cause: error });
     });
-    // A status-0 close only means bash itself exited; a detached descendant
-    // it forked with its own redirected stdio can outlive it in the same
-    // process group. Confirm the whole group is actually dead before
-    // resolving, the same bound stop() above waits on, so a caller can't
-    // start a concurrent installer against a "successful" run that's still
-    // holding the group open. If the group survives the wait, escalate
-    // (SIGTERM then, after scheduleRuntimeProcessKill's grace period,
-    // SIGKILL) and confirm once more; only reject with
+    // A close, status 0 or not, only means bash itself exited; a detached
+    // descendant it forked with its own redirected stdio can outlive it in
+    // the same process group. Confirm the whole group is actually dead
+    // before settling, the same bound stop() above waits on, so a caller
+    // can't start a concurrent installer against a "finished" run that's
+    // still holding the group open. If the group survives the wait,
+    // escalate (SIGTERM then, after scheduleRuntimeProcessKill's grace
+    // period, SIGKILL) and confirm once more; only reject with
     // RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED (retaining the caller's lock) if
-    // it is still alive after that.
-    const confirmNormalCompletionGroupDeath = () => {
+    // it is still alive after that. `onConfirmedDead` decides how to settle
+    // once death is confirmed: success for a status-0 close, or the
+    // original installer error for a nonzero one, so a surviving descendant
+    // never gets a chance to overlap a retry either way.
+    const confirmCloseGroupDeath = (onConfirmedDead) => {
       const pid = child.pid;
       waitForProcessGroupDeath(pid, {
         platform,
@@ -2304,7 +2307,7 @@ export async function startInstalledRuntimeGuidedSetup(
         isAliveImpl: isGroupAliveImpl,
       }).then((confirmedDead) => {
         if (confirmedDead) {
-          finish();
+          onConfirmedDead();
           return;
         }
         forceKillTimer = scheduleRuntimeProcessKill(
@@ -2317,7 +2320,7 @@ export async function startInstalledRuntimeGuidedSetup(
               isAliveImpl: isGroupAliveImpl,
             }).then((confirmedDeadAfterKill) => {
               if (confirmedDeadAfterKill) {
-                finish();
+                onConfirmedDead();
                 return;
               }
               finish(
@@ -2342,13 +2345,15 @@ export async function startInstalledRuntimeGuidedSetup(
       // scheduled group SIGKILL rather than settling here.
       if (stopError) return;
       if (status === 0) {
-        confirmNormalCompletionGroupDeath();
+        confirmCloseGroupDeath(() => finish());
         return;
       }
-      fail("The Claude Code installer did not finish successfully.", {
-        status,
-        signal: closeSignal,
-      });
+      confirmCloseGroupDeath(() =>
+        fail("The Claude Code installer did not finish successfully.", {
+          status,
+          signal: closeSignal,
+        })
+      );
     });
 
     timer = setTimeout(

@@ -24,7 +24,16 @@ import {
 } from "../core/ai/runtime-selection.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
-const GUIDED_SETUP_SHUTDOWN_TIMEOUT_MS = 5000;
+// Must outlast the installer's own bounded cancellation path (see
+// startInstalledRuntimeGuidedSetup's stop() in installed-runtimes.mjs):
+// scheduleRuntimeProcessKill's SIGTERM grace (RUNTIME_TERMINATION_GRACE_MS,
+// 250ms) before it escalates to SIGKILL, then a group-death confirmation
+// wait (GUIDED_SETUP_GROUP_DEATH_TIMEOUT_MS, 5000ms) after that, for a
+// worst case of ~5250ms. A shorter outer bound here would let this race
+// resolve before that inner cleanup finishes, so shutdown could return
+// while the installer's process group (and the ownership record guarding
+// it) is still live. 8000ms gives that worst case real margin.
+const GUIDED_SETUP_SHUTDOWN_TIMEOUT_MS = 8000;
 
 const MAX_BODY_BYTES = 16 * 1024;
 

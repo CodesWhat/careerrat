@@ -127,15 +127,23 @@ function recordIsStale(record, now) {
 //   - A pid-less record (reserved, not yet spawned) is alive as long as it
 //     isn't stale; there's no process to check liveness against yet.
 //   - A recorded pid is alive only if its process group still answers, and,
-//     when a start-time identity was captured for it, that identity still
-//     matches, closing the specific reused-pid gap group liveness alone
-//     can't catch.
+//     when a start-time identity was captured for it and `ps` can still
+//     name a current identity for that pid, that identity still matches,
+//     closing the specific reused-pid gap group liveness alone can't
+//     catch. If the leader itself has exited but the group lives on
+//     through a descendant, `ps` returns nothing for the leader's pid
+//     (null, not a mismatch): that is not evidence of reuse, so the record
+//     stays alive on group liveness alone until the group dies or the
+//     stale bound passes.
 function recordIsAlive(record, platform, now) {
   if (recordIsStale(record, now)) return false;
   if (record.pid === null) return true;
   if (!processGroupAlive(record.pid, platform)) return false;
-  if (record.pidStartedAt && processStartIdentity(record.pid, platform) !== record.pidStartedAt) {
-    return false;
+  if (record.pidStartedAt) {
+    const currentIdentity = processStartIdentity(record.pid, platform);
+    if (currentIdentity !== null && currentIdentity !== record.pidStartedAt) {
+      return false;
+    }
   }
   return true;
 }

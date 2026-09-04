@@ -1419,6 +1419,56 @@ describe("ProfileSettingsController AI preferences", () => {
     const settled = renderController(module, api);
     expect(settingsProps(settled).aiPreferencesBusy).toBe(false);
   });
+
+  it("hydrates AI preferences from the initial mount fetch even when an unrelated Settings request fails, and does not overwrite the unhydrated sibling preference on save", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAiPreferences.mockResolvedValue({
+      quality: "balanced",
+      reasoning: "medium",
+      source: "saved",
+      updatedAt: "2026-08-27T15:00:00.000Z",
+    });
+    // The mount effect's own automation-settings request fails; a single
+    // Promise.all here would previously have discarded the AI preferences
+    // this same mount fetch already fulfilled.
+    api.getAutomationSettings.mockRejectedValueOnce(new Error("automation settings unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+
+    const view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "balanced",
+      reasoning: "medium",
+    });
+    expect(settingsProps(view).aiPreferencesBusy).toBe(false);
+
+    await settingsProps(view).onAiPreferenceChange("reasoning", "high");
+
+    // A pre-fix bug (Promise.all discarding the whole mount fetch on any
+    // single failure, while still enabling the controls) would have left
+    // aiPreferences at EMPTY_MODEL's "automatic" default here, so this save
+    // would silently post "automatic" quality over the candidate's real
+    // saved "balanced" choice.
+    expect(api.saveAiPreferences).toHaveBeenLastCalledWith({
+      quality: "balanced",
+      reasoning: "high",
+    });
+  });
+
+  it("keeps the AI preference controls disabled, with an error, when their own mount fetch fails even though the rest of hydration completes", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAiPreferences.mockRejectedValue(new Error("ai preferences unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+
+    const view = renderController(module, api);
+    expect(settingsProps(view).aiPreferencesBusy).toBe(true);
+    expect(controllerAlertText(view)).toBeTruthy();
+  });
 });
 
 describe("ProfileSettingsController guided update", () => {

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, test } from "node:test";
+import { afterEach, mock, test } from "node:test";
 
 import {
   inspectInstalledRuntimeState,
@@ -86,6 +86,35 @@ function writeAsymmetricInstallerWrapperScript(wrapperPath) {
       "  );",
       "});",
       "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+// A real-process stand-in for a dead group leader with a live descendant:
+// the leader spawns a descendant (inheriting the leader's process group,
+// since it isn't itself detached) that ignores SIGTERM and keeps running,
+// writes the descendant's pid to pidFilePath, then exits on its own. This
+// is the shape finding 2 covers: `ps` can no longer name any identity for
+// the leader's own pid once it's gone (null, not a mismatch), while
+// process.kill(-leaderPid, 0) still succeeds because the descendant keeps
+// the group alive.
+function writeLeaderExitsDescendantSurvivesWrapperScript(wrapperPath) {
+  writeFileSync(
+    wrapperPath,
+    [
+      "import('node:child_process').then(({ spawn }) => {",
+      "  const child = spawn(",
+      "    process.execPath,",
+      "    ['-e', \"process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\"],",
+      "    { stdio: 'ignore' }",
+      "  );",
+      "  import('node:fs').then(({ writeFileSync }) => {",
+      "    writeFileSync(process.argv[2], String(child.pid));",
+      "    process.exit(0);",
+      "  });",
+      "});",
       "",
     ].join("\n"),
     "utf8"
@@ -1500,6 +1529,103 @@ test("a remount of the routes (simulating a relaunch) refuses while the recorded
   }
 });
 
+test("a dead group leader with a live descendant is not mistaken for a reused pid: a relaunch is refused while the descendant lives and admitted once it dies", async () => {
+  const repoRoot = root();
+  const env = { CAREERRAT_DESKTOP_CLI_ONLY: "1" };
+  const setupRoot = root();
+  const wrapperPath = join(setupRoot, "wrapper.mjs");
+  const pidFilePath = join(setupRoot, "descendant.pid");
+  writeLeaderExitsDescendantSurvivesWrapperScript(wrapperPath);
+
+  // A real, detached leader (own process group) that spawns a descendant,
+  // records the descendant's pid, then exits on its own, leaving the
+  // descendant alive in the leader's now-leaderless process group.
+  const leader = spawn(process.execPath, [wrapperPath, pidFilePath], {
+    detached: true,
+    stdio: "ignore",
+  });
+  await new Promise((resolve) => leader.once("spawn", resolve));
+  const leaderPid = leader.pid;
+  writeGuidedSetupOwnership({ repoRoot, env, runtimeId: "claude", pid: leaderPid });
+
+  const descendantPid = Number(await waitForFileContent(pidFilePath));
+  assert.ok(Number.isInteger(descendantPid) && descendantPid > 0, "descendant pid was recorded");
+  assert.equal(
+    await waitUntilProcessDead(leaderPid),
+    true,
+    "the leader must actually exit on its own before the admission checks below run"
+  );
+  const descendantAlive = () => {
+    try {
+      process.kill(descendantPid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  assert.equal(descendantAlive(), true, "the descendant must still be alive once the leader exits");
+
+  try {
+    const relaunched = boot({
+      repoRoot,
+      inventory: INVENTORY,
+      probes: {},
+      env,
+      platform: "darwin",
+      belowBoundaryImpl: async () => "below",
+      startGuidedSetupImpl: async () => {
+        throw new Error("must not run while the descendant is still alive");
+      },
+    });
+
+    // `ps` can no longer name any identity for the leader's own (now gone)
+    // pid: null, not a mismatch. The group is still alive through the
+    // descendant, so this must stay refused rather than reading the null
+    // identity as evidence of pid reuse and reclaiming.
+    const refused = await request(relaunched, "POST", "/api/settings/ai-runtime/guided-setup", {
+      runtimeId: "claude",
+    });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.code, "RUNTIME_GUIDED_SETUP_IN_PROGRESS");
+
+    process.kill(descendantPid, "SIGKILL");
+    assert.equal(
+      await waitUntilProcessDead(descendantPid),
+      true,
+      "the descendant must actually die"
+    );
+
+    const started = [];
+    const relaunchedAgain = boot({
+      repoRoot,
+      inventory: INVENTORY,
+      probes: {},
+      env,
+      platform: "darwin",
+      belowBoundaryImpl: async () => "below",
+      startGuidedSetupImpl: async (runtimeId, { onStart }) => {
+        started.push(runtimeId);
+        onStart();
+        return { runtimeId, installCommand: "curl -fsSL https://claude.ai/install.sh | bash" };
+      },
+    });
+    const admitted = await requestStream(
+      relaunchedAgain,
+      "POST",
+      "/api/settings/ai-runtime/guided-setup",
+      { runtimeId: "claude" }
+    );
+    assert.equal(admitted.status, 200);
+    assert.deepEqual(started, ["claude"]);
+  } finally {
+    try {
+      process.kill(descendantPid, "SIGKILL");
+    } catch {
+      // Already dead by the time cleanup runs.
+    }
+  }
+});
+
 test("a malformed ownership record is reclaimed rather than blocking admission", async () => {
   const repoRoot = root();
   const env = { CAREERRAT_DESKTOP_CLI_ONLY: "1" };
@@ -1685,6 +1811,142 @@ test("shutdownGuidedSetups returns within its own bound even when a descendant's
   // own STOP_UNCONFIRMED bound afterward, so nothing leaks past this test.
   assert.equal(await waitUntilProcessDead(grandchildPid, { timeoutMs: 2000 }), true);
   await pending;
+});
+
+test("shutdownGuidedSetups's default outer bound outlasts the installer's own default cleanup bound instead of racing a shorter timer", async () => {
+  // Mocked (not real) time, and a fake in-memory child rather than a real
+  // process: the whole point here is the production DEFAULT bounds on both
+  // sides -- the installer's own grace-then-confirm cleanup
+  // (RUNTIME_TERMINATION_GRACE_MS + GUIDED_SETUP_GROUP_DEATH_TIMEOUT_MS,
+  // installed-runtimes.mjs) against the route's own outer shutdown bound
+  // (GUIDED_SETUP_SHUTDOWN_TIMEOUT_MS, installed-runtime-route.mjs) --
+  // without spending real wall-clock seconds waiting them out or racing a
+  // real process's own (fast, unrepresentative) death against the clock.
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.pid = 999_999;
+  child.kill = () => {};
+  let spawned = false;
+
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    belowBoundaryImpl: async () => "below",
+    startGuidedSetupImpl: (runtimeId, options) =>
+      startInstalledRuntimeGuidedSetup(runtimeId, {
+        ...options,
+        spawnImpl: () => {
+          queueMicrotask(() => {
+            spawned = true;
+            child.emit("spawn");
+          });
+          return child;
+        },
+        // Group liveness stays true for the whole inner bound: the shape a
+        // descendant that never confirms dead takes, and exactly what the
+        // outer shutdown bound has to tolerate without cutting the
+        // installer's own cleanup short.
+        isGroupAliveImpl: () => true,
+      }),
+  });
+
+  function guidedSetupHarness() {
+    const res = {
+      on() {
+        return this;
+      },
+      writeHead() {
+        return this;
+      },
+      flushHeaders() {},
+      write() {
+        return true;
+      },
+      end() {},
+    };
+    const req = Readable.from([Buffer.from(JSON.stringify({ runtimeId: "claude" }))]);
+    req.headers = { "content-type": "application/json" };
+    const handler = server.routes.get("POST /api/settings/ai-runtime/guided-setup");
+    return handler(req, res);
+  }
+
+  const pending = guidedSetupHarness();
+  // Real timers still, since mock.timers isn't enabled yet: a bounded real
+  // wait for the fake spawn to land, same shape waitForFileContent above
+  // uses for a real process's pid file.
+  const spawnDeadline = Date.now() + 2000;
+  while (!spawned && Date.now() < spawnDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  assert.equal(spawned, true, "the fake installer must have been spawned before shutdown runs");
+
+  let pendingSettled = false;
+  pending.then(
+    () => {
+      pendingSettled = true;
+    },
+    () => {
+      pendingSettled = true;
+    }
+  );
+
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  try {
+    // No override on either side: exercises the real production defaults
+    // end to end.
+    const shutdownPromise = server.shutdownGuidedSetups();
+    let shutdownSettled = false;
+    shutdownPromise.then(() => {
+      shutdownSettled = true;
+    });
+
+    // Advance past the grace period (250ms) alone first, in its own tick:
+    // mock.timers.tick() snaps the mocked Date straight to the requested
+    // target before running any callback due within it, so the
+    // group-death confirmation's own deadline (computed from Date.now()
+    // inside the escalation callback) must be established at exactly
+    // 250ms, not folded into one larger jump together with the ticks
+    // below.
+    mock.timers.tick(250);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Now advance into the group-death confirmation wait, but stay short
+    // of its default 5000ms timeout (cumulative 5100ms < the ~5250ms inner
+    // bound): neither the underlying request nor shutdownGuidedSetups
+    // itself may have settled yet.
+    mock.timers.tick(4850);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(
+      pendingSettled,
+      false,
+      "the underlying guided-setup request must still be pending mid-way through the inner bound"
+    );
+    assert.equal(
+      shutdownSettled,
+      false,
+      "shutdownGuidedSetups must not resolve before the installer's own cleanup confirms/gives up"
+    );
+
+    // Advance past the inner bound (grace + group-death confirmation
+    // timeout, ~5250ms total) but still far short of the outer shutdown
+    // bound (well under 8000ms): the installer's own cleanup gives up
+    // (RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED, retaining its lock) on its
+    // own, and shutdownGuidedSetups must resolve only once that happens.
+    mock.timers.tick(300);
+    await shutdownPromise;
+    assert.equal(
+      pendingSettled,
+      true,
+      "shutdownGuidedSetups must not resolve before the underlying request has actually settled"
+    );
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("two guided-setup admissions on separate mounts race the durable reservation, and the second is refused", async () => {
