@@ -25,11 +25,23 @@ function isDocx(buffer) {
   );
 }
 
+// Reused across calls; `fatal: true` makes decode() throw instead of
+// silently substituting U+FFFD for invalid byte sequences.
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
 // A plain-text export is "valid" when it's non-empty UTF-8 with no null
 // bytes (the one byte sequence that never appears in real text and reliably
-// flags a truncated or binary write).
+// flags a truncated or binary write) and decodes cleanly as UTF-8. A
+// malformed sequence (an invalid lead byte, or a multibyte sequence
+// truncated mid-character) is corrupt output masquerading as text.
 function isPlainText(buffer) {
-  return buffer.length > 0 && !buffer.includes(0);
+  if (buffer.length === 0 || buffer.includes(0)) return false;
+  try {
+    utf8Decoder.decode(buffer);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function validDocumentArtifact(path) {

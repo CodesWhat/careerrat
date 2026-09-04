@@ -5,9 +5,9 @@
 // Preview fragments are sanitized server-side.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import sanitizeHtml from "sanitize-html";
@@ -165,15 +165,36 @@ export function normalizeAtsText(text) {
 
 /**
  * Split a pipe-table row into trimmed cell strings. Outer pipes are optional.
+ * Escape-aware: a backslash-escaped pipe (`\|`) is a literal pipe inside a
+ * cell, not a column separator, and the backslash is removed from the
+ * output cell text.
  *
  * @param {string} line
  * @returns {string[]}
  */
 function splitPipeRow(line) {
   const s = line.trim();
-  const inner = s.startsWith("|") ? s.slice(1) : s;
-  const cells = inner.endsWith("|") ? inner.slice(0, -1).split("|") : inner.split("|");
-  return cells.map((c) => c.trim());
+  const hasOuterLeading = s.startsWith("|");
+  let inner = hasOuterLeading ? s.slice(1) : s;
+  const hasOuterTrailing = inner.endsWith("|") && !inner.endsWith("\\|");
+  if (hasOuterTrailing) inner = inner.slice(0, -1);
+
+  const cells = [];
+  let current = "";
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === "\\" && inner[i + 1] === "|") {
+      current += "|";
+      i++;
+    } else if (ch === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
 }
 
 /**
@@ -729,6 +750,47 @@ function runsToPlainText(runs) {
 }
 
 /**
+ * Same as runsToPlainText, but for heading text: uppercases each run's
+ * visible label only, and never the link destination. A link destination
+ * can be case-sensitive (path or query string), so the URL bytes must
+ * survive uppercasing untouched.
+ *
+ * @param {Array<{text: string, href?: string}>} runs
+ * @returns {string}
+ */
+function headingRunsToPlainText(runs) {
+  return (runs || [])
+    .map((run) => {
+      const text = String(run?.text || "");
+      if (run?.href && run.href !== text) {
+        const upperText = text.toUpperCase();
+        return upperText ? `${upperText} (${run.href})` : run.href;
+      }
+      // Bare autolink (href === text): preserve the URL's own case.
+      if (run?.href) return text;
+      return text.toUpperCase();
+    })
+    .join("");
+}
+
+/**
+ * Strip a leading ATX heading marker (`#` through `######` followed by
+ * whitespace, with up to 3 leading spaces) from a fenced-code-block line.
+ * Fenced content is otherwise copied verbatim into the plain-text output,
+ * but a fenced line that looks exactly like an ATX heading would leak as
+ * live heading syntax once the fence markers themselves are dropped. This
+ * keeps the plain-text renderer's no-heading-syntax contract intact while
+ * leaving every other character of the line untouched.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+function stripFencedAtxMarker(line) {
+  const m = line.match(/^( {0,3})(#{1,6})( +)(.*)$/);
+  return m ? `${m[1]}${m[4]}` : line;
+}
+
+/**
  * Render a résumé/cover-letter/packet markdown string to plain text for
  * application-form paste boxes and .txt downloads: no markdown syntax
  * (headings, bold, tables, backticks, pipes), UTF-8, no smart quotes or em
@@ -745,7 +807,13 @@ export function renderResumeText(markdown) {
   const blocks = parseMdBlocks(normalizeAtsText(String(markdown ?? "")));
   const lines = [];
   let previousType = null;
-  let listCounter = 0;
+  // Per-level ordered-list counters, indexed by depth. Reset in full
+  // whenever a list run breaks (previousType !== "li"); entering a deeper
+  // level resets that level's counter to its own start number, and
+  // returning to a shallower level continues that level's counter from
+  // where it left off, matching how nested numbered lists actually read.
+  let listCounters = [];
+  let lastListDepth = -1;
 
   function pushBlank() {
     if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("");
@@ -754,7 +822,7 @@ export function renderResumeText(markdown) {
   for (const block of blocks) {
     if (block.type === "heading") {
       pushBlank();
-      lines.push(runsToPlainText(block.runs).toUpperCase());
+      lines.push(headingRunsToPlainText(block.runs));
       pushBlank();
     } else if (block.type === "para") {
       if (previousType === "para" || previousType === "li" || previousType === "blockquote") {
@@ -764,11 +832,22 @@ export function renderResumeText(markdown) {
     } else if (block.type === "li") {
       if (previousType !== "li") {
         pushBlank();
-        listCounter = 0;
+        listCounters = [];
+        lastListDepth = -1;
       }
-      listCounter += 1;
-      const prefix = block.ordered ? `${listCounter}. ` : "- ";
-      lines.push(`${prefix}${runsToPlainText(block.runs)}`);
+      const depth = block.depth || 0;
+      const indent = "  ".repeat(depth);
+      let prefix = "- ";
+      if (block.ordered) {
+        if (depth > lastListDepth || listCounters[depth] === undefined) {
+          listCounters[depth] = block.start ?? 1;
+        } else {
+          listCounters[depth] += 1;
+        }
+        prefix = `${listCounters[depth]}. `;
+      }
+      lastListDepth = depth;
+      lines.push(`${indent}${prefix}${runsToPlainText(block.runs)}`);
     } else if (block.type === "blockquote") {
       pushBlank();
       lines.push(runsToPlainText(block.runs));
@@ -778,7 +857,7 @@ export function renderResumeText(markdown) {
       for (const row of block.rows) lines.push(row.map(runsToPlainText).join("   "));
     } else if (block.type === "codeblock") {
       pushBlank();
-      for (const codeLine of block.lines) lines.push(codeLine);
+      for (const codeLine of block.lines) lines.push(stripFencedAtxMarker(codeLine));
     } else if (block.type === "hr") {
       pushBlank();
     }
@@ -1313,7 +1392,7 @@ function buildStylesXml() {
 /**
  * @typedef {{ type: 'heading', level: number, runs: Run[] }
  *           |{ type: 'para', runs: Run[] }
- *           |{ type: 'li', ordered: boolean, runs: Run[] }
+ *           |{ type: 'li', ordered: boolean, depth: number, start?: number, runs: Run[] }
  *           |{ type: 'hr' }
  *           |{ type: 'blockquote', runs: Run[] }
  *           |{ type: 'table', headers: Run[][], rows: Run[][][] }} Block
@@ -1323,6 +1402,20 @@ function buildStylesXml() {
 function parseMdBlocks(markdown) {
   const lines = markdown.split(/\r?\n/);
   const blocks = [];
+  // Stack of indentation widths, one per active nesting level, used to
+  // derive each list item's depth. Reset whenever a non-list block breaks
+  // the run of list items (blank lines alone do not break it).
+  const listIndentStack = [];
+
+  const listItemDepth = (indent) => {
+    while (listIndentStack.length > 0 && indent < listIndentStack[listIndentStack.length - 1]) {
+      listIndentStack.pop();
+    }
+    if (listIndentStack.length === 0 || indent > listIndentStack[listIndentStack.length - 1]) {
+      listIndentStack.push(indent);
+    }
+    return listIndentStack.length - 1;
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -1341,6 +1434,7 @@ function parseMdBlocks(markdown) {
       }
       i = j; // skip the closing fence
       blocks.push({ type: "codeblock", lines: codeLines });
+      listIndentStack.length = 0;
       continue;
     }
 
@@ -1350,26 +1444,36 @@ function parseMdBlocks(markdown) {
     const hm = line.match(/^(#{1,6})\s+(.*)/);
     if (hm) {
       blocks.push({ type: "heading", level: hm[1].length, runs: parseRuns(hm[2].trim()) });
+      listIndentStack.length = 0;
       continue;
     }
 
     // Horizontal rule
     if (/^(\s*[-*_]){3,}\s*$/.test(line)) {
       blocks.push({ type: "hr" });
+      listIndentStack.length = 0;
       continue;
     }
 
     // Unordered list
-    const ulm = line.match(/^\s*[-*]\s+(.*)/);
+    const ulm = line.match(/^(\s*)[-*]\s+(.*)/);
     if (ulm) {
-      blocks.push({ type: "li", ordered: false, runs: parseRuns(ulm[1]) });
+      const depth = listItemDepth(ulm[1].length);
+      blocks.push({ type: "li", ordered: false, depth, runs: parseRuns(ulm[2]) });
       continue;
     }
 
     // Ordered list
-    const olm = line.match(/^\s*\d+\.\s+(.*)/);
+    const olm = line.match(/^(\s*)(\d+)\.\s+(.*)/);
     if (olm) {
-      blocks.push({ type: "li", ordered: true, runs: parseRuns(olm[1]) });
+      const depth = listItemDepth(olm[1].length);
+      blocks.push({
+        type: "li",
+        ordered: true,
+        depth,
+        start: Number(olm[2]),
+        runs: parseRuns(olm[3]),
+      });
       continue;
     }
 
@@ -1391,12 +1495,14 @@ function parseMdBlocks(markdown) {
           headers: headerCells.map(parseRuns),
           rows: bodyRows,
         });
+        listIndentStack.length = 0;
         continue;
       }
     }
 
     // Blockquote
     if (/^>\s?/.test(line)) {
+      listIndentStack.length = 0;
       const bqRuns = [];
       let j = i;
       while (j < lines.length && /^>\s?/.test(lines[j])) {
@@ -1411,9 +1517,75 @@ function parseMdBlocks(markdown) {
 
     // Regular paragraph line
     blocks.push({ type: "para", runs: parseRuns(line) });
+    listIndentStack.length = 0;
   }
 
   return blocks;
+}
+
+/**
+ * Find the earliest `[text](destination)` link in `s`, scanning the
+ * destination with a balanced-parenthesis, backslash-escape-aware walk so a
+ * destination containing `(...)` groups (or an escaped paren) is captured
+ * whole instead of truncating at the first `)`.
+ *
+ * @param {string} s
+ * @returns {{index: number, length: number, text: string, href: string}|null}
+ */
+function findLinkMatch(s) {
+  let searchFrom = 0;
+  while (searchFrom < s.length) {
+    const openBracket = s.indexOf("[", searchFrom);
+    if (openBracket === -1) return null;
+    const closeBracket = s.indexOf("]", openBracket);
+    if (closeBracket === -1) return null;
+    if (s[closeBracket + 1] !== "(") {
+      searchFrom = openBracket + 1;
+      continue;
+    }
+
+    let depth = 0;
+    let href = "";
+    let matched = false;
+    let j = closeBracket + 1;
+    for (; j < s.length; j++) {
+      const ch = s[j];
+      if (ch === "\\" && j + 1 < s.length) {
+        href += s[j + 1];
+        j++;
+        continue;
+      }
+      if (ch === "(") {
+        depth++;
+        if (depth > 1) href += ch;
+        continue;
+      }
+      if (ch === ")") {
+        depth--;
+        if (depth === 0) {
+          matched = true;
+          j++;
+          break;
+        }
+        href += ch;
+        continue;
+      }
+      href += ch;
+    }
+
+    if (!matched) {
+      searchFrom = openBracket + 1;
+      continue;
+    }
+
+    return {
+      index: openBracket,
+      length: j - openBracket,
+      text: s.slice(openBracket + 1, closeBracket),
+      href,
+    };
+  }
+  return null;
 }
 
 /**
@@ -1425,11 +1597,11 @@ function parseMdBlocks(markdown) {
 function parseRuns(text) {
   const runs = [];
 
-  // Tokenise: backtick code, [text](url), **bold**, __bold__, *italic*, _italic_
-  // We walk through the string with a simple state machine.
+  // Tokenise: backtick code, **bold**, __bold__, *italic*, _italic_. Links
+  // are matched separately by findLinkMatch (see below) so a destination
+  // with balanced parens or backslash escapes stays in one run.
   const patterns = [
     { re: /`([^`]+)`/, type: "code" },
-    { re: /\[([^\]]*)\]\(([^)]*)\)/, type: "link" },
     { re: /\*\*([^*]+)\*\*/, type: "bold" },
     { re: /__([^_]+)__/, type: "bold" },
     { re: /\*([^*]+)\*/, type: "italic" },
@@ -1438,16 +1610,25 @@ function parseRuns(text) {
 
   let remaining = text;
   while (remaining.length > 0) {
-    // Find earliest match across all patterns
+    // Find earliest match across all patterns plus the link scanner
     let earliest = null;
     let earliestIdx = Infinity;
+    let earliestLen = 0;
 
     for (const p of patterns) {
       const m = p.re.exec(remaining);
       if (m && m.index < earliestIdx) {
         earliest = { m, type: p.type };
         earliestIdx = m.index;
+        earliestLen = m[0].length;
       }
+    }
+
+    const link = findLinkMatch(remaining);
+    if (link && link.index < earliestIdx) {
+      earliest = { m: link, type: "link" };
+      earliestIdx = link.index;
+      earliestLen = link.length;
     }
 
     if (!earliest) {
@@ -1464,14 +1645,14 @@ function parseRuns(text) {
     if (type === "code") {
       runs.push({ text: m[1], code: true });
     } else if (type === "link") {
-      runs.push({ text: m[1], href: m[2] });
+      runs.push({ text: m.text, href: m.href });
     } else if (type === "bold") {
       runs.push({ text: m[1], bold: true });
     } else if (type === "italic") {
       runs.push({ text: m[1], italic: true });
     }
 
-    remaining = remaining.slice(earliestIdx + m[0].length);
+    remaining = remaining.slice(earliestIdx + earliestLen);
   }
 
   return runs;
@@ -1762,6 +1943,54 @@ function dosDateTime(date) {
  * }} opts
  * @returns {Promise<{ pdf?: string, docx?: string, docxTool?: string, docxLabel?: string, text?: string }>}
  */
+/**
+ * Write the rendered text artifact to `${outBase}.txt`, confined to
+ * outBase's own directory (the packet directory) and safe against an
+ * existing symlink sitting at the destination.
+ *
+ * outBase must be a non-empty absolute path. Deriving outBase by
+ * extension-stripping an extensionless source (`full.slice(0,
+ * -extname(full).length)`) is a classic negative-zero bug: `extname()`
+ * returns `""`, `-"".length` is `-0`, and `String.prototype.slice(0, -0)`
+ * behaves like `slice(0, 0)`, producing `""` rather than the whole string.
+ * An empty/relative outBase is rejected here rather than silently writing
+ * `.txt` under process.cwd().
+ *
+ * The resolved destination must also stay inside the resolved packet
+ * directory. The write itself goes to a freshly created, uniquely named
+ * sibling file (`wx`, which fails if it already exists, so two concurrent
+ * exports can't clobber each other's temp file) and is then renamed into
+ * place: rename() replaces whatever sits at the destination path,
+ * including an existing symlink, without ever opening or following it,
+ * so a symlink planted at the destination can't redirect the write
+ * outside the packet directory.
+ *
+ * @param {string} outBase
+ * @param {string} text
+ * @returns {string} the destination path
+ */
+function writeTextArtifactConfined(outBase, text) {
+  if (!outBase || !isAbsolute(outBase)) {
+    throw new Error(
+      `exportArtifact: outBase must be a non-empty absolute path, got ${JSON.stringify(outBase)}`
+    );
+  }
+
+  const destPath = `${outBase}.txt`;
+  const packetDir = resolve(dirname(outBase));
+  const resolvedDest = resolve(destPath);
+  if (resolvedDest !== packetDir && !resolvedDest.startsWith(`${packetDir}${sep}`)) {
+    throw new Error(
+      `exportArtifact: text export destination escapes the packet directory: ${destPath}`
+    );
+  }
+
+  const tmpPath = `${destPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  writeFileSync(tmpPath, text, { encoding: "utf8", flag: "wx" });
+  renameSync(tmpPath, destPath);
+  return destPath;
+}
+
 export async function exportArtifact({
   markdown,
   outBase,
@@ -1783,9 +2012,7 @@ export async function exportArtifact({
       result.docxTool = info.tool;
       result.docxLabel = info.label;
     } else if (fmt === "text") {
-      const textPath = `${outBase}.txt`;
-      writeFileSync(textPath, renderResumeText(markdown), "utf8");
-      result.text = textPath;
+      result.text = writeTextArtifactConfined(outBase, renderResumeText(markdown));
     }
   }
 

@@ -10,6 +10,7 @@ import { dirname, join, relative } from "node:path";
 import { after, test } from "node:test";
 import JSZip from "jszip";
 import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
+import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
@@ -644,6 +645,62 @@ test("POST /api/packet/export exports plain text through the local route", async
     const artifacts = readApp(repoRoot).artifacts;
     assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
     assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/export routes text through the workspace-agent runtime path, not a silent PDF default", async () => {
+  // Regression: the workspace-agent's job.export-documents handler filtered
+  // requested formats through a pdf/docx-only allowlist, so formats: ["text"]
+  // was filtered down to [] and then defaulted back to ["pdf"], so a
+  // Files-panel "Plain text" export would silently come back as a PDF. This
+  // exercises the real executeWorkspaceIntent handler (not the local-route
+  // fallback used by the tests above) so the allowlist fix is actually
+  // covered.
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const calls = [];
+  const textPath = "workspace/tailored/acme-staff-engineer-resume.txt";
+  const workspaceAgentRuntime = {
+    executeIntent: ({ intent }) =>
+      executeWorkspaceIntent({
+        repoRoot,
+        env: {},
+        intent,
+        exportDocumentsImpl: async (input) => {
+          calls.push(input);
+          return {
+            appId: input.applicationId,
+            applicationId: input.applicationId,
+            formats: input.formats,
+            artifacts: { resumeText: textPath },
+            userFacing: {
+              resume: [{ format: "text", path: textPath, name: "acme-staff-engineer-resume.txt" }],
+              coverLetter: [],
+              answers: [],
+            },
+            downloadsErrors: [],
+          };
+        },
+      }),
+  };
+  const server = await bootPacketServer(repoRoot, { workspaceAgentRuntime });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/export", {
+      appId: "app-export",
+      formats: ["text"],
+    });
+
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    // The allowlist fix: "text" survives the filter instead of being dropped
+    // and defaulted back to ["pdf"].
+    assert.deepEqual(calls[0].formats, ["text"]);
+    assert.match(body.data?.artifacts?.resumeText, /\.txt$/);
+    assert.equal(body.data?.artifacts?.resumePdf, undefined);
   } finally {
     await closeServer(server);
   }

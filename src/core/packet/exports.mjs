@@ -259,7 +259,15 @@ export async function exportPacketArtifacts({
     }
     const markdown = readFileSync(full, "utf8");
     const kind = sourceKind(sourceKey);
-    const outBase = full.slice(0, -extname(full).length);
+    // extname() returns "" for an extensionless source, and
+    // full.slice(0, -"".length) is full.slice(0, -0). Because -0 === 0 in
+    // JS, that behaves like full.slice(0, 0) and produces "" rather than
+    // the whole path. Only slice when there's an actual extension to
+    // strip, so an extensionless source keeps its full absolute path as
+    // outBase instead of collapsing to an empty (and therefore relative,
+    // process.cwd()-anchored) base.
+    const sourceExt = extname(full);
+    const outBase = sourceExt ? full.slice(0, -sourceExt.length) : full;
     const result = await exportArtifact({
       markdown,
       outBase,

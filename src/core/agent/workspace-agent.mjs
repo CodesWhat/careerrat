@@ -4710,7 +4710,7 @@ export async function executeWorkspaceIntent({
       const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const formats = Array.isArray(input.formats)
         ? [...new Set(input.formats.map((value) => String(value).toLowerCase()))].filter((value) =>
-            ["pdf", "docx"].includes(value)
+            ["pdf", "docx", "text"].includes(value)
           )
         : ["pdf"];
       const operation = await exportDocumentsImpl({
@@ -4721,7 +4721,7 @@ export async function executeWorkspaceIntent({
         exportArtifact: packetExportArtifact,
       });
       const artifacts = operation.artifacts || {};
-      const fileCount = Object.keys(artifacts).filter((key) => /(Pdf|Docx)$/.test(key)).length;
+      const fileCount = Object.keys(artifacts).filter((key) => /(Pdf|Docx|Text)$/.test(key)).length;
       const downloadsErrors = Array.isArray(operation.downloadsErrors)
         ? operation.downloadsErrors
         : [];

@@ -105,3 +105,77 @@ test("renderResumeText on an empty or whitespace-only document returns an empty 
   assert.equal(renderResumeText(""), "");
   assert.equal(renderResumeText("   \n\n  "), "");
 });
+
+// ---------------------------------------------------------------------------
+// Nested and mixed lists
+// ---------------------------------------------------------------------------
+
+test("renderResumeText preserves depth and numbering for a mixed nested list", () => {
+  const text = renderResumeText("1. parent\n   - child\n2. next\n");
+  const lines = text.split("\n");
+  assert.deepEqual(lines, ["1. parent", "  - child", "2. next"]);
+});
+
+test("renderResumeText restarts a nested ordered list's counter under each new parent", () => {
+  const text = renderResumeText(
+    ["1. Fruit", "   1. Apple", "   2. Banana", "2. Veg", "   1. Carrot"].join("\n")
+  );
+  const lines = text.split("\n");
+  assert.deepEqual(lines, ["1. Fruit", "  1. Apple", "  2. Banana", "2. Veg", "  1. Carrot"]);
+});
+
+test("renderResumeText honors an ordered list's declared start number", () => {
+  const text = renderResumeText("5. fifth\n6. sixth\n");
+  const lines = text.split("\n");
+  assert.deepEqual(lines, ["5. fifth", "6. sixth"]);
+});
+
+// ---------------------------------------------------------------------------
+// Table rows: escape-aware pipe splitting
+// ---------------------------------------------------------------------------
+
+test("renderResumeText keeps an escaped pipe as a literal character inside a table cell", () => {
+  const text = renderResumeText("| Language | Level |\n| --- | --- |\n| C\\|C++ | Advanced |\n");
+  assert.match(text, /^C\|C\+\+ {3}Advanced$/m);
+});
+
+// ---------------------------------------------------------------------------
+// Links: balanced parentheses and escapes in the destination
+// ---------------------------------------------------------------------------
+
+test("renderResumeText keeps a link destination with balanced parentheses intact", () => {
+  const text = renderResumeText("[case study](https://example.com/foo_(bar)_baz)\n");
+  assert.match(text, /case study \(https:\/\/example\.com\/foo_\(bar\)_baz\)/);
+  assert.doesNotMatch(text, /_baz\)\)/, "the underscore suffix must not be reparsed as italics");
+});
+
+test("renderResumeText unescapes a backslash-escaped parenthesis inside a link destination", () => {
+  const text = renderResumeText("[note](https://example.com/a\\(1\\).html)\n");
+  assert.match(text, /note \(https:\/\/example\.com\/a\(1\)\.html\)/);
+});
+
+// ---------------------------------------------------------------------------
+// Headings: uppercase visible text only, never a link destination
+// ---------------------------------------------------------------------------
+
+test("renderResumeText uppercases heading text but preserves a link destination's case", () => {
+  const text = renderResumeText("## [CaseStudy](https://Example.com/Path?Q=Value)\n");
+  assert.match(text, /^CASESTUDY \(https:\/\/Example\.com\/Path\?Q=Value\)$/m);
+});
+
+// ---------------------------------------------------------------------------
+// Fenced code: strip leading ATX markers, copy everything else verbatim
+// ---------------------------------------------------------------------------
+
+test("renderResumeText strips a leading ATX marker from a fenced heading-shaped line", () => {
+  const text = renderResumeText("```\n# Heading\nplain code line\n```\n");
+  const lines = text.split("\n");
+  assert.ok(lines.includes("Heading"), "the ATX marker is stripped");
+  assert.ok(!lines.some((line) => line.startsWith("#")), "no line starts with a heading marker");
+  assert.ok(lines.includes("plain code line"), "non-heading fenced content is untouched");
+});
+
+test("renderResumeText leaves non-heading fenced content byte-for-byte", () => {
+  const text = renderResumeText("```\nconst x = 1; // #hashtag\n```\n");
+  assert.match(text, /^const x = 1; \/\/ #hashtag$/m);
+});
