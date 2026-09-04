@@ -524,6 +524,63 @@ test("detectInstalledRuntimes with fingerprintId only hashes the matching runtim
   }
 });
 
+// Codex adversarial finding (round 9): Doctor's normal cached-selection path
+// calls detectInstalledRuntimes with a fingerprintId to hash the selected
+// runtime once, then handed the same runtime straight to
+// installedRuntimeExecutionIdentity, which used to hash the identical file
+// again from scratch — roughly double the read/hash cost of every cached
+// Doctor run for whatever CLI happens to be selected. This proves the fix
+// (installedRuntimeExecutionIdentity's precomputedFingerprint option) at the
+// unit level, mirroring doctor.mjs's exact call sequence, with a counting
+// wrapper around the real fingerprint implementation injected through the
+// existing runtimeBinaryFingerprintImpl override point rather than
+// monkeypatching the module.
+test("detectInstalledRuntimes and installedRuntimeExecutionIdentity fingerprint a cached selected runtime exactly once", () => {
+  const root = tempRoot();
+  const claudePath = join(root, "claude");
+  executable(claudePath);
+  let fingerprintCalls = 0;
+  const countingFingerprintImpl = (path) => {
+    fingerprintCalls += 1;
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
+  };
+  try {
+    const inventory = detectInstalledRuntimes({
+      env: { PATH: root },
+      platform: "darwin",
+      homeDir: root,
+      searchDirs: [root],
+      fingerprintId: "claude",
+      runtimeBinaryFingerprintImpl: countingFingerprintImpl,
+    });
+    const claude = inventory.find(({ id }) => id === "claude");
+    assert.match(claude.binaryFingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(fingerprintCalls, 1, "detection itself must hash the selected binary once");
+
+    const identity = installedRuntimeExecutionIdentity(
+      { ...claude, version: "2.1.241" },
+      {
+        platform: "darwin",
+        runtimeBinaryFingerprintImpl: countingFingerprintImpl,
+        precomputedFingerprint: {
+          path: claude.path,
+          realPath: claude.realPath,
+          binaryFingerprint: claude.binaryFingerprint,
+        },
+      }
+    );
+    assert.ok(identity, "expected a resolved execution identity");
+    assert.equal(identity.binaryFingerprint, claude.binaryFingerprint);
+    assert.equal(
+      fingerprintCalls,
+      1,
+      "a cached selected runtime must be fingerprinted once per Doctor run, not twice"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("detectInstalledRuntimes finds Antigravity by its agy binary", () => {
   const root = tempRoot();
   const binDir = join(root, "bin");

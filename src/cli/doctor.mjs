@@ -249,8 +249,19 @@ const nonExecutingIdentityMatchesCache = Boolean(
     selectedRuntimeForVerification.realPath === cachedRuntimeVerification.realPath &&
     selectedRuntimeForVerification.binaryFingerprint === cachedRuntimeVerification.binaryFingerprint
 );
+// Detection (above) already fingerprinted this exact path once to build
+// nonExecutingIdentityMatchesCache — handing it back in as
+// precomputedFingerprint lets the identity helper reuse that hash instead
+// of reading and hashing the same (possibly hundreds-of-MB) binary again.
 const selectedRuntimeCurrentIdentity = nonExecutingIdentityMatchesCache
-  ? installedRuntimeExecutionIdentity(selectedRuntimeForVerification, { env: process.env })
+  ? installedRuntimeExecutionIdentity(selectedRuntimeForVerification, {
+      env: process.env,
+      precomputedFingerprint: {
+        path: selectedRuntimeForVerification.path,
+        realPath: selectedRuntimeForVerification.realPath,
+        binaryFingerprint: selectedRuntimeForVerification.binaryFingerprint,
+      },
+    })
   : null;
 
 // Bundled plugins (plugins/<name>/). Informational: a plugin needing a

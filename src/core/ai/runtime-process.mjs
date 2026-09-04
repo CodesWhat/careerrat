@@ -261,6 +261,24 @@ export function runtimeProcessIdentityFiles(
   ];
 }
 
+// The Windows half of the tree kill: taskkill's /t walks the whole process
+// tree rooted at `pid`, which is the closest POSIX-detached-group equivalent
+// Windows offers (there's no negative-pid group signal to send). Shared by
+// the ChildProcess-based path below and killProcessTreeByPid's pid-only path,
+// so both ever have exactly one place that knows how to reach a tree here.
+function taskkillProcessTree(pid, { env = process.env, spawnSyncImpl = spawnSync } = {}) {
+  const systemRoot = String(env.SystemRoot || env.SYSTEMROOT || env.WINDIR || "C:\\Windows");
+  const command = win32.join(systemRoot, "System32", "taskkill.exe");
+  const result = spawnSyncImpl(command, ["/pid", String(pid), "/t", "/f"], {
+    shell: false,
+    windowsHide: true,
+    stdio: "ignore",
+  });
+  if (result?.error || (Number.isInteger(result?.status) && result.status !== 0)) {
+    throw result.error || new Error(`taskkill exited with status ${result.status}`);
+  }
+}
+
 function terminateWindowsProcessTree(child, { env = process.env, spawnSyncImpl = spawnSync } = {}) {
   const pid = Number(child?.pid);
   if (!Number.isSafeInteger(pid) || pid <= 0) {
@@ -271,22 +289,46 @@ function terminateWindowsProcessTree(child, { env = process.env, spawnSyncImpl =
     }
     return;
   }
-  const systemRoot = String(env.SystemRoot || env.SYSTEMROOT || env.WINDIR || "C:\\Windows");
-  const command = win32.join(systemRoot, "System32", "taskkill.exe");
   try {
-    const result = spawnSyncImpl(command, ["/pid", String(pid), "/t", "/f"], {
-      shell: false,
-      windowsHide: true,
-      stdio: "ignore",
-    });
-    if (result?.error || (Number.isInteger(result?.status) && result.status !== 0)) {
-      throw result.error || new Error(`taskkill exited with status ${result.status}`);
-    }
+    taskkillProcessTree(pid, { env, spawnSyncImpl });
   } catch {
     try {
       child.kill?.("SIGKILL");
     } catch {
       // The process already exited between the tree-kill attempt and fallback.
+    }
+  }
+}
+
+// A synchronous, pid-only counterpart to scheduleRuntimeProcessKill for
+// callers that only ever have a spawnSync result (no ChildProcess object to
+// hang a `.kill()` fallback off of) — installedRuntimeExecutionIdentity's
+// own `--version` probe being the one caller today. Reuses the exact same
+// mechanism: process-group SIGKILL on POSIX (the probe is spawned with
+// `detached: true` so its pid doubles as its pgid), taskkill's tree walk on
+// Windows. Best-effort and silent: the pid may already be gone by the time
+// this runs, and that's the success case, not an error.
+export function killProcessTreeByPid(
+  pid,
+  { platform = process.platform, env = process.env, spawnSyncImpl = spawnSync } = {}
+) {
+  const numericPid = Number(pid);
+  if (!Number.isSafeInteger(numericPid) || numericPid <= 0) return;
+  if (platform === "win32") {
+    try {
+      taskkillProcessTree(numericPid, { env, spawnSyncImpl });
+    } catch {
+      // The process tree may have already exited on its own.
+    }
+    return;
+  }
+  try {
+    process.kill(-numericPid, "SIGKILL");
+  } catch {
+    try {
+      process.kill(numericPid, "SIGKILL");
+    } catch {
+      // Already gone.
     }
   }
 }

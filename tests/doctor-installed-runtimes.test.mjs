@@ -706,6 +706,17 @@ test("doctor completes within a bounded timeout and reports an executable FIFO s
 // Doctor a generous but bounded window (well past the inner 5s timeout, far
 // short of the script's 60s sleep) so a regression is caught by the outer
 // timeout killing Doctor instead of by the suite hanging for a minute.
+//
+// Codex adversarial finding (round 9): killSignal: "SIGKILL" only ever
+// reached the trap script's own pid, never a descendant it forked — a
+// launcher that starts a helper and then hangs let Doctor return while the
+// helper kept running under the user's account. The fix spawns the probe
+// detached (its own process-group leader on POSIX) and follows up with a
+// group-wide kill. The trap script below forks /bin/sleep 60 as a
+// background job and records its real OS pid to sleepPidFile before
+// blocking on `wait`, so this proves the fix at the level that matters:
+// actual process liveness via process.kill(pid, 0), not just that Doctor
+// itself returned in time.
 test("doctor completes within a bounded timeout when the selected runtime's --version ignores SIGTERM", (t) => {
   if (process.platform === "win32") {
     t.skip("trap/sleep shell scripting is POSIX-only");
@@ -720,7 +731,12 @@ test("doctor completes within a bounded timeout when the selected runtime's --ve
     // — so the script calls /bin/sleep by absolute path instead of relying
     // on PATH lookup for it (trap is a shell builtin, no lookup needed).
     const claudePath = join(registry, "claude");
-    writeFileSync(claudePath, "#!/bin/sh\ntrap '' TERM\n/bin/sleep 60\n", "utf8");
+    const sleepPidFile = join(registry, "sleep.pid");
+    writeFileSync(
+      claudePath,
+      `#!/bin/sh\ntrap '' TERM\n/bin/sleep 60 &\necho $! > "${sleepPidFile}"\nwait\n`,
+      "utf8"
+    );
     chmodSync(claudePath, 0o755);
     const realPath = realpathSync(claudePath);
     const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
@@ -776,6 +792,17 @@ test("doctor completes within a bounded timeout when the selected runtime's --ve
     );
     assert.equal(claude.boundaryProbePassed, false);
     assert.equal(claude.boundaryProbeCheckedAt, null);
+
+    const sleepPid = Number(readFileSync(sleepPidFile, "utf8").trim());
+    assert.ok(
+      Number.isInteger(sleepPid) && sleepPid > 0,
+      "the trap script must have recorded the sleep descendant's real pid"
+    );
+    assert.throws(
+      () => process.kill(sleepPid, 0),
+      /ESRCH/,
+      "the sleep descendant must not survive Doctor's version-probe cleanup"
+    );
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(registry, { recursive: true, force: true });

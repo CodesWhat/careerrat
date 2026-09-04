@@ -43,6 +43,7 @@ import { userPath } from "../paths/workspace.mjs";
 import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
 import { isWithinRuntimePath } from "./runtime-path-policy.mjs";
 import {
+  killProcessTreeByPid,
   runtimeProcessIdentityFiles,
   runtimeProcessInvocation,
   scheduleRuntimeProcessKill,
@@ -426,12 +427,13 @@ export function findInstalledExecutable(
 export function detectInstalledRuntimes(options = {}) {
   const restrictFingerprint = Object.hasOwn(options, "fingerprintId");
   const fingerprintId = options.fingerprintId ?? null;
+  const fingerprintImpl = options.runtimeBinaryFingerprintImpl ?? runtimeBinaryFingerprint;
   return INSTALLED_RUNTIME_DEFINITIONS.map((definition) => {
     const path = findInstalledExecutable(definition.binaries, options);
     const realPath = path ? existingCanonicalPath(path) : null;
     const shouldFingerprint = !restrictFingerprint || definition.id === fingerprintId;
     const binaryFingerprint =
-      realPath && shouldFingerprint ? runtimeBinaryFingerprint(realPath, options) : null;
+      realPath && shouldFingerprint ? fingerprintImpl(realPath, options) : null;
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       available: Boolean(path),
     });
@@ -746,8 +748,19 @@ export function installedRuntimeExecutionIdentity(
     env = process.env,
     platform = process.platform,
     spawnSyncImpl = spawnSync,
+    treeKillImpl = spawnSync,
     runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+    runtimeBinaryFingerprintImpl = runtimeBinaryFingerprint,
     requireCurrentExecutable = false,
+    // A caller that just fingerprinted this exact path moments ago (Doctor,
+    // via detectInstalledRuntimes with a fingerprintId) can pass that result
+    // back in here instead of paying for a second full-file hash: reused
+    // only when requireCurrentExecutable is off (that path always demands a
+    // fresh read, by design) and only when the path this call resolves to
+    // right now still matches what the caller fingerprinted — a mismatch
+    // means the target moved since detection ran, so it falls back to
+    // hashing it fresh rather than trusting stale data.
+    precomputedFingerprint = null,
   } = {}
 ) {
   const path = String(runtime?.path || "").trim();
@@ -755,9 +768,17 @@ export function installedRuntimeExecutionIdentity(
   const currentRealPath = existingCanonicalPath(path);
   const realPath =
     currentRealPath || (requireCurrentExecutable ? "" : String(runtime?.realPath || "").trim());
-  const resolvedFingerprint = currentRealPath
-    ? runtimeBinaryFingerprint(currentRealPath, { env, platform, runtimeIdentityFilesImpl })
-    : null;
+  const canReusePrecomputedFingerprint =
+    !requireCurrentExecutable &&
+    Boolean(currentRealPath) &&
+    String(precomputedFingerprint?.path || "").trim() === path &&
+    String(precomputedFingerprint?.realPath || "").trim() === currentRealPath &&
+    /^[a-f0-9]{64}$/.test(String(precomputedFingerprint?.binaryFingerprint || ""));
+  const resolvedFingerprint = canReusePrecomputedFingerprint
+    ? String(precomputedFingerprint.binaryFingerprint).trim().toLowerCase()
+    : currentRealPath
+      ? runtimeBinaryFingerprintImpl(currentRealPath, { env, platform, runtimeIdentityFilesImpl })
+      : null;
   const requiresResolvedChain = platform === "win32" && /\.(?:bat|cmd)$/i.test(String(realPath));
   const binaryFingerprint =
     resolvedFingerprint ||
@@ -783,7 +804,17 @@ export function installedRuntimeExecutionIdentity(
         killSignal: "SIGKILL",
         shell: false,
         windowsHide: true,
+        // POSIX only: a detached child becomes its own process-group leader
+        // (pgid === pid), so the killProcessTreeByPid cleanup below actually
+        // reaches any descendant this probe forks. spawnSync's own timeout
+        // handling only ever signals this one pid, never the group, which
+        // is exactly what let a hung launcher's children outlive the probe.
+        // Windows has no process-group signaling here; killProcessTreeByPid
+        // falls back to the same taskkill /t tree kill the async probe and
+        // guided setup already use.
+        detached: platform !== "win32",
       });
+      killProcessTreeByPid(result?.pid, { platform, env: childEnv, spawnSyncImpl: treeKillImpl });
       if (!result?.error && result?.status === 0) {
         version = parseVersion(`${result.stdout || ""}\n${result.stderr || ""}`)?.join(".") || "";
       }
