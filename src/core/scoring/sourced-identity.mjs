@@ -119,10 +119,17 @@ function explicitReqId(row = {}) {
 
 export function postingIdentityKeys(row = {}) {
   const url = postingUrl(row);
-  const reqId = explicitReqId(row) || extractReqId(url).id;
+  const derived = extractReqId(url);
+  const reqId = explicitReqId(row) || derived.id;
   const keys = [];
   if (url) keys.push(`url:${normalizePostingUrl(url)}`);
   if (reqId) keys.push(`req:${reqId}`);
+  // Aggregators (HiringCafe et al.) stamp their own reqId ahead of the
+  // posting URL, which wins above. That alone would suppress the
+  // URL-derived requisition id (e.g. Workday's hostname-scoped dedup key),
+  // so canonical dedupe against a row keyed only by the URL would miss it.
+  // Keep both keys whenever they diverge.
+  if (derived.id && derived.id !== reqId) keys.push(`req:${derived.id}`);
   if (keys.length) return keys;
 
   const company = String(row.company || row.co || "").trim();

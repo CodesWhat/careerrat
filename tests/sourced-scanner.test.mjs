@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { workdayDedupKey } from "../src/core/providers/career-ops/vendor/workday.mjs";
+import { postingIdentityKeys } from "../src/core/scoring/sourced-identity.mjs";
 import * as sourcedScanner from "../src/core/scoring/sourced-scanner.mjs";
 import {
   buildLocationFilter,
@@ -2173,6 +2174,36 @@ test("extractReqId and the vendored workdayDedupKey collide on exactly the same 
       );
     }
   }
+});
+
+test("postingIdentityKeys emits both the aggregator reqId and the URL-derived Workday key when they diverge", () => {
+  const keys = postingIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    hiringCafeUrl: "https://hiring.cafe/job/swfwvwmaq6basefz",
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+    reqId: "hiringcafe:swfwvwmaq6basefz",
+  });
+
+  assert.deepEqual(keys, [
+    "url:https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+    "req:hiringcafe:swfwvwmaq6basefz",
+    "req:workday:acme.wd5.myworkdayjobs.com:jr12345",
+  ]);
+});
+
+test("postingIdentityKeys does not duplicate the req key when the explicit reqId already matches the URL-derived one", () => {
+  const keys = postingIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    url: "https://job-boards.greenhouse.io/acme/jobs/123456",
+    reqId: "greenhouse:123456",
+  });
+
+  assert.deepEqual(keys, [
+    "url:https://job-boards.greenhouse.io/acme/jobs/123456",
+    "req:greenhouse:123456",
+  ]);
 });
 
 // ---------------------------------------------------------------------------

@@ -497,3 +497,69 @@ test("snapshot ingestion canonically dedupes a Workday posting against a row per
   assert.equal(rows.length, 1);
   assert.equal(rows[0].id, "workday:acme:jr12345");
 });
+
+test("snapshot ingestion canonically dedupes a HiringCafe-sourced Workday posting despite its own aggregator reqId", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  // Existing row persisted straight from the direct Workday board, keyed on
+  // the unsuffixed requisition.
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "workday:acme.wd5.myworkdayjobs.com:jr12345",
+        company: "Acme",
+        role: "Senior Engineer",
+        status: "sourced",
+        source: "scanner",
+        channel: "board",
+        link: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+        loc: "Boston, MA",
+        base: "verify",
+        fitScore: 80,
+        fitBucket: "high",
+        fitBasis: "triage",
+        gate: "likely-keep",
+        sourcedAt: "2026-07-05T00:00:00Z",
+        updatedAt: "2026-07-05T00:00:00Z",
+        artifacts: {},
+      },
+    ],
+  });
+
+  // HiringCafe re-publishes the same requisition with its own aggregator
+  // reqId and the Workday external link carrying a "-2" cross-site
+  // disambiguator suffix. Its explicit reqId alone would shadow the
+  // URL-derived Workday key and miss the duplicate.
+  const result = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-06T00:00:00.000Z"),
+    snapshot: {
+      source: "hiringcafe-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Senior Engineer",
+          hiringCafeUrl: "https://hiring.cafe/job/swfwvwmaq6basefz",
+          url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+          reqId: "hiringcafe:swfwvwmaq6basefz",
+          location: "Boston, MA",
+          source: "hiringcafe-browser",
+          rawText: "Own the platform roadmap for the Boston engineering team.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.persistedRows, 0);
+  assert.equal(result.duplicates, 1);
+  assert.equal(result.offers.length, 0);
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+});
