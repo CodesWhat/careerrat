@@ -131,6 +131,44 @@ function writeDescendantWrapperScript(wrapperPath) {
   );
 }
 
+// The asymmetric counterpart to writeDescendantWrapperScript above: this
+// wrapper does NOT trap SIGTERM, so the group signal terminates it via
+// Node's default handling (a quick, real exit rather than the SIGKILL
+// escalation), while the grandchild it forks still ignores SIGTERM and
+// keeps running. This is the ordering the close/error-settles-before-the
+// -group-SIGKILL race needs: the leader's own close/error event fires while
+// a same-group descendant is still alive.
+//
+// The grandchild writes its OWN pid to pidFilePath, and only after
+// registering its SIGTERM handler: writing it from the wrapper right after
+// spawn() (like writeDescendantWrapperScript does) records a pid before
+// Node has necessarily finished starting up and installed the handler in
+// the new process, which lets a fast-enough SIGTERM land before the
+// handler exists and kill the "resistant" descendant for the wrong reason,
+// making the test pass whether or not the settle-before-cleanup fix is
+// present.
+function writeExitingLeaderDescendantWrapperScript(wrapperPath) {
+  writeFileSync(
+    wrapperPath,
+    [
+      "import('node:child_process').then(({ spawn }) => {",
+      "  spawn(",
+      "    process.execPath,",
+      "    [",
+      "      '-e',",
+      "      \"process.on('SIGTERM', () => {}); import('node:fs').then(({ writeFileSync }) => writeFileSync(process.argv[1], String(process.pid))); setInterval(() => {}, 1000);\",",
+      "      process.argv[2],",
+      "    ],",
+      "    { stdio: 'ignore' }",
+      "  );",
+      "});",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+}
+
 async function waitForFileContent(path, { timeoutMs = 2000, intervalMs = 20 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1799,6 +1837,42 @@ test("isInstalledRuntimeBelowVersionBoundary kills a probed CLI's whole descenda
   }
 });
 
+test("isInstalledRuntimeBelowVersionBoundary does not settle early when the wrapper exits on SIGTERM but its descendant ignores it", async () => {
+  // The asymmetric case the timeout test above can't reach: here the leader
+  // dies from the group SIGTERM (no handler, so Node's default action
+  // terminates it) while the grandchild it forked keeps ignoring SIGTERM.
+  // The leader's own close event fires well before the scheduled group
+  // SIGKILL, so a settle-on-close bug would resolve the probe with the
+  // grandchild still alive.
+  const root = tempRoot();
+  const wrapperPath = join(root, "wrapper.mjs");
+  const pidFilePath = join(root, "grandchild.pid");
+  writeExitingLeaderDescendantWrapperScript(wrapperPath);
+
+  try {
+    const claudeRuntime = { id: "claude", path: process.execPath };
+    const resultPromise = isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+      platform: "darwin",
+      timeoutMs: 500,
+      spawnImpl: (_command, _args, options) =>
+        spawn(process.execPath, [wrapperPath, pidFilePath], options),
+    });
+
+    const grandchildPid = Number(await waitForFileContent(pidFilePath));
+    assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+    const result = await resultPromise;
+    assert.equal(result, "indeterminate");
+    assert.equal(
+      await waitUntilProcessDead(grandchildPid),
+      true,
+      "the grandchild must not survive the probe's cleanup, even though the leader exited first"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Codex readiness depends on authentication rather than a complete-workflow version floor", async () => {
   const calls = [];
   const ready = await probeInstalledRuntime(
@@ -2488,6 +2562,71 @@ test("guided Claude setup timeout kills the whole installer process tree after i
       await waitUntilProcessDead(grandchildPid),
       true,
       "the installer's descendant must not survive a timeout"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("guided Claude setup cancellation does not release the lock early when bash exits before a resistant descendant", async () => {
+  // Asymmetric case: bash itself (the direct child here, standing in for
+  // the real "/bin/bash -o pipefail -c ..." leader) exits on the group
+  // SIGTERM, but a descendant it forked ignores it and keeps running. A
+  // settle-on-close bug would reject the request the instant bash's close
+  // event fires, letting the route release activeGuidedSetups while
+  // installer work continues underneath it.
+  const root = tempRoot();
+  const wrapperPath = join(root, "wrapper.mjs");
+  const pidFilePath = join(root, "grandchild.pid");
+  writeExitingLeaderDescendantWrapperScript(wrapperPath);
+
+  try {
+    const controller = new AbortController();
+    const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+      platform: "darwin",
+      signal: controller.signal,
+      spawnImpl: (_command, _args, options) =>
+        spawn(process.execPath, [wrapperPath, pidFilePath], options),
+    });
+
+    const grandchildPid = Number(await waitForFileContent(pidFilePath));
+    assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+    controller.abort();
+
+    await assert.rejects(resultPromise, { code: "RUNTIME_GUIDED_SETUP_CANCELLED" });
+    assert.equal(
+      await waitUntilProcessDead(grandchildPid),
+      true,
+      "the installer's descendant must not survive cancellation, even though bash exited first"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("guided Claude setup timeout does not release the lock early when bash exits before a resistant descendant", async () => {
+  const root = tempRoot();
+  const wrapperPath = join(root, "wrapper.mjs");
+  const pidFilePath = join(root, "grandchild.pid");
+  writeExitingLeaderDescendantWrapperScript(wrapperPath);
+
+  try {
+    const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+      platform: "darwin",
+      timeoutMs: 300,
+      spawnImpl: (_command, _args, options) =>
+        spawn(process.execPath, [wrapperPath, pidFilePath], options),
+    });
+
+    const grandchildPid = Number(await waitForFileContent(pidFilePath));
+    assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+    await assert.rejects(resultPromise, { code: "ETIMEDOUT" });
+    assert.equal(
+      await waitUntilProcessDead(grandchildPid),
+      true,
+      "the installer's descendant must not survive a timeout, even though bash exited first"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

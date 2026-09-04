@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -13,6 +14,7 @@ import {
 import {
   INSTALLED_RUNTIME_DEFINITIONS,
   isInstalledRuntimeBelowVersionBoundary,
+  startInstalledRuntimeGuidedSetup,
 } from "../src/core/ai/installed-runtimes.mjs";
 import {
   loadInstalledRuntimeSelection,
@@ -52,6 +54,71 @@ function root() {
   const value = mkdtempSync(join(tmpdir(), "careerrat-runtime-route-"));
   roots.add(value);
   return value;
+}
+
+// A real-process-group stand-in for a resistant installer descendant, used
+// to prove the route's activeGuidedSetups lock only releases once the
+// process tree is actually dead, not the instant the leader (bash, in
+// production) exits. The wrapper does NOT trap SIGTERM, so the group
+// signal terminates it via Node's default handling, while the grandchild
+// it forks still ignores SIGTERM and keeps running. The grandchild writes
+// its OWN pid to pidFilePath, and only after registering its SIGTERM
+// handler, so the test never races Node's own startup time in the new
+// process.
+function writeAsymmetricInstallerWrapperScript(wrapperPath) {
+  writeFileSync(
+    wrapperPath,
+    [
+      "import('node:child_process').then(({ spawn }) => {",
+      "  spawn(",
+      "    process.execPath,",
+      "    [",
+      "      '-e',",
+      "      \"process.on('SIGTERM', () => {}); import('node:fs').then(({ writeFileSync }) => writeFileSync(process.argv[1], String(process.pid))); setInterval(() => {}, 1000);\",",
+      "      process.argv[2],",
+      "    ],",
+      "    { stdio: 'ignore' }",
+      "  );",
+      "});",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+// pathOrGetter accepts a getter as well as a plain string: the guided-setup
+// tests below only know a pid file's path once the route has actually
+// called startGuidedSetupImpl (after its own await on belowBoundaryImpl),
+// which happens after this function is first invoked, so a plain string
+// argument would capture "not yet pushed" and poll a stale undefined path.
+async function waitForFileContent(pathOrGetter, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const path = typeof pathOrGetter === "function" ? pathOrGetter() : pathOrGetter;
+    if (path && existsSync(path)) {
+      const raw = readFileSync(path, "utf8").trim();
+      if (raw) return raw;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("timed out waiting for file content");
+}
+
+async function waitUntilProcessDead(pid, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+  const isAlive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const deadline = Date.now() + timeoutMs;
+  while (isAlive() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return !isAlive();
 }
 
 afterEach(() => {
@@ -1251,6 +1318,108 @@ test("a second concurrent guided-setup request is refused, and a retry after cle
   });
   assert.equal(retry.status, 200);
   assert.deepEqual(started, ["claude", "claude"]);
+});
+
+test("a cancelled guided-setup request does not release the lock until a resistant descendant is actually dead, and a follow-up request is admitted only afterwards", async () => {
+  // Real production startInstalledRuntimeGuidedSetup, not a fake: this
+  // proves the route's activeGuidedSetups lock is only ever released after
+  // the real function's own group-SIGKILL cleanup has actually run, not
+  // the instant its promise handler fires.
+  const setupRoot = root();
+  const wrapperPath = join(setupRoot, "wrapper.mjs");
+  writeAsymmetricInstallerWrapperScript(wrapperPath);
+  const pidFilePaths = [];
+  let installAttempt = 0;
+
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    belowBoundaryImpl: async () => "below",
+    startGuidedSetupImpl: (runtimeId, options) => {
+      installAttempt += 1;
+      const pidFilePath = join(setupRoot, `grandchild-${installAttempt}.pid`);
+      pidFilePaths.push(pidFilePath);
+      return startInstalledRuntimeGuidedSetup(runtimeId, {
+        ...options,
+        spawnImpl: (_command, _args, spawnOptions) =>
+          spawn(process.execPath, [wrapperPath, pidFilePath], spawnOptions),
+      });
+    },
+  });
+
+  // A minimal streaming-response harness that, unlike requestStream, keeps
+  // the "close" listener the route registers so this test can trigger a
+  // real client disconnect mid-install.
+  function guidedSetupHarness() {
+    let closeHandler = null;
+    const res = {
+      on(event, handler) {
+        if (event === "close") closeHandler = handler;
+        return this;
+      },
+      writeHead() {
+        return this;
+      },
+      flushHeaders() {},
+      write() {
+        return true;
+      },
+      end() {},
+    };
+    const req = Readable.from([Buffer.from(JSON.stringify({ runtimeId: "claude" }))]);
+    req.headers = { "content-type": "application/json" };
+    const handler = server.routes.get("POST /api/settings/ai-runtime/guided-setup");
+    return {
+      pending: handler(req, res),
+      cancel() {
+        assert.ok(closeHandler, "close handler must be registered before cancellation");
+        closeHandler();
+      },
+    };
+  }
+
+  const firstInstall = guidedSetupHarness();
+  const firstGrandchildPid = Number(await waitForFileContent(() => pidFilePaths[0]));
+  assert.ok(
+    Number.isInteger(firstGrandchildPid) && firstGrandchildPid > 0,
+    "first install's grandchild pid was recorded"
+  );
+
+  // A second request while the first is still mid-flight must be refused,
+  // proving the lock is actually held.
+  const concurrent = await request(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  assert.equal(concurrent.status, 409);
+  assert.equal(concurrent.body.code, "RUNTIME_GUIDED_SETUP_IN_PROGRESS");
+
+  firstInstall.cancel();
+  await firstInstall.pending;
+
+  assert.equal(
+    await waitUntilProcessDead(firstGrandchildPid),
+    true,
+    "the first install's descendant must not survive cancellation"
+  );
+
+  // Only now, with the process tree actually dead, must a follow-up be
+  // admitted rather than refused a second time.
+  const secondInstall = guidedSetupHarness();
+  const secondGrandchildPid = Number(await waitForFileContent(() => pidFilePaths[1]));
+  assert.ok(
+    Number.isInteger(secondGrandchildPid) && secondGrandchildPid > 0,
+    "the follow-up request was admitted and actually started a new installer"
+  );
+
+  secondInstall.cancel();
+  await secondInstall.pending;
+  assert.equal(
+    await waitUntilProcessDead(secondGrandchildPid),
+    true,
+    "the follow-up install's descendant must not survive cancellation either"
+  );
 });
 
 test("selection rejects an unavailable or unauthenticated runtime with an actionable code", async () => {

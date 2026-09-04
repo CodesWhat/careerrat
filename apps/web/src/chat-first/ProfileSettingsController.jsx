@@ -416,10 +416,15 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     navigateForeground({ tab: "settings", panel: open ? "technical" : null }, { replace: !open });
   }
 
-  async function load() {
+  // preFetchedRuntimes lets a caller that already fetched the runtime
+  // inventory (refreshRuntimesAfterInstall's targeted post-install refresh)
+  // hand it straight to load() instead of load() re-running the same
+  // executable-discovery and version/auth probe work a second time. load()
+  // only fetches its own copy when no fresh inventory was handed in.
+  async function load(preFetchedRuntimes) {
     const [onboard, runtimes, automation, sources, aiPreferences] = await Promise.all([
       api.getOnboardState(),
-      api.getInstalledAiRuntimes(),
+      preFetchedRuntimes ? Promise.resolve(preFetchedRuntimes) : api.getInstalledAiRuntimes(),
       api.getAutomationSettings(),
       api.getSourceMaintenance(),
       api.getAiPreferences(),
@@ -633,6 +638,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     setError(null);
     try {
       const saved = await api.saveAiPreferences(next);
+      // Keep settingsPartsRef in lockstep with the saved model: a later
+      // guided update rebuilds its model from this ref, and a stale
+      // aiPreferences here would resurface (and then repost) the value this
+      // save just replaced.
+      settingsPartsRef.current = { ...settingsPartsRef.current, aiPreferences: saved };
       setModel((current) => ({ ...current, aiPreferences: saved }));
       setAiPreferencesStatus("Saved on this computer");
     } catch (cause) {
@@ -726,17 +736,23 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   // fetched runtime inventory must not be discarded just because the rest
   // of the page couldn't refresh.
   async function refreshRuntimesAfterInstall() {
+    let runtimes = null;
     try {
-      const runtimes = await api.getInstalledAiRuntimes();
+      runtimes = await api.getInstalledAiRuntimes();
       settingsPartsRef.current = { ...settingsPartsRef.current, runtimes };
       setModel(buildSettingsModel(settingsPartsRef.current));
     } catch {
       // Keep the installed result even if the fresh inventory couldn't be
       // fetched; a stale inventory is preferable to reporting a successful
-      // update as failed.
+      // update as failed. load() below still gets a chance at its own
+      // fallback inventory request since runtimes stays null here.
     }
     try {
-      await load();
+      // Hand the inventory this function already fetched straight to
+      // load() so it doesn't repeat the same executable-discovery and
+      // version/auth probe work; load() only re-fetches on its own when the
+      // targeted refresh above failed (runtimes is still null).
+      await load(runtimes);
     } catch {
       // Best-effort: the fresh runtime inventory above already reflects the
       // update regardless of whether the rest of Settings could refresh.

@@ -1096,10 +1096,19 @@ function runInstalledRuntimeProbeAsync(
       stderr += chunk.toString("utf8");
     });
     child.on("error", (error) => {
-      finish({ status: null, stdout, stderr, error: stopError || error });
+      // Once a stop is in flight, the scheduled group SIGKILL (forceKillTimer)
+      // is the only thing allowed to settle the probe: finishing here instead
+      // would race a same-group descendant that ignored the SIGTERM and is
+      // still alive when the wrapper itself errors out.
+      if (stopError) return;
+      finish({ status: null, stdout, stderr, error });
     });
     child.on("close", (status, signal) => {
-      finish({ status, stdout, stderr, signal, ...(stopError ? { error: stopError } : {}) });
+      // Same race as the error handler above: a same-group descendant can
+      // outlive the wrapper's own close event, so a pending stop must wait
+      // for the scheduled group SIGKILL rather than settling here.
+      if (stopError) return;
+      finish({ status, stdout, stderr, signal });
     });
     timer = setTimeout(
       () => stop(Object.assign(new Error("Runtime probe timed out."), { code: "ETIMEDOUT" })),
@@ -2183,17 +2192,19 @@ export async function startInstalledRuntimeGuidedSetup(
       }
     });
     child.once("error", (error) => {
-      if (stopError) {
-        finish(stopError);
-        return;
-      }
+      // A stopped setup stays pending until the scheduled group SIGKILL
+      // (forceKillTimer, via stop() above) has actually run: bash or curl
+      // can error out while a resistant descendant they forked is still
+      // alive, and finishing here instead would let the route release its
+      // lock while installer work continues underneath it.
+      if (stopError) return;
       fail("CareerRat could not start the in-app installer.", { cause: error });
     });
     child.once("close", (status, closeSignal) => {
-      if (stopError) {
-        finish(stopError);
-        return;
-      }
+      // Same race as the error handler above: bash can exit before a
+      // resistant descendant it forked, so a pending stop must wait for the
+      // scheduled group SIGKILL rather than settling here.
+      if (stopError) return;
       if (status === 0) {
         finish();
         return;

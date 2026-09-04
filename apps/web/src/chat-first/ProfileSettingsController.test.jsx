@@ -1228,20 +1228,54 @@ describe("ProfileSettingsController AI preferences", () => {
     );
     expect(settingsProps(view).aiPreferences.quality).toBe("automatic");
   });
+
+  it("keeps a saved preference through a post-install refresh instead of letting a later save roll it back", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    // The post-install refresh's own load() fails on an unrelated request
+    // (automation settings), the same shape as the "guided update" describe
+    // block below: settingsPartsRef must already carry the saved
+    // aiPreferences by then, since load() never gets a chance to refresh it.
+    api.getAutomationSettings
+      .mockResolvedValueOnce({ capabilities: [] })
+      .mockRejectedValueOnce(new Error("automation settings unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+
+    let view = renderController(module, api);
+    await settingsProps(view).onAiPreferenceChange("quality", "best");
+
+    view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    await settingsProps(view).onGuidedUpdateEngine("claude");
+
+    view = renderController(module, api);
+    await settingsProps(view).onAiPreferenceChange("reasoning", "high");
+
+    // A stale settingsPartsRef would post the pre-guided-update "automatic"
+    // quality here, silently reverting the earlier save.
+    expect(api.saveAiPreferences).toHaveBeenLastCalledWith({
+      quality: "best",
+      reasoning: "high",
+    });
+  });
 });
 
 describe("ProfileSettingsController guided update", () => {
-  it("reports the installed result even when an unrelated Settings request fails during the post-install refresh", async () => {
+  it("reports the installed result even when an unrelated Settings request fails during the post-install refresh, without re-fetching the inventory it already has", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     api.getInstalledAiRuntimes
       .mockResolvedValueOnce({ runtimes: [], guidedSetupAvailable: true })
       .mockResolvedValueOnce({
-        runtimes: [{ id: "claude", name: "Claude Code", available: true, ready: true }],
-        guidedSetupAvailable: true,
-      })
-      .mockResolvedValueOnce({
-        runtimes: [{ id: "claude", name: "Claude Code", available: true, ready: true }],
+        runtimes: [
+          { id: "claude", name: "Claude Code", supported: true, available: true, ready: true },
+        ],
         guidedSetupAvailable: true,
       });
     // The post-install load() bundles automation settings, sources,
@@ -1264,7 +1298,16 @@ describe("ProfileSettingsController guided update", () => {
     expect.soft(props.guidedSetup).toEqual({ runtimeId: "claude", status: "installed" });
     expect.soft(props.enginePickerBusy).toBe(false);
     expect.soft(controllerAlertText(view)).toBe(null);
-    expect.soft(api.getInstalledAiRuntimes).toHaveBeenCalledTimes(3);
+    // Only the mount's initial load and refreshRuntimesAfterInstall's own
+    // targeted fetch: load()'s own inventory request is skipped since it
+    // was handed that already-fetched inventory directly.
+    expect.soft(api.getInstalledAiRuntimes).toHaveBeenCalledTimes(2);
+    // The rendered runtime state reflects the second (post-install) fetch,
+    // not the empty inventory the mount started with.
+    expect.soft(props.engine.choices.find((choice) => choice.id === "claude")).toMatchObject({
+      id: "claude",
+      ready: true,
+    });
   });
 
   it("reports the installed result even when the runtime-inventory refresh itself fails after a successful install", async () => {
