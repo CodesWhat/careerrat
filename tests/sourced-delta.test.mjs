@@ -393,6 +393,82 @@ test("buildRepoSeenIds re-normalizes a persisted URL-only alias through sourced-
   );
 });
 
+test("buildRepoSeenIds preserves a persisted URL alias's path/query casing, but still lowercases a requisition id (CR-29 round 6)", () => {
+  // buildRepoSeenIds used to lowercase EVERY id it collected, url: keys
+  // included. offerIdentityKeys' own "url:" keys are normalizeUrl-
+  // normalized but never lowercased, so a persisted URL-only alias with a
+  // case-sensitive path segment (e.g. a board that actually serves
+  // "/Jobs/Platform-Engineer", not "/jobs/platform-engineer") got mangled
+  // here and could never match the CURRENT snapshot offer's own,
+  // correctly-cased key — reporting an already-persisted posting as
+  // repo-new. Requisition identities carry no case-sensitive meaning and
+  // must still lowercase.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-mixed-case-url-canonical",
+        company: "Acme",
+        role: "Platform Engineer",
+        status: "sourced",
+        source: "scanner",
+        channel: "board",
+        link: "https://boards.example.test/careers/Platform-Engineer",
+        loc: "Remote",
+        base: "verify",
+        fitScore: 75,
+        fitBucket: "high",
+        fitBasis: "triage",
+        gate: "likely-keep",
+        sourcedAt: "2026-07-05T00:00:00Z",
+        updatedAt: "2026-07-05T00:00:00Z",
+        artifacts: {},
+        // Persisted by an earlier merge for a differently-tracked republish
+        // whose board serves a case-sensitive path.
+        aliasKeys: [
+          "url:https://boards.example.test/careers/Case-Sensitive-Path?dept=Engineering",
+          "req:MIXED-CASE-REQ-123",
+        ],
+      },
+    ],
+  });
+
+  const seenIds = buildRepoSeenIds({ repoRoot });
+  assert.ok(
+    seenIds.has("url:https://boards.example.test/careers/Case-Sensitive-Path?dept=Engineering"),
+    "a persisted URL alias's path/query casing must be preserved, not lowercased"
+  );
+  assert.ok(seenIds.has("mixed-case-req-123"), "a requisition identity must still lowercase");
+  assert.equal(
+    seenIds.has("url:https://boards.example.test/careers/case-sensitive-path?dept=engineering"),
+    false,
+    "a lowercased URL must not spuriously satisfy the case-sensitive one"
+  );
+
+  const delta = diffSnapshotOffers({
+    current: [
+      {
+        company: "Acme",
+        title: "Case Sensitive Path Role",
+        // Same case-sensitive board, identical casing to the persisted alias.
+        url: "https://boards.example.test/careers/Case-Sensitive-Path?dept=Engineering",
+      },
+    ],
+    previous: [],
+    seenIds,
+  });
+
+  assert.equal(delta.newOffers.length, 1);
+  assert.equal(
+    delta.newOffers[0].repoDuplicate,
+    true,
+    "a mixed-case URL-only alias must still resolve an identically-cased republish as repo-seen"
+  );
+});
+
 test("buildRepoSeenIds falls back to the legacy tracker.json builder when there is no DB", () => {
   const repoRoot = tempRepo();
   // No openDb() call: this repo has no SQLite database at all.

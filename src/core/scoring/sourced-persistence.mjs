@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { currencyCodePatternSource } from "../currency-format.mjs";
-import { dbExists } from "../db/connection.mjs";
+import { dbExists, requireDb } from "../db/connection.mjs";
 import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../db/verbs/source-config.mjs";
 import { sourcedReconcilePolicyBatch, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
@@ -358,73 +358,85 @@ function offerWithCapturedJob({ repoRoot, env, offer, savedAt }) {
   return offerWithArtifactPath(offer, jd);
 }
 
-let stagingSequence = 0;
-
-function stagedJobPath(absPath) {
-  stagingSequence += 1;
-  return `${absPath}.staging-${process.pid}-${Date.now()}-${stagingSequence}`;
+function contentDigest(content) {
+  return createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
 
-// Stages a JD artifact's rendered content at a scratch path adjacent to its
-// final deterministic location, WITHOUT ever touching the final path itself
-// (CR-29 round 5). Used by captureAndPersistOffersIfDb's dedupeCanonical
-// path, BEFORE it ever opens a sourcedUpsertBatch transaction: the caller
-// can't know until AFTER that transaction's own fresh duplicate check
-// whether this offer wins its deterministic path or loses it to an
-// already-accepted row with the same explicit reqId (different URL/body),
-// so writing straight to the shared final path here (as the immediate-write
-// non-DB path does) could let a losing row's content overwrite the
-// winner's. Staging to an offer-exclusive scratch path instead means the
-// actual filesystem write never needs to happen inside — or even close to
-// — the DB transaction's writer lock; only the later finalize (a plain
-// rename, see finalizeStagedCapturedJob) touches the shared path, and only
-// for the offer that actually won it.
-//
-// Also verifies the final destination is actually usable (existsSync +
-// isFile, so a stale directory or other non-file at that exact path is
-// caught) so finalize — which runs AFTER a row has already committed —
-// can't discover a blocked destination for the first time post-commit.
-// That failure belongs HERE, before this offer is even considered for
-// insertion ("abort before insertion" if staging fails).
-function stageCapturedJob({ repoRoot, env, offer, savedAt }) {
-  const relPath = jobCaptureRelPath(offer);
-  const absPath = userPath({ repoRoot, env }, relPath);
+// Computes a JD artifact's FINAL, content-addressed relative path (CR-29
+// round 6): the last path component is a digest of the rendered content
+// itself, so the path is immutable (the same offer + savedAt date always
+// renders identical bytes and therefore the identical path) and
+// collision-free (two different renders can never share a path). That
+// immutability is what lets writeCanonicalCapturedJob below write straight
+// to this path BEFORE any DB transaction opens, with no stage-then-rename
+// step: a retry after a crash re-renders the same bytes to the same path (a
+// harmless overwrite of identical content), so there is no pending state to
+// recover and no window where a committed row can reference a path nothing
+// ever wrote.
+function contentAddressedJobCaptureRelPath(offer, content) {
+  const company = slug(offer?.company, "unknown-company");
+  const role = slug(offer?.title, "open-role");
+  return `workspace/jobs/${company}-${role}-${contentDigest(content)}.md`;
+}
+
+// Writes a JD artifact straight to its FINAL deterministic path — the ONLY
+// filesystem write in the DB-batch capture path, always called BEFORE
+// captureAndPersistOffersIfDb opens sourcedUpsertBatch's transaction (CR-29
+// round 6, replacing round 5's stage-then-rename dance, which left a window
+// between a row's commit and its artifact's rename where a crash or rename
+// failure could permanently orphan an already-committed row). Throws
+// without writing partial content when the destination is blocked by
+// something that isn't a plain file, so that failure surfaces here —
+// "abort before insertion" — never after a row has already committed to
+// reference it.
+function writeCanonicalCapturedJob({ repoRoot, env, offer, savedAt }) {
   const content = renderCapturedJob({ offer, savedAt });
-  const stagingAbsPath = stagedJobPath(absPath);
-  try {
-    mkdirSync(dirname(stagingAbsPath), { recursive: true });
-    writeFileSync(stagingAbsPath, content, "utf8");
-    if (existsSync(absPath) && !statSync(absPath).isFile()) {
-      throw new Error(`sourced-persistence: JD artifact path is blocked: ${relPath}`);
-    }
-  } catch (err) {
-    discardStagedCapturedJob({ stagingAbsPath });
-    throw err;
+  const relPath = contentAddressedJobCaptureRelPath(offer, content);
+  const absPath = userPath({ repoRoot, env }, relPath);
+  if (existsSync(absPath) && !statSync(absPath).isFile()) {
+    throw new Error(`sourced-persistence: JD artifact path is blocked: ${relPath}`);
   }
-  return { relPath, absPath, stagingAbsPath };
-}
-
-// Moves a staged artifact into its final deterministic location — the ONLY
-// filesystem write in the whole capture path that happens once a row is
-// KNOWN to have won its identity slot. Always called OUTSIDE any DB
-// transaction (CR-29 round 5): sourcedUpsertBatch's own guard(db)-protected
-// transaction does DB work only now, never fs I/O, so lock duration no
-// longer scales with batch size or document size.
-function finalizeStagedCapturedJob({ absPath, stagingAbsPath }) {
   mkdirSync(dirname(absPath), { recursive: true });
-  renameSync(stagingAbsPath, absPath);
+  writeFileSync(absPath, content, "utf8");
+  return { relPath, absPath };
 }
 
-// Removes a staged artifact that never made it into a committed row: either
-// the whole batch's transaction rejected/rolled back (guard rejection, or
-// any other write failure — "remove unreferenced staged artifacts after a
-// rollback") or sourcedUpsertBatch's own duplicate check found this row's
-// identity already claimed by another row. Best-effort — a leftover staging
-// file is disk bloat, never a correctness problem, so a failed cleanup here
-// must never mask the real outcome.
-function discardStagedCapturedJob({ stagingAbsPath }) {
+// True when SOME row currently committed in the DB (in this batch, an
+// earlier batch, or an earlier run entirely) references `relPath` as its
+// JD artifact. Used to decide whether a written-but-unaccepted artifact from
+// THIS batch is safe to delete (CR-29 round 6): because the path is content-
+// addressed, an identical offer resubmitted after an earlier partial
+// failure re-renders the exact same path, so this batch's own duplicate hit
+// or rollback must never delete a file a previously committed row still
+// depends on.
+function artifactPathIsReferenced({ repoRoot, env, relPath }) {
+  if (!dbExists({ repoRoot, env })) return false;
+  const db = requireDb({ repoRoot, env });
+  for (const table of ["applications", "sourced"]) {
+    for (const { data } of db.prepare(`SELECT data FROM ${table}`).all()) {
+      let row;
+      try {
+        row = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      if (row?.artifacts?.jd === relPath) return true;
+    }
+  }
+  return false;
+}
+
+// Best-effort removal of a JD artifact this batch wrote but that ended up
+// with no committed row referencing it: a duplicate hit, a sibling offer's
+// pre-transaction write failure aborting the whole batch, or the whole
+// transaction rolling back. Always re-checks the DB before deleting (see
+// artifactPathIsReferenced) rather than trusting this batch's own
+// accepted-id bookkeeping alone. A failed cleanup here is disk bloat, never
+// a correctness problem, so it must never mask the real outcome.
+function discardUnreferencedCapturedJob({ repoRoot, env, relPath, absPath }) {
   try {
-    rmSync(stagingAbsPath, { force: true });
+    if (artifactPathIsReferenced({ repoRoot, env, relPath })) return;
+    rmSync(absPath, { force: true });
   } catch {
     // best-effort
   }
@@ -623,33 +635,37 @@ export function captureAndPersistOffersIfDb({
       },
     };
   }
-  // Every reconciled offer's JD artifact is STAGED here — a scratch-path
-  // write, never the shared deterministic path — BEFORE sourcedUpsertBatch
-  // ever opens its transaction (CR-29 round 5). An offer whose staging
-  // fails is excluded from the batch entirely: it never reaches the DB
-  // ("abort before insertion"), so it's neither a dangling row nor a
-  // silently-clobbered artifact. What used to be a deferred WRITE running
-  // from inside the transaction (via a commitAcceptedArtifact hook, CR-29
-  // round 4) is now a plain rename that runs AFTER the transaction has
-  // already resolved — see the finalize/discard loop below — so the
-  // transaction itself does DB work only and never holds the SQLite writer
-  // lock for filesystem I/O.
+  // Every reconciled offer's JD artifact is written to its FINAL
+  // content-addressed path HERE, BEFORE sourcedUpsertBatch ever opens its
+  // transaction (CR-29 round 6). An offer whose write fails is excluded
+  // from the batch entirely: it never reaches the DB ("abort before
+  // insertion"), so it's neither a dangling row nor a silently-clobbered
+  // artifact. Unlike round 5's stage-then-rename, there is no finalize step
+  // afterward: the write already landed at the exact path the row's
+  // artifacts.jd will reference inside the transaction, so a crash or
+  // failure between this write and the transaction's commit can never
+  // orphan a committed row — a retry just re-renders identical content to
+  // the identical path. The only cleanup needed afterward is for artifacts
+  // this batch wrote that DIDN'T end up referenced by any committed row
+  // (a duplicate hit, a sibling's pre-transaction failure aborting the
+  // whole batch, or the whole transaction rolling back) — see the
+  // discardUnreferencedCapturedJob loop below.
   const acceptedOffersById = new Map();
-  const stagedById = new Map();
-  const preStagingFailedIds = [];
+  const writtenById = new Map();
+  const preWriteFailedIds = [];
   const preparedOffers = [];
   for (const offer of reconciled.offers) {
     const [row] = sourcedRowsFromScanOffers([offer], savedAt.toISOString());
     if (!row) continue;
     const id = String(row.id);
     try {
-      const staged = stageCapturedJob({ repoRoot, env, offer, savedAt });
-      const preparedOffer = offerWithArtifactPath(offer, staged.relPath);
+      const written = writeCanonicalCapturedJob({ repoRoot, env, offer, savedAt });
+      const preparedOffer = offerWithArtifactPath(offer, written.relPath);
       acceptedOffersById.set(id, preparedOffer);
-      stagedById.set(id, staged);
+      writtenById.set(id, written);
       preparedOffers.push(preparedOffer);
     } catch {
-      preStagingFailedIds.push(id);
+      preWriteFailedIds.push(id);
     }
   }
 
@@ -670,34 +686,34 @@ export function captureAndPersistOffersIfDb({
       if (err?.code === "EXPORT_FAILED") {
         // The db write already committed (runVerb's ExportFailedError
         // contract) — only the tracker.json/activity.jsonl compatibility
-        // export failed AFTER it. The accepted rows' staged artifacts must
-        // still be finalized below before this rethrows, or a caller
-        // re-reading the now-durable row would find its artifacts.jd
-        // pointing at a file that was never actually finalized.
+        // export failed AFTER it. The accepted rows' artifacts are already
+        // at their final path (written before the transaction even opened),
+        // so nothing more needs to happen for them before this rethrows.
         persisted = err.result;
         pendingRethrow = err;
       } else {
-        // Nothing committed: every staged artifact for this batch is now
-        // unreferenced ("remove unreferenced staged artifacts after a
-        // rollback").
-        for (const staged of stagedById.values()) discardStagedCapturedJob(staged);
+        // Nothing committed: every artifact this batch wrote is now
+        // unreferenced, unless an earlier run already committed a row at
+        // that exact content-addressed path.
+        for (const written of writtenById.values()) {
+          discardUnreferencedCapturedJob({ repoRoot, env, ...written });
+        }
         throw err;
       }
     }
   }
 
   const acceptedIds = new Set((persisted?.acceptedIds || []).map(String));
-  for (const [id, staged] of stagedById) {
-    if (acceptedIds.has(id)) finalizeStagedCapturedJob(staged);
-    else discardStagedCapturedJob(staged);
+  for (const [id, written] of writtenById) {
+    if (!acceptedIds.has(id)) discardUnreferencedCapturedJob({ repoRoot, env, ...written });
   }
   if (pendingRethrow) throw pendingRethrow;
 
   const acceptedOffers = [...acceptedIds].map((id) => acceptedOffersById.get(id)).filter(Boolean);
-  const failed = preStagingFailedIds.length + (persisted?.failed || 0);
-  const failedIds = [...preStagingFailedIds, ...(persisted?.failedIds || [])];
+  const failed = preWriteFailedIds.length + (persisted?.failed || 0);
+  const failedIds = [...preWriteFailedIds, ...(persisted?.failedIds || [])];
   return {
-    ok: true,
+    ok: failed === 0,
     persistedRows: (persisted?.created || 0) + (persisted?.updated || 0),
     duplicates: reconciled.duplicates + (persisted?.duplicates || 0),
     failed,

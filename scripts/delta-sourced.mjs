@@ -39,11 +39,22 @@ import { buildSeenSets } from "../src/core/tracker/tracker-data.mjs";
 // when there is no DB.
 export function buildRepoSeenIds({ repoRoot = ROOT } = {}) {
   const { seenUrls, seenReqIds } = buildSeenSets(repoRoot);
-  const ids = new Set(
-    [...seenReqIds, ...buildOfferIdentitySet([...seenUrls].map((url) => ({ url })))]
-      .filter(Boolean)
-      .map((id) => String(id).toLowerCase())
-  );
+  const ids = new Set();
+  for (const id of [
+    ...seenReqIds,
+    ...buildOfferIdentitySet([...seenUrls].map((url) => ({ url }))),
+  ]) {
+    if (!id) continue;
+    // Preserve path and query casing for URL identities (CR-29 round 6):
+    // offerIdentityKeys' own "url:" keys are only normalizeUrl-normalized
+    // (strips tracking params/hash/trailing slash, see normalizeUrl below),
+    // never lowercased — lowercasing them here made a case-sensitive path
+    // (e.g. "/Jobs/Foo") never match an identical mixed-case snapshot URL,
+    // reporting an already-persisted posting as repo-new. Requisition
+    // identities (bare, unprefixed here) still lowercase; exact case never
+    // carries meaning for them.
+    ids.add(String(id).startsWith("url:") ? String(id) : String(id).toLowerCase());
+  }
   if (dbExists({ repoRoot })) {
     const { seenPostingKeys } = buildDbSeenSets({ repoRoot });
     for (const key of seenPostingKeys) {
@@ -63,9 +74,18 @@ export function buildRepoSeenIds({ repoRoot = ROOT } = {}) {
       // tracking param diffSnapshotOffers' own key for that same offer
       // never does, so the two `url:` keys would never match and the row
       // would be reported as repo-new (CR-29 round 5).
+      //
+      // Do NOT lowercase the result (CR-29 round 6, unlike the req: branch
+      // above): normalizeUrl only strips tracking params/hash/trailing
+      // slash, it never touches casing, so offerIdentityKeys' own `url:`
+      // keys for the CURRENT snapshot keep whatever path/query casing the
+      // posting URL actually has. Lowercasing only THIS side made a
+      // case-sensitive path (e.g. "/Jobs/Foo") never match an identical
+      // mixed-case snapshot URL, reporting an already-persisted posting as
+      // repo-new.
       if (key.startsWith("url:")) {
         const normalized = normalizeUrl(key.slice(4));
-        if (normalized) ids.add(`url:${normalized.toLowerCase()}`);
+        if (normalized) ids.add(`url:${normalized}`);
       }
     }
   }

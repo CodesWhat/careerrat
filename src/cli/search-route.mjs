@@ -189,9 +189,36 @@ export function mountSearchRoutes({
           : [];
         const allSelectedPromptsFailed =
           Number(result?.searched || 0) > 0 && failedPromptIds.length >= Number(result.searched);
-        if (!allSelectedPromptsFailed) {
+        // A successful prompt can still lose its posting to a JD
+        // artifact-write failure downstream (CR-29 round 6): runAiWebSearch
+        // already reports that in result.ok/result.failed/result.failedIds,
+        // but this worker used to only look at whether EVERY prompt failed,
+        // so a partial persistence failure settled as a completed run —
+        // suppressing retry despite the lost posting. failedIds (row ids,
+        // distinct from failedPromptIds above) is carried into the run's
+        // error so a caller can see exactly what needs retrying.
+        const hasArtifactFailures = result?.ok === false || Number(result?.failed || 0) > 0;
+        if (!allSelectedPromptsFailed && !hasArtifactFailures) {
           return {
             settlement: { status: "completed", summary: result },
+            value: result,
+          };
+        }
+        if (!allSelectedPromptsFailed) {
+          return {
+            settlement: {
+              status: "failed",
+              error: {
+                code: "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED",
+                message: `Failed to persist ${result.failed} job description artifact(s).`,
+                action: "retry-failed",
+                failedPromptIds,
+                failedIds: result.failedIds || [],
+                queryResults: result.queryResults || [],
+                sources: result.sources || [],
+                errors: result.errors || [],
+              },
+            },
             value: result,
           };
         }
@@ -205,6 +232,7 @@ export function mountSearchRoutes({
                 "Every selected AI web-search prompt failed or had no reported query coverage.",
               action: "retry-failed",
               failedPromptIds,
+              failedIds: result.failedIds || [],
               queryResults: result.queryResults || [],
               sources: result.sources || [],
               errors: result.errors || [],

@@ -31,7 +31,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runSourcedScan } from "../scripts/scan-sourced.mjs";
@@ -2263,16 +2263,17 @@ test("a JD artifact-write failure during a DB-mode scan marks the run failed, ke
       },
     });
 
-    // Precomputed deterministic JD path (sourced-persistence.mjs's
-    // jobCaptureRelPath: <company-slug>-<title-slug>-<reqId-slug>.md) for
-    // the offer captureBrowserSourceImpl returns below. sourced-scanner.mjs's
-    // qualification pass overwrites offer.reqId with extractReqId(url).id
-    // (dropping any explicit reqId an offer arrives with), so the URL has to
-    // be a Greenhouse-shaped one for the derived reqId — and therefore the
-    // artifact path — to be predictable. Blocking that path with a directory
-    // makes stageCapturedJob's write throw before any DB transaction opens.
-    const jdRelPath = "workspace/jobs/example-labs-blocked-artifact-role-greenhouse-1234567.md";
-    mkdirSync(userPath({ repoRoot }, jdRelPath), { recursive: true });
+    // JD artifacts land at a content-addressed final path (sourced-
+    // persistence.mjs's contentAddressedJobCaptureRelPath: <company-slug>-
+    // <title-slug>-<content-digest>.md, CR-29 round 6), so the exact
+    // filename can't be predicted ahead of rendering. Block EVERY artifact
+    // write instead, regardless of filename: making "workspace/jobs" itself
+    // a plain FILE means mkdirSync(dirname(absPath), { recursive: true })
+    // throws for any offer, since an ancestor path component exists but
+    // isn't a directory — the write throws before any DB transaction opens.
+    const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+    mkdirSync(dirname(jobsDir), { recursive: true });
+    writeFileSync(jobsDir, "");
 
     const before = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
     assert.equal(before.searches[0].recency.lastRunAt, undefined);

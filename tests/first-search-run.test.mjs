@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
@@ -1419,6 +1419,113 @@ test("completed search runs preserve bounded rejection evidence", async () => {
       provider: "lever",
     },
   ]);
+});
+
+test("a JD artifact-write failure settles the DIRECT (settle: true) path as failed, keeps failedIds, and still allows a retry run", async () => {
+  // CR-29 round 6: runSourcedScan already reported the write failure in
+  // ok/failed/failedIds, but normalizeRunSummary dropped all three and
+  // runFirstSearchInBackground settled the run as "completed" regardless —
+  // the source watermark stayed blocked with no visible failed run to
+  // retry against.
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: { title_filter: {}, location_filter: null, searches: [] },
+  });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  // Block EVERY JD artifact write: making "workspace/jobs" itself a plain
+  // FILE means the write's mkdirSync(dirname(absPath)) throws for any
+  // offer, since an ancestor path component exists but isn't a directory.
+  mkdirSync(dirname(jobsDir), { recursive: true });
+  writeFileSync(jobsDir, "");
+
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    fetchImpl: async () =>
+      leverResponse({ title: "AI Engineer", url: "https://jobs.lever.co/acme/ai-engineer" }),
+  });
+
+  const failed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error.code, "SOURCED_ARTIFACT_WRITE_FAILED");
+  assert.deepEqual(failed.error.failedIds, ["sourced-acme-lever-ai-engineer"]);
+
+  // A failed run must still allow a retry to be started once the failure is
+  // fixed.
+  rmSync(jobsDir, { force: true });
+  const retry = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    retryFailed: true,
+    inputFingerprint: started.run.metadata.inputFingerprint,
+  });
+  assert.equal(retry.reused, false);
+  assert.notEqual(retry.run.id, started.run.id);
+
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: retry.run.id,
+    fetchImpl: async () =>
+      leverResponse({ title: "AI Engineer", url: "https://jobs.lever.co/acme/ai-engineer" }),
+  });
+  const completed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.summary.new, 1);
+});
+
+test("a JD artifact-write failure settles the SHARED-WORKER (settle: false) path as failed and keeps failedIds", async () => {
+  // Same failure mode as the direct-settle test above, but through the
+  // settle:false branch createWorkspaceAgentRuntime's sourcing workers use
+  // (they settle terminal state themselves off `result.settlement`).
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: { title_filter: {}, location_filter: null, searches: [] },
+  });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  mkdirSync(dirname(jobsDir), { recursive: true });
+  writeFileSync(jobsDir, "");
+
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  const result = await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    settle: false,
+    fetchImpl: async () =>
+      leverResponse({ title: "AI Engineer", url: "https://jobs.lever.co/acme/ai-engineer" }),
+  });
+
+  assert.equal(result.settlement.status, "failed");
+  assert.equal(result.settlement.error.code, "SOURCED_ARTIFACT_WRITE_FAILED");
+  assert.deepEqual(result.settlement.error.failedIds, ["sourced-acme-lever-ai-engineer"]);
+  // settle:false never touches the durable run itself — the caller (the
+  // sourcing worker manager) owns settling it off this settlement.
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
 });
 
 test("background first search publishes a growing found count before completion", async () => {

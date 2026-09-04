@@ -189,9 +189,18 @@ export function identityKeysWithAliases(row = {}) {
 // discarding `duplicate` as a match for `canonicalRow` needs to add to
 // canonicalRow.aliasKeys so a future lookup by one of those keys still finds
 // it. Empty when the duplicate adds nothing new (the common case).
+//
+// Reads `duplicate`'s FULL identity set — identityKeysWithAliases, its own
+// url/reqId PLUS any aliasKeys already merged onto it — not just its own
+// postingIdentityKeys (CR-29 round 6): a same-batch row can accumulate
+// several aliasKeys before it collides with a concurrently persisted row
+// through just one of them. Reading only the duplicate's OWN keys dropped
+// every other alias it had already accumulated, so a later capture carrying
+// only one of those dropped aliases inserted as a second row instead of
+// resolving back to the canonical one.
 export function identityAliasAdditions(canonicalRow, duplicate) {
   const covered = new Set(identityKeysWithAliases(canonicalRow));
-  return postingIdentityKeys(duplicate).filter((key) => !covered.has(key));
+  return identityKeysWithAliases(duplicate).filter((key) => !covered.has(key));
 }
 
 export function addPostingIdentity(seenKeys, row) {

@@ -7,6 +7,7 @@ import {
   rowAliasKeys,
 } from "../../scoring/sourced-identity.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
+import { normalizeTextKey } from "../../tracker/tracker-data.mjs";
 import {
   bumpMeta,
   deleteRow,
@@ -71,16 +72,72 @@ function storedPostingIndex(db) {
 // later duplicate matching one of those original keys rebuilt `updatedRow`
 // from that stale row and overwrote (rather than accumulated with) the
 // earlier merge's aliasKeys.
+function normalizedPostingSignature(row = {}) {
+  const company = normalizeTextKey(row.company || row.co || "");
+  const role = normalizeTextKey(row.role || row.title || "");
+  return company && role ? `${company}::${role}` : null;
+}
+
+// Corroborates that `duplicate` and `row` describe the SAME posting before an
+// "unseen" alias key gets attached to `row` (CR-29 round 6). The identity
+// match that got a caller here already proves overlap on ONE key; an
+// addition is, by definition, a key `row` did NOT already claim, so
+// attaching it on trust alone is exactly how a malformed aggregator card
+// pairing an unrelated posting's URL with this row's reqId could bind that
+// posting's other identities onto this row and later cause the LEGITIMATE
+// owner of that URL to be discarded as a false duplicate.
+function corroboratesSamePosting(row, duplicate) {
+  const rowSignature = normalizedPostingSignature(row);
+  return Boolean(rowSignature) && rowSignature === normalizedPostingSignature(duplicate);
+}
+
+// Every DISTINCT stored row `duplicate`'s offered identities (its own keys
+// plus any aliases already merged onto it) currently match in `index`.
+function matchingOwners(index, duplicate) {
+  const owners = new Map();
+  for (const key of identityKeysWithAliases(duplicate)) {
+    const entry = index.get(key);
+    if (entry) owners.set(`${entry.table}:${entry.id}`, entry);
+  }
+  return [...owners.values()];
+}
+
+// Merges `duplicate`'s identity keys onto whichever ALREADY-STORED row they
+// belong to, guarding against both identity LOSS and identity POISONING
+// (CR-29 round 6):
+//
+// - If `duplicate`'s offered identities resolve to MORE THAN ONE distinct
+//   stored row, the offer is ambiguous — merging onto either one would
+//   repoint that row's aliasKeys onto a posting it may not be, and could
+//   silently orphan the other row's legitimate identity. Reject the merge
+//   entirely (`conflict: true`) and persist nothing for it.
+// - An addition already owned by a DIFFERENT row in `index` is never taken:
+//   a candidate addition is (by identityAliasAdditions' contract) a key the
+//   matched row doesn't already answer for, which is exactly the situation
+//   where it could belong to someone else; repointing it would steal it from
+//   the row that legitimately holds it.
+// - Before attaching any surviving "unseen" addition, require basic posting
+//   corroboration (normalized company AND role agree) — see
+//   corroboratesSamePosting above.
+//
+// Returns `{ additions, conflict }`. `additions` is empty (never a merge)
+// whenever `conflict` is true, no candidate addition survives the
+// already-owned-elsewhere filter, or corroboration fails.
 function mergeDuplicateIdentityAlias(db, index, duplicate) {
-  const matchKey = identityKeysWithAliases(duplicate).find((key) => index.has(key));
-  if (!matchKey) return [];
-  const entry = index.get(matchKey);
-  const additions = identityAliasAdditions(entry.row, duplicate);
-  if (!additions.length) return [];
-  entry.row = { ...entry.row, aliasKeys: [...rowAliasKeys(entry.row), ...additions] };
+  const owners = matchingOwners(index, duplicate);
+  if (owners.length === 0) return { additions: [], conflict: false };
+  if (owners.length > 1) {
+    return { additions: [], conflict: true };
+  }
+  const [entry] = owners;
+  const candidateAdditions = identityAliasAdditions(entry.row, duplicate);
+  const safeAdditions = candidateAdditions.filter((key) => !index.has(key));
+  if (!safeAdditions.length) return { additions: [], conflict: false };
+  if (!corroboratesSamePosting(entry.row, duplicate)) return { additions: [], conflict: false };
+  entry.row = { ...entry.row, aliasKeys: [...rowAliasKeys(entry.row), ...safeAdditions] };
   putRow(db, entry.table, entry.id, entry.row);
-  for (const key of additions) index.set(key, entry);
-  return additions;
+  for (const key of safeAdditions) index.set(key, entry);
+  return { additions: safeAdditions, conflict: false };
 }
 
 const ACTIVE_SOURCED_STATUSES = new Set(["sourced", "prospect", "saved", "gated"]);
@@ -137,6 +194,7 @@ export function sourcedUpsertBatch({
     let created = 0;
     let updated = 0;
     let duplicates = 0;
+    let conflicts = 0;
     const failed = 0;
     let aliasesMerged = false;
     const acceptedIds = [];
@@ -146,7 +204,8 @@ export function sourcedUpsertBatch({
     if (hasDuplicateOffers) {
       for (const offer of duplicateOffers) {
         duplicates++;
-        const additions = mergeDuplicateIdentityAlias(db, postingIndex, offer);
+        const { additions, conflict } = mergeDuplicateIdentityAlias(db, postingIndex, offer);
+        if (conflict) conflicts++;
         if (additions.length) {
           aliasesMerged = true;
           for (const key of additions) seenPostingKeys.add(key);
@@ -161,7 +220,8 @@ export function sourcedUpsertBatch({
       // here and merged, not inserted as a second row for that identity.
       if (seenPostingKeys && identityKeysWithAliases(row).some((key) => seenPostingKeys.has(key))) {
         duplicates++;
-        const additions = mergeDuplicateIdentityAlias(db, postingIndex, row);
+        const { additions, conflict } = mergeDuplicateIdentityAlias(db, postingIndex, row);
+        if (conflict) conflicts++;
         if (additions.length) {
           aliasesMerged = true;
           for (const key of additions) seenPostingKeys.add(key);
@@ -189,6 +249,7 @@ export function sourcedUpsertBatch({
         created,
         updated,
         duplicates,
+        conflicts,
         failed,
         acceptedIds,
         failedIds,
@@ -204,7 +265,18 @@ export function sourcedUpsertBatch({
       tags: [`count:${acceptedIds.length}`],
     });
     const analytics = refreshAnalytics(db);
-    return { created, updated, duplicates, failed, acceptedIds, failedIds, meta, event, analytics };
+    return {
+      created,
+      updated,
+      duplicates,
+      conflicts,
+      failed,
+      acceptedIds,
+      failedIds,
+      meta,
+      event,
+      analytics,
+    };
   });
 }
 
@@ -227,9 +299,9 @@ export function sourcedUpsertBatch({
 export function sourcedMergeIdentityAlias({ repoRoot, env, offer } = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const index = storedPostingIndex(db);
-    const additions = mergeDuplicateIdentityAlias(db, index, offer);
+    const { additions, conflict } = mergeDuplicateIdentityAlias(db, index, offer);
     if (additions.length) bumpMeta(db);
-    return { merged: additions.length > 0 };
+    return { merged: additions.length > 0, conflict };
   });
 }
 
@@ -243,17 +315,19 @@ export function sourcedMergeIdentityAlias({ repoRoot, env, offer } = {}) {
 // singular verb. A no-op, no db open at all, when `offers` is empty.
 export function sourcedMergeIdentityAliasBatch({ repoRoot, env, offers } = {}) {
   if (!Array.isArray(offers) || offers.length === 0) {
-    return { merged: 0 };
+    return { merged: 0, conflicts: 0 };
   }
   return runVerb({ repoRoot, env }, (db) => {
     const index = storedPostingIndex(db);
     let merged = 0;
+    let conflicts = 0;
     for (const offer of offers) {
-      const additions = mergeDuplicateIdentityAlias(db, index, offer);
+      const { additions, conflict } = mergeDuplicateIdentityAlias(db, index, offer);
+      if (conflict) conflicts++;
       if (additions.length) merged++;
     }
     if (merged) bumpMeta(db);
-    return { merged };
+    return { merged, conflicts };
   });
 }
 

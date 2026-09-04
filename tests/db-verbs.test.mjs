@@ -11,7 +11,10 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
-import { sourcedMergeIdentityAliasBatch } from "../src/core/db/verbs/sourced.mjs";
+import {
+  sourcedMergeIdentityAlias,
+  sourcedMergeIdentityAliasBatch,
+} from "../src/core/db/verbs/sourced.mjs";
 import {
   activityAppend,
   analyticsRefresh,
@@ -1577,6 +1580,228 @@ test("a second same-batch duplicate matching a canonical row by its ORIGINAL ide
   assert.ok(
     row.aliasKeys?.includes("req:hiringcafe:sequential-c"),
     "the later same-batch alias merge must also be present"
+  );
+});
+
+test("mergeDuplicateIdentityAlias rejects an offer whose identities resolve to MORE THAN ONE stored row (CR-29 round 6)", () => {
+  // A malformed aggregator card can pair one posting's URL with an unrelated
+  // posting's reqId. If that offer's identities resolve to two DIFFERENT
+  // stored rows, merging onto either one would repoint aliasKeys onto a
+  // posting it may not be. The merge must be rejected outright — reported as
+  // a conflict, nothing persisted for it.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-conflict-owner-a",
+        company: "Acme",
+        role: "Conflict Role",
+        link: "https://jobs.example.test/acme/conflict-a",
+        fitScore: 70,
+      },
+      {
+        id: "sourced-conflict-owner-b",
+        company: "Acme",
+        role: "Conflict Role",
+        link: "https://jobs.example.test/acme/conflict-b",
+        fitScore: 70,
+        aliasKeys: ["req:conflict-shared-req"],
+      },
+    ],
+  });
+  const beforeA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-conflict-owner-a").data
+  );
+  const beforeB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-conflict-owner-b").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+
+  const result = sourcedMergeIdentityAlias({
+    repoRoot,
+    offer: {
+      company: "Acme",
+      title: "Conflict Role",
+      url: "https://jobs.example.test/acme/conflict-a",
+      reqId: "conflict-shared-req",
+    },
+  });
+
+  assert.equal(result.merged, false);
+  assert.equal(result.conflict, true);
+
+  const afterA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-conflict-owner-a").data
+  );
+  const afterB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-conflict-owner-b").data
+  );
+  assert.deepEqual(afterA, beforeA, "the conflicting merge must not touch either owner's row");
+  assert.deepEqual(afterB, beforeB, "the conflicting merge must not touch either owner's row");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeMeta,
+    "a rejected conflict must not bump meta"
+  );
+});
+
+test("mergeDuplicateIdentityAlias never attaches an unseen alias without company+role corroboration (CR-29 round 6)", () => {
+  // A single-owner match on one shared key is not proof the offer describes
+  // the SAME posting as the row it matched. Before attaching a NEW identity
+  // key onto that row, company and role must also agree.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-uncorroborated-owner",
+        company: "Acme",
+        role: "Real Role",
+        link: "https://jobs.example.test/acme/uncorroborated",
+        fitScore: 70,
+      },
+    ],
+  });
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-uncorroborated-owner").data
+  );
+
+  const result = sourcedMergeIdentityAlias({
+    repoRoot,
+    offer: {
+      // Matches the row's own url (single owner, no conflict) but claims a
+      // DIFFERENT company/role — a mismatch that must block the new
+      // req: key from being attached.
+      company: "Wrongco",
+      title: "Wrong Role",
+      url: "https://jobs.example.test/acme/uncorroborated",
+      reqId: "hiringcafe:uncorroborated-new",
+    },
+  });
+
+  assert.equal(result.merged, false);
+  assert.equal(result.conflict, false);
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-uncorroborated-owner").data
+  );
+  assert.deepEqual(after, before, "an uncorroborated alias must not be attached");
+});
+
+test("mergeDuplicateIdentityAlias attaches a new alias once company+role corroborate the match (CR-29 round 6)", () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-corroborated-owner",
+        company: "Acme",
+        role: "Real Role",
+        link: "https://jobs.example.test/acme/corroborated",
+        fitScore: 70,
+      },
+    ],
+  });
+
+  const result = sourcedMergeIdentityAlias({
+    repoRoot,
+    offer: {
+      company: "Acme",
+      title: "Real Role",
+      url: "https://jobs.example.test/acme/corroborated",
+      reqId: "hiringcafe:corroborated-new",
+    },
+  });
+
+  assert.equal(result.merged, true);
+  assert.equal(result.conflict, false);
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-corroborated-owner").data
+  );
+  assert.ok(
+    after.aliasKeys?.includes("req:hiringcafe:corroborated-new"),
+    "a corroborated new identity must be attached as an alias"
+  );
+});
+
+test("a key an earlier duplicate in the SAME batch just claimed is never repointed onto a later duplicate's row (CR-29 round 6)", () => {
+  // The multi-owner conflict guard runs against the ONE shared
+  // storedPostingIndex a whole batch's worth of duplicates merges through
+  // (sourcedMergeIdentityAliasBatch), so an alias a batch's EARLIER
+  // duplicate just attached to row A must still block a LATER duplicate in
+  // that same batch from repointing that same key onto a different row B —
+  // not just a key owned since before the batch started.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-repoint-a",
+        company: "Acme",
+        role: "Repoint Role",
+        link: "https://jobs.example.test/acme/repoint-a",
+        fitScore: 70,
+      },
+      {
+        id: "sourced-repoint-b",
+        company: "Acme",
+        role: "Repoint Role",
+        link: "https://jobs.example.test/acme/repoint-b",
+        fitScore: 70,
+      },
+    ],
+  });
+
+  const result = sourcedMergeIdentityAliasBatch({
+    repoRoot,
+    offers: [
+      {
+        // Matches row A by its own url alone; attaches a NEW, previously
+        // unowned req: key onto A.
+        company: "Acme",
+        title: "Repoint Role",
+        url: "https://jobs.example.test/acme/repoint-a",
+        reqId: "shared-later-req",
+      },
+      {
+        // Matches row B by its own url, but also carries the SAME req: key
+        // the first offer just attached to A moments ago in this batch —
+        // now a second, conflicting owner for that key.
+        company: "Acme",
+        title: "Repoint Role",
+        url: "https://jobs.example.test/acme/repoint-b",
+        reqId: "shared-later-req",
+      },
+    ],
+  });
+
+  assert.equal(result.merged, 1, "only the first offer's merge succeeds");
+  assert.equal(result.conflicts, 1, "the second offer's repoint attempt is rejected as a conflict");
+
+  const rowA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-repoint-a").data
+  );
+  const rowB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-repoint-b").data
+  );
+  assert.ok(
+    rowA.aliasKeys?.includes("req:shared-later-req"),
+    "row A keeps the key it legitimately claimed first"
+  );
+  assert.equal(
+    Boolean(rowB.aliasKeys?.includes("req:shared-later-req")),
+    false,
+    "row B must never receive a key already claimed by a different row in this same batch"
   );
 });
 

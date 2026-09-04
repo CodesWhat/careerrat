@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 
 import { closeAll } from "../src/core/db/connection.mjs";
@@ -3214,13 +3214,17 @@ test("a JD artifact-write failure during an AI web search marks the run failed a
   // shrank the duplicate count, so a lost posting looked like ordinary
   // dedupe instead of a write that needs a retry.
   const repoRoot = repo({ prompts: 1 });
-  // Precomputed deterministic JD path (sourced-persistence.mjs's
-  // jobCaptureRelPath: <company-slug>-<title-slug>-<reqId-slug>.md) for
-  // role()'s default url, https://jobs.lever.co/acme/req-1, whose extracted
-  // reqId is lever:req-1. Blocking it with a directory makes
-  // stageCapturedJob's write throw before any DB transaction opens.
-  const jdRelPath = "workspace/jobs/acme-ai-applied-ai-engineer-lever-req-1.md";
-  mkdirSync(userPath({ repoRoot }, jdRelPath), { recursive: true });
+  // JD artifacts land at a content-addressed final path (sourced-
+  // persistence.mjs's contentAddressedJobCaptureRelPath: <company-slug>-
+  // <title-slug>-<content-digest>.md, CR-29 round 6), so the exact filename
+  // can't be predicted ahead of rendering. Block EVERY artifact write
+  // instead: making "workspace/jobs" itself a plain FILE means
+  // mkdirSync(dirname(absPath), { recursive: true }) throws for any offer,
+  // since an ancestor path component exists but isn't a directory — the
+  // write throws before any DB transaction opens.
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  mkdirSync(dirname(jobsDir), { recursive: true });
+  writeFileSync(jobsDir, "");
 
   const result = await runAiWebSearch({
     repoRoot,

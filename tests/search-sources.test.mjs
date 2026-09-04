@@ -1,22 +1,26 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 
+import { reportIngestFailure } from "../scripts/capture-board-snapshot.mjs";
 import {
   buildSearchSnapshotPath,
   captureSearchSources,
   hiringCafeSearchUrl,
   ingestCapturedSnapshot,
   loadSearchSourceConfig,
+  reportSnapshotIngestFailure,
   searchSourceUrl,
   selectSearchSources,
   stampSourceOffers,
 } from "../scripts/capture-search-sources.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { putRow } from "../src/core/db/verbs/shared.mjs";
 import { ExportFailedError, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { captureAndPersistOffersIfDb } from "../src/core/scoring/sourced-persistence.mjs";
 
 const cleanupRoots = [];
 
@@ -733,10 +737,11 @@ test("a JD artifact-write failure leaves no dangling DB row, and a retry after t
   // export inside it) had already returned, so a write failure landed a
   // durable row whose artifacts.jd pointed at a file that never got written.
   // Reconciliation then rejected a retry of the same offer as a duplicate,
-  // permanently losing the description. The write is now committed INSIDE
-  // sourcedUpsertBatch, before that row's putRow — a failure there must
-  // leave NO row and NO claimed identity, so a retry (once whatever failed
-  // is fixed) inserts cleanly instead of bouncing off a phantom duplicate.
+  // permanently losing the description. The write now happens BEFORE
+  // sourcedUpsertBatch is even called (CR-29 round 6, to its FINAL
+  // content-addressed path) — a failure there must leave NO row and NO
+  // claimed identity, so a retry (once whatever failed is fixed) inserts
+  // cleanly instead of bouncing off a phantom duplicate.
   const repoRoot = tempRepo();
   openDb({ repoRoot });
 
@@ -747,11 +752,13 @@ test("a JD artifact-write failure leaves no dangling DB row, and a retry after t
     reqId: "explicit-jdfail-1",
     rawText: "Body content for the write-failure regression.",
   };
-  const jdRelPath = "workspace/jobs/acme-jd-write-failure-role-explicit-jdfail-1.md";
-  const jdAbsPath = userPath({ repoRoot }, jdRelPath);
-  // Block the deterministic artifact path with a DIRECTORY, so
-  // atomicWriteFile's write onto it throws EISDIR.
-  mkdirSync(jdAbsPath, { recursive: true });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  // Block EVERY artifact write, regardless of its content-addressed
+  // filename: making "workspace/jobs" itself a plain FILE means
+  // mkdirSync(dirname(absPath), { recursive: true }) throws for any offer,
+  // since an ancestor path component exists but isn't a directory.
+  mkdirSync(dirname(jobsDir), { recursive: true });
+  writeFileSync(jobsDir, "");
 
   const failed = ingestCapturedSnapshot({
     repoRoot,
@@ -759,6 +766,7 @@ test("a JD artifact-write failure leaves no dangling DB row, and a retry after t
     snapshot: { source: "generic-browser", offers: [offer] },
   });
 
+  assert.equal(failed.ok, false);
   assert.equal(failed.persistedRows, 0);
   assert.equal(failed.offers.length, 0);
   assert.equal(failed.persisted?.failed, 1);
@@ -766,9 +774,9 @@ test("a JD artifact-write failure leaves no dangling DB row, and a retry after t
   const rowsAfterFailure = openDb({ repoRoot }).prepare("SELECT data FROM sourced").all();
   assert.equal(rowsAfterFailure.length, 0, "a write failure must not leave a dangling row");
 
-  // Fix the failure (remove the blocking directory) and retry the exact
-  // same offer.
-  rmSync(jdAbsPath, { recursive: true, force: true });
+  // Fix the failure (remove the blocking file) and retry the exact same
+  // offer.
+  rmSync(jobsDir, { force: true });
 
   const retried = ingestCapturedSnapshot({
     repoRoot,
@@ -776,8 +784,10 @@ test("a JD artifact-write failure leaves no dangling DB row, and a retry after t
     snapshot: { source: "generic-browser", offers: [offer] },
   });
 
+  assert.equal(retried.ok, true);
   assert.equal(retried.persistedRows, 1);
   assert.equal(retried.offers.length, 1);
+  const jdAbsPath = userPath({ repoRoot }, retried.offers[0].artifacts.jd);
   assert.equal(readFileSync(jdAbsPath, "utf8").includes("write-failure regression"), true);
 
   const rowsAfterRetry = openDb({ repoRoot })
@@ -785,7 +795,7 @@ test("a JD artifact-write failure leaves no dangling DB row, and a retry after t
     .all()
     .map((row) => JSON.parse(row.data));
   assert.equal(rowsAfterRetry.length, 1);
-  assert.equal(rowsAfterRetry[0].artifacts.jd, jdRelPath);
+  assert.equal(rowsAfterRetry[0].artifacts.jd, retried.offers[0].artifacts.jd);
 });
 
 test("a tracker export failure still leaves the DB row and its already-written JD artifact consistent", () => {
@@ -922,4 +932,167 @@ test("two offers for the same posting in ONE batch (direct Workday, then a Hirin
     .map((row) => JSON.parse(row.data));
   assert.equal(finalRows.length, 1, "still one row after the alias-only retry");
   assert.equal(finalRows[0].id, afterFirstBatch[0].id);
+});
+
+test("a same-batch row's ACCUMULATED aliases survive final reconciliation against a concurrently persisted row (CR-29 round 6)", () => {
+  // sourced-identity.mjs's identityAliasAdditions used to compute additions
+  // from `duplicate`'s OWN postingIdentityKeys only, dropping any aliasKeys
+  // the duplicate had already accumulated from an EARLIER same-batch merge.
+  // Here, X wins an in-batch identity contest against Y (accumulating Y's
+  // URL as an alias), then a DIFFERENT row Z — persisted CONCURRENTLY, after
+  // reconcileOffersBeforeCapture's read-only seenPostingKeys snapshot but
+  // before sourcedUpsertBatch's own transaction opens (simulated here via
+  // `guard`, which runs inside that transaction right before its fresh
+  // storedPostingIndex is built) — turns out to already own X's shared
+  // reqId. X is discarded as Z's duplicate, and Z must inherit BOTH of X's
+  // surviving identities: its own URL AND the URL X only holds because Y's
+  // alias was merged onto it earlier in this same batch.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  const sharedReqId = "req-concurrent-shared";
+  const offerX = {
+    company: "Acme",
+    title: "Concurrent Engineer",
+    url: "https://jobs.example.test/acme/concurrent-x",
+    reqId: sharedReqId,
+    rawText: "Body content for the concurrent-reconciliation regression (X).",
+  };
+  const offerY = {
+    company: "Acme",
+    title: "Concurrent Engineer",
+    url: "https://jobs.example.test/acme/concurrent-y",
+    reqId: sharedReqId,
+    rawText: "Body content for the concurrent-reconciliation regression (Y).",
+  };
+
+  const result = captureAndPersistOffersIfDb({
+    repoRoot,
+    // X before Y: X wins the in-batch identity contest on sharedReqId and
+    // accumulates Y's URL as an alias (identityAliasAdditions(X, Y)).
+    offers: [offerX, offerY],
+    dedupeCanonical: true,
+    guard: (db) => {
+      putRow(db, "sourced", "sourced-concurrent-z", {
+        id: "sourced-concurrent-z",
+        company: "Acme",
+        role: "Concurrent Engineer",
+        status: "sourced",
+        link: "https://jobs.example.test/acme/concurrent-z-canonical",
+        reqId: sharedReqId,
+      });
+    },
+  });
+
+  // X loses to the concurrently-persisted Z; nothing new is accepted.
+  assert.equal(result.persistedRows, 0);
+  assert.equal(result.offers.length, 0);
+
+  const zRow = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-concurrent-z").data
+  );
+  assert.ok(
+    zRow.aliasKeys?.includes("url:https://jobs.example.test/acme/concurrent-x"),
+    "Z must inherit X's own URL"
+  );
+  assert.ok(
+    zRow.aliasKeys?.includes("url:https://jobs.example.test/acme/concurrent-y"),
+    "Z must also inherit Y's URL, which X only held as an ACCUMULATED alias from the same batch"
+  );
+});
+
+function withStubbedConsoleError(fn) {
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => {
+    lines.push(args.join(" "));
+  };
+  const originalExitCode = process.exitCode;
+  process.exitCode = undefined;
+  try {
+    fn();
+    return { lines, exitCode: process.exitCode };
+  } finally {
+    console.error = original;
+    process.exitCode = originalExitCode;
+  }
+}
+
+test("capture-board-snapshot's reportIngestFailure prints a bounded failed-id list, sets a nonzero exit code, and never touches an already-committed row (CR-29 round 6)", () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  const ok = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [
+      {
+        company: "Acme",
+        title: "Board Snapshot Survivor",
+        url: "https://jobs.example.test/acme/board-survivor",
+        reqId: "board-survivor",
+        rawText: "Body content for the board-snapshot survivor regression.",
+      },
+    ],
+    dedupeCanonical: true,
+  });
+  assert.equal(ok.persistedRows, 1, "the first offer must commit before the block is set up");
+  const survivorId = db.prepare("SELECT id FROM sourced").get().id;
+
+  // Block every subsequent JD write: workspace/jobs itself becomes a plain
+  // file, so mkdirSync(dirname(absPath)) throws ENOTDIR for any offer.
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  rmSync(jobsDir, { recursive: true, force: true });
+  writeFileSync(jobsDir, "blocking file, not a directory", "utf8");
+
+  const failed = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [
+      {
+        company: "Acme",
+        title: "Board Snapshot Casualty",
+        url: "https://jobs.example.test/acme/board-casualty",
+        reqId: "board-casualty",
+        rawText: "Body content for the board-snapshot casualty regression.",
+      },
+    ],
+    dedupeCanonical: true,
+  });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.failed, 1);
+
+  const { lines, exitCode } = withStubbedConsoleError(() => reportIngestFailure(failed));
+
+  assert.equal(exitCode, 1, "a JD artifact-write failure must set a nonzero exit code");
+  assert.match(lines[0], /Failed to persist 1 offer\(s\)/);
+  assert.ok(
+    failed.failedIds.every((id) => lines[0].includes(id)),
+    "the failed id must be printed"
+  );
+  assert.match(lines[1], /still intact/);
+
+  const survivorRow = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced WHERE id = ?")
+    .get(survivorId);
+  assert.ok(survivorRow, "the earlier successfully committed row must be untouched");
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT id FROM sourced")
+    .all()
+    .map((row) => row.id);
+  assert.equal(rows.length, 1, "the blocked offer must never have landed a dangling row");
+});
+
+test("capture-board-snapshot's reportIngestFailure and capture-search-sources' reportSnapshotIngestFailure both bound a long failed-id list with a trailing ellipsis (CR-29 round 6)", () => {
+  const manyFailedIds = Array.from({ length: 15 }, (_, i) => `sourced-bulk-${i}`);
+  const syntheticResult = { failed: 15, failedIds: manyFailedIds };
+
+  const board = withStubbedConsoleError(() => reportIngestFailure(syntheticResult));
+  const searchSources = withStubbedConsoleError(() => reportSnapshotIngestFailure(syntheticResult));
+
+  for (const { lines, exitCode } of [board, searchSources]) {
+    assert.equal(exitCode, 1);
+    assert.match(lines[0], /Failed to persist 15 offer\(s\)/);
+    for (const id of manyFailedIds.slice(0, 10)) assert.ok(lines[0].includes(id));
+    for (const id of manyFailedIds.slice(10)) assert.ok(!lines[0].includes(id));
+    assert.match(lines[0], /, \.\.\.$/, "a list longer than 10 ids must end with an ellipsis");
+  }
 });

@@ -123,7 +123,7 @@ function normalizeError(error) {
     if (typeof error.action === "string" && error.action.trim()) {
       result.action = error.action.trim();
     }
-    for (const key of ["failedPromptIds", "queryResults", "sources", "errors"]) {
+    for (const key of ["failedPromptIds", "failedIds", "queryResults", "sources", "errors"]) {
       if (Array.isArray(error[key])) result[key] = clone(error[key]);
     }
     return result;

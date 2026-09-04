@@ -217,6 +217,24 @@ export async function captureSearchSources({
   };
 }
 
+// Prints a bounded failed-id list and exits nonzero without touching the
+// snapshot file or any row captureAndPersistOffersIfDb already committed
+// (CR-29 round 6): a JD artifact-write failure aborts only the offers it
+// touched before the DB transaction ever opens, so the snapshot above and
+// every successfully persisted row stay intact for a rerun.
+export function reportSnapshotIngestFailure(ingest) {
+  const shown = (ingest.failedIds || []).slice(0, 10);
+  console.error(
+    `Failed to persist ${ingest.failed} offer(s): ${shown.join(", ")}${
+      ingest.failedIds.length > shown.length ? ", ..." : ""
+    }`
+  );
+  console.error(
+    "The snapshot file above and every successfully committed row are still intact; rerun with --ingest once the failure is fixed."
+  );
+  process.exitCode = 1;
+}
+
 export function ingestCapturedSnapshot({
   repoRoot = ROOT,
   env = process.env,
@@ -292,6 +310,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (options.ingest) {
     const ingest = ingestCapturedSnapshot({ repoRoot: ROOT, snapshot });
     console.log(`Ingested ${ingest.persistedRows} captured offers into SQLite sourced rows`);
+    if (!ingest.ok) reportSnapshotIngestFailure(ingest);
   }
   if (snapshot.errors.length > 0) {
     console.log("Errors:");

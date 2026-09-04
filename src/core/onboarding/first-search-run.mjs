@@ -895,6 +895,14 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
     zeroResults: Number(summary.new || 0) === 0,
     deterministicSources: clone(deterministicSources),
+    // runSourcedScan already reports a JD artifact-write failure in
+    // ok/failed/failedIds (CR-29 round 5), but this normalizer used to drop
+    // all three — runFirstSearchInBackground below settled the run as
+    // completed regardless, leaving the watermark blocked with no visible
+    // failed run to retry (CR-29 round 6).
+    ok: summary.ok !== false,
+    failed: Number(summary.failed || 0),
+    failedIds: clone(Array.isArray(summary.failedIds) ? summary.failedIds : []),
   };
 }
 
@@ -1319,6 +1327,32 @@ export async function runFirstSearchInBackground({
       errorCount: Array.isArray(summary.errors) ? summary.errors.length : 0,
     });
     const normalizedSummary = normalizeRunSummary(summary, deterministicSources);
+    // A JD artifact-write failure means a posting this scan found never
+    // actually landed durably (CR-29 round 6): settling the run as
+    // "completed" anyway would let the source watermark advance behind a
+    // lost posting, and there'd be no failed run for onboarding to offer a
+    // retry against. Both the shared-worker path (settle: false, settled by
+    // sourcing-worker-manager off this settlement) and the direct path
+    // below must treat it as a failure, carrying failedIds so a retry knows
+    // what it's for.
+    if (normalizedSummary.ok === false) {
+      const artifactFailureError = {
+        code: "SOURCED_ARTIFACT_WRITE_FAILED",
+        message: `Failed to persist ${normalizedSummary.failed} job description artifact(s).`,
+        failedIds: normalizedSummary.failedIds,
+      };
+      if (!settle) {
+        return {
+          settlement: { status: "failed", error: artifactFailureError },
+          value: summary,
+        };
+      }
+      return sourcingRunFail({
+        ...pathCtx,
+        id: runId,
+        error: artifactFailureError,
+      }).run;
+    }
     if (!settle) {
       return {
         settlement: { status: "completed", summary: normalizedSummary },

@@ -126,6 +126,30 @@ test("keeps deterministic results when AI top-up fails", async () => {
   });
 });
 
+test("marks the AI lane failed on a JD artifact-write failure, not just when every prompt failed (CR-29 round 6)", async () => {
+  const { runUnifiedJobSearch } = await loadSubject();
+
+  const result = await runUnifiedJobSearch({
+    searchExecutionId: "search-ai-artifact-failed",
+    runDeterministic: async () => ({ ok: true, offers: [{ id: "configured-result" }] }),
+    runAiWeb: async () => ({
+      ok: false,
+      failed: 1,
+      failedIds: ["sourced-acme-example-1"],
+      error: "Failed to persist 1 job description artifact(s).",
+    }),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, true);
+  assert.deepEqual(result.lanes.deterministic, {
+    status: "succeeded",
+    result: { ok: true, offers: [{ id: "configured-result" }] },
+  });
+  assert.equal(result.lanes.aiWeb.status, "failed");
+  assert.deepEqual(result.lanes.aiWeb.result.failedIds, ["sourced-acme-example-1"]);
+});
+
 test("does not start AI top-up after deterministic cancellation", async () => {
   const { runUnifiedJobSearch } = await loadSubject();
   const controller = new AbortController();

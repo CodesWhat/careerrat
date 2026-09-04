@@ -495,6 +495,45 @@ test("AI web-search route durably warns when only an auxiliary top-up query fail
   assert.equal(durable.summary.queryResults[0].queries[1].error, warning);
 });
 
+test("AI web-search route marks the run failed when a successful prompt still lost its posting to a JD artifact-write failure (CR-29 round 6)", async () => {
+  // A successful prompt followed by a JD staging failure used to settle as
+  // a completed run: the worker only checked whether EVERY selected prompt
+  // failed, ignoring runAiWebSearch's own ok/failed/failedIds. That
+  // suppressed retry despite the lost posting.
+  const repoRoot = tempRepo();
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 1,
+      new: 0,
+      presented: 0,
+      duplicates: 0,
+      errors: [],
+      failedPromptIds: [],
+      ok: false,
+      failed: 1,
+      failedIds: ["sourced-acme-example-1"],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find AI roles",
+          status: "completed",
+          queries: [{ query: "AI roles", status: "completed", error: null }],
+        },
+      ],
+      sources: [{ url: "https://jobs.example.test/role", status: "completed" }],
+    }),
+  })(request(), res);
+
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "failed");
+  assert.equal(durable.error.code, "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED");
+  assert.deepEqual(durable.error.failedIds, ["sourced-acme-example-1"]);
+  assert.deepEqual(durable.error.failedPromptIds, []);
+});
+
 test("AI web-search route preserves candidate-safe provider-cap guidance", async () => {
   const repoRoot = tempRepo();
   const message =

@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
@@ -192,16 +200,19 @@ test("sourced rows preserve qualification unknowns and unverified search status"
   assert.equal(row.scanner.unverified, true);
 });
 
-test("captureAndPersistOffersIfDb stages every JD artifact BEFORE opening the DB transaction, so the transaction itself does no filesystem I/O (CR-29 round 5)", () => {
+test("captureAndPersistOffersIfDb writes every JD artifact to its FINAL content-addressed path BEFORE opening the DB transaction, so the transaction itself does no filesystem I/O (CR-29 round 6)", () => {
   // JD writes used to happen INSIDE sourcedUpsertBatch's BEGIN IMMEDIATE
-  // transaction, so lock duration scaled with batch size and document size.
-  // The write is now staged (scratch path, plain writeFileSync) before this
-  // function ever calls sourcedUpsertBatch at all; only a rename happens
-  // after the transaction resolves. Proven directly here: `guard` runs
-  // INSIDE sourcedUpsertBatch's own transaction (right after BEGIN
-  // IMMEDIATE), so if every offer's staged file is already on disk by the
-  // time guard fires, the writes provably happened before the transaction
-  // opened, not during it.
+  // transaction (round 4), then were staged to a scratch path and renamed
+  // after the transaction resolved (round 5). Both a crash and a rename
+  // failure between commit and rename could permanently orphan an
+  // already-committed row (CR-29 round 6 finding). The write now lands
+  // directly at its FINAL, content-addressed path before this function ever
+  // calls sourcedUpsertBatch at all — no rename step, nothing left to
+  // recover after a crash. Proven directly here: `guard` runs INSIDE
+  // sourcedUpsertBatch's own transaction (right after BEGIN IMMEDIATE), so
+  // if every offer's final .md file is already on disk by the time guard
+  // fires, the writes provably happened before the transaction opened, not
+  // during it.
   const repoRoot = tempRepo();
   openDb({ repoRoot });
   const jobsDir = userPath({ repoRoot }, "workspace/jobs");
@@ -214,30 +225,166 @@ test("captureAndPersistOffersIfDb stages every JD artifact BEFORE opening the DB
     rawText: `Body content for the writer-contention regression: ${slug}.`,
   }));
 
-  let stagedFilesSeenByGuard = null;
+  let mdFilesSeenByGuard = null;
   const result = captureAndPersistOffersIfDb({
     repoRoot,
     offers,
     dedupeCanonical: true,
     guard: () => {
-      stagedFilesSeenByGuard = existsSync(jobsDir)
-        ? readdirSync(jobsDir).filter((name) => name.includes(".staging-")).length
+      mdFilesSeenByGuard = existsSync(jobsDir)
+        ? readdirSync(jobsDir).filter((name) => name.endsWith(".md")).length
         : 0;
     },
   });
 
   assert.equal(
-    stagedFilesSeenByGuard,
+    mdFilesSeenByGuard,
     offers.length,
-    "every offer's JD artifact must already be staged to disk before guard(db) — and therefore the write transaction — runs"
+    "every offer's JD artifact must already be written to its final path before guard(db) — and therefore the write transaction — runs"
   );
   assert.equal(result.persistedRows, offers.length);
   assert.equal(result.failed, 0);
+  assert.equal(result.ok, true);
 
-  // Every staged scratch file must be gone once the batch resolves: the
-  // winners were renamed to their final deterministic path, and none lost
-  // their slot here (dedupeCanonical, all distinct identities), so nothing
-  // should remain to discard either.
-  const remainingStagingFiles = readdirSync(jobsDir).filter((name) => name.includes(".staging-"));
-  assert.deepEqual(remainingStagingFiles, []);
+  // Every written file must still be there once the batch resolves: all
+  // five offers have distinct identities (dedupeCanonical, no collisions),
+  // so every one of them won its row and none should have been discarded.
+  const finalFiles = readdirSync(jobsDir).filter((name) => name.endsWith(".md"));
+  assert.equal(finalFiles.length, offers.length);
+  for (const row of openDb({ repoRoot }).prepare("SELECT data FROM sourced").all()) {
+    const parsed = JSON.parse(row.data);
+    assert.equal(existsSync(userPath({ repoRoot }, parsed.artifacts.jd)), true);
+  }
+});
+
+test("a JD artifact write failure excludes the offer BEFORE any DB transaction opens, leaving no row (CR-29 round 6)", () => {
+  // The write now happens before sourcedUpsertBatch is even called: a
+  // failure there must abort insertion for that offer entirely, never leave
+  // a row whose artifacts.jd references something that was never written.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  // Block EVERY artifact write, regardless of its content-addressed
+  // filename: making "workspace/jobs" itself a plain FILE means
+  // mkdirSync(dirname(absPath), { recursive: true }) throws ENOTDIR for any
+  // offer, since an ancestor path component exists but isn't a directory.
+  mkdirSync(dirname(jobsDir), { recursive: true });
+  writeFileSync(jobsDir, "");
+
+  const result = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [offer({ reqId: "write-fail-1" })],
+    dedupeCanonical: true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.persistedRows, 0);
+  assert.equal(result.failed, 1);
+  assert.deepEqual(result.failedIds, ["sourced-acme-write-fail-1"]);
+  assert.equal(result.offers.length, 0);
+
+  const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+  assert.equal(rows.length, 0, "a write failure before the transaction must leave no DB row");
+});
+
+test("a rejected transaction removes the JD artifact this batch just wrote, since no row ends up referencing it (CR-29 round 6)", () => {
+  // The artifact write happens before the transaction opens, so a guard
+  // rejection (or any other rollback) must not leave that write orphaned on
+  // disk with nothing pointing at it.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+
+  let caught;
+  try {
+    captureAndPersistOffersIfDb({
+      repoRoot,
+      offers: [offer({ reqId: "rollback-1" })],
+      dedupeCanonical: true,
+      guard: () => {
+        throw new Error("forced rollback for the regression");
+      },
+    });
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.ok(caught, "the guard rejection must propagate, not be swallowed");
+  assert.equal(caught.message, "forced rollback for the regression");
+
+  const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+  assert.equal(rows.length, 0, "the rejected transaction must leave no row");
+
+  const remainingFiles = existsSync(jobsDir)
+    ? readdirSync(jobsDir).filter((name) => name.endsWith(".md"))
+    : [];
+  assert.deepEqual(
+    remainingFiles,
+    [],
+    "the written-but-unreferenced artifact must be removed after the rollback"
+  );
+});
+
+test("a crash between the artifact write and the DB commit is idempotent on retry: one row ends up pointing at the artifact that already existed (CR-29 round 6)", () => {
+  // Writing straight to the FINAL content-addressed path (no stage/rename
+  // step) means a crash in that window leaves no pending state to recover:
+  // the retry just re-renders identical content to the identical path and
+  // commits normally.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  const crashOffer = offer({
+    reqId: "crash-retry-1",
+    rawText: "Body content for the crash-retry regression.",
+  });
+
+  const first = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [crashOffer],
+    dedupeCanonical: true,
+  });
+  assert.equal(first.persistedRows, 1);
+  const relPath = first.offers[0].artifacts.jd;
+  const absPath = userPath({ repoRoot }, relPath);
+  const originalContent = readFileSync(absPath, "utf8");
+
+  // Simulate a crash AFTER the artifact write landed (proven durable above)
+  // but BEFORE the DB transaction's commit ever reached this process again:
+  // delete the row directly, leaving the file exactly as a real crash
+  // would.
+  openDb({ repoRoot }).prepare("DELETE FROM sourced").run();
+  assert.equal(openDb({ repoRoot }).prepare("SELECT id FROM sourced").all().length, 0);
+  assert.equal(
+    existsSync(absPath),
+    true,
+    "the artifact must still exist after the simulated crash"
+  );
+
+  const retried = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [crashOffer],
+    dedupeCanonical: true,
+  });
+
+  assert.equal(retried.persistedRows, 1);
+  assert.equal(
+    retried.offers[0].artifacts.jd,
+    relPath,
+    "the retry must re-derive the identical content-addressed path"
+  );
+  assert.equal(readFileSync(absPath, "utf8"), originalContent);
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].artifacts.jd, relPath);
+
+  const jobFiles = readdirSync(jobsDir).filter((name) => name.endsWith(".md"));
+  assert.deepEqual(
+    jobFiles,
+    [relPath.replace("workspace/jobs/", "")],
+    "no duplicate artifact must be created on retry"
+  );
 });
