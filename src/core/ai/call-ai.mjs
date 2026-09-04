@@ -37,7 +37,10 @@ import {
   assertInstalledRuntimeExecutionEvidence,
   resolveAIExecutionPlan,
 } from "./operation-policy.mjs";
-import { loadInstalledRuntimeSelection } from "./runtime-selection.mjs";
+import {
+  loadInstalledRuntimeSelection,
+  trustedInstalledRuntimeCapabilityEvidence,
+} from "./runtime-selection.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
 
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -91,12 +94,11 @@ export function resolveAIRoute(
               "re-check it in Settings",
           };
         }
-        const verificationMatches =
-          selection.verification?.path === currentIdentity.path &&
-          selection.verification?.realPath === currentIdentity.realPath &&
-          selection.verification?.version === currentIdentity.version &&
-          selection.verification?.binaryFingerprint === currentIdentity.binaryFingerprint;
-        const persistedEvidence = verificationMatches ? selection.verification.capabilities : null;
+        const persistedEvidence = trustedInstalledRuntimeCapabilityEvidence(
+          runtime,
+          selection.verification,
+          currentIdentity
+        );
         const capabilityEvidence =
           runtime.capabilitiesVerified === true ? runtime.capabilities : persistedEvidence;
         const capabilityState = installedRuntimeCapabilities(runtime.id, {

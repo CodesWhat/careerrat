@@ -22,12 +22,17 @@ import {
   resolveAIRouteForExecutionPlan,
   sanitizeNativeOutputSchema,
 } from "../src/core/ai/call-ai.mjs";
+import { INSTALLED_RUNTIME_DEFINITIONS } from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), "careerrat-call-ai-"));
 }
+
+const CLAUDE_BOUNDARY_MINIMUM_VERSION = INSTALLED_RUNTIME_DEFINITIONS.find(
+  (definition) => definition.id === "claude"
+).minimumBoundaryVersion;
 
 const VERIFIED_CAPABILITIES = Object.freeze({
   completion: true,
@@ -349,6 +354,99 @@ test("resolveAIRoute: carries the selected runtime's verified capability evidenc
       taskTools: true,
       research: true,
     });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Codex review: the router accepted a cached verification whose identity
+// (path/realPath/version/fingerprint) still matched, but never checked
+// whether its boundary-gated capabilities (exactRead, publicWeb) were
+// tested against the *current* policy minimum. After a policy-floor bump,
+// a cache written under the old, lower floor must not keep rehydrating
+// exactRead/publicWeb — Doctor already downgrades this same cache to an
+// unknown boundary probe (installedRuntimeBoundaryPassed); the router now
+// shares that same predicate (installedRuntimeBoundaryEvidenceCurrent) so
+// the two can't disagree about which capabilities are safe to grant.
+test("resolveAIRoute: strips exactRead/publicWeb from persisted evidence tested against a stale policy minimum", () => {
+  const root = tempRoot();
+  try {
+    const path = "/safe/claude";
+    writeInstalledRuntimeSelection({
+      repoRoot: root,
+      env: {},
+      runtimeId: "claude",
+      verification: runtimeVerification(path, VERIFIED_CAPABILITIES, {
+        versionBoundaryState: "at_or_above",
+        // Tested against an older, lower minimum than the policy currently
+        // in force — nothing about the binary's identity has changed.
+        testedMinimumVersion: "0.0.1",
+      }),
+    });
+
+    const route = resolveAIRoute(
+      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      {
+        repoRoot: root,
+        runtimeInventory: [
+          verifiedInstalled("claude", "Claude Code", path, {
+            capabilitiesVerified: false,
+            capabilities: undefined,
+          }),
+        ],
+      }
+    );
+
+    assert.equal(route.type, "installed");
+    assert.equal(route.runtime.capabilities.completion, true);
+    assert.equal(route.runtime.capabilities.appWorkflows, true);
+    assert.equal(
+      route.runtime.capabilities.exactRead,
+      false,
+      "exactRead must not rehydrate from a cache tested against a stale policy minimum"
+    );
+    assert.equal(
+      route.runtime.capabilities.publicWeb,
+      false,
+      "publicWeb must not rehydrate from a cache tested against a stale policy minimum"
+    );
+    assert.equal(route.runtime.capabilities.taskTools, false);
+    assert.equal(route.runtime.capabilities.research, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveAIRoute: rehydrates exactRead/publicWeb when the cache was tested against the current policy minimum", () => {
+  const root = tempRoot();
+  try {
+    const path = "/safe/claude";
+    writeInstalledRuntimeSelection({
+      repoRoot: root,
+      env: {},
+      runtimeId: "claude",
+      verification: runtimeVerification(path, VERIFIED_CAPABILITIES, {
+        versionBoundaryState: "at_or_above",
+        testedMinimumVersion: CLAUDE_BOUNDARY_MINIMUM_VERSION,
+      }),
+    });
+
+    const route = resolveAIRoute(
+      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      {
+        repoRoot: root,
+        runtimeInventory: [
+          verifiedInstalled("claude", "Claude Code", path, {
+            capabilitiesVerified: false,
+            capabilities: undefined,
+          }),
+        ],
+      }
+    );
+
+    assert.equal(route.type, "installed");
+    assert.equal(route.runtime.capabilities.exactRead, true);
+    assert.equal(route.runtime.capabilities.publicWeb, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

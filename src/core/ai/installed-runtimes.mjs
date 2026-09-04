@@ -306,6 +306,14 @@ function installedRuntimeDefinition(runtimeId) {
   return INSTALLED_RUNTIME_DEFINITIONS_BY_ID.get(String(runtimeId || "").trim());
 }
 
+// The version-boundary policy floor a runtime is currently held to, so a
+// cached probe can be checked against the floor in force right now rather
+// than whatever floor happened to be current when the probe last ran. A
+// runtime with no boundary policy (e.g. codex) has no minimum at all.
+export function installedRuntimeBoundaryPolicyMinimum(runtimeId) {
+  return installedRuntimeDefinition(runtimeId)?.minimumBoundaryVersion || null;
+}
+
 function splitPaths(value, separator) {
   return String(value || "")
     .split(separator)

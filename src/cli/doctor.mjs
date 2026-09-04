@@ -22,9 +22,13 @@ import {
 } from "../core/agent-guidance.mjs";
 import {
   detectInstalledRuntimes,
-  INSTALLED_RUNTIME_DEFINITIONS,
+  installedRuntimeExecutionIdentity,
 } from "../core/ai/installed-runtimes.mjs";
-import { loadInstalledRuntimeSelection } from "../core/ai/runtime-selection.mjs";
+import {
+  installedRuntimeBoundaryEvidenceCurrent,
+  installedRuntimeVerificationCurrent,
+  loadInstalledRuntimeSelection,
+} from "../core/ai/runtime-selection.mjs";
 import { automationStatus, loadAutomation } from "../core/automation/consent.mjs";
 import { detectSession } from "../core/automation/session.mjs";
 import { sourceConfigGet } from "../core/db/verbs.mjs";
@@ -186,16 +190,18 @@ const modes = loadModes({ root });
 const automationData = loadAutomation({ root }).data;
 const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 
-// Installed AI CLI runtimes (claude, codex, gemini, ...). Detection only —
-// no live probe, matching doctor's fast-by-default posture: this never
-// spawns any of the detected binaries, it only checks what's on disk, via
-// the same registry/detector the desktop app's runtime picker uses
+// Installed AI CLI runtimes (claude, codex, gemini, ...). Detection itself
+// never spawns any of the detected binaries, it only checks what's on disk,
+// via the same registry/detector the desktop app's runtime picker uses
 // (installed-runtimes.mjs's detectInstalledRuntimes). Version and whether
 // the version-boundary probe passed are only ever known for the currently
 // selected runtime, and only when its cached verification still matches the
-// binary found on disk right now (installed-runtimes.mjs only ever writes
-// that cache after a real probe has passed) — never from a fresh probe run
-// here.
+// binary found on disk right now AND the runtime's current live version
+// (installed-runtimes.mjs only ever writes that cache after a real probe
+// has passed) — a launcher can delegate to an updated payload without
+// moving its path, realPath, or fingerprint, so the one live read this file
+// performs is a single `--version` invocation of the selected runtime,
+// gated behind having a cache to validate in the first place (below).
 //
 // Skipped entirely in --guidance-only mode: detection reads and SHA-256
 // hashes every discovered executable, which is cheap once but not on a
@@ -204,14 +210,29 @@ const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 // Even outside --guidance-only, a cached verification can only ever be
 // validated for the currently selected runtime (installedRuntimeCachedVerification
 // below rejects any other id outright), so only that one runtime's binary
-// is worth hashing — and only when there's a cached verification to
-// validate in the first place. detectInstalledRuntimes's fingerprintId
-// option makes every other detected executable skip the read entirely.
+// is worth hashing or version-checking — and only when there's a cached
+// verification to validate in the first place. detectInstalledRuntimes's
+// fingerprintId option makes every other detected executable skip the read
+// entirely, and the version check below is scoped to that same one runtime.
 const runtimeSelection = guidanceOnly ? null : loadInstalledRuntimeSelection(pathCtx);
 const runtimeFingerprintId = runtimeSelection?.verification ? runtimeSelection.runtimeId : null;
 const installedRuntimes = guidanceOnly
   ? []
   : detectInstalledRuntimes({ env: process.env, fingerprintId: runtimeFingerprintId });
+
+// Live version of the selected runtime, established fresh (not read from
+// the cache) so a cached verification can be compared against what's
+// actually installed right now — see installedRuntimeCachedVerification.
+// Only ever computed for the one selected runtime, and only when there's a
+// cached verification to validate; every other detected runtime is left
+// alone.
+const selectedRuntimeForVerification =
+  runtimeFingerprintId && !guidanceOnly
+    ? installedRuntimes.find((runtime) => runtime.id === runtimeFingerprintId)
+    : null;
+const selectedRuntimeCurrentIdentity = selectedRuntimeForVerification
+  ? installedRuntimeExecutionIdentity(selectedRuntimeForVerification, { env: process.env })
+  : null;
 
 // Bundled plugins (plugins/<name>/). Informational: a plugin needing a
 // consent capability is unaffected by this block, that's the automation
@@ -303,7 +324,11 @@ const result = {
     detail: sessionBrowser.presence.detail,
   },
   installedRuntimes: installedRuntimes.map((runtime) => {
-    const verification = installedRuntimeCachedVerification(runtime, runtimeSelection);
+    const verification = installedRuntimeCachedVerification(
+      runtime,
+      runtimeSelection,
+      selectedRuntimeCurrentIdentity
+    );
     return {
       id: runtime.id,
       name: runtime.name,
@@ -459,7 +484,7 @@ console.log("Installed AI runtimes:");
 if (guidanceOnly) {
   console.log("- skipped (--guidance-only).");
 } else {
-  printInstalledRuntimes(installedRuntimes, runtimeSelection);
+  printInstalledRuntimes(installedRuntimes, runtimeSelection, selectedRuntimeCurrentIdentity);
 }
 console.log("");
 
@@ -728,49 +753,29 @@ function installedRuntimeStatusLabel(runtime) {
 }
 
 // Cached verification is only ever trustworthy for the runtime it was
-// written for, and only while it still matches the exact binary
-// detectInstalledRuntimes just found on disk — a different path (including
-// a different launcher resolving to the same underlying binary, the case
-// the AI execution router itself refuses) or a changed binaryFingerprint
-// means the cached probe no longer describes what's actually installed, so
-// it's treated as unknown rather than stale.
-function installedRuntimeCachedVerification(runtime, selection) {
+// written for, and only while it still matches the exact binary CareerRat
+// would use right now — same launcher path, same resolved binary (realPath
+// + fingerprint), and the same live version. A launcher can delegate to an
+// updated payload without moving its path, realPath, or fingerprint, so
+// `currentIdentity` (the selected runtime's live-read execution identity,
+// established once above) carries the version check the AI execution
+// router applies too — this is the same installedRuntimeVerificationCurrent
+// predicate both places use, so Doctor and the router can't disagree about
+// what still counts as current. A mismatch on any of it, or no cache at
+// all, is reported as unknown rather than stale.
+function installedRuntimeCachedVerification(runtime, selection, currentIdentity) {
   const verification = selection?.verification;
-  if (
-    !verification ||
-    selection.runtimeId !== runtime.id ||
-    !runtime.path ||
-    !runtime.realPath ||
-    !runtime.binaryFingerprint ||
-    verification.path !== runtime.path ||
-    verification.realPath !== runtime.realPath ||
-    verification.binaryFingerprint !== runtime.binaryFingerprint.toLowerCase()
-  ) {
-    return null;
-  }
+  if (!verification || selection.runtimeId !== runtime.id) return null;
+  if (!installedRuntimeVerificationCurrent(runtime, verification, currentIdentity)) return null;
   return verification;
-}
-
-// The policy floor a cached "at_or_above" was actually tested against. A
-// runtime with no boundary policy (e.g. codex) always passes; one with a
-// policy only passes when the cached testedMinimumVersion still equals the
-// current policy's minimum, so a CareerRat update raising the floor makes an
-// old cached pass report as unknown instead of continuing to read as
-// current.
-function installedRuntimeBoundaryPolicyMinimum(runtimeId) {
-  return (
-    INSTALLED_RUNTIME_DEFINITIONS.find((d) => d.id === runtimeId)?.minimumBoundaryVersion || null
-  );
 }
 
 function installedRuntimeBoundaryPassed(runtime, verification) {
   if (verification?.versionBoundaryState !== "at_or_above") return false;
-  const policyMinimum = installedRuntimeBoundaryPolicyMinimum(runtime.id);
-  if (!policyMinimum) return true;
-  return verification.testedMinimumVersion === policyMinimum;
+  return installedRuntimeBoundaryEvidenceCurrent(runtime.id, verification);
 }
 
-function printInstalledRuntimes(runtimes, selection) {
+function printInstalledRuntimes(runtimes, selection, currentIdentity) {
   for (const runtime of runtimes) {
     if (!runtime.available) {
       console.log(`- ${runtime.id} (${runtime.name}): not installed.`);
@@ -782,7 +787,7 @@ function printInstalledRuntimes(runtimes, selection) {
       );
       continue;
     }
-    const verification = installedRuntimeCachedVerification(runtime, selection);
+    const verification = installedRuntimeCachedVerification(runtime, selection, currentIdentity);
     const versionText = verification ? `v${verification.version}` : "version unknown";
     const boundaryText = !verification
       ? "boundary probe not yet run"

@@ -1,12 +1,19 @@
 // Tests for doctor.mjs's "Installed AI runtimes" block (src/cli/doctor.mjs),
 // which reuses installed-runtimes.mjs's own registry/detector
 // (detectInstalledRuntimes) rather than re-implementing detection. Detection
-// never spawns a binary — it only checks what's on disk — so these tests
-// fake the registry's search space with a throwaway temp directory (via the
-// PATH and CAREERRAT_RUNTIME_SEARCH_DIRS overrides installed-runtimes.mjs
+// itself never spawns a binary — it only checks what's on disk — so these
+// tests fake the registry's search space with a throwaway temp directory (via
+// the PATH and CAREERRAT_RUNTIME_SEARCH_DIRS overrides installed-runtimes.mjs
 // already supports for exactly this purpose) instead of depending on
-// whatever CLIs happen to be installed on the machine running the suite. No
-// real binary is ever spawned by doctor here.
+// whatever CLIs happen to be installed on the machine running the suite.
+//
+// One narrow exception: validating a cached verification for the selected
+// runtime does spawn that one binary with `--version`, so its live version
+// can be compared against the cached one (Codex review — Doctor used to
+// accept a cache whose version had drifted). Tests that exercise that path
+// use writeVersionedFakeBinary so the fake executable actually answers
+// `--version` with the version the cache expects; every other test's fake
+// binary answers "fake", which never parses as a version.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -43,6 +50,17 @@ function tempFakeRegistry() {
 function writeFakeBinary(registryDir, name, contents = "#!/bin/sh\necho fake\n") {
   const path = join(registryDir, name);
   writeFileSync(path, contents, "utf8");
+  chmodSync(path, 0o755);
+  return path;
+}
+
+// A fake binary whose `--version` output (any args, this ignores them)
+// actually parses to `version` — for tests that need the cache matcher's
+// live version read to land on a specific, known value instead of the
+// unparseable "fake" the default fake binary answers with.
+function writeVersionedFakeBinary(registryDir, name, version) {
+  const path = join(registryDir, name);
+  writeFileSync(path, `#!/bin/sh\necho ${version}\n`, "utf8");
   chmodSync(path, 0o755);
   return path;
 }
@@ -143,7 +161,7 @@ test("doctor --json surfaces cached version and a passed boundary probe only whe
   const home = tempHome();
   const registry = tempFakeRegistry();
   try {
-    const claudePath = writeFakeBinary(registry, "claude");
+    const claudePath = writeVersionedFakeBinary(registry, "claude", "9.9.9");
     const realPath = realpathSync(claudePath);
     const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
     const checkedAt = new Date().toISOString();
@@ -181,6 +199,63 @@ test("doctor --json surfaces cached version and a passed boundary probe only whe
       text,
       /- claude \(Claude Code\): supported engine, installed v9\.9\.9, boundary probe passed \(checked/
     );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+  }
+});
+
+// Codex review: the cache matcher checked id, path, realPath, and
+// fingerprint but never the runtime's current live version, so an
+// unchanged launcher that delegates to an updated payload — same path,
+// same realPath, same binaryFingerprint, different actual version — could
+// keep reporting a stale cached version and a passed boundary probe
+// forever. The router (call-ai.mjs's resolveAIRoute) already rejects this
+// case by comparing the cached version against a fresh read; Doctor's
+// cache matcher now does the same fresh read via the shared
+// installedRuntimeVerificationCurrent predicate.
+test("doctor reports an unknown cache, never a stale version, when the cached version disagrees with the selected runtime's live version", () => {
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  try {
+    const claudePath = writeVersionedFakeBinary(registry, "claude", "9.9.9");
+    const realPath = realpathSync(claudePath);
+    const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
+    const checkedAt = new Date().toISOString();
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        path: claudePath,
+        realPath,
+        // Same path, same realPath, same binaryFingerprint as the binary
+        // installed right now — only the cached version disagrees with
+        // what the launcher actually reports when run live.
+        version: "1.0.0",
+        binaryFingerprint,
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        testedMinimumVersion: CLAUDE_BOUNDARY_MINIMUM_VERSION,
+        checkedAt,
+      },
+    });
+
+    const data = runDoctorJson(home, fakeRegistryEnv(registry));
+    const claude = data.installedRuntimes.find((r) => r.id === "claude");
+    assert.ok(claude);
+    assert.equal(claude.status, "supported engine");
+    assert.equal(claude.version, null, "a changed live version must invalidate the cache");
+    assert.equal(claude.boundaryProbePassed, false);
+    assert.equal(claude.boundaryProbeCheckedAt, null);
+
+    const text = spawnSync(process.execPath, [join(ROOT, "src/cli/doctor.mjs")], {
+      cwd: ROOT,
+      env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
+      encoding: "utf8",
+    }).stdout;
+    assert.match(text, /- claude \(Claude Code\): supported engine, installed version unknown/);
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(registry, { recursive: true, force: true });
@@ -254,7 +329,7 @@ test("doctor reports an unknown boundary probe, never passed, when the cached te
   const home = tempHome();
   const registry = tempFakeRegistry();
   try {
-    const claudePath = writeFakeBinary(registry, "claude");
+    const claudePath = writeVersionedFakeBinary(registry, "claude", "9.9.9");
     const realPath = realpathSync(claudePath);
     const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
     const checkedAt = new Date().toISOString();
@@ -353,7 +428,7 @@ test("doctor --json reports an indeterminate cached boundary probe as unknown, n
   const home = tempHome();
   const registry = tempFakeRegistry();
   try {
-    const claudePath = writeFakeBinary(registry, "claude");
+    const claudePath = writeVersionedFakeBinary(registry, "claude", "9.9.9");
     const realPath = realpathSync(claudePath);
     const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
     const checkedAt = new Date().toISOString();
@@ -455,7 +530,7 @@ test("doctor does not read the binary content of an unselected runtime", (t) => 
   const home = tempHome();
   const registry = tempFakeRegistry();
   try {
-    const claudePath = writeFakeBinary(registry, "claude");
+    const claudePath = writeVersionedFakeBinary(registry, "claude", "9.9.9");
     const realPath = realpathSync(claudePath);
     const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
     writeInstalledRuntimeSelection({
