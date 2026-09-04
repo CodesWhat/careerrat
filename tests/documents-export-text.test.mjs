@@ -263,3 +263,38 @@ test("renderResumeText treats three preceding backslashes as escaping the pipe a
   );
   assert.match(text, /^C\\\\\|C\+\+ {3}Advanced$/m);
 });
+
+// ---------------------------------------------------------------------------
+// Soft-wrapped paragraphs: consecutive non-blank lines join into one
+// paragraph instead of fragmenting into one paragraph per source line.
+// ---------------------------------------------------------------------------
+
+test("renderResumeText joins consecutive soft-wrapped source lines into a single paragraph", () => {
+  const text = renderResumeText(
+    "Led payment infrastructure across three regions,\nshipping a rewrite that cut latency by 40%\nwhile keeping the team headcount flat.\n"
+  );
+  assert.equal(
+    text,
+    "Led payment infrastructure across three regions, shipping a rewrite that cut latency by 40% while keeping the team headcount flat."
+  );
+});
+
+test("renderResumeText still separates a blank-line-delimited paragraph from the one before it", () => {
+  const text = renderResumeText("First paragraph line one,\nline two.\n\nSecond paragraph.\n");
+  assert.equal(text, "First paragraph line one, line two.\n\nSecond paragraph.");
+});
+
+test("renderResumeText preserves an explicit trailing-two-space hard break inside a paragraph", () => {
+  const text = renderResumeText("123 Main Street  \nAnytown, ST 00000\n");
+  assert.equal(text, "123 Main Street\nAnytown, ST 00000");
+});
+
+test("renderResumeText preserves an explicit trailing-backslash hard break inside a paragraph", () => {
+  const text = renderResumeText("123 Main Street\\\nAnytown, ST 00000\n");
+  assert.equal(text, "123 Main Street\nAnytown, ST 00000");
+});
+
+test("renderResumeText keeps a heading immediately followed by prose from merging into the heading", () => {
+  const text = renderResumeText("## Summary\nStaff engineer with 10 years of experience.\n");
+  assert.equal(text, "SUMMARY\n\nStaff engineer with 10 years of experience.");
+});

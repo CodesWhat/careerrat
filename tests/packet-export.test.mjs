@@ -685,6 +685,82 @@ test("a text-only regeneration clears a prior resumePdf so apply cannot still se
   );
 });
 
+test("a text-only export that clears the last PDF/DOCX resume is never left upload-ready", async () => {
+  // Regression: a text-only export deletes the prior PDF/DOCX pointers
+  // (see the previous test), but the manifest's uploadReady flag used to
+  // stay true whenever the export itself produced no exportGaps — even
+  // though the upload driver only accepts a .pdf or .docx resume and
+  // intentionally rejects a .txt one. That let the apply gate accept a
+  // packet the upload driver could never actually submit.
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  const priorPdfPath = writeWorkspaceFile(repoRoot, "tailored/prior-resume.pdf", "%PDF-fake");
+  seedApp(repoRoot, { ...sources, resumePdf: priorPdfPath });
+
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource, packetManifest: sources.packetManifest },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter([]),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const manifest = readApp(repoRoot).packetManifest;
+  assert.equal(
+    manifest.uploadReady,
+    false,
+    "no PDF/DOCX resume survives the text-only export, so the packet cannot be upload-ready"
+  );
+  assert.equal(manifest.status, "reviewable");
+  assert.ok(
+    manifest.gaps.some((gap) => gap.code === "RESUME_UPLOAD_ARTIFACT_MISSING"),
+    "a blocking gap must record why the packet is not upload-ready"
+  );
+});
+
+test("a later PDF export clears the RESUME_UPLOAD_ARTIFACT_MISSING gap and restores upload readiness", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  const priorPdfPath = writeWorkspaceFile(repoRoot, "tailored/prior-resume.pdf", "%PDF-fake");
+  seedApp(repoRoot, { ...sources, resumePdf: priorPdfPath });
+
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource, packetManifest: sources.packetManifest },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter([]),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+  assert.equal(readApp(repoRoot).packetManifest.uploadReady, false);
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource, packetManifest: sources.packetManifest },
+    request: { formats: ["pdf"] },
+    exportArtifact: fakeExporter([]),
+    now: () => new Date("2026-07-06T16:00:00Z"),
+  });
+
+  const manifest = readApp(repoRoot).packetManifest;
+  assert.equal(manifest.uploadReady, true, "a valid resume PDF must clear the blocking gap");
+  assert.equal(manifest.status, "upload-ready");
+  assert.deepEqual(
+    manifest.gaps.filter((gap) => gap.code === "RESUME_UPLOAD_ARTIFACT_MISSING"),
+    []
+  );
+  assert.match(readApp(repoRoot).artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+});
+
 test("a docx-only regeneration clears a prior resumePdf the same way", async () => {
   const repoRoot = tempRepo();
   const sources = seedPacketSources(repoRoot);
@@ -848,6 +924,73 @@ test("resumeSource=application.txt and coverLetterSource=application.md do not b
   );
   assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
   assert.match(artifacts.coverLetterText, /^workspace\/tailored\/.+\.txt$/);
+});
+
+test("a partial export reserves every source registered on the application, not just the ones it was passed", async () => {
+  // Regression: reservedIdentities used to build its collision set only
+  // from the packetSources this call was given. A partial export (e.g.
+  // regenerating just the resume, via packetSources: { resumeSource })
+  // omits the application's other registered sources from that set, so a
+  // collision with an omitted source went undetected and the atomic
+  // rename silently replaced it while its artifact pointer kept pointing
+  // at the now-overwritten file.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/resume-src.md",
+    "# Resume\n\nOriginal resume source body.\n"
+  );
+  const coverLetterCanaryContent = "cover letter source body — must survive untouched\n";
+  const coverLetterSource = writeWorkspaceFile(
+    repoRoot,
+    // Deliberately shares resumeSource's stripped base ("resume-src") once
+    // resumeSource's own extension is removed, so the naive text outBase
+    // for resumeSource collides with this file's own path.
+    "tailored/resume-src.txt",
+    coverLetterCanaryContent
+  );
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/partial-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  seedApp(repoRoot, { resumeSource, coverLetterSource, packetManifest });
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    // Partial: only resumeSource is passed. coverLetterSource is still
+    // registered on the application row (seeded above) but omitted here —
+    // exactly the fallback-route shape a caller like the raw POST
+    // /api/packet/export body can produce.
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(
+    readFileSync(join(repoRoot, coverLetterSource), "utf8"),
+    coverLetterCanaryContent,
+    "the omitted cover-letter source's bytes must survive, byte-for-byte"
+  );
+
+  assert.equal(calls.length, 1);
+  assert.notEqual(
+    `${calls[0].outBase}.txt`,
+    join(repoRoot, coverLetterSource),
+    "the resume export destination must not be the omitted source's path"
+  );
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.notEqual(
+    artifacts.resumeText,
+    coverLetterSource,
+    "the resume text artifact must not point at the omitted cover-letter source"
+  );
 });
 
 test("exportPacketArtifacts registers a text artifact through a symlinked workspace root", async () => {

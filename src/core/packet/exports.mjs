@@ -355,8 +355,16 @@ export async function exportPacketArtifacts({
   // resolve to the same destination (e.g. resumeSource=application.txt and
   // coverLetterSource=application.md both stripping to "application")
   // never both land on application-export.txt.
+  //
+  // `sources` only covers the packetSources passed into this call — a
+  // partial export (e.g. a caller regenerating just the resume) omits the
+  // other kinds. But every source registered on the application row is
+  // still live on disk and still readable by other code paths, so an
+  // omitted source must be reserved too, or a partial export's outBase can
+  // collide with it and silently rename over it while its artifact
+  // pointer keeps pointing at the now-overwritten file.
   const reservedIdentities = new Set(
-    sourceEntries(sources)
+    [...sourceEntries(sources), ...sourceEntries(packetSourcesFromApp(app))]
       .map(([, storedPath]) => resolveWorkspacePath(workspaceDir, storedPath))
       .filter(Boolean)
       .map(canonicalIdentity)
@@ -458,13 +466,57 @@ export async function exportPacketArtifacts({
 
   if (sources.packetManifest) artifacts.packetManifest = sources.packetManifest;
 
+  // RESUME_UPLOAD_ARTIFACT_MISSING behaves like ARTIFACT_EXPORT_FAILED for
+  // readiness recovery: both describe a transient export-time shortfall,
+  // not an unresolved content decision, so a later successful export that
+  // restores the missing artifact must be able to clear it automatically
+  // rather than requiring a human to dismiss a stuck content gap.
+  const RECOVERABLE_GAP_CODES = new Set([
+    "ARTIFACT_EXPORT_FAILED",
+    "RESUME_UPLOAD_ARTIFACT_MISSING",
+  ]);
   const priorGaps = Array.isArray(priorManifestForDb.gaps) ? priorManifestForDb.gaps : [];
-  const priorExportFailed = priorGaps.some((gap) => gap?.code === "ARTIFACT_EXPORT_FAILED");
-  const contentGaps = priorGaps.filter((gap) => gap?.code !== "ARTIFACT_EXPORT_FAILED");
+  const priorRecoverable = priorGaps.some((gap) => RECOVERABLE_GAP_CODES.has(gap?.code));
+  const contentGaps = priorGaps.filter((gap) => !RECOVERABLE_GAP_CODES.has(gap?.code));
   const generationReady =
-    priorManifestForDb.uploadReady === true || (priorExportFailed && contentGaps.length === 0);
-  const gaps = [...contentGaps, ...exportGaps];
-  const uploadReady = generationReady && exportGaps.length === 0;
+    priorManifestForDb.uploadReady === true || (priorRecoverable && contentGaps.length === 0);
+  const mergedArtifacts = mergeArtifacts(priorManifestForDb.artifacts, artifacts);
+
+  // A text-only (or docx-only) export deletes the prior PDF/DOCX pointers
+  // by design (the "Authoritative-format-request semantics" note above),
+  // but the upload driver only accepts a .pdf or .docx resume — never the
+  // raw text/markdown source. So readiness must come from the post-export
+  // artifact set, not merely from exportGaps being empty: an export that
+  // "succeeded" at producing exactly what was asked for can still leave no
+  // artifact the apply flow is able to submit. Only evaluate this (and
+  // only surface the gap) in the case that would otherwise be declared
+  // upload-ready, so an unrelated export failure keeps reporting its own
+  // ARTIFACT_EXPORT_FAILED gaps unchanged.
+  const wouldBeUploadReady = generationReady && exportGaps.length === 0;
+  const validUploadableArtifact = (storedPath) => {
+    if (!storedPath) return false;
+    const abs = resolveWorkspacePath(workspaceDir, storedPath);
+    return Boolean(abs && validDocumentArtifact(abs));
+  };
+  const hasUploadableResume =
+    validUploadableArtifact(mergedArtifacts.resumePdf) ||
+    validUploadableArtifact(mergedArtifacts.resumeDocx);
+  const missingResumeArtifactGap =
+    wouldBeUploadReady && !hasUploadableResume
+      ? {
+          kind: "resume",
+          code: "RESUME_UPLOAD_ARTIFACT_MISSING",
+          message:
+            "No PDF or DOCX resume is available to upload; a text-only export cannot be submitted as-is.",
+        }
+      : null;
+
+  const gaps = [
+    ...contentGaps,
+    ...exportGaps,
+    ...(missingResumeArtifactGap ? [missingResumeArtifactGap] : []),
+  ];
+  const uploadReady = wouldBeUploadReady && hasUploadableResume;
 
   const nextManifest = {
     ...priorManifestForDb,
@@ -475,7 +527,7 @@ export async function exportPacketArtifacts({
     status: uploadReady ? "upload-ready" : "reviewable",
     gapCount: gaps.length,
     gaps,
-    artifacts: mergeArtifacts(priorManifestForDb.artifacts, artifacts),
+    artifacts: mergedArtifacts,
   };
   const manifestPath = resolveWorkspacePath(workspaceDir, sources.packetManifest);
   if (manifestPath)

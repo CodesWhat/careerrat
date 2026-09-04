@@ -1464,6 +1464,13 @@ function parseMdBlocks(markdown) {
   // derive each list item's depth. Reset whenever a non-list block breaks
   // the run of list items (blank lines alone do not break it).
   const listIndentStack = [];
+  // Whether the most recently pushed block is a "para" that a following
+  // plain line may still extend. CommonMark treats every run of
+  // consecutive non-blank plain lines as a single paragraph — a blank
+  // line, or any other block construct, ends it. Cleared everywhere a
+  // block boundary is crossed so a later plain line always starts a fresh
+  // paragraph instead of merging across one.
+  let paragraphOpen = false;
 
   const listItemDepth = (indent) => {
     while (listIndentStack.length > 0 && indent < listIndentStack[listIndentStack.length - 1]) {
@@ -1493,16 +1500,21 @@ function parseMdBlocks(markdown) {
       i = j; // skip the closing fence
       blocks.push({ type: "codeblock", lines: codeLines });
       listIndentStack.length = 0;
+      paragraphOpen = false;
       continue;
     }
 
-    if (line.trim() === "") continue;
+    if (line.trim() === "") {
+      paragraphOpen = false;
+      continue;
+    }
 
     // ATX heading
     const hm = line.match(/^(#{1,6})\s+(.*)/);
     if (hm) {
       blocks.push({ type: "heading", level: hm[1].length, runs: parseRuns(hm[2].trim()) });
       listIndentStack.length = 0;
+      paragraphOpen = false;
       continue;
     }
 
@@ -1510,6 +1522,7 @@ function parseMdBlocks(markdown) {
     if (/^(\s*[-*_]){3,}\s*$/.test(line)) {
       blocks.push({ type: "hr" });
       listIndentStack.length = 0;
+      paragraphOpen = false;
       continue;
     }
 
@@ -1518,6 +1531,7 @@ function parseMdBlocks(markdown) {
     if (ulm) {
       const depth = listItemDepth(ulm[1].length);
       blocks.push({ type: "li", ordered: false, depth, runs: parseRuns(ulm[2]) });
+      paragraphOpen = false;
       continue;
     }
 
@@ -1532,6 +1546,7 @@ function parseMdBlocks(markdown) {
         start: Number(olm[2]),
         runs: parseRuns(olm[3]),
       });
+      paragraphOpen = false;
       continue;
     }
 
@@ -1554,6 +1569,7 @@ function parseMdBlocks(markdown) {
           rows: bodyRows,
         });
         listIndentStack.length = 0;
+        paragraphOpen = false;
         continue;
       }
     }
@@ -1570,11 +1586,33 @@ function parseMdBlocks(markdown) {
       }
       i = j - 1;
       blocks.push({ type: "blockquote", runs: bqRuns });
+      paragraphOpen = false;
       continue;
     }
 
-    // Regular paragraph line
-    blocks.push({ type: "para", runs: parseRuns(line) });
+    // Regular paragraph line — CommonMark folds every run of consecutive
+    // non-blank plain lines into one paragraph. When one is already open
+    // (paragraphOpen, cleared at every block boundary above), extend it
+    // instead of starting a new "para" block: an explicit hard break
+    // (a line ending in two-or-more spaces, or a backslash) survives as a
+    // literal in-paragraph line break, and every other join is a soft
+    // break folded to a single space, matching markdownToHtml's own
+    // soft/hard-break handling for the same markdown.
+    const hardBreakMatch = line.match(/(?: {2,}|\\)$/);
+    const lineText = hardBreakMatch ? line.slice(0, hardBreakMatch.index) : line;
+    const openParagraph = paragraphOpen ? blocks[blocks.length - 1] : null;
+    if (openParagraph) {
+      openParagraph.runs.push({ text: openParagraph.hardBreakPending ? "\n" : " " });
+      openParagraph.runs.push(...parseRuns(lineText));
+      openParagraph.hardBreakPending = Boolean(hardBreakMatch);
+    } else {
+      blocks.push({
+        type: "para",
+        runs: parseRuns(lineText),
+        hardBreakPending: Boolean(hardBreakMatch),
+      });
+    }
+    paragraphOpen = true;
     listIndentStack.length = 0;
   }
 

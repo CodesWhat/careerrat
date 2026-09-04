@@ -108,6 +108,30 @@ test("exportArtifact writes the text artifact inside the packet directory", asyn
   assert.match(readFileSync(result.text, "utf8"), /Thank you\./);
 });
 
+test("exportArtifact's written .txt file joins soft-wrapped source lines into one paragraph", async () => {
+  // Regression: the plain-text renderer used to treat every consecutive
+  // non-blank source line as its own paragraph, so an ordinary
+  // soft-wrapped CommonMark paragraph fragmented into one line per
+  // paragraph in the exported .txt file, with a spurious blank line
+  // between each fragment. Assert the actual file on disk, not just the
+  // in-memory renderer, since a fix could regress in the write path
+  // without this catching it.
+  const packetDir = tempDir("careerrat-export-softwrap-");
+  const outBase = join(packetDir, "resume");
+
+  const result = await exportArtifact({
+    markdown:
+      "Led payment infrastructure across three regions,\nshipping a rewrite that cut latency by 40%\nwhile keeping the team headcount flat.\n",
+    outBase,
+    formats: ["text"],
+  });
+
+  assert.equal(
+    readFileSync(result.text, "utf8"),
+    "Led payment infrastructure across three regions, shipping a rewrite that cut latency by 40% while keeping the team headcount flat."
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Trusted-root confinement: an ancestor symlink must not bypass the check
 // ---------------------------------------------------------------------------
