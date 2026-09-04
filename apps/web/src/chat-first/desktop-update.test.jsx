@@ -290,6 +290,101 @@ describe("desktop update bridge", () => {
     delete globalThis.careerratDesktopUpdate;
   });
 
+  it("surfaces a real error pushed mid-install instead of leaving the notice stuck", async () => {
+    vi.resetModules();
+    let push;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn(),
+      checkNow: vi.fn(),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    push({ supported: true, enabled: true, notify: true, phase: "ready", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    await captured.notice.onPrimary();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing" });
+
+    // A legitimate error push must still surface with its retry action, not
+    // get stripped by the installing guard.
+    push({
+      supported: true,
+      phase: "error",
+      errorKind: "install",
+      message: "CareerRat couldn't finish the update. Try again. Your current version still works.",
+    });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({
+      visible: true,
+      kind: "error",
+      primaryLabel: "Try again",
+    });
+    expect(captured.notice.onPrimary).toBeTypeOf("function");
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
+  it("releases the installing latch after a rejected restart so later pushes still apply", async () => {
+    vi.resetModules();
+    let push;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn(),
+      checkNow: vi.fn().mockResolvedValue({ supported: true, enabled: true, phase: "ready" }),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi
+        .fn()
+        .mockResolvedValueOnce({ accepted: true })
+        .mockResolvedValueOnce({ accepted: false }),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    push({ supported: true, enabled: true, notify: true, phase: "ready", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    await captured.notice.onPrimary();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing" });
+
+    // A direct checkNow response is authoritative: it can move the phase
+    // back to "ready", which is what makes restartAndInstall callable again.
+    await captured.checkNow();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "ready" });
+
+    await captured.notice.onPrimary();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "error" });
+
+    // A later authoritative push must still apply; the installing latch
+    // must not have survived the rejected restart.
+    push({ supported: true, enabled: true, phase: "current" });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "current" });
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
   it("explains unsupported Windows updates without pretending to check", async () => {
     vi.resetModules();
     let push;

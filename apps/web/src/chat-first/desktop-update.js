@@ -47,9 +47,16 @@ if (bridge) {
   bridge.onUpdate((next) => {
     receivedPush = true;
     // Once the install has been accepted the renderer's install phase is
-    // terminal: a stale external push (the main process is tearing itself
-    // down) must not revive the Restart and install button.
+    // terminal for stale pre-install phases: a stale external push (the
+    // main process is tearing itself down) must not revive the Restart and
+    // install button. A real failure is authoritative even mid-install, so
+    // it always applies and releases the latch for recovery.
     if (installing && next && typeof next === "object") {
+      if (next.phase === "error") {
+        installing = false;
+        mergeBridgeState(next);
+        return;
+      }
       const { phase, ...rest } = next;
       mergeBridgeState(rest);
       return;
@@ -112,7 +119,11 @@ async function checkNow() {
   if (!bridge || state.supported === false) return;
   setState({ phase: "checking", manual: true, message: null, errorKind: null });
   try {
-    mergeBridgeState(await bridge.checkNow());
+    const next = await bridge.checkNow();
+    // A direct checkNow response is authoritative and supersedes any
+    // in-flight install lifecycle, so later pushes aren't stripped forever.
+    installing = false;
+    mergeBridgeState(next);
   } catch {
     setState({
       phase: "error",
@@ -146,6 +157,7 @@ async function restartAndInstall() {
   try {
     const result = await bridge.restartAndInstall();
     if (result?.accepted === false) {
+      installing = false;
       setState({
         phase: "error",
         message: "That update isn't ready to install yet. Check for updates again.",
@@ -155,6 +167,7 @@ async function restartAndInstall() {
       setState({ phase: "installing", message: "Restarting to install…" });
     }
   } catch {
+    installing = false;
     setState({
       phase: "error",
       message:
