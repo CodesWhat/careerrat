@@ -3,7 +3,13 @@
   "ignoreBinaries": ["pandoc", "soffice", "iconutil"],
   "workspaces": {
     ".": {
-      "entry": ["src/cli/*.mjs", "scripts/*.mjs", "scripts/eval/*.mjs", "plugins/*/index.mjs"],
+      "entry": [
+        "src/cli/*.mjs",
+        "scripts/*.mjs",
+        "scripts/eval/*.mjs",
+        "plugins/*/index.mjs",
+        "src/core/ai/runtime-probe-helper.mjs"
+      ],
       "project": [
         "src/**/*.mjs",
         "scripts/**/*.mjs",

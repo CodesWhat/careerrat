@@ -44,10 +44,22 @@ import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
 import { isWithinRuntimePath } from "./runtime-path-policy.mjs";
 import {
   killProcessTreeByPid,
+  resolveWindowsCommandInterpreter,
   runtimeProcessIdentityFiles,
   runtimeProcessInvocation,
   scheduleRuntimeProcessKill,
 } from "./runtime-process.mjs";
+
+// Windows-only helper for installedRuntimeExecutionIdentity's synchronous
+// `--version` probe below. See runtime-probe-helper.mjs for why it exists:
+// a bare spawnSync of the runtime itself only ever reaps the direct child on
+// timeout, which leaves killProcessTreeByPid's taskkill /t nothing to walk.
+// Referenced by path (spawned as its own node process), not imported, so it
+// stays out of installed-runtimes.mjs's own module graph. knip's entry list
+// (knip.json) lists it explicitly for the same reason.
+const RUNTIME_PROBE_HELPER_PATH = fileURLToPath(
+  new URL("./runtime-probe-helper.mjs", import.meta.url)
+);
 
 const CLAUDE_BOUNDARY_MINIMUM_VERSION = "2.1.241";
 const UNVERIFIED_COMPLETION_REASON =
@@ -762,6 +774,7 @@ export function installedRuntimeExecutionIdentity(
     treeKillImpl = spawnSync,
     runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
     runtimeBinaryFingerprintImpl = runtimeBinaryFingerprint,
+    realpathImpl = realpathSync,
     requireCurrentExecutable = false,
     // A fingerprint the caller already trusts for this exact runtime
     // (Doctor's cached verification, say). When supplied, it is never
@@ -806,33 +819,85 @@ export function installedRuntimeExecutionIdentity(
   let version = String(runtime?.version || "").trim();
   if (!version) {
     const childEnv = buildInstalledRuntimeChildEnv({ env });
-    const invocation = runtimeProcessInvocation(path, ["--version"], {
-      env: childEnv,
-      platform,
-    });
     try {
-      const result = spawnSyncImpl(invocation.command, invocation.args, {
-        ...invocation.options,
-        env: childEnv,
-        encoding: "utf8",
-        maxBuffer: MAX_RUNTIME_PROBE_BYTES,
-        timeout: 5_000,
-        killSignal: "SIGKILL",
-        shell: false,
-        windowsHide: true,
-        // POSIX only: a detached child becomes its own process-group leader
-        // (pgid === pid), so the killProcessTreeByPid cleanup below actually
-        // reaches any descendant this probe forks. spawnSync's own timeout
-        // handling only ever signals this one pid, never the group, which
-        // is exactly what let a hung launcher's children outlive the probe.
-        // Windows has no process-group signaling here; killProcessTreeByPid
-        // falls back to the same taskkill /t tree kill the async probe and
-        // guided setup already use.
-        detached: platform !== "win32",
-      });
-      killProcessTreeByPid(result?.pid, { platform, env: childEnv, spawnSyncImpl: treeKillImpl });
-      if (!result?.error && result?.status === 0) {
-        version = parseVersion(`${result.stdout || ""}\n${result.stderr || ""}`)?.join(".") || "";
+      if (platform === "win32") {
+        // A direct spawnSync of the runtime here would only ever reap the
+        // cmd.exe/npm-shim root on timeout; killProcessTreeByPid's
+        // taskkill /t runs afterward and finds nothing left to walk (see
+        // runtime-probe-helper.mjs's own header comment for the full
+        // reasoning). installedRuntimeExecutionIdentity has to stay
+        // synchronous, so the fix isn't to make this call async, it's to
+        // push the runtime spawn into its own node process that CAN be
+        // async: that helper enforces probeTimeoutMs itself, tree-kills
+        // the runtime while its root pid is still addressable, and only
+        // reports back once the whole tree is confirmed gone. The
+        // interpreter resolution is done once, here, via
+        // resolveWindowsCommandInterpreter, and handed straight to the
+        // helper as argv, never re-derived inside it.
+        const invocation = runtimeProcessInvocation(path, ["--version"], {
+          env: childEnv,
+          platform,
+          resolveInterpreter: () =>
+            resolveWindowsCommandInterpreter({ env: childEnv, realpathImpl }),
+        });
+        const probeTimeoutMs = 5_000;
+        const result = spawnSyncImpl(
+          process.execPath,
+          [
+            RUNTIME_PROBE_HELPER_PATH,
+            invocation.command,
+            ...invocation.args,
+            "--timeout-ms",
+            String(probeTimeoutMs),
+          ],
+          {
+            env: childEnv,
+            encoding: "utf8",
+            maxBuffer: MAX_RUNTIME_PROBE_BYTES,
+            // Backstop only, well above probeTimeoutMs: the helper is the
+            // one enforcing the real deadline against the runtime it
+            // spawns, and always reports back before this fires under
+            // normal operation. This exists only so a wedged helper
+            // process itself can't hang Doctor forever.
+            timeout: probeTimeoutMs + 5_000,
+            killSignal: "SIGKILL",
+            shell: false,
+            windowsHide: true,
+          }
+        );
+        if (!result?.error && result?.status === 0 && typeof result.stdout === "string") {
+          const reported = JSON.parse(result.stdout);
+          if (reported && !reported.timedOut && reported.status === 0) {
+            version =
+              parseVersion(`${reported.stdout || ""}\n${reported.stderr || ""}`)?.join(".") || "";
+          }
+        }
+      } else {
+        const invocation = runtimeProcessInvocation(path, ["--version"], {
+          env: childEnv,
+          platform,
+        });
+        const result = spawnSyncImpl(invocation.command, invocation.args, {
+          ...invocation.options,
+          env: childEnv,
+          encoding: "utf8",
+          maxBuffer: MAX_RUNTIME_PROBE_BYTES,
+          timeout: 5_000,
+          killSignal: "SIGKILL",
+          shell: false,
+          windowsHide: true,
+          // A detached child becomes its own process-group leader (pgid ===
+          // pid), so the killProcessTreeByPid cleanup below actually
+          // reaches any descendant this probe forks. spawnSync's own
+          // timeout handling only ever signals this one pid, never the
+          // group, which is exactly what let a hung launcher's children
+          // outlive the probe.
+          detached: true,
+        });
+        killProcessTreeByPid(result?.pid, { platform, env: childEnv, spawnSyncImpl: treeKillImpl });
+        if (!result?.error && result?.status === 0) {
+          version = parseVersion(`${result.stdout || ""}\n${result.stderr || ""}`)?.join(".") || "";
+        }
       }
     } catch {
       version = "";

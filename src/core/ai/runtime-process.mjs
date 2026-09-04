@@ -26,7 +26,7 @@ function escapeWindowsArgument(value, doubleEscapeMetaCharacters) {
 export function runtimeProcessInvocation(
   command,
   args,
-  { env = process.env, platform = process.platform } = {}
+  { env = process.env, platform = process.platform, resolveInterpreter } = {}
 ) {
   const sourceArgs = Array.isArray(args) ? [...args] : [];
   if (platform !== "win32" || !WINDOWS_BATCH_EXTENSION.test(String(command || ""))) {
@@ -44,8 +44,22 @@ export function runtimeProcessInvocation(
     escapeWindowsCommand(commandText),
     ...sourceArgs.map((argument) => escapeWindowsArgument(argument, doubleEscapeMetaCharacters)),
   ].join(" ");
+  // Callers that already carry an execution-identity guarantee (today, only
+  // installedRuntimeExecutionIdentity's own `--version` probe) pass
+  // resolveInterpreter so the exact same absolute cmd.exe path used to build
+  // that guarantee is also the one that gets spawned, never a bare
+  // "cmd.exe" that Windows would resolve against cwd/PATH on its own. Every
+  // other caller keeps the historical COMSPEC-or-literal behavior; widening
+  // this resolution to them is CR42's hash-to-spawn-window work, not this
+  // fix's.
+  const interpreter = resolveInterpreter
+    ? resolveInterpreter()
+    : String(env.COMSPEC || env.ComSpec || "cmd.exe");
+  if (!interpreter) {
+    throw new TypeError("Unable to resolve the Windows command interpreter (cmd.exe).");
+  }
   return {
-    command: String(env.COMSPEC || env.ComSpec || "cmd.exe"),
+    command: interpreter,
     args: ["/d", "/s", "/v:off", "/c", `"${shellCommand}"`],
     options: { windowsVerbatimArguments: true },
   };
@@ -65,7 +79,31 @@ function canonicalPath(path, realpathImpl) {
   }
 }
 
-function resolveWindowsExecutable(command, { env, realpathImpl, includeSystemCmd = false }) {
+// The one place that decides which cmd.exe is "the" Windows command
+// interpreter: COMSPEC if it's set and actually resolves, else the canonical
+// SystemRoot\System32\cmd.exe, else null. No PATH search, ever. A bare
+// "cmd.exe" handed to spawn would let Windows' own executable search (which
+// checks the current directory before PATH) run a decoy sitting ahead of the
+// real one. Every consumer that needs "the" interpreter, the npm-shim
+// identity chain below and installedRuntimeExecutionIdentity's own
+// `--version` probe, calls this exact function so the path that gets
+// fingerprinted is provably the same path that gets spawned. Callers must
+// fail closed (no spawn) when this returns null.
+export function resolveWindowsCommandInterpreter({
+  env = process.env,
+  realpathImpl = realpathSync,
+} = {}) {
+  const comspec = windowsEnvValue(env, "COMSPEC");
+  if (comspec) {
+    const resolved = canonicalPath(comspec, realpathImpl);
+    if (resolved) return resolved;
+  }
+  const systemRoot = windowsEnvValue(env, "SystemRoot") || windowsEnvValue(env, "WINDIR");
+  if (!systemRoot) return null;
+  return canonicalPath(win32.join(systemRoot, "System32", "cmd.exe"), realpathImpl);
+}
+
+function resolveWindowsExecutable(command, { env, realpathImpl }) {
   const value = String(command || "").trim();
   if (!value || WINDOWS_LINE_BREAK.test(value)) return null;
   if (win32.isAbsolute(value) || /[\\/]/.test(value)) {
@@ -73,10 +111,6 @@ function resolveWindowsExecutable(command, { env, realpathImpl, includeSystemCmd
   }
 
   const candidates = [];
-  if (includeSystemCmd && /^cmd(?:\.exe)?$/i.test(value)) {
-    const systemRoot = windowsEnvValue(env, "SystemRoot") || windowsEnvValue(env, "WINDIR");
-    if (systemRoot) candidates.push(win32.join(systemRoot, "System32", "cmd.exe"));
-  }
   const pathValue = windowsEnvValue(env, "PATH");
   const extensions = win32.extname(value)
     ? [""]
@@ -207,12 +241,7 @@ export function runtimeProcessIdentityFiles(
   }
   if (!WINDOWS_NPM_SHIM.test(commandText)) return null;
 
-  const launcherCommand = windowsEnvValue(env, "COMSPEC") || "cmd.exe";
-  const launcher = resolveWindowsExecutable(launcherCommand, {
-    env,
-    realpathImpl,
-    includeSystemCmd: true,
-  });
+  const launcher = resolveWindowsCommandInterpreter({ env, realpathImpl });
   if (!launcher || !/\.exe$/i.test(launcher)) return null;
 
   let shim;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
@@ -47,6 +47,7 @@ import {
   supportsInstalledRuntimeStreaming,
 } from "../src/core/ai/installed-runtimes.mjs";
 import {
+  resolveWindowsCommandInterpreter,
   runtimeProcessIdentityFiles,
   runtimeProcessInvocation,
   scheduleRuntimeProcessKill,
@@ -1399,6 +1400,234 @@ test("Windows verified runtime identity fails closed for an unresolved batch imp
         }
       ),
       null
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Codex round 12 review: the old spawn side of installedRuntimeExecutionIdentity
+// trusted `env.COMSPEC || "cmd.exe"` verbatim, while the fingerprint side (via
+// runtimeProcessIdentityFiles) resolved the launcher to an absolute, canonical
+// path. Those two resolutions could diverge: a bare "cmd.exe" handed to spawn
+// lets Windows' own executable search find a decoy ahead of the real one, even
+// though the fingerprint just verified a completely different file. This test
+// proves both sides now go through the exact same resolveWindowsCommandInterpreter
+// call, that PATH is never consulted (the decoy directory here is first on
+// PATH and never wins), and that the probe is routed through
+// runtime-probe-helper.mjs rather than spawning the runtime directly.
+test("Windows execution identity spawns the version probe through the same resolved cmd.exe the fingerprint used, ignoring a PATH decoy", () => {
+  const root = tempRoot();
+  const wrapperDir = join(root, "npm");
+  mkdirSync(wrapperDir, { recursive: true });
+  const wrapper = join(wrapperDir, "codex.cmd");
+  const interpreter = join(wrapperDir, "node.exe");
+  const payload = join(wrapperDir, "codex.js");
+  const systemRoot = join(root, "Windows");
+  const system32 = join(systemRoot, "System32");
+  mkdirSync(system32, { recursive: true });
+  const realCmd = join(system32, "cmd.exe");
+  const decoyDir = join(root, "decoy");
+  mkdirSync(decoyDir, { recursive: true });
+  const decoyCmd = join(decoyDir, "cmd.exe");
+
+  writeFileSync(interpreter, "node implementation");
+  writeFileSync(payload, "codex implementation");
+  writeFileSync(realCmd, "real cmd.exe");
+  writeFileSync(decoyCmd, "decoy cmd.exe");
+  writeFileSync(
+    wrapper,
+    [
+      "@ECHO off",
+      "GOTO start",
+      ":find_dp0",
+      "SET dp0=%~dp0",
+      "EXIT /b",
+      ":start",
+      "SETLOCAL",
+      "CALL :find_dp0",
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ") ELSE (",
+      '  SET "_prog=node"',
+      ")",
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%" "%dp0%\\codex.js" %*',
+    ].join("\r\n")
+  );
+
+  // No COMSPEC set, so resolution must fall back to SystemRoot\System32\cmd.exe.
+  // decoyDir leads PATH and also contains a file literally named cmd.exe.
+  const env = { SystemRoot: systemRoot, Path: decoyDir };
+  // win32's own join/resolve always render fully backslash-separated output
+  // (verified: win32.join("/tmp/a","b") -> "\\tmp\\a\\b"), regardless of host
+  // OS or the separators in its inputs. That's exactly right for genuine
+  // Windows paths, which is all production ever sees. It just means a real
+  // macOS temp tree standing in for "the Windows filesystem" here needs
+  // those flattened back to forward slashes before realpathSync can find it.
+  const fakeRealpathImpl = (path) => realpathSync(String(path).replace(/\\/g, "/"));
+  const runtimeIdentityFilesImpl = (command, opts) =>
+    runtimeProcessIdentityFiles(command, { ...opts, realpathImpl: fakeRealpathImpl });
+
+  try {
+    const expectedInterpreter = resolveWindowsCommandInterpreter({
+      env,
+      realpathImpl: fakeRealpathImpl,
+    });
+    assert.equal(
+      expectedInterpreter,
+      realpathSync(realCmd),
+      "the real System32 cmd.exe must resolve"
+    );
+    assert.notEqual(expectedInterpreter, realpathSync(decoyCmd));
+
+    const calls = [];
+    const identity = installedRuntimeExecutionIdentity(
+      { path: wrapper },
+      {
+        platform: "win32",
+        env,
+        realpathImpl: fakeRealpathImpl,
+        runtimeIdentityFilesImpl,
+        spawnSyncImpl(command, args, options) {
+          calls.push({ command, args, options });
+          return {
+            error: null,
+            status: 0,
+            stdout: JSON.stringify({
+              stdout: "codex-cli 0.149.1",
+              stderr: "",
+              status: 0,
+              timedOut: false,
+            }),
+            stderr: "",
+            pid: 4242,
+          };
+        },
+      }
+    );
+
+    assert.ok(
+      identity,
+      "identity must resolve when the fingerprint and probe both reach the real cmd.exe"
+    );
+    assert.equal(identity.version, "0.149.1");
+    assert.equal(calls.length, 1);
+    // Routed through the helper process, not a direct spawn of cmd.exe.
+    assert.equal(calls[0].command, process.execPath);
+    assert.match(calls[0].args[0], /runtime-probe-helper\.mjs$/);
+    // The exact same absolute path the fingerprint just verified, never the
+    // decoy and never a bare "cmd.exe" left for Windows to resolve itself.
+    assert.equal(calls[0].args[1], expectedInterpreter);
+    assert.deepEqual(calls[0].args.slice(2, 6), ["/d", "/s", "/v:off", "/c"]);
+    assert.equal(calls[0].args.at(-2), "--timeout-ms");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveWindowsCommandInterpreter fails closed with no PATH search when neither COMSPEC nor SystemRoot resolves", () => {
+  assert.equal(resolveWindowsCommandInterpreter({ env: {} }), null);
+  assert.equal(
+    resolveWindowsCommandInterpreter({
+      env: { COMSPEC: "C:\\does\\not\\exist\\cmd.exe" },
+      realpathImpl: () => {
+        throw new Error("ENOENT");
+      },
+    }),
+    null
+  );
+});
+
+test("runtimeProcessInvocation fails closed instead of falling back to a bare cmd.exe", () => {
+  assert.throws(
+    () =>
+      runtimeProcessInvocation("C:\\tools\\agent.cmd", ["--version"], {
+        platform: "win32",
+        env: {},
+        resolveInterpreter: () => null,
+      }),
+    TypeError
+  );
+});
+
+// The end-to-end version of the two unit tests above: when the interpreter
+// truly cannot be resolved, installedRuntimeExecutionIdentity must return
+// unverified (null) without ever invoking spawnSyncImpl, never fall back to
+// spawning a bare "cmd.exe" on trust.
+test("Windows execution identity fails closed without spawning when no cmd.exe interpreter resolves", () => {
+  const root = tempRoot();
+  const wrapper = join(root, "codex.cmd");
+  writeFileSync(wrapper, "@echo off\r\ncodex-real.exe %*");
+  let spawned = false;
+  try {
+    const identity = installedRuntimeExecutionIdentity(
+      { path: wrapper },
+      {
+        platform: "win32",
+        env: {},
+        spawnSyncImpl() {
+          spawned = true;
+          return { error: null, status: 0, stdout: "0.0.0", stderr: "" };
+        },
+      }
+    );
+    assert.equal(identity, null);
+    assert.equal(spawned, false, "no interpreter must resolve to no spawn at all");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Codex round 12 review: installedRuntimeExecutionIdentity's old Windows
+// `--version` probe was a bare spawnSync of the runtime, so a hung or
+// hostile probe's own SIGKILL-on-timeout only ever reached the direct child.
+// By the time killProcessTreeByPid's taskkill /t ran afterward, that pid
+// was already reaped and there was nothing left for taskkill to walk.
+// runtime-probe-helper.mjs fixes that by moving the probe into its own node
+// process that can spawn the runtime asynchronously and run the tree kill
+// while the root pid is still addressable. The kill primitive
+// (killProcessTreeByPid) already branches on platform, so this test proves
+// the helper's protocol, spawn, enforce the timeout, confirm the whole
+// tree is gone, report JSON, on macOS via the POSIX process-group kill,
+// the same helper file win32 production runs use with taskkill /T /F
+// instead. Mirrors the resistant-descendant shell script already proven in
+// doctor-installed-runtimes.test.mjs's SIGTERM-trap test.
+test("runtime-probe-helper.mjs kills a resistant descendant on timeout and reports it in its JSON protocol", (t) => {
+  if (process.platform === "win32") {
+    t.skip("trap/sleep shell scripting is POSIX-only; win32 exercises taskkill /T /F instead");
+    return;
+  }
+  const root = tempRoot();
+  const scriptPath = join(root, "resistant-runtime.sh");
+  const sleepPidFile = join(root, "sleep.pid");
+  writeFileSync(
+    scriptPath,
+    `#!/bin/sh\ntrap '' TERM\n/bin/sleep 60 &\necho $! > "${sleepPidFile}"\nwait\n`,
+    "utf8"
+  );
+  chmodSync(scriptPath, 0o755);
+  const helperPath = fileURLToPath(
+    new URL("../src/core/ai/runtime-probe-helper.mjs", import.meta.url)
+  );
+
+  try {
+    const result = spawnSync(process.execPath, [helperPath, scriptPath, "--timeout-ms", "300"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    assert.equal(result.status, 0, result.stderr || "the helper must exit 0 after reporting");
+    const reported = JSON.parse(result.stdout);
+    assert.equal(reported.timedOut, true);
+
+    const sleepPid = Number(readFileSync(sleepPidFile, "utf8").trim());
+    assert.ok(
+      Number.isInteger(sleepPid) && sleepPid > 0,
+      "the resistant script must have recorded the sleep descendant's real pid"
+    );
+    assert.throws(
+      () => process.kill(sleepPid, 0),
+      /ESRCH/,
+      "the sleep descendant must not survive the helper's timeout cleanup"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
