@@ -65,9 +65,11 @@ still enforces the allowlist on every request. Readiness is different,
 and for Claude Code the version check is tri-state, not pass/fail. Basic
 readiness needs the CLI installed, signed in, and passing the completion
 receipt; a below-floor version (currently `2.1.241`) blocks readiness
-outright, but an indeterminate version read (the CLI didn't report a
-parseable version) can still be selectable with reduced capabilities. The
-`2.1.241` boundary itself is enforced separately, only on tool-bearing runs.
+outright. An indeterminate boundary read (the version probe exited
+abnormally but still printed a parseable version) can remain selectable
+with reduced capabilities, while a CLI that reports no parseable version at
+all fails the completion receipt and is not selectable. The `2.1.241`
+boundary itself is enforced separately, only on tool-bearing runs.
 Only the completion receipt is cached, for 24 hours; the version and sign-in checks
 run every time and are never skipped just because a cached receipt exists.
 That 24-hour TTL governs the settings route's own smoke-probe reuse, not
