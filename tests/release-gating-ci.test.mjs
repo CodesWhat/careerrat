@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -43,33 +43,6 @@ function isPureBooleanOptionType(type) {
   return false;
 }
 
-// Corepack's own default cache location (sources/folderUtils.ts,
-// getCorepackHomeFolder/getInstallFolder in the installed corepack CLI):
-// $COREPACK_HOME, else a platform cache root ($XDG_CACHE_HOME or
-// %LOCALAPPDATA% or ~/.cache, ~/AppData/Local on win32) joined with
-// "node/corepack", then versioned install folder "v1". This is where the
-// "Activate the repository-pinned npm release" step (STEP_NAMES.activate)
-// actually leaves the pinned npm release on every dependency job's runner
-// once `corepack enable npm` + the first `npm --version` call have
-// activated it — npm itself is never a dependency of this repo, so this is
-// the only place "the pinned npm" exists on disk in CI.
-function corepackNpmDefinitionsPath(npmVersion) {
-  const cacheRoot =
-    process.env.COREPACK_HOME ??
-    join(
-      process.env.XDG_CACHE_HOME ??
-        process.env.LOCALAPPDATA ??
-        join(homedir(), process.platform === "win32" ? "AppData/Local" : ".cache"),
-      "node/corepack"
-    );
-  return join(
-    cacheRoot,
-    "v1/npm",
-    npmVersion,
-    "node_modules/@npmcli/config/lib/definitions/definitions.js"
-  );
-}
-
 // Reads the exact pinned npm version off package.json's `packageManager`
 // field (the same field the workflow's own activation step reads and
 // verifies against, EXPECTED_NPM in ci-verify.yml) rather than trusting
@@ -86,64 +59,32 @@ function pinnedNpmVersion() {
   return match[1];
 }
 
-// Locates npm's real @npmcli/config option definitions and returns the set
-// of `--flag`/`-shortFlag` tokens that consume a separate value token, per
-// isPureBooleanOptionType above. Tries, in order: a real node_modules/npm
-// (if npm is ever added as a project dependency), a hoisted
-// node_modules/@npmcli/config (if some other devDependency ever pulls it
-// in as a sibling package), then corepack's own install cache for the
-// exact pinned version (the actual case in this repo today — see
-// corepackNpmDefinitionsPath above). Throws instead of silently falling
-// back to a partial list when none resolve: a partial, hand-maintained set
-// is the exact bug this replaces (Codex review /tmp/codex-305-r10.md,
-// finding 2), so a missing pinned npm must fail this test loudly rather
-// than quietly re-introduce it.
-function loadNpmValueTakingFlags() {
-  const npmVersion = pinnedNpmVersion();
-  const attempts = [
-    () =>
-      require.resolve("npm/node_modules/@npmcli/config/lib/definitions/definitions.js", {
-        paths: [fileURLToPath(new URL("..", import.meta.url))],
-      }),
-    () =>
-      require.resolve("@npmcli/config/lib/definitions/definitions.js", {
-        paths: [fileURLToPath(new URL("..", import.meta.url))],
-      }),
-    () => {
-      const p = corepackNpmDefinitionsPath(npmVersion);
-      if (!existsSync(p)) {
-        throw new Error(`no corepack-cached npm@${npmVersion} at ${p}`);
-      }
-      return p;
-    },
-  ];
+// The exact @npmcli/config version each pinned npm release bundles (checked
+// against that release's own installed node_modules/@npmcli/config/
+// package.json, not just its package.json's "^" dependency range, which is
+// looser than what actually ships). Kept as a hardcoded, offline map instead
+// of a live `npm view` lookup so this suite never needs network access; the
+// version-pin regression below fails the moment the `packageManager` pin
+// moves to an npm release not yet listed here, until this map (and the
+// @npmcli/config devDependency in package.json) are updated to match.
+const NPM_BUNDLED_NPMCLI_CONFIG_VERSION = {
+  "12.0.2": "11.0.1",
+};
 
-  const errors = [];
-  for (const attempt of attempts) {
-    try {
-      const definitionsPath = attempt();
-      const definitions = require(definitionsPath);
-      const flags = new Set();
-      for (const [key, def] of Object.entries(definitions)) {
-        if (isPureBooleanOptionType(def.type)) continue;
-        flags.add(`--${key}`);
-        for (const short of [].concat(def.short ?? [])) {
-          flags.add(`-${short}`);
-        }
-      }
-      if (flags.size === 0) {
-        throw new Error(`${definitionsPath} loaded but produced no value-taking options`);
-      }
-      return flags;
-    } catch (err) {
-      errors.push(err.message);
-    }
-  }
-  throw new Error(
-    `release-gating-ci.test.mjs: could not load npm@${npmVersion}'s own option definitions from ` +
-      `node_modules/npm, a hoisted @npmcli/config, or corepack's install cache; refusing to fall ` +
-      `back to a hand-maintained partial list. Tried:\n  ${errors.join("\n  ")}`
-  );
+// Codex review /tmp/codex-305-r11.md (finding 1): this used to require
+// either a hoisted node_modules/@npmcli/config or Corepack's own install
+// cache for the pinned npm release. The CI verification job happens to seed
+// that cache (it runs `npm --version` through Corepack before this suite
+// runs), but the macOS desktop-release job runs bundled `npm ci` followed
+// directly by `release:pretag` without ever invoking Corepack, and a fresh
+// developer machine using bundled npm has neither — both threw before this
+// suite ever registered a single test. Fix: @npmcli/config is now a plain,
+// exact-pinned devDependency (see package.json), so this is a normal
+// `require`, no filesystem probing or Corepack cache needed at all. The
+// version-pin regression below (and the empty-COREPACK_HOME regression
+// further down) keep this honest against future npm bumps.
+function loadNpmConfigDefinitions() {
+  return require("@npmcli/config/lib/definitions/index.js");
 }
 
 async function loadWorkflow() {
@@ -342,10 +283,58 @@ const LEADING_PREFIX_PATTERN = /^(?:(?:env|command|corepack)\s+|[A-Za-z_][A-Za-z
 // @npmcli/config definitions (npm's own source of truth for which options
 // take a value, `type` !== a purely-boolean shape) instead of
 // hand-listing it, so a future npm option is covered automatically the
-// next time the pin moves. See loadNpmValueTakingFlags below for where
-// "the pinned npm" is actually found on disk (it's never a project
-// dependency here) and the deliberate hard failure when it can't be.
-const NPM_VALUE_OPTIONS = loadNpmValueTakingFlags();
+// next time the pin moves. See loadNpmConfigDefinitions above for where
+// that comes from now (a plain devDependency, not a filesystem probe).
+const { definitions: NPM_DEFINITIONS, shorthands: NPM_SHORTHANDS } = loadNpmConfigDefinitions();
+
+function computeNpmValueOptions(definitions) {
+  const flags = new Set();
+  for (const [key, def] of Object.entries(definitions)) {
+    if (isPureBooleanOptionType(def.type)) continue;
+    flags.add(`--${key}`);
+    for (const short of [].concat(def.short ?? [])) {
+      flags.add(`-${short}`);
+    }
+  }
+  if (flags.size === 0) {
+    throw new Error(
+      "release-gating-ci.test.mjs: @npmcli/config's definitions loaded but produced no " +
+        "value-taking options"
+    );
+  }
+  return flags;
+}
+
+const NPM_VALUE_OPTIONS = computeNpmValueOptions(NPM_DEFINITIONS);
+
+// Codex review /tmp/codex-305-r11.md (finding 2): the option-token loop
+// below only ever consulted each definition's own `short` field (a
+// single-letter shortcut for that same flag, e.g. `-w` for `--workspace`).
+// npm also defines a separate table of *standalone* aliases
+// (@npmcli/config's `shorthands` export, definitions/index.js) that expand
+// to a completely different flag, sometimes with a value already baked in:
+// `reg` -> `['--registry']` (rename only, still value-taking) and
+// `enjoy-by` -> `['--before']` (same shape) let `npm --reg URL ci` and
+// `npm --enjoy-by DATE ci` walk straight past the old loop, since neither
+// `--reg` nor `--enjoy-by` was ever a key in `definitions.js` itself, so
+// the loop treated them as bare (non-consuming) flags and stopped one
+// token too early — landing on the option's value ("URL"/"DATE") instead
+// of the `ci` that followed it, and failing the whole match. Other aliases
+// bake their value directly into the expansion instead of taking a
+// separate token at all (`d` -> `['--loglevel', 'info']`, so `-d` alone
+// consumes nothing further from argv).
+//
+// Fix: before classifying an option token, look it up (stripped of its
+// leading dash(es), since npm's alias table itself has no dashes) in this
+// same `shorthands` export and, if it matches, classify the *expansion*
+// instead: a single-element expansion is a plain rename, so whether it
+// consumes a following value token is decided by NPM_VALUE_OPTIONS same as
+// any other flag; a multi-element expansion already supplies its value, so
+// it consumes nothing further.
+function expandNpmShorthand(token) {
+  const bareName = token.replace(/^--?/, "");
+  return NPM_SHORTHANDS[bareName] ?? null;
+}
 
 function stripBashComments(run) {
   return run
@@ -373,6 +362,14 @@ function normalizeCommandSegment(segment) {
 // option, per NPM_VALUE_OPTIONS), then requires `ci` as the next bare token.
 // A subcommand like "run" in `npm run ci` isn't option-shaped (no leading
 // `-`), so the walk stops there and the final check against "ci" fails.
+//
+// Codex review /tmp/codex-305-r11.md (finding 2): before consulting
+// NPM_VALUE_OPTIONS directly, first expand the token through npm's own
+// standalone shorthand table (expandNpmShorthand above) — a bare rename
+// (`--reg` -> `--registry`) is then classified exactly like the real flag
+// it stands for, and an alias whose expansion already bakes in a value
+// (`-d` -> `--loglevel info`) consumes nothing further from argv, since
+// nothing about it came from a separate token in the actual command line.
 function isExecutableNpmCiSegment(segment) {
   const tokens = segment.split(/\s+/).filter(Boolean);
   if (tokens[0] !== "npm") return false;
@@ -381,7 +378,14 @@ function isExecutableNpmCiSegment(segment) {
     const token = tokens[i];
     if (token.includes("=")) {
       i += 1;
-    } else if (NPM_VALUE_OPTIONS.has(token)) {
+      continue;
+    }
+    const expansion = expandNpmShorthand(token);
+    if (expansion) {
+      i += expansion.length > 1 || !NPM_VALUE_OPTIONS.has(expansion[0]) ? 1 : 2;
+      continue;
+    }
+    if (NPM_VALUE_OPTIONS.has(token)) {
       i += 2;
     } else {
       i += 1;
@@ -696,7 +700,14 @@ test("negative case: an extra npm ci inserted before the activation step defeats
 // the same separate-valued-option evasion, but for options the old
 // nine-entry hand list didn't cover at all (`--omit`, `--install-strategy`,
 // `--location`, `--allow-git`), proving the dynamically-loaded flag set
-// (loadNpmValueTakingFlags) actually closes the gap a hand list can't.
+// (computeNpmValueOptions, over the real @npmcli/config definitions) closes
+// the gap a hand list can't.
+//
+// Codex review /tmp/codex-305-r11.md (finding 2): `--reg` and `--enjoy-by`
+// are npm's own *standalone* aliases for `--registry` and `--before` (see
+// expandNpmShorthand) — neither is a key in `definitions.js` itself, so
+// they evaded the option-token loop entirely until it started expanding
+// through npm's `shorthands` table first.
 for (const [label, run] of [
   ["corepack npm ci", "corepack npm ci"],
   ["command npm ci", "command npm ci"],
@@ -710,6 +721,8 @@ for (const [label, run] of [
   ["npm --install-strategy hoisted ci", "npm --install-strategy hoisted ci"],
   ["npm --location project ci", "npm --location project ci"],
   ["npm --allow-git root ci", "npm --allow-git root ci"],
+  ["npm --reg URL ci", "npm --reg https://registry.example.com ci"],
+  ["npm --enjoy-by DATE ci", "npm --enjoy-by 2020-01-01 ci"],
 ]) {
   test(`negative case: a new job running "${label}" is caught by dynamic discovery`, async () => {
     const workflow = await loadWorkflow();
@@ -747,6 +760,71 @@ test("[codex-305-r10] isExecutableNpmCiSegment recognizes every dynamically-load
     assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
   }
   assert.equal(isExecutableNpmCiSegment("npm run ci"), false);
+});
+
+test("[codex-305-r11] isExecutableNpmCiSegment expands npm's own standalone shorthand aliases before classifying", () => {
+  // `--reg` and `--enjoy-by` are rename-only aliases (their expansion is a
+  // single element, `['--registry']`/`['--before']`) for two definitions
+  // that do take a value, so both must still consume their following
+  // token and reach the real `ci`.
+  for (const run of ["npm --reg https://registry.example.com ci", "npm --enjoy-by 2020-01-01 ci"]) {
+    assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
+  }
+  // `-d` is npm's alias for `--loglevel info` — a multi-element expansion
+  // that already bakes its value in, so it must consume nothing further
+  // from argv; `ci` right after it is still the next real token, not `-d`'s
+  // value.
+  assert.equal(isExecutableNpmCiSegment("npm -d ci"), true);
+});
+
+// Codex review /tmp/codex-305-r11.md (finding 1): keeps the @npmcli/config
+// devDependency pin (package.json) honest against the npm version actually
+// pinned in `packageManager`. This is deliberately offline — no `npm view`
+// call — so the suite never needs network access; a future npm bump must
+// update NPM_BUNDLED_NPMCLI_CONFIG_VERSION and the devDependency together,
+// or this fails.
+test("[codex-305-r11] the @npmcli/config devDependency is pinned to the exact version the pinned npm release bundles", () => {
+  const npmVersion = pinnedNpmVersion();
+  const expectedVersion = NPM_BUNDLED_NPMCLI_CONFIG_VERSION[npmVersion];
+  assert.ok(
+    expectedVersion,
+    `release-gating-ci.test.mjs: no recorded bundled @npmcli/config version for npm@${npmVersion}; ` +
+      "add one to NPM_BUNDLED_NPMCLI_CONFIG_VERSION (check that npm release's own installed " +
+      "node_modules/@npmcli/config/package.json) before moving the packageManager pin"
+  );
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(
+    pkg.devDependencies["@npmcli/config"],
+    expectedVersion,
+    `package.json's @npmcli/config devDependency must be pinned to the exact version ` +
+      `(${expectedVersion}) that npm@${npmVersion} bundles, not a range or a different version`
+  );
+});
+
+// Codex review /tmp/codex-305-r11.md (finding 1): proves the loader
+// (loadNpmConfigDefinitions) genuinely no longer depends on a pre-populated
+// Corepack cache. Spawns a fresh node process, with $COREPACK_HOME pointed
+// at a brand-new empty directory, that requires the exact module this file
+// loads its option/shorthand tables from — the same failure mode the
+// macOS desktop-release job hit (bundled `npm ci` then `release:pretag`,
+// with Corepack never invoked) is reproduced directly here instead of only
+// being asserted about.
+test("[codex-305-r11] the loader still works with COREPACK_HOME pointed at an empty directory", () => {
+  const emptyCorepackHome = mkdtempSync(join(tmpdir(), "empty-corepack-home-"));
+  const result = spawnSync(
+    process.execPath,
+    ["-e", "require('@npmcli/config/lib/definitions/index.js')"],
+    {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      env: { ...process.env, COREPACK_HOME: emptyCorepackHome },
+      encoding: "utf8",
+    }
+  );
+  assert.equal(
+    result.status,
+    0,
+    `expected the loader to succeed with an empty COREPACK_HOME, got: ${result.stderr}`
+  );
 });
 
 test("hostile fixture: a node_modules/.bin/node shim cannot intercept the checker step's trusted, absolute-path node invocation", () => {
