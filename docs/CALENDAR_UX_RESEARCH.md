@@ -3,8 +3,9 @@
 ## Retired 2026-09-04
 
 This is a research and recommendation doc for `CalendarNextPage.jsx`, which the July 10, 2026 decision note
-below made `/calendar`. Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted
-`CalendarNextPage.jsx` along with the rest of the page-based UI. The chat-first workspace now supplies Schedule
+below made `/calendar`. Commit `a85a9e96` renamed `CalendarNextPage.jsx` to `CalendarPage.jsx` that same day.
+Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted `CalendarPage.jsx`,
+that renamed successor, along with the rest of the page-based UI. The chat-first workspace now supplies Schedule
 through `apps/web/src/chat-first/WorkspaceBrowser.jsx`'s Schedule panel. One correction to the analysis below:
 it says the page renders `event.export` and `event.done` per event; the chat-first Schedule panel only reads
 `event.export` to gate one shared "Add to calendar" action, and that shared action exports only the first

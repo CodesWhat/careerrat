@@ -3,8 +3,10 @@
 ## Retired 2026-09-04
 
 This is a research and recommendation doc for `LibraryPage.jsx`, which it called the canonical `/library`
-route. Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted `LibraryPage.jsx`
-along with `LibraryV2Page.jsx` and `LibraryV3Page.jsx`. The chat-first workspace now supplies Files through
+route. Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted `LibraryPage.jsx`.
+`LibraryV2Page.jsx` and `LibraryV3Page.jsx`, the other candidates this doc weighs, never entered this repo's
+git history under either name; they don't appear in any commit's tree, so there is no deletion commit to cite
+for them. The chat-first workspace now supplies Files through
 `apps/web/src/chat-first/WorkspaceBrowser.jsx`'s Files panel. One correction to the analysis below: it says
 cross-job document aggregation exists nowhere in the app, but the chat-first Files panel now aggregates
 files across every application behind a "Job" filter, so that gap has closed.

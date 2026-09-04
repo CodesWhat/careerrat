@@ -4,7 +4,9 @@
 
 This is a research and recommendation doc for `NetworkPage.jsx`, which it called the canonical `/network`
 route. Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted `NetworkPage.jsx`
-along with the other Network route candidates. The chat-first workspace now supplies People through
+and its support files. `NetworkV2Page.jsx` and `NetworkV3Page.jsx`, the other route candidates this doc weighs,
+never entered this repo's git history under either name; they don't appear in any commit's tree, so there is
+no deletion commit to cite for them. The chat-first workspace now supplies People through
 `apps/web/src/chat-first/WorkspaceBrowser.jsx`'s People panel, a single cross-application contact list rather
 than the four competing shapes this doc weighed.
 
