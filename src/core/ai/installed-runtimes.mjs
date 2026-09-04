@@ -780,6 +780,7 @@ export function installedRuntimeExecutionIdentity(
         encoding: "utf8",
         maxBuffer: MAX_RUNTIME_PROBE_BYTES,
         timeout: 5_000,
+        killSignal: "SIGKILL",
         shell: false,
         windowsHide: true,
       });

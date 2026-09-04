@@ -694,6 +694,94 @@ test("doctor completes within a bounded timeout and reports an executable FIFO s
   }
 });
 
+// Codex adversarial finding (round 8): the FIFO fix above closes the read
+// side of fingerprinting, but the cache matcher's live `--version` spawn
+// (installedRuntimeExecutionIdentity, src/core/ai/installed-runtimes.mjs) ran
+// with a 5-second timeout and Node's default SIGTERM kill signal. Node's
+// synchronous spawn keeps waiting for the child to actually exit after
+// sending that signal, so a matching runtime whose `--version` traps and
+// ignores SIGTERM hung Doctor indefinitely instead of returning once the
+// timeout elapsed. The fix pairs the timeout with killSignal: "SIGKILL",
+// which the trap script below cannot ignore. The outer spawnSync here gives
+// Doctor a generous but bounded window (well past the inner 5s timeout, far
+// short of the script's 60s sleep) so a regression is caught by the outer
+// timeout killing Doctor instead of by the suite hanging for a minute.
+test("doctor completes within a bounded timeout when the selected runtime's --version ignores SIGTERM", (t) => {
+  if (process.platform === "win32") {
+    t.skip("trap/sleep shell scripting is POSIX-only");
+    return;
+  }
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  try {
+    // buildInstalledRuntimeChildEnv only forwards an allowlist of env keys
+    // (including PATH) into the probe's child process, and this suite's
+    // fakeRegistryEnv PATH is deliberately just the fake registry directory
+    // — so the script calls /bin/sleep by absolute path instead of relying
+    // on PATH lookup for it (trap is a shell builtin, no lookup needed).
+    const claudePath = join(registry, "claude");
+    writeFileSync(claudePath, "#!/bin/sh\ntrap '' TERM\n/bin/sleep 60\n", "utf8");
+    chmodSync(claudePath, 0o755);
+    const realPath = realpathSync(claudePath);
+    const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
+
+    // A cached selection whose path/realPath/binaryFingerprint match what
+    // detection will report for the trap script, so Doctor's non-executing
+    // identity check agrees with the cache and reaches the live --version
+    // probe instead of short-circuiting before it.
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        path: claudePath,
+        realPath,
+        version: "9.9.9",
+        binaryFingerprint,
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        testedMinimumVersion: CLAUDE_BOUNDARY_MINIMUM_VERSION,
+        checkedAt: new Date().toISOString(),
+      },
+    });
+
+    const startedAt = Date.now();
+    const result = spawnSync(process.execPath, [join(ROOT, "src/cli/doctor.mjs"), "--json"], {
+      cwd: ROOT,
+      env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
+      encoding: "utf8",
+      timeout: 12_000,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.equal(
+      result.signal,
+      null,
+      "doctor must not hang past its own version-probe timeout when --version ignores SIGTERM"
+    );
+    assert.ok(
+      elapsedMs < 12_000,
+      `doctor took ${elapsedMs}ms, expected well under the script's 60s sleep`
+    );
+    assert.ok(result.stdout, result.stderr || "doctor produced no stdout");
+    const data = JSON.parse(result.stdout);
+    const claude = data.installedRuntimes.find((r) => r.id === "claude");
+    assert.ok(claude, "expected a claude entry in installedRuntimes");
+    assert.equal(claude.status, "supported engine");
+    assert.equal(
+      claude.version,
+      null,
+      "a --version probe that never returns must never verify as a known version"
+    );
+    assert.equal(claude.boundaryProbePassed, false);
+    assert.equal(claude.boundaryProbeCheckedAt, null);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+  }
+});
+
 // Codex next-steps: detection never spawns a candidate binary, it only
 // checks what's on disk. A fake binary that WOULD prove itself if executed
 // (by writing a marker file) makes that assertion concrete instead of just
