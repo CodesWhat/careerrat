@@ -1,6 +1,13 @@
 // verbs/sourced.mjs — sourced[] domain actions.
 
-import { addPostingIdentity, postingIdentityIsSeen } from "../../scoring/sourced-identity.mjs";
+import {
+  addPostingIdentity,
+  identityAliasAdditions,
+  identityKeysWithAliases,
+  postingIdentityIsSeen,
+  postingIdentityKeys,
+  rowAliasKeys,
+} from "../../scoring/sourced-identity.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
 import {
   bumpMeta,
@@ -23,14 +30,42 @@ function applicationNote(value) {
     .join("");
 }
 
-function storedPostingKeys(db) {
-  const keys = new Set();
-  for (const entry of db
-    .prepare("SELECT data FROM applications UNION ALL SELECT data FROM sourced")
-    .all()) {
-    addPostingIdentity(keys, JSON.parse(entry.data));
+// Index every applications[]/sourced[] identity key back to the row it came
+// from (table + id + the row itself), not just a flat membership Set, so a
+// duplicate hit during canonical dedupe can locate and patch the canonical
+// row's aliasKeys[], not merely detect the collision.
+function storedPostingIndex(db) {
+  const index = new Map();
+  for (const table of ["applications", "sourced"]) {
+    for (const entry of db.prepare(`SELECT id, data FROM ${table}`).all()) {
+      const row = JSON.parse(entry.data);
+      const entryRef = { table, id: entry.id, row };
+      for (const key of identityKeysWithAliases(row)) index.set(key, entryRef);
+    }
   }
-  return keys;
+  return index;
+}
+
+// When `duplicate` collides with a row already in `index`, persist the union
+// of `duplicate`'s identity keys onto that row's aliasKeys[] (CR-29 round 3)
+// so a later capture that only carries one of the discarded row's OTHER
+// representations (e.g. an aggregator relisting with no outbound board URL)
+// still resolves back to the same canonical row. addPostingIdentity folds
+// aliasKeys into every seen-set builder, so persisting them here is what
+// makes reconciliation and sourcedUpsertBatch "consume" them. Returns the
+// newly-added keys (empty when the duplicate adds nothing new, the common
+// case), so the caller can fold them into its own in-flight seen set.
+function mergeDuplicateIdentityAlias(db, index, duplicate) {
+  const matchKey = postingIdentityKeys(duplicate).find((key) => index.has(key));
+  if (!matchKey) return [];
+  const { table, id, row } = index.get(matchKey);
+  const additions = identityAliasAdditions(row, duplicate);
+  if (!additions.length) return [];
+  const updatedRow = { ...row, aliasKeys: [...rowAliasKeys(row), ...additions] };
+  putRow(db, table, id, updatedRow);
+  const entryRef = { table, id, row: updatedRow };
+  for (const key of additions) index.set(key, entryRef);
+  return additions;
 }
 
 const ACTIVE_SOURCED_STATUSES = new Set(["sourced", "prospect", "saved", "gated"]);
@@ -70,11 +105,18 @@ export function sourcedUpsertBatch({
     let created = 0;
     let updated = 0;
     let duplicates = 0;
+    let aliasesMerged = false;
     const acceptedIds = [];
-    const seenPostingKeys = dedupeCanonical ? storedPostingKeys(db) : null;
+    const postingIndex = dedupeCanonical ? storedPostingIndex(db) : null;
+    const seenPostingKeys = postingIndex ? new Set(postingIndex.keys()) : null;
     for (const { row, acceptedRow } of preparedRows) {
       if (seenPostingKeys && postingIdentityIsSeen(row, seenPostingKeys)) {
         duplicates++;
+        const additions = mergeDuplicateIdentityAlias(db, postingIndex, row);
+        if (additions.length) {
+          aliasesMerged = true;
+          for (const key of additions) seenPostingKeys.add(key);
+        }
         continue;
       }
       if (seenPostingKeys) addPostingIdentity(seenPostingKeys, row);
@@ -85,6 +127,7 @@ export function sourcedUpsertBatch({
       acceptedIds.push(String(acceptedRow.id));
     }
     if (!acceptedIds.length) {
+      if (aliasesMerged) bumpMeta(db);
       return {
         created,
         updated,
@@ -103,6 +146,24 @@ export function sourcedUpsertBatch({
     });
     const analytics = refreshAnalytics(db);
     return { created, updated, duplicates, acceptedIds, meta, event, analytics };
+  });
+}
+
+// sourcedMergeIdentityAlias({offer}): the standalone entry point for the
+// same alias-merge sourcedUpsertBatch does inline on a duplicate hit, for
+// callers that discard a duplicate BEFORE it ever reaches sourcedUpsertBatch
+// (sourced-persistence.mjs's pre-capture reconciliation drops known
+// duplicates early to skip the expensive JD-capture path, see CR-29 round
+// 3). No-op, no write, when `offer` doesn't match a stored row or adds
+// nothing new to it. Intentionally skips the activity-event log (an alias
+// merge is internal bookkeeping, not a user-visible change) but still bumps
+// meta when it writes, per the Data Write Contract.
+export function sourcedMergeIdentityAlias({ repoRoot, env, offer } = {}) {
+  return runVerb({ repoRoot, env }, (db) => {
+    const index = storedPostingIndex(db);
+    const additions = mergeDuplicateIdentityAlias(db, index, offer);
+    if (additions.length) bumpMeta(db);
+    return { merged: additions.length > 0 };
   });
 }
 

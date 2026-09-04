@@ -5,9 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  buildOfferIdentitySet,
   diffSnapshotOffers,
   latestSnapshotPair,
   offerIdentity,
+  offerIdentityKeys,
   renderDeltaMarkdown,
   summarizeDelta,
 } from "../src/core/scoring/sourced-delta.mjs";
@@ -116,6 +118,76 @@ test("summarizes delta counts separately from repo dedupe", () => {
     carried: 1,
     removed: 0,
   });
+});
+
+test("offerIdentityKeys keeps both an aggregator's own reqId and its URL-derived Workday key", () => {
+  const keys = offerIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    hiringCafeUrl: "https://hiring.cafe/job/swfwvwmaq6basefz",
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+    reqId: "hiringcafe:swfwvwmaq6basefz",
+  });
+
+  assert.ok(keys.includes("hiringcafe:swfwvwmaq6basefz"));
+  assert.ok(keys.includes("workday:acme.wd5.myworkdayjobs.com:jr12345"));
+});
+
+test("recognizes a posting carried from a direct Workday snapshot into its HiringCafe-bridged representation", () => {
+  // CR-29 round 3: offerIdentity reduced the bridged posting to its
+  // aggregator reqId alone, shadowing the URL-derived Workday key the
+  // PREVIOUS snapshot's direct posting was keyed on: reported as one new
+  // role and one removed role instead of one carried role.
+  const previous = [
+    {
+      company: "Acme",
+      title: "Senior Engineer",
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+    },
+  ];
+  const current = [
+    {
+      company: "Acme",
+      title: "Senior Engineer",
+      hiringCafeUrl: "https://hiring.cafe/job/swfwvwmaq6basefz",
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+      reqId: "hiringcafe:swfwvwmaq6basefz",
+    },
+  ];
+
+  const delta = diffSnapshotOffers({ current, previous });
+
+  assert.deepEqual(
+    delta.carriedOffers.map((offer) => offer.company),
+    ["Acme"]
+  );
+  assert.deepEqual(delta.newOffers, []);
+  assert.deepEqual(delta.removedOffers, []);
+});
+
+test("flags a HiringCafe-bridged posting as a repo duplicate of an already-seen direct Workday key", () => {
+  const seenIds = buildOfferIdentitySet([
+    {
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+    },
+  ]);
+
+  const delta = diffSnapshotOffers({
+    current: [
+      {
+        company: "Acme",
+        title: "Senior Engineer",
+        hiringCafeUrl: "https://hiring.cafe/job/swfwvwmaq6basefz",
+        url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+        reqId: "hiringcafe:swfwvwmaq6basefz",
+      },
+    ],
+    previous: [],
+    seenIds,
+  });
+
+  assert.equal(delta.newOffers.length, 1);
+  assert.equal(delta.newOffers[0].repoDuplicate, true);
 });
 
 test("allows a one-file baseline when explicitly requested", () => {

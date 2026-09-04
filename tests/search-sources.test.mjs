@@ -407,6 +407,69 @@ test("ingests captured browser snapshot offers into DB sourced rows with JD arti
   assert.equal(tracker.sourced[0].id, rows[0].id);
 });
 
+test("a losing duplicate with the same explicit reqId never overwrites the accepted row's JD artifact", () => {
+  // CR-29 round 3: prepareAcceptedRow wrote the deterministic JD artifact
+  // (company-role-reqId.md, same path for both offers here since the reqId
+  // is unchanged) BEFORE sourcedUpsertBatch's own inner duplicate check ran.
+  // A second capture reusing the same explicit reqId with a changed
+  // URL/body could therefore overwrite the first (accepted) row's artifact
+  // file and then still get rejected as a duplicate, leaving the DB
+  // pointing at content that no longer matches what was captured.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const first = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-04T12:00:00.000Z"),
+    snapshot: {
+      source: "generic-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Widget Engineer",
+          url: "https://example.test/jobs/111",
+          reqId: "explicit:foo",
+          rawText: "Original body content unique-marker-A.",
+        },
+      ],
+    },
+  });
+  assert.equal(first.persistedRows, 1);
+  const artifactPath = userPath({ repoRoot }, first.offers[0].artifacts.jd);
+  assert.match(readFileSync(artifactPath, "utf8"), /unique-marker-A/);
+
+  const second = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-05T12:00:00.000Z"),
+    snapshot: {
+      source: "generic-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Widget Engineer",
+          url: "https://example.test/jobs/222",
+          reqId: "explicit:foo",
+          rawText: "Replacement body content unique-marker-B.",
+        },
+      ],
+    },
+  });
+  assert.equal(second.persistedRows, 0);
+  assert.equal(second.duplicates, 1);
+  assert.equal(second.offers.length, 0);
+
+  const artifactContent = readFileSync(artifactPath, "utf8");
+  assert.match(artifactContent, /unique-marker-A/);
+  assert.doesNotMatch(artifactContent, /unique-marker-B/);
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].link, "https://example.test/jobs/111");
+});
+
 test("capture ingest skips invalid blank-company offers without writing JD artifacts", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -562,4 +625,104 @@ test("snapshot ingestion canonically dedupes a HiringCafe-sourced Workday postin
     .map((row) => JSON.parse(row.data));
   assert.equal(rows.length, 1);
   assert.equal(rows[0].id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+});
+
+test("a discarded HiringCafe bridge alias resolves a later HiringCafe-only ingest back to the same row", () => {
+  // CR-29 round 3: suppressing the bridged HiringCafe duplicate (previous
+  // test) used to drop it silently: the canonical row never learned the
+  // aggregator's own identity. A LATER capture that only carries the
+  // HiringCafe side (no outbound Workday URL at all, e.g. the listing lost
+  // its external link) then shared no key with the stored row and inserted
+  // as a second, duplicate role. Three steps, one row throughout: direct
+  // Workday, bridged HiringCafe (merges the alias), HiringCafe-only (must
+  // now match via that alias).
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  // Step 1: direct Workday board capture.
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "workday:acme.wd5.myworkdayjobs.com:jr12345",
+        company: "Acme",
+        role: "Senior Engineer",
+        status: "sourced",
+        source: "scanner",
+        channel: "board",
+        link: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+        loc: "Boston, MA",
+        base: "verify",
+        fitScore: 80,
+        fitBucket: "high",
+        fitBasis: "triage",
+        gate: "likely-keep",
+        sourcedAt: "2026-07-05T00:00:00Z",
+        updatedAt: "2026-07-05T00:00:00Z",
+        artifacts: {},
+      },
+    ],
+  });
+
+  // Step 2: bridged HiringCafe capture, same posting, carries both its own
+  // aggregator reqId and the Workday URL (with the cross-site "-2" suffix).
+  const bridged = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-06T00:00:00.000Z"),
+    snapshot: {
+      source: "hiringcafe-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Senior Engineer",
+          hiringCafeUrl: "https://hiring.cafe/job/swfwvwmaq6basefz",
+          url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+          reqId: "hiringcafe:swfwvwmaq6basefz",
+          location: "Boston, MA",
+          source: "hiringcafe-browser",
+          rawText: "Own the platform roadmap for the Boston engineering team.",
+        },
+      ],
+    },
+  });
+  assert.equal(bridged.persistedRows, 0);
+  assert.equal(bridged.duplicates, 1);
+
+  const afterBridge = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(afterBridge.length, 1);
+  assert.ok(afterBridge[0].aliasKeys?.includes("req:hiringcafe:swfwvwmaq6basefz"));
+
+  // Step 3: HiringCafe-only capture, no Workday URL at all, only the
+  // aggregator's own page and reqId. Must still resolve to the same row via
+  // the alias persisted in step 2.
+  const hiringCafeOnly = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-07T00:00:00.000Z"),
+    snapshot: {
+      source: "hiringcafe-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Senior Engineer",
+          url: "https://hiring.cafe/job/swfwvwmaq6basefz",
+          reqId: "hiringcafe:swfwvwmaq6basefz",
+          location: "Boston, MA",
+          source: "hiringcafe-browser",
+          rawText: "Own the platform roadmap for the Boston engineering team.",
+        },
+      ],
+    },
+  });
+  assert.equal(hiringCafeOnly.persistedRows, 0);
+  assert.equal(hiringCafeOnly.duplicates, 1);
+
+  const finalRows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(finalRows.length, 1);
+  assert.equal(finalRows[0].id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
 });

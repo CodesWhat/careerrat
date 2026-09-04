@@ -99,7 +99,26 @@ export function extractReqId(rawUrl = "") {
     // and workday.mjs's fetchDetail compares it case-insensitively but
     // otherwise verbatim against the CXS detail response's jobReqId, so a
     // stripped "-N" suffix would make a genuine exact-detail lookup fail.
-    const workdayId = workdayDedupKey({ url: rawUrl });
+    // Board/portal root URLs (e.g. .../External_Career_Site) share the
+    // myworkdayjobs.com host and can have an underscored last path segment,
+    // but they aren't a specific posting: only a URL with a genuine
+    // `/job/<leaf>` segment (mirroring resolvePostingEndpoint's own posting
+    // check in the vendor file, which this deliberately duplicates rather
+    // than import, since that helper isn't exported and the vendor file
+    // stays byte-identical apart from the two locally-ported fixes
+    // documented in its README) names one. Without this guard,
+    // workdayDedupKey accepts ANY underscored last segment, so a board URL
+    // like ".../External_Career_Site" derives requisition "career_site",
+    // which then collides with ".../Internal_Career_Site" and can make
+    // Universal Intake report the board itself as an expired job (CR-29
+    // round 3).
+    const isWorkdayPostingPath = path
+      .split("/")
+      .filter(Boolean)
+      .some(
+        (segment, index, segments) => segment.toLowerCase() === "job" && index < segments.length - 1
+      );
+    const workdayId = isWorkdayPostingPath ? workdayDedupKey({ url: rawUrl }) : null;
     if (workdayId) {
       const workdayValue =
         workdayLiteralTail(rawUrl) ?? workdayId.slice(workdayId.lastIndexOf(":") + 1);
@@ -145,7 +164,37 @@ export function postingIdentityIsSeen(row, seenKeys) {
   return postingIdentityKeys(row).some((key) => seenKeys.has(key));
 }
 
+// A canonical row's OWN fields (url, reqId) only carry the identity it was
+// captured under. When canonical dedupe discards a differently-sourced
+// duplicate of that row (e.g. a HiringCafe-bridged republish of a direct
+// Workday posting), the discarded row's other identity keys are persisted
+// here so a LATER capture that only carries one of those other
+// representations (no outbound board URL, just the aggregator's own page)
+// still resolves back to the same row instead of inserting a duplicate.
+export function rowAliasKeys(row = {}) {
+  return Array.isArray(row.aliasKeys)
+    ? row.aliasKeys.filter((key) => typeof key === "string" && key)
+    : [];
+}
+
+// The keys addPostingIdentity/postingIdentityIsSeen should treat this row as
+// answering for: its own postingIdentityKeys() plus whatever aliases were
+// merged onto it by a prior duplicate-suppression (see rowAliasKeys above).
+export function identityKeysWithAliases(row = {}) {
+  return [...postingIdentityKeys(row), ...rowAliasKeys(row)];
+}
+
+// The identity keys `duplicate` carries that `canonicalRow` doesn't already
+// answer for (via its own fields or its existing aliasKeys): what a caller
+// discarding `duplicate` as a match for `canonicalRow` needs to add to
+// canonicalRow.aliasKeys so a future lookup by one of those keys still finds
+// it. Empty when the duplicate adds nothing new (the common case).
+export function identityAliasAdditions(canonicalRow, duplicate) {
+  const covered = new Set(identityKeysWithAliases(canonicalRow));
+  return postingIdentityKeys(duplicate).filter((key) => !covered.has(key));
+}
+
 export function addPostingIdentity(seenKeys, row) {
-  for (const key of postingIdentityKeys(row)) seenKeys.add(key);
+  for (const key of identityKeysWithAliases(row)) seenKeys.add(key);
   return seenKeys;
 }

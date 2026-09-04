@@ -304,11 +304,24 @@ export function workdayDedupKey(job) {
   const raw = lastSegment.slice(underscoreIdx + 1).toLowerCase();
   // Only treat a trailing "-N" as Workday's cross-site disambiguator when what
   // precedes it is already requisition-ID-shaped on its own (a leading digit,
-  // 2+ trailing digits, underscores allowed in between) — otherwise the hyphen
-  // digits ARE the requisition ID and must be kept, e.g. Walmart's "R-2593225"
-  // (credit: ronanime-arch, PR #3446).
+  // 2+ trailing digits, hyphens/underscores allowed in between), otherwise
+  // the hyphen digits ARE the requisition ID and must be kept, e.g. Walmart's
+  // "R-2593225" (credit: ronanime-arch, PR #3446).
+  //
+  // CareerRat-local fix (2026-09-04, CR-29 round 3). The shape check used to
+  // forbid hyphens/underscores between the leading letters and the first
+  // digit, so it rejected its own documented example the moment a "-N"
+  // disambiguator followed it: "r-2593225-2" left m[1] = "r-2593225", which
+  // the old `[a-z]*\d[a-z0-9_]*\d{2,}` pattern couldn't match (no hyphen in
+  // the character class), so the disambiguator went unstripped and the
+  // direct/aggregator republish never collapsed to one key. Same failure for
+  // underscore-separated bases like "jr_2024_00123": the old pattern required
+  // a digit immediately after the leading letters, with no separator allowed.
+  // Broadened to accept hyphens/underscores throughout while keeping the
+  // constraint that a genuine reqId-shaped base has a digit and ends in 2+
+  // trailing digits.
   const m = raw.match(/^(.*?)-(\d{1,2})$/);
-  const reqId = m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : raw;
+  const reqId = m && /^[a-z0-9_-]*\d[a-z0-9_-]*\d{2,}$/.test(m[1]) ? m[1] : raw;
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
 }

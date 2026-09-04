@@ -5,7 +5,11 @@ import { currencyCodePatternSource } from "../currency-format.mjs";
 import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../db/verbs/source-config.mjs";
-import { sourcedReconcilePolicyBatch, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import {
+  sourcedMergeIdentityAlias,
+  sourcedReconcilePolicyBatch,
+  sourcedUpsertBatch,
+} from "../db/verbs/sourced.mjs";
 import { readJobDescriptionArtifact } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
@@ -309,13 +313,36 @@ function jobDescriptionIsPartial(offer, body = offerBodyText(offer)) {
   return offer?.bodyPartial === true || body.length === 0;
 }
 
-function captureSourcedOfferJob({ repoRoot, env, offer, savedAt = new Date() } = {}) {
-  const pathCtx = { repoRoot, env };
+// Computes the deterministic JD artifact path + rendered content WITHOUT
+// touching disk. Split out of captureSourcedOfferJob so a caller that can't
+// yet promise this offer wins its slot (dedupeCanonical's inner duplicate
+// check, e.g.) can defer the actual write, see offerWithPendingCapturedJob.
+function preparedCapturedJob({ repoRoot, env, offer, savedAt }) {
   const relPath = jobCaptureRelPath(offer);
-  const absPath = userPath(pathCtx, relPath);
+  const absPath = userPath({ repoRoot, env }, relPath);
+  return { relPath, absPath, content: renderCapturedJob({ offer, savedAt }) };
+}
+
+function writeCapturedJob({ absPath, content }) {
   mkdirSync(dirname(absPath), { recursive: true });
-  atomicWriteFile(absPath, renderCapturedJob({ offer, savedAt }));
-  return relPath;
+  atomicWriteFile(absPath, content);
+}
+
+function captureSourcedOfferJob({ repoRoot, env, offer, savedAt = new Date() } = {}) {
+  const prepared = preparedCapturedJob({ repoRoot, env, offer, savedAt });
+  writeCapturedJob(prepared);
+  return prepared.relPath;
+}
+
+function offerWithArtifactPath(offer, relPath) {
+  const bodyText = offerBodyText(offer);
+  const { rawText, description, ...rest } = offer;
+  return {
+    ...rest,
+    ...(bodyText ? { bodyText } : {}),
+    bodyChars: bodyText.length,
+    artifacts: { ...(offer.artifacts || {}), jd: relPath },
+  };
 }
 
 export function offersWithCapturedJobs({ repoRoot, env, offers, savedAt = new Date() } = {}) {
@@ -326,13 +353,24 @@ export function offersWithCapturedJobs({ repoRoot, env, offers, savedAt = new Da
 
 function offerWithCapturedJob({ repoRoot, env, offer, savedAt }) {
   const jd = captureSourcedOfferJob({ repoRoot, env, offer, savedAt });
-  const bodyText = offerBodyText(offer);
-  const { rawText, description, ...rest } = offer;
+  return offerWithArtifactPath(offer, jd);
+}
+
+// Same shape as offerWithCapturedJob, but the JD artifact write is deferred:
+// the deterministic path lands in the returned offer's artifacts.jd exactly
+// as offerWithCapturedJob would set it, but the content isn't written to
+// disk until the caller invokes the returned `commit()`. Used by
+// captureAndPersistOffersIfDb's dedupeCanonical path (CR-29 round 3): the
+// caller there can't know until AFTER sourcedUpsertBatch's own duplicate
+// check whether this offer wins its deterministic path or loses it to an
+// already-accepted row with the same explicit reqId (different URL/body).
+// Committing unconditionally, as the immediate-write path does, let a
+// losing row's content silently overwrite the winner's artifact file.
+function offerWithPendingCapturedJob({ repoRoot, env, offer, savedAt }) {
+  const prepared = preparedCapturedJob({ repoRoot, env, offer, savedAt });
   return {
-    ...rest,
-    ...(bodyText ? { bodyText } : {}),
-    bodyChars: bodyText.length,
-    artifacts: { ...(offer.artifacts || {}), jd },
+    preparedOffer: offerWithArtifactPath(offer, prepared.relPath),
+    commit: () => writeCapturedJob(prepared),
   };
 }
 
@@ -415,6 +453,12 @@ function reconcileOffersBeforeCapture({ repoRoot, env, offers, dedupeCanonical }
   for (const offer of offers) {
     if (postingIdentityIsSeen(offer, seenPostingKeys)) {
       duplicates++;
+      // Persist the union of this discarded offer's identity keys onto
+      // whichever stored row it collided with (CR-29 round 3), so a LATER
+      // capture that only carries one of ITS other representations (e.g. an
+      // aggregator relisting with no outbound board URL) still resolves
+      // back to that same canonical row instead of inserting a duplicate.
+      sourcedMergeIdentityAlias({ repoRoot, env, offer });
       continue;
     }
     addPostingIdentity(seenPostingKeys, offer);
@@ -453,6 +497,15 @@ export function captureAndPersistOffersIfDb({
     };
   }
   const acceptedOffersById = new Map();
+  // JD artifact writes are deferred until each row's DB acceptance is known
+  // (CR-29 round 3): prepareAcceptedRow runs for every reconciled offer
+  // BEFORE sourcedUpsertBatch's own inner duplicate check decides which of
+  // them actually lands, so writing the deterministic artifact path
+  // immediately here let a row that loses that check (e.g. the same
+  // explicit reqId arriving with a changed URL/body) overwrite the winning
+  // row's already-accepted content. Only committed for ids that come back
+  // in persisted.acceptedIds below.
+  const pendingWritesById = new Map();
   const uncapturedRows = sourcedRowsFromScanOffers(reconciled.offers, savedAt.toISOString());
   const offerById = new Map(
     uncapturedRows.map((row, index) => [String(row.id), reconciled.offers[index]])
@@ -465,16 +518,20 @@ export function captureAndPersistOffersIfDb({
     guard,
     dedupeCanonical,
     prepareAcceptedRow: (row) => {
-      const captured = offerWithCapturedJob({
+      const { preparedOffer, commit } = offerWithPendingCapturedJob({
         repoRoot,
         env,
         offer: offerById.get(String(row.id)),
         savedAt,
       });
-      acceptedOffersById.set(String(row.id), captured);
-      return sourcedRowsFromScanOffers([captured], savedAt.toISOString())[0];
+      acceptedOffersById.set(String(row.id), preparedOffer);
+      pendingWritesById.set(String(row.id), commit);
+      return sourcedRowsFromScanOffers([preparedOffer], savedAt.toISOString())[0];
     },
   });
+  for (const id of persisted?.acceptedIds || []) {
+    pendingWritesById.get(String(id))?.();
+  }
   const acceptedOffers = (persisted?.acceptedIds || [])
     .map((id) => acceptedOffersById.get(String(id)))
     .filter(Boolean);

@@ -2142,6 +2142,91 @@ test("dedupes Workday postings republished with a cross-site disambiguator suffi
   assert.equal(unrelatedHost.id, null);
 });
 
+test("dedupes cross-site disambiguators on requisition bases with internal hyphens or underscores", () => {
+  // CR-29 round 3: the suffix guard's shape-check regex forbade hyphens and
+  // underscores between the leading letters and the first digit, so it
+  // rejected its own documented base shapes ("R-2593225") the moment a
+  // cross-site "-N" disambiguator followed them, and never matched
+  // underscore-separated bases ("JR_2024_00123") at all: the disambiguator
+  // went unstripped in both cases and the direct/aggregator republish never
+  // collapsed to one key. Regression covers extractReqId directly (the
+  // sourced-identity.mjs entry point) and the underlying vendored
+  // workdayDedupKey, for both a hyphen-bearing and an underscore-bearing
+  // base.
+  const hyphenBase = extractReqId(
+    "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Bentonville-AR/Staff-Engineer_R-2593225"
+  );
+  const hyphenSuffixed = extractReqId(
+    "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Bentonville-AR/Staff-Engineer_R-2593225-2"
+  );
+  assert.equal(hyphenBase.id, "workday:walmart.wd5.myworkdayjobs.com:r-2593225");
+  assert.equal(hyphenSuffixed.id, hyphenBase.id);
+  assert.equal(
+    workdayDedupKey({
+      url: "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Bentonville-AR/Staff-Engineer_R-2593225-2",
+    }),
+    hyphenBase.id
+  );
+
+  const underscoreBase = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123"
+  );
+  const underscoreSuffixed = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123-2"
+  );
+  assert.equal(underscoreBase.id, "workday:acme.wd5.myworkdayjobs.com:jr_2024_00123");
+  assert.equal(underscoreSuffixed.id, underscoreBase.id);
+  assert.equal(
+    workdayDedupKey({
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123-2",
+    }),
+    underscoreBase.id
+  );
+
+  // Aggregator representation: HiringCafe stamps its own reqId ahead of the
+  // Workday URL, so postingIdentityKeys must still surface the URL-derived
+  // key for the disambiguated aggregator row to collide with the direct one.
+  const directKeys = postingIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123",
+  });
+  const aggregatorKeys = postingIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    hiringCafeUrl: "https://hiring.cafe/job/some-aggregator-id",
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123-2",
+    reqId: "hiringcafe:some-aggregator-id",
+  });
+  assert.ok(directKeys.some((key) => aggregatorKeys.includes(key)));
+});
+
+test("extractReqId does not derive a requisition identity from a Workday board/portal root URL", () => {
+  // CR-29 round 3: delegating every myworkdayjobs.com URL to workdayDedupKey
+  // accepted board paths whose final segment merely contains an underscore
+  // (no /job/<leaf> posting segment at all): "External_Career_Site" derived
+  // requisition "career_site", colliding with a sibling board named
+  // "Internal_Career_Site". Only a genuine /job/<leaf> posting path may
+  // derive a requisition identity now.
+  const boardRoot = extractReqId("https://acme.wd5.myworkdayjobs.com/External_Career_Site");
+  assert.equal(boardRoot.id, null);
+  assert.equal(boardRoot.provider, null);
+
+  const siblingBoard = extractReqId("https://acme.wd5.myworkdayjobs.com/Internal_Career_Site");
+  assert.equal(siblingBoard.id, null);
+
+  const localeBoardRoot = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/External_Career_Site"
+  );
+  assert.equal(localeBoardRoot.id, null);
+
+  // A real posting under that same board still resolves normally.
+  const posting = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/External_Career_Site/job/Boston/Senior-Engineer_JR12345"
+  );
+  assert.equal(posting.id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+});
+
 test("extractReqId and the vendored workdayDedupKey collide on exactly the same Workday URL pairs", () => {
   // Fixture covers the divergent cases that used to make extractReqId and
   // workdayDedupKey disagree: same tenant on a different wd host, different
