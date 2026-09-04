@@ -135,6 +135,12 @@ function fakeExporter(calls) {
       result.docxTool = "test-double";
       result.docxLabel = "test double";
     }
+    if (formats.includes("text")) {
+      const textPath = `${outBase}.txt`;
+      mkdirSync(dirname(textPath), { recursive: true });
+      writeFileSync(textPath, "fake packet plain text\n", "utf8");
+      result.text = textPath;
+    }
     return result;
   };
 }
@@ -506,6 +512,36 @@ test("exportPacketArtifacts generates DOCX only for explicit selection or captur
   }
 });
 
+test("exportPacketArtifacts generates plain text only when explicitly requested", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  const result = await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].formats, ["pdf", "text"]);
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+  assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+  assert.equal(artifacts.resumeDocx ?? null, null);
+  assert.equal(
+    result.userFacing.resume.some((entry) => entry.format === "text"),
+    true
+  );
+});
+
 test("appRegisterPacketArtifacts stamps source and export fields through the DB-owned write path", async () => {
   const repoRoot = tempRepo();
   const sources = seedPacketSources(repoRoot);
@@ -579,6 +615,35 @@ test("POST /api/packet/export exports saved packet sources through the local rou
     const artifacts = readApp(repoRoot).artifacts;
     assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
     assert.match(artifacts.resumeDocx, /^workspace\/tailored\/.+\.docx$/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/export exports plain text through the local route", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const calls = [];
+  const server = await bootPacketServer(repoRoot, {
+    env: tempDownloadsEnv(),
+    packetExportArtifact: fakeExporter(calls),
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/export", {
+      appId: "app-export",
+      formats: ["text"],
+    });
+
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.appId, "app-export");
+    assert.deepEqual(calls[0].formats, ["pdf", "text"]);
+
+    const artifacts = readApp(repoRoot).artifacts;
+    assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+    assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
   } finally {
     await closeServer(server);
   }

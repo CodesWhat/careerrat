@@ -25,13 +25,22 @@ function isDocx(buffer) {
   );
 }
 
+// A plain-text export is "valid" when it's non-empty UTF-8 with no null
+// bytes (the one byte sequence that never appears in real text and reliably
+// flags a truncated or binary write).
+function isPlainText(buffer) {
+  return buffer.length > 0 && !buffer.includes(0);
+}
+
 export function validDocumentArtifact(path) {
   const extension = extname(String(path || "")).toLowerCase();
-  if (!new Set([".pdf", ".docx"]).has(extension) || !existsSync(path)) return false;
+  if (!new Set([".pdf", ".docx", ".txt"]).has(extension) || !existsSync(path)) return false;
   try {
     if (!statSync(path).isFile()) return false;
     const buffer = readFileSync(path);
-    return extension === ".pdf" ? isPdf(buffer) : isDocx(buffer);
+    if (extension === ".pdf") return isPdf(buffer);
+    if (extension === ".docx") return isDocx(buffer);
+    return isPlainText(buffer);
   } catch {
     return false;
   }

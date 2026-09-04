@@ -43,9 +43,10 @@ function sourceKind(sourceKey) {
   return "resume";
 }
 
+const FORMAT_SUFFIX = { pdf: "Pdf", docx: "Docx", text: "Text" };
+
 function outputKey(kind, format) {
-  if (kind === "coverLetter") return format === "pdf" ? "coverLetterPdf" : "coverLetterDocx";
-  return `${kind}${format === "pdf" ? "Pdf" : "Docx"}`;
+  return `${kind}${FORMAT_SUFFIX[format] || "Pdf"}`;
 }
 
 function titleFor(app, kind) {
@@ -115,6 +116,7 @@ function requestedFormats({ request = {}, uploadRequirements = [] } = {}) {
   const formats = new Set(["pdf"]);
   const requested = Array.isArray(request.formats) ? request.formats : [];
   if (requested.includes("docx")) formats.add("docx");
+  if (requested.includes("text")) formats.add("text");
   for (const requirement of uploadRequirements || []) {
     const reqFormats = Array.isArray(requirement?.formats) ? requirement.formats : [];
     if (requirement?.required && reqFormats.includes("docx")) formats.add("docx");
@@ -273,7 +275,7 @@ export async function exportPacketArtifacts({
     // standalone (without generatePacket) still leaves the packet readable.
     artifacts[kind] = storedPath;
     artifacts[`${kind}GeneratedAt`] = generatedAt;
-    for (const format of ["pdf", "docx"]) {
+    for (const format of ["pdf", "docx", "text"]) {
       const absPath = result[format];
       if (!selectedFormats.includes(format)) continue;
       if (!absPath || !validDocumentArtifact(absPath)) {

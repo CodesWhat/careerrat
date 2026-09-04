@@ -1,6 +1,8 @@
-// export.mjs — render tailored artifacts (resume, cover letter, packet) to PDF or DOCX.
-// PDF via Playwright Chromium; DOCX via pandoc → soffice → hand-rolled OOXML,
-// detected in that priority order. Preview fragments are sanitized server-side.
+// export.mjs — render tailored artifacts (resume, cover letter, packet) to
+// PDF, DOCX, or plain text. PDF via Playwright Chromium; DOCX via pandoc →
+// soffice → hand-rolled OOXML, detected in that priority order; plain text
+// via renderResumeText, built on the same block/run content model as DOCX.
+// Preview fragments are sanitized server-side.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -698,6 +700,95 @@ blockquote p { margin: 0; }
 ${body}
 </body>
 </html>`;
+}
+
+// ---------------------------------------------------------------------------
+// renderResumeText
+// ---------------------------------------------------------------------------
+
+/**
+ * Flatten a run list (parseRuns output — the same inline model renderDocx
+ * builds its WML from) to plain text. A link keeps its visible label and
+ * appends the URL in parens so the destination survives losing markdown
+ * syntax; every other run type (bold/italic/code/plain) already carries only
+ * its bare text.
+ *
+ * @param {Array<{text: string, href?: string}>} runs
+ * @returns {string}
+ */
+function runsToPlainText(runs) {
+  return (runs || [])
+    .map((run) => {
+      const text = String(run?.text || "");
+      if (run?.href && run.href !== text) {
+        return text ? `${text} (${run.href})` : run.href;
+      }
+      return text;
+    })
+    .join("");
+}
+
+/**
+ * Render a résumé/cover-letter/packet markdown string to plain text for
+ * application-form paste boxes and .txt downloads: no markdown syntax
+ * (headings, bold, tables, backticks, pipes), UTF-8, no smart quotes or em
+ * dashes, unwrapped lines (paste boxes reflow on their own). Sections are
+ * separated by a single blank line, with headings rendered in uppercase.
+ * Built on parseMdBlocks/parseRuns — the same content model renderDocx uses —
+ * so section order always matches the DOCX and ATS PDF output for the same
+ * markdown source.
+ *
+ * @param {string} markdown
+ * @returns {string}
+ */
+export function renderResumeText(markdown) {
+  const blocks = parseMdBlocks(normalizeAtsText(String(markdown ?? "")));
+  const lines = [];
+  let previousType = null;
+  let listCounter = 0;
+
+  function pushBlank() {
+    if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("");
+  }
+
+  for (const block of blocks) {
+    if (block.type === "heading") {
+      pushBlank();
+      lines.push(runsToPlainText(block.runs).toUpperCase());
+      pushBlank();
+    } else if (block.type === "para") {
+      if (previousType === "para" || previousType === "li" || previousType === "blockquote") {
+        pushBlank();
+      }
+      lines.push(runsToPlainText(block.runs));
+    } else if (block.type === "li") {
+      if (previousType !== "li") {
+        pushBlank();
+        listCounter = 0;
+      }
+      listCounter += 1;
+      const prefix = block.ordered ? `${listCounter}. ` : "- ";
+      lines.push(`${prefix}${runsToPlainText(block.runs)}`);
+    } else if (block.type === "blockquote") {
+      pushBlank();
+      lines.push(runsToPlainText(block.runs));
+    } else if (block.type === "table") {
+      pushBlank();
+      lines.push(block.headers.map(runsToPlainText).join("   "));
+      for (const row of block.rows) lines.push(row.map(runsToPlainText).join("   "));
+    } else if (block.type === "codeblock") {
+      pushBlank();
+      for (const codeLine of block.lines) lines.push(codeLine);
+    } else if (block.type === "hr") {
+      pushBlank();
+    }
+    previousType = block.type;
+  }
+
+  while (lines.length > 0 && lines[0] === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1664,12 +1755,12 @@ function dosDateTime(date) {
  * @param {{
  *   markdown: string,
  *   outBase: string,          e.g. "/path/to/Resume" (no extension)
- *   formats: Array<'pdf'|'docx'>,
+ *   formats: Array<'pdf'|'docx'|'text'>,
  *   title?: string,
  *   ats?: boolean             render the PDF with the ATS-safe standard font stack and
  *                             scrub bidi/hidden-text channels from both the PDF and DOCX
  * }} opts
- * @returns {Promise<{ pdf?: string, docx?: string, docxTool?: string, docxLabel?: string }>}
+ * @returns {Promise<{ pdf?: string, docx?: string, docxTool?: string, docxLabel?: string, text?: string }>}
  */
 export async function exportArtifact({
   markdown,
@@ -1691,6 +1782,10 @@ export async function exportArtifact({
       result.docx = docxPath;
       result.docxTool = info.tool;
       result.docxLabel = info.label;
+    } else if (fmt === "text") {
+      const textPath = `${outBase}.txt`;
+      writeFileSync(textPath, renderResumeText(markdown), "utf8");
+      result.text = textPath;
     }
   }
 
