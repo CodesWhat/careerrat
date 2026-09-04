@@ -1,5 +1,24 @@
 # Port parity: what the original did that the React app doesn't
 
+## Retired 2026-09-04
+
+This audit compared the original server-rendered dashboard against the page-based React UI
+(`JobsPage.jsx`, `DashboardV2Page.jsx`, `JobDrawer.jsx`, `CalendarV2Page.jsx`, `NetworkPage.jsx`,
+`LibraryPage.jsx`, `ActivityBell.jsx`, `JobRow.jsx`, and friends) and catalogued what that port dropped.
+Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted that whole
+page-based UI. The app is now a single chat/artifact surface under `apps/web/src/chat-first/`, which this
+audit never looked at, so its findings no longer describe the running app.
+
+The original content stays below for reference. Its item numbers are still cited by other docs. The
+capabilities it flagged as still wanted are being re-filed as fresh requests against the chat-first
+architecture rather than tracked here.
+
+<!-- markdownlint-disable MD022 MD032 MD012 -->
+<!-- Everything below "Original audit (retired)" is preserved byte-for-byte from the pre-retirement
+     file and is exempt from reformatting; do not run a markdown formatter over it. -->
+
+## Original audit (retired)
+
 ## Verdict
 
 The port is functionally complete for the single happy path (see today's top item, see this week, see one job) but it strips out almost every layer of depth behind that headline view. All 20 confirmed losses in this audit are render-only: the exact fields the React components need (`strategy`, `allNextSteps`, `jobs.rail`, `drawer.companyHealth`, calendar event export payloads, and so on) are already sitting in the view model that `dashboard-data.js` emits on every poll. Nothing here needs new backend work, it's all wiring that never got written. The single biggest category of loss is the "go deeper than the headline" layer: everywhere the original paired one featured card with a way to see and act on everything else (Focus plus the Next Steps queue plus the Action Queue drawer, one dashboard recommendation plus `jobs.rail`'s decision queue, one comp line plus the full negotiation band, one company name plus the health rating that scored it), the React port kept the featured card and dropped the machinery behind it. Jobs took the worst hit: search, filter, sort, decay state, comp band, health badge, and fit confidence are all gone, which means a candidate running more than a handful of applications has no way to work the list, only to eyeball it. Calendar is close behind, missing its entire reason for existing on top of the tracker (add-to-calendar) plus the week-paging that made it useful for planning ahead. This is a clean render pass through an already-complete API, not a re-architecture.
