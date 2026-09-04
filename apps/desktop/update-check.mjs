@@ -110,6 +110,7 @@ export function createDesktopUpdateController({
   }
 
   const supported = Boolean(selfUpdateSupported);
+  let installAccepted = false;
   let saved = {
     enabled: persisted.enabled ?? DEFAULT_STATE.enabled,
     lastCheckedAt: persisted.lastCheckedAt ?? DEFAULT_STATE.lastCheckedAt,
@@ -262,12 +263,27 @@ export function createDesktopUpdateController({
     error: fail,
   };
 
-  for (const [event, handler] of Object.entries(handlers))
-    updater.on(event, handler);
+  const boundHandlers = {};
+  for (const [event, handler] of Object.entries(handlers)) {
+    boundHandlers[event] = (...args) => {
+      if (installAccepted) {
+        log(event);
+        return undefined;
+      }
+      return handler(...args);
+    };
+    updater.on(event, boundHandlers[event]);
+  }
 
   async function checkNow({ manual = false, force = false } = {}) {
     if (!supported) return setRuntime({ manual: Boolean(manual) });
     if (!manual && !force && !saved.enabled) return getState();
+    if (installAccepted) return getState();
+    if (
+      !force &&
+      (runtime.phase === "checking" || runtime.phase === "downloading")
+    )
+      return getState();
 
     saved = { ...saved, lastCheckedAt: now() };
     persist(saved);
@@ -307,6 +323,12 @@ export function createDesktopUpdateController({
     });
   }
 
+  function acceptInstall() {
+    if (!supported || runtime.phase !== "ready") return false;
+    installAccepted = true;
+    return true;
+  }
+
   function install() {
     if (!supported || runtime.phase !== "ready") return false;
     updater.quitAndInstall(false, true);
@@ -314,11 +336,12 @@ export function createDesktopUpdateController({
   }
 
   function destroy() {
-    for (const [event, handler] of Object.entries(handlers))
+    for (const [event, handler] of Object.entries(boundHandlers))
       updater.removeListener(event, handler);
   }
 
   return {
+    acceptInstall,
     checkNow,
     destroy,
     getState,

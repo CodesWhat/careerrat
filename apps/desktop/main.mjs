@@ -279,6 +279,14 @@ async function boot() {
 }
 
 async function shutdown() {
+  // Disarm the update timer first: runtime teardown below can take several
+  // seconds (guided-setup cleanup is bounded at 8s), and a check firing in
+  // that window would flip a ready update back to "checking", so the
+  // Restart-and-install path would exit without installing.
+  if (updateCheckTimer) {
+    clearTimeout(updateCheckTimer);
+    updateCheckTimer = null;
+  }
   const active = dev;
   dev = null;
   if (active) await shutdownDesktopRuntime(active);
@@ -288,11 +296,6 @@ async function shutdown() {
   delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
   delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
   if (activePdfRenderer) await activePdfRenderer.close();
-
-  if (updateCheckTimer) {
-    clearTimeout(updateCheckTimer);
-    updateCheckTimer = null;
-  }
 }
 
 function openExternalIfAllowed(target, baseUrl) {
@@ -434,7 +437,7 @@ function registerUpdateCheckHandlers() {
   ipcMain.handle(UPDATE_IPC.checkNow, () => runManualUpdateCheck());
 
   ipcMain.handle(UPDATE_IPC.restartAndInstall, () => {
-    if (updateController.getState().phase !== "ready") return { accepted: false };
+    if (!updateController.acceptInstall()) return { accepted: false };
     installUpdateAfterShutdown = true;
     app.quit();
     return { accepted: true };
@@ -515,6 +518,7 @@ function installApplicationMenu() {
 function scheduleNextUpdateCheck() {
   if (updateCheckTimer) clearTimeout(updateCheckTimer);
   updateCheckTimer = null;
+  if (shuttingDown) return;
   if (!updateController?.getState().supported) return;
   const delay = nextUpdateCheckDelay({
     enabled: updateState.enabled,
@@ -538,6 +542,7 @@ function scheduleNextUpdateCheck() {
 
 async function runManualUpdateCheck() {
   try {
+    if (shuttingDown) return updateController.getState();
     return await updateController.checkNow({ manual: true });
   } finally {
     scheduleNextUpdateCheck();
@@ -731,6 +736,7 @@ app.whenReady().then(async () => {
       createController: createDesktopUpdateController,
       requestInstall(controller) {
         updateController = controller;
+        if (!controller.acceptInstall()) return false;
         installUpdateAfterShutdown = true;
         app.quit();
         return true;

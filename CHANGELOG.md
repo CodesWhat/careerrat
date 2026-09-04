@@ -21,6 +21,12 @@ All notable changes to CareerRat are documented here. This project follows
 - A Claude Code older than 2.1.241 can no longer be picked as the engine; the
   picker shows Update needed with the installed and required versions and an
   Update Claude Code button that runs the installer from inside the app.
+- A workspace that only needs the voluntary self-identification confirmation
+  no longer flashes the boot screen over that prompt on start.
+- Restart and install can no longer be cancelled by an update check that
+  runs during shutdown: accepting the install locks the downloaded update in
+  place, a second check never starts while one is in flight, and the
+  scheduled check is disarmed before teardown.
 
 ## [0.18.0] - 2026-09-03
 

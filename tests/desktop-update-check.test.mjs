@@ -258,6 +258,59 @@ describe("desktop updater controller", () => {
     assert.equal(controller.getState().phase, "current");
     assert.equal(controller.getState().version, "0.16.3");
   });
+
+  it("refuses to start a second check while one is in flight", async () => {
+    const { controller, updater } = makeController();
+
+    updater.emit("checking-for-update");
+    const state = await controller.checkNow({ manual: true });
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state.phase, "checking");
+
+    updater.emit("update-available", { version: "0.16.4" });
+    const state2 = await controller.checkNow({ manual: true });
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state2.phase, "downloading");
+  });
+
+  it("latches an accepted install so late updater events cannot revoke it", async () => {
+    const { controller, updater } = makeController();
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.acceptInstall(), true);
+
+    updater.emit("checking-for-update");
+    assert.equal(controller.getState().phase, "ready");
+
+    updater.emit("update-available", { version: "0.16.5" });
+    assert.equal(controller.getState().phase, "ready");
+
+    updater.emit("error", new Error("network blip"));
+    assert.equal(controller.getState().phase, "ready");
+
+    updater.emit("update-cancelled");
+    assert.equal(controller.getState().phase, "ready");
+
+    const state = await controller.checkNow({ force: true });
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state.phase, "ready");
+
+    assert.equal(controller.install(), true);
+    assert.deepEqual(updater.installCalls, [[false, true]]);
+  });
+
+  it("does not accept an install that is not ready", () => {
+    const { controller, updater } = makeController();
+    updater.emit("checking-for-update");
+    assert.equal(controller.getState().phase, "checking");
+    assert.equal(controller.acceptInstall(), false);
+    assert.equal(controller.install(), false);
+
+    updater.emit("update-not-available", { version: "0.16.3" });
+    assert.equal(controller.getState().phase, "current");
+    assert.equal(controller.acceptInstall(), false);
+    assert.equal(controller.install(), false);
+  });
 });
 
 describe("updater error copy", () => {
