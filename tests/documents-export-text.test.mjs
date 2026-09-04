@@ -29,11 +29,21 @@ const FIXTURE_RESUME = `# Jordan Rivera
 2. BS Mathematics, State University
 `;
 
+// Test-only: pulls heading text out of the rendered HTML. Tags are removed
+// until none remain, so a tag split across another tag cannot survive.
+function stripTags(html) {
+  let text = html;
+  let previous;
+  do {
+    previous = text;
+    text = text.replace(/<[^>]*>/g, "");
+  } while (text !== previous);
+  return text;
+}
+
 function headingsFromHtml(markdown) {
   const html = markdownToHtml(markdown);
-  return [...html.matchAll(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/gs)].map((m) =>
-    m[1].replace(/<[^>]+>/g, "").trim()
-  );
+  return [...html.matchAll(/<h[1-6][^>]*>(.*?)<\/h[1-6]>/gs)].map((m) => stripTags(m[1]).trim());
 }
 
 function nonBlankLines(text) {
