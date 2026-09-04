@@ -787,12 +787,14 @@ test("a same-owner re-export reuses its own registered destination and overwrite
     now: () => new Date("2026-07-06T15:00:00Z"),
   });
 
+  // calls[0].outBase now points into the batch's confined staging
+  // directory, not the final destination directly — the render happens
+  // there first and is only promoted (renamed) into the real destination
+  // once the whole batch validates. The "reuses its own destination rather
+  // than picking a suffix" invariant this test exists for is what lands
+  // after promotion, so assert it there instead of on the exporter's raw
+  // outBase argument.
   assert.equal(calls.length, 1);
-  assert.equal(
-    `${calls[0].outBase}.txt`,
-    join(repoRoot, priorResumeText),
-    "the re-export reuses its own registered destination rather than picking a suffix"
-  );
   assert.equal(
     readFileSync(join(repoRoot, priorResumeText), "utf8"),
     "fake packet plain text\n",
@@ -800,7 +802,11 @@ test("a same-owner re-export reuses its own registered destination and overwrite
   );
 
   const artifacts = readApp(repoRoot).artifacts;
-  assert.equal(artifacts.resumeText, priorResumeText);
+  assert.equal(
+    artifacts.resumeText,
+    priorResumeText,
+    "the re-export reuses its own registered destination rather than picking a suffix"
+  );
 });
 
 test("an unrelated application's registered artifact at the computed destination survives", async () => {
@@ -865,6 +871,352 @@ test("an unrelated application's registered artifact at the computed destination
 
   const artifacts = readApp(repoRoot, "app-export").artifacts;
   assert.notEqual(artifacts.resumeText, otherResumeText);
+});
+
+test("a shared existing path registered by two applications is not overwritten", async () => {
+  // Regression: registeredDestination(kind, format) only ever asks "did
+  // THIS application register this path" by reading its own artifacts. If
+  // app-export's own artifacts.resumeText happens to point at the exact
+  // same path app-other's artifacts.resumeText also points at (e.g. both
+  // rows still carry a stale pointer to a resume the two applications once
+  // shared), the same-owner-reuse check saw only "my own registered
+  // destination" and treated it as safe to overwrite -- destroying
+  // app-other's file. The cross-application owner index must veto reuse
+  // the moment ANY other application also has this exact path registered,
+  // regardless of what this application's own artifacts say.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-resume.md",
+    "# Acme Staff Engineer\n\nEvidence-backed resume body.\n"
+  );
+  const sharedContent = "shared plain-text resume both rows still point at\n";
+  const sharedResumeText = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-resume.txt",
+    sharedContent
+  );
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeSource, packetManifest, resumeText: sharedResumeText },
+    },
+    {
+      id: "app-other",
+      company: "Globex",
+      role: "Principal Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeText: sharedResumeText },
+    },
+  ]);
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(
+    readFileSync(join(repoRoot, sharedResumeText), "utf8"),
+    sharedContent,
+    "the path shared with another application must survive byte-for-byte"
+  );
+
+  const artifacts = readApp(repoRoot, "app-export").artifacts;
+  assert.notEqual(
+    artifacts.resumeText,
+    sharedResumeText,
+    "app-export's re-export must not reuse a destination another application also registered"
+  );
+});
+
+test("a foreign registered path whose file is missing is not claimed", async () => {
+  // Regression: the pre-fix availability check was existsSync-gated —
+  // `if (!existsSync(candidatePath)) return false` (available) — so a path
+  // another application had registered, but whose file was currently
+  // missing from disk (deleted by hand, never rendered, etc.), looked
+  // exactly like empty, unclaimed space. The foreign-owner index must
+  // reserve a registered path regardless of whether its file currently
+  // exists.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-resume.md",
+    "# Acme Staff Engineer\n\nEvidence-backed resume body.\n"
+  );
+  const missingResumeText = "workspace/tailored/shared-resume.txt";
+  assert.equal(
+    existsSync(join(repoRoot, missingResumeText)),
+    false,
+    "test setup: the foreign-registered file must not exist on disk"
+  );
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeSource, packetManifest },
+    },
+    {
+      id: "app-other",
+      company: "Globex",
+      role: "Principal Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeText: missingResumeText },
+    },
+  ]);
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(
+    existsSync(join(repoRoot, missingResumeText)),
+    false,
+    "the foreign-registered path must stay empty, not get claimed by this export"
+  );
+
+  const artifacts = readApp(repoRoot, "app-export").artifacts;
+  assert.notEqual(
+    artifacts.resumeText,
+    missingResumeText,
+    "app-export must not claim a path another application registered, even with no file on disk"
+  );
+});
+
+test("a renderer failure after the first successful render leaves prior files and metadata intact", async () => {
+  // Batch atomicity: every render in a multi-document batch goes to a
+  // confined staging directory first, and promotion (renaming staged
+  // renders into their real destinations) only happens after every
+  // document in the batch has rendered successfully. resumeSource renders
+  // fine here, but coverLetterSource's render throws -- so even resume's
+  // successful render must never reach its final destination: the prior
+  // resumePdf (and the untouched answersPdf, whose render never even ran)
+  // must both survive byte-for-byte, and the packet manifest/application
+  // row must stay exactly as they were before this call.
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot, "batch-atomic");
+  const resumeStem = sources.resumeSource.replace(/\.md$/, "");
+  const coverLetterStem = sources.coverLetterSource.replace(/\.md$/, "");
+  const answersStem = sources.answersSource.replace(/\.md$/, "");
+  const priorResumePdf = writeWorkspaceFile(
+    repoRoot,
+    `${resumeStem.replace(/^workspace\//, "")}.pdf`,
+    "%PDF-1.4\nprior resume\n%%EOF\n"
+  );
+  const priorCoverLetterPdf = writeWorkspaceFile(
+    repoRoot,
+    `${coverLetterStem.replace(/^workspace\//, "")}.pdf`,
+    "%PDF-1.4\nprior cover letter\n%%EOF\n"
+  );
+  const priorAnswersPdf = writeWorkspaceFile(
+    repoRoot,
+    `${answersStem.replace(/^workspace\//, "")}.pdf`,
+    "%PDF-1.4\nprior answers\n%%EOF\n"
+  );
+  const priorArtifacts = {
+    ...sources,
+    resumePdf: priorResumePdf,
+    coverLetterPdf: priorCoverLetterPdf,
+    answersPdf: priorAnswersPdf,
+  };
+  const priorManifest = {
+    applicationId: "app-export",
+    generatedAt: "2026-07-06T14:00:00Z",
+    uploadReady: true,
+    status: "upload-ready",
+    gapCount: 0,
+    gaps: [],
+    artifacts: priorArtifacts,
+  };
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: priorArtifacts,
+      packetManifest: priorManifest,
+    },
+  ]);
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  const renderCalls = [];
+  const crashingExportArtifact = async ({ outBase, formats, title }) => {
+    renderCalls.push(title);
+    if (title.includes("Cover Letter")) {
+      throw new Error("simulated renderer crash for cover letter");
+    }
+    const result = {};
+    if (formats.includes("pdf")) {
+      const pdfPath = `${outBase}.pdf`;
+      mkdirSync(dirname(pdfPath), { recursive: true });
+      writeFileSync(pdfPath, "%PDF-1.4\nfreshly rendered resume\n%%EOF\n", "utf8");
+      result.pdf = pdfPath;
+    }
+    return result;
+  };
+
+  await assert.rejects(
+    () =>
+      exportPacketArtifacts({
+        repoRoot,
+        env: tempDownloadsEnv(),
+        appId: "app-export",
+        request: { formats: ["pdf"] },
+        exportArtifact: crashingExportArtifact,
+        now: () => new Date("2026-07-06T15:00:00Z"),
+      }),
+    /simulated renderer crash for cover letter/
+  );
+
+  // The resume render succeeded and answers was never even attempted
+  // (answers comes after coverLetter in source order), but neither must
+  // reach the real destination: promotion only happens after the WHOLE
+  // batch renders successfully.
+  assert.equal(renderCalls.length, 2, "answers must never be rendered once cover letter crashes");
+  assert.equal(
+    readFileSync(join(repoRoot, priorResumePdf), "utf8"),
+    "%PDF-1.4\nprior resume\n%%EOF\n",
+    "resume's successful render in this batch must not be promoted"
+  );
+  assert.equal(
+    readFileSync(join(repoRoot, priorCoverLetterPdf), "utf8"),
+    "%PDF-1.4\nprior cover letter\n%%EOF\n"
+  );
+  assert.equal(
+    readFileSync(join(repoRoot, priorAnswersPdf), "utf8"),
+    "%PDF-1.4\nprior answers\n%%EOF\n"
+  );
+
+  const appAfter = readApp(repoRoot, "app-export");
+  assert.deepEqual(appAfter.artifacts, priorArtifacts);
+  assert.deepEqual(appAfter.packetManifest, priorManifest);
+
+  // The confined staging directory is always cleaned up, success or failure.
+  const leftoverStaging = readdirSync(join(repoRoot, "workspace")).filter((name) =>
+    name.startsWith(".export-staging-")
+  );
+  assert.deepEqual(leftoverStaging, []);
+});
+
+test("a registration failure restores the prior files and pointers", async () => {
+  // The other half of batch atomicity: every staged render can promote
+  // (rename into its real destination) cleanly, and it's only the DB
+  // registration afterward that fails. Every promoted file must be rolled
+  // back to its pre-call state (backup restored, or removed if it had no
+  // predecessor) and the application row/manifest must stay exactly as
+  // they were before this call -- not the new, never-committed state.
+  //
+  // Forces the failure deterministically: the prior manifest's `artifacts`
+  // carries a key the packet-manifest schema doesn't recognize
+  // (additionalProperties: false), which survives mergeArtifacts into the
+  // new manifest and makes appRegisterPacketArtifacts's schema validation
+  // throw from inside its own (uncommitted) DB transaction -- a real,
+  // non-ExportFailedError failure with no `.committed` flag, exactly the
+  // case rollbackPromotion exists for.
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot, "registration-fail");
+  const resumeStem = sources.resumeSource.replace(/\.md$/, "").replace(/^workspace\//, "");
+  const priorResumePdf = writeWorkspaceFile(
+    repoRoot,
+    `${resumeStem}.pdf`,
+    "%PDF-1.4\nprior resume\n%%EOF\n"
+  );
+  const priorArtifacts = { ...sources, resumePdf: priorResumePdf };
+  const priorManifest = {
+    applicationId: "app-export",
+    generatedAt: "2026-07-06T14:00:00Z",
+    uploadReady: true,
+    status: "upload-ready",
+    gapCount: 0,
+    gaps: [],
+    artifacts: { ...priorArtifacts, notASchemaRecognizedKey: "workspace/tailored/whatever.pdf" },
+  };
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: priorArtifacts,
+      packetManifest: priorManifest,
+    },
+  ]);
+  const manifestFull = join(repoRoot, sources.packetManifest);
+  const priorManifestFileContent = readFileSync(manifestFull, "utf8");
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  const calls = [];
+  await assert.rejects(
+    () =>
+      exportPacketArtifacts({
+        repoRoot,
+        env: tempDownloadsEnv(),
+        appId: "app-export",
+        packetSources: {
+          resumeSource: sources.resumeSource,
+          packetManifest: sources.packetManifest,
+        },
+        request: { formats: ["pdf"] },
+        exportArtifact: fakeExporter(calls),
+        now: () => new Date("2026-07-06T15:00:00Z"),
+      }),
+    /packet manifest is invalid/
+  );
+
+  assert.equal(calls.length, 1, "the render did run and would have promoted successfully");
+  assert.equal(
+    readFileSync(join(repoRoot, priorResumePdf), "utf8"),
+    "%PDF-1.4\nprior resume\n%%EOF\n",
+    "the promoted resume PDF must be rolled back to its pre-call backup"
+  );
+  assert.equal(
+    readFileSync(manifestFull, "utf8"),
+    priorManifestFileContent,
+    "the on-disk packet manifest file must be restored from its backup"
+  );
+
+  const appAfter = readApp(repoRoot, "app-export");
+  assert.deepEqual(appAfter.artifacts, priorArtifacts);
+  assert.deepEqual(appAfter.packetManifest, priorManifest);
+
+  const leftoverStaging = readdirSync(join(repoRoot, "workspace")).filter((name) =>
+    name.startsWith(".export-staging-")
+  );
+  assert.deepEqual(leftoverStaging, []);
+  const leftoverBackups = readdirSync(join(repoRoot, "workspace/tailored")).filter((name) =>
+    name.includes(".bak-")
+  );
+  assert.deepEqual(leftoverBackups, [], "no .bak sibling should survive a completed rollback");
 });
 
 test("a text-only regeneration clears a prior resumePdf so apply cannot still select it", async () => {

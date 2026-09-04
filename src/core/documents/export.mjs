@@ -5,7 +5,14 @@
 // Preview fragments are sanitized server-side.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +20,28 @@ import { deflateRawSync } from "node:zlib";
 import sanitizeHtml from "sanitize-html";
 
 const repoRoot = join(fileURLToPath(new URL("../../..", import.meta.url)));
+
+// exportArtifact is the one shared entry point every caller (the CLI
+// script, packet/exports.mjs's batch export, tests) funnels a Markdown
+// source through, so a size cap here bounds every format's parsing cost —
+// including parseMdBlocks/parseRuns' per-paragraph allocations, the DOCX
+// OOXML writer, and the ATS PDF HTML build — at the door, rather than each
+// caller having to remember to check first. 2 MiB comfortably covers any
+// real resume/cover-letter/answers markdown source; a paragraph beyond that
+// is a bug or an attack, not a legitimate export.
+export const MARKDOWN_SOURCE_MAX_BYTES = 2 * 1024 * 1024;
+
+function assertMarkdownSourceSize(markdown) {
+  const byteLength = Buffer.byteLength(String(markdown ?? ""), "utf8");
+  if (byteLength > MARKDOWN_SOURCE_MAX_BYTES) {
+    const err = new Error(
+      `exportArtifact: markdown source is ${byteLength} bytes, which exceeds the ${MARKDOWN_SOURCE_MAX_BYTES}-byte export limit.`
+    );
+    err.code = "MARKDOWN_SOURCE_TOO_LARGE";
+    throw err;
+  }
+}
+
 const ARTIFACT_HTML_TAGS = [
   "h1",
   "h2",
@@ -1869,6 +1898,16 @@ function findDelimiterClose(text, from, closeToken, excludeChar) {
   return text.startsWith(closeToken, j) ? j : -1;
 }
 
+// Every inline construct parseRuns recognizes is anchored on one of these
+// characters (code/link brackets/emphasis markers) or the hard-break
+// sentinel. A paragraph containing none of them can only ever produce the
+// single plain-text run flushPlain(n) would have built anyway, so testing
+// for their presence once up front is a correct O(n) substitute for running
+// the full cursor walk — and, more importantly, for the O(n) Int32Array
+// allocations below it. Plain prose (the common case for a resume/cover
+// letter paragraph) is exactly the shape this skips the slow path for.
+const PARSE_RUNS_DELIMITER_PATTERN = /[*_`[\]()\u{e000}]/u;
+
 /**
  * Parse inline markdown into runs: bold, italic, code, links, plain text.
  *
@@ -1885,21 +1924,40 @@ function findDelimiterClose(text, from, closeToken, excludeChar) {
  * @returns {Run[]}
  */
 function parseRuns(text) {
+  if (!PARSE_RUNS_DELIMITER_PATTERN.test(text)) {
+    // No code/emphasis/link marker and no hard-break sentinel: the whole
+    // string is exactly one plain-text run, the same result flushPlain(n)
+    // below would build via pushPlainText, but without allocating any of
+    // the O(n)-sized lookup structures a delimiter-free paragraph never
+    // needs. A multi-megabyte plain paragraph (a long summary, a pasted
+    // block of prose) used to allocate several input-sized Int32Arrays for
+    // nothing.
+    return text ? [{ text }] : [];
+  }
+
   const runs = [];
   const n = text.length;
 
   // One backward pass giving an O(1) "next ']' at or after i" lookup for
   // every position — see matchLinkAt's doc comment for why this matters.
-  const nextCloseBracket = new Int32Array(n + 1);
-  nextCloseBracket[n] = -1;
-  for (let k = n - 1; k >= 0; k--) {
-    nextCloseBracket[k] = text[k] === "]" ? k : nextCloseBracket[k + 1];
+  // Only built when the text actually contains a "[": a paragraph with
+  // bold/italic/code but no link never needs the link-matching structures
+  // at all.
+  const hasLink = text.includes("[");
+  let nextCloseBracket = null;
+  let nextEqualParenDelta = null;
+  if (hasLink) {
+    nextCloseBracket = new Int32Array(n + 1);
+    nextCloseBracket[n] = -1;
+    for (let k = n - 1; k >= 0; k--) {
+      nextCloseBracket[k] = text[k] === "]" ? k : nextCloseBracket[k + 1];
+    }
+    // Same idea for a link destination's matching close parenthesis: resolve
+    // every position's answer once, up front, instead of letting matchLinkAt
+    // rescan the remaining text for each candidate "(" it's asked about.
+    const parenDelta = parenDeltaPrefixSums(text);
+    nextEqualParenDelta = nextEqualPrefixSum(parenDelta);
   }
-  // Same idea for a link destination's matching close parenthesis: resolve
-  // every position's answer once, up front, instead of letting matchLinkAt
-  // rescan the remaining text for each candidate "(" it's asked about.
-  const parenDelta = parenDeltaPrefixSums(text);
-  const nextEqualParenDelta = nextEqualPrefixSum(parenDelta);
 
   let plainStart = 0;
   let i = 0;
@@ -1979,7 +2037,7 @@ function parseRuns(text) {
     }
 
     if (ch === "[") {
-      const link = matchLinkAt(text, i, nextCloseBracket, nextEqualParenDelta);
+      const link = hasLink ? matchLinkAt(text, i, nextCloseBracket, nextEqualParenDelta) : null;
       if (link) {
         flushPlain(i);
         // The destination stays opaque, but the visible label can itself
@@ -2329,15 +2387,17 @@ function dosDateTime(date) {
  * @param {string} [root] trusted packet/workspace root the destination must resolve inside
  * @returns {string} the destination path
  */
-function writeTextArtifactConfined(outBase, text, root) {
-  if (!outBase || !isAbsolute(outBase)) {
-    throw new Error(
-      `exportArtifact: outBase must be a non-empty absolute path, got ${JSON.stringify(outBase)}`
-    );
-  }
-
-  const destPath = `${outBase}.txt`;
-  const parentDir = dirname(outBase);
+// Shared by every format (text, pdf, docx): resolve `destPath`'s parent
+// against a caller-trusted `root` with realpath() on both sides, so a
+// symlinked ancestor (e.g. workspace/tailored pointing entirely outside the
+// workspace) can't redirect the write — a lexical containment check alone is
+// self-referential (the "packet directory" it checks against is just
+// dirname(destPath) again) and catches nothing. Without `root`, falls back
+// to the old lexical containment for callers that haven't adopted a trusted
+// root yet (the CLI script, which writes next to its own input file).
+// `formatLabel` only changes the thrown error text ("PDF"/"DOCX"/"text").
+function confineExportDestination(destPath, root, formatLabel) {
+  const parentDir = dirname(destPath);
   let confinedParent = resolve(parentDir);
 
   if (root != null) {
@@ -2357,7 +2417,7 @@ function writeTextArtifactConfined(outBase, text, root) {
       canonicalParent = realpathSync(parentDir);
     } catch {
       throw new Error(
-        `exportArtifact: text export destination directory does not exist: ${parentDir}`
+        `exportArtifact: ${formatLabel} export destination directory does not exist: ${parentDir}`
       );
     }
     if (
@@ -2365,7 +2425,7 @@ function writeTextArtifactConfined(outBase, text, root) {
       !canonicalParent.startsWith(`${canonicalRoot}${sep}`)
     ) {
       throw new Error(
-        `exportArtifact: text export destination escapes the trusted root: ${destPath}`
+        `exportArtifact: ${formatLabel} export destination escapes the trusted root: ${destPath}`
       );
     }
     confinedParent = canonicalParent;
@@ -2373,12 +2433,93 @@ function writeTextArtifactConfined(outBase, text, root) {
     const resolvedDest = resolve(destPath);
     if (resolvedDest !== confinedParent && !resolvedDest.startsWith(`${confinedParent}${sep}`)) {
       throw new Error(
-        `exportArtifact: text export destination escapes the packet directory: ${destPath}`
+        `exportArtifact: ${formatLabel} export destination escapes the packet directory: ${destPath}`
       );
     }
   }
 
-  const finalDestPath = join(confinedParent, basename(destPath));
+  return join(confinedParent, basename(destPath));
+}
+
+// PDF and DOCX rendering (renderPdf/renderDocx below) write through a
+// third-party tool (Playwright, pandoc, soffice) or a raw fs write directly
+// to whatever path they're handed — none of them know about a trusted root,
+// and a couple (Playwright's page.pdf({path}), a plain writeFileSync) will
+// happily follow a symlink sitting at that path. The text writer never had
+// this problem because it always renders to a fresh randomly-named sibling
+// and rename()s into place; renderFormatConfined below gives PDF/DOCX the
+// same guarantee. A destination that is ALREADY a symlink (dangling or not)
+// is refused outright rather than silently replaced — unlike the text
+// writer's older, more permissive path, a PDF/DOCX destination that turns
+// out to be a symlink is far more likely to be a sign of tampering than of
+// a legitimate prior export, since nothing in this codebase ever creates
+// one on purpose.
+function refuseSymlinkDestination(finalDestPath, formatLabel) {
+  let stat;
+  try {
+    stat = lstatSync(finalDestPath);
+  } catch {
+    return;
+  }
+  if (stat.isSymbolicLink()) {
+    throw new Error(
+      `exportArtifact: ${formatLabel} export destination is a symlink, refusing to write: ${finalDestPath}`
+    );
+  }
+}
+
+// A confined temp sibling that KEEPS the destination's own extension
+// (`.export-tmp-<pid>-<ts>-<rand>-resume.docx`, not
+// `resume.docx.tmp-<rand>`): pandoc infers its output format from the `-o`
+// path's extension (renderDocxViaPandoc passes no explicit `--to`), so a
+// temp name that lost the `.docx` suffix would silently change what pandoc
+// writes.
+function confinedTempSiblingPath(finalDestPath) {
+  return join(
+    dirname(finalDestPath),
+    `.export-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}-${basename(finalDestPath)}`
+  );
+}
+
+// Render one PDF or DOCX format through `render(tmpPath)` into a confined,
+// uniquely-named sibling of the validated final destination, then rename()
+// into place — the same write-elsewhere-then-atomically-replace pattern
+// writeTextArtifactConfined already uses, so a renderer that follows
+// symlinks or partially writes on failure never touches the real
+// destination path directly.
+async function renderFormatConfined({ destPath, root, formatLabel, render }) {
+  if (!destPath || !isAbsolute(destPath)) {
+    throw new Error(
+      `exportArtifact: outBase must be a non-empty absolute path, got ${JSON.stringify(destPath)}`
+    );
+  }
+  const finalDestPath = confineExportDestination(destPath, root, formatLabel);
+  refuseSymlinkDestination(finalDestPath, formatLabel);
+  const tmpPath = confinedTempSiblingPath(finalDestPath);
+  let info;
+  try {
+    info = await render(tmpPath);
+  } catch (err) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // best-effort: the renderer may never have created the file
+    }
+    throw err;
+  }
+  renameSync(tmpPath, finalDestPath);
+  return { finalDestPath, info };
+}
+
+function writeTextArtifactConfined(outBase, text, root) {
+  if (!outBase || !isAbsolute(outBase)) {
+    throw new Error(
+      `exportArtifact: outBase must be a non-empty absolute path, got ${JSON.stringify(outBase)}`
+    );
+  }
+
+  const destPath = `${outBase}.txt`;
+  const finalDestPath = confineExportDestination(destPath, root, "text");
   const tmpPath = `${finalDestPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   writeFileSync(tmpPath, text, { encoding: "utf8", flag: "wx" });
   renameSync(tmpPath, finalDestPath);
@@ -2393,17 +2534,29 @@ export async function exportArtifact({
   ats = false,
   root,
 }) {
+  assertMarkdownSourceSize(markdown);
   const result = {};
 
   for (const fmt of formats) {
     if (fmt === "pdf") {
-      const pdfPath = `${outBase}.pdf`;
-      await renderPdf({ markdown, outPath: pdfPath, title, ats });
-      result.pdf = pdfPath;
+      const { finalDestPath } = await renderFormatConfined({
+        destPath: `${outBase}.pdf`,
+        root,
+        formatLabel: "PDF",
+        render: (tmpPath) => renderPdf({ markdown, outPath: tmpPath, title, ats }),
+      });
+      result.pdf = finalDestPath;
     } else if (fmt === "docx") {
-      const docxPath = `${outBase}.docx`;
-      const info = await renderDocx({ markdown, outPath: docxPath, title, ats });
-      result.docx = docxPath;
+      let info;
+      const { finalDestPath } = await renderFormatConfined({
+        destPath: `${outBase}.docx`,
+        root,
+        formatLabel: "DOCX",
+        render: async (tmpPath) => {
+          info = await renderDocx({ markdown, outPath: tmpPath, title, ats });
+        },
+      });
+      result.docx = finalDestPath;
       result.docxTool = info.tool;
       result.docxLabel = info.label;
     } else if (fmt === "text") {

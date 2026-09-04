@@ -17,6 +17,7 @@ import {
   analyticsRefresh,
   appApproveReview,
   appCaptureInterviewIntake,
+  appListArtifactRegistrations,
   appPersistEvaluation,
   appRecordOutcome,
   appRegisterArtifact,
@@ -1405,6 +1406,133 @@ test("appRegisterPacketArtifacts accepts GeneratedAt timestamps but still reject
       }),
     /workspace|artifact path/i
   );
+});
+
+// appListArtifactRegistrations is the cross-application owner index that
+// packet/exports.mjs's collision check reads before reusing a destination
+// path: any path registered by ANOTHER application is reserved, even when
+// that other application's file is missing from disk (a foreign registration
+// is a claim on the path, not a claim the file currently exists).
+test("appListArtifactRegistrations classifies every registered artifact key across all applications", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-one",
+      company: "Acme",
+      role: "Engineer",
+      status: "reviewed-hold",
+      artifacts: {
+        resumePdf: "workspace/tailored/app-one/resume.pdf",
+        resumeDocx: "workspace/tailored/app-one/resume.docx",
+        resumeText: "workspace/tailored/app-one/resume.txt",
+        resumeSource: "workspace/tailored/app-one/resume.md",
+        coverLetter: "workspace/tailored/app-one/cover-letter.md",
+        packetManifest: "workspace/tailored/app-one/manifest.json",
+        resumeGeneratedAt: "2026-08-24T12:00:00.000Z",
+        packetGeneratedAt: "2026-08-24T12:00:00.000Z",
+      },
+    },
+  });
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-two",
+      company: "Globex",
+      role: "Manager",
+      status: "applied",
+      artifacts: {
+        answersPdf: "workspace/tailored/app-two/answers.pdf",
+      },
+    },
+  });
+
+  const registrations = appListArtifactRegistrations({ repoRoot });
+  const byPath = new Map(registrations.map((r) => [r.path, r]));
+
+  assert.deepEqual(byPath.get("workspace/tailored/app-one/resume.pdf"), {
+    applicationId: "app-one",
+    kind: "resume",
+    format: "pdf",
+    path: "workspace/tailored/app-one/resume.pdf",
+  });
+  assert.deepEqual(byPath.get("workspace/tailored/app-one/resume.docx"), {
+    applicationId: "app-one",
+    kind: "resume",
+    format: "docx",
+    path: "workspace/tailored/app-one/resume.docx",
+  });
+  assert.deepEqual(byPath.get("workspace/tailored/app-one/resume.txt"), {
+    applicationId: "app-one",
+    kind: "resume",
+    format: "text",
+    path: "workspace/tailored/app-one/resume.txt",
+  });
+  assert.deepEqual(byPath.get("workspace/tailored/app-one/resume.md"), {
+    applicationId: "app-one",
+    kind: "resume",
+    format: "source",
+    path: "workspace/tailored/app-one/resume.md",
+  });
+  assert.deepEqual(byPath.get("workspace/tailored/app-one/cover-letter.md"), {
+    applicationId: "app-one",
+    kind: "coverLetter",
+    format: "plain",
+    path: "workspace/tailored/app-one/cover-letter.md",
+  });
+  assert.deepEqual(byPath.get("workspace/tailored/app-one/manifest.json"), {
+    applicationId: "app-one",
+    kind: "packetManifest",
+    format: "manifest",
+    path: "workspace/tailored/app-one/manifest.json",
+  });
+  assert.deepEqual(byPath.get("workspace/tailored/app-two/answers.pdf"), {
+    applicationId: "app-two",
+    kind: "answers",
+    format: "pdf",
+    path: "workspace/tailored/app-two/answers.pdf",
+  });
+
+  // *GeneratedAt stamps are timestamps, not paths, and must never surface as
+  // a registration (they'd otherwise poison the owner index with a bogus
+  // "path" equal to an ISO date string).
+  assert.equal(byPath.has("2026-08-24T12:00:00.000Z"), false);
+
+  // Exactly the seven real path-shaped keys above, nothing extra picked up
+  // from the two GeneratedAt stamps on app-one.
+  assert.equal(registrations.length, 7);
+});
+
+test("appListArtifactRegistrations still reports a registration whose underlying file is missing from disk", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-missing-file",
+      company: "Initech",
+      role: "Analyst",
+      status: "reviewed-hold",
+      artifacts: {
+        resumePdf: "workspace/tailored/app-missing-file/resume.pdf",
+      },
+    },
+  });
+
+  // No file was ever written at that workspace path — the registration is a
+  // claim on the path itself, independent of whether the file exists.
+  assert.equal(existsSync(join(repoRoot, "workspace/tailored/app-missing-file/resume.pdf")), false);
+
+  const registrations = appListArtifactRegistrations({ repoRoot });
+  assert.deepEqual(registrations, [
+    {
+      applicationId: "app-missing-file",
+      kind: "resume",
+      format: "pdf",
+      path: "workspace/tailored/app-missing-file/resume.pdf",
+    },
+  ]);
 });
 
 // activityAppend is the one domain-action-shaped verb that does NOT bump the

@@ -5,15 +5,20 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
+import { hasUploadableResumeArtifact } from "../apply/apply-driver.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
-import { appRegisterPacketArtifacts as registerPacketArtifacts } from "../db/verbs.mjs";
-import { validDocumentArtifact, validUploadArtifact } from "../documents/artifact-validation.mjs";
+import {
+  appListArtifactRegistrations,
+  appRegisterPacketArtifacts as registerPacketArtifacts,
+} from "../db/verbs.mjs";
+import { validDocumentArtifact } from "../documents/artifact-validation.mjs";
 import { exportArtifact as documentExportArtifact } from "../documents/export.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 
@@ -29,19 +34,39 @@ function safeRealpath(path) {
   }
 }
 
-// The confined text writer (writeTextArtifactConfined) returns a
-// realpath-canonical destination when it validates against a trusted root,
-// while PDF/DOCX destinations stay lexical (built from the lexical
-// workspaceDir). Relativizing a canonical absPath against a lexical
-// workspaceDir under a symlinked root (a symlinked CAREERRAT_HOME, or
-// macOS's /var-to-/private/var alias) produces workspace/../ segments that
-// registration rejects. Canonicalize both sides before deriving the stored
-// relative path so the comparison is apples to apples regardless of which
-// namespace either side started in.
+// Resolves `path` to a canonical form WITHOUT requiring `path` itself to
+// exist: realpath() the parent directory (which, for every destination this
+// module builds, already exists — it's the same directory a real source
+// file lives in) and join the literal basename back on. Unlike
+// realpathSync(path) directly, this works identically whether the
+// destination has already been written or is still staged/unwritten, which
+// matters once a destination's canonical display path has to be computed
+// before promotion (see exportPacketArtifacts' staging phase).
+function canonicalDestinationPath(path) {
+  const parent = dirname(path);
+  let canonicalParent;
+  try {
+    canonicalParent = realpathSync(parent);
+  } catch {
+    canonicalParent = resolve(parent);
+  }
+  return join(canonicalParent, basename(path));
+}
+
+// Relativizing a canonical absPath against a lexical workspaceDir under a
+// symlinked root (a symlinked CAREERRAT_HOME, or macOS's /var-to-/private/var
+// alias) produces workspace/../ segments that registration rejects.
+// Canonicalize both sides before deriving the stored relative path so the
+// comparison is apples to apples regardless of which namespace either side
+// started in, and regardless of whether `absPath` has been written yet.
 function workspaceDisplayPath(workspaceDir, absPath) {
   const canonicalWorkspaceDir = safeRealpath(workspaceDir);
-  const canonicalAbsPath = safeRealpath(absPath);
+  const canonicalAbsPath = canonicalDestinationPath(absPath);
   return `workspace/${relative(canonicalWorkspaceDir, canonicalAbsPath).replaceAll(sep, "/")}`;
+}
+
+function randomToken() {
+  return Math.random().toString(36).slice(2);
 }
 
 // Probes the real filesystem rather than assuming by platform: a
@@ -443,6 +468,28 @@ export async function exportPacketArtifacts({
     const abs = resolveWorkspacePath(workspaceDir, storedPath);
     return abs ? canonicalIdentity(abs) : null;
   };
+  // registeredDestination above can only ever answer "did THIS application
+  // register this path" — reading app.artifacts alone has no way to know
+  // whether some OTHER application also points at the same canonical path,
+  // or points at it while its own file happens to be missing right now. A
+  // shared path (two applications' rows both pointing at the same physical
+  // file, e.g. because they share a source resume that both exported from)
+  // looked like "my own prior render" and got overwritten out from under
+  // the other application; a foreign-registered path with no file on disk
+  // looked merely unavailable-if-it-existed and got silently claimed.
+  // Build the cross-application index once per call and use it to reserve
+  // every path any OTHER application has ever registered, regardless of
+  // that path's current on-disk state.
+  const foreignOwnersByIdentity = new Map();
+  for (const registration of appListArtifactRegistrations({ repoRoot, env })) {
+    if (String(registration?.applicationId) === id) continue;
+    const abs = resolveWorkspacePath(workspaceDir, registration?.path);
+    if (!abs) continue;
+    const identity = canonicalIdentity(abs);
+    if (!foreignOwnersByIdentity.has(identity)) foreignOwnersByIdentity.set(identity, new Set());
+    foreignOwnersByIdentity.get(identity).add(String(registration.applicationId));
+  }
+  const isForeignOwned = (identity) => foreignOwnersByIdentity.has(identity);
   const isUnavailable = (base, kind) =>
     selectedFormats.some((format) => {
       const ext = FORMAT_EXTENSION[format];
@@ -450,6 +497,7 @@ export async function exportPacketArtifacts({
       const candidatePath = `${base}${ext}`;
       const identity = canonicalIdentity(candidatePath);
       if (reservedIdentities.has(identity)) return true;
+      if (isForeignOwned(identity)) return true;
       if (!existsSync(candidatePath)) return false;
       return identity !== registeredDestination(kind, format);
     });
@@ -473,184 +521,326 @@ export async function exportPacketArtifacts({
     return candidate;
   };
 
-  for (const [sourceKey, storedPath] of sourceEntries(sources)) {
-    const full = resolveWorkspacePath(workspaceDir, storedPath);
-    if (!full || !existsSync(full)) {
-      const err = new Error(`packet source artifact is missing: ${sourceKey}`);
-      err.code = "NOT_FOUND";
+  // Every render for this batch goes to a confined staging directory first,
+  // created under the same trusted root every destination is validated
+  // against, and is only promoted (renamed) into its real workspace
+  // destination once every document has rendered and validated. Without
+  // this, a later missing source, a renderer error, or a registration
+  // failure partway through a multi-document batch could leave an EARLIER
+  // document's destination already overwritten with a fresh render while
+  // the manifest/db still describe the previous (now-stale-on-disk) state.
+  const stagingDir = join(workspaceDir, `.export-staging-${process.pid}-${randomToken()}`);
+  mkdirSync(stagingDir, { recursive: true });
+  const pendingPromotions = []; // { stagedPath, finalPath }
+
+  try {
+    for (const [sourceKey, storedPath] of sourceEntries(sources)) {
+      const full = resolveWorkspacePath(workspaceDir, storedPath);
+      if (!full || !existsSync(full)) {
+        const err = new Error(`packet source artifact is missing: ${sourceKey}`);
+        err.code = "NOT_FOUND";
+        throw err;
+      }
+      const markdown = readFileSync(full, "utf8");
+      const kind = sourceKind(sourceKey);
+      // extname() returns "" for an extensionless source, and
+      // full.slice(0, -"".length) is full.slice(0, -0). Because -0 === 0 in
+      // JS, that behaves like full.slice(0, 0) and produces "" rather than
+      // the whole path. Only slice when there's an actual extension to
+      // strip, so an extensionless source keeps its full absolute path as
+      // outBase instead of collapsing to an empty (and therefore relative,
+      // process.cwd()-anchored) base.
+      const sourceExt = extname(full);
+      const outBase = distinctOutBase(sourceExt ? full.slice(0, -sourceExt.length) : full, kind);
+      // sourceEntries(sources) yields at most one entry per DOCUMENT_KINDS
+      // kind (resumeSource/coverLetterSource/answersSource each map to a
+      // distinct kind), so `kind` alone is a unique, stable staging
+      // filename for this batch — no risk of two sources colliding on the
+      // same staged path the way two different outBase directories both
+      // stripping to "resume" could if staged by basename instead.
+      const stagingOutBase = join(stagingDir, kind);
+      const result = await exportArtifact({
+        markdown,
+        outBase: stagingOutBase,
+        formats: selectedFormats,
+        title: titleFor(app, kind),
+        ats: true,
+        root: stagingDir,
+      });
+
+      artifacts[sourceKey] = storedPath;
+      // BUG: the read path (GET /api/packet, isGatedIn) keys off the plain
+      // artifacts.<kind> field, not this finer-grained <kind>Source key — stamp
+      // it too, pointed at the same source markdown, so an export run
+      // standalone (without generatePacket) still leaves the packet readable.
+      artifacts[kind] = storedPath;
+      artifacts[`${kind}GeneratedAt`] = generatedAt;
+      // Authoritative-format-request semantics: a run that processes `kind`
+      // owns every format key for that kind, not just the ones it was asked
+      // to produce. Seed an explicit null for pdf/docx/text here so a
+      // text-only or docx-only regeneration clears a stale resumePdf left
+      // over from an earlier run instead of merging on top of it — apply
+      // must not still be able to pick an artifact this run never produced.
+      // A format the loop below exports successfully overwrites its null
+      // with the real path; mergeArtifacts (manifest) and
+      // appRegisterPacketArtifacts (app row) both treat a surviving null as
+      // "delete this key".
+      for (const format of ["pdf", "docx", "text"]) {
+        artifacts[outputKey(kind, format)] = null;
+      }
+      for (const format of ["pdf", "docx", "text"]) {
+        const stagedPath = result[format];
+        if (!selectedFormats.includes(format)) continue;
+        if (!stagedPath || !validDocumentArtifact(stagedPath)) {
+          exportGaps.push({
+            kind,
+            code: "ARTIFACT_EXPORT_FAILED",
+            message: `${titleFor(app, kind)} did not produce a valid ${format.toUpperCase()} file.`,
+          });
+          continue;
+        }
+        // The real destination this staged render is bound for — computed
+        // here (not derived from the staged path) so artifacts[key] and
+        // pendingPromotions always agree on where promotion will land it.
+        const finalPath = `${outBase}${FORMAT_EXTENSION[format]}`;
+        const key = outputKey(kind, format);
+        artifacts[key] = workspaceDisplayPath(workspaceDir, finalPath);
+        pendingPromotions.push({ stagedPath, finalPath });
+        const entry = { format, path: artifacts[key], name: basename(finalPath) };
+        if (format === "pdf") {
+          // Reads from the STAGED file: the final destination doesn't exist
+          // yet (promotion hasn't happened), but the staged render is
+          // already complete and byte-identical to what promotion will
+          // move into place.
+          const copy = copyPdfToDownloads({
+            env,
+            company: app.company,
+            kind,
+            absPath: stagedPath,
+          });
+          if (copy?.ok) entry.downloadsPath = copy.path;
+          else if (copy && !copy.ok) downloadsErrors.push({ kind, format, message: copy.error });
+        }
+        userFacing[kind].push(entry);
+      }
+    }
+
+    if (sources.packetManifest) artifacts.packetManifest = sources.packetManifest;
+
+    // ---- Promote every staged file into its real destination ----
+    // A destination that already exists is displaced to a `.bak-<rand>`
+    // sibling first (never deleted outright); one with no predecessor is
+    // tracked separately so a rollback can remove it instead of "restoring"
+    // a backup that never existed. Both lists, plus the manifest's own
+    // before-state, feed rollbackPromotion below if anything from here
+    // through db registration fails.
+    const fileBackups = []; // { finalPath, backupPath }
+    const newFilePaths = [];
+    let manifestPath = null;
+    let manifestBackupPath = null;
+    let manifestIsNew = false;
+    let manifestTouched = false;
+
+    const rollbackPromotion = () => {
+      for (const { finalPath, backupPath } of fileBackups) {
+        try {
+          renameSync(backupPath, finalPath);
+        } catch {
+          // best-effort restore
+        }
+      }
+      for (const finalPath of newFilePaths) {
+        try {
+          unlinkSync(finalPath);
+        } catch {
+          // best-effort cleanup
+        }
+      }
+      if (manifestTouched && manifestPath) {
+        if (manifestIsNew) {
+          try {
+            unlinkSync(manifestPath);
+          } catch {
+            // best-effort cleanup
+          }
+        } else if (manifestBackupPath) {
+          try {
+            renameSync(manifestBackupPath, manifestPath);
+          } catch {
+            // best-effort restore
+          }
+        }
+      }
+    };
+
+    let registered;
+    try {
+      for (const { stagedPath, finalPath } of pendingPromotions) {
+        if (existsSync(finalPath)) {
+          const backupPath = `${finalPath}.bak-${randomToken()}`;
+          renameSync(finalPath, backupPath);
+          fileBackups.push({ finalPath, backupPath });
+        } else {
+          newFilePaths.push(finalPath);
+        }
+        renameSync(stagedPath, finalPath);
+      }
+
+      // RESUME_UPLOAD_ARTIFACT_MISSING behaves like ARTIFACT_EXPORT_FAILED
+      // for readiness recovery: both describe a transient export-time
+      // shortfall, not an unresolved content decision, so a later
+      // successful export that restores the missing artifact must be able
+      // to clear it automatically rather than requiring a human to dismiss
+      // a stuck content gap.
+      const RECOVERABLE_GAP_CODES = new Set([
+        "ARTIFACT_EXPORT_FAILED",
+        "RESUME_UPLOAD_ARTIFACT_MISSING",
+      ]);
+      const priorGaps = Array.isArray(priorManifestForDb.gaps) ? priorManifestForDb.gaps : [];
+      const priorRecoverable = priorGaps.some((gap) => RECOVERABLE_GAP_CODES.has(gap?.code));
+      const contentGaps = priorGaps.filter((gap) => !RECOVERABLE_GAP_CODES.has(gap?.code));
+      const generationReady =
+        priorManifestForDb.uploadReady === true || (priorRecoverable && contentGaps.length === 0);
+      const mergedArtifacts = mergeArtifacts(priorManifestForDb.artifacts, artifacts);
+
+      // A text-only (or docx-only) export deletes the prior PDF/DOCX
+      // pointers by design (the "Authoritative-format-request semantics"
+      // note above), but the upload driver only accepts a .pdf or .docx
+      // resume — never the raw text/markdown source. So overall readiness
+      // must come from the post-export artifact set, not merely from
+      // exportGaps being empty.
+      const wouldBeUploadReady = generationReady && exportGaps.length === 0;
+      // hasUploadableResumeArtifact must see the complete post-export
+      // application artifact set the apply driver will actually read, not
+      // just this export's own manifest-tracked view of it (mergedArtifacts,
+      // above, derives from priorManifestForDb.artifacts, which only ever
+      // learns about a key once some export call has passed it through). A
+      // plain "resume" key can land on the application row directly, e.g. a
+      // legacy or externally-registered PDF/DOCX that never went through
+      // this export path, and the manifest-only merge would miss it
+      // entirely. app.artifacts (read at the top of this call, before this
+      // export's own changes) is the same source uploadArtifacts in
+      // apply-driver.mjs reads from, so overlaying this export's fresh
+      // `artifacts` on top of it (respecting its explicit nulls the same
+      // way appRegisterPacketArtifacts will when it commits) reproduces
+      // exactly what apply-driver will see once this export's registration
+      // lands. Computed here, after promotion, so its existsSync-based
+      // validation sees the files this run just wrote at their real
+      // destinations rather than their now-vacated staging paths.
+      const applicationArtifactsAfterExport = mergeArtifacts(app.artifacts, artifacts);
+      const hasUploadableResume = hasUploadableResumeArtifact({
+        repoRoot,
+        env,
+        artifacts: applicationArtifactsAfterExport,
+      });
+      // Derived independently of every OTHER gap, and always — not only
+      // when this export would otherwise be declared upload-ready. A
+      // text-only export sitting next to an unrelated open gap (a pending
+      // answer confirmation, a content gap on a different kind) must still
+      // carry this gap forward in the persisted manifest: the
+      // answer-confirmation readiness recompute
+      // (confirmOneOffScreeningAnswer in one-off-answer.mjs) only clears
+      // gaps it specifically resolves, so a resume gap that was never
+      // recorded here would silently vanish the moment an unrelated gap
+      // gets confirmed away, leaving the packet wrongly marked
+      // upload-ready. The one exception: if this run's own exportGaps
+      // already recorded an ARTIFACT_EXPORT_FAILED for kind "resume", that
+      // failure already explains the missing resume, and a second,
+      // redundant gap would just double-report the same problem.
+      const resumeExportFailedThisRun = exportGaps.some(
+        (gap) => gap?.kind === "resume" && gap?.code === "ARTIFACT_EXPORT_FAILED"
+      );
+      const missingResumeArtifactGap =
+        !hasUploadableResume && !resumeExportFailedThisRun
+          ? {
+              kind: "resume",
+              code: "RESUME_UPLOAD_ARTIFACT_MISSING",
+              message:
+                "No PDF or DOCX resume is available to upload; a text-only export cannot be submitted as-is.",
+            }
+          : null;
+
+      const gaps = [
+        ...contentGaps,
+        ...exportGaps,
+        ...(missingResumeArtifactGap ? [missingResumeArtifactGap] : []),
+      ];
+      const uploadReady = wouldBeUploadReady && hasUploadableResume;
+
+      const nextManifest = {
+        ...priorManifestForDb,
+        applicationId: id,
+        generatedAt: priorManifestForDb.generatedAt || generatedAt,
+        exportedAt: generatedAt,
+        uploadReady,
+        status: uploadReady ? "upload-ready" : "reviewable",
+        gapCount: gaps.length,
+        gaps,
+        artifacts: mergedArtifacts,
+      };
+
+      manifestPath = resolveWorkspacePath(workspaceDir, sources.packetManifest);
+      if (manifestPath) {
+        manifestIsNew = !existsSync(manifestPath);
+        if (!manifestIsNew) {
+          manifestBackupPath = `${manifestPath}.bak-${randomToken()}`;
+          renameSync(manifestPath, manifestBackupPath);
+        }
+        writeFileSync(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`, "utf8");
+        manifestTouched = true;
+      }
+
+      registered = await appRegisterPacketArtifacts({
+        repoRoot,
+        env,
+        appId: id,
+        artifacts,
+        now,
+        manifest: nextManifest,
+      });
+    } catch (err) {
+      // ExportFailedError (err.committed === true) means the database write
+      // itself already succeeded and only the tracker.json/activity.jsonl
+      // mirror regeneration failed afterward — the application row and the
+      // promoted files ARE already the correct new state for that committed
+      // row, so rolling back here would put the files out of sync with the
+      // row that now points at them. Anything else means nothing durable
+      // committed, so every promoted file and the manifest are restored to
+      // exactly what they were before this call.
+      if (!err?.committed) rollbackPromotion();
       throw err;
     }
-    const markdown = readFileSync(full, "utf8");
-    const kind = sourceKind(sourceKey);
-    // extname() returns "" for an extensionless source, and
-    // full.slice(0, -"".length) is full.slice(0, -0). Because -0 === 0 in
-    // JS, that behaves like full.slice(0, 0) and produces "" rather than
-    // the whole path. Only slice when there's an actual extension to
-    // strip, so an extensionless source keeps its full absolute path as
-    // outBase instead of collapsing to an empty (and therefore relative,
-    // process.cwd()-anchored) base.
-    const sourceExt = extname(full);
-    const outBase = distinctOutBase(sourceExt ? full.slice(0, -sourceExt.length) : full, kind);
-    const result = await exportArtifact({
-      markdown,
-      outBase,
-      formats: selectedFormats,
-      title: titleFor(app, kind),
-      ats: true,
-      root: workspaceDir,
-    });
 
-    artifacts[sourceKey] = storedPath;
-    // BUG: the read path (GET /api/packet, isGatedIn) keys off the plain
-    // artifacts.<kind> field, not this finer-grained <kind>Source key — stamp
-    // it too, pointed at the same source markdown, so an export run
-    // standalone (without generatePacket) still leaves the packet readable.
-    artifacts[kind] = storedPath;
-    artifacts[`${kind}GeneratedAt`] = generatedAt;
-    // Authoritative-format-request semantics: a run that processes `kind`
-    // owns every format key for that kind, not just the ones it was asked
-    // to produce. Seed an explicit null for pdf/docx/text here so a
-    // text-only or docx-only regeneration clears a stale resumePdf left
-    // over from an earlier run instead of merging on top of it — apply
-    // must not still be able to pick an artifact this run never produced.
-    // A format the loop below exports successfully overwrites its null
-    // with the real path; mergeArtifacts (manifest) and
-    // appRegisterPacketArtifacts (app row) both treat a surviving null as
-    // "delete this key".
-    for (const format of ["pdf", "docx", "text"]) {
-      artifacts[outputKey(kind, format)] = null;
+    // Success: drop the backups, nothing left to restore.
+    for (const { backupPath } of fileBackups) {
+      try {
+        unlinkSync(backupPath);
+      } catch {
+        // best-effort cleanup
+      }
     }
-    for (const format of ["pdf", "docx", "text"]) {
-      const absPath = result[format];
-      if (!selectedFormats.includes(format)) continue;
-      if (!absPath || !validDocumentArtifact(absPath)) {
-        exportGaps.push({
-          kind,
-          code: "ARTIFACT_EXPORT_FAILED",
-          message: `${titleFor(app, kind)} did not produce a valid ${format.toUpperCase()} file.`,
-        });
-        continue;
+    if (manifestBackupPath) {
+      try {
+        unlinkSync(manifestBackupPath);
+      } catch {
+        // best-effort cleanup
       }
-      const key = outputKey(kind, format);
-      artifacts[key] = workspaceDisplayPath(workspaceDir, absPath);
-      const entry = { format, path: artifacts[key], name: basename(absPath) };
-      if (format === "pdf") {
-        const copy = copyPdfToDownloads({ env, company: app.company, kind, absPath });
-        if (copy?.ok) entry.downloadsPath = copy.path;
-        else if (copy && !copy.ok) downloadsErrors.push({ kind, format, message: copy.error });
-      }
-      userFacing[kind].push(entry);
+    }
+
+    return {
+      appId: id,
+      applicationId: id,
+      formats: selectedFormats,
+      artifacts,
+      userFacing,
+      ...(downloadsErrors.length ? { downloadsErrors } : {}),
+      registered,
+    };
+  } finally {
+    try {
+      rmSync(stagingDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
     }
   }
-
-  if (sources.packetManifest) artifacts.packetManifest = sources.packetManifest;
-
-  // RESUME_UPLOAD_ARTIFACT_MISSING behaves like ARTIFACT_EXPORT_FAILED for
-  // readiness recovery: both describe a transient export-time shortfall,
-  // not an unresolved content decision, so a later successful export that
-  // restores the missing artifact must be able to clear it automatically
-  // rather than requiring a human to dismiss a stuck content gap.
-  const RECOVERABLE_GAP_CODES = new Set([
-    "ARTIFACT_EXPORT_FAILED",
-    "RESUME_UPLOAD_ARTIFACT_MISSING",
-  ]);
-  const priorGaps = Array.isArray(priorManifestForDb.gaps) ? priorManifestForDb.gaps : [];
-  const priorRecoverable = priorGaps.some((gap) => RECOVERABLE_GAP_CODES.has(gap?.code));
-  const contentGaps = priorGaps.filter((gap) => !RECOVERABLE_GAP_CODES.has(gap?.code));
-  const generationReady =
-    priorManifestForDb.uploadReady === true || (priorRecoverable && contentGaps.length === 0);
-  const mergedArtifacts = mergeArtifacts(priorManifestForDb.artifacts, artifacts);
-
-  // A text-only (or docx-only) export deletes the prior PDF/DOCX pointers
-  // by design (the "Authoritative-format-request semantics" note above),
-  // but the upload driver only accepts a .pdf or .docx resume — never the
-  // raw text/markdown source. So readiness must come from the post-export
-  // artifact set, not merely from exportGaps being empty: an export that
-  // "succeeded" at producing exactly what was asked for can still leave no
-  // artifact the apply flow is able to submit. Only evaluate this (and
-  // only surface the gap) in the case that would otherwise be declared
-  // upload-ready, so an unrelated export failure keeps reporting its own
-  // ARTIFACT_EXPORT_FAILED gaps unchanged.
-  const wouldBeUploadReady = generationReady && exportGaps.length === 0;
-  // hasUploadableResume must see the complete post-export application
-  // artifact set the apply driver will actually read, not just this
-  // export's own manifest-tracked view of it (mergedArtifacts, above,
-  // derives from priorManifestForDb.artifacts, which only ever learns
-  // about a key once some export call has passed it through). A plain
-  // "resume" key can land on the application row directly, e.g. a legacy
-  // or externally-registered PDF/DOCX that never went through this export
-  // path, and the manifest-only merge would miss it entirely. app.artifacts
-  // (read at the top of this call, before this export's own changes) is
-  // the same source uploadArtifacts in apply-driver.mjs reads from, so
-  // overlaying this export's fresh `artifacts` on top of it (respecting
-  // its explicit nulls the same way appRegisterPacketArtifacts will when
-  // it commits) reproduces exactly what apply-driver will see once this
-  // export's registration lands.
-  const applicationArtifactsAfterExport = mergeArtifacts(app.artifacts, artifacts);
-  // Same eligibility rule the apply driver's automatic-upload candidate
-  // list uses (uploadArtifacts in apply-driver.mjs): validUploadArtifact,
-  // not the looser validDocumentArtifact, so a .txt pointer never counts
-  // as uploadable here either. Also check the plain "resume" key, the
-  // apply driver's own fallback candidate after resumePdf/resumeDocx, so a
-  // cover-letter-only export doesn't report RESUME_UPLOAD_ARTIFACT_MISSING
-  // when a valid PDF/DOCX resume still survives there.
-  const validUploadableArtifact = (storedPath) => {
-    if (!storedPath) return false;
-    const abs = resolveWorkspacePath(workspaceDir, storedPath);
-    return Boolean(abs && validUploadArtifact(abs));
-  };
-  const hasUploadableResume =
-    validUploadableArtifact(applicationArtifactsAfterExport.resumePdf) ||
-    validUploadableArtifact(applicationArtifactsAfterExport.resumeDocx) ||
-    validUploadableArtifact(applicationArtifactsAfterExport.resume);
-  const missingResumeArtifactGap =
-    wouldBeUploadReady && !hasUploadableResume
-      ? {
-          kind: "resume",
-          code: "RESUME_UPLOAD_ARTIFACT_MISSING",
-          message:
-            "No PDF or DOCX resume is available to upload; a text-only export cannot be submitted as-is.",
-        }
-      : null;
-
-  const gaps = [
-    ...contentGaps,
-    ...exportGaps,
-    ...(missingResumeArtifactGap ? [missingResumeArtifactGap] : []),
-  ];
-  const uploadReady = wouldBeUploadReady && hasUploadableResume;
-
-  const nextManifest = {
-    ...priorManifestForDb,
-    applicationId: id,
-    generatedAt: priorManifestForDb.generatedAt || generatedAt,
-    exportedAt: generatedAt,
-    uploadReady,
-    status: uploadReady ? "upload-ready" : "reviewable",
-    gapCount: gaps.length,
-    gaps,
-    artifacts: mergedArtifacts,
-  };
-  const manifestPath = resolveWorkspacePath(workspaceDir, sources.packetManifest);
-  if (manifestPath)
-    writeFileSync(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`, "utf8");
-
-  const registered = await appRegisterPacketArtifacts({
-    repoRoot,
-    env,
-    appId: id,
-    artifacts,
-    now,
-    manifest: nextManifest,
-  });
-
-  return {
-    appId: id,
-    applicationId: id,
-    formats: selectedFormats,
-    artifacts,
-    userFacing,
-    ...(downloadsErrors.length ? { downloadsErrors } : {}),
-    registered,
-  };
 }

@@ -441,3 +441,39 @@ test("renderResumeText resolves many unterminated links in one paragraph, at sca
   assert.ok(text.includes("[a](b"), "an unresolved link with no closing paren stays literal text");
   assert.ok(elapsedMs < 500, `expected parsing to finish well under a second, took ${elapsedMs}ms`);
 });
+
+// ---------------------------------------------------------------------------
+// parseRuns delimiter-free fast path: a paragraph containing none of the
+// inline-syntax characters (* _ ` [ ] ( )) or the hard-break sentinel returns
+// a single plain run directly, instead of walking the paragraph character by
+// character and allocating the Int32Array link-matching structures
+// (nextCloseBracket, parenDeltaPrefixSums, nextEqualPrefixSum) that only ever
+// matter once a "[" is present. There's no exported hook into that
+// allocation, so this asserts the observable effect: a large delimiter-free
+// paragraph parses in low single-digit milliseconds, an order of magnitude
+// under the 256 KB delimiter-heavy scaling tests' own 500ms budget above.
+// ---------------------------------------------------------------------------
+
+test("renderResumeText's delimiter-free fast path parses a 1.5 MiB paragraph in well under 200ms", () => {
+  const unit =
+    "Built cross region payments using redis and a status page to track it and shipped multiple releases without regressions across the whole quarter. ";
+  assert.doesNotMatch(
+    unit,
+    /[*_`[\]()]/,
+    "fixture must contain none of parseRuns' delimiter characters"
+  );
+  const target = 1.5 * 1024 * 1024;
+  const repeats = Math.ceil(target / unit.length);
+  const md = unit.repeat(repeats);
+  assert.ok(md.length >= target);
+
+  const start = Date.now();
+  const text = renderResumeText(md);
+  const elapsedMs = Date.now() - start;
+
+  assert.ok(text.includes("Built cross region payments"));
+  assert.ok(
+    elapsedMs < 200,
+    `expected the delimiter-free fast path to finish well under 200ms, took ${elapsedMs}ms`
+  );
+});

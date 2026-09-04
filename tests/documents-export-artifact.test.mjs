@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import JSZip from "jszip";
-import { exportArtifact } from "../src/core/documents/export.mjs";
+import { exportArtifact, MARKDOWN_SOURCE_MAX_BYTES } from "../src/core/documents/export.mjs";
 
 const cleanupRoots = [];
 
@@ -93,6 +93,27 @@ test("exportArtifact replaces an existing symlink at the .txt destination instea
     "outside content, must not be touched\n",
     "the symlink target outside the packet dir is untouched"
   );
+});
+
+// ---------------------------------------------------------------------------
+// Markdown source size cap: exportArtifact is the one shared entry point
+// every caller funnels a Markdown source through, so the cap applies before
+// any format-specific parsing (parseMdBlocks/parseRuns, the DOCX writer, the
+// ATS PDF HTML build) ever runs.
+// ---------------------------------------------------------------------------
+
+test("exportArtifact rejects a markdown source over the export size limit before writing anything", async () => {
+  const packetDir = tempDir("careerrat-export-oversize-");
+  const outBase = join(packetDir, "resume");
+  const markdown = "a".repeat(10 * 1024 * 1024);
+  assert.ok(markdown.length > MARKDOWN_SOURCE_MAX_BYTES);
+
+  await assert.rejects(
+    () => exportArtifact({ markdown, outBase, formats: ["text"] }),
+    /exceeds the .* export limit/
+  );
+
+  assert.equal(existsSync(`${outBase}.txt`), false, "no file was written for an oversized source");
 });
 
 test("exportArtifact writes the text artifact inside the packet directory", async () => {
@@ -185,6 +206,130 @@ test("exportArtifact rejects a destination whose ancestor directory is a symlink
     existsSync(join(outsideDir, "resume.txt")),
     false,
     "no artifact was written outside the trusted root"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// PDF/DOCX confinement: the same trusted-root and symlink-destination guards
+// the text writer already has, applied to the other two formats. Both checks
+// run inside renderFormatConfined before the format-specific render callback
+// is ever invoked, so these assertions don't need chromium or pandoc
+// installed: a rejection here means the renderer was never reached.
+// ---------------------------------------------------------------------------
+
+test("exportArtifact rejects a PDF destination whose ancestor directory is a symlink escaping the trusted root", async () => {
+  const workspaceDir = tempDir("careerrat-export-workspace-");
+  const outsideDir = tempDir("careerrat-export-outside-");
+
+  const tailoredLink = join(workspaceDir, "tailored");
+  symlinkSync(outsideDir, tailoredLink);
+
+  const outBase = join(tailoredLink, "resume");
+  await assert.rejects(
+    () =>
+      exportArtifact({
+        markdown: "# Resume\n\nRendered body.\n",
+        outBase,
+        formats: ["pdf"],
+        root: workspaceDir,
+      }),
+    /escapes the trusted root/
+  );
+
+  assert.equal(
+    existsSync(join(outsideDir, "resume.pdf")),
+    false,
+    "no PDF was written outside the trusted root"
+  );
+});
+
+test("exportArtifact rejects a DOCX destination whose ancestor directory is a symlink escaping the trusted root", async () => {
+  const workspaceDir = tempDir("careerrat-export-workspace-");
+  const outsideDir = tempDir("careerrat-export-outside-");
+
+  const tailoredLink = join(workspaceDir, "tailored");
+  symlinkSync(outsideDir, tailoredLink);
+
+  const outBase = join(tailoredLink, "resume");
+  await assert.rejects(
+    () =>
+      exportArtifact({
+        markdown: "# Resume\n\nRendered body.\n",
+        outBase,
+        formats: ["docx"],
+        root: workspaceDir,
+      }),
+    /escapes the trusted root/
+  );
+
+  assert.equal(
+    existsSync(join(outsideDir, "resume.docx")),
+    false,
+    "no DOCX was written outside the trusted root"
+  );
+});
+
+test("exportArtifact refuses a dangling PDF destination symlink instead of following it", async () => {
+  const packetDir = tempDir("careerrat-export-packet-");
+  const outsideDir = tempDir("careerrat-export-outside-");
+  const outsideTarget = join(outsideDir, "secret.pdf");
+  // Intentionally does not exist: a dangling symlink still must not be
+  // followed, since lstat (not stat) is what refuseSymlinkDestination uses.
+  const destPath = join(packetDir, "resume.pdf");
+  symlinkSync(outsideTarget, destPath);
+  assert.ok(lstatSync(destPath).isSymbolicLink(), "test setup: destination starts as a symlink");
+
+  const outBase = join(packetDir, "resume");
+  await assert.rejects(
+    () =>
+      exportArtifact({
+        markdown: "# Resume\n\nRendered body.\n",
+        outBase,
+        formats: ["pdf"],
+      }),
+    /refusing to write/
+  );
+
+  assert.equal(
+    lstatSync(destPath).isSymbolicLink(),
+    true,
+    "the dangling symlink was left in place, not followed or replaced"
+  );
+  assert.equal(
+    existsSync(outsideTarget),
+    false,
+    "nothing was created at the dangling symlink target"
+  );
+});
+
+test("exportArtifact refuses a dangling DOCX destination symlink instead of following it", async () => {
+  const packetDir = tempDir("careerrat-export-packet-");
+  const outsideDir = tempDir("careerrat-export-outside-");
+  const outsideTarget = join(outsideDir, "secret.docx");
+  const destPath = join(packetDir, "resume.docx");
+  symlinkSync(outsideTarget, destPath);
+  assert.ok(lstatSync(destPath).isSymbolicLink(), "test setup: destination starts as a symlink");
+
+  const outBase = join(packetDir, "resume");
+  await assert.rejects(
+    () =>
+      exportArtifact({
+        markdown: "# Resume\n\nRendered body.\n",
+        outBase,
+        formats: ["docx"],
+      }),
+    /refusing to write/
+  );
+
+  assert.equal(
+    lstatSync(destPath).isSymbolicLink(),
+    true,
+    "the dangling symlink was left in place, not followed or replaced"
+  );
+  assert.equal(
+    existsSync(outsideTarget),
+    false,
+    "nothing was created at the dangling symlink target"
   );
 });
 

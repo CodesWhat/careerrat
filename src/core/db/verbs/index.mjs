@@ -9,6 +9,7 @@ export {
   appApplySyncedStatus,
   appApproveReview,
   appCaptureInterviewIntake,
+  appListArtifactRegistrations,
   appPersistEvaluation,
   appRecordOutcome,
   appRecordRoundOutcome,
