@@ -46,6 +46,11 @@ test("desktop shutdown settles app-owned work before browser and server teardown
     stopRuntimeSignIns() {
       calls.push("sign-ins:stop");
     },
+    async shutdownGuidedSetups() {
+      calls.push("guided-setups:start");
+      await Promise.resolve();
+      calls.push("guided-setups:end");
+    },
     browserSessionManager: {
       async shutdown() {
         calls.push("browser:shutdown");
@@ -76,6 +81,8 @@ test("desktop shutdown settles app-owned work before browser and server teardown
     "app-operations:end",
     "chat:shutdown",
     "sign-ins:stop",
+    "guided-setups:start",
+    "guided-setups:end",
     "browser:shutdown",
     "server:close",
   ]);

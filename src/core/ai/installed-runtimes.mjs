@@ -2083,6 +2083,50 @@ export function installedRuntimeSignInCommand(runtimeId) {
 
 export const CLAUDE_NATIVE_INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
 const GUIDED_SETUP_TIMEOUT_MS = 10 * 60 * 1000;
+const GUIDED_SETUP_GROUP_DEATH_TIMEOUT_MS = 5000;
+const GUIDED_SETUP_GROUP_DEATH_POLL_MS = 50;
+
+// The real group-liveness check scheduleRuntimeProcessKill's SIGKILL escalation
+// must be confirmed against: process.kill(-pid, 0) targets the whole process
+// group (matching killRuntimeProcess's own -pid signal delivery), so a
+// resistant descendant the installer forked still counts as alive. win32 has
+// no POSIX process-group signaling, so this is unreachable there in practice
+// (the caller guards platform === "darwin" up front) but still returns a safe
+// `false` rather than throwing if it's ever invoked off that path.
+function guidedSetupGroupAlive(pid, platform) {
+  if (platform === "win32" || !Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+// Polls group liveness after a SIGKILL escalation instead of trusting the
+// signal was delivered and acted on instantly: a resistant descendant can
+// take a moment to actually die even once it can no longer ignore the
+// signal. Bounded, so a group that genuinely never disappears (a wedged
+// kernel state, a permissions surprise) can't hang the caller forever.
+// isAliveImpl is injectable so tests can force both outcomes deterministically
+// instead of depending on real OS reap timing.
+async function waitForProcessGroupDeath(
+  pid,
+  {
+    platform = process.platform,
+    timeoutMs = GUIDED_SETUP_GROUP_DEATH_TIMEOUT_MS,
+    intervalMs = GUIDED_SETUP_GROUP_DEATH_POLL_MS,
+    isAliveImpl = guidedSetupGroupAlive,
+  } = {}
+) {
+  if (platform === "win32" || !Number.isSafeInteger(pid) || pid <= 0) return true;
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    if (!isAliveImpl(pid, platform)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
 
 export async function startInstalledRuntimeGuidedSetup(
   runtimeId,
@@ -2095,6 +2139,9 @@ export async function startInstalledRuntimeGuidedSetup(
     onStart,
     signal,
     timeoutMs = GUIDED_SETUP_TIMEOUT_MS,
+    groupDeathTimeoutMs = GUIDED_SETUP_GROUP_DEATH_TIMEOUT_MS,
+    groupDeathPollIntervalMs = GUIDED_SETUP_GROUP_DEATH_POLL_MS,
+    isGroupAliveImpl = guidedSetupGroupAlive,
   } = {}
 ) {
   if (runtimeId !== "claude" || platform !== "darwin") {
@@ -2152,14 +2199,48 @@ export async function startInstalledRuntimeGuidedSetup(
     // process closes on its own or the escalation completes), never the
     // instant the signal is sent, so a cancelled request can't race a still
     // -running installer.
+    //
+    // The escalation callback itself only dispatches SIGKILL; it does not
+    // wait for the OS to actually reap the group. Settling right there (the
+    // old behavior) let a retry land in the gap between "signal sent" and
+    // "process actually gone" and be admitted against a still-alive
+    // installer. waitForProcessGroupDeath below polls for confirmed death
+    // before this promise settles at all; if the group never disappears
+    // within the bound, this rejects with a distinct error instead of the
+    // original cancel/timeout cause, and the caller (the guided-setup route)
+    // keeps its lock rather than releasing it against an unconfirmed group.
     const stop = (error) => {
       stopError ||= error;
       if (forceKillTimer) return;
-      forceKillTimer = scheduleRuntimeProcessKill(child, () => finish(stopError), {
-        platform,
-        env,
-        spawnSyncImpl: treeKillImpl,
-      });
+      forceKillTimer = scheduleRuntimeProcessKill(
+        child,
+        () => {
+          const pid = child.pid;
+          waitForProcessGroupDeath(pid, {
+            platform,
+            timeoutMs: groupDeathTimeoutMs,
+            intervalMs: groupDeathPollIntervalMs,
+            isAliveImpl: isGroupAliveImpl,
+          }).then((confirmedDead) => {
+            if (confirmedDead) {
+              finish(stopError);
+              return;
+            }
+            finish(
+              runtimeError(
+                "CareerRat could not confirm the Claude Code installer stopped. It may still be running.",
+                "RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED",
+                { cause: stopError }
+              )
+            );
+          });
+        },
+        {
+          platform,
+          env,
+          spawnSyncImpl: treeKillImpl,
+        }
+      );
     };
     const abort = () => {
       stop(runtimeError("Claude Code setup was cancelled.", "RUNTIME_GUIDED_SETUP_CANCELLED"));
@@ -2178,7 +2259,11 @@ export async function startInstalledRuntimeGuidedSetup(
     child.stderr?.on("data", report);
     child.once("spawn", () => {
       try {
-        onStart?.();
+        // Detached (see the spawn options above), so on POSIX child.pid is
+        // also the process-group id, exactly the pid a durable ownership
+        // record (and process.kill(-pid, ...)) needs to identify the whole
+        // installer group later, including across a crash or relaunch.
+        onStart?.({ pid: child.pid });
       } catch (error) {
         stop(
           runtimeError(

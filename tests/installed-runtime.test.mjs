@@ -2633,6 +2633,68 @@ test("guided Claude setup timeout does not release the lock early when bash exit
   }
 });
 
+test("guided Claude setup cancellation waits for confirmed process-group death instead of settling the instant SIGKILL is dispatched", async () => {
+  // A fake child, not a real process: isGroupAliveImpl is the thing under
+  // test here, so it alone controls when the group is reported dead. This
+  // proves the promise only settles once it says so, and specifically after
+  // being polled more than once, rather than the moment the SIGKILL
+  // escalation fires.
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.pid = 999_999;
+  child.kill = () => {};
+  const controller = new AbortController();
+  let aliveChecks = 0;
+  let alive = true;
+
+  const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+    platform: "darwin",
+    signal: controller.signal,
+    groupDeathPollIntervalMs: 5,
+    spawnImpl: () => child,
+    isGroupAliveImpl: () => {
+      aliveChecks += 1;
+      if (aliveChecks >= 5) alive = false;
+      return alive;
+    },
+  });
+
+  child.emit("spawn");
+  controller.abort();
+
+  await assert.rejects(resultPromise, { code: "RUNTIME_GUIDED_SETUP_CANCELLED" });
+  assert.ok(
+    aliveChecks >= 5,
+    `expected the confirmation loop to poll until the group reported dead, got ${aliveChecks} checks`
+  );
+});
+
+test("guided Claude setup rejects with a stop-unconfirmed error when the process group never confirms dead within the bound", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.pid = 999_999;
+  child.kill = () => {};
+  const controller = new AbortController();
+
+  const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+    platform: "darwin",
+    signal: controller.signal,
+    groupDeathTimeoutMs: 40,
+    groupDeathPollIntervalMs: 5,
+    spawnImpl: () => child,
+    // Never confirms dead: the bounded wait must give up and settle with
+    // this outcome, rather than hang or silently report success.
+    isGroupAliveImpl: () => true,
+  });
+
+  child.emit("spawn");
+  controller.abort();
+
+  await assert.rejects(resultPromise, { code: "RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED" });
+});
+
 test("guided runtime setup is limited to Claude on macOS", async () => {
   await assert.rejects(startInstalledRuntimeGuidedSetup("codex", { platform: "darwin" }), {
     code: "RUNTIME_GUIDED_SETUP_UNSUPPORTED",

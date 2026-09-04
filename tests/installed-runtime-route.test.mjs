@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, test } from "node:test";
 
@@ -11,6 +11,7 @@ import {
   inspectInstalledRuntimeState,
   mountInstalledRuntimeRoutes,
 } from "../src/cli/installed-runtime-route.mjs";
+import { writeGuidedSetupOwnership } from "../src/core/ai/guided-setup-ownership.mjs";
 import {
   INSTALLED_RUNTIME_DEFINITIONS,
   isInstalledRuntimeBelowVersionBoundary,
@@ -20,6 +21,7 @@ import {
   loadInstalledRuntimeSelection,
   writeInstalledRuntimeSelection,
 } from "../src/core/ai/runtime-selection.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 
 const roots = new Set();
 const VERIFIED_CAPABILITIES = Object.freeze({
@@ -136,10 +138,10 @@ function boot({
   platform,
   probeCustomImpl,
   onProbe,
+  repoRoot = root(),
 }) {
-  const repoRoot = root();
   const routes = new Map();
-  mountInstalledRuntimeRoutes({
+  const mounted = mountInstalledRuntimeRoutes({
     addRoute: (method, path, handler) => routes.set(`${method} ${path}`, handler),
     repoRoot,
     env,
@@ -154,7 +156,7 @@ function boot({
     platform,
     probeCustomImpl,
   });
-  return { routes, repoRoot, env };
+  return { routes, repoRoot, env, ...mounted };
 }
 
 async function request(server, method, path, body) {
@@ -1419,6 +1421,170 @@ test("a cancelled guided-setup request does not release the lock until a resista
     await waitUntilProcessDead(secondGrandchildPid),
     true,
     "the follow-up install's descendant must not survive cancellation either"
+  );
+});
+
+test("a remount of the routes (simulating a relaunch) refuses while the recorded installer group is alive, and reclaims once it's dead", async () => {
+  const repoRoot = root();
+  const env = { CAREERRAT_DESKTOP_CLI_ONLY: "1" };
+  // A real, detached, long-lived process group standing in for a prior
+  // mount's still-running installer: detached so its own pid is also its
+  // process-group id, exactly what writeGuidedSetupOwnership records for a
+  // real guided-setup run and what the admission check's
+  // process.kill(-pid, 0) targets.
+  const survivor = spawn(
+    process.execPath,
+    ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"],
+    { detached: true, stdio: "ignore" }
+  );
+  await new Promise((resolve) => survivor.once("spawn", resolve));
+  writeGuidedSetupOwnership({ repoRoot, env, runtimeId: "claude", pid: survivor.pid });
+
+  try {
+    const relaunched = boot({
+      repoRoot,
+      inventory: INVENTORY,
+      probes: {},
+      env,
+      platform: "darwin",
+      belowBoundaryImpl: async () => "below",
+      startGuidedSetupImpl: async () => {
+        throw new Error("must not run while a prior installer's process group is still alive");
+      },
+    });
+
+    const refused = await request(relaunched, "POST", "/api/settings/ai-runtime/guided-setup", {
+      runtimeId: "claude",
+    });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.code, "RUNTIME_GUIDED_SETUP_IN_PROGRESS");
+
+    process.kill(-survivor.pid, "SIGKILL");
+    assert.equal(
+      await waitUntilProcessDead(survivor.pid),
+      true,
+      "the stand-in survivor process must actually die"
+    );
+
+    const started = [];
+    const relaunchedAgain = boot({
+      repoRoot,
+      inventory: INVENTORY,
+      probes: {},
+      env,
+      platform: "darwin",
+      belowBoundaryImpl: async () => "below",
+      startGuidedSetupImpl: async (runtimeId, { onStart }) => {
+        started.push(runtimeId);
+        onStart();
+        return { runtimeId, installCommand: "curl -fsSL https://claude.ai/install.sh | bash" };
+      },
+    });
+    const admitted = await requestStream(
+      relaunchedAgain,
+      "POST",
+      "/api/settings/ai-runtime/guided-setup",
+      { runtimeId: "claude" }
+    );
+    assert.equal(admitted.status, 200);
+    assert.deepEqual(started, ["claude"]);
+  } finally {
+    try {
+      process.kill(-survivor.pid, "SIGKILL");
+    } catch {
+      // Already dead by the time cleanup runs.
+    }
+  }
+});
+
+test("a malformed ownership record is reclaimed rather than blocking admission", async () => {
+  const repoRoot = root();
+  const env = { CAREERRAT_DESKTOP_CLI_ONLY: "1" };
+  const lockFile = userPath({ repoRoot, env }, ".internal/ai-runtime-guided-setup.lock.json");
+  mkdirSync(dirname(lockFile), { recursive: true });
+  writeFileSync(lockFile, "{ this is not valid json", "utf8");
+
+  const started = [];
+  const server = boot({
+    repoRoot,
+    inventory: INVENTORY,
+    probes: {},
+    env,
+    platform: "darwin",
+    belowBoundaryImpl: async () => "below",
+    startGuidedSetupImpl: async (runtimeId, { onStart }) => {
+      started.push(runtimeId);
+      onStart();
+      return { runtimeId, installCommand: "curl -fsSL https://claude.ai/install.sh | bash" };
+    },
+  });
+
+  const response = await requestStream(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(started, ["claude"]);
+  assert.equal(
+    existsSync(lockFile),
+    false,
+    "reclaiming a malformed record must also remove the stale file itself"
+  );
+});
+
+test("graceful shutdown aborts an active installer and confirms its process group is gone afterward", async () => {
+  const setupRoot = root();
+  const wrapperPath = join(setupRoot, "wrapper.mjs");
+  writeAsymmetricInstallerWrapperScript(wrapperPath);
+  const pidFilePath = join(setupRoot, "grandchild.pid");
+
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    belowBoundaryImpl: async () => "below",
+    startGuidedSetupImpl: (runtimeId, options) =>
+      startInstalledRuntimeGuidedSetup(runtimeId, {
+        ...options,
+        spawnImpl: (_command, _args, spawnOptions) =>
+          spawn(process.execPath, [wrapperPath, pidFilePath], spawnOptions),
+      }),
+  });
+
+  // Same minimal streaming harness as the cancellation test above, kept
+  // local since this test never needs to trigger a client-side "close":
+  // shutdownGuidedSetups aborts the request's own controller directly.
+  function guidedSetupHarness() {
+    const res = {
+      on() {
+        return this;
+      },
+      writeHead() {
+        return this;
+      },
+      flushHeaders() {},
+      write() {
+        return true;
+      },
+      end() {},
+    };
+    const req = Readable.from([Buffer.from(JSON.stringify({ runtimeId: "claude" }))]);
+    req.headers = { "content-type": "application/json" };
+    const handler = server.routes.get("POST /api/settings/ai-runtime/guided-setup");
+    return handler(req, res);
+  }
+
+  const pending = guidedSetupHarness();
+  const grandchildPid = Number(await waitForFileContent(pidFilePath));
+  assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+  await server.shutdownGuidedSetups();
+  await pending;
+
+  assert.equal(
+    await waitUntilProcessDead(grandchildPid),
+    true,
+    "graceful shutdown must not leave the installer's descendant running"
   );
 });
 

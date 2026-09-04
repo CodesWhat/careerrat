@@ -246,6 +246,10 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   // for example just `runtimes` after a guided install, can rebuild the
   // model without re-fetching or clobbering the other pieces.
   const settingsPartsRef = useRef({});
+  // Bumped on every successful AI-preference save; load() uses it to detect
+  // a save that landed while its own request was in flight. See load()'s
+  // comment above for the full race this closes.
+  const aiPreferencesRevisionRef = useRef(0);
   const desktopUpdate = useDesktopUpdate();
   const draftContext = model.draftContext;
   const contextId = draftContextId(draftContext);
@@ -421,7 +425,17 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   // hand it straight to load() instead of load() re-running the same
   // executable-discovery and version/auth probe work a second time. load()
   // only fetches its own copy when no fresh inventory was handed in.
+  //
+  // aiPreferencesRevisionRef guards against a stale load() clobbering a
+  // preference save that lands while it's in flight: changeAiPreference
+  // bumps the revision on every successful save, and load() records the
+  // revision at request start. If the revision has moved by the time
+  // load()'s own Promise.all resolves, a save landed mid-flight, and its
+  // aiPreferences (already the newest value in settingsPartsRef.current) is
+  // merged over this snapshot's, so a slow post-install refresh (or the
+  // initial mount fetch) can never revert what the user just saved.
   async function load(preFetchedRuntimes) {
+    const revisionAtRequest = aiPreferencesRevisionRef.current;
     const [onboard, runtimes, automation, sources, aiPreferences] = await Promise.all([
       api.getOnboardState(),
       preFetchedRuntimes ? Promise.resolve(preFetchedRuntimes) : api.getInstalledAiRuntimes(),
@@ -429,7 +443,16 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       api.getSourceMaintenance(),
       api.getAiPreferences(),
     ]);
-    const next = { onboard, runtimes, automation, sources, aiPreferences };
+    const next = {
+      onboard,
+      runtimes,
+      automation,
+      sources,
+      aiPreferences:
+        aiPreferencesRevisionRef.current !== revisionAtRequest
+          ? (settingsPartsRef.current.aiPreferences ?? aiPreferences)
+          : aiPreferences,
+    };
     settingsPartsRef.current = next;
     setModel(buildSettingsModel(next));
     setError(null);
@@ -643,6 +666,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       // aiPreferences here would resurface (and then repost) the value this
       // save just replaced.
       settingsPartsRef.current = { ...settingsPartsRef.current, aiPreferences: saved };
+      // Bumped after settingsPartsRef is updated above, so a load() already
+      // past its revision check by the time this runs still sees the saved
+      // value sitting in the ref (nothing to merge over is fine, since the
+      // ref already has the newest value either way).
+      aiPreferencesRevisionRef.current += 1;
       setModel((current) => ({ ...current, aiPreferences: saved }));
       setAiPreferencesStatus("Saved on this computer");
     } catch (cause) {

@@ -1,5 +1,10 @@
 import { loadAIPreferences, writeAIPreferences } from "../core/ai/ai-preferences.mjs";
 import {
+  admitGuidedSetupOwnership,
+  clearGuidedSetupOwnership,
+  writeGuidedSetupOwnership,
+} from "../core/ai/guided-setup-ownership.mjs";
+import {
   CLAUDE_NATIVE_INSTALL_COMMAND,
   detectInstalledRuntimes,
   hasCompleteCareerRatCapabilities,
@@ -18,6 +23,8 @@ import {
   writeInstalledRuntimeSelection,
 } from "../core/ai/runtime-selection.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
+
+const GUIDED_SETUP_SHUTDOWN_TIMEOUT_MS = 5000;
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -254,8 +261,31 @@ export function mountInstalledRuntimeRoutes({
   // tests never see each other's locks. Keyed by runtimeId and held from the
   // moment a guided-setup request is admitted until its process tree has
   // fully terminated (the finally block below), so two concurrent requests
-  // for the same runtime can never both reach the native installer.
+  // for the same runtime can never both reach the native installer. This is
+  // only the same-mount fast path, though: it's in-memory, so it can't see a
+  // guided setup a *previous* mount started (a crash, or a normal relaunch).
+  // The durable ownership record in guided-setup-ownership.mjs is the
+  // fallback that survives that gap.
   const activeGuidedSetups = new Set();
+  // Tracks the AbortController for every in-flight guided-setup request on
+  // this mount, purely so graceful shutdown (shutdownGuidedSetups below) can
+  // abort and await them; unrelated to the admission lock above, and always
+  // cleaned up when a request's own promise settles regardless of how it
+  // settled.
+  const activeGuidedSetupControllers = new Map();
+
+  async function shutdownGuidedSetups({ timeoutMs = GUIDED_SETUP_SHUTDOWN_TIMEOUT_MS } = {}) {
+    const pending = [...activeGuidedSetupControllers.values()];
+    if (pending.length === 0) return;
+    for (const { controller } of pending) controller.abort();
+    await Promise.race([
+      Promise.all(pending.map((entry) => entry.done)),
+      new Promise((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  }
 
   addRoute("GET", "/api/settings/ai-preferences", (_req, res) => {
     sendJson(res, 200, loadAIPreferences({ repoRoot, env }));
@@ -491,7 +521,34 @@ export function mountInstalledRuntimeRoutes({
       });
       return;
     }
+    // The Set above only ever sees this mount's own requests. A previous
+    // mount's installer (crashed, or a normal app relaunch) can still be
+    // alive underneath a fresh, empty Set. The durable ownership record is
+    // what catches that case, and reclaims it once the recorded process
+    // group is confirmed dead.
+    const ownershipError = admitGuidedSetupOwnership({ repoRoot, env, platform });
+    if (ownershipError) {
+      sendJson(res, 409, {
+        ok: false,
+        code: ownershipError.code,
+        error: ownershipError.message,
+      });
+      return;
+    }
     activeGuidedSetups.add(runtimeId);
+    // `lockRetained` and `ownedPid` govern the finally block at the very
+    // bottom: a settle that couldn't confirm the installer's process group
+    // actually died must keep both the in-memory Set entry and the durable
+    // ownership record, rather than releasing a lock over a group that may
+    // still be running.
+    let lockRetained = false;
+    let ownedPid = null;
+    const controller = new AbortController();
+    let resolveControllerDone;
+    const controllerDone = new Promise((resolve) => {
+      resolveControllerDone = resolve;
+    });
+    activeGuidedSetupControllers.set(runtimeId, { controller, done: controllerDone });
     try {
       // The abort controller and close handler are registered before any
       // probing or installer launch, not after: a disconnect that lands while
@@ -501,7 +558,6 @@ export function mountInstalledRuntimeRoutes({
       let started = false;
       let heartbeat = null;
       const pendingOutput = [];
-      const controller = new AbortController();
       res.on?.("close", () => {
         closed = true;
         controller.abort();
@@ -572,7 +628,17 @@ export function mountInstalledRuntimeRoutes({
         await startGuidedSetupImpl(runtimeId, {
           platform,
           signal: controller.signal,
-          onStart: startStream,
+          onStart(info) {
+            startStream();
+            // Real installer runs report the process-group leader's pid;
+            // fakes/doubles used elsewhere in tests call onStart with no
+            // argument, which correctly skips writing a durable record for
+            // a process that was never actually spawned.
+            if (Number.isSafeInteger(info?.pid) && info.pid > 0) {
+              writeGuidedSetupOwnership({ repoRoot, env, runtimeId, pid: info.pid });
+              ownedPid = info.pid;
+            }
+          },
           onOutput(message) {
             if (started) emit({ type: "output", message });
             else pendingOutput.push(message);
@@ -581,6 +647,7 @@ export function mountInstalledRuntimeRoutes({
         startStream();
         emit({ type: "done", runtimeId });
       } catch (error) {
+        if (error?.code === "RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED") lockRetained = true;
         if (!started) {
           sendJson(res, 500, {
             ok: false,
@@ -593,16 +660,24 @@ export function mountInstalledRuntimeRoutes({
           type: "error",
           code: error?.code || "RUNTIME_GUIDED_SETUP_FAILED",
           message:
-            error?.code === "RUNTIME_GUIDED_SETUP_CANCELLED"
-              ? "Claude Code setup was cancelled."
-              : "Claude Code did not finish installing. Check your connection and try again.",
+            error?.code === "RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED"
+              ? "CareerRat could not confirm the Claude Code installer stopped. It may still be running."
+              : error?.code === "RUNTIME_GUIDED_SETUP_CANCELLED"
+                ? "Claude Code setup was cancelled."
+                : "Claude Code did not finish installing. Check your connection and try again.",
         });
       } finally {
         clearInterval(heartbeat);
         if (started && !closed) res.end();
       }
     } finally {
-      activeGuidedSetups.delete(runtimeId);
+      if (!lockRetained) {
+        activeGuidedSetups.delete(runtimeId);
+        if (ownedPid !== null) clearGuidedSetupOwnership({ repoRoot, env, pid: ownedPid });
+      }
+      const tracked = activeGuidedSetupControllers.get(runtimeId);
+      if (tracked?.controller === controller) activeGuidedSetupControllers.delete(runtimeId);
+      resolveControllerDone();
     }
   });
 
@@ -625,4 +700,6 @@ export function mountInstalledRuntimeRoutes({
     const result = await probeCustomImpl({ command, env });
     sendJson(res, 200, result);
   });
+
+  return { shutdownGuidedSetups };
 }

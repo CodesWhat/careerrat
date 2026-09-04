@@ -1264,6 +1264,81 @@ describe("ProfileSettingsController AI preferences", () => {
       reasoning: "high",
     });
   });
+
+  it("keeps a preference saved mid-flight instead of letting a slower, earlier-started load overwrite it", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    let resolvePostInstallPreferences;
+    api.getAiPreferences
+      // The initial mount fetch: resolves immediately, same as every other test here.
+      .mockResolvedValueOnce({
+        quality: "automatic",
+        reasoning: "automatic",
+        source: "default",
+        updatedAt: null,
+      })
+      // refreshRuntimesAfterInstall's own load() call: deferred, so this test
+      // can land a save while it's still in flight and control exactly when
+      // its (now stale) snapshot arrives.
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolvePostInstallPreferences = resolve;
+          })
+      );
+    api.getInstalledAiRuntimes.mockResolvedValue({
+      runtimes: [
+        { id: "claude", name: "Claude Code", supported: true, available: true, ready: true },
+      ],
+      guidedSetupAvailable: true,
+    });
+
+    renderController(module, api);
+    await flushEffects();
+
+    let view = renderController(module, api);
+    const guidedUpdate = settingsProps(view).onGuidedUpdateEngine("claude");
+    // Let refreshRuntimesAfterInstall run far enough to call load(), which
+    // calls getAiPreferences a second time and blocks on the deferred
+    // promise above, before the save below races it.
+    await flushEffects();
+
+    view = renderController(module, api);
+    await settingsProps(view).onAiPreferenceChange("quality", "best");
+
+    view = renderController(module, api);
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    // The post-install load's own (now stale) fetch finally resolves, still
+    // carrying the pre-save value.
+    resolvePostInstallPreferences({
+      quality: "automatic",
+      reasoning: "automatic",
+      source: "default",
+      updatedAt: null,
+    });
+    await guidedUpdate;
+    await flushEffects();
+
+    view = renderController(module, api);
+    // A stale-load-wins bug would revert this to "automatic" here.
+    expect(settingsProps(view).aiPreferences).toMatchObject({
+      quality: "best",
+      reasoning: "automatic",
+    });
+
+    await settingsProps(view).onAiPreferenceChange("reasoning", "high");
+
+    // And a stale settingsPartsRef would post "automatic" here too, since
+    // changeAiPreference merges the next save on top of model.aiPreferences.
+    expect(api.saveAiPreferences).toHaveBeenLastCalledWith({
+      quality: "best",
+      reasoning: "high",
+    });
+  });
 });
 
 describe("ProfileSettingsController guided update", () => {
