@@ -1,4 +1,7 @@
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// Retry spacing for a scheduler tick that lands while a check or download is
+// still in flight.
+export const IN_FLIGHT_RETRY_MS = 10 * 60 * 1000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const SHARED_UPDATE_STAGING_ID = "00000000-0000-5000-8000-000000000000";
 const WINDOWS_STATUS_URL = "https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md";
@@ -34,6 +37,10 @@ export function nextUpdateCheckDelay({
   // in that state and leaves lastCheckedAt alone, so re-arming from an
   // expired timestamp would spin the timer at zero delay.
   if (phase === "ready") return null;
+  // A check or download still in flight past its deadline (long sleep, a
+  // stalled transfer) also coalesces without touching lastCheckedAt. Re-arm
+  // with a retry delay instead of zero so the scheduler cannot spin.
+  const inFlight = phase === "checking" || phase === "downloading";
   if (
     lastCheckedAt === null ||
     lastCheckedAt === undefined ||
@@ -42,8 +49,9 @@ export function nextUpdateCheckDelay({
     return Math.min(maxDelayMs, Math.max(0, initialDelayMs));
   }
   const checkedAt = new Date(lastCheckedAt).getTime();
-  if (!Number.isFinite(checkedAt)) return 0;
-  return Math.min(maxDelayMs, Math.max(0, checkedAt + intervalMs - now));
+  if (!Number.isFinite(checkedAt)) return inFlight ? IN_FLIGHT_RETRY_MS : 0;
+  const due = Math.max(0, checkedAt + intervalMs - now);
+  return Math.min(maxDelayMs, inFlight ? Math.max(due, IN_FLIGHT_RETRY_MS) : due);
 }
 
 export function updaterErrorCopy(error) {

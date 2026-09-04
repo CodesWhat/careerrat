@@ -5,6 +5,7 @@ import {
   CHECK_INTERVAL_MS,
   createDesktopUpdateController,
   DEFAULT_STATE,
+  IN_FLIGHT_RETRY_MS,
   nextUpdateCheckDelay,
   updaterErrorCopy,
 } from "../apps/desktop/update-check.mjs";
@@ -387,6 +388,23 @@ describe("next update check delay", () => {
     assert.equal(nextUpdateCheckDelay({ lastCheckedAt: null, initialDelayMs: 5000, now }), 5000);
     assert.equal(
       nextUpdateCheckDelay({ lastCheckedAt: now - 1000, now }),
+      CHECK_INTERVAL_MS - 1000
+    );
+  });
+
+  it("re-arms an overdue in-flight check with a retry delay instead of zero", () => {
+    const now = Date.parse("2026-08-26T20:00:00Z");
+    const pastDue = now - CHECK_INTERVAL_MS - 1;
+    assert.equal(
+      nextUpdateCheckDelay({ lastCheckedAt: pastDue, now, phase: "checking" }),
+      IN_FLIGHT_RETRY_MS
+    );
+    assert.equal(
+      nextUpdateCheckDelay({ lastCheckedAt: pastDue, now, phase: "downloading" }),
+      IN_FLIGHT_RETRY_MS
+    );
+    assert.equal(
+      nextUpdateCheckDelay({ lastCheckedAt: now - 1000, now, phase: "checking" }),
       CHECK_INTERVAL_MS - 1000
     );
   });
