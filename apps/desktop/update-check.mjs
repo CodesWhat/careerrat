@@ -282,8 +282,12 @@ export function createDesktopUpdateController({
     if (
       !force &&
       (runtime.phase === "checking" || runtime.phase === "downloading")
-    )
-      return getState();
+    ) {
+      // Coalesce onto the check already running. A manual request still has
+      // to see the outcome, so promote the in-flight operation to manual
+      // instead of starting a second native check.
+      return manual && !runtime.manual ? setRuntime({ manual: true }) : getState();
+    }
 
     saved = { ...saved, lastCheckedAt: now() };
     persist(saved);
@@ -324,7 +328,9 @@ export function createDesktopUpdateController({
   }
 
   function acceptInstall() {
-    if (!supported || runtime.phase !== "ready") return false;
+    // One-shot: the first acceptance owns the quit-and-install sequence. A
+    // repeat request during teardown must not trigger a second app quit.
+    if (!supported || installAccepted || runtime.phase !== "ready") return false;
     installAccepted = true;
     return true;
   }

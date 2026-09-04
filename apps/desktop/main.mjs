@@ -864,7 +864,12 @@ app.on("window-all-closed", () => {
 // darwin does NOT reach here (see window-all-closed above); the app and its
 // server stay alive in the dock until an actual quit.
 app.on("before-quit", (event) => {
-  if (shuttingDown) return;
+  // A repeat quit (Cmd+Q again, a second restart request) while teardown is
+  // in flight must not let Electron exit underneath the pending install.
+  if (shuttingDown) {
+    event.preventDefault();
+    return;
+  }
   shuttingDown = true;
   event.preventDefault();
   shutdown().then(
@@ -874,7 +879,18 @@ app.on("before-quit", (event) => {
         return;
       }
       try {
-        if (!updateController?.install()) app.exit(1);
+        if (!updateController?.install()) {
+          app.exit(1);
+          return;
+        }
+        // The native handoff after quitAndInstall is asynchronous, and the
+        // controller ignores updater events once an install is accepted.
+        // A failure here must still end the process so the next launch's
+        // startup reconciliation can retry the downloaded update.
+        autoUpdater.once("error", (error) => {
+          log(`update install failed: ${error?.message || error}`);
+          app.exit(1);
+        });
       } catch (error) {
         log(`update install failed: ${error?.message || error}`);
         app.exit(1);

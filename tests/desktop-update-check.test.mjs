@@ -311,6 +311,45 @@ describe("desktop updater controller", () => {
     assert.equal(controller.acceptInstall(), false);
     assert.equal(controller.install(), false);
   });
+
+  it("accepts an install only once", () => {
+    const { controller, updater } = makeController();
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "ready");
+
+    assert.equal(controller.acceptInstall(), true);
+    assert.equal(controller.acceptInstall(), false);
+    assert.equal(controller.acceptInstall(), false);
+
+    assert.equal(controller.install(), true);
+    assert.deepEqual(updater.installCalls, [[false, true]]);
+  });
+
+  it("promotes a coalesced manual check so its result stays visible", async () => {
+    const { controller, updater } = makeController();
+
+    updater.emit("checking-for-update");
+    const state = await controller.checkNow({ manual: true });
+
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state.manual, true);
+    assert.equal(state.phase, "checking");
+
+    updater.emit("update-not-available", { version: "0.16.3" });
+    assert.equal(controller.getState().manual, true);
+    assert.equal(controller.getState().phase, "current");
+  });
+
+  it("keeps a coalesced background check non-manual", async () => {
+    const { controller, updater } = makeController();
+
+    updater.emit("checking-for-update");
+    const state = await controller.checkNow();
+
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(state.manual, false);
+    assert.equal(controller.getState().manual, false);
+  });
 });
 
 describe("updater error copy", () => {
