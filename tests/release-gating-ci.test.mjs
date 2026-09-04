@@ -53,6 +53,63 @@ test("all deterministic product builds are declared as protected contexts", asyn
   assert.doesNotMatch(workflow, /Non-gating for now/i);
 });
 
+test("every npm ci job installs with scripts disabled, checks allowScripts, then runs only approved scripts", async () => {
+  // Codex review /tmp/codex-305-r3.md (finding 1): the workflow ran plain
+  // `npm ci` before the checker, so a newly-added dependency with no
+  // allowScripts entry got to run its install script before anything
+  // validated it. Every job that installs from the lockfile must instead:
+  // (1) `npm ci --ignore-scripts` so nothing runs yet, (2) run this repo's
+  // checker, (3) `npm rebuild --strict-allow-scripts`, which fails closed on
+  // any package npm's own matcher still finds unreviewed and only then runs
+  // the approved scripts. This must hold for every job, including the ones
+  // that only build an app (web-build, website-build) and the Windows smoke
+  // job, not just the `tests` job.
+  const workflow = await source(".github/workflows/ci-verify.yml");
+  const jobNames = [
+    "tests",
+    "web-build",
+    "website-build",
+    "windows-package-smoke",
+    "browser-application-prep",
+    "knip",
+  ];
+  const jobStarts = jobNames.map((name) => ({
+    name,
+    index: workflow.indexOf(`\n  ${name}:\n`),
+  }));
+  for (const { name, index } of jobStarts) {
+    assert.notEqual(index, -1, `expected a top-level "${name}:" job in ci-verify.yml`);
+  }
+  const sortedStarts = [...jobStarts].sort((a, b) => a.index - b.index).map((j) => j.index);
+
+  for (const { name, index } of jobStarts) {
+    const nextIndex = sortedStarts.find((i) => i > index) ?? workflow.length;
+    const job = workflow.slice(index, nextIndex);
+    assert.match(
+      job,
+      /run:\s*npm ci --ignore-scripts/,
+      `${name}: expected \`npm ci --ignore-scripts\`, not a plain \`npm ci\` that can run an unreviewed script`
+    );
+    assert.match(
+      job,
+      /run:\s*npm run check:install-scripts/,
+      `${name}: expected a check:install-scripts step`
+    );
+    assert.match(
+      job,
+      /run:\s*npm rebuild --strict-allow-scripts/,
+      `${name}: expected \`npm rebuild --strict-allow-scripts\` to run only approved scripts and fail closed on the rest`
+    );
+    const ciAt = job.indexOf("npm ci --ignore-scripts");
+    const checkAt = job.indexOf("npm run check:install-scripts");
+    const rebuildAt = job.indexOf("npm rebuild --strict-allow-scripts");
+    assert.ok(
+      ciAt < checkAt && checkAt < rebuildAt,
+      `${name}: expected install, then check, then rebuild, in that order`
+    );
+  }
+});
+
 test("paid native AI certification is separate from deterministic release gates", async () => {
   const [rootPackage, rootVerify, desktopVerify, desktopWorkflow] = await Promise.all([
     source("package.json"),

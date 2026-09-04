@@ -92,10 +92,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
         run: npm run check:install-scripts
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm rebuild --strict-allow-scripts
       - name: Core test suite
         run: npm test
       - name: Web UI test suite
@@ -121,8 +123,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: npm run check:install-scripts
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm rebuild --strict-allow-scripts
       - name: Build the web app shell (apps/web)
         run: npm run build --workspace apps/web
 
@@ -157,8 +163,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: npm run check:install-scripts
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm rebuild --strict-allow-scripts
       - name: Build the marketing site and docs (apps/website, apps/docs)
         run: npm run build --workspace apps/website
 
@@ -181,8 +191,12 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: npm run check:install-scripts
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm rebuild --strict-allow-scripts
       - name: Build the Windows x64 NSIS installer
         run: npm run dist:windows --workspace apps/desktop
       - name: Verify install, packaged smoke, and uninstall
@@ -216,8 +230,12 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: npm run check:install-scripts
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm rebuild --strict-allow-scripts
       - name: Install the real Chromium test browser
         run: npx playwright install --with-deps chromium
       - name: Build the app used by the visual contract
@@ -332,7 +350,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: npm run check:install-scripts
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm rebuild --strict-allow-scripts
       - name: Knip check
         run: npx knip --no-progress --max-issues=0
