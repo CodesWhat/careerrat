@@ -115,6 +115,11 @@ function runtimeVerification(runtime) {
     binaryFingerprint: String(runtime.binaryFingerprint).toLowerCase(),
     capabilities: runtime.capabilities,
     versionBoundaryState: runtime.versionBoundaryState || "indeterminate",
+    // The policy floor this boundary state was actually tested against, so a
+    // reader can tell a cached "at_or_above" apart from one tested before
+    // CareerRat raised the minimum. null for a runtime with no boundary
+    // policy (e.g. codex).
+    testedMinimumVersion: runtime.minimumVersion || null,
     checkedAt: new Date().toISOString(),
   };
 }

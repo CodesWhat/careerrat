@@ -40,6 +40,15 @@ function sanitizeVerification(value, runtimeId) {
   }
   const capabilities = sanitizeInstalledRuntimeCapabilityEvidence(runtimeId, value.capabilities);
   const versionBoundaryState = sanitizeVersionBoundaryState(value.versionBoundaryState);
+  // The minimum version the boundary probe was actually run against, so a
+  // reader can tell a cached "at_or_above" apart from one tested against a
+  // since-raised policy floor. Missing on a cache written before this field
+  // existed, or on a runtime with no boundary policy at all (e.g. codex) —
+  // both sanitize to null rather than being treated as a match.
+  const testedMinimumVersion =
+    typeof value.testedMinimumVersion === "string" && value.testedMinimumVersion.trim()
+      ? value.testedMinimumVersion.trim()
+      : null;
   return {
     path,
     realPath,
@@ -47,6 +56,7 @@ function sanitizeVerification(value, runtimeId) {
     binaryFingerprint,
     capabilities,
     versionBoundaryState,
+    testedMinimumVersion,
     checkedAt,
   };
 }

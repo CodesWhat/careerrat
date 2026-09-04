@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -609,5 +617,57 @@ test("CLI output lines that mention flags use ASCII hyphen separators", () => {
     assert.deepEqual(offenders, []);
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// Codex review: `careerrat next` only ever consumes doctor's agentGuidance,
+// which never depends on installedRuntimes, so it must run doctor with
+// --guidance-only rather than paying for full runtime detection (and the
+// fingerprint hashing that can do) on every handoff check. Proven
+// end-to-end with a FIFO standing in for a detected runtime binary: a FIFO
+// passes the executable-bit check detection uses to find a runtime, but a
+// content read against it (as eager fingerprinting would attempt) blocks
+// forever with no writer connected. If next ever stops passing
+// --guidance-only, this hangs until spawnSync's timeout kills it instead of
+// completing.
+test("careerrat next runs doctor with --guidance-only and never hangs reading a detected runtime binary", (t) => {
+  if (process.platform === "win32") {
+    t.skip("mkfifo is POSIX-only");
+    return;
+  }
+  const home = tempHome();
+  const registry = mkdtempSync(join(tmpdir(), "careerrat-next-registry-"));
+  try {
+    const claudeFifo = join(registry, "claude");
+    const mkfifoResult = spawnSync("mkfifo", [claudeFifo]);
+    if (mkfifoResult.status !== 0) {
+      t.skip("mkfifo unavailable on this host");
+      return;
+    }
+    chmodSync(claudeFifo, 0o755);
+
+    const result = spawnSync(process.execPath, [join(ROOT, "src/cli/next.mjs"), "--json"], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        CAREERRAT_HOME: home,
+        PATH: registry,
+        CAREERRAT_RUNTIME_SEARCH_DIRS: registry,
+      },
+      encoding: "utf8",
+      timeout: 5000,
+    });
+
+    assert.equal(
+      result.signal,
+      null,
+      "careerrat next must not hang reading a detected runtime binary's content"
+    );
+    assert.equal(result.status, 0, result.stderr || "careerrat next exited non-zero");
+    const data = JSON.parse(result.stdout);
+    assert.ok(data.agentGuidance, "next --json must still produce agentGuidance");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
   }
 });

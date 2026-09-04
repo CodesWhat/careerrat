@@ -468,6 +468,62 @@ test("detectInstalledRuntimes finds multiple CLIs outside the inherited PATH", (
   }
 });
 
+// Codex review: Doctor's cached verification is only ever validated for the
+// currently selected runtime, so hashing every other detected executable's
+// content wastes reads that can never be used (on the reviewed host, ~419MB
+// across the full registry). fingerprintId restricts hashing to a single
+// definition id — passing it at all (even null) opts in, so every existing
+// caller that omits the option keeps hashing everything.
+test("detectInstalledRuntimes with fingerprintId only hashes the matching runtime's binary", () => {
+  const root = tempRoot();
+  const claudePath = join(root, "claude");
+  const codexPath = join(root, "codex");
+  executable(claudePath);
+  executable(codexPath);
+  try {
+    const restricted = detectInstalledRuntimes({
+      env: { PATH: root },
+      platform: "darwin",
+      homeDir: root,
+      searchDirs: [root],
+      fingerprintId: "claude",
+    });
+    const claude = restricted.find(({ id }) => id === "claude");
+    const codex = restricted.find(({ id }) => id === "codex");
+    assert.ok(claude.available && codex.available, "both binaries must still be detected");
+    assert.match(claude.binaryFingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(codex.binaryFingerprint, null, "an unselected runtime must not be hashed");
+
+    // fingerprintId: null (still present as a key) restricts to no
+    // definition at all — nothing gets hashed.
+    const restrictedToNone = detectInstalledRuntimes({
+      env: { PATH: root },
+      platform: "darwin",
+      homeDir: root,
+      searchDirs: [root],
+      fingerprintId: null,
+    });
+    assert.equal(restrictedToNone.find(({ id }) => id === "claude").binaryFingerprint, null);
+    assert.equal(restrictedToNone.find(({ id }) => id === "codex").binaryFingerprint, null);
+
+    // Omitting the option entirely keeps the default of hashing every
+    // detected executable, unchanged for existing callers.
+    const unrestricted = detectInstalledRuntimes({
+      env: { PATH: root },
+      platform: "darwin",
+      homeDir: root,
+      searchDirs: [root],
+    });
+    assert.match(
+      unrestricted.find(({ id }) => id === "claude").binaryFingerprint,
+      /^[a-f0-9]{64}$/
+    );
+    assert.match(unrestricted.find(({ id }) => id === "codex").binaryFingerprint, /^[a-f0-9]{64}$/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("detectInstalledRuntimes finds Antigravity by its agy binary", () => {
   const root = tempRoot();
   const binDir = join(root, "bin");
@@ -644,6 +700,7 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     action: null,
     version: "0.149.1",
     versionBoundaryState: "at_or_above",
+    minimumVersion: null,
     capabilities: {
       completion: true,
       structuredOutput: true,
@@ -1948,6 +2005,7 @@ test("Codex readiness depends on authentication rather than a complete-workflow 
     action: null,
     version: "0.149.1",
     versionBoundaryState: "at_or_above",
+    minimumVersion: null,
     capabilities: {
       completion: true,
       structuredOutput: true,

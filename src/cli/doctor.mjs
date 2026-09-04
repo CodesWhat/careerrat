@@ -20,7 +20,10 @@ import {
   readDiscoverySkips,
   readSetupState,
 } from "../core/agent-guidance.mjs";
-import { detectInstalledRuntimes } from "../core/ai/installed-runtimes.mjs";
+import {
+  detectInstalledRuntimes,
+  INSTALLED_RUNTIME_DEFINITIONS,
+} from "../core/ai/installed-runtimes.mjs";
 import { loadInstalledRuntimeSelection } from "../core/ai/runtime-selection.mjs";
 import { automationStatus, loadAutomation } from "../core/automation/consent.mjs";
 import { detectSession } from "../core/automation/session.mjs";
@@ -197,8 +200,18 @@ const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 // Skipped entirely in --guidance-only mode: detection reads and SHA-256
 // hashes every discovered executable, which is cheap once but not on a
 // 30-second dashboard refresh loop across hundreds of MB of installed CLIs.
-const installedRuntimes = guidanceOnly ? [] : detectInstalledRuntimes({ env: process.env });
+//
+// Even outside --guidance-only, a cached verification can only ever be
+// validated for the currently selected runtime (installedRuntimeCachedVerification
+// below rejects any other id outright), so only that one runtime's binary
+// is worth hashing — and only when there's a cached verification to
+// validate in the first place. detectInstalledRuntimes's fingerprintId
+// option makes every other detected executable skip the read entirely.
 const runtimeSelection = guidanceOnly ? null : loadInstalledRuntimeSelection(pathCtx);
+const runtimeFingerprintId = runtimeSelection?.verification ? runtimeSelection.runtimeId : null;
+const installedRuntimes = guidanceOnly
+  ? []
+  : detectInstalledRuntimes({ env: process.env, fingerprintId: runtimeFingerprintId });
 
 // Bundled plugins (plugins/<name>/). Informational: a plugin needing a
 // consent capability is unaffected by this block, that's the automation
@@ -296,7 +309,7 @@ const result = {
       name: runtime.name,
       status: installedRuntimeStatusLabel(runtime),
       version: verification?.version ?? null,
-      boundaryProbePassed: verification?.versionBoundaryState === "at_or_above",
+      boundaryProbePassed: installedRuntimeBoundaryPassed(runtime, verification),
       boundaryProbeCheckedAt: verification?.checkedAt ?? null,
     };
   }),
@@ -716,22 +729,45 @@ function installedRuntimeStatusLabel(runtime) {
 
 // Cached verification is only ever trustworthy for the runtime it was
 // written for, and only while it still matches the exact binary
-// detectInstalledRuntimes just found on disk — a different path or a
-// changed binaryFingerprint means the cached probe no longer describes
-// what's actually installed, so it's treated as unknown rather than stale.
+// detectInstalledRuntimes just found on disk — a different path (including
+// a different launcher resolving to the same underlying binary, the case
+// the AI execution router itself refuses) or a changed binaryFingerprint
+// means the cached probe no longer describes what's actually installed, so
+// it's treated as unknown rather than stale.
 function installedRuntimeCachedVerification(runtime, selection) {
   const verification = selection?.verification;
   if (
     !verification ||
     selection.runtimeId !== runtime.id ||
+    !runtime.path ||
     !runtime.realPath ||
     !runtime.binaryFingerprint ||
+    verification.path !== runtime.path ||
     verification.realPath !== runtime.realPath ||
     verification.binaryFingerprint !== runtime.binaryFingerprint.toLowerCase()
   ) {
     return null;
   }
   return verification;
+}
+
+// The policy floor a cached "at_or_above" was actually tested against. A
+// runtime with no boundary policy (e.g. codex) always passes; one with a
+// policy only passes when the cached testedMinimumVersion still equals the
+// current policy's minimum, so a CareerRat update raising the floor makes an
+// old cached pass report as unknown instead of continuing to read as
+// current.
+function installedRuntimeBoundaryPolicyMinimum(runtimeId) {
+  return (
+    INSTALLED_RUNTIME_DEFINITIONS.find((d) => d.id === runtimeId)?.minimumBoundaryVersion || null
+  );
+}
+
+function installedRuntimeBoundaryPassed(runtime, verification) {
+  if (verification?.versionBoundaryState !== "at_or_above") return false;
+  const policyMinimum = installedRuntimeBoundaryPolicyMinimum(runtime.id);
+  if (!policyMinimum) return true;
+  return verification.testedMinimumVersion === policyMinimum;
 }
 
 function printInstalledRuntimes(runtimes, selection) {
@@ -750,7 +786,7 @@ function printInstalledRuntimes(runtimes, selection) {
     const versionText = verification ? `v${verification.version}` : "version unknown";
     const boundaryText = !verification
       ? "boundary probe not yet run"
-      : verification.versionBoundaryState === "at_or_above"
+      : installedRuntimeBoundaryPassed(runtime, verification)
         ? `boundary probe passed (checked ${verification.checkedAt})`
         : `boundary probe unknown (checked ${verification.checkedAt})`;
     console.log(

@@ -402,11 +402,25 @@ export function findInstalledExecutable(
   return null;
 }
 
+// `fingerprintId` restricts binary hashing to a single definition id, for a
+// caller that only ever needs the fingerprint of one already-known runtime
+// (Doctor validating a cached verification for the selected engine, say).
+// Passing the key at all — even as null, meaning "fingerprint none" — opts
+// into the restriction; omitting it keeps the default of fingerprinting
+// every detected executable, so existing callers (call-ai.mjs, the settings
+// route, every test that doesn't pass this option) are unaffected. Reading
+// and SHA-256 hashing a full binary is not cheap across hundreds of MB of
+// installed CLIs, so a caller that only cares about one runtime's cached
+// verification should never pay for the others.
 export function detectInstalledRuntimes(options = {}) {
+  const restrictFingerprint = Object.hasOwn(options, "fingerprintId");
+  const fingerprintId = options.fingerprintId ?? null;
   return INSTALLED_RUNTIME_DEFINITIONS.map((definition) => {
     const path = findInstalledExecutable(definition.binaries, options);
     const realPath = path ? existingCanonicalPath(path) : null;
-    const binaryFingerprint = realPath ? runtimeBinaryFingerprint(realPath, options) : null;
+    const shouldFingerprint = !restrictFingerprint || definition.id === fingerprintId;
+    const binaryFingerprint =
+      realPath && shouldFingerprint ? runtimeBinaryFingerprint(realPath, options) : null;
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       available: Boolean(path),
     });
@@ -1394,6 +1408,7 @@ export async function probeInstalledRuntime(
         action: null,
         version: runtimeVersion,
         versionBoundaryState,
+        minimumVersion: definition.minimumBoundaryVersion || null,
         capabilities: runtimeCapabilities,
         capabilityReason:
           capabilityReason || (runtimeCapabilities.taskTools ? null : UNVERIFIED_COMPLETION_REASON),
@@ -1466,6 +1481,7 @@ export async function probeInstalledRuntime(
       action: null,
       version: runtimeVersion,
       versionBoundaryState,
+      minimumVersion: definition.minimumBoundaryVersion || null,
       capabilities: runtimeCapabilities,
       capabilityReason:
         capabilityReason ||
