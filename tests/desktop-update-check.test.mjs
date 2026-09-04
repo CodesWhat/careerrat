@@ -226,6 +226,32 @@ describe("desktop updater controller", () => {
     assert.equal(updater.checkCalls, 0);
     assert.equal(controller.needsStartupCheck(), false);
     assert.equal(state.enabled, false);
+    assert.notEqual(state.phase, "checking");
+  });
+
+  it("recovers from a skipped startup reconciliation once updates are re-enabled", async () => {
+    const { controller, updater } = makeController({
+      persisted: {
+        ...DEFAULT_STATE,
+        enabled: false,
+        operation: { phase: "ready", version: "0.16.4" },
+      },
+    });
+
+    assert.equal(controller.getState().phase, "checking");
+
+    const state = await controller.reconcileStartup();
+    assert.equal(updater.checkCalls, 0);
+    assert.notEqual(state.phase, "checking");
+
+    // Before the fix, the leftover synthetic `checking` phase made this
+    // manual check coalesce onto the abandoned reconciliation instead of
+    // invoking the updater, so checkCalls stayed at 0 forever.
+    controller.setEnabled(true);
+    const manualState = await controller.checkNow({ manual: true });
+
+    assert.equal(updater.checkCalls, 1);
+    assert.equal(manualState.phase, "checking");
   });
 
   it("recovers an interrupted download as a clear retry instead of idle", () => {
