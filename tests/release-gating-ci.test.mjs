@@ -10,7 +10,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -18,29 +17,17 @@ import { fileURLToPath } from "node:url";
 
 import YAML from "yaml";
 
+// installedNpmConfigVersion and resolveNpmConfigDefinitionsPath aren't
+// called from this file directly — the empty-COREPACK_HOME regression
+// further down imports them itself, inside a freshly spawned node
+// process, so it exercises the exact same helper module this file uses.
+import {
+  computeNpmValueOptions,
+  loadNpmConfigDefinitions,
+} from "./helpers/npm-cli-definitions.mjs";
+
 async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
-}
-
-const require = createRequire(import.meta.url);
-
-// npm's own boolean-flag type shapes (@npmcli/config's Definition.type):
-// either the bare `Boolean` constructor, or an array whose only non-`null`
-// member is `Boolean` (npm uses `null` in a type array to mean "also
-// accepts being unset", e.g. `workspaces`'s `[null, Boolean]` — still a
-// standalone flag, not a value-taking one). Anything else in the type
-// (String, Number, Array, an enumerated set of string literals like
-// `install-strategy`'s `['hoisted', 'nested', 'shallow', 'linked']`, ...)
-// means the option consumes a value. Verified against the pinned npm
-// 12.0.2's own node_modules/@npmcli/config/lib/definitions/definitions.js:
-// `foreground-scripts: { type: Boolean }` (pure), `workspaces: { type:
-// [null, Boolean] }` (pure, confirmed boolean-only in practice: `npm test
-// --workspaces` never consumes a following token as its value), `omit:
-// { type: [Array, 'dev', 'optional', 'peer'] }` (value-taking).
-function isPureBooleanOptionType(type) {
-  if (type === Boolean || type === null) return true;
-  if (Array.isArray(type)) return type.every((t) => t === Boolean || t === null);
-  return false;
 }
 
 // Reads the exact pinned npm version off package.json's `packageManager`
@@ -71,21 +58,21 @@ const NPM_BUNDLED_NPMCLI_CONFIG_VERSION = {
   "12.0.2": "11.0.1",
 };
 
-// Codex review /tmp/codex-305-r11.md (finding 1): this used to require
-// either a hoisted node_modules/@npmcli/config or Corepack's own install
-// cache for the pinned npm release. The CI verification job happens to seed
-// that cache (it runs `npm --version` through Corepack before this suite
-// runs), but the macOS desktop-release job runs bundled `npm ci` followed
-// directly by `release:pretag` without ever invoking Corepack, and a fresh
-// developer machine using bundled npm has neither — both threw before this
-// suite ever registered a single test. Fix: @npmcli/config is now a plain,
-// exact-pinned devDependency (see package.json), so this is a normal
-// `require`, no filesystem probing or Corepack cache needed at all. The
-// version-pin regression below (and the empty-COREPACK_HOME regression
-// further down) keep this honest against future npm bumps.
-function loadNpmConfigDefinitions() {
-  return require("@npmcli/config/lib/definitions/index.js");
-}
+// Codex review /tmp/codex-305-r12.md (finding 1): npm 12.0.2 resolves
+// several other command spellings to `ci` before ever comparing the
+// parsed command against the literal string "ci" — a `run:` line using
+// one of them installed with lifecycle scripts unguarded while every
+// check here still passed, since isExecutableNpmCiSegment only ever
+// accepted the exact token "ci". Verified against the published
+// npm@12.0.2 package's own lib/utils/cmd-list.js: its `aliases` table
+// maps `clean-install`, `ic`, `install-clean`, and `isntall-clean` (a
+// deliberate npm typo alias, not a mistake in this list) directly to
+// canonical command "ci". The abbreviation chains built from `commands`
+// (`insta`, `instal`, ...) resolve to "install" instead and are
+// correctly excluded. Kept next to NPM_BUNDLED_NPMCLI_CONFIG_VERSION so a
+// future npm bump prompts re-checking this set against that release's
+// own cmd-list.js.
+const NPM_CI_COMMAND_ALIASES = new Set(["clean-install", "ic", "install-clean", "isntall-clean"]);
 
 async function loadWorkflow() {
   return YAML.parse(await source(".github/workflows/ci-verify.yml"));
@@ -283,27 +270,13 @@ const LEADING_PREFIX_PATTERN = /^(?:(?:env|command|corepack)\s+|[A-Za-z_][A-Za-z
 // @npmcli/config definitions (npm's own source of truth for which options
 // take a value, `type` !== a purely-boolean shape) instead of
 // hand-listing it, so a future npm option is covered automatically the
-// next time the pin moves. See loadNpmConfigDefinitions above for where
-// that comes from now (a plain devDependency, not a filesystem probe).
+// next time the pin moves. See ./helpers/npm-cli-definitions.mjs for
+// loadNpmConfigDefinitions and computeNpmValueOptions themselves (a
+// plain devDependency require, not a filesystem probe) — moved there
+// (Codex review /tmp/codex-305-r12.md, finding 2) so the empty-COREPACK_HOME
+// regression further down can import and exercise the real loader from a
+// freshly spawned process.
 const { definitions: NPM_DEFINITIONS, shorthands: NPM_SHORTHANDS } = loadNpmConfigDefinitions();
-
-function computeNpmValueOptions(definitions) {
-  const flags = new Set();
-  for (const [key, def] of Object.entries(definitions)) {
-    if (isPureBooleanOptionType(def.type)) continue;
-    flags.add(`--${key}`);
-    for (const short of [].concat(def.short ?? [])) {
-      flags.add(`-${short}`);
-    }
-  }
-  if (flags.size === 0) {
-    throw new Error(
-      "release-gating-ci.test.mjs: @npmcli/config's definitions loaded but produced no " +
-        "value-taking options"
-    );
-  }
-  return flags;
-}
 
 const NPM_VALUE_OPTIONS = computeNpmValueOptions(NPM_DEFINITIONS);
 
@@ -334,6 +307,95 @@ const NPM_VALUE_OPTIONS = computeNpmValueOptions(NPM_DEFINITIONS);
 function expandNpmShorthand(token) {
   const bareName = token.replace(/^--?/, "");
   return NPM_SHORTHANDS[bareName] ?? null;
+}
+
+// Codex review /tmp/codex-305-r12.md (finding 1): grouped short options
+// (POSIX-style glomming of several single-character flags onto one dash,
+// e.g. `-dC .` for `-d -C .`) evaded expandNpmShorthand entirely, since
+// "dC" is never itself a key in npm's shorthands table — only "d" and "C"
+// are. npm's own parser (nopt's resolveShort, in the nopt version
+// @npmcli/config bundles) accepts this form specifically when EVERY
+// character of the token (after its single leading dash) is itself a
+// single-character shorthand key, and expands it by concatenating each
+// character's own expansion in order: `-dC` becomes `--loglevel info
+// --prefix`, the exact three-token sequence isExecutableNpmCiSegment
+// below splices back into the stream and re-walks, so each piece gets
+// the same single/multi-element handling as any other shorthand
+// expansion (see expandNpmShorthand's own comment above) without needing
+// separate consumption logic here.
+function expandGroupedShortOptions(token) {
+  if (!/^-[^-]/.test(token) || token.length < 3) return null;
+  const characters = token.slice(1).split("");
+  if (!characters.every((char) => Object.hasOwn(NPM_SHORTHANDS, char))) return null;
+  return characters.flatMap((char) => NPM_SHORTHANDS[char]);
+}
+
+// Codex review /tmp/codex-305-r12.md (finding 1): the option-token loop
+// used to split each segment on bare whitespace
+// (`segment.split(/\s+/).filter(Boolean)`), so a quoted option value
+// containing a space (`npm --enjoy-by "2020-01-01 00:00" ci`) split into
+// two separate tokens ("2020-01-01" and "00:00"), leaving `ci` one token
+// further away than the option-token loop expects and failing the whole
+// match. This is a small POSIX-ish word-splitter, not a shell: it
+// understands single quotes (fully literal, no escapes), double quotes
+// (backslash escapes only `\`, `"`, `$`, and a backtick, per POSIX —
+// anything else after a backslash inside double quotes keeps the
+// backslash literally), and a bare backslash outside quotes escaping
+// whatever character follows it. It performs no expansion at all — no
+// `$VAR`, no globs, no command substitution — because none of those
+// change *whether* the invocation is `npm ci`, only what an option's
+// value resolves to at runtime, which is out of scope for this gate.
+function tokenizeShellWords(segment) {
+  const tokens = [];
+  let current = "";
+  let hasToken = false;
+  let i = 0;
+  while (i < segment.length) {
+    const char = segment[i];
+    if (/\s/.test(char)) {
+      if (hasToken) {
+        tokens.push(current);
+        current = "";
+        hasToken = false;
+      }
+      i += 1;
+      continue;
+    }
+    if (char === "'") {
+      hasToken = true;
+      const end = segment.indexOf("'", i + 1);
+      const close = end === -1 ? segment.length : end;
+      current += segment.slice(i + 1, close);
+      i = close + 1;
+      continue;
+    }
+    if (char === '"') {
+      hasToken = true;
+      i += 1;
+      while (i < segment.length && segment[i] !== '"') {
+        if (segment[i] === "\\" && '"\\$`'.includes(segment[i + 1])) {
+          current += segment[i + 1];
+          i += 2;
+        } else {
+          current += segment[i];
+          i += 1;
+        }
+      }
+      i += 1; // skip the closing quote (or step past the end if unterminated)
+      continue;
+    }
+    if (char === "\\" && i + 1 < segment.length) {
+      current += segment[i + 1];
+      hasToken = true;
+      i += 2;
+      continue;
+    }
+    current += char;
+    hasToken = true;
+    i += 1;
+  }
+  if (hasToken) tokens.push(current);
+  return tokens;
 }
 
 function stripBashComments(run) {
@@ -370,8 +432,24 @@ function normalizeCommandSegment(segment) {
 // it stands for, and an alias whose expansion already bakes in a value
 // (`-d` -> `--loglevel info`) consumes nothing further from argv, since
 // nothing about it came from a separate token in the actual command line.
+//
+// Codex review /tmp/codex-305-r12.md (finding 1): rather than special-case
+// how many tokens each *kind* of expansion consumes (single-element vs.
+// multi-element, as the old inline arithmetic did), a matched expansion
+// — whether from a plain shorthand or from expandGroupedShortOptions'
+// grouped form — is spliced back into the token stream in place of the
+// token it replaced, and the loop re-walks from the same index. This is
+// the same mechanism npm's own parser (nopt) uses: it lets a multi-element
+// expansion's own baked-in words resolve themselves on the next pass
+// (`--loglevel` immediately followed by its own `info`) and lets a
+// trailing single-element rename fall through to the ordinary
+// NPM_VALUE_OPTIONS check and consume whatever real token follows it,
+// without this loop needing to know which case it's in up front. The
+// parsed command is then resolved through npm's own command aliases
+// (NPM_CI_COMMAND_ALIASES) before comparing against "ci", so
+// `npm clean-install`/`npm ic` are recognized exactly like `npm ci`.
 function isExecutableNpmCiSegment(segment) {
-  const tokens = segment.split(/\s+/).filter(Boolean);
+  const tokens = tokenizeShellWords(segment);
   if (tokens[0] !== "npm") return false;
   let i = 1;
   while (i < tokens.length && tokens[i].startsWith("-")) {
@@ -380,9 +458,9 @@ function isExecutableNpmCiSegment(segment) {
       i += 1;
       continue;
     }
-    const expansion = expandNpmShorthand(token);
+    const expansion = expandNpmShorthand(token) ?? expandGroupedShortOptions(token);
     if (expansion) {
-      i += expansion.length > 1 || !NPM_VALUE_OPTIONS.has(expansion[0]) ? 1 : 2;
+      tokens.splice(i, 1, ...expansion);
       continue;
     }
     if (NPM_VALUE_OPTIONS.has(token)) {
@@ -391,7 +469,8 @@ function isExecutableNpmCiSegment(segment) {
       i += 1;
     }
   }
-  return tokens[i] === "ci";
+  const command = tokens[i];
+  return command === "ci" || NPM_CI_COMMAND_ALIASES.has(command);
 }
 
 function countExecutableNpmCi(steps) {
@@ -708,6 +787,19 @@ test("negative case: an extra npm ci inserted before the activation step defeats
 // expandNpmShorthand) — neither is a key in `definitions.js` itself, so
 // they evaded the option-token loop entirely until it started expanding
 // through npm's `shorthands` table first.
+//
+// Codex review /tmp/codex-305-r12.md (finding 1): three more evasion
+// shapes, all still executing the real `npm ci` while defeating the old
+// classifier. `npm clean-install` and `npm ic` are npm's own command
+// aliases (see NPM_CI_COMMAND_ALIASES) — no `ci` token ever appears, so
+// the old literal `tokens[i] === "ci"` check could never match either
+// one. `npm -dC . ci` is a grouped short option (`-d` and `-C` glommed
+// onto one dash; see expandGroupedShortOptions) that the old loop
+// treated as a single unrecognized token and gave up on one token too
+// early. `npm --enjoy-by "2020-01-01 00:00" ci` is the shell-quoting
+// evasion (see tokenizeShellWords) — the old bare `.split(/\s+/)`
+// split the quoted value's internal space into two tokens, landing on
+// "00:00" instead of the real `ci` two tokens later.
 for (const [label, run] of [
   ["corepack npm ci", "corepack npm ci"],
   ["command npm ci", "command npm ci"],
@@ -723,6 +815,10 @@ for (const [label, run] of [
   ["npm --allow-git root ci", "npm --allow-git root ci"],
   ["npm --reg URL ci", "npm --reg https://registry.example.com ci"],
   ["npm --enjoy-by DATE ci", "npm --enjoy-by 2020-01-01 ci"],
+  ["npm clean-install", "npm clean-install"],
+  ["npm ic", "npm ic"],
+  ["npm -dC . ci", "npm -dC . ci"],
+  ["npm --enjoy-by quoted DATE ci", 'npm --enjoy-by "2020-01-01 00:00" ci'],
 ]) {
   test(`negative case: a new job running "${label}" is caught by dynamic discovery`, async () => {
     const workflow = await loadWorkflow();
@@ -777,6 +873,45 @@ test("[codex-305-r11] isExecutableNpmCiSegment expands npm's own standalone shor
   assert.equal(isExecutableNpmCiSegment("npm -d ci"), true);
 });
 
+test("[codex-305-r12] isExecutableNpmCiSegment resolves npm's own command aliases to ci", () => {
+  // Verified against the published npm@12.0.2 package's own
+  // lib/utils/cmd-list.js `aliases` table (see NPM_CI_COMMAND_ALIASES):
+  // all four resolve to canonical command "ci", not to a bare "ci" token
+  // anywhere in the run string.
+  for (const run of ["npm clean-install", "npm ic", "npm install-clean", "npm isntall-clean"]) {
+    assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
+  }
+});
+
+test("[codex-305-r12] isExecutableNpmCiSegment expands grouped short options letter by letter", () => {
+  // `-dC .` gloms `-d` (multi-element: `--loglevel info`, self-contained)
+  // and `-C` (single-element rename for `--prefix`, value-taking) onto one
+  // dash. Both must resolve in order, with `-C`'s expansion still
+  // consuming the real `.` token, to reach the real `ci`.
+  assert.equal(isExecutableNpmCiSegment("npm -dC . ci"), true);
+  // A grouped token where every character is a real single-char shorthand
+  // but the group itself doesn't end on a value-taking expansion (`-f` is
+  // the boolean `--force`) must not swallow an unrelated following token.
+  assert.equal(isExecutableNpmCiSegment("npm -gf ci"), true);
+  // Not every multi-letter, single-dash token is a valid grouped option —
+  // "-xz" has no shorthand keys "x" or "z" at all, so expandGroupedShortOptions
+  // must decline it (returning null, not a bogus partial expansion) and
+  // fall through to ordinary, non-consuming option handling, which still
+  // finds "ci" as the very next token.
+  assert.equal(isExecutableNpmCiSegment("npm -xz ci"), true);
+});
+
+test("[codex-305-r12] isExecutableNpmCiSegment tokenizes shell quoting instead of splitting on bare whitespace", () => {
+  // A double-quoted option value containing a space must stay one token,
+  // so the option-token loop consumes exactly one value token (not two)
+  // and still reaches the real `ci` right after it.
+  assert.equal(isExecutableNpmCiSegment('npm --enjoy-by "2020-01-01 00:00" ci'), true);
+  // Single quotes are fully literal (no backslash escapes inside them),
+  // and a backslash outside quotes escapes the very next character.
+  assert.equal(isExecutableNpmCiSegment("npm --enjoy-by '2020-01-01 00:00' ci"), true);
+  assert.equal(isExecutableNpmCiSegment("npm --enjoy-by 2020-01-01\\ 00:00 ci"), true);
+});
+
 // Codex review /tmp/codex-305-r11.md (finding 1): keeps the @npmcli/config
 // devDependency pin (package.json) honest against the npm version actually
 // pinned in `packageManager`. This is deliberately offline — no `npm view`
@@ -809,21 +944,58 @@ test("[codex-305-r11] the @npmcli/config devDependency is pinned to the exact ve
 // macOS desktop-release job hit (bundled `npm ci` then `release:pretag`,
 // with Corepack never invoked) is reproduced directly here instead of only
 // being asserted about.
-test("[codex-305-r11] the loader still works with COREPACK_HOME pointed at an empty directory", () => {
+//
+// Codex review /tmp/codex-305-r12.md (finding 2): the spawned child used
+// to `require()` the definitions module directly, by its own hardcoded
+// path literal — a completely separate resolution from
+// loadNpmConfigDefinitions, so a future regression inside that function
+// (e.g. reintroducing a Corepack-cache probe) could still pass this test
+// even though the real loader under test was never exercised. The child
+// now imports tests/helpers/npm-cli-definitions.mjs — the same module
+// this file itself imports loadNpmConfigDefinitions from — and calls the
+// real loadNpmConfigDefinitions, then asserts the resolved path landed
+// inside this project's own node_modules/@npmcli/config (not some other
+// copy on the machine) and that the resolved version matches the pin map
+// entry for the currently-pinned npm release.
+test("[codex-305-r12] the loader still works with COREPACK_HOME pointed at an empty directory, importing the real helper under test", () => {
   const emptyCorepackHome = mkdtempSync(join(tmpdir(), "empty-corepack-home-"));
-  const result = spawnSync(
-    process.execPath,
-    ["-e", "require('@npmcli/config/lib/definitions/index.js')"],
-    {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...process.env, COREPACK_HOME: emptyCorepackHome },
-      encoding: "utf8",
-    }
-  );
+  const helperUrl = new URL("./helpers/npm-cli-definitions.mjs", import.meta.url).href;
+  const script = [
+    `import { loadNpmConfigDefinitions, resolveNpmConfigDefinitionsPath, installedNpmConfigVersion } from ${JSON.stringify(helperUrl)};`,
+    "const { definitions } = loadNpmConfigDefinitions();",
+    "process.stdout.write(JSON.stringify({",
+    "  definitionCount: Object.keys(definitions).length,",
+    "  resolvedPath: resolveNpmConfigDefinitionsPath(),",
+    "  version: installedNpmConfigVersion(),",
+    "}));",
+  ].join("\n");
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    env: { ...process.env, COREPACK_HOME: emptyCorepackHome },
+    encoding: "utf8",
+  });
   assert.equal(
     result.status,
     0,
-    `expected the loader to succeed with an empty COREPACK_HOME, got: ${result.stderr}`
+    `expected the real loader to succeed with an empty COREPACK_HOME, got: ${result.stderr}`
+  );
+  const output = JSON.parse(result.stdout);
+  assert.ok(
+    output.definitionCount > 0,
+    "expected the real loader to return npm's own option definitions"
+  );
+  const projectNpmcliConfigDir = fileURLToPath(
+    new URL("../node_modules/@npmcli/config/", import.meta.url)
+  );
+  assert.ok(
+    output.resolvedPath.startsWith(projectNpmcliConfigDir),
+    `expected the loader to resolve under this project's own ${projectNpmcliConfigDir}, got: ${output.resolvedPath}`
+  );
+  const npmVersion = pinnedNpmVersion();
+  assert.equal(
+    output.version,
+    NPM_BUNDLED_NPMCLI_CONFIG_VERSION[npmVersion],
+    `expected the resolved @npmcli/config version to equal the pin map entry for npm@${npmVersion}`
   );
 });
 
