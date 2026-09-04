@@ -948,6 +948,56 @@ test("[codex-305-r7] stale-key liveness honors an actual-tree implicit node-gyp 
   }
 });
 
+test("[codex-305-r9] a prepare-only Git dependency's approval is not falsely reported stale in actual mode", async () => {
+  // Regression for the ninth adversarial review (/tmp/codex-305-r9.md,
+  // finding 2). Stale-key liveness always read scripts off the virtual
+  // (lockfile) node, even in actual mode. That's fine for
+  // preinstall/install/postinstall: the lockfile's `hasInstallScript` flag
+  // covers those, and getInstallScripts falls back to a real disk read once
+  // it sees that flag set (see the gyp-dep case above, which relies on the
+  // filesystem path rather than this flag at all). But npm's lockfile
+  // writer never sets `hasInstallScript` for a `prepare`-only script, and
+  // lock metadata carries no script bodies either, so a Git dependency
+  // whose only install-relevant script is `prepare` reads as scriptless on
+  // its virtual node even though the real, installed package on disk
+  // genuinely has one. That falsely staled the approval below and would
+  // fail every gated CI job for a legitimately reviewed prepare-only Git
+  // dependency. In actual mode, liveness must come from the corresponding
+  // installed (actual) node instead, which correctly reads the real
+  // prepare script off disk.
+  const root = makeFixtureRoot();
+  try {
+    const sha = "abc123def4567890abc123def4567890abc123d";
+    const shortSha = sha.slice(0, 7);
+    writeManifests(root, {
+      rootExtra: {
+        dependencies: { "prepare-only-git-dep": `github:user/prepare-only-git-dep#${sha}` },
+      },
+      packages: {
+        "node_modules/prepare-only-git-dep": {
+          version: "1.0.0",
+          resolved: `git+ssh://git@github.com/user/prepare-only-git-dep.git#${sha}`,
+        },
+      },
+    });
+    writeInstalledPackage(root, "node_modules/prepare-only-git-dep", {
+      name: "prepare-only-git-dep",
+      version: "1.0.0",
+      scripts: { prepare: "tsc" },
+    });
+
+    const result = await checkInstallScripts({
+      allowScripts: { [`github:user/prepare-only-git-dep#${shortSha}`]: true },
+      root,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.staleKeys, []);
+    assert.deepEqual(result.uncovered, []);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Stale-key matching under omit-lockfile-registry-resolved. [codex-305-r5]
 // ---------------------------------------------------------------------------

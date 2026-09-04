@@ -172,6 +172,19 @@ function assertInstallSequence(steps, jobId) {
 // unrelated subcommand like `npm run ci`).
 const COMMAND_SPLIT_PATTERN = /[;&|(]+|\n/g;
 
+// Codex review /tmp/codex-305-r9.md (finding 1): a backslash immediately
+// before a line ending (LF or CRLF) is bash's own line-continuation syntax,
+// joining the next physical line onto the current logical one. Before this,
+// `npm \` on one line and `  ci` on the next were two separate segments —
+// neither containing both `npm` and `ci` — so a continued `npm ci` was
+// invisible to discovery entirely. Applied before comment-stripping and
+// command-splitting so the joined logical line is what both operate on.
+const LINE_CONTINUATION_PATTERN = /\\\r?\n[ \t]*/g;
+
+function joinLineContinuations(run) {
+  return run.replace(LINE_CONTINUATION_PATTERN, " ");
+}
+
 // Leading prefixes that don't change whether `npm ci` actually runs, so they
 // have to be peeled off before matching: a bare environment-variable
 // assignment (`FOO=1 npm ci`), the `env` builtin (`env FOO=1 npm ci`), the
@@ -181,12 +194,26 @@ const COMMAND_SPLIT_PATTERN = /[;&|(]+|\n/g;
 // FOO=1 command corepack npm ci`) resolve too.
 const LEADING_PREFIX_PATTERN = /^(?:(?:env|command|corepack)\s+|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)/;
 
-// `npm`, then any number of flag-shaped tokens (`-x`, `--long`,
-// `--key=value`), then `ci` as its own word. Recognizes `npm
-// --foreground-scripts ci` alongside the plain `npm ci` without also
-// matching an unrelated subcommand or package script named "ci" (`npm run
-// ci` never reaches this pattern, since "run" isn't a flag token).
-const NPM_CI_INVOCATION_PATTERN = /^npm(?:\s+--?[\w][\w-]*(?:=\S+)?)*\s+ci\b/;
+// Codex review /tmp/codex-305-r9.md (finding 1): npm global options can take
+// their value as a SEPARATE token (`npm --prefix . ci`, `npm --workspace
+// apps/web ci`), not just attached via `=` (`--prefix=.`). A regex matching
+// only `--key=value` flags never consumes the separate value token, so it
+// never reaches `ci` and misses the invocation entirely. This set is not
+// exhaustive — only the npm global options plausible in a CI install step —
+// each maps to "the next token is this option's value, not part of the
+// subcommand". Any option not in this set is treated as a standalone
+// boolean flag (`--foreground-scripts`), matching npm's own default.
+const NPM_VALUE_OPTIONS = new Set([
+  "-C",
+  "--prefix",
+  "-w",
+  "--workspace",
+  "--userconfig",
+  "--globalconfig",
+  "--registry",
+  "--cache",
+  "--loglevel",
+]);
 
 function stripBashComments(run) {
   return run
@@ -206,13 +233,40 @@ function normalizeCommandSegment(segment) {
   }
 }
 
+// Codex review /tmp/codex-305-r9.md (finding 1): argv-aware replacement for
+// the old `NPM_CI_INVOCATION_PATTERN` regex, which could only recognize a
+// `--key=value` flag and never consumed a separate-token option value. Walks
+// whitespace-separated tokens: `npm`, then any run of option tokens (each
+// consuming its own separate value token when it's a known value-taking
+// option, per NPM_VALUE_OPTIONS), then requires `ci` as the next bare token.
+// A subcommand like "run" in `npm run ci` isn't option-shaped (no leading
+// `-`), so the walk stops there and the final check against "ci" fails.
+function isExecutableNpmCiSegment(segment) {
+  const tokens = segment.split(/\s+/).filter(Boolean);
+  if (tokens[0] !== "npm") return false;
+  let i = 1;
+  while (i < tokens.length && tokens[i].startsWith("-")) {
+    const token = tokens[i];
+    if (token.includes("=")) {
+      i += 1;
+    } else if (NPM_VALUE_OPTIONS.has(token)) {
+      i += 2;
+    } else {
+      i += 1;
+    }
+  }
+  return tokens[i] === "ci";
+}
+
 function countExecutableNpmCi(steps) {
   let count = 0;
   for (const step of steps ?? []) {
     if (typeof step?.run !== "string") continue;
-    const segments = stripBashComments(step.run).split(COMMAND_SPLIT_PATTERN);
+    const segments = stripBashComments(joinLineContinuations(step.run)).split(
+      COMMAND_SPLIT_PATTERN
+    );
     for (const segment of segments) {
-      if (NPM_CI_INVOCATION_PATTERN.test(normalizeCommandSegment(segment))) count++;
+      if (isExecutableNpmCiSegment(normalizeCommandSegment(segment))) count++;
     }
   }
   return count;
@@ -494,12 +548,26 @@ test("negative case: an extra npm ci inserted before the activation step defeats
 // spliced in before the activation step of an already-gated job (proving
 // the exact-count check still catches it, the same shape as the "extra npm
 // ci inserted before the activation step" case above).
+//
+// Codex review /tmp/codex-305-r9.md (finding 1): the separate-valued-option
+// and line-continuation cases below are the same evasion shape, added after
+// the argv-aware rewrite. `npm --prefix . ci` and `npm --workspace apps/web
+// ci` take their option's value as its own token, which the old
+// `--key=value`-only regex could never consume; a backslash immediately
+// before a line ending is bash's own continuation syntax, joining `npm \`
+// and the next line into one logical `npm ci`, which the old per-line split
+// never reassembled. `npm run ci` (an unrelated subcommand, not tested in
+// this loop) must keep failing to match; isExecutableNpmCiSegment's own unit
+// shape guarantees that, since "run" never starts with `-`.
 for (const [label, run] of [
   ["corepack npm ci", "corepack npm ci"],
   ["command npm ci", "command npm ci"],
   ["env FOO=1 npm ci", "env FOO=1 npm ci"],
   ["npm --foreground-scripts ci", "npm --foreground-scripts ci"],
   ["doubled whitespace", "npm   ci"],
+  ["npm --prefix . ci", "npm --prefix . ci"],
+  ["npm --workspace apps/web ci", "npm --workspace apps/web ci"],
+  ["a backslash line continuation", "npm \\\n  ci"],
 ]) {
   test(`negative case: a new job running "${label}" is caught by dynamic discovery`, async () => {
     const workflow = await loadWorkflow();
@@ -585,6 +653,20 @@ test("fixture: a scriptless package's bin.node never reaches PATH while the stri
   // already-tested concern — review completeness, not PATH exposure — and
   // isn't required to reproduce this mechanism), against two local `file:`
   // dependencies, so no network access is needed.
+  //
+  // The fixture root approves "approved-pkg" via allowScripts. CI's pinned
+  // npm 12.0.2 blocks (warns and skips, exit 0) any install script not
+  // covered by allowScripts by default, whether or not
+  // `--strict-allow-scripts` is passed — that flag only changes the warning
+  // into a hard failure, per ci-verify.yml's own comment on the strict
+  // reinstall step. Without this approval, npm 12.0.2 never runs
+  // "approved-pkg"'s postinstall at all, so the fixture's own sanity
+  // assertion (the approved postinstall ran) fails before it ever reaches
+  // the PATH-shadowing behavior under test. The key uses the `file:` spec
+  // form npm's own matcher requires for a non-registry dependency
+  // (script-allowed.js's matchFileOrDir): a bare `name@version` key never
+  // matches a file/directory node regardless of the name and version being
+  // otherwise correct.
   const root = mkdtempSync(join(tmpdir(), "bin-shadow-integration-"));
   try {
     writeFileSync(
@@ -594,6 +676,7 @@ test("fixture: a scriptless package's bin.node never reaches PATH while the stri
           name: "bin-shadow-integration-fixture",
           version: "1.0.0",
           private: true,
+          allowScripts: { "approved-pkg@file:vendor/approved-pkg": true },
           dependencies: {
             "scriptless-shim": "file:./vendor/scriptless-shim",
             "approved-pkg": "file:./vendor/approved-pkg",

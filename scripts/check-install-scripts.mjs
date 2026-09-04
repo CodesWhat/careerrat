@@ -277,6 +277,10 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
         "with a current npm."
     );
   }
+  // Re-derived (not read off the try block above, which scopes its own
+  // `const`): needed again below to decide where stale-key liveness reads
+  // its scripts from.
+  const actualMode = nodeModulesPresent && !lockOnly;
 
   // Same eligibility filter collectUnreviewedScripts applies below (project
   // root, workspaces, and linked workspace deps are managed by the workspace
@@ -300,9 +304,43 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
   // `foo` reintroduces. getInstallScripts is the same enumerator
   // collectUnreviewedScripts uses below for the uncovered check, so "live"
   // here means the same thing npm's own `--strict-allow-scripts` would run.
+  //
+  // Codex review /tmp/codex-305-r9.md (finding 2): identity still comes from
+  // the virtual-tree node above (staleKeyNodes) so a platform-pruned
+  // dependency (e.g. macOS-only fsevents, absent from node_modules on this
+  // CI runner) is still checked against the full lockfile graph. But
+  // liveness must not be read off that same virtual node ALONE in actual
+  // mode: the lockfile's `hasInstallScript` flag never covers `prepare`
+  // (only preinstall/install/postinstall set it), and lock metadata carries
+  // no script bodies at all, so a Git dependency whose only
+  // install-relevant script is `prepare` reads as scriptless on its virtual
+  // node even though the real, installed package on disk genuinely has one.
+  // That falsely stales its approval and fails every gated CI job for a
+  // legitimately reviewed prepare-only Git dependency.
+  //
+  // This is a union, not a swap: the corresponding installed (actual) node
+  // is checked ONLY when the virtual node itself reports no scripts, and
+  // the virtual node's own result is kept if it already found something.
+  // A straight swap to "always prefer the actual node in actual mode" was
+  // tried and reverted — this repo's own node_modules/.package-lock.json
+  // (npm's "hidden lockfile") makes arborist's loadActual() rebuild the
+  // installed tree from that hidden lockfile rather than genuinely
+  // rescanning disk, and the hidden lockfile does not carry
+  // `hasInstallScript` at all. A straight swap read that missing flag off
+  // the actual node for fsevents (a real, currently-approved dependency in
+  // this repo's own package.json) and wrongly staled it, even though the
+  // package is genuinely installed with its script intact. Checking the
+  // actual node only as a fallback keeps that existing, disk-verified
+  // virtual-node path (and its own node.path-based disk fallback below)
+  // working exactly as before, while still catching the prepare-only case
+  // the virtual node alone cannot see.
   const liveStaleKeyNodes = [];
   for (const node of staleKeyNodes) {
-    const scripts = await getInstallScripts(node);
+    let scripts = await getInstallScripts(node);
+    if (Object.keys(scripts).length === 0 && actualMode) {
+      const liveNode = tree.inventory.get(node.location);
+      if (liveNode) scripts = await getInstallScripts(liveNode);
+    }
     if (Object.keys(scripts).length > 0) liveStaleKeyNodes.push(node);
   }
 
