@@ -589,6 +589,38 @@ function versionAtLeast(value, floor) {
   return true;
 }
 
+// Authorization-grade version parsing: unlike parseVersion (first match,
+// used for informational display), this only recognizes Claude Code's own
+// `--version` output shape, exactly as it prints it: "2.1.200 (Claude
+// Code)", nothing before it and nothing after. A boundary decision that
+// unlocks the native installer must never be made by scanning arbitrary
+// combined stdout/stderr for a version-shaped substring: "2.1.200.999" has
+// an extra numeric component past the recognized shape, and "protocol
+// 2.1.200; version unavailable" has a lone match sitting in unrelated
+// prose. Both must refuse rather than guess.
+const CLAUDE_VERSION_OUTPUT_SHAPE = /^(\d+\.\d+\.\d+) \(Claude Code\)$/;
+
+function parseUnambiguousVersion(value) {
+  const match = CLAUDE_VERSION_OUTPUT_SHAPE.exec(String(value || "").trim());
+  return match ? match[1] : null;
+}
+
+// Tri-state classification for a completed version probe against a
+// minimum boundary version. "below" and "at_or_above" both require a clean
+// status-0 exit with exactly one unambiguous version in the combined
+// output; anything else (nonzero exit, timeout, spawn failure, cancellation,
+// empty or multi-version output) is "indeterminate" and must never be
+// treated as authorization to run the native installer or to block a
+// working runtime.
+function classifyRuntimeVersionBoundary(result, minimumBoundaryVersion) {
+  if (!minimumBoundaryVersion) return "at_or_above";
+  if (result?.status !== 0 || result.error || result.signal) return "indeterminate";
+  const combined = `${result.stdout || ""}\n${result.stderr || ""}`;
+  const version = parseUnambiguousVersion(combined);
+  if (!version) return "indeterminate";
+  return versionAtLeast(version, minimumBoundaryVersion) ? "at_or_above" : "below";
+}
+
 const MAX_RUNTIME_PROBE_BYTES = 64 * 1024;
 const COMPLETION_SMOKE_RECEIPT = "CAREERRAT_COMPLETION_READY";
 const COMPLETION_SMOKE_TIMEOUT_MS = 30_000;
@@ -956,11 +988,18 @@ export async function probeInstalledRuntimeCompletion({
   }
 }
 
-async function runInstalledRuntimeProbe(
+// Shared async child-process probe: bounded output (MAX_RUNTIME_PROBE_BYTES),
+// abort-signal propagation, and SIGTERM-then-SIGKILL escalation via
+// scheduleRuntimeProcessKill. Platform-agnostic: killRuntimeProcess (inside
+// scheduleRuntimeProcessKill) already branches on win32 vs POSIX signal
+// delivery, so this same implementation is safe for any caller that cannot
+// tolerate a synchronous spawn blocking its process (for example a probe run
+// from Electron's main/local-server process).
+function runInstalledRuntimeProbeAsync(
   invocation,
+  options,
   {
     spawnImpl = spawn,
-    spawnSyncImpl = spawnSync,
     treeKillImpl = spawnSync,
     env = process.env,
     platform = process.platform,
@@ -969,33 +1008,13 @@ async function runInstalledRuntimeProbe(
     beforeSpawn,
   } = {}
 ) {
-  const options = {
-    shell: false,
-    windowsHide: true,
-    ...invocation.options,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  };
-  if (platform !== "win32") {
-    beforeSpawn?.();
-    try {
-      return spawnSyncImpl(invocation.command, invocation.args, {
-        ...options,
-        encoding: "utf8",
-        timeout: timeoutMs,
-      });
-    } catch {
-      return null;
-    }
-  }
-
   if (signal?.aborted) {
-    return {
+    return Promise.resolve({
       status: null,
       stdout: "",
       stderr: "",
       error: runtimeError("Installed AI request was cancelled.", "RUNTIME_CANCELLED"),
-    };
+    });
   }
 
   return new Promise((resolve) => {
@@ -1004,7 +1023,16 @@ async function runInstalledRuntimeProbe(
       beforeSpawn?.();
       child = spawnImpl(invocation.command, invocation.args, {
         ...options,
-        detached: false,
+        // POSIX only: a detached child becomes its own process-group leader
+        // (pgid === pid), so scheduleRuntimeProcessKill's `process.kill(-pid,
+        // signal)` below actually reaches the whole group, including any
+        // descendant the probed CLI forks that inherits its stdio pipes.
+        // Without this, `-child.pid` is not the child's real group id (it's
+        // still grouped with this Node process) and the signal can miss the
+        // real group entirely or land on an unrelated one. Windows has no
+        // process-group signaling here, so it keeps the platform's own tree
+        // kill (taskkill /t) via killRuntimeProcess instead.
+        detached: platform !== "win32",
       });
     } catch (error) {
       resolve({ status: null, stdout: "", stderr: "", error });
@@ -1068,10 +1096,19 @@ async function runInstalledRuntimeProbe(
       stderr += chunk.toString("utf8");
     });
     child.on("error", (error) => {
-      finish({ status: null, stdout, stderr, error: stopError || error });
+      // Once a stop is in flight, the scheduled group SIGKILL (forceKillTimer)
+      // is the only thing allowed to settle the probe: finishing here instead
+      // would race a same-group descendant that ignored the SIGTERM and is
+      // still alive when the wrapper itself errors out.
+      if (stopError) return;
+      finish({ status: null, stdout, stderr, error });
     });
     child.on("close", (status, signal) => {
-      finish({ status, stdout, stderr, signal, ...(stopError ? { error: stopError } : {}) });
+      // Same race as the error handler above: a same-group descendant can
+      // outlive the wrapper's own close event, so a pending stop must wait
+      // for the scheduled group SIGKILL rather than settling here.
+      if (stopError) return;
+      finish({ status, stdout, stderr, signal });
     });
     timer = setTimeout(
       () => stop(Object.assign(new Error("Runtime probe timed out."), { code: "ETIMEDOUT" })),
@@ -1080,6 +1117,50 @@ async function runInstalledRuntimeProbe(
     timer.unref?.();
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
+  });
+}
+
+async function runInstalledRuntimeProbe(
+  invocation,
+  {
+    spawnImpl = spawn,
+    spawnSyncImpl = spawnSync,
+    treeKillImpl = spawnSync,
+    env = process.env,
+    platform = process.platform,
+    timeoutMs = 5000,
+    signal,
+    beforeSpawn,
+  } = {}
+) {
+  const options = {
+    shell: false,
+    windowsHide: true,
+    ...invocation.options,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+  if (platform !== "win32") {
+    beforeSpawn?.();
+    try {
+      return spawnSyncImpl(invocation.command, invocation.args, {
+        ...options,
+        encoding: "utf8",
+        timeout: timeoutMs,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  return runInstalledRuntimeProbeAsync(invocation, options, {
+    spawnImpl,
+    treeKillImpl,
+    env,
+    platform,
+    timeoutMs,
+    signal,
+    beforeSpawn,
   });
 }
 
@@ -1135,6 +1216,58 @@ async function assertInstalledRuntimeBoundaryVersion(
   }
 }
 
+// A lightweight, non-throwing companion to assertInstalledRuntimeBoundaryVersion.
+// The guided-setup route uses this to decide whether an already-installed
+// Claude Code may still run the native installer as an in-place update: it
+// only runs the cheap --version check and skips the auth and completion
+// probes entirely, since it never needs to know anything beyond the version
+// gap to make that call.
+//
+// Authorization is tri-state, not boolean, and fails closed: "below" is the
+// only result that may ever authorize running the native installer.
+// "at_or_above" and "indeterminate" (nonzero exit, timeout, spawn failure,
+// cancellation, or unparseable/ambiguous output) must both refuse. The probe
+// itself always runs through the async, abort-aware, SIGTERM-then-SIGKILL
+// path (runInstalledRuntimeProbeAsync) regardless of platform, because this
+// function is called from Electron's main/local-server process and a
+// synchronous spawn there can block the whole app if the child ignores
+// SIGTERM.
+export async function isInstalledRuntimeBelowVersionBoundary(
+  runtime,
+  {
+    spawnImpl = spawn,
+    treeKillImpl = spawnSync,
+    env = process.env,
+    platform = process.platform,
+    timeoutMs = 5000,
+    signal,
+  } = {}
+) {
+  const definition = installedRuntimeDefinition(runtime?.id);
+  if (!definition?.minimumBoundaryVersion || !runtime?.path) return "at_or_above";
+  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
+    env: childEnv,
+    platform,
+  });
+  const options = {
+    shell: false,
+    windowsHide: true,
+    ...versionInvocation.options,
+    env: childEnv,
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+  const result = await runInstalledRuntimeProbeAsync(versionInvocation, options, {
+    spawnImpl,
+    treeKillImpl,
+    env: childEnv,
+    platform,
+    timeoutMs,
+    signal,
+  });
+  return classifyRuntimeVersionBoundary(result, definition.minimumBoundaryVersion);
+}
+
 export async function probeInstalledRuntime(
   runtime,
   {
@@ -1159,6 +1292,7 @@ export async function probeInstalledRuntime(
   let runtimeVersion = null;
   let capabilityOverrides = {};
   let capabilityReason = null;
+  let versionBoundaryState = "at_or_above";
 
   if (definition.supported === true || definition.minimumBoundaryVersion) {
     const versionInvocation = runtimeProcessInvocation(runtime.path, ["--version"], {
@@ -1173,14 +1307,11 @@ export async function probeInstalledRuntime(
       platform,
       timeoutMs,
     });
-    if (
-      definition.minimumBoundaryVersion &&
-      (versionResult?.status !== 0 ||
-        !versionAtLeast(
-          `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`,
-          definition.minimumBoundaryVersion
-        ))
-    ) {
+    versionBoundaryState = classifyRuntimeVersionBoundary(
+      versionResult,
+      definition.minimumBoundaryVersion
+    );
+    if (definition.minimumBoundaryVersion && versionBoundaryState !== "at_or_above") {
       capabilityOverrides = {
         exactRead: false,
         publicWeb: false,
@@ -1190,6 +1321,30 @@ export async function probeInstalledRuntime(
     runtimeVersion = parseVersion(
       `${versionResult?.stdout || ""}\n${versionResult?.stderr || ""}`
     )?.join(".");
+  }
+
+  // A conclusive below-boundary version blocks the runtime before the auth
+  // and completion probes ever run: no amount of successful sign-in or
+  // completion smoke changes the fact that the tool boundary isn't met, and
+  // running those probes anyway used to let a signed-out or completion-
+  // failing old install mask update_required behind authentication_required
+  // or completion_probe_failed. An indeterminate version never reaches this
+  // branch, so it always falls through to the existing non-installer states.
+  if (definition.minimumBoundaryVersion && versionBoundaryState === "below") {
+    const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
+      capabilityEvidence: capabilityEvidenceForProbe(definition, capabilityOverrides),
+    }).capabilities;
+    return {
+      status: "update_required",
+      ready: false,
+      action: "retry",
+      actionLabel: "Check again",
+      version: runtimeVersion,
+      minimumVersion: definition.minimumBoundaryVersion,
+      capabilities: runtimeCapabilities,
+      probeMessage: capabilityReason,
+      capabilityReason,
+    };
   }
 
   if (definition.protocol === "acp") {
@@ -1296,6 +1451,13 @@ export async function probeInstalledRuntime(
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       capabilityEvidence: capabilityEvidenceForProbe(definition, capabilityOverrides),
     }).capabilities;
+    // A conclusive below-boundary version already returned update_required
+    // above, before this auth/completion probe ever ran. Any capabilityReason
+    // reaching this point comes from an indeterminate version probe, which
+    // never earns update_required. It stays a soft, advisory warning on an
+    // otherwise-ready runtime, exactly as it did before the boundary gate
+    // existed, since offering the installer with no conclusive basis is the
+    // fail-open bug this fix closes.
     return {
       status: definition.authProbe.launchOnly ? "ready_unverified" : "ready",
       ready: true,
@@ -1921,16 +2083,65 @@ export function installedRuntimeSignInCommand(runtimeId) {
 
 export const CLAUDE_NATIVE_INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash";
 const GUIDED_SETUP_TIMEOUT_MS = 10 * 60 * 1000;
+const GUIDED_SETUP_GROUP_DEATH_TIMEOUT_MS = 5000;
+const GUIDED_SETUP_GROUP_DEATH_POLL_MS = 50;
+
+// The real group-liveness check scheduleRuntimeProcessKill's SIGKILL escalation
+// must be confirmed against: process.kill(-pid, 0) targets the whole process
+// group (matching killRuntimeProcess's own -pid signal delivery), so a
+// resistant descendant the installer forked still counts as alive. win32 has
+// no POSIX process-group signaling, so this is unreachable there in practice
+// (the caller guards platform === "darwin" up front) but still returns a safe
+// `false` rather than throwing if it's ever invoked off that path.
+function guidedSetupGroupAlive(pid, platform) {
+  if (platform === "win32" || !Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+// Polls group liveness after a SIGKILL escalation instead of trusting the
+// signal was delivered and acted on instantly: a resistant descendant can
+// take a moment to actually die even once it can no longer ignore the
+// signal. Bounded, so a group that genuinely never disappears (a wedged
+// kernel state, a permissions surprise) can't hang the caller forever.
+// isAliveImpl is injectable so tests can force both outcomes deterministically
+// instead of depending on real OS reap timing.
+async function waitForProcessGroupDeath(
+  pid,
+  {
+    platform = process.platform,
+    timeoutMs = GUIDED_SETUP_GROUP_DEATH_TIMEOUT_MS,
+    intervalMs = GUIDED_SETUP_GROUP_DEATH_POLL_MS,
+    isAliveImpl = guidedSetupGroupAlive,
+  } = {}
+) {
+  if (platform === "win32" || !Number.isSafeInteger(pid) || pid <= 0) return true;
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  for (;;) {
+    if (!isAliveImpl(pid, platform)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
 
 export async function startInstalledRuntimeGuidedSetup(
   runtimeId,
   {
     spawnImpl = spawn,
+    treeKillImpl = spawnSync,
+    env = process.env,
     platform = process.platform,
     onOutput,
     onStart,
     signal,
     timeoutMs = GUIDED_SETUP_TIMEOUT_MS,
+    groupDeathTimeoutMs = GUIDED_SETUP_GROUP_DEATH_TIMEOUT_MS,
+    groupDeathPollIntervalMs = GUIDED_SETUP_GROUP_DEATH_POLL_MS,
+    isGroupAliveImpl = guidedSetupGroupAlive,
   } = {}
 ) {
   if (runtimeId !== "claude" || platform !== "darwin") {
@@ -1940,20 +2151,36 @@ export async function startInstalledRuntimeGuidedSetup(
     );
   }
 
-  const child = spawnImpl("/bin/sh", ["-c", CLAUDE_NATIVE_INSTALL_COMMAND], {
+  // /bin/sh with no pipefail lets `curl ... | bash` report success even when
+  // curl fails before producing any input: without pipefail the pipeline's
+  // exit status is bash's own (0, for an empty script), so a download
+  // failure could be reported as a completed update. macOS's /bin/bash
+  // supports `-o pipefail`, which makes the pipeline's status the last
+  // *failing* stage's status instead, so a curl failure can never resolve
+  // as a successful install. The displayed install command text itself
+  // (CLAUDE_NATIVE_INSTALL_COMMAND) is unchanged; only how it's invoked is.
+  const child = spawnImpl("/bin/bash", ["-o", "pipefail", "-c", CLAUDE_NATIVE_INSTALL_COMMAND], {
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+    // Its own POSIX process group (this function only ever runs on darwin,
+    // per the guard above) so a cancelled or timed-out update can stop curl
+    // and bash together, the same tree-kill guarantee runInstalledRuntimeProbeAsync
+    // gives a hung version probe.
+    detached: true,
   });
 
   return await new Promise((resolve, reject) => {
     let settled = false;
     let timer = null;
+    let forceKillTimer = null;
+    let stopError = null;
 
     const finish = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(forceKillTimer);
       signal?.removeEventListener?.("abort", abort);
       if (error) reject(error);
       else
@@ -1965,9 +2192,58 @@ export async function startInstalledRuntimeGuidedSetup(
     };
     const fail = (message, fields = {}) =>
       finish(runtimeError(message, "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED", fields));
+    // Shared with the version probe's cleanup: SIGTERM the whole process
+    // group, then escalate to SIGKILL after a short grace period if curl,
+    // bash, or a descendant they forked ignores it. The cancelled/timed-out
+    // result only settles once that cleanup has actually run (either the
+    // process closes on its own or the escalation completes), never the
+    // instant the signal is sent, so a cancelled request can't race a still
+    // -running installer.
+    //
+    // The escalation callback itself only dispatches SIGKILL; it does not
+    // wait for the OS to actually reap the group. Settling right there (the
+    // old behavior) let a retry land in the gap between "signal sent" and
+    // "process actually gone" and be admitted against a still-alive
+    // installer. waitForProcessGroupDeath below polls for confirmed death
+    // before this promise settles at all; if the group never disappears
+    // within the bound, this rejects with a distinct error instead of the
+    // original cancel/timeout cause, and the caller (the guided-setup route)
+    // keeps its lock rather than releasing it against an unconfirmed group.
+    const stop = (error) => {
+      stopError ||= error;
+      if (forceKillTimer) return;
+      forceKillTimer = scheduleRuntimeProcessKill(
+        child,
+        () => {
+          const pid = child.pid;
+          waitForProcessGroupDeath(pid, {
+            platform,
+            timeoutMs: groupDeathTimeoutMs,
+            intervalMs: groupDeathPollIntervalMs,
+            isAliveImpl: isGroupAliveImpl,
+          }).then((confirmedDead) => {
+            if (confirmedDead) {
+              finish(stopError);
+              return;
+            }
+            finish(
+              runtimeError(
+                "CareerRat could not confirm the Claude Code installer stopped. It may still be running.",
+                "RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED",
+                { cause: stopError }
+              )
+            );
+          });
+        },
+        {
+          platform,
+          env,
+          spawnSyncImpl: treeKillImpl,
+        }
+      );
+    };
     const abort = () => {
-      child.kill?.("SIGTERM");
-      finish(runtimeError("Claude Code setup was cancelled.", "RUNTIME_GUIDED_SETUP_CANCELLED"));
+      stop(runtimeError("Claude Code setup was cancelled.", "RUNTIME_GUIDED_SETUP_CANCELLED"));
     };
     const report = (chunk) => {
       const message = safeRuntimeDiagnostic(chunk);
@@ -1983,30 +2259,112 @@ export async function startInstalledRuntimeGuidedSetup(
     child.stderr?.on("data", report);
     child.once("spawn", () => {
       try {
-        onStart?.();
+        // Detached (see the spawn options above), so on POSIX child.pid is
+        // also the process-group id, exactly the pid a durable ownership
+        // record (and process.kill(-pid, ...)) needs to identify the whole
+        // installer group later, including across a crash or relaunch.
+        onStart?.({ pid: child.pid });
       } catch (error) {
-        child.kill?.("SIGTERM");
-        fail("CareerRat could not start the in-app installer.", { cause: error });
+        stop(
+          runtimeError(
+            "CareerRat could not start the in-app installer.",
+            "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+            {
+              cause: error,
+            }
+          )
+        );
       }
     });
     child.once("error", (error) => {
+      // A stopped setup stays pending until the scheduled group SIGKILL
+      // (forceKillTimer, via stop() above) has actually run: bash or curl
+      // can error out while a resistant descendant they forked is still
+      // alive, and finishing here instead would let the route release its
+      // lock while installer work continues underneath it.
+      if (stopError) return;
       fail("CareerRat could not start the in-app installer.", { cause: error });
     });
+    // A close, status 0 or not, only means bash itself exited; a detached
+    // descendant it forked with its own redirected stdio can outlive it in
+    // the same process group. Confirm the whole group is actually dead
+    // before settling, the same bound stop() above waits on, so a caller
+    // can't start a concurrent installer against a "finished" run that's
+    // still holding the group open. If the group survives the wait,
+    // escalate (SIGTERM then, after scheduleRuntimeProcessKill's grace
+    // period, SIGKILL) and confirm once more; only reject with
+    // RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED (retaining the caller's lock) if
+    // it is still alive after that. `onConfirmedDead` decides how to settle
+    // once death is confirmed: success for a status-0 close, or the
+    // original installer error for a nonzero one, so a surviving descendant
+    // never gets a chance to overlap a retry either way.
+    const confirmCloseGroupDeath = (onConfirmedDead) => {
+      const pid = child.pid;
+      waitForProcessGroupDeath(pid, {
+        platform,
+        timeoutMs: groupDeathTimeoutMs,
+        intervalMs: groupDeathPollIntervalMs,
+        isAliveImpl: isGroupAliveImpl,
+      }).then((confirmedDead) => {
+        if (confirmedDead) {
+          onConfirmedDead();
+          return;
+        }
+        forceKillTimer = scheduleRuntimeProcessKill(
+          child,
+          () => {
+            waitForProcessGroupDeath(pid, {
+              platform,
+              timeoutMs: groupDeathTimeoutMs,
+              intervalMs: groupDeathPollIntervalMs,
+              isAliveImpl: isGroupAliveImpl,
+            }).then((confirmedDeadAfterKill) => {
+              if (confirmedDeadAfterKill) {
+                onConfirmedDead();
+                return;
+              }
+              finish(
+                runtimeError(
+                  "CareerRat could not confirm the Claude Code installer stopped. It may still be running.",
+                  "RUNTIME_GUIDED_SETUP_STOP_UNCONFIRMED"
+                )
+              );
+            });
+          },
+          {
+            platform,
+            env,
+            spawnSyncImpl: treeKillImpl,
+          }
+        );
+      });
+    };
     child.once("close", (status, closeSignal) => {
+      // Same race as the error handler above: bash can exit before a
+      // resistant descendant it forked, so a pending stop must wait for the
+      // scheduled group SIGKILL rather than settling here.
+      if (stopError) return;
       if (status === 0) {
-        finish();
+        confirmCloseGroupDeath(() => finish());
         return;
       }
-      fail("The Claude Code installer did not finish successfully.", {
-        status,
-        signal: closeSignal,
-      });
+      confirmCloseGroupDeath(() =>
+        fail("The Claude Code installer did not finish successfully.", {
+          status,
+          signal: closeSignal,
+        })
+      );
     });
 
     timer = setTimeout(
       () => {
-        child.kill?.("SIGTERM");
-        fail("The Claude Code installer took too long to finish.", { code: "ETIMEDOUT" });
+        stop(
+          runtimeError(
+            "The Claude Code installer took too long to finish.",
+            "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+            { code: "ETIMEDOUT" }
+          )
+        );
       },
       Math.max(1, timeoutMs)
     );

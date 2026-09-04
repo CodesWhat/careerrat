@@ -29,6 +29,7 @@ function buildSettingsModel(input = {}) {
     engine: {
       ...model.engine,
       choices: firstRunRuntimeChoices(input.runtimes),
+      guidedSetupAvailable: input.runtimes?.guidedSetupAvailable === true,
     },
   };
 }
@@ -202,6 +203,22 @@ function sourceDraftKey(context) {
   return storedDraftKey(SOURCE_DRAFT_PREFIX, context);
 }
 
+// Module-level rather than defined inside the component: it only ever
+// closes over the two refs a caller hands it explicitly, so it has no
+// per-render captures for the effect below's exhaustive-deps check to flag,
+// and both load() and the mount effect route their merge through this one
+// place instead of drifting out of sync with each other.
+function mergeAiPreferencesRevisionAware(
+  aiPreferencesRevisionRef,
+  settingsPartsRef,
+  revisionAtRequest,
+  fetchedAiPreferences
+) {
+  return aiPreferencesRevisionRef.current !== revisionAtRequest
+    ? (settingsPartsRef.current.aiPreferences ?? fetchedAiPreferences)
+    : fetchedAiPreferences;
+}
+
 function settingsLocationUrl(location) {
   return `${location?.pathname || "/settings"}${location?.search || ""}`;
 }
@@ -229,16 +246,32 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [draftStorageWarning, setDraftStorageWarning] = useState(null);
   const [enginePickerBusy, setEnginePickerBusy] = useState(false);
   const [engineSignInId, setEngineSignInId] = useState(null);
+  const [guidedSetup, setGuidedSetup] = useState(null);
   const [sourceDialogBusy, setSourceDialogBusy] = useState(false);
   const [sourceDraftState, setSourceDraftState] = useState({ contextId: null, value: "" });
   const [browserProviderBusy, setBrowserProviderBusy] = useState(false);
   const [publicSyncBusy, setPublicSyncBusy] = useState(false);
   const [aiPreferencesBusy, setAiPreferencesBusy] = useState(false);
   const [aiPreferencesStatus, setAiPreferencesStatus] = useState("");
+  const [initialHydrationComplete, setInitialHydrationComplete] = useState(false);
+  // Set when the mount effect's own getAiPreferences call rejects, so the
+  // AI preference controls stay disabled even after the rest of hydration
+  // completes: see the mount useEffect below for why enabling them over an
+  // unhydrated default is unsafe.
+  const [aiPreferencesHydrationFailed, setAiPreferencesHydrationFailed] = useState(false);
   const [editorDraftState, setEditorDraftState] = useState({ contextId: null, values: {} });
   const [editorBusy, setEditorBusy] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(null);
   const permittedNavigationRef = useRef(null);
+  // The raw pieces the model is built from (onboard/runtimes/automation/
+  // sources/aiPreferences), kept alongside `model` so a targeted refresh,
+  // for example just `runtimes` after a guided install, can rebuild the
+  // model without re-fetching or clobbering the other pieces.
+  const settingsPartsRef = useRef({});
+  // Bumped on every successful AI-preference save; load() uses it to detect
+  // a save that landed while its own request was in flight. See load()'s
+  // comment above for the full race this closes.
+  const aiPreferencesRevisionRef = useRef(0);
   const desktopUpdate = useDesktopUpdate();
   const draftContext = model.draftContext;
   const contextId = draftContextId(draftContext);
@@ -409,15 +442,45 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     navigateForeground({ tab: "settings", panel: open ? "technical" : null }, { replace: !open });
   }
 
-  async function load() {
+  // aiPreferencesRevisionRef guards against a stale request clobbering a
+  // preference save that lands while it's in flight: changeAiPreference
+  // bumps the revision on every successful save, and both the initial mount
+  // fetch and load() record the revision at request start. If the revision
+  // has moved by the time their own Promise.all resolves, a save landed
+  // mid-flight, and its aiPreferences (already the newest value in
+  // settingsPartsRef.current) is merged over that snapshot's, so a slow
+  // post-install refresh, a slow load(), or the initial mount fetch can
+  // never revert what the user just saved. Both call sites route through
+  // mergeAiPreferencesRevisionAware (above) so neither can drift out of
+  // sync with the other.
+
+  // preFetchedRuntimes lets a caller that already fetched the runtime
+  // inventory (refreshRuntimesAfterInstall's targeted post-install refresh)
+  // hand it straight to load() instead of load() re-running the same
+  // executable-discovery and version/auth probe work a second time. load()
+  // only fetches its own copy when no fresh inventory was handed in.
+  async function load(preFetchedRuntimes) {
+    const revisionAtRequest = aiPreferencesRevisionRef.current;
     const [onboard, runtimes, automation, sources, aiPreferences] = await Promise.all([
       api.getOnboardState(),
-      api.getInstalledAiRuntimes(),
+      preFetchedRuntimes ? Promise.resolve(preFetchedRuntimes) : api.getInstalledAiRuntimes(),
       api.getAutomationSettings(),
       api.getSourceMaintenance(),
       api.getAiPreferences(),
     ]);
-    const next = { onboard, runtimes, automation, sources, aiPreferences };
+    const next = {
+      onboard,
+      runtimes,
+      automation,
+      sources,
+      aiPreferences: mergeAiPreferencesRevisionAware(
+        aiPreferencesRevisionRef,
+        settingsPartsRef,
+        revisionAtRequest,
+        aiPreferences
+      ),
+    };
+    settingsPartsRef.current = next;
     setModel(buildSettingsModel(next));
     setError(null);
     return next;
@@ -425,24 +488,73 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
+    const revisionAtRequest = aiPreferencesRevisionRef.current;
+    // allSettled, not all: an unrelated Settings request rejecting must
+    // never discard the other fields this same mount fetch already
+    // fulfilled. A single Promise.all here previously meant one failed
+    // request (say, automation settings) threw away a successfully
+    // hydrated aiPreferences too, and the finally below still flipped
+    // initialHydrationComplete, enabling the AI preference controls over
+    // EMPTY_MODEL's "automatic" defaults instead of the candidate's real
+    // saved values; the next preference change would then post that
+    // default over the unhydrated sibling field, silently overwriting it.
+    Promise.allSettled([
       api.getOnboardState(),
       api.getInstalledAiRuntimes(),
       api.getAutomationSettings(),
       api.getSourceMaintenance(),
       api.getAiPreferences(),
     ])
-      .then(([onboard, runtimes, automation, sources, aiPreferences]) => {
-        if (cancelled) return;
-        const next = { onboard, runtimes, automation, sources, aiPreferences };
-        setModel(buildSettingsModel(next));
-      })
-      .catch((cause) => {
-        if (!cancelled) {
-          setError(
-            profileSettingsErrorMessage(cause, "CareerRat couldn't load Settings. Try again.")
-          );
+      .then(
+        ([onboardResult, runtimesResult, automationResult, sourcesResult, aiPreferencesResult]) => {
+          if (cancelled) return;
+          const current = settingsPartsRef.current;
+          const next = {
+            onboard: onboardResult.status === "fulfilled" ? onboardResult.value : current.onboard,
+            runtimes:
+              runtimesResult.status === "fulfilled" ? runtimesResult.value : current.runtimes,
+            automation:
+              automationResult.status === "fulfilled" ? automationResult.value : current.automation,
+            sources: sourcesResult.status === "fulfilled" ? sourcesResult.value : current.sources,
+            aiPreferences:
+              aiPreferencesResult.status === "fulfilled"
+                ? mergeAiPreferencesRevisionAware(
+                    aiPreferencesRevisionRef,
+                    settingsPartsRef,
+                    revisionAtRequest,
+                    aiPreferencesResult.value
+                  )
+                : current.aiPreferences,
+          };
+          settingsPartsRef.current = next;
+          setModel(buildSettingsModel(next));
+          const failure = [
+            onboardResult,
+            runtimesResult,
+            automationResult,
+            sourcesResult,
+            aiPreferencesResult,
+          ].find((result) => result.status === "rejected");
+          if (failure) {
+            setError(
+              profileSettingsErrorMessage(
+                failure.reason,
+                "CareerRat couldn't load Settings. Try again."
+              )
+            );
+          }
+          // The AI preference controls stay disabled (see aiPreferencesBusy
+          // below) whenever their own fetch failed, even though hydration as a
+          // whole otherwise completed: enabling them would let the next change
+          // post EMPTY_MODEL's defaults over whatever the candidate actually
+          // has saved.
+          if (aiPreferencesResult.status !== "fulfilled") {
+            setAiPreferencesHydrationFailed(true);
+          }
         }
+      )
+      .finally(() => {
+        if (!cancelled) setInitialHydrationComplete(true);
       });
     return () => {
       cancelled = true;
@@ -624,6 +736,16 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     setError(null);
     try {
       const saved = await api.saveAiPreferences(next);
+      // Keep settingsPartsRef in lockstep with the saved model: a later
+      // guided update rebuilds its model from this ref, and a stale
+      // aiPreferences here would resurface (and then repost) the value this
+      // save just replaced.
+      settingsPartsRef.current = { ...settingsPartsRef.current, aiPreferences: saved };
+      // Bumped after settingsPartsRef is updated above, so a load() already
+      // past its revision check by the time this runs still sees the saved
+      // value sitting in the ref (nothing to merge over is fine, since the
+      // ref already has the newest value either way).
+      aiPreferencesRevisionRef.current += 1;
       setModel((current) => ({ ...current, aiPreferences: saved }));
       setAiPreferencesStatus("Saved on this computer");
     } catch (cause) {
@@ -704,6 +826,74 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
     }
   }
 
+  // Returning users hit "Update needed" from Settings, not the first-run
+  // picker, so Settings needs its own guided-update path rather than only a
+  // "Check again" retry that can never clear the boundary on its own.
+  // Mirrors FirstRunController's startGuidedSetup outcome mapping so the
+  // same installing/failed/cancelled/unavailable states show up here too.
+  // Refreshes just the runtime inventory after a successful guided install,
+  // then best-effort refreshes the rest of Settings. Never throws: an
+  // unrelated Settings request failing (automation, sources, onboarding, AI
+  // preferences, all bundled into load()'s Promise.all) must not turn a
+  // successful installer run into a reported failure, and the freshly
+  // fetched runtime inventory must not be discarded just because the rest
+  // of the page couldn't refresh.
+  async function refreshRuntimesAfterInstall() {
+    let runtimes = null;
+    try {
+      runtimes = await api.getInstalledAiRuntimes();
+      settingsPartsRef.current = { ...settingsPartsRef.current, runtimes };
+      setModel(buildSettingsModel(settingsPartsRef.current));
+    } catch {
+      // Keep the installed result even if the fresh inventory couldn't be
+      // fetched; a stale inventory is preferable to reporting a successful
+      // update as failed. load() below still gets a chance at its own
+      // fallback inventory request since runtimes stays null here.
+    }
+    try {
+      // Hand the inventory this function already fetched straight to
+      // load() so it doesn't repeat the same executable-discovery and
+      // version/auth probe work; load() only re-fetches on its own when the
+      // targeted refresh above failed (runtimes is still null).
+      await load(runtimes);
+    } catch {
+      // Best-effort: the fresh runtime inventory above already reflects the
+      // update regardless of whether the rest of Settings could refresh.
+    }
+  }
+
+  async function guidedUpdateEngine(runtimeId) {
+    setEnginePickerBusy(true);
+    setError(null);
+    setGuidedSetup({ runtimeId, status: "installing" });
+    try {
+      await api.startInstalledAiRuntimeGuidedSetup(runtimeId, { onEvent() {} });
+      await refreshRuntimesAfterInstall();
+      setGuidedSetup({ runtimeId, status: "installed" });
+    } catch (cause) {
+      const code = String(cause?.code || cause?.body?.code || "").toUpperCase();
+      if (code === "RUNTIME_ALREADY_INSTALLED") {
+        try {
+          await load();
+        } finally {
+          setGuidedSetup({ runtimeId, status: "installed" });
+        }
+      } else {
+        const status =
+          code === "RUNTIME_GUIDED_SETUP_CANCELLED"
+            ? "cancelled"
+            : ["RUNTIME_GUIDED_SETUP_UNAVAILABLE", "RUNTIME_GUIDED_SETUP_UNSUPPORTED"].includes(
+                  code
+                )
+              ? "unavailable"
+              : "failed";
+        setGuidedSetup({ runtimeId, status });
+      }
+    } finally {
+      setEnginePickerBusy(false);
+    }
+  }
+
   function addSource() {
     setSourceDialogOpen(true);
   }
@@ -763,7 +953,9 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         onEditSection={editSection}
         onOpenFiles={() => requestNavigation("/", { state: { browse: "files" } })}
         onPermissionChange={changePermission}
-        aiPreferencesBusy={aiPreferencesBusy}
+        aiPreferencesBusy={
+          aiPreferencesBusy || !initialHydrationComplete || aiPreferencesHydrationFailed
+        }
         aiPreferencesStatus={aiPreferencesStatus}
         onAiPreferenceChange={changeAiPreference}
         publicSyncBusy={publicSyncBusy}
@@ -786,10 +978,12 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
         enginePickerOpen={enginePickerOpen}
         enginePickerBusy={enginePickerBusy}
         engineSignInId={engineSignInId}
+        guidedSetup={guidedSetup}
         onCloseEnginePicker={() => setEnginePickerOpen(false)}
         onSelectEngine={selectEngine}
         onConnectEngine={connectEngine}
         onRetryEngine={retryEngine}
+        onGuidedUpdateEngine={guidedUpdateEngine}
         onRefreshEngines={() =>
           updateRuntime(
             () => Promise.resolve(),

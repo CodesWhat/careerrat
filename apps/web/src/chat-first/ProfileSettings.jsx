@@ -582,15 +582,29 @@ function runtimeStatus(choice) {
   return runtimePresentation(choice).label;
 }
 
+function guidedUpdateStatusMessage(status) {
+  return (
+    {
+      installing: "CareerRat is installing the update. You can stay on this screen.",
+      failed: "CareerRat couldn't finish the update. Nothing in your setup was lost.",
+      cancelled: "Update stopped. Nothing in your setup was lost.",
+      unavailable: "In-app update isn't available here. Use the setup guide instead.",
+    }[status] || null
+  );
+}
+
 function EnginePicker({
   engine,
   busy,
   signInRuntimeId,
+  guidedSetup,
+  guidedSetupAvailable,
   onClose,
   onSelect,
   onConnect,
   onRetry,
   onRefresh,
+  onGuidedUpdate,
 }) {
   const choices = safeArray(engine?.choices).filter(runtimeIsSupported);
   return (
@@ -603,6 +617,18 @@ function EnginePicker({
           const selected =
             choice.id === engine?.selectedId && choice.ready && choice.selectable !== false;
           const signingIn = choice.id === signInRuntimeId && choice.ready !== true;
+          const needsUpdate = choice.status === "update_required";
+          const choiceGuidedSetup = guidedSetup?.runtimeId === choice.id ? guidedSetup : null;
+          const guidedInstalling = choiceGuidedSetup?.status === "installing";
+          const canGuidedUpdate =
+            needsUpdate &&
+            guidedSetupAvailable === true &&
+            choiceGuidedSetup?.status !== "unavailable";
+          const showExternalUpdateLink =
+            needsUpdate && !canGuidedUpdate && Boolean(choice.installUrl);
+          const guidedStatusMessage = choiceGuidedSetup
+            ? guidedUpdateStatusMessage(choiceGuidedSetup.status)
+            : null;
           return (
             <article
               className="cf-settings-dialog__runtime"
@@ -620,6 +646,7 @@ function EnginePicker({
                   {signingIn ? (
                     <span role="status">Finish sign-in in your browser, then check again.</span>
                   ) : null}
+                  {guidedStatusMessage ? <span role="status">{guidedStatusMessage}</span> : null}
                 </div>
               </div>
               {selected ? (
@@ -636,6 +663,18 @@ function EnginePicker({
                 <button type="button" disabled={busy} onClick={() => onConnect?.(choice.id)}>
                   Sign in
                 </button>
+              ) : canGuidedUpdate ? (
+                <button
+                  type="button"
+                  disabled={busy || guidedInstalling}
+                  onClick={() => onGuidedUpdate?.(choice.id)}
+                >
+                  {guidedInstalling ? "Updating…" : "Update"}
+                </button>
+              ) : showExternalUpdateLink ? (
+                <a href={choice.installUrl} target="_blank" rel="noreferrer">
+                  Open setup guide
+                </a>
               ) : choice.action === "retry" ? (
                 <button type="button" disabled={busy} onClick={() => onRetry?.(choice.id)}>
                   {choice.actionLabel || "Try again"}
@@ -974,11 +1013,13 @@ export function ProfileSettings({
   enginePickerOpen = false,
   enginePickerBusy = false,
   engineSignInId = null,
+  guidedSetup = null,
   onCloseEnginePicker,
   onSelectEngine,
   onConnectEngine,
   onRetryEngine,
   onRefreshEngines,
+  onGuidedUpdateEngine,
   sourceDialogOpen = false,
   sourceDialogBusy = false,
   sourceDraft = "",
@@ -1096,11 +1137,14 @@ export function ProfileSettings({
           engine={engine}
           busy={enginePickerBusy}
           signInRuntimeId={engineSignInId}
+          guidedSetup={guidedSetup}
+          guidedSetupAvailable={engine?.guidedSetupAvailable === true}
           onClose={onCloseEnginePicker}
           onSelect={onSelectEngine}
           onConnect={onConnectEngine}
           onRetry={onRetryEngine}
           onRefresh={onRefreshEngines}
+          onGuidedUpdate={onGuidedUpdateEngine}
         />
       ) : null}
       {sourceDialogOpen ? (

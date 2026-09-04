@@ -394,7 +394,7 @@ export function createDevServer({
   // Also registers GET /api/runtime/config (the allowlist the SPA's evaluate
   // flow polls to decide whether its decision buttons can run).
   mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env });
-  mountInstalledRuntimeRoutes({ addRoute, repoRoot, env });
+  const installedRuntimeRoutes = mountInstalledRuntimeRoutes({ addRoute, repoRoot, env });
   mountHostedInterestRoutes({ addRoute, repoRoot, env });
   mountAutomationRoutes({ addRoute, repoRoot });
 
@@ -794,6 +794,7 @@ export function createDevServer({
     chatRuntime,
     browserSessionManager,
     stopRuntimeSignIns: stopInstalledRuntimeSignIns,
+    shutdownGuidedSetups: installedRuntimeRoutes.shutdownGuidedSetups,
     shutdownAiWebSearch: searchRoutes.shutdownAiWebSearch,
     shutdownSourcingWorkers: workspaceAgentRuntime.shutdownSourcingWorkers,
     shutdownIntake: intakeRoutes.shutdownLaneB,
@@ -847,6 +848,11 @@ async function main() {
     // child process running.
     dev.chatRuntime.shutdown();
     dev.stopRuntimeSignIns();
+    // A normal quit must not leave a detached in-app installer running
+    // underneath a process that's about to exit: abort any active guided
+    // setup and wait (bounded) for its process group to actually die before
+    // the server itself closes.
+    await dev.shutdownGuidedSetups();
     await dev.shutdownSourcingWorkers();
     await dev.shutdownAiWebSearch();
     await dev.shutdownIntake();
