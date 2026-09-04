@@ -63,6 +63,14 @@ the CLI has to be installed, meet the applicable version floor, be signed
 in, and return a passing completion receipt, all four together. Only the
 completion receipt is cached, for 24 hours; the version and sign-in checks
 run every time and are never skipped just because a cached receipt exists.
+That 24-hour TTL governs the settings route's own smoke-probe reuse, not
+how long a selected runtime stays trusted for real work. When Settings
+probes a runtime, it persists the resulting capabilities alongside the
+executable's identity (path, version, and binary fingerprint). Normal AI
+routing reuses that persisted evidence for as long as the current
+executable's identity still matches what was probed, with no separate
+check of how old the probe is and no repeated sign-in. Probing the runtime
+again from Settings replaces the persisted evidence and its timestamp.
 Running a real workflow reapplies more checks on top of that: normal AI
 routing rechecks `supported`, every runner validates the runtime's
 capabilities before it will spawn anything, the permission boundary is
@@ -87,10 +95,13 @@ AI routing, is the same `supported: false` flag from the registry. Qwen
 Code, Antigravity, Amp, Goose, and Droid have no protocol adapter at all.
 Asking CareerRat to run work through any unsupported runtime on those two
 paths is rejected before an invocation is ever built: the settings route
-returns `RUNTIME_NOT_SUPPORTED`, and normal AI routing returns
-`RUNTIME_COMPLETION_UNSUPPORTED`. That guarantee covers those two paths, not
-every way CareerRat's own code can call a runtime; the lower-level runner
-functions don't check `supported` themselves.
+returns `RUNTIME_NOT_SUPPORTED`, and normal AI routing returns a generic
+route failure that the caller turns into a plain error, not a coded one.
+`RUNTIME_COMPLETION_UNSUPPORTED` is a different, lower-level check: it comes
+from a runner's own capability assertion when something asks it to spawn a
+runtime directly, bypassing normal routing. That guarantee covers those two
+paths, not every way CareerRat's own code can call a runtime; the
+lower-level runner functions don't check `supported` themselves.
 
 Building the four gates for a new engine is real, deliberate work: a
 permission boundary mapped onto that CLI's actual sandbox flags, plus a
