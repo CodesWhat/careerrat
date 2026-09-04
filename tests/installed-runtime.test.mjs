@@ -1526,6 +1526,12 @@ test("Windows execution identity spawns the version probe through the same resol
     // to reach the helper subprocess's own argv, or its spawn re-quotes that
     // payload a second time and corrupts it.
     assert.equal(calls[0].args.at(-1), "--windows-verbatim-arguments");
+    // Codex round 14 review: process.execPath (the command spawned above)
+    // is CareerRat.exe in the packaged desktop, not a Node binary. Without
+    // ELECTRON_RUN_AS_NODE on the helper's own env, that spawn launches
+    // another Electron GUI instead of running runtime-probe-helper.mjs as a
+    // script, and Doctor's Windows identity probe never returns valid JSON.
+    assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, "1");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1681,6 +1687,41 @@ test("runtime-probe-helper.mjs's runProbe forwards windowsVerbatimArguments to i
     "the flag must never default to on for a caller that never asked for it"
   );
   assert.equal(defaultResult.status, 0);
+});
+
+// Codex round 14 review: this helper process is itself launched with
+// ELECTRON_RUN_AS_NODE=1 (see installed-runtimes.mjs) so process.execPath
+// runs it as Node in the packaged desktop instead of another GUI instance.
+// That flag is scoped to getting this process running; the runtime it
+// spawns below is a real target binary, not another Electron host, and
+// must not inherit it. Proves the strip happens on runProbe's own spawn
+// call via a stubbed spawnImpl, not just that the parent's env is untouched.
+test("runtime-probe-helper.mjs's runProbe strips ELECTRON_RUN_AS_NODE from the runtime child's env", async () => {
+  const calls = [];
+  const fakeChild = new EventEmitter();
+  fakeChild.stdout = new EventEmitter();
+  fakeChild.stderr = new EventEmitter();
+  const spawnImpl = (exe, args, options) => {
+    calls.push({ exe, args, options });
+    queueMicrotask(() => fakeChild.emit("close", 0));
+    return fakeChild;
+  };
+
+  const original = process.env.ELECTRON_RUN_AS_NODE;
+  process.env.ELECTRON_RUN_AS_NODE = "1";
+  try {
+    await runProbe({ exe: "claude", args: ["--version"], timeoutMs: 5_000 }, { spawnImpl });
+  } finally {
+    if (original === undefined) delete process.env.ELECTRON_RUN_AS_NODE;
+    else process.env.ELECTRON_RUN_AS_NODE = original;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(
+    Object.hasOwn(calls[0].options.env, "ELECTRON_RUN_AS_NODE"),
+    false,
+    "the runtime child must never inherit the flag that got this helper process running as Node"
+  );
 });
 
 // Codex round 13 review: the genuine, unstubbed proof. A real .cmd shim

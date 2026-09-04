@@ -181,6 +181,14 @@ jobs:
           package-manager-cache: false
       - name: Install dependencies
         run: npm ci
+      - name: Run win32-gated installed-runtime identity tests
+        shell: bash
+        # The only runner that exercises the real win32 branches these files
+        # gate on (cmd.exe interpreter resolution, the runtime-probe-helper
+        # spawn, ELECTRON_RUN_AS_NODE scoping around it). Everywhere else
+        # those branches are skipped, not run, so this is the one CI job
+        # that can actually catch a packaged-Windows regression in them.
+        run: node --test tests/installed-runtime.test.mjs tests/doctor-installed-runtimes.test.mjs
       - name: Build the Windows x64 NSIS installer
         run: npm run dist:windows --workspace apps/desktop
       - name: Verify install, packaged smoke, and uninstall

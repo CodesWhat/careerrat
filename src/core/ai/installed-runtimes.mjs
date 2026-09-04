@@ -859,7 +859,16 @@ export function installedRuntimeExecutionIdentity(
               : []),
           ],
           {
-            env: childEnv,
+            // In the packaged desktop, process.execPath (used as the
+            // command above) is CareerRat.exe, not a Node binary — without
+            // ELECTRON_RUN_AS_NODE, this launches another Electron GUI
+            // instead of running runtime-probe-helper.mjs as a script. Scoped
+            // to this one child, same pattern as buildChildEnv's
+            // electronGuard (skill-runtime.mjs) and update-core.mjs's
+            // installer relaunch. The helper strips this back out of the
+            // env it hands to the runtime it spawns (runtime-probe-helper.mjs),
+            // so the runtime itself never inherits it.
+            env: { ...childEnv, ELECTRON_RUN_AS_NODE: "1" },
             encoding: "utf8",
             maxBuffer: MAX_RUNTIME_PROBE_BYTES,
             // Backstop only, well above probeTimeoutMs: the helper is the

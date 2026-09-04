@@ -72,8 +72,19 @@ export function runProbe(
   return new Promise((resolve) => {
     let child;
     try {
+      // This helper is itself launched with ELECTRON_RUN_AS_NODE=1 so
+      // process.execPath (CareerRat.exe in the packaged desktop) runs it as
+      // Node instead of another GUI instance — see installed-runtimes.mjs's
+      // spawnSyncImpl call. That flag is scoped to getting *this* process
+      // running as Node; the runtime it spawns below is a real target
+      // binary, not another Electron host in disguise, and must not inherit
+      // it (Electron-shelled runtimes would themselves be forced into
+      // Node-run mode by an inherited ELECTRON_RUN_AS_NODE).
+      const runtimeEnv = { ...process.env };
+      delete runtimeEnv.ELECTRON_RUN_AS_NODE;
       child = spawnImpl(exe, args, {
         stdio: ["ignore", "pipe", "pipe"],
+        env: runtimeEnv,
         // Mirrors the async probe path in installed-runtimes.mjs: a detached
         // child becomes its own process-group leader on POSIX (pgid === pid),
         // which is what lets killProcessTreeByPid's group SIGKILL below reach
