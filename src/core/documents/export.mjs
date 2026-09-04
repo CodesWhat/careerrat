@@ -5,9 +5,9 @@
 // Preview fragments are sanitized server-side.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import sanitizeHtml from "sanitize-html";
@@ -164,10 +164,33 @@ export function normalizeAtsText(text) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Count the run of consecutive backslashes in `str` ending immediately
+ * before `index` (exclusive). Used to decide whether a pipe is escaped: an
+ * odd-length run means the last backslash escapes the pipe (the rest pair
+ * off), an even-length run (including zero) means the backslashes only
+ * escape each other and the pipe is a real delimiter.
+ *
+ * @param {string} str
+ * @param {number} index
+ * @returns {number}
+ */
+function backslashRunLengthBefore(str, index) {
+  let count = 0;
+  let i = index - 1;
+  while (i >= 0 && str[i] === "\\") {
+    count++;
+    i--;
+  }
+  return count;
+}
+
+/**
  * Split a pipe-table row into trimmed cell strings. Outer pipes are optional.
  * Escape-aware: a backslash-escaped pipe (`\|`) is a literal pipe inside a
  * cell, not a column separator, and the backslash is removed from the
- * output cell text.
+ * output cell text. Escaping follows backslash-run parity — `\|` escapes,
+ * `\\|` does not (the two backslashes escape each other), `\\\|` escapes
+ * again — for both internal pipes and the optional outer trailing pipe.
  *
  * @param {string} line
  * @returns {string[]}
@@ -176,14 +199,15 @@ function splitPipeRow(line) {
   const s = line.trim();
   const hasOuterLeading = s.startsWith("|");
   let inner = hasOuterLeading ? s.slice(1) : s;
-  const hasOuterTrailing = inner.endsWith("|") && !inner.endsWith("\\|");
+  const hasOuterTrailing =
+    inner.endsWith("|") && backslashRunLengthBefore(inner, inner.length - 1) % 2 === 0;
   if (hasOuterTrailing) inner = inner.slice(0, -1);
 
   const cells = [];
   let current = "";
   for (let i = 0; i < inner.length; i++) {
     const ch = inner[i];
-    if (ch === "\\" && inner[i + 1] === "|") {
+    if (ch === "\\" && inner[i + 1] === "|" && backslashRunLengthBefore(inner, i + 1) % 2 === 1) {
       current += "|";
       i++;
     } else if (ch === "|") {
@@ -776,17 +800,19 @@ function headingRunsToPlainText(runs) {
 /**
  * Strip a leading ATX heading marker (`#` through `######` followed by
  * whitespace, with up to 3 leading spaces) from a fenced-code-block line.
- * Fenced content is otherwise copied verbatim into the plain-text output,
- * but a fenced line that looks exactly like an ATX heading would leak as
- * live heading syntax once the fence markers themselves are dropped. This
- * keeps the plain-text renderer's no-heading-syntax contract intact while
- * leaving every other character of the line untouched.
+ * The whitespace after the marker may be spaces or tabs, matching the ATX
+ * heading spec's own whitespace rule. Fenced content is otherwise copied
+ * verbatim into the plain-text output, but a fenced line that looks exactly
+ * like an ATX heading would leak as live heading syntax once the fence
+ * markers themselves are dropped. This keeps the plain-text renderer's
+ * no-heading-syntax contract intact while leaving every other character of
+ * the line untouched.
  *
  * @param {string} line
  * @returns {string}
  */
 function stripFencedAtxMarker(line) {
-  const m = line.match(/^( {0,3})(#{1,6})( +)(.*)$/);
+  const m = line.match(/^( {0,3})(#{1,6})([ \t]+)(.*)$/);
   return m ? `${m[1]}${m[4]}` : line;
 }
 
@@ -812,7 +838,12 @@ export function renderResumeText(markdown) {
   // level resets that level's counter to its own start number, and
   // returning to a shallower level continues that level's counter from
   // where it left off, matching how nested numbered lists actually read.
+  // listTypes tracks whether the active list at each depth is "ordered" or
+  // "unordered", so a same-depth switch between the two (e.g. an ordered
+  // list, an intervening bullet, then another ordered list) also resets
+  // the counter instead of resuming a list that already ended.
   let listCounters = [];
+  let listTypes = [];
   let lastListDepth = -1;
 
   function pushBlank() {
@@ -833,18 +864,22 @@ export function renderResumeText(markdown) {
       if (previousType !== "li") {
         pushBlank();
         listCounters = [];
+        listTypes = [];
         lastListDepth = -1;
       }
       const depth = block.depth || 0;
       const indent = "  ".repeat(depth);
       let prefix = "- ";
       if (block.ordered) {
-        if (depth > lastListDepth || listCounters[depth] === undefined) {
-          listCounters[depth] = block.start ?? 1;
-        } else {
-          listCounters[depth] += 1;
-        }
+        const isNewListAtDepth =
+          depth > lastListDepth ||
+          listCounters[depth] === undefined ||
+          listTypes[depth] !== "ordered";
+        listCounters[depth] = isNewListAtDepth ? (block.start ?? 1) : listCounters[depth] + 1;
+        listTypes[depth] = "ordered";
         prefix = `${listCounters[depth]}. `;
+      } else {
+        listTypes[depth] = "unordered";
       }
       lastListDepth = depth;
       lines.push(`${indent}${prefix}${runsToPlainText(block.runs)}`);
@@ -1643,13 +1678,27 @@ function parseRuns(text) {
 
     const { m, type } = earliest;
     if (type === "code") {
+      // Code spans stay opaque: no recursion, the literal text is the run.
       runs.push({ text: m[1], code: true });
     } else if (type === "link") {
-      runs.push({ text: m.text, href: m.href });
+      // The destination stays opaque, but the visible label can itself
+      // contain bold/italic (e.g. [**Example**](url)) — parse it
+      // recursively and stamp the href onto every resulting run so the
+      // label's own formatting survives alongside the link.
+      for (const run of parseRuns(m.text)) {
+        runs.push({ ...run, href: run.href || m.href });
+      }
     } else if (type === "bold") {
-      runs.push({ text: m[1], bold: true });
+      // The visible content can itself contain a link or the other
+      // emphasis marker (e.g. **[Example](url)**) — parse recursively and
+      // merge the bold flag onto every resulting run.
+      for (const run of parseRuns(m[1])) {
+        runs.push({ ...run, bold: true });
+      }
     } else if (type === "italic") {
-      runs.push({ text: m[1], italic: true });
+      for (const run of parseRuns(m[1])) {
+        runs.push({ ...run, italic: true });
+      }
     }
 
     remaining = remaining.slice(earliestIdx + earliestLen);
@@ -1944,9 +1993,9 @@ function dosDateTime(date) {
  * @returns {Promise<{ pdf?: string, docx?: string, docxTool?: string, docxLabel?: string, text?: string }>}
  */
 /**
- * Write the rendered text artifact to `${outBase}.txt`, confined to
- * outBase's own directory (the packet directory) and safe against an
- * existing symlink sitting at the destination.
+ * Write the rendered text artifact to `${outBase}.txt`, confined to a
+ * caller-trusted root and safe against an existing symlink sitting at the
+ * destination.
  *
  * outBase must be a non-empty absolute path. Deriving outBase by
  * extension-stripping an extensionless source (`full.slice(0,
@@ -1956,20 +2005,30 @@ function dosDateTime(date) {
  * An empty/relative outBase is rejected here rather than silently writing
  * `.txt` under process.cwd().
  *
- * The resolved destination must also stay inside the resolved packet
- * directory. The write itself goes to a freshly created, uniquely named
- * sibling file (`wx`, which fails if it already exists, so two concurrent
- * exports can't clobber each other's temp file) and is then renamed into
- * place: rename() replaces whatever sits at the destination path,
- * including an existing symlink, without ever opening or following it,
- * so a symlink planted at the destination can't redirect the write
- * outside the packet directory.
+ * When the caller passes `root` (the trusted packet/workspace root), both
+ * `root` and the destination's parent directory are resolved with
+ * realpath() and the canonical parent must sit inside the canonical root.
+ * A lexical containment check alone is self-referential (the "packet
+ * directory" it checks against is just dirname(outBase) again) and does
+ * nothing to stop a symlinked ancestor — e.g. workspace/tailored pointing
+ * outside the workspace — from redirecting the write. Without `root`, the
+ * check falls back to the old lexical containment for callers that
+ * haven't adopted a trusted root yet.
+ *
+ * The write itself goes to a freshly created, uniquely named sibling file
+ * in the validated canonical parent (`wx`, which fails if it already
+ * exists, so two concurrent exports can't clobber each other's temp file)
+ * and is then renamed into place: rename() replaces whatever sits at the
+ * destination path, including an existing symlink, without ever opening
+ * or following it, so a symlink planted at the destination can't redirect
+ * the write outside the confined directory.
  *
  * @param {string} outBase
  * @param {string} text
+ * @param {string} [root] trusted packet/workspace root the destination must resolve inside
  * @returns {string} the destination path
  */
-function writeTextArtifactConfined(outBase, text) {
+function writeTextArtifactConfined(outBase, text, root) {
   if (!outBase || !isAbsolute(outBase)) {
     throw new Error(
       `exportArtifact: outBase must be a non-empty absolute path, got ${JSON.stringify(outBase)}`
@@ -1977,18 +2036,52 @@ function writeTextArtifactConfined(outBase, text) {
   }
 
   const destPath = `${outBase}.txt`;
-  const packetDir = resolve(dirname(outBase));
-  const resolvedDest = resolve(destPath);
-  if (resolvedDest !== packetDir && !resolvedDest.startsWith(`${packetDir}${sep}`)) {
-    throw new Error(
-      `exportArtifact: text export destination escapes the packet directory: ${destPath}`
-    );
+  const parentDir = dirname(outBase);
+  let confinedParent = resolve(parentDir);
+
+  if (root != null) {
+    if (!root || !isAbsolute(root)) {
+      throw new Error(
+        `exportArtifact: root must be a non-empty absolute path, got ${JSON.stringify(root)}`
+      );
+    }
+    let canonicalRoot;
+    let canonicalParent;
+    try {
+      canonicalRoot = realpathSync(root);
+    } catch {
+      throw new Error(`exportArtifact: trusted root does not exist: ${root}`);
+    }
+    try {
+      canonicalParent = realpathSync(parentDir);
+    } catch {
+      throw new Error(
+        `exportArtifact: text export destination directory does not exist: ${parentDir}`
+      );
+    }
+    if (
+      canonicalParent !== canonicalRoot &&
+      !canonicalParent.startsWith(`${canonicalRoot}${sep}`)
+    ) {
+      throw new Error(
+        `exportArtifact: text export destination escapes the trusted root: ${destPath}`
+      );
+    }
+    confinedParent = canonicalParent;
+  } else {
+    const resolvedDest = resolve(destPath);
+    if (resolvedDest !== confinedParent && !resolvedDest.startsWith(`${confinedParent}${sep}`)) {
+      throw new Error(
+        `exportArtifact: text export destination escapes the packet directory: ${destPath}`
+      );
+    }
   }
 
-  const tmpPath = `${destPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const finalDestPath = join(confinedParent, basename(destPath));
+  const tmpPath = `${finalDestPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   writeFileSync(tmpPath, text, { encoding: "utf8", flag: "wx" });
-  renameSync(tmpPath, destPath);
-  return destPath;
+  renameSync(tmpPath, finalDestPath);
+  return finalDestPath;
 }
 
 export async function exportArtifact({
@@ -1997,6 +2090,7 @@ export async function exportArtifact({
   formats,
   title = "Document",
   ats = false,
+  root,
 }) {
   const result = {};
 
@@ -2012,7 +2106,7 @@ export async function exportArtifact({
       result.docxTool = info.tool;
       result.docxLabel = info.label;
     } else if (fmt === "text") {
-      result.text = writeTextArtifactConfined(outBase, renderResumeText(markdown));
+      result.text = writeTextArtifactConfined(outBase, renderResumeText(markdown), root);
     }
   }
 

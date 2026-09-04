@@ -179,3 +179,57 @@ test("renderResumeText leaves non-heading fenced content byte-for-byte", () => {
   const text = renderResumeText("```\nconst x = 1; // #hashtag\n```\n");
   assert.match(text, /^const x = 1; \/\/ #hashtag$/m);
 });
+
+test("renderResumeText strips a tab-separated ATX marker from a fenced heading-shaped line", () => {
+  const text = renderResumeText("```\n#\tHeading\n```\n");
+  const lines = text.split("\n");
+  assert.ok(lines.includes("Heading"), "the ATX marker is stripped");
+  assert.ok(!lines.some((line) => line.startsWith("#")), "no line starts with a heading marker");
+});
+
+// ---------------------------------------------------------------------------
+// Nested inline formatting: bold/link/italic combined
+// ---------------------------------------------------------------------------
+
+test("renderResumeText resolves a bold link (bold outside) without leaking markdown syntax", () => {
+  const text = renderResumeText("**[Example](https://example.com)**\n");
+  assert.match(text, /^Example \(https:\/\/example\.com\)$/m);
+  assert.doesNotMatch(text, /[*[\]]/);
+});
+
+test("renderResumeText resolves a bold link (bold inside) without leaking markdown syntax", () => {
+  const text = renderResumeText("[**Example**](https://example.com)\n");
+  assert.match(text, /^Example \(https:\/\/example\.com\)$/m);
+  assert.doesNotMatch(text, /[*[\]]/);
+});
+
+// ---------------------------------------------------------------------------
+// Lists: a same-depth type change resets the ordered counter
+// ---------------------------------------------------------------------------
+
+test("renderResumeText restarts the ordered counter after an intervening bullet at the same depth", () => {
+  const text = renderResumeText("1. one\n- bullet\n5. five\n");
+  const lines = text.split("\n");
+  assert.deepEqual(lines, ["1. one", "- bullet", "5. five"]);
+});
+
+// ---------------------------------------------------------------------------
+// Table rows: backslash-run parity for escaped pipes
+// ---------------------------------------------------------------------------
+
+test("renderResumeText treats one preceding backslash as escaping the pipe", () => {
+  const text = renderResumeText("| Language | Level |\n| --- | --- |\n| C\\|C++ | Advanced |\n");
+  assert.match(text, /^C\|C\+\+ {3}Advanced$/m);
+});
+
+test("renderResumeText treats two preceding backslashes as not escaping the pipe", () => {
+  const text = renderResumeText("| Language | Level |\n| --- | --- |\n| C\\\\|C++ | Advanced |\n");
+  assert.match(text, /^C\\\\ {3}C\+\+ {3}Advanced$/m);
+});
+
+test("renderResumeText treats three preceding backslashes as escaping the pipe again", () => {
+  const text = renderResumeText(
+    "| Language | Level |\n| --- | --- |\n| C\\\\\\|C++ | Advanced |\n"
+  );
+  assert.match(text, /^C\\\\\|C\+\+ {3}Advanced$/m);
+});

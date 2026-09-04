@@ -7,8 +7,10 @@ import assert from "node:assert/strict";
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -104,4 +106,59 @@ test("exportArtifact writes the text artifact inside the packet directory", asyn
 
   assert.equal(result.text, `${outBase}.txt`);
   assert.match(readFileSync(result.text, "utf8"), /Thank you\./);
+});
+
+// ---------------------------------------------------------------------------
+// Trusted-root confinement: an ancestor symlink must not bypass the check
+// ---------------------------------------------------------------------------
+
+test("exportArtifact writes inside a passed trusted root when the destination genuinely resolves inside it", async () => {
+  const workspaceDir = tempDir("careerrat-export-workspace-");
+  const packetDir = join(workspaceDir, "tailored");
+  mkdirSync(packetDir, { recursive: true });
+  const outBase = join(packetDir, "resume");
+
+  const result = await exportArtifact({
+    markdown: "# Resume\n\nRendered body.\n",
+    outBase,
+    formats: ["text"],
+    root: workspaceDir,
+  });
+
+  // The destination's parent is written via its realpath()-canonicalized
+  // form, which on macOS may differ from the lexical outBase (/var vs.
+  // /private/var), so compare through realpath on both sides.
+  assert.equal(realpathSync(result.text), `${realpathSync(packetDir)}/resume.txt`);
+  assert.match(readFileSync(result.text, "utf8"), /Rendered body\./);
+});
+
+test("exportArtifact rejects a destination whose ancestor directory is a symlink escaping the trusted root", async () => {
+  const workspaceDir = tempDir("careerrat-export-workspace-");
+  const outsideDir = tempDir("careerrat-export-outside-");
+
+  // workspace/tailored is a symlink pointing entirely outside the
+  // workspace. A lexical containment check on dirname(outBase) alone
+  // would see "workspace/tailored/resume" and consider it confined; only
+  // realpath()-ing both the root and the destination's parent catches
+  // this.
+  const tailoredLink = join(workspaceDir, "tailored");
+  symlinkSync(outsideDir, tailoredLink);
+
+  const outBase = join(tailoredLink, "resume");
+  await assert.rejects(
+    () =>
+      exportArtifact({
+        markdown: "# Resume\n\nRendered body.\n",
+        outBase,
+        formats: ["text"],
+        root: workspaceDir,
+      }),
+    /escapes the trusted root/
+  );
+
+  assert.equal(
+    existsSync(join(outsideDir, "resume.txt")),
+    false,
+    "no artifact was written outside the trusted root"
+  );
 });

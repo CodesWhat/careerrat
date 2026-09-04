@@ -44,6 +44,7 @@ function sourceKind(sourceKey) {
 }
 
 const FORMAT_SUFFIX = { pdf: "Pdf", docx: "Docx", text: "Text" };
+const FORMAT_EXTENSION = { pdf: ".pdf", docx: ".docx", text: ".txt" };
 
 function outputKey(kind, format) {
   return `${kind}${FORMAT_SUFFIX[format] || "Pdf"}`;
@@ -112,11 +113,16 @@ function copyPdfToDownloads({ env, company, kind, absPath }) {
   }
 }
 
+const SUPPORTED_EXPORT_FORMATS = new Set(["pdf", "docx", "text"]);
+
+// A nonempty request of supported formats is authoritative: it replaces the
+// default rather than adding to it, so a text-only request stays text-only
+// instead of always dragging a PDF export along. PDF is only the fallback
+// when nothing supported was requested at all.
 function requestedFormats({ request = {}, uploadRequirements = [] } = {}) {
-  const formats = new Set(["pdf"]);
   const requested = Array.isArray(request.formats) ? request.formats : [];
-  if (requested.includes("docx")) formats.add("docx");
-  if (requested.includes("text")) formats.add("text");
+  const supportedRequested = requested.filter((format) => SUPPORTED_EXPORT_FORMATS.has(format));
+  const formats = new Set(supportedRequested.length ? supportedRequested : ["pdf"]);
   for (const requirement of uploadRequirements || []) {
     const reqFormats = Array.isArray(requirement?.formats) ? requirement.formats : [];
     if (requirement?.required && reqFormats.includes("docx")) formats.add("docx");
@@ -250,6 +256,32 @@ export async function exportPacketArtifacts({
   const exportGaps = [];
   const generatedAt = now().toISOString();
 
+  // Every export format writes to `${outBase}${ext}`, so an outBase that
+  // lands on a source path (e.g. a resume.txt source stripped to "resume"
+  // colliding with its own text export) would overwrite that source. Check
+  // the full set of stored source paths, not just the one being exported,
+  // since a distinct source could also land there.
+  const sourcePaths = new Set(
+    sourceEntries(sources)
+      .map(([, storedPath]) => resolveWorkspacePath(workspaceDir, storedPath))
+      .filter(Boolean)
+  );
+  const collidesWithSource = (base) =>
+    selectedFormats.some((format) => {
+      const ext = FORMAT_EXTENSION[format];
+      return ext ? sourcePaths.has(`${base}${ext}`) : false;
+    });
+  const distinctOutBase = (base) => {
+    if (!collidesWithSource(base)) return base;
+    let candidate = `${base}-export`;
+    let suffix = 2;
+    while (collidesWithSource(candidate)) {
+      candidate = `${base}-export-${suffix}`;
+      suffix += 1;
+    }
+    return candidate;
+  };
+
   for (const [sourceKey, storedPath] of sourceEntries(sources)) {
     const full = resolveWorkspacePath(workspaceDir, storedPath);
     if (!full || !existsSync(full)) {
@@ -267,13 +299,14 @@ export async function exportPacketArtifacts({
     // outBase instead of collapsing to an empty (and therefore relative,
     // process.cwd()-anchored) base.
     const sourceExt = extname(full);
-    const outBase = sourceExt ? full.slice(0, -sourceExt.length) : full;
+    const outBase = distinctOutBase(sourceExt ? full.slice(0, -sourceExt.length) : full);
     const result = await exportArtifact({
       markdown,
       outBase,
       formats: selectedFormats,
       title: titleFor(app, kind),
       ats: true,
+      root: workspaceDir,
     });
 
     artifacts[sourceKey] = storedPath;

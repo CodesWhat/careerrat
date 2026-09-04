@@ -3,7 +3,15 @@
 // These tests intentionally fail until src/core/packet/exports.mjs exists.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -469,10 +477,13 @@ test("exportPacketArtifacts generates DOCX only for explicit selection or captur
       expectedFormats: ["pdf"],
     },
     {
+      // A nonempty supported-formats request is authoritative: it replaces
+      // the default rather than adding to it, so an explicit docx-only
+      // request stays docx-only instead of always dragging a PDF along.
       name: "explicit docx",
       request: { formats: ["docx"] },
       uploadRequirements: [],
-      expectedFormats: ["pdf", "docx"],
+      expectedFormats: ["docx"],
     },
     {
       name: "captured board requirement",
@@ -504,7 +515,11 @@ test("exportPacketArtifacts generates DOCX only for explicit selection or captur
     assert.deepEqual(calls[0].formats, entry.expectedFormats, entry.name);
 
     const artifacts = readApp(repoRoot).artifacts;
-    assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+    if (entry.expectedFormats.includes("pdf")) {
+      assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+    } else {
+      assert.equal(artifacts.resumePdf ?? null, null);
+    }
     if (entry.expectedFormats.includes("docx")) {
       assert.match(artifacts.resumeDocx, /^workspace\/tailored\/.+\.docx$/);
     } else {
@@ -513,16 +528,21 @@ test("exportPacketArtifacts generates DOCX only for explicit selection or captur
   }
 });
 
-test("exportPacketArtifacts generates plain text only when explicitly requested", async () => {
+test("exportPacketArtifacts generates plain text only when explicitly requested, with no PDF fan-out", async () => {
+  // Regression for the round-three finding: a nonempty supported-formats
+  // request used to always get "pdf" seeded in ahead of it, so a
+  // text-only request rendered (and copied to Downloads) a PDF nobody
+  // asked for. requestedFormats() must treat the request as authoritative.
   const repoRoot = tempRepo();
   const sources = seedPacketSources(repoRoot);
   seedApp(repoRoot, sources);
   const calls = [];
+  const downloadsEnv = tempDownloadsEnv();
   const { exportPacketArtifacts } = await importPacketExports();
 
   const result = await exportPacketArtifacts({
     repoRoot,
-    env: tempDownloadsEnv(),
+    env: downloadsEnv,
     appId: "app-export",
     packetSources: { resumeSource: sources.resumeSource },
     request: { formats: ["text"] },
@@ -531,15 +551,86 @@ test("exportPacketArtifacts generates plain text only when explicitly requested"
   });
 
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].formats, ["pdf", "text"]);
+  assert.deepEqual(calls[0].formats, ["text"], "no PDF format was requested from the renderer");
 
   const artifacts = readApp(repoRoot).artifacts;
-  assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+  assert.equal(artifacts.resumePdf ?? null, null, "no PDF artifact was produced");
   assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
   assert.equal(artifacts.resumeDocx ?? null, null);
   assert.equal(
     result.userFacing.resume.some((entry) => entry.format === "text"),
     true
+  );
+  assert.equal(
+    result.userFacing.resume.some((entry) => entry.format === "pdf"),
+    false,
+    "no pdf entry in the user-facing export list"
+  );
+  assert.equal((result.downloadsErrors || []).length, 0);
+  assert.deepEqual(
+    readdirSync(downloadsEnv.CAREERRAT_DOWNLOADS_DIR),
+    [],
+    "a text-only export never copies anything to Downloads"
+  );
+});
+
+test("exportPacketArtifacts picks a distinct output base instead of overwriting a .txt source with its own text export", async () => {
+  // Regression: a stored source path can itself be a .txt file (e.g.
+  // resume.txt). Extension-stripping that to an outBase and exporting
+  // "text" would rename the render onto resume.txt itself, destroying the
+  // canonical source. The export must detect the collision and pick a
+  // distinct base.
+  const repoRoot = tempRepo();
+  const originalContent = "# Acme Staff Engineer\n\nEvidence-backed resume body.\n";
+  const resumeSource = writeWorkspaceFile(repoRoot, "tailored/acme-resume.txt", originalContent);
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/acme-packet-manifest.json",
+    JSON.stringify(
+      {
+        appId: "app-export",
+        generatedAt: "2026-07-06T14:00:00Z",
+        uploadReady: true,
+        questions: [],
+      },
+      null,
+      2
+    )
+  );
+  seedApp(repoRoot, { resumeSource, packetManifest });
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const sourceAbsPath = join(repoRoot, resumeSource);
+  assert.equal(
+    readFileSync(sourceAbsPath, "utf8"),
+    originalContent,
+    "the .txt source is untouched, byte-for-byte"
+  );
+
+  assert.equal(calls.length, 1);
+  assert.notEqual(
+    `${calls[0].outBase}.txt`,
+    sourceAbsPath,
+    "the export destination is distinct from the source path"
+  );
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+  assert.notEqual(
+    artifacts.resumeText,
+    resumeSource,
+    "the exported text artifact is not the source itself"
   );
 });
 
@@ -610,24 +701,29 @@ test("POST /api/packet/export exports saved packet sources through the local rou
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.data?.appId, "app-export");
-    assert.deepEqual(calls[0].formats, ["pdf", "docx"]);
+    assert.deepEqual(calls[0].formats, ["docx"]);
     assert.doesNotMatch(JSON.stringify(body), /\/api\/skill\/run|tailor-application/);
 
     const artifacts = readApp(repoRoot).artifacts;
-    assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+    assert.equal(artifacts.resumePdf ?? null, null, "no PDF was requested, so none was produced");
     assert.match(artifacts.resumeDocx, /^workspace\/tailored\/.+\.docx$/);
   } finally {
     await closeServer(server);
   }
 });
 
-test("POST /api/packet/export exports plain text through the local route", async () => {
+test("POST /api/packet/export exports plain text through the local route with no PDF artifact, renderer call, or Downloads copy", async () => {
+  // End-to-end regression for the round-three finding: the UI's Files-panel
+  // "Plain text" action sends formats: ["text"], and this must come back
+  // text-only through the real /api/packet/export route — no PDF renderer
+  // invocation, no PDF artifact, and no convenience copy under Downloads.
   const repoRoot = tempRepo();
   const sources = seedPacketSources(repoRoot);
   seedApp(repoRoot, sources);
   const calls = [];
+  const downloadsEnv = tempDownloadsEnv();
   const server = await bootPacketServer(repoRoot, {
-    env: tempDownloadsEnv(),
+    env: downloadsEnv,
     packetExportArtifact: fakeExporter(calls),
   });
 
@@ -640,11 +736,16 @@ test("POST /api/packet/export exports plain text through the local route", async
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.data?.appId, "app-export");
-    assert.deepEqual(calls[0].formats, ["pdf", "text"]);
+    assert.deepEqual(calls[0].formats, ["text"], "the renderer was never asked for a PDF");
 
     const artifacts = readApp(repoRoot).artifacts;
-    assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+    assert.equal(artifacts.resumePdf ?? null, null, "no PDF artifact was produced");
     assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+    assert.deepEqual(
+      readdirSync(downloadsEnv.CAREERRAT_DOWNLOADS_DIR),
+      [],
+      "a text-only export never copies anything to Downloads"
+    );
   } finally {
     await closeServer(server);
   }
