@@ -25,36 +25,54 @@ rejected outright, both in the settings route
 **The per-protocol boundary.** A supported runtime doesn't just get invoked,
 it runs inside a locked-down sandbox CareerRat builds itself. Claude Code runs
 with `defaultMode: "dontAsk"`, `Bash`, `Edit`, `Write`, and `Agent` denied
-outright, and a `denyRead` allowlist that only opens the paths a skill needs.
-Codex runs with `--sandbox read-only`, `--ignore-user-config`,
-`--ignore-rules`, and a long list of disabled features (shell tool, browser
-use, computer use, multi-agent, plugins, and more). Neither CLI's default
-mode looks like this; CareerRat constructs it per call.
+outright, and a blanket `denyRead` rule (`//**`) paired with an `allowRead`
+list holding only the paths the skill needs. Codex runs with
+`--sandbox read-only`, `--ignore-user-config`, `--ignore-rules`, and a long
+list of disabled features (shell tool, browser use, computer use,
+multi-agent, plugins, and more). Neither CLI's default mode looks like this;
+CareerRat constructs it per call.
 
 **The completion receipt.** Before CareerRat trusts a runtime for real work,
 it runs a smoke test: ask the CLI, inside that same sandbox, to return one
 exact JSON object matching a fixed schema (`COMPLETION_SMOKE_SCHEMA`) with a
-single `receipt` field and nothing else. Only an exact match counts as proof
-the sandboxed invocation actually works, not just that the binary launches.
+single `receipt` field and nothing else. The probe requests no tools and
+touches no files, so an exact match proves the CLI can complete a bounded,
+structured request under the configured sandbox. It doesn't independently
+exercise every deny rule; a CLI that accepted the sandbox flags but quietly
+ignored them could still pass.
 
-**The binary fingerprint.** Every spawn is preceded by a SHA-256 hash check
-against the executable CareerRat resolved at detection time. If the binary on
-disk changed since detection, the identity check fails and the spawn is
-refused, every time, not just once at setup.
+**The binary fingerprint.** Before CareerRat runs real work through a
+runtime, it re-checks a SHA-256 hash of the executable against the one it
+resolved at detection time. If the binary on disk changed since detection,
+the identity check fails and the workflow execution is refused. Version
+checks, authentication probes, ACP probes, and sign-in launches don't repeat
+this check; it's enforced right before a workflow runs, not on every process
+CareerRat spawns.
 
-A CLI clears "supported" only by passing all four, every time. That's a much
-higher bar than "has a CLI you can pipe a prompt into."
+A CLI clears "supported" by being listed as one in the registry, a static
+allowlist that doesn't get re-checked per request. Passing the boundary and
+the completion receipt makes it ready, and that readiness is cached: a
+successful completion receipt is trusted for 24 hours, and persisted
+capability evidence is reused as long as the executable's identity still
+matches. The binary fingerprint is the one gate CareerRat repeats every
+time, immediately before each workflow execution.
 
 ## The other nine
 
 The rest of the registry exists for diagnostics, not workflows. Gemini CLI,
 OpenCode, GitHub Copilot CLI, and Hermes Agent have a real ACP transport
-wired in, so CareerRat can probe them and show readiness state, but each
-one's `acceptedCapabilities` is set to the no-workflow capability set: even a
-successful probe never unlocks completion, structured output, or task tools.
-Qwen Code, Antigravity, Amp, Goose, and Droid have no protocol adapter at
-all; asking CareerRat to run work through one of them hits a
-`RUNTIME_UNSUPPORTED` error.
+wired in, built for future acceptance testing. Today CareerRat only uses it
+to detect them: settings shows each as `detected_unverified` and never runs
+the readiness probe against them, so there's no probed readiness state to
+see yet. Their `acceptedCapabilities` is set to the no-workflow capability
+set, but that's policy metadata describing what a runtime would be allowed
+to do, not the reason these four are excluded today. What actually keeps
+every one of the nine out of real work is the same `supported: false` flag
+from the registry. Qwen Code, Antigravity, Amp, Goose, and Droid have no
+protocol adapter at all. Asking CareerRat to run work through any
+unsupported runtime is rejected before an invocation is ever built: the
+settings route returns `RUNTIME_NOT_SUPPORTED`, and a direct call returns
+`RUNTIME_COMPLETION_UNSUPPORTED`.
 
 Building the four gates for a new engine is real, deliberate work: a
 permission boundary mapped onto that CLI's actual sandbox flags, proven by a
