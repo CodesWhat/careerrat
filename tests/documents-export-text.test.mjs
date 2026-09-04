@@ -298,3 +298,40 @@ test("renderResumeText keeps a heading immediately followed by prose from mergin
   const text = renderResumeText("## Summary\nStaff engineer with 10 years of experience.\n");
   assert.equal(text, "SUMMARY\n\nStaff engineer with 10 years of experience.");
 });
+
+// ---------------------------------------------------------------------------
+// Inline markdown spanning a soft break: parseMdBlocks used to call
+// parseRuns once per source line and join the resulting runs afterward, so
+// an inline construct whose delimiters land on different lines (a soft
+// wrap in the middle of **bold**, *italic*, `code`, or a [link](url)) could
+// never resolve, because each line was parsed before either delimiter's
+// partner existed. It now assembles the whole paragraph's raw text first
+// (soft breaks folded to a space) and parses it once.
+// ---------------------------------------------------------------------------
+
+test("renderResumeText resolves bold spanning a soft break instead of leaking ** markers", () => {
+  const text = renderResumeText("Built **cross-region\npayments** systems.\n");
+  assert.equal(text, "Built cross-region payments systems.");
+});
+
+test("renderResumeText resolves italic spanning a soft break instead of leaking * markers", () => {
+  const text = renderResumeText("Ran *a multi-region\nfailover drill* last quarter.\n");
+  assert.equal(text, "Ran a multi-region failover drill last quarter.");
+});
+
+test("renderResumeText resolves a code span spanning a soft break instead of leaking backticks", () => {
+  const text = renderResumeText("Deployed via `terraform\napply` in CI.\n");
+  assert.equal(text, "Deployed via terraform apply in CI.");
+});
+
+test("renderResumeText resolves a link whose label spans a soft break instead of leaking [] and () syntax", () => {
+  const text = renderResumeText(
+    "See [the engineering\nblog post](https://example.com/post) for detail.\n"
+  );
+  assert.equal(text, "See the engineering blog post (https://example.com/post) for detail.");
+});
+
+test("renderResumeText keeps an explicit hard break intact alongside a bold span that starts on the next line", () => {
+  const text = renderResumeText("123 Main Street  \n**Anytown, ST 00000**\n");
+  assert.equal(text, "123 Main Street\nAnytown, ST 00000");
+});

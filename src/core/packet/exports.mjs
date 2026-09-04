@@ -13,7 +13,7 @@ import { basename, dirname, extname, join, normalize, relative, resolve, sep } f
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { appRegisterPacketArtifacts as registerPacketArtifacts } from "../db/verbs.mjs";
-import { validDocumentArtifact } from "../documents/artifact-validation.mjs";
+import { validDocumentArtifact, validUploadArtifact } from "../documents/artifact-validation.mjs";
 import { exportArtifact as documentExportArtifact } from "../documents/export.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 
@@ -363,9 +363,22 @@ export async function exportPacketArtifacts({
   // omitted source must be reserved too, or a partial export's outBase can
   // collide with it and silently rename over it while its artifact
   // pointer keeps pointing at the now-overwritten file.
+  //
+  // That same risk applies to the plain-key legacy/registered artifacts
+  // (`artifacts.resume`, `artifacts.coverLetter`, `artifacts.answers`), not
+  // just their `*Source` counterparts. A supported application can have
+  // one registered without the other (e.g. a legacy `artifacts.coverLetter`
+  // pointer with no `coverLetterSource`), and if its stem collides with an
+  // exported resume's outBase, an unreserved plain-key artifact would get
+  // silently overwritten while its pointer still referenced it.
+  const plainArtifactPaths = ["resume", "coverLetter", "answers"]
+    .map((key) => app.artifacts?.[key])
+    .filter((value) => typeof value === "string" && value.trim());
   const reservedIdentities = new Set(
     [...sourceEntries(sources), ...sourceEntries(packetSourcesFromApp(app))]
-      .map(([, storedPath]) => resolveWorkspacePath(workspaceDir, storedPath))
+      .map(([, storedPath]) => storedPath)
+      .concat(plainArtifactPaths)
+      .map((storedPath) => resolveWorkspacePath(workspaceDir, storedPath))
       .filter(Boolean)
       .map(canonicalIdentity)
   );
@@ -493,14 +506,37 @@ export async function exportPacketArtifacts({
   // upload-ready, so an unrelated export failure keeps reporting its own
   // ARTIFACT_EXPORT_FAILED gaps unchanged.
   const wouldBeUploadReady = generationReady && exportGaps.length === 0;
+  // hasUploadableResume must see the complete post-export application
+  // artifact set the apply driver will actually read, not just this
+  // export's own manifest-tracked view of it (mergedArtifacts, above,
+  // derives from priorManifestForDb.artifacts, which only ever learns
+  // about a key once some export call has passed it through). A plain
+  // "resume" key can land on the application row directly, e.g. a legacy
+  // or externally-registered PDF/DOCX that never went through this export
+  // path, and the manifest-only merge would miss it entirely. app.artifacts
+  // (read at the top of this call, before this export's own changes) is
+  // the same source uploadArtifacts in apply-driver.mjs reads from, so
+  // overlaying this export's fresh `artifacts` on top of it (respecting
+  // its explicit nulls the same way appRegisterPacketArtifacts will when
+  // it commits) reproduces exactly what apply-driver will see once this
+  // export's registration lands.
+  const applicationArtifactsAfterExport = mergeArtifacts(app.artifacts, artifacts);
+  // Same eligibility rule the apply driver's automatic-upload candidate
+  // list uses (uploadArtifacts in apply-driver.mjs): validUploadArtifact,
+  // not the looser validDocumentArtifact, so a .txt pointer never counts
+  // as uploadable here either. Also check the plain "resume" key, the
+  // apply driver's own fallback candidate after resumePdf/resumeDocx, so a
+  // cover-letter-only export doesn't report RESUME_UPLOAD_ARTIFACT_MISSING
+  // when a valid PDF/DOCX resume still survives there.
   const validUploadableArtifact = (storedPath) => {
     if (!storedPath) return false;
     const abs = resolveWorkspacePath(workspaceDir, storedPath);
-    return Boolean(abs && validDocumentArtifact(abs));
+    return Boolean(abs && validUploadArtifact(abs));
   };
   const hasUploadableResume =
-    validUploadableArtifact(mergedArtifacts.resumePdf) ||
-    validUploadableArtifact(mergedArtifacts.resumeDocx);
+    validUploadableArtifact(applicationArtifactsAfterExport.resumePdf) ||
+    validUploadableArtifact(applicationArtifactsAfterExport.resumeDocx) ||
+    validUploadableArtifact(applicationArtifactsAfterExport.resume);
   const missingResumeArtifactGap =
     wouldBeUploadReady && !hasUploadableResume
       ? {

@@ -1454,8 +1454,17 @@ function buildStylesXml() {
  *           |{ type: 'hr' }
  *           |{ type: 'blockquote', runs: Run[] }
  *           |{ type: 'table', headers: Run[][], rows: Run[][][] }} Block
- * @typedef {{ text: string, bold?: boolean, italic?: boolean, code?: boolean, href?: string }} Run
+ * @typedef {{ text: string, bold?: boolean, italic?: boolean, code?: boolean, href?: string, break?: boolean }} Run
  */
+
+// Sentinel inserted in place of an explicit hard break while a paragraph's
+// lines are assembled into one raw string (see the paragraph-building loop
+// in parseMdBlocks below). No markdown pattern parseRuns matches contains
+// U+E000 (Private Use Area), so it always survives parseRuns as opaque
+// plain text and can be split back out into its own break run afterward,
+// unlike a literal "\n", which the code-span/link/emphasis regexes below
+// don't treat specially and would otherwise leave embedded in a run's text.
+const BREAK_MARKER = "";
 
 function parseMdBlocks(markdown) {
   const lines = markdown.split(/\r?\n/);
@@ -1598,22 +1607,42 @@ function parseMdBlocks(markdown) {
     // literal in-paragraph line break, and every other join is a soft
     // break folded to a single space, matching markdownToHtml's own
     // soft/hard-break handling for the same markdown.
+    //
+    // The paragraph's raw text accumulates across every line here and is
+    // only handed to parseRuns once, in the finalization pass below (after
+    // the line loop). Calling parseRuns per line and joining the resulting
+    // runs afterward, the prior approach, can never match an inline
+    // construct (bold, italic, code, a link) whose delimiters land on
+    // different source lines, since each line was parsed in isolation
+    // before either delimiter's partner existed.
     const hardBreakMatch = line.match(/(?: {2,}|\\)$/);
     const lineText = hardBreakMatch ? line.slice(0, hardBreakMatch.index) : line;
     const openParagraph = paragraphOpen ? blocks[blocks.length - 1] : null;
     if (openParagraph) {
-      openParagraph.runs.push({ text: openParagraph.hardBreakPending ? "\n" : " " });
-      openParagraph.runs.push(...parseRuns(lineText));
+      openParagraph.raw += (openParagraph.hardBreakPending ? BREAK_MARKER : " ") + lineText;
       openParagraph.hardBreakPending = Boolean(hardBreakMatch);
     } else {
       blocks.push({
         type: "para",
-        runs: parseRuns(lineText),
+        raw: lineText,
         hardBreakPending: Boolean(hardBreakMatch),
       });
     }
     paragraphOpen = true;
     listIndentStack.length = 0;
+  }
+
+  // Finalize every paragraph block: parse its fully assembled raw text
+  // (soft breaks already folded to spaces, hard breaks marked with
+  // BREAK_MARKER) through parseRuns exactly once, so an inline construct
+  // spanning a soft break resolves correctly. parseRuns splits BREAK_MARKER
+  // back out into its own { break: true } run (see pushPlainText below).
+  for (const block of blocks) {
+    if (block.type === "para") {
+      block.runs = parseRuns(block.raw);
+      delete block.raw;
+      delete block.hardBreakPending;
+    }
   }
 
   return blocks;
@@ -1685,6 +1714,24 @@ function findLinkMatch(s) {
 }
 
 /**
+ * Push `text` onto `runs`, splitting out any embedded BREAK_MARKER into its
+ * own `{ break: true }` run instead of leaving the sentinel character in
+ * plain text. A run of consecutive markers (a hard break can never repeat
+ * in practice, but this stays correct if it does) produces one break run
+ * per marker with no empty text run between them.
+ *
+ * @param {Run[]} runs
+ * @param {string} text
+ */
+function pushPlainText(runs, text) {
+  const segments = text.split(BREAK_MARKER);
+  segments.forEach((segment, index) => {
+    if (segment) runs.push({ text: segment });
+    if (index < segments.length - 1) runs.push({ text: "\n", break: true });
+  });
+}
+
+/**
  * Parse inline markdown into runs: bold, italic, code, links, plain text.
  *
  * @param {string} text
@@ -1728,19 +1775,23 @@ function parseRuns(text) {
     }
 
     if (!earliest) {
-      runs.push({ text: remaining });
+      pushPlainText(runs, remaining);
       break;
     }
 
     // Plain text before match
     if (earliestIdx > 0) {
-      runs.push({ text: remaining.slice(0, earliestIdx) });
+      pushPlainText(runs, remaining.slice(0, earliestIdx));
     }
 
     const { m, type } = earliest;
     if (type === "code") {
       // Code spans stay opaque: no recursion, the literal text is the run.
-      runs.push({ text: m[1], code: true });
+      // A hard break can't land inside real backtick-delimited source (it
+      // would have to survive as a raw newline mid-span, which markdown
+      // doesn't produce), but if BREAK_MARKER ever does end up here, fold
+      // it back to a literal newline rather than leaking the sentinel.
+      runs.push({ text: m[1].split(BREAK_MARKER).join("\n"), code: true });
     } else if (type === "link") {
       // The destination stays opaque, but the visible label can itself
       // contain bold/italic (e.g. [**Example**](url)) — parse it
@@ -1782,19 +1833,24 @@ function escXml(s) {
 function runsToWml(runs) {
   return runs
     .map((run) => {
-      const text = escXml(run.text || "");
-      // Preserve leading/trailing spaces with xml:space
-      const needsSpace = /^\s|\s$/.test(run.text || "");
-      const tAttr = needsSpace ? ' xml:space="preserve"' : "";
-
       let rPr = "";
       if (run.bold) rPr += "<w:b/>";
       if (run.italic) rPr += "<w:i/>";
       if (run.code) rPr += '<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>';
       // Links: underline + blue color
       if (run.href) rPr += '<w:u w:val="single"/><w:color w:val="1155CC"/>';
-
       const rPrBlock = rPr ? `<w:rPr>${rPr}</w:rPr>` : "";
+
+      // WordprocessingML has no text-based line break: a raw newline inside
+      // <w:t> is just whitespace to Word, never a forced break. A hard
+      // break run (see BREAK_MARKER/pushPlainText above) must therefore
+      // become an explicit <w:br/>, not a <w:t> containing "\n".
+      if (run.break) return `      <w:r>${rPrBlock}<w:br/></w:r>`;
+
+      const text = escXml(run.text || "");
+      // Preserve leading/trailing spaces with xml:space
+      const needsSpace = /^\s|\s$/.test(run.text || "");
+      const tAttr = needsSpace ? ' xml:space="preserve"' : "";
       return `      <w:r>${rPrBlock}<w:t${tAttr}>${text}</w:t></w:r>`;
     })
     .join("\n");
@@ -1804,15 +1860,18 @@ function runsToWml(runs) {
 function cellRunsToWml(runs) {
   return runs
     .map((run) => {
-      const text = escXml(run.text || "");
-      const needsSpace = /^\s|\s$/.test(run.text || "");
-      const tAttr = needsSpace ? ' xml:space="preserve"' : "";
       let rPr = "";
       if (run.bold) rPr += "<w:b/>";
       if (run.italic) rPr += "<w:i/>";
       if (run.code) rPr += '<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>';
       if (run.href) rPr += '<w:u w:val="single"/><w:color w:val="1155CC"/>';
       const rPrBlock = rPr ? `<w:rPr>${rPr}</w:rPr>` : "";
+
+      if (run.break) return `          <w:r>${rPrBlock}<w:br/></w:r>`;
+
+      const text = escXml(run.text || "");
+      const needsSpace = /^\s|\s$/.test(run.text || "");
+      const tAttr = needsSpace ? ' xml:space="preserve"' : "";
       return `          <w:r>${rPrBlock}<w:t${tAttr}>${text}</w:t></w:r>`;
     })
     .join("\n");

@@ -761,6 +761,52 @@ test("a later PDF export clears the RESUME_UPLOAD_ARTIFACT_MISSING gap and resto
   assert.match(readApp(repoRoot).artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
 });
 
+test("a cover-letter-only export doesn't report RESUME_UPLOAD_ARTIFACT_MISSING when a valid plain resume artifact survives", async () => {
+  // Regression: hasUploadableResume only checked resumePdf/resumeDocx, the
+  // keys this export path itself produces. The apply driver's own upload
+  // candidate list (uploadArtifacts in apply-driver.mjs) also accepts the
+  // plain "resume" key as its final fallback -- a legacy application, or
+  // one whose PDF was registered directly rather than exported through this
+  // path. A cover-letter-only export on that application used to report
+  // RESUME_UPLOAD_ARTIFACT_MISSING even though a resume the apply driver
+  // can actually upload still survives untouched in the merged artifacts.
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  const legacyResumePdf = writeWorkspaceFile(
+    repoRoot,
+    "tailored/legacy-resume.pdf",
+    "%PDF-1.4\nfake legacy resume\n%%EOF\n"
+  );
+  seedApp(repoRoot, { ...sources, resume: legacyResumePdf });
+
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    // Cover-letter-only: resumeSource is never passed, so resumePdf and
+    // resumeDocx stay whatever they already were (absent, in this fixture)
+    // and the legacy plain "resume" artifact is the only uploadable resume.
+    packetSources: {
+      coverLetterSource: sources.coverLetterSource,
+      packetManifest: sources.packetManifest,
+    },
+    request: { formats: ["pdf"] },
+    exportArtifact: fakeExporter([]),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const manifest = readApp(repoRoot).packetManifest;
+  assert.equal(
+    manifest.gaps.some((gap) => gap.code === "RESUME_UPLOAD_ARTIFACT_MISSING"),
+    false,
+    "a valid plain resume artifact survives the cover-letter-only export; no gap should fire"
+  );
+  assert.equal(manifest.uploadReady, true);
+  assert.equal(manifest.status, "upload-ready");
+});
+
 test("a docx-only regeneration clears a prior resumePdf the same way", async () => {
   const repoRoot = tempRepo();
   const sources = seedPacketSources(repoRoot);
@@ -990,6 +1036,74 @@ test("a partial export reserves every source registered on the application, not 
     artifacts.resumeText,
     coverLetterSource,
     "the resume text artifact must not point at the omitted cover-letter source"
+  );
+});
+
+test("a partial export reserves a plain-key registered artifact, not just its *Source counterpart", async () => {
+  // Regression: reservedIdentities only ever looked at keys ending in
+  // "Source". A supported plain-key registration -- artifacts.resume,
+  // artifacts.coverLetter, artifacts.answers, e.g. a legacy application, or
+  // one whose cover letter was registered directly with no coverLetterSource
+  // markdown -- was invisible to the collision set, so an exported resume
+  // whose outBase collided with it could get atomically renamed over it
+  // while artifacts.coverLetter kept pointing at the now-overwritten file.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/plain-key-resume-src.md",
+    "# Resume\n\nOriginal resume source body.\n"
+  );
+  const coverLetterCanaryContent = "plain-key cover letter body, must survive untouched\n";
+  const coverLetterPlainPath = writeWorkspaceFile(
+    repoRoot,
+    // Shares resumeSource's stripped base ("plain-key-resume-src") once
+    // resumeSource's own extension is removed, so the naive text outBase
+    // for resumeSource collides with this file's own path -- and it's
+    // registered only under the plain "coverLetter" key, with no
+    // coverLetterSource counterpart for sourceEntries to pick up.
+    "tailored/plain-key-resume-src.txt",
+    coverLetterCanaryContent
+  );
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/plain-key-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  seedApp(repoRoot, { resumeSource, coverLetter: coverLetterPlainPath, packetManifest });
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    // Partial: only resumeSource is passed. The plain-key coverLetter
+    // artifact is still registered on the application row (seeded above)
+    // but has no coverLetterSource, so it never appears in `sources`.
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(
+    readFileSync(join(repoRoot, coverLetterPlainPath), "utf8"),
+    coverLetterCanaryContent,
+    "the plain-key cover-letter artifact's bytes must survive, byte-for-byte"
+  );
+
+  assert.equal(calls.length, 1);
+  assert.notEqual(
+    `${calls[0].outBase}.txt`,
+    join(repoRoot, coverLetterPlainPath),
+    "the resume export destination must not be the plain-key artifact's path"
+  );
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.notEqual(
+    artifacts.resumeText,
+    coverLetterPlainPath,
+    "the resume text artifact must not point at the plain-key cover-letter artifact"
   );
 });
 

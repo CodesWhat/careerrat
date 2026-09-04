@@ -18,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import JSZip from "jszip";
 import { exportArtifact } from "../src/core/documents/export.mjs";
 
 const cleanupRoots = [];
@@ -185,4 +186,52 @@ test("exportArtifact rejects a destination whose ancestor directory is a symlink
     false,
     "no artifact was written outside the trusted root"
   );
+});
+
+test("exportArtifact's built-in OOXML DOCX writer serializes both hard-break forms as <w:br/>, not a literal newline", async () => {
+  // Regression: hard breaks (a two-space trailing line, or a trailing
+  // backslash) became newline-only text runs, and runsToWml serialized
+  // every run as <w:t>. WordprocessingML has no text-based line break: a
+  // raw "\n" inside <w:t> is just whitespace to Word, never a forced
+  // break, so a fallback DOCX export (no pandoc/soffice) silently collapsed
+  // an address or contact block onto one line. Force the built-in path by
+  // clearing PATH so detectDocxCapability finds neither pandoc nor soffice.
+  const dir = tempDir("careerrat-docx-hardbreak-");
+  const savedPath = process.env.PATH;
+
+  try {
+    process.env.PATH = "";
+    const markdown = "Jordan Rivera  \n123 Main Street\\\nAnytown, ST 00000\n";
+    const result = await exportArtifact({
+      markdown,
+      outBase: join(dir, "resume"),
+      formats: ["docx"],
+      title: "Resume",
+    });
+
+    assert.equal(result.docxTool, "ooxml");
+
+    const documentXml = await (await JSZip.loadAsync(readFileSync(result.docx)))
+      .file("word/document.xml")
+      .async("string");
+
+    // The two-space hard break (Jordan Rivera -> 123 Main Street) and the
+    // backslash hard break (123 Main Street -> Anytown, ST 00000) each
+    // become their own <w:br/> run.
+    assert.equal(
+      (documentXml.match(/<w:br\s*\/>/g) || []).length,
+      2,
+      "both the two-space and backslash hard breaks must serialize as <w:br/>"
+    );
+    assert.doesNotMatch(
+      documentXml,
+      /<w:t[^>]*>[^<]*\n[^<]*<\/w:t>/,
+      "no hard break should survive as a raw newline embedded inside a <w:t> run"
+    );
+    assert.match(documentXml, /<w:t>Jordan Rivera<\/w:t>/);
+    assert.match(documentXml, /<w:t>123 Main Street<\/w:t>/);
+    assert.match(documentXml, /<w:t>Anytown, ST 00000<\/w:t>/);
+  } finally {
+    process.env.PATH = savedPath;
+  }
 });
