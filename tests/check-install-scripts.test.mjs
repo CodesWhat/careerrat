@@ -70,6 +70,32 @@ function writeInstalledPackage(root, relPath, content) {
   return dir;
 }
 
+// For actual-mode (loadActual) fixtures that only care about on-disk script
+// discovery, not lockfile-driven stale-key matching: writes just the root
+// package.json plus a minimal, self-consistent package-lock.json (packages[""]
+// mirrors rootPkg, no dependency entries). checkInstallScripts now always
+// loads a virtual tree in actual mode too (for stale-key matching against the
+// lockfile rather than the possibly platform-pruned on-disk tree), so
+// loadVirtual needs a package-lock.json to exist even when a scenario never
+// exercises staleKeys.
+function writeRootManifestOnly(root, rootPkg) {
+  writeFileSync(join(root, "package.json"), JSON.stringify(rootPkg, null, 2));
+  writeFileSync(
+    join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: rootPkg.name,
+        version: rootPkg.version,
+        lockfileVersion: 3,
+        requires: true,
+        packages: { "": rootPkg },
+      },
+      null,
+      2
+    )
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Basics: clean tree, bad allowScripts values, stale/uncovered reporting.
 // ---------------------------------------------------------------------------
@@ -619,14 +645,11 @@ test("fails closed when package-lock.json is malformed JSON", async () => {
 test("catches an implicit node-gyp install script from a binding.gyp on disk", async () => {
   const root = makeFixtureRoot();
   try {
-    writeFileSync(
-      join(root, "package.json"),
-      JSON.stringify({
-        name: "fixture-root",
-        version: "1.0.0",
-        dependencies: { "native-gyp-dep": "1.0.0" },
-      })
-    );
+    writeRootManifestOnly(root, {
+      name: "fixture-root",
+      version: "1.0.0",
+      dependencies: { "native-gyp-dep": "1.0.0" },
+    });
     const dir = writeInstalledPackage(root, "node_modules/native-gyp-dep", {
       name: "native-gyp-dep",
       version: "1.0.0",
@@ -644,14 +667,11 @@ test("catches an implicit node-gyp install script from a binding.gyp on disk", a
 test("[codex-305-r3] gypfile:false suppresses the implicit node-gyp script even with a binding.gyp on disk", async () => {
   const root = makeFixtureRoot();
   try {
-    writeFileSync(
-      join(root, "package.json"),
-      JSON.stringify({
-        name: "fixture-root",
-        version: "1.0.0",
-        dependencies: { "opted-out-gyp-dep": "1.0.0" },
-      })
-    );
+    writeRootManifestOnly(root, {
+      name: "fixture-root",
+      version: "1.0.0",
+      dependencies: { "opted-out-gyp-dep": "1.0.0" },
+    });
     const dir = writeInstalledPackage(root, "node_modules/opted-out-gyp-dep", {
       name: "opted-out-gyp-dep",
       version: "1.0.0",
@@ -678,14 +698,11 @@ test("catches a prepare-only script on a non-registry (file) dependency", async 
       version: "1.0.0",
       scripts: { prepare: "tsc" },
     });
-    writeFileSync(
-      join(root, "package.json"),
-      JSON.stringify({
-        name: "fixture-root",
-        version: "1.0.0",
-        dependencies: { "prepare-only-dep": "file:packages/prepare-only-dep" },
-      })
-    );
+    writeRootManifestOnly(root, {
+      name: "fixture-root",
+      version: "1.0.0",
+      dependencies: { "prepare-only-dep": "file:packages/prepare-only-dep" },
+    });
     mkdirSync(join(root, "node_modules"));
     const target = join(root, "packages/prepare-only-dep");
     const { symlinkSync } = await import("node:fs");
@@ -694,6 +711,45 @@ test("catches a prepare-only script on a non-registry (file) dependency", async 
     const result = await checkInstallScripts({ allowScripts: {}, root });
     assert.equal(result.ok, false);
     assert.deepEqual(result.uncovered, ["file:../packages/prepare-only-dep"]);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});
+
+test("[codex-305-r4] an approved Darwin-only dependency absent from node_modules is not reported stale in actual mode", async () => {
+  // Regression for the fourth adversarial review: stale-key matching used to
+  // check the approved key against the same tree loadActual walks, so on a
+  // Linux/Windows CI runner an approved macOS-only optional dependency (e.g.
+  // fsevents) is never written to node_modules and its key wrongly looked
+  // stale, failing every non-Darwin job. Stale-key matching must instead use
+  // the lockfile's virtual tree, which records the dependency regardless of
+  // which platform actually installed it.
+  const root = makeFixtureRoot();
+  try {
+    writeManifests(root, {
+      rootExtra: { optionalDependencies: { fsevents: "2.3.3" } },
+      packages: {
+        "node_modules/fsevents": {
+          version: "2.3.3",
+          resolved: "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz",
+          hasInstallScript: true,
+          optional: true,
+          os: ["darwin"],
+        },
+      },
+    });
+    // No node_modules/fsevents folder: on this (non-Darwin) runner, a real
+    // `npm ci` never writes an optional dependency whose os field excludes
+    // the current platform.
+    mkdirSync(join(root, "node_modules"));
+
+    const result = await checkInstallScripts({
+      allowScripts: { "fsevents@2.3.3": true },
+      root,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.staleKeys, []);
+    assert.deepEqual(result.uncovered, []);
   } finally {
     removeFixtureRoot(root);
   }

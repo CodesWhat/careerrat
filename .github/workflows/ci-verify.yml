@@ -92,12 +92,38 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
       - name: Install dependencies (scripts held back until allowScripts is checked)
         run: npm ci --ignore-scripts
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
         run: npm run check:install-scripts
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm rebuild --strict-allow-scripts
+        run: npm ci --strict-allow-scripts
       - name: Core test suite
         run: npm test
       - name: Web UI test suite
@@ -123,12 +149,38 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
       - name: Install dependencies (scripts held back until allowScripts is checked)
         run: npm ci --ignore-scripts
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
         run: npm run check:install-scripts
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm rebuild --strict-allow-scripts
+        run: npm ci --strict-allow-scripts
       - name: Build the web app shell (apps/web)
         run: npm run build --workspace apps/web
 
@@ -163,12 +215,38 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
       - name: Install dependencies (scripts held back until allowScripts is checked)
         run: npm ci --ignore-scripts
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
         run: npm run check:install-scripts
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm rebuild --strict-allow-scripts
+        run: npm ci --strict-allow-scripts
       - name: Build the marketing site and docs (apps/website, apps/docs)
         run: npm run build --workspace apps/website
 
@@ -191,12 +269,38 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
       - name: Install dependencies (scripts held back until allowScripts is checked)
         run: npm ci --ignore-scripts
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
         run: npm run check:install-scripts
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm rebuild --strict-allow-scripts
+        run: npm ci --strict-allow-scripts
       - name: Build the Windows x64 NSIS installer
         run: npm run dist:windows --workspace apps/desktop
       - name: Verify install, packaged smoke, and uninstall
@@ -230,12 +334,38 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
       - name: Install dependencies (scripts held back until allowScripts is checked)
         run: npm ci --ignore-scripts
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
         run: npm run check:install-scripts
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm rebuild --strict-allow-scripts
+        run: npm ci --strict-allow-scripts
       - name: Install the real Chromium test browser
         run: npx playwright install --with-deps chromium
       - name: Build the app used by the visual contract
@@ -350,11 +480,37 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
       - name: Install dependencies (scripts held back until allowScripts is checked)
         run: npm ci --ignore-scripts
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
         run: npm run check:install-scripts
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm rebuild --strict-allow-scripts
+        run: npm ci --strict-allow-scripts
       - name: Knip check
         run: npx knip --no-progress --max-issues=0

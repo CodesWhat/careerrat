@@ -239,8 +239,24 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
 
   const arb = new Arborist({ path: root });
   let tree;
+  let staleKeyTree;
   try {
-    tree = nodeModulesPresent && !lockOnly ? await arb.loadActual() : await arb.loadVirtual();
+    const actualMode = nodeModulesPresent && !lockOnly;
+    tree = actualMode ? await arb.loadActual() : await arb.loadVirtual();
+    // Stale-key matching always runs against the lockfile's virtual tree, not
+    // whichever tree `tree` above ended up being. In actual mode, `loadActual`
+    // only reflects what's really on disk, and a platform-specific optional
+    // dependency (e.g. macOS-only fsevents) is legitimately absent from
+    // node_modules on a Linux or Windows CI runner. Matching stale keys
+    // against that tree would report every approved platform-only key as
+    // stale on every job that isn't the matching platform. `loadVirtual`
+    // reflects every package the lockfile records regardless of platform, so
+    // an approved key that's genuinely gone from the dependency graph (not
+    // just absent from this OS's install) is still correctly flagged.
+    // Arborist caches loadActual/loadVirtual separately on the instance
+    // (this.actualTree / this.virtualTree), so calling both is safe and
+    // doesn't re-walk or invalidate the first.
+    staleKeyTree = actualMode ? await arb.loadVirtual() : tree;
   } catch (err) {
     throw new Error(
       `could not load the dependency tree from ${root} (${err.message}); this checker requires a valid ` +
@@ -249,11 +265,11 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
     );
   }
 
-  const nodes = [...tree.inventory.values()].filter((node) => !node.isProjectRoot);
+  const staleKeyNodes = [...staleKeyTree.inventory.values()].filter((node) => !node.isProjectRoot);
 
   const staleKeys = [];
   for (const key of Object.keys(allow)) {
-    const matchedAny = nodes.some((node) => matches(node, key, false));
+    const matchedAny = staleKeyNodes.some((node) => matches(node, key, false));
     if (!matchedAny) staleKeys.push(key);
   }
   staleKeys.sort();

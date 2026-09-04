@@ -53,17 +53,29 @@ test("all deterministic product builds are declared as protected contexts", asyn
   assert.doesNotMatch(workflow, /Non-gating for now/i);
 });
 
-test("every npm ci job installs with scripts disabled, checks allowScripts, then runs only approved scripts", async () => {
+test("every npm ci job activates the pinned npm, installs with scripts disabled, checks allowScripts, then reinstalls strictly", async () => {
   // Codex review /tmp/codex-305-r3.md (finding 1): the workflow ran plain
   // `npm ci` before the checker, so a newly-added dependency with no
   // allowScripts entry got to run its install script before anything
-  // validated it. Every job that installs from the lockfile must instead:
-  // (1) `npm ci --ignore-scripts` so nothing runs yet, (2) run this repo's
-  // checker, (3) `npm rebuild --strict-allow-scripts`, which fails closed on
-  // any package npm's own matcher still finds unreviewed and only then runs
-  // the approved scripts. This must hold for every job, including the ones
-  // that only build an app (web-build, website-build) and the Windows smoke
-  // job, not just the `tests` job.
+  // validated it.
+  //
+  // Codex review /tmp/codex-305-r4.md (findings 2 and 3): setup-node's
+  // bundled npm is not the pinned npm@12.0.2, so `--strict-allow-scripts`
+  // could be silently ignored and an older Pacote's Git fetcher could run a
+  // nested install during the ignored-script phase; and `npm rebuild` skips
+  // the root lifecycle phases (prepublish/preprepare/prepare/postprepare)
+  // and a regular Git dependency's own prepare hook, so it isn't a faithful
+  // replay of what `npm ci` would have run.
+  //
+  // Every job that installs from the lockfile must therefore: (1) activate
+  // the pinned npm via Corepack and assert its version, (2)
+  // `npm ci --ignore-scripts` so nothing runs yet, (3) run this repo's
+  // checker, (4) `npm ci --strict-allow-scripts`, a second full install on
+  // the now-pinned npm that replays every lifecycle phase a normal
+  // `npm ci` runs and fails closed on anything npm's own matcher still
+  // finds unreviewed. This must hold for every job, including the ones that
+  // only build an app (web-build, website-build) and the Windows smoke job,
+  // not just the `tests` job.
   const workflow = await source(".github/workflows/ci-verify.yml");
   const jobNames = [
     "tests",
@@ -85,6 +97,22 @@ test("every npm ci job installs with scripts disabled, checks allowScripts, then
   for (const { name, index } of jobStarts) {
     const nextIndex = sortedStarts.find((i) => i > index) ?? workflow.length;
     const job = workflow.slice(index, nextIndex);
+    assert.match(job, /corepack enable/, `${name}: expected Corepack activation`);
+    assert.match(
+      job,
+      /require\(['"]\.\/package\.json['"]\)\.packageManager/,
+      `${name}: expected the activation step to read the pinned version from package.json`
+    );
+    assert.match(
+      job,
+      /actual_npm="npm@\$\(npm --version\)"/,
+      `${name}: expected the activation step to assert the activated npm version`
+    );
+    assert.match(
+      job,
+      /Corepack activated \$actual_npm instead of \$EXPECTED_NPM/,
+      `${name}: expected the activation step to fail the job on a version mismatch`
+    );
     assert.match(
       job,
       /run:\s*npm ci --ignore-scripts/,
@@ -97,15 +125,21 @@ test("every npm ci job installs with scripts disabled, checks allowScripts, then
     );
     assert.match(
       job,
-      /run:\s*npm rebuild --strict-allow-scripts/,
-      `${name}: expected \`npm rebuild --strict-allow-scripts\` to run only approved scripts and fail closed on the rest`
+      /run:\s*npm ci --strict-allow-scripts/,
+      `${name}: expected \`npm ci --strict-allow-scripts\` to fully reinstall on the pinned npm and fail closed on the rest`
     );
+    assert.doesNotMatch(
+      job,
+      /run:\s*npm rebuild --strict-allow-scripts/,
+      `${name}: \`npm rebuild\` does not replay root or Git-dependency lifecycle hooks; must use \`npm ci --strict-allow-scripts\` instead`
+    );
+    const corepackAt = job.indexOf("corepack enable");
     const ciAt = job.indexOf("npm ci --ignore-scripts");
     const checkAt = job.indexOf("npm run check:install-scripts");
-    const rebuildAt = job.indexOf("npm rebuild --strict-allow-scripts");
+    const strictCiAt = job.indexOf("npm ci --strict-allow-scripts");
     assert.ok(
-      ciAt < checkAt && checkAt < rebuildAt,
-      `${name}: expected install, then check, then rebuild, in that order`
+      corepackAt < ciAt && ciAt < checkAt && checkAt < strictCiAt,
+      `${name}: expected corepack activation, then ignored-script install, then check, then strict install, in that order`
     );
   }
 });
