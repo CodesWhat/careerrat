@@ -335,29 +335,39 @@ function terminateWindowsProcessTree(child, { env = process.env, spawnSyncImpl =
 // own `--version` probe being the one caller today. Reuses the exact same
 // mechanism: process-group SIGKILL on POSIX (the probe is spawned with
 // `detached: true` so its pid doubles as its pgid), taskkill's tree walk on
-// Windows. Best-effort and silent: the pid may already be gone by the time
-// this runs, and that's the success case, not an error.
+// Windows. Best-effort: the pid may already be gone by the time this runs,
+// and that's a success case too. Returns whether the kill attempt itself
+// reported success (taskkill exited 0 on Windows, either SIGKILL landed on
+// POSIX) so callers who need a fallback (runProbe's helper, when taskkill is
+// blocked or unavailable and descendants may have survived) know to run one
+// instead of the failure being swallowed silently.
 export function killProcessTreeByPid(
   pid,
   { platform = process.platform, env = process.env, spawnSyncImpl = spawnSync } = {}
 ) {
   const numericPid = Number(pid);
-  if (!Number.isSafeInteger(numericPid) || numericPid <= 0) return;
+  if (!Number.isSafeInteger(numericPid) || numericPid <= 0) return false;
   if (platform === "win32") {
     try {
       taskkillProcessTree(numericPid, { env, spawnSyncImpl });
+      return true;
     } catch {
-      // The process tree may have already exited on its own.
+      // The process tree may have already exited on its own, or taskkill
+      // was blocked/unavailable — either way, the caller can't tell which
+      // from here, so it's reported as a failed attempt.
+      return false;
     }
-    return;
   }
   try {
     process.kill(-numericPid, "SIGKILL");
+    return true;
   } catch {
     try {
       process.kill(numericPid, "SIGKILL");
+      return true;
     } catch {
       // Already gone.
+      return false;
     }
   }
 }

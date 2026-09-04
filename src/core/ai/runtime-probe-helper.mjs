@@ -42,6 +42,14 @@ const MAX_PROBE_BYTES = 64 * 1024;
 
 const WINDOWS_VERBATIM_FLAG = "--windows-verbatim-arguments";
 
+// How long runProbe waits, after a failed tree kill's direct-child fallback,
+// for confirmed exit before it gives up and settles anyway. taskkill can be
+// blocked or unavailable on a locked-down Windows host, in which case even
+// the direct-child SIGKILL/TerminateProcess may never land; this caps how
+// long the probe (and the caller's spawnSync waiting on it) hangs on that
+// instead of leaving both indefinitely stuck on a runtime that won't die.
+const CLEANUP_DEADLINE_MS = 2000;
+
 function parseArgv(argv) {
   let end = argv.length;
   let windowsVerbatimArguments = false;
@@ -67,7 +75,11 @@ function report(payload) {
 // that it survives argv parsing.
 export function runProbe(
   { exe, args, timeoutMs, windowsVerbatimArguments = false },
-  { spawnImpl = spawn } = {}
+  {
+    spawnImpl = spawn,
+    killTreeImpl = killProcessTreeByPid,
+    cleanupDeadlineMs = CLEANUP_DEADLINE_MS,
+  } = {}
 ) {
   return new Promise((resolve) => {
     let child;
@@ -101,7 +113,7 @@ export function runProbe(
         windowsVerbatimArguments,
       });
     } catch {
-      resolve({ stdout: "", stderr: "", status: null, timedOut: false });
+      resolve({ stdout: "", stderr: "", status: null, timedOut: false, cleanupFailed: false });
       return;
     }
 
@@ -111,12 +123,14 @@ export function runProbe(
     let settled = false;
     let timedOut = false;
     let timer = null;
+    let cleanupTimer = null;
 
-    const finish = (status) => {
+    const finish = (status, { cleanupFailed = false } = {}) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ stdout, stderr, status, timedOut });
+      clearTimeout(cleanupTimer);
+      resolve({ stdout, stderr, status, timedOut, cleanupFailed });
     };
 
     child.stdout?.on("data", (chunk) => {
@@ -131,13 +145,37 @@ export function runProbe(
     // Fires once the root process itself has exited, whether that's the
     // runtime finishing on its own or the tree kill below reaching it. This is
     // the "confirmed exit" the parent process is relying on before it trusts
-    // timedOut in the reported payload.
+    // timedOut in the reported payload. Also what makes the cleanup deadline
+    // below a no-op on the common path: finish() is idempotent, so if this
+    // fires first the deadline timer's own finish() call later is dropped.
     child.on("close", (status) => finish(status));
 
     timer = setTimeout(
       () => {
         timedOut = true;
-        killProcessTreeByPid(child.pid);
+        // killTreeImpl reports whether the kill attempt itself succeeded
+        // (taskkill exited 0 on Windows). If it didn't — taskkill blocked or
+        // unavailable — fall back to killing the direct child so the root
+        // process at least has a second chance to die, even though any
+        // descendants it forked may now be orphaned.
+        const killed = killTreeImpl(child.pid);
+        if (!killed) {
+          try {
+            child.kill?.("SIGKILL");
+          } catch {
+            // The process already exited between the tree-kill attempt and
+            // this fallback.
+          }
+        }
+        // Neither cleanup path is guaranteed to produce a confirmed exit
+        // (child.on("close") firing) — a fallback SIGKILL can itself be
+        // ignored or fail silently. Cap how long this waits for that
+        // confirmation before settling anyway, so a stuck cleanup can't hang
+        // the probe (and the caller's spawnSync) indefinitely.
+        cleanupTimer = setTimeout(() => {
+          finish(null, { cleanupFailed: true });
+        }, cleanupDeadlineMs);
+        cleanupTimer.unref?.();
       },
       Math.max(1, timeoutMs)
     );

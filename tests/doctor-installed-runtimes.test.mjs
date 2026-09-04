@@ -33,6 +33,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   detectInstalledRuntimes,
   findInstalledExecutable,
@@ -41,7 +42,7 @@ import {
 } from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLAUDE_BOUNDARY_MINIMUM_VERSION = INSTALLED_RUNTIME_DEFINITIONS.find(
   (definition) => definition.id === "claude"
 ).minimumBoundaryVersion;

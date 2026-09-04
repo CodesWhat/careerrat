@@ -1647,6 +1647,56 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
   }
 });
 
+// PR #309 review: the timeout path used to call killProcessTreeByPid and
+// trust it silently, even on Windows where a blocked or unavailable
+// taskkill leaves the root process (and any descendants) running forever
+// with nothing left to notice. killProcessTreeByPid now reports whether the
+// kill attempt itself succeeded, so runProbe can fall back to killing the
+// direct child, then give that fallback a bounded deadline instead of
+// hanging on a confirmed exit that may never come. Stubs killTreeImpl to
+// return false (the taskkill-failure case) and a fake child that never
+// emits "close", so this proves the fallback fires and the probe still
+// settles instead of hanging.
+test("runtime-probe-helper.mjs's runProbe falls back to a direct child kill and settles on cleanup deadline when the tree kill fails", async () => {
+  const fakeChild = new EventEmitter();
+  fakeChild.stdout = new EventEmitter();
+  fakeChild.stderr = new EventEmitter();
+  const killCalls = [];
+  fakeChild.kill = (signal) => {
+    killCalls.push(signal);
+    // Deliberately never emits "close" — this is the case where even the
+    // direct-child fallback doesn't produce a confirmed exit, which is what
+    // the cleanup deadline exists to bound.
+  };
+  const spawnImpl = () => fakeChild;
+
+  const killTreeCalls = [];
+  const killTreeImpl = (pid) => {
+    killTreeCalls.push(pid);
+    return false;
+  };
+
+  const started = Date.now();
+  const result = await runProbe(
+    { exe: "stuck-runtime", args: ["--version"], timeoutMs: 10 },
+    { spawnImpl, killTreeImpl, cleanupDeadlineMs: 50 }
+  );
+  const elapsedMs = Date.now() - started;
+
+  assert.equal(killTreeCalls.length, 1, "the tree kill must be attempted first");
+  assert.deepEqual(
+    killCalls,
+    ["SIGKILL"],
+    "a failed tree kill must fall back to killing the direct child"
+  );
+  assert.ok(
+    elapsedMs < 5_000,
+    `the probe must settle on the cleanup deadline instead of hanging (took ${elapsedMs}ms)`
+  );
+  assert.equal(result.timedOut, true);
+  assert.equal(result.cleanupFailed, true);
+});
+
 // Codex round 13 review: runtimeProcessInvocation returns
 // windowsVerbatimArguments: true for .cmd/.bat runtimes because their args
 // are already folded into one cmd-escaped `/c "..."` payload, but that
@@ -2655,7 +2705,7 @@ test("Codex public-web invocation uses supported per-call search and MCP config"
   assert.ok(
     overrides.includes(
       `mcp_servers.careerrat_scoped_tools.args=${JSON.stringify([
-        new URL("../src/core/ai/installed-runtimes.mjs", import.meta.url).pathname,
+        fileURLToPath(new URL("../src/core/ai/installed-runtimes.mjs", import.meta.url)),
         "--careerrat-scoped-tools",
         "--allow-public-web",
       ])}`
