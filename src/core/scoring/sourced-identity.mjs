@@ -1,3 +1,4 @@
+import { workdayDedupKey } from "../providers/career-ops/vendor/workday.mjs";
 import { normalizeCompanyRoleKey, normalizeTextKey } from "../tracker/tracker-data.mjs";
 
 function postingUrl(row = {}) {
@@ -16,6 +17,26 @@ function normalizePostingUrl(rawUrl = "") {
       .trim()
       .toLowerCase();
   }
+}
+
+// Mirrors workdayDedupKey's "last path segment, split at its first
+// underscore" tokenization, but returns the tail verbatim (original case,
+// suffix untouched) instead of the lowercased/stripped reqId it keys on.
+// Kept local rather than exported from the vendor file, which stays
+// byte-identical to upstream.
+function workdayLiteralTail(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const lastSegment = segments[segments.length - 1];
+  if (!lastSegment) return null;
+  const underscoreIdx = lastSegment.indexOf("_");
+  if (underscoreIdx === -1) return null;
+  return lastSegment.slice(underscoreIdx + 1);
 }
 
 export function extractReqId(rawUrl = "") {
@@ -57,19 +78,33 @@ export function extractReqId(rawUrl = "") {
         value: hireology[1],
         id: `hireology:${hireology[1]}`,
       };
-    const workday = path.match(/_([a-z]{1,8}\d{4,}(?:-\d+)?)(?:\/|$)/i);
-    const workdayHost = url.hostname.match(/^([\w-]+)\.wd[\w-]*\.myworkdayjobs\.com$/i);
-    if (workdayHost && workday)
-      return {
-        provider: "workday",
-        value: workday[1],
-        // The dedup key drops Workday's cross-site "-N" disambiguator so the same
-        // requisition republished on a second site collapses to one row; value keeps
-        // the literal suffix because detail lookups match it against jobReqId. Only
-        // one or two digits count as the disambiguator, matching the vendored
-        // workdayDedupKey: a longer tail ("R1234-0001") is part of the requisition.
-        id: `workday:${workdayHost[1].toLowerCase()}:${workday[1].replace(/-\d{1,2}$/, "").toLowerCase()}`,
-      };
+    // Migration note (2026-09-04, CR-29): this used to compute a Workday key
+    // independently of the vendored workdayDedupKey (src/core/providers/
+    // career-ops/vendor/workday.mjs) and the two diverged. This function
+    // scoped by tenant only (dropping the "wdN" instance from the hostname)
+    // and matched a narrow "_LETTERSdigits" pattern anywhere in the path,
+    // where workdayDedupKey scopes by the full hostname and keeps the whole
+    // tail after the final path segment's FIRST underscore. That let
+    // matchTrackerRecord's exact_req_id and filterAndDedupeOffers's
+    // req_id_batch either miss a real duplicate (same tenant, different wd
+    // instance) or falsely collide (different requisition-id prefixes
+    // sharing a "LETTERSdigits" tail, e.g. "REQ_US12345" vs "OTHER_US12345").
+    // Fixed by calling workdayDedupKey directly instead of re-deriving the
+    // same key with different rules, so the two can no longer drift apart.
+    // Key shape changed as a result: "workday:<tenant>:<id>" (tenant-only)
+    // is now "workday:<full-hostname>:<id>". No persisted data was found
+    // keyed on the old shape (see report). `value` still comes from a local
+    // literal-tail read (not workdayDedupKey's lowercased, "-N"-stripped
+    // reqId): src/core/intake/resolve.mjs threads it through as job.reqId
+    // and workday.mjs's fetchDetail compares it case-insensitively but
+    // otherwise verbatim against the CXS detail response's jobReqId, so a
+    // stripped "-N" suffix would make a genuine exact-detail lookup fail.
+    const workdayId = workdayDedupKey({ url: rawUrl });
+    if (workdayId) {
+      const workdayValue =
+        workdayLiteralTail(rawUrl) ?? workdayId.slice(workdayId.lastIndexOf(":") + 1);
+      return { provider: "workday", value: workdayValue, id: workdayId };
+    }
   } catch {
     return { provider: null, value: null, id: null };
   }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-
+import { workdayDedupKey } from "../src/core/providers/career-ops/vendor/workday.mjs";
 import * as sourcedScanner from "../src/core/scoring/sourced-scanner.mjs";
 import {
   buildLocationFilter,
@@ -2069,15 +2069,18 @@ test("extracts canonical req ids from common ATS URLs", () => {
     null
   );
   for (const requisition of ["JR12269", "JR13123-1", "R100123149", "HB344468-3"]) {
-    const baseRequisition = requisition.replace(/-\d+$/, "");
+    const baseRequisition = requisition.replace(/-\d+$/, "").toLowerCase();
     assert.deepEqual(
       extractReqId(
         `https://shakeshack.wd5.myworkdayjobs.com/en-US/External/job/New-York-NY/Assistant-General-Manager_${requisition}`
       ),
       {
         provider: "workday",
+        // value stays the literal, unstripped tail (resolve.mjs matches it
+        // verbatim against Workday's own detail-response jobReqId); id is
+        // the canonicalized, hostname-scoped dedup key.
         value: requisition,
-        id: `workday:shakeshack:${baseRequisition.toLowerCase()}`,
+        id: `workday:shakeshack.wd5.myworkdayjobs.com:${baseRequisition}`,
       }
     );
   }
@@ -2088,15 +2091,21 @@ test("extracts canonical req ids from common ATS URLs", () => {
   assert.equal(extractReqId("https://careers.example.com/jobs/123456").id, null);
 });
 
-test("scopes Workday requisition identity to its tenant", () => {
+test("scopes Workday requisition identity to the full hostname, not just the tenant", () => {
   const shakeShack = extractReqId(
     "https://shakeshack.wd5.myworkdayjobs.com/External/job/Manager_JR12269"
   );
   const acme = extractReqId("https://acme.wd3.myworkdayjobs.com/Careers/job/Manager_JR12269");
+  // Same tenant, different wd instance. CR-29: tenant-only scoping used to
+  // collapse these into one id even though they're different Workday hosts.
+  const acmeOtherInstance = extractReqId(
+    "https://acme.wd1.myworkdayjobs.com/Careers/job/Manager_JR12269"
+  );
 
-  assert.equal(shakeShack.id, "workday:shakeshack:jr12269");
-  assert.equal(acme.id, "workday:acme:jr12269");
+  assert.equal(shakeShack.id, "workday:shakeshack.wd5.myworkdayjobs.com:jr12269");
+  assert.equal(acme.id, "workday:acme.wd3.myworkdayjobs.com:jr12269");
   assert.notEqual(shakeShack.id, acme.id);
+  assert.notEqual(acme.id, acmeOtherInstance.id);
 });
 
 test("dedupes Workday postings republished with a cross-site disambiguator suffix", () => {
@@ -2110,9 +2119,9 @@ test("dedupes Workday postings republished with a cross-site disambiguator suffi
     "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-3/"
   );
 
-  assert.equal(unsuffixed.id, "workday:acme:jr12345");
-  assert.equal(suffixedTwo.id, "workday:acme:jr12345");
-  assert.equal(suffixedThree.id, "workday:acme:jr12345");
+  assert.equal(unsuffixed.id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+  assert.equal(suffixedTwo.id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+  assert.equal(suffixedThree.id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
   assert.equal(suffixedTwo.value, "JR12345-2");
   assert.equal(suffixedThree.value, "JR12345-3");
 
@@ -2122,14 +2131,48 @@ test("dedupes Workday postings republished with a cross-site disambiguator suffi
   const sequenceTwo = extractReqId(
     "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Platform-Engineer_R1234-0002"
   );
-  assert.equal(sequenceOne.id, "workday:acme:r1234-0001");
-  assert.equal(sequenceTwo.id, "workday:acme:r1234-0002");
+  assert.equal(sequenceOne.id, "workday:acme.wd5.myworkdayjobs.com:r1234-0001");
+  assert.equal(sequenceTwo.id, "workday:acme.wd5.myworkdayjobs.com:r1234-0002");
   assert.notEqual(sequenceOne.id, sequenceTwo.id);
 
   const unrelatedHost = extractReqId(
     "https://careers.example.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2"
   );
   assert.equal(unrelatedHost.id, null);
+});
+
+test("extractReqId and the vendored workdayDedupKey collide on exactly the same Workday URL pairs", () => {
+  // Fixture covers the divergent cases that used to make extractReqId and
+  // workdayDedupKey disagree: same tenant on a different wd host, different
+  // requisition-id prefixes sharing a "LETTERSdigits" tail, "-N" cross-site
+  // disambiguator suffixes, mixed case, trailing slashes, and query strings.
+  const urls = [
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-3/",
+    "https://ACME.WD5.MYWORKDAYJOBS.COM/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345?source=indeed",
+    "https://acme.wd1.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+    "https://acme.wd3.myworkdayjobs.com/Careers/job/Manager_JR12269",
+    "https://shakeshack.wd5.myworkdayjobs.com/External/job/Manager_JR12269",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_REQ_US12345",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_OTHER_US12345",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Data-Engineer_R1234-0001",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Platform-Engineer_R1234-0002",
+    "https://careers.example.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+  ];
+
+  for (let i = 0; i < urls.length; i++) {
+    for (let j = 0; j < urls.length; j++) {
+      const extractSame = extractReqId(urls[i]).id === extractReqId(urls[j]).id;
+      const vendorSame = workdayDedupKey({ url: urls[i] }) === workdayDedupKey({ url: urls[j] });
+      assert.equal(
+        extractSame,
+        vendorSame,
+        `mismatch for pair (${urls[i]}, ${urls[j]}): extractReqId agree=${extractSame}, workdayDedupKey agree=${vendorSame}`
+      );
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
