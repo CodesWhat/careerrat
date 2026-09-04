@@ -205,6 +205,10 @@ let pdfRenderer = null;
 let win = null;
 let shuttingDown = false;
 let installUpdateAfterShutdown = false;
+// Set once the native installer owns the quit: from then on a before-quit is
+// the updater's own and must be allowed through.
+let installHandoffStarted = false;
+const INSTALL_HANDOFF_WATCHDOG_MS = 30_000;
 
 // Desktop update state. The native updater lives in the main process; the
 // renderer only receives typed progress and actions through the preload.
@@ -865,9 +869,10 @@ app.on("window-all-closed", () => {
 // server stay alive in the dock until an actual quit.
 app.on("before-quit", (event) => {
   // A repeat quit (Cmd+Q again, a second restart request) while teardown is
-  // in flight must not let Electron exit underneath the pending install.
+  // in flight must not let Electron exit underneath the pending install. Once
+  // the installer has been handed the quit, its own before-quit goes through.
   if (shuttingDown) {
-    event.preventDefault();
+    if (!installHandoffStarted) event.preventDefault();
     return;
   }
   shuttingDown = true;
@@ -879,6 +884,7 @@ app.on("before-quit", (event) => {
         return;
       }
       try {
+        installHandoffStarted = true;
         if (!updateController?.install()) {
           app.exit(1);
           return;
@@ -886,11 +892,16 @@ app.on("before-quit", (event) => {
         // The native handoff after quitAndInstall is asynchronous, and the
         // controller ignores updater events once an install is accepted.
         // A failure here must still end the process so the next launch's
-        // startup reconciliation can retry the downloaded update.
+        // startup reconciliation can retry the downloaded update, and a
+        // handoff that neither quits nor errors gets a bounded watchdog.
         autoUpdater.once("error", (error) => {
           log(`update install failed: ${error?.message || error}`);
           app.exit(1);
         });
+        setTimeout(() => {
+          log("update install handoff did not quit in time");
+          app.exit(1);
+        }, INSTALL_HANDOFF_WATCHDOG_MS).unref?.();
       } catch (error) {
         log(`update install failed: ${error?.message || error}`);
         app.exit(1);
