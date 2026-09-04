@@ -590,13 +590,19 @@ function versionAtLeast(value, floor) {
 }
 
 // Authorization-grade version parsing: unlike parseVersion (first match,
-// used for informational display), this refuses to guess when the probe
-// output contains zero or more than one semantic-version-shaped substring.
-// A boundary decision that unlocks the native installer must never be made
-// from an arbitrary, possibly-unrelated number in combined stdout/stderr.
+// used for informational display), this only recognizes Claude Code's own
+// `--version` output shape, exactly as it prints it: "2.1.200 (Claude
+// Code)", nothing before it and nothing after. A boundary decision that
+// unlocks the native installer must never be made by scanning arbitrary
+// combined stdout/stderr for a version-shaped substring: "2.1.200.999" has
+// an extra numeric component past the recognized shape, and "protocol
+// 2.1.200; version unavailable" has a lone match sitting in unrelated
+// prose. Both must refuse rather than guess.
+const CLAUDE_VERSION_OUTPUT_SHAPE = /^(\d+\.\d+\.\d+) \(Claude Code\)$/;
+
 function parseUnambiguousVersion(value) {
-  const matches = String(value || "").match(/\b\d+\.\d+\.\d+\b/g);
-  return matches && matches.length === 1 ? matches[0] : null;
+  const match = CLAUDE_VERSION_OUTPUT_SHAPE.exec(String(value || "").trim());
+  return match ? match[1] : null;
 }
 
 // Tri-state classification for a completed version probe against a
@@ -612,7 +618,7 @@ function classifyRuntimeVersionBoundary(result, minimumBoundaryVersion) {
   const combined = `${result.stdout || ""}\n${result.stderr || ""}`;
   const version = parseUnambiguousVersion(combined);
   if (!version) return "indeterminate";
-  return versionAtLeast(combined, minimumBoundaryVersion) ? "at_or_above" : "below";
+  return versionAtLeast(version, minimumBoundaryVersion) ? "at_or_above" : "below";
 }
 
 const MAX_RUNTIME_PROBE_BYTES = 64 * 1024;
@@ -1017,7 +1023,16 @@ function runInstalledRuntimeProbeAsync(
       beforeSpawn?.();
       child = spawnImpl(invocation.command, invocation.args, {
         ...options,
-        detached: false,
+        // POSIX only: a detached child becomes its own process-group leader
+        // (pgid === pid), so scheduleRuntimeProcessKill's `process.kill(-pid,
+        // signal)` below actually reaches the whole group, including any
+        // descendant the probed CLI forks that inherits its stdio pipes.
+        // Without this, `-child.pid` is not the child's real group id (it's
+        // still grouped with this Node process) and the signal can miss the
+        // real group entirely or land on an unrelated one. Windows has no
+        // process-group signaling here, so it keeps the platform's own tree
+        // kill (taskkill /t) via killRuntimeProcess instead.
+        detached: platform !== "win32",
       });
     } catch (error) {
       resolve({ status: null, stdout: "", stderr: "", error });
@@ -2064,6 +2079,8 @@ export async function startInstalledRuntimeGuidedSetup(
   runtimeId,
   {
     spawnImpl = spawn,
+    treeKillImpl = spawnSync,
+    env = process.env,
     platform = process.platform,
     onOutput,
     onStart,
@@ -2078,20 +2095,36 @@ export async function startInstalledRuntimeGuidedSetup(
     );
   }
 
-  const child = spawnImpl("/bin/sh", ["-c", CLAUDE_NATIVE_INSTALL_COMMAND], {
+  // /bin/sh with no pipefail lets `curl ... | bash` report success even when
+  // curl fails before producing any input: without pipefail the pipeline's
+  // exit status is bash's own (0, for an empty script), so a download
+  // failure could be reported as a completed update. macOS's /bin/bash
+  // supports `-o pipefail`, which makes the pipeline's status the last
+  // *failing* stage's status instead, so a curl failure can never resolve
+  // as a successful install. The displayed install command text itself
+  // (CLAUDE_NATIVE_INSTALL_COMMAND) is unchanged; only how it's invoked is.
+  const child = spawnImpl("/bin/bash", ["-o", "pipefail", "-c", CLAUDE_NATIVE_INSTALL_COMMAND], {
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+    // Its own POSIX process group (this function only ever runs on darwin,
+    // per the guard above) so a cancelled or timed-out update can stop curl
+    // and bash together, the same tree-kill guarantee runInstalledRuntimeProbeAsync
+    // gives a hung version probe.
+    detached: true,
   });
 
   return await new Promise((resolve, reject) => {
     let settled = false;
     let timer = null;
+    let forceKillTimer = null;
+    let stopError = null;
 
     const finish = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(forceKillTimer);
       signal?.removeEventListener?.("abort", abort);
       if (error) reject(error);
       else
@@ -2103,9 +2136,24 @@ export async function startInstalledRuntimeGuidedSetup(
     };
     const fail = (message, fields = {}) =>
       finish(runtimeError(message, "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED", fields));
+    // Shared with the version probe's cleanup: SIGTERM the whole process
+    // group, then escalate to SIGKILL after a short grace period if curl,
+    // bash, or a descendant they forked ignores it. The cancelled/timed-out
+    // result only settles once that cleanup has actually run (either the
+    // process closes on its own or the escalation completes), never the
+    // instant the signal is sent, so a cancelled request can't race a still
+    // -running installer.
+    const stop = (error) => {
+      stopError ||= error;
+      if (forceKillTimer) return;
+      forceKillTimer = scheduleRuntimeProcessKill(child, () => finish(stopError), {
+        platform,
+        env,
+        spawnSyncImpl: treeKillImpl,
+      });
+    };
     const abort = () => {
-      child.kill?.("SIGTERM");
-      finish(runtimeError("Claude Code setup was cancelled.", "RUNTIME_GUIDED_SETUP_CANCELLED"));
+      stop(runtimeError("Claude Code setup was cancelled.", "RUNTIME_GUIDED_SETUP_CANCELLED"));
     };
     const report = (chunk) => {
       const message = safeRuntimeDiagnostic(chunk);
@@ -2123,14 +2171,29 @@ export async function startInstalledRuntimeGuidedSetup(
       try {
         onStart?.();
       } catch (error) {
-        child.kill?.("SIGTERM");
-        fail("CareerRat could not start the in-app installer.", { cause: error });
+        stop(
+          runtimeError(
+            "CareerRat could not start the in-app installer.",
+            "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+            {
+              cause: error,
+            }
+          )
+        );
       }
     });
     child.once("error", (error) => {
+      if (stopError) {
+        finish(stopError);
+        return;
+      }
       fail("CareerRat could not start the in-app installer.", { cause: error });
     });
     child.once("close", (status, closeSignal) => {
+      if (stopError) {
+        finish(stopError);
+        return;
+      }
       if (status === 0) {
         finish();
         return;
@@ -2143,8 +2206,13 @@ export async function startInstalledRuntimeGuidedSetup(
 
     timer = setTimeout(
       () => {
-        child.kill?.("SIGTERM");
-        fail("The Claude Code installer took too long to finish.", { code: "ETIMEDOUT" });
+        stop(
+          runtimeError(
+            "The Claude Code installer took too long to finish.",
+            "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
+            { code: "ETIMEDOUT" }
+          )
+        );
       },
       Math.max(1, timeoutMs)
     );

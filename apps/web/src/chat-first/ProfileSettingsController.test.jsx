@@ -112,6 +112,7 @@ function createApi() {
       enabled = nextEnabled;
       return { ok: true };
     }),
+    startInstalledAiRuntimeGuidedSetup: vi.fn().mockResolvedValue({ ok: true }),
   };
 }
 
@@ -1226,6 +1227,69 @@ describe("ProfileSettingsController AI preferences", () => {
       "CareerRat couldn't save that AI setting. Choose one of the options and try again."
     );
     expect(settingsProps(view).aiPreferences.quality).toBe("automatic");
+  });
+});
+
+describe("ProfileSettingsController guided update", () => {
+  it("reports the installed result even when an unrelated Settings request fails during the post-install refresh", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getInstalledAiRuntimes
+      .mockResolvedValueOnce({ runtimes: [], guidedSetupAvailable: true })
+      .mockResolvedValueOnce({
+        runtimes: [{ id: "claude", name: "Claude Code", available: true, ready: true }],
+        guidedSetupAvailable: true,
+      })
+      .mockResolvedValueOnce({
+        runtimes: [{ id: "claude", name: "Claude Code", available: true, ready: true }],
+        guidedSetupAvailable: true,
+      });
+    // The post-install load() bundles automation settings, sources,
+    // onboarding, and AI preferences in one Promise.all alongside runtimes.
+    // A failure in any of those must never turn a successful installer run
+    // into a reported failure.
+    api.getAutomationSettings
+      .mockResolvedValueOnce({ capabilities: [] })
+      .mockRejectedValueOnce(new Error("automation settings unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+
+    await props.onGuidedUpdateEngine("claude");
+
+    const view = renderController(module, api);
+    props = settingsProps(view);
+
+    expect.soft(props.guidedSetup).toEqual({ runtimeId: "claude", status: "installed" });
+    expect.soft(props.enginePickerBusy).toBe(false);
+    expect.soft(controllerAlertText(view)).toBe(null);
+    expect.soft(api.getInstalledAiRuntimes).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports the installed result even when the runtime-inventory refresh itself fails after a successful install", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getInstalledAiRuntimes
+      .mockResolvedValueOnce({ runtimes: [], guidedSetupAvailable: true })
+      .mockRejectedValueOnce(new Error("runtime inventory unavailable"))
+      .mockResolvedValueOnce({
+        runtimes: [{ id: "claude", name: "Claude Code", available: true, ready: true }],
+        guidedSetupAvailable: true,
+      });
+
+    renderController(module, api);
+    await flushEffects();
+    let props = settingsProps(renderController(module, api));
+
+    await props.onGuidedUpdateEngine("claude");
+
+    const view = renderController(module, api);
+    props = settingsProps(view);
+
+    expect.soft(props.guidedSetup).toEqual({ runtimeId: "claude", status: "installed" });
+    expect.soft(props.enginePickerBusy).toBe(false);
+    expect.soft(controllerAlertText(view)).toBe(null);
   });
 });
 

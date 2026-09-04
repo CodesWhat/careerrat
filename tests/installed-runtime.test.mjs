@@ -109,6 +109,56 @@ function tempRoot() {
   return mkdtempSync(join(tmpdir(), "careerrat-installed-runtime-"));
 }
 
+// A deterministic stand-in for a probed/installer child process forking a
+// descendant that inherits its pipes: the wrapper spawns a grandchild (both
+// ignoring SIGTERM, forcing the SIGKILL escalation) and records the
+// grandchild's real OS pid to `pidFilePath` before either process is
+// touched, so a process-group-kill test can assert on actual process
+// liveness with process.kill(pid, 0) rather than a mock.
+function writeDescendantWrapperScript(wrapperPath) {
+  writeFileSync(
+    wrapperPath,
+    [
+      "process.on('SIGTERM', () => {});",
+      "import('node:child_process').then(({ spawn }) => {",
+      "  const child = spawn(process.execPath, ['-e', \"process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\"], { stdio: 'ignore' });",
+      "  import('node:fs').then(({ writeFileSync }) => writeFileSync(process.argv[2], String(child.pid)));",
+      "});",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+async function waitForFileContent(path, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) {
+      const raw = readFileSync(path, "utf8").trim();
+      if (raw) return raw;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`timed out waiting for ${path}`);
+}
+
+async function waitUntilProcessDead(pid, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+  const isAlive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const deadline = Date.now() + timeoutMs;
+  while (isAlive() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return !isAlive();
+}
+
 const VERIFIED_CAPABILITIES = Object.freeze({
   completion: true,
   structuredOutput: true,
@@ -1631,6 +1681,21 @@ test("isInstalledRuntimeBelowVersionBoundary is tri-state and fails closed on an
   });
   assert.equal(multiVersionOutput, "indeterminate");
 
+  const extraNumericComponent = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+    platform: "darwin",
+    spawnImpl: () => versionProbeChild({ stdout: "2.1.200.999 (Claude Code)" }),
+  });
+  assert.equal(extraNumericComponent, "indeterminate");
+
+  const unrelatedProseAroundLoneMatch = await isInstalledRuntimeBelowVersionBoundary(
+    claudeRuntime,
+    {
+      platform: "darwin",
+      spawnImpl: () => versionProbeChild({ stdout: "protocol 2.1.200; version unavailable" }),
+    }
+  );
+  assert.equal(unrelatedProseAroundLoneMatch, "indeterminate");
+
   const spawnFailure = await isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
     platform: "darwin",
     spawnImpl: () => {
@@ -1699,6 +1764,39 @@ test("isInstalledRuntimeBelowVersionBoundary escalates to SIGKILL when the probe
   const result = await pending;
   assert.equal(result, "indeterminate");
   assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("isInstalledRuntimeBelowVersionBoundary kills a probed CLI's whole descendant tree, not just the wrapper, on timeout", async () => {
+  const root = tempRoot();
+  const wrapperPath = join(root, "wrapper.mjs");
+  const pidFilePath = join(root, "grandchild.pid");
+  writeDescendantWrapperScript(wrapperPath);
+
+  try {
+    const claudeRuntime = { id: "claude", path: process.execPath };
+    const resultPromise = isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
+      platform: "darwin",
+      timeoutMs: 500,
+      spawnImpl: (_command, _args, options) =>
+        spawn(process.execPath, [wrapperPath, pidFilePath], options),
+    });
+
+    // Poll for the grandchild's real pid instead of a fixed sleep: it must
+    // exist well before the 500ms timeout fires so the kill race below is
+    // meaningful rather than accidental.
+    const grandchildPid = Number(await waitForFileContent(pidFilePath));
+    assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+    const result = await resultPromise;
+    assert.equal(result, "indeterminate");
+    assert.equal(
+      await waitUntilProcessDead(grandchildPid),
+      true,
+      "the grandchild must not survive the probe's cleanup"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("Codex readiness depends on authentication rather than a complete-workflow version floor", async () => {
@@ -2248,9 +2346,15 @@ test("guided Claude setup runs the fixed installer and streams its output", asyn
   assert.equal(result.runtimeId, "claude");
   assert.equal(result.installCommand, "curl -fsSL https://claude.ai/install.sh | bash");
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, "/bin/sh");
-  assert.deepEqual(calls[0].args, ["-c", "curl -fsSL https://claude.ai/install.sh | bash"]);
+  assert.equal(calls[0].command, "/bin/bash");
+  assert.deepEqual(calls[0].args, [
+    "-o",
+    "pipefail",
+    "-c",
+    "curl -fsSL https://claude.ai/install.sh | bash",
+  ]);
   assert.equal(calls[0].options.shell, false);
+  assert.equal(calls[0].options.detached, true);
   assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
   assert.deepEqual(output, ["Installing Claude Code…", "Finishing setup"]);
   assert.doesNotMatch(calls[0].args.join("\n"), /referral\/rOLHwxlsfA/);
@@ -2286,6 +2390,108 @@ test("guided Claude setup rejects when the installer exits unsuccessfully", asyn
   await assert.rejects(result, {
     code: "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED",
   });
+});
+
+test("guided Claude setup cannot report success when curl fails before producing any output", async () => {
+  // Real subprocess, real /bin/bash -o pipefail invocation from the
+  // production code path: only curl is stubbed, via a PATH override, so
+  // this never touches the network. Without pipefail, the right-hand `bash`
+  // in `curl ... | bash` runs an empty script (EOF on stdin) and exits 0,
+  // so the whole pipeline's status is 0 even though curl failed; that would
+  // let the route resolve the guided update as a success. With pipefail the
+  // pipeline's status is curl's own nonzero exit instead.
+  const root = tempRoot();
+  const fakeCurlPath = join(root, "curl");
+  writeFileSync(fakeCurlPath, "#!/bin/sh\nexit 22\n", "utf8");
+  chmodSync(fakeCurlPath, 0o755);
+
+  try {
+    const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+      platform: "darwin",
+      spawnImpl: (command, args, options) =>
+        spawn(command, args, {
+          ...options,
+          env: { ...process.env, PATH: `${root}:${process.env.PATH}` },
+        }),
+    });
+
+    await assert.rejects(
+      resultPromise,
+      (error) =>
+        error.code === "RUNTIME_GUIDED_SETUP_LAUNCH_FAILED" &&
+        Number.isInteger(error.status) &&
+        error.status !== 0
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("guided Claude setup cancellation kills the whole installer process tree after it has started", async () => {
+  const root = tempRoot();
+  const wrapperPath = join(root, "wrapper.mjs");
+  const pidFilePath = join(root, "grandchild.pid");
+  writeDescendantWrapperScript(wrapperPath);
+
+  try {
+    const controller = new AbortController();
+    const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+      platform: "darwin",
+      signal: controller.signal,
+      spawnImpl: (_command, _args, options) =>
+        spawn(process.execPath, [wrapperPath, pidFilePath], options),
+    });
+
+    const grandchildPid = Number(await waitForFileContent(pidFilePath));
+    assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+    // Cancel only after the descendant is confirmed running, matching the
+    // finding: a disconnect that lands while the installer is mid-flight,
+    // not one that beats it to the punch.
+    controller.abort();
+
+    await assert.rejects(resultPromise, { code: "RUNTIME_GUIDED_SETUP_CANCELLED" });
+    assert.equal(
+      await waitUntilProcessDead(grandchildPid),
+      true,
+      "the installer's descendant must not survive cancellation"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("guided Claude setup timeout kills the whole installer process tree after it has started", async () => {
+  const root = tempRoot();
+  const wrapperPath = join(root, "wrapper.mjs");
+  const pidFilePath = join(root, "grandchild.pid");
+  writeDescendantWrapperScript(wrapperPath);
+
+  try {
+    const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
+      platform: "darwin",
+      timeoutMs: 300,
+      spawnImpl: (_command, _args, options) =>
+        spawn(process.execPath, [wrapperPath, pidFilePath], options),
+    });
+
+    const grandchildPid = Number(await waitForFileContent(pidFilePath));
+    assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
+
+    // Pre-existing shape: the timeout path's own { code: "ETIMEDOUT" } field
+    // overwrites the RUNTIME_GUIDED_SETUP_LAUNCH_FAILED code runtimeError was
+    // given, the same way it did before this fix. Unrelated to what this
+    // test is verifying (that the descendant tree actually dies), so it's
+    // left as-is rather than changed here.
+    await assert.rejects(resultPromise, { code: "ETIMEDOUT" });
+    assert.equal(
+      await waitUntilProcessDead(grandchildPid),
+      true,
+      "the installer's descendant must not survive a timeout"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("guided runtime setup is limited to Claude on macOS", async () => {

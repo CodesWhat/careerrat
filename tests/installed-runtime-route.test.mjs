@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,10 @@ import {
   inspectInstalledRuntimeState,
   mountInstalledRuntimeRoutes,
 } from "../src/cli/installed-runtime-route.mjs";
-import { INSTALLED_RUNTIME_DEFINITIONS } from "../src/core/ai/installed-runtimes.mjs";
+import {
+  INSTALLED_RUNTIME_DEFINITIONS,
+  isInstalledRuntimeBelowVersionBoundary,
+} from "../src/core/ai/installed-runtimes.mjs";
 import {
   loadInstalledRuntimeSelection,
   writeInstalledRuntimeSelection,
@@ -1161,6 +1165,92 @@ test("guided setup never launches the installer if the request disconnects while
 
   assert.equal(capturedSignal?.aborted, true);
   assert.deepEqual(started, []);
+});
+
+test("guided setup refuses malformed real version-probe output instead of authorizing an update", async () => {
+  // Wires the real isInstalledRuntimeBelowVersionBoundary/classifyRuntimeVersionBoundary
+  // through the actual route (belowBoundaryImpl is only spawnImpl-faked, not
+  // mocked away), so this proves the route itself refuses on shapes an
+  // adversarial or buggy install could plausibly print: an extra numeric
+  // component tacked onto the version, and a lone version-shaped substring
+  // sitting in otherwise unrelated prose.
+  function malformedVersionChild(stdout) {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => {};
+    queueMicrotask(() => {
+      child.stdout.emit("data", Buffer.from(stdout, "utf8"));
+      queueMicrotask(() => child.emit("close", 0, null));
+    });
+    return child;
+  }
+
+  for (const stdout of ["2.1.200.999 (Claude Code)", "protocol 2.1.200; version unavailable"]) {
+    const started = [];
+    const server = boot({
+      inventory: INVENTORY,
+      probes: {},
+      env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      platform: "darwin",
+      startGuidedSetupImpl: (runtimeId) => started.push(runtimeId),
+      belowBoundaryImpl: (runtime, options) =>
+        isInstalledRuntimeBelowVersionBoundary(runtime, {
+          ...options,
+          spawnImpl: () => malformedVersionChild(stdout),
+        }),
+    });
+    const response = await request(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+      runtimeId: "claude",
+    });
+    assert.equal(response.status, 409, stdout);
+    assert.equal(response.body.code, "RUNTIME_VERSION_INDETERMINATE", stdout);
+    assert.deepEqual(started, [], stdout);
+  }
+});
+
+test("a second concurrent guided-setup request is refused, and a retry after cleanup succeeds", async () => {
+  const started = [];
+  const gate = deferred();
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    env: { CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+    platform: "darwin",
+    belowBoundaryImpl: async () => "below",
+    startGuidedSetupImpl: async (runtimeId, { onStart }) => {
+      started.push(runtimeId);
+      onStart();
+      await gate.promise;
+      return { runtimeId, installCommand: "curl -fsSL https://claude.ai/install.sh | bash" };
+    },
+  });
+
+  const first = requestStream(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  // Give the first request a turn to acquire the lock and start streaming
+  // before the second one races it.
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const second = await request(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  assert.equal(second.status, 409);
+  assert.equal(second.body.code, "RUNTIME_GUIDED_SETUP_IN_PROGRESS");
+
+  gate.resolve();
+  const firstResponse = await first;
+  assert.equal(firstResponse.status, 200);
+  assert.deepEqual(started, ["claude"]);
+
+  // The lock is released only once the first install's promise has settled,
+  // so a retry after that point must be admitted rather than refused again.
+  const retry = await requestStream(server, "POST", "/api/settings/ai-runtime/guided-setup", {
+    runtimeId: "claude",
+  });
+  assert.equal(retry.status, 200);
+  assert.deepEqual(started, ["claude", "claude"]);
 });
 
 test("selection rejects an unavailable or unauthenticated runtime with an actionable code", async () => {

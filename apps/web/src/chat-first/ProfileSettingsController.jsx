@@ -241,6 +241,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   const [editorBusy, setEditorBusy] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(null);
   const permittedNavigationRef = useRef(null);
+  // The raw pieces the model is built from (onboard/runtimes/automation/
+  // sources/aiPreferences), kept alongside `model` so a targeted refresh,
+  // for example just `runtimes` after a guided install, can rebuild the
+  // model without re-fetching or clobbering the other pieces.
+  const settingsPartsRef = useRef({});
   const desktopUpdate = useDesktopUpdate();
   const draftContext = model.draftContext;
   const contextId = draftContextId(draftContext);
@@ -420,6 +425,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       api.getAiPreferences(),
     ]);
     const next = { onboard, runtimes, automation, sources, aiPreferences };
+    settingsPartsRef.current = next;
     setModel(buildSettingsModel(next));
     setError(null);
     return next;
@@ -437,6 +443,7 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
       .then(([onboard, runtimes, automation, sources, aiPreferences]) => {
         if (cancelled) return;
         const next = { onboard, runtimes, automation, sources, aiPreferences };
+        settingsPartsRef.current = next;
         setModel(buildSettingsModel(next));
       })
       .catch((cause) => {
@@ -711,13 +718,38 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   // "Check again" retry that can never clear the boundary on its own.
   // Mirrors FirstRunController's startGuidedSetup outcome mapping so the
   // same installing/failed/cancelled/unavailable states show up here too.
+  // Refreshes just the runtime inventory after a successful guided install,
+  // then best-effort refreshes the rest of Settings. Never throws: an
+  // unrelated Settings request failing (automation, sources, onboarding, AI
+  // preferences, all bundled into load()'s Promise.all) must not turn a
+  // successful installer run into a reported failure, and the freshly
+  // fetched runtime inventory must not be discarded just because the rest
+  // of the page couldn't refresh.
+  async function refreshRuntimesAfterInstall() {
+    try {
+      const runtimes = await api.getInstalledAiRuntimes();
+      settingsPartsRef.current = { ...settingsPartsRef.current, runtimes };
+      setModel(buildSettingsModel(settingsPartsRef.current));
+    } catch {
+      // Keep the installed result even if the fresh inventory couldn't be
+      // fetched; a stale inventory is preferable to reporting a successful
+      // update as failed.
+    }
+    try {
+      await load();
+    } catch {
+      // Best-effort: the fresh runtime inventory above already reflects the
+      // update regardless of whether the rest of Settings could refresh.
+    }
+  }
+
   async function guidedUpdateEngine(runtimeId) {
     setEnginePickerBusy(true);
     setError(null);
     setGuidedSetup({ runtimeId, status: "installing" });
     try {
       await api.startInstalledAiRuntimeGuidedSetup(runtimeId, { onEvent() {} });
-      await load();
+      await refreshRuntimesAfterInstall();
       setGuidedSetup({ runtimeId, status: "installed" });
     } catch (cause) {
       const code = String(cause?.code || cause?.body?.code || "").toUpperCase();

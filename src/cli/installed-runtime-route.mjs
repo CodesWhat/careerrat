@@ -249,6 +249,14 @@ export function mountInstalledRuntimeRoutes({
       platform,
     });
 
+  // Scoped to this mount, not module-level: each mountInstalledRuntimeRoutes
+  // call (one per server/test) gets its own in-flight registry, so parallel
+  // tests never see each other's locks. Keyed by runtimeId and held from the
+  // moment a guided-setup request is admitted until its process tree has
+  // fully terminated (the finally block below), so two concurrent requests
+  // for the same runtime can never both reach the native installer.
+  const activeGuidedSetups = new Set();
+
   addRoute("GET", "/api/settings/ai-preferences", (_req, res) => {
     sendJson(res, 200, loadAIPreferences({ repoRoot, env }));
   });
@@ -467,113 +475,134 @@ export function mountInstalledRuntimeRoutes({
       });
       return;
     }
-    // The abort controller and close handler are registered before any
-    // probing or installer launch, not after: a disconnect that lands while
-    // the version-boundary probe is still in flight must be observed before
-    // the code below ever decides whether to run the native installer.
-    let closed = false;
-    let started = false;
-    let heartbeat = null;
-    const pendingOutput = [];
-    const controller = new AbortController();
-    res.on?.("close", () => {
-      closed = true;
-      controller.abort();
-    });
-
-    const runtime = detectImpl({ env }).find(({ id }) => id === runtimeId);
-    if (runtime?.available) {
-      const versionBoundaryState = await belowBoundaryImpl(runtime, {
-        env,
-        platform,
-        signal: controller.signal,
+    // Only one guided setup per runtime at a time: two tabs or local clients
+    // racing this route could otherwise both pass the version-boundary check
+    // before either installation finishes and concurrently run the native
+    // installer against the same Claude install. The lock is acquired here,
+    // before any probing starts, and released in the finally block below
+    // only after startGuidedSetupImpl's promise has settled, which, per its
+    // own process-tree cleanup, only happens once the installer's process
+    // group has actually terminated.
+    if (activeGuidedSetups.has(runtimeId)) {
+      sendJson(res, 409, {
+        ok: false,
+        code: "RUNTIME_GUIDED_SETUP_IN_PROGRESS",
+        error: "Claude Code setup is already running. Wait for it to finish.",
       });
-      if (closed || controller.signal.aborted) return;
-      if (versionBoundaryState === "at_or_above") {
-        sendJson(res, 409, {
-          ok: false,
-          code: "RUNTIME_ALREADY_INSTALLED",
-          error: "Claude Code is already installed. Sign in instead.",
-        });
-        return;
-      }
-      if (versionBoundaryState !== "below") {
-        sendJson(res, 409, {
-          ok: false,
-          code: "RUNTIME_VERSION_INDETERMINATE",
-          error:
-            "CareerRat couldn't tell what version of Claude Code is installed. Check the install and try again.",
-        });
-        return;
-      }
+      return;
     }
-    // Authorization only ever reaches here for a conclusive below-boundary
-    // probe (or no existing installation at all). Still refuse to launch the
-    // installer if the request already disconnected while we were deciding.
-    if (closed || controller.signal.aborted) return;
-
-    function emit(payload) {
-      if (closed || !started) return;
-      try {
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      } catch {
+    activeGuidedSetups.add(runtimeId);
+    try {
+      // The abort controller and close handler are registered before any
+      // probing or installer launch, not after: a disconnect that lands while
+      // the version-boundary probe is still in flight must be observed before
+      // the code below ever decides whether to run the native installer.
+      let closed = false;
+      let started = false;
+      let heartbeat = null;
+      const pendingOutput = [];
+      const controller = new AbortController();
+      res.on?.("close", () => {
         closed = true;
         controller.abort();
-      }
-    }
+      });
 
-    function startStream() {
-      if (started || closed) return;
-      started = true;
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-store",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      });
-      res.flushHeaders?.();
-      emit({
-        type: "started",
-        runtimeId,
-        installCommand: CLAUDE_NATIVE_INSTALL_COMMAND,
-      });
-      for (const message of pendingOutput.splice(0)) emit({ type: "output", message });
-      heartbeat = setInterval(() => emit({ type: "heartbeat" }), 10_000);
-      heartbeat.unref?.();
-    }
-
-    try {
-      await startGuidedSetupImpl(runtimeId, {
-        platform,
-        signal: controller.signal,
-        onStart: startStream,
-        onOutput(message) {
-          if (started) emit({ type: "output", message });
-          else pendingOutput.push(message);
-        },
-      });
-      startStream();
-      emit({ type: "done", runtimeId });
-    } catch (error) {
-      if (!started) {
-        sendJson(res, 500, {
-          ok: false,
-          code: error?.code || "RUNTIME_GUIDED_SETUP_FAILED",
-          error: "CareerRat could not start the in-app Claude installer.",
+      const runtime = detectImpl({ env }).find(({ id }) => id === runtimeId);
+      if (runtime?.available) {
+        const versionBoundaryState = await belowBoundaryImpl(runtime, {
+          env,
+          platform,
+          signal: controller.signal,
         });
-        return;
+        if (closed || controller.signal.aborted) return;
+        if (versionBoundaryState === "at_or_above") {
+          sendJson(res, 409, {
+            ok: false,
+            code: "RUNTIME_ALREADY_INSTALLED",
+            error: "Claude Code is already installed. Sign in instead.",
+          });
+          return;
+        }
+        if (versionBoundaryState !== "below") {
+          sendJson(res, 409, {
+            ok: false,
+            code: "RUNTIME_VERSION_INDETERMINATE",
+            error:
+              "CareerRat couldn't tell what version of Claude Code is installed. Check the install and try again.",
+          });
+          return;
+        }
       }
-      emit({
-        type: "error",
-        code: error?.code || "RUNTIME_GUIDED_SETUP_FAILED",
-        message:
-          error?.code === "RUNTIME_GUIDED_SETUP_CANCELLED"
-            ? "Claude Code setup was cancelled."
-            : "Claude Code did not finish installing. Check your connection and try again.",
-      });
+      // Authorization only ever reaches here for a conclusive below-boundary
+      // probe (or no existing installation at all). Still refuse to launch the
+      // installer if the request already disconnected while we were deciding.
+      if (closed || controller.signal.aborted) return;
+
+      function emit(payload) {
+        if (closed || !started) return;
+        try {
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch {
+          closed = true;
+          controller.abort();
+        }
+      }
+
+      function startStream() {
+        if (started || closed) return;
+        started = true;
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-store",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        });
+        res.flushHeaders?.();
+        emit({
+          type: "started",
+          runtimeId,
+          installCommand: CLAUDE_NATIVE_INSTALL_COMMAND,
+        });
+        for (const message of pendingOutput.splice(0)) emit({ type: "output", message });
+        heartbeat = setInterval(() => emit({ type: "heartbeat" }), 10_000);
+        heartbeat.unref?.();
+      }
+
+      try {
+        await startGuidedSetupImpl(runtimeId, {
+          platform,
+          signal: controller.signal,
+          onStart: startStream,
+          onOutput(message) {
+            if (started) emit({ type: "output", message });
+            else pendingOutput.push(message);
+          },
+        });
+        startStream();
+        emit({ type: "done", runtimeId });
+      } catch (error) {
+        if (!started) {
+          sendJson(res, 500, {
+            ok: false,
+            code: error?.code || "RUNTIME_GUIDED_SETUP_FAILED",
+            error: "CareerRat could not start the in-app Claude installer.",
+          });
+          return;
+        }
+        emit({
+          type: "error",
+          code: error?.code || "RUNTIME_GUIDED_SETUP_FAILED",
+          message:
+            error?.code === "RUNTIME_GUIDED_SETUP_CANCELLED"
+              ? "Claude Code setup was cancelled."
+              : "Claude Code did not finish installing. Check your connection and try again.",
+        });
+      } finally {
+        clearInterval(heartbeat);
+        if (started && !closed) res.end();
+      }
     } finally {
-      clearInterval(heartbeat);
-      if (started && !closed) res.end();
+      activeGuidedSetups.delete(runtimeId);
     }
   });
 
