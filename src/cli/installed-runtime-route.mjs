@@ -98,7 +98,13 @@ function withProbeReadiness(runtime, probe) {
   };
 }
 
-function runtimeVerification(runtime) {
+// Exported so callers outside this route (e.g. scripts/qa-live-runtime-search.mjs)
+// write the exact same cached-verification shape this route does, instead of
+// hand-assembling a subset that omits fields the cache matcher requires
+// (installedRuntimeCachedVerification and installedRuntimeBoundaryEvidenceCurrent
+// both read versionBoundaryState/testedMinimumVersion — a verification missing
+// them reads back as an untested boundary probe).
+export function runtimeVerification(runtime) {
   if (
     !runtime?.path ||
     !runtime.realPath ||

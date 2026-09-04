@@ -606,6 +606,64 @@ test("doctor never executes a discovered runtime binary during detection", () =>
   }
 });
 
+// Codex adversarial finding (round 5): the cache matcher's one live read —
+// invoking the selected runtime with `--version` — used to run before path,
+// realPath, and binaryFingerprint were ever compared against the cache. A
+// replacement binary at the same launcher path (or a PATH-shadowed one) was
+// therefore executed under the user's account even though Doctor went on to
+// report the cache as stale. Detection resolves path/realPath/fingerprint
+// without executing anything, so those fields must be checked against the
+// cache FIRST — the live version spawn only happens once they already agree.
+test("doctor never executes a replacement binary whose identity mismatches the cached verification", () => {
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  const markerDir = mkdtempSync(join(tmpdir(), "careerrat-doctor-mismatch-no-exec-"));
+  const markerFile = join(markerDir, "executed.marker");
+  try {
+    const claudePath = writeVersionedFakeBinary(registry, "claude", "9.9.9");
+    const realPath = realpathSync(claudePath);
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        path: claudePath,
+        realPath,
+        version: "9.9.9",
+        // Fingerprint deliberately does not match the replacement binary
+        // written below, standing in for an in-place replacement or a
+        // PATH-shadowed executable at the same launcher path.
+        binaryFingerprint: "a".repeat(64),
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        testedMinimumVersion: CLAUDE_BOUNDARY_MINIMUM_VERSION,
+        checkedAt: new Date().toISOString(),
+      },
+    });
+
+    // Replace the binary at the same launcher path with one that would
+    // prove it ran, if Doctor ever invoked it.
+    writeFakeBinary(registry, "claude", `#!/bin/sh\necho executed > "${markerFile}"\nexit 0\n`);
+
+    const data = runDoctorJson(home, fakeRegistryEnv(registry));
+    const claude = data.installedRuntimes.find((r) => r.id === "claude");
+    assert.ok(claude);
+    assert.equal(claude.status, "supported engine");
+    assert.equal(claude.version, null, "an identity mismatch must invalidate the cache");
+    assert.equal(claude.boundaryProbePassed, false);
+    assert.equal(
+      existsSync(markerFile),
+      false,
+      "doctor must never execute a binary whose identity mismatches the cache"
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+    rmSync(markerDir, { recursive: true, force: true });
+  }
+});
+
 // Closes the medium Codex finding: Doctor's "Installed AI runtimes" section
 // reads and SHA-256 hashes every discovered executable on every invocation.
 // The dashboard's guidance snapshot re-runs Doctor on a 30-second TTL and

@@ -4,8 +4,14 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-
 import { assertExpectedSourceRevision } from "../scripts/lib/live-search-revision-guard.mjs";
+import { runtimeVerification as buildInstalledRuntimeVerification } from "../src/cli/installed-runtime-route.mjs";
+import { resolveAIRoute } from "../src/core/ai/call-ai.mjs";
+import { INSTALLED_RUNTIME_DEFINITIONS } from "../src/core/ai/installed-runtimes.mjs";
+import {
+  loadInstalledRuntimeSelection,
+  writeInstalledRuntimeSelection,
+} from "../src/core/ai/runtime-selection.mjs";
 
 const GIT_REPOSITORY_ENV_VARS = execFileSync("git", ["rev-parse", "--local-env-vars"], {
   encoding: "utf8",
@@ -157,24 +163,94 @@ test("the engineering native AI search fixture stays base-only", () => {
   );
 });
 
-test("native AI search verification binds the selected runtime to its current executable identity", () => {
-  const script = readFileSync(
-    new URL("../scripts/qa-live-runtime-search.mjs", import.meta.url),
-    "utf8"
-  );
+// Codex adversarial finding (round 5): the persisted verification used to omit
+// versionBoundaryState and testedMinimumVersion. Reloading that selection made
+// installedRuntimeBoundaryEvidenceCurrent() read the boundary probe as
+// untested (testedMinimumVersion=null never equals a real policy minimum), so
+// resolveAIRoute() stripped publicWeb from Claude's capabilities and the
+// immediately following live search rejected its own WebSearch/WebFetch
+// profile. This exercises the actual write -> reload -> routing path with the
+// same canonical shape the script now writes (installed-runtime-route.mjs's
+// runtimeVerification, imported by the script as
+// buildInstalledRuntimeVerification) instead of asserting on the script's
+// source text.
+test("a verification built from a successful probe keeps Claude's publicWeb capability after reload and routing", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-qa-live-search-route-"));
+  try {
+    const claudeDefinition = INSTALLED_RUNTIME_DEFINITIONS.find(
+      (definition) => definition.id === "claude"
+    );
+    const path = "/safe/claude";
+    const probedCapabilities = {
+      completion: true,
+      structuredOutput: true,
+      appWorkflows: true,
+      exactRead: true,
+      publicWeb: true,
+      liveActivity: true,
+      resumable: true,
+    };
 
-  assert.match(script, /installedRuntimeExecutionIdentity/);
-  assert.match(
-    script,
-    /installedRuntimeExecutionIdentity\(\s*\{ \.\.\.runtime, version: probe\.version \},\s*\{ env \}\s*\)/
-  );
-  assert.match(script, /if \(!identity\) throw new Error/);
-  assert.match(
-    script,
-    /const runtimeVerification = \{\s*\.\.\.identity,\s*capabilities: probe\.capabilities,\s*checkedAt:/
-  );
-  assert.match(script, /verification: runtimeVerification/);
-  assert.match(script, /runtimeVerification,/);
+    // The exact shape the QA script assembles from installedRuntimeExecutionIdentity()
+    // and a successful probeInstalledRuntime() call, then hands to
+    // buildInstalledRuntimeVerification.
+    const verification = buildInstalledRuntimeVerification({
+      path,
+      realPath: path,
+      version: "0.149.1",
+      binaryFingerprint: "a".repeat(64),
+      capabilities: probedCapabilities,
+      versionBoundaryState: "at_or_above",
+      minimumVersion: claudeDefinition.minimumBoundaryVersion,
+    });
+    assert.ok(verification, "a successful probe's fields must build a valid verification");
+
+    writeInstalledRuntimeSelection({
+      repoRoot,
+      env: {},
+      runtimeId: "claude",
+      providerFallback: false,
+      verification,
+    });
+
+    // Reload from disk, exactly like the next process (e.g. the live search
+    // this QA run performs right after writing the selection) would.
+    const reloaded = loadInstalledRuntimeSelection({ repoRoot, env: {} });
+    assert.equal(reloaded.verification.versionBoundaryState, "at_or_above");
+    assert.equal(
+      reloaded.verification.testedMinimumVersion,
+      claudeDefinition.minimumBoundaryVersion
+    );
+
+    const route = resolveAIRoute(
+      { CAREERRAT_DESKTOP_SHELL: "1", CAREERRAT_DESKTOP_CLI_ONLY: "1" },
+      {
+        repoRoot,
+        runtimeInventory: [
+          {
+            id: "claude",
+            name: "Claude Code",
+            path,
+            realPath: path,
+            version: "0.149.1",
+            binaryFingerprint: "a".repeat(64),
+            available: true,
+            capabilitiesVerified: false,
+            capabilities: undefined,
+          },
+        ],
+      }
+    );
+
+    assert.equal(route.type, "installed");
+    assert.equal(
+      route.runtime.capabilities.publicWeb,
+      true,
+      "a verification missing versionBoundaryState/testedMinimumVersion would strip publicWeb here"
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test("completed native AI searches emit diagnostics before the release gate writes a receipt", () => {

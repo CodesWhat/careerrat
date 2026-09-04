@@ -230,7 +230,26 @@ const selectedRuntimeForVerification =
   runtimeFingerprintId && !guidanceOnly
     ? installedRuntimes.find((runtime) => runtime.id === runtimeFingerprintId)
     : null;
-const selectedRuntimeCurrentIdentity = selectedRuntimeForVerification
+
+// installedRuntimeExecutionIdentity() spawns the runtime with --version
+// whenever the runtime it's handed doesn't already carry a version — which
+// detectInstalledRuntimes's output never does. Calling it unconditionally
+// would therefore execute whatever binary is on disk right now BEFORE this
+// file ever compares it against the cache, so an in-place replacement or a
+// PATH-shadowed executable would run under the user's account even though
+// Doctor goes on to report the cache as stale. Detection already resolved
+// path, realPath, and binaryFingerprint without executing anything, so
+// those non-executing fields are checked against the cached verification
+// first; the live --version spawn only happens once they already agree.
+const cachedRuntimeVerification = runtimeFingerprintId ? runtimeSelection.verification : null;
+const nonExecutingIdentityMatchesCache = Boolean(
+  selectedRuntimeForVerification &&
+    cachedRuntimeVerification &&
+    selectedRuntimeForVerification.path === cachedRuntimeVerification.path &&
+    selectedRuntimeForVerification.realPath === cachedRuntimeVerification.realPath &&
+    selectedRuntimeForVerification.binaryFingerprint === cachedRuntimeVerification.binaryFingerprint
+);
+const selectedRuntimeCurrentIdentity = nonExecutingIdentityMatchesCache
   ? installedRuntimeExecutionIdentity(selectedRuntimeForVerification, { env: process.env })
   : null;
 
