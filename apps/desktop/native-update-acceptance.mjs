@@ -302,19 +302,26 @@ export async function beginNativeUpdateAcceptance({
           return;
         }
         installing = true;
-        writeFileAtomic(
-          acceptance.pointerPath,
-          `${JSON.stringify({ requestPath: acceptance.requestPath })}\n`
-        );
+        // The pointer is what makes the next packaged launch treat itself as
+        // a restarted acceptance run (mode "complete") instead of a normal
+        // boot. Only write it once requestInstall has actually started the
+        // native install. A pointer written before that call and left behind
+        // by a failed request would make the next launch run the acceptance
+        // check and exit instead of opening a window.
         const install =
           typeof requestInstall === "function"
             ? requestInstall(controller)
             : controller.install();
         if (!install) {
           installing = false;
+          rmSync(acceptance.pointerPath, { force: true });
           fail(new Error("Native update acceptance could not start the native installer."));
           return;
         }
+        writeFileAtomic(
+          acceptance.pointerPath,
+          `${JSON.stringify({ requestPath: acceptance.requestPath })}\n`
+        );
         resolvePromise({ installStarted: true });
       },
     });

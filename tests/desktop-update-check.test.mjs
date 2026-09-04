@@ -210,6 +210,24 @@ describe("desktop updater controller", () => {
     assert.deepEqual(writes.at(-1).operation, { phase: "ready", version: "0.16.4" });
   });
 
+  it("does not check GitHub on startup reconciliation once checks are turned off", async () => {
+    const { controller, updater } = makeController({
+      persisted: {
+        ...DEFAULT_STATE,
+        enabled: false,
+        operation: { phase: "ready", version: "0.16.4" },
+      },
+    });
+
+    assert.equal(controller.needsStartupCheck(), true);
+
+    const state = await controller.reconcileStartup();
+
+    assert.equal(updater.checkCalls, 0);
+    assert.equal(controller.needsStartupCheck(), false);
+    assert.equal(state.enabled, false);
+  });
+
   it("recovers an interrupted download as a clear retry instead of idle", () => {
     const { controller, writes } = makeController({
       persisted: {

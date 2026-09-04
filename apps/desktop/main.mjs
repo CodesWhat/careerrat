@@ -212,6 +212,13 @@ let installUpdateAfterShutdown = false;
 // held so it cannot exit the process underneath a Squirrel transfer that is
 // still in progress.
 let installHandoffStarted = false;
+// Counts before-quit calls received while teardown already holds the quit.
+// The first re-entrant quit stays swallowed (a stray double Cmd+Q must not
+// abort a teardown that is about to finish cleanly); a second one means the
+// user is stuck waiting behind the 30s teardown deadline or the 5 minute
+// install-handoff watchdog, so it exits immediately instead of making them
+// wait either one out.
+let reentrantQuitCount = 0;
 // Bounds for the two waits a quit can get stuck in: runtime teardown (guided
 // setup cleanup alone is bounded at 8s) and the native install handoff.
 // Both end in a nonzero exit so the next launch reconciles the downloaded
@@ -513,6 +520,10 @@ function waitForRendererReady(browserWindow, timeoutMs = 20000) {
 }
 
 async function ensureDesktopWindow() {
+  // Teardown may already have torn down the server and PDF renderer a fresh
+  // window would depend on. Never create one once shutdown has started;
+  // hand back whatever window still exists (or null) instead.
+  if (shuttingDown) return win && !win.isDestroyed() ? win : null;
   const browserWindow = !win || win.isDestroyed() ? openDesktopRoute(desktopRoute) : win;
   await waitForRendererReady(browserWindow);
   browserWindow?.show();
@@ -852,6 +863,7 @@ app.whenReady().then(async () => {
   // macOS convention: clicking the dock icon with no open windows reopens
   // one instead of doing nothing.
   app.on("activate", () => {
+    if (shuttingDown) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow(url, route);
   });
 }).catch((err) => {
@@ -929,7 +941,14 @@ app.on("before-quit", (event) => {
   // in flight must not let Electron exit underneath the pending install. Once
   // the installer has been handed the quit, its own before-quit goes through.
   if (shuttingDown) {
-    if (!installHandoffStarted) event.preventDefault();
+    if (installHandoffStarted) return;
+    reentrantQuitCount += 1;
+    if (reentrantQuitCount >= 2) {
+      log("quit requested again during teardown, exiting");
+      app.exit(1);
+      return;
+    }
+    event.preventDefault();
     return;
   }
   shuttingDown = true;

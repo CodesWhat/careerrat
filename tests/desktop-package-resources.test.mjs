@@ -372,6 +372,41 @@ test("electron-builder macOS pilot config requires signing, entitlements, and no
   }
 });
 
+test("desktop never creates a window once shutdown has started", async () => {
+  const main = await readText("apps/desktop/main.mjs");
+  const ensureWindowBody =
+    main.match(/async function ensureDesktopWindow\(\) \{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(
+    ensureWindowBody,
+    /if \(shuttingDown\) return/,
+    "the manual-update-check window path must not open a window during teardown"
+  );
+  const activateBody =
+    main.match(/app\.on\("activate", \(\) => \{([\s\S]*?)\n {2}\}\);/)?.[1] || "";
+  assert.match(
+    activateBody,
+    /if \(shuttingDown\) return/,
+    "the dock-icon activate handler must not recreate a window during teardown"
+  );
+});
+
+test("a second quit during teardown exits instead of waiting out the install watchdog", async () => {
+  const main = await readText("apps/desktop/main.mjs");
+  const beforeQuitBody =
+    main.match(/app\.on\("before-quit", \(event\) => \{([\s\S]*?)\n\}\);/)?.[1] || "";
+
+  assert.match(
+    beforeQuitBody,
+    /reentrantQuitCount \+= 1[\s\S]*reentrantQuitCount >= 2[\s\S]*quit requested again during teardown, exiting[\s\S]*app\.exit\(1\)/,
+    "a second re-entrant quit must exit instead of staying held behind the teardown/handoff deadlines"
+  );
+  assert.match(
+    beforeQuitBody,
+    /if \(installHandoffStarted\) return;/,
+    "a before-quit after the native installer took over must still pass through untouched"
+  );
+});
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
