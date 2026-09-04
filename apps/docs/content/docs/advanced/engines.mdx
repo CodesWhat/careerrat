@@ -41,9 +41,10 @@ CareerRat constructs it per call.
 it runs a smoke test: ask the CLI, inside that same sandbox, to return one
 exact JSON object matching a fixed schema (`COMPLETION_SMOKE_SCHEMA`) with a
 single `receipt` field and nothing else. The probe requests no tools and
-reads no candidate or workspace files. CareerRat does create a temporary
-schema file and a scratch working directory to run the probe itself, but
-the CLI never sees anything that belongs to the candidate. An exact match
+reads no candidate or workspace files. Both probes run inside a scratch
+working directory CareerRat creates for the probe itself. Codex also gets a
+temporary schema file; Claude Code receives the same schema inline through
+`--json-schema`. Neither CLI sees anything that belongs to the candidate. An exact match
 proves the CLI can complete a bounded, structured request under the
 configured sandbox. It doesn't independently
 exercise every deny rule; a CLI that accepted the sandbox flags but quietly
@@ -59,10 +60,14 @@ identity before the boundary-version probe, then check it again
 immediately before the workflow process spawns.
 
 A CLI clears "supported" by being listed as one in the registry, a static
-allowlist that doesn't get re-checked per request. Readiness is different:
-the CLI has to be installed, meet the applicable version floor, be signed
-in, and return a passing completion receipt, all four together. Only the
-completion receipt is cached, for 24 hours; the version and sign-in checks
+allowlist that doesn't get re-checked per request. Readiness is different,
+and for Claude Code the version check is tri-state, not pass/fail. Basic
+readiness needs the CLI installed, signed in, and passing the completion
+receipt; a below-floor version (currently `2.1.241`) blocks readiness
+outright, but an indeterminate version read (the CLI didn't report a
+parseable version) can still be selectable with reduced capabilities. The
+`2.1.241` boundary itself is enforced separately, only on tool-bearing runs.
+Only the completion receipt is cached, for 24 hours; the version and sign-in checks
 run every time and are never skipped just because a cached receipt exists.
 That 24-hour TTL governs the settings route's own smoke-probe reuse, not
 how long a selected runtime stays trusted for real work. Settings persists
@@ -99,8 +104,10 @@ of the nine out of real work, on the settings route and CareerRat's normal
 AI routing, is the same `supported: false` flag from the registry. Qwen
 Code, Antigravity, Amp, Goose, and Droid have no protocol adapter at all.
 Asking CareerRat to run work through any unsupported runtime on those two
-paths is rejected before an invocation is ever built: the settings route
-returns `RUNTIME_NOT_SUPPORTED`, and normal AI routing returns a generic
+paths is rejected before an invocation is ever built. The settings route
+checks availability before support: an unsupported runtime that isn't even
+installed returns `RUNTIME_NOT_AVAILABLE`; `RUNTIME_NOT_SUPPORTED` only comes
+back once the runtime is detected and available. Normal AI routing returns a generic
 route-failure result that `callAI` throws as a plain, uncoded error;
 workflow callers that catch it, such as the skill runtime, chat runtime,
 intake route, and workspace-agent route, may then label it `NO_AI_ROUTE`
