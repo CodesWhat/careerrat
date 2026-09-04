@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -1775,6 +1776,75 @@ test("[win32] runtime-probe-helper.mjs runs a real .cmd shim through a spaced, m
       reported.stdout.includes(expectedVersion),
       `expected the shim's version output intact, got: ${reported.stdout}`
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Codex round 16 review: the test above proves runtime-probe-helper.mjs's
+// own cmd.exe quoting in isolation, but nothing in this suite drove a real
+// win32 host through installedRuntimeExecutionIdentity itself -- the
+// function Doctor and every runtime caller actually use. A wrong
+// RUNTIME_PROBE_HELPER_PATH, a broken interpreter/version handoff, or a
+// regression in the npm-shim identity chain could all still pass CI, since
+// the CI-filtered Windows step ran only the helper-level test above. This
+// exercises the genuine top-level entry point end to end: no spawnImpl or
+// helper-path override, a real npm-shim .cmd sitting in a directory with a
+// space, resolved through the exact same production interpreter/payload
+// resolution installedRuntimeExecutionIdentity always uses.
+test("[win32] installedRuntimeExecutionIdentity verifies a real npm-shim .cmd end to end with no spawn injection", (t) => {
+  if (process.platform !== "win32") {
+    t.skip("exercises the real cmd.exe/node.exe handoff; only meaningful on win32");
+    return;
+  }
+  const root = tempRoot();
+  // The npm-shim identity chain (runtimeProcessIdentityFiles) only
+  // recognizes a .cmd whose immediate parent directory is literally "npm"
+  // (or node_modules/.bin); the space lives one level up, matching real
+  // installs like "C:\Users\Taylor Smith\AppData\Roaming\npm\myshim.cmd".
+  const spacedRoot = join(root, "Taylor Smith & Co");
+  const npmDir = join(spacedRoot, "npm");
+  const payloadDir = join(npmDir, "node_modules", "myshim", "bin");
+  mkdirSync(payloadDir, { recursive: true });
+
+  const wrapper = join(npmDir, "myshim.cmd");
+  const localNode = join(npmDir, "node.exe");
+  const payload = join(payloadDir, "myshim.js");
+  const expectedVersion = "myshim-cli 9.9.9";
+
+  // A byte-for-byte copy of the real node.exe running this test, so the
+  // shim's own `%dp0%\node.exe` branch resolves without touching PATH.
+  copyFileSync(process.execPath, localNode);
+  writeFileSync(payload, `console.log(${JSON.stringify(expectedVersion)});\n`);
+  writeFileSync(
+    wrapper,
+    [
+      "@ECHO off",
+      "GOTO start",
+      ":find_dp0",
+      "SET dp0=%~dp0",
+      "EXIT /b",
+      ":start",
+      "SETLOCAL",
+      "CALL :find_dp0",
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ") ELSE (",
+      '  SET "_prog=node"',
+      ")",
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%" "%dp0%\\node_modules\\myshim\\bin\\myshim.js" %*',
+    ].join("\r\n")
+  );
+
+  try {
+    // No spawnImpl, no runtimeIdentityFilesImpl, no RUNTIME_PROBE_HELPER_PATH
+    // override -- the same production path Doctor and every runtime caller
+    // resolve through.
+    const identity = installedRuntimeExecutionIdentity({ path: wrapper }, { platform: "win32" });
+    assert.ok(identity, "a genuine npm-shim .cmd must verify through the real production path");
+    assert.equal(identity.path, wrapper);
+    assert.match(identity.binaryFingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(identity.version, "9.9.9");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -20,7 +20,9 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -33,6 +35,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   detectInstalledRuntimes,
+  findInstalledExecutable,
   INSTALLED_RUNTIME_DEFINITIONS,
   installedRuntimeExecutionIdentity,
 } from "../src/core/ai/installed-runtimes.mjs";
@@ -206,6 +209,116 @@ test("doctor --json surfaces cached version and a passed boundary probe only whe
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(registry, { recursive: true, force: true });
+  }
+});
+
+// Codex round 16 review: every other test in this file fakes the registry
+// with a POSIX shell-script binary and a raw-bytes SHA-256, which never
+// exercises win32's own identity chain (the npm-shim launcher/interpreter/
+// payload hash in runtimeBinaryFingerprint) or the runtime-probe-helper.mjs
+// handoff installedRuntimeExecutionIdentity spawns for its `--version`
+// probe on Windows. The CI step that filters this suite down to `[win32]`
+// cases therefore had nothing here to run, and a broken helper path or a
+// regression in that identity chain could reach a real Windows user with
+// every gate green. This drives doctor.mjs end to end against a real
+// npm-shim .cmd fixture: a persisted cache seeded from a genuine
+// installedRuntimeExecutionIdentity() call, then re-validated by Doctor's
+// own real (uninjected) spawn of that same fixture.
+test("[win32] doctor --json verifies a real npm-shim .cmd end to end against a cached selection", (t) => {
+  if (process.platform !== "win32") {
+    t.skip("exercises the real cmd.exe/node.exe handoff; only meaningful on win32");
+    return;
+  }
+  const home = tempHome();
+  const parent = tempFakeRegistry();
+  // runtimeProcessIdentityFiles only recognizes a .cmd whose immediate
+  // parent directory is literally "npm" (or node_modules/.bin) -- this has
+  // to be the exact directory CAREERRAT_RUNTIME_SEARCH_DIRS points at, not
+  // a subdirectory findInstalledExecutable would never look inside.
+  const npmDir = join(parent, "npm");
+  const payloadDir = join(npmDir, "node_modules", "claude-fixture", "bin");
+  mkdirSync(payloadDir, { recursive: true });
+
+  const wrapper = join(npmDir, "claude.cmd");
+  const localNode = join(npmDir, "node.exe");
+  const payload = join(payloadDir, "claude.js");
+  const expectedVersion = "9.9.9";
+
+  // A byte-for-byte copy of the real node.exe running this test, so the
+  // shim's own `%dp0%\node.exe` branch resolves without touching PATH.
+  copyFileSync(process.execPath, localNode);
+  writeFileSync(payload, `console.log(${JSON.stringify(`claude-cli ${expectedVersion}`)});\n`);
+  writeFileSync(
+    wrapper,
+    [
+      "@ECHO off",
+      "GOTO start",
+      ":find_dp0",
+      "SET dp0=%~dp0",
+      "EXIT /b",
+      ":start",
+      "SETLOCAL",
+      "CALL :find_dp0",
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ") ELSE (",
+      '  SET "_prog=node"',
+      ")",
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%" "%dp0%\\node_modules\\claude-fixture\\bin\\claude.js" %*',
+    ].join("\r\n")
+  );
+
+  try {
+    // findInstalledExecutable rebuilds the filename from PATHEXT
+    // (`claude` + whatever extension casing PATHEXT carries), which is not
+    // guaranteed to match this fixture's own literal "claude.cmd" casing
+    // even though NTFS resolves either one to the same file. doctor.mjs's
+    // subprocess below detects through this exact function with this exact
+    // PATH, so the cache has to be seeded from the same resolved path or a
+    // pure casing difference would make Doctor's own cache-currency check
+    // (installedRuntimeVerificationCurrent) fail closed on `path` alone.
+    const resolvedPath = findInstalledExecutable(["claude"], {
+      env: { ...process.env, PATH: npmDir },
+      platform: "win32",
+    });
+    assert.equal(resolvedPath?.toLowerCase(), wrapper.toLowerCase());
+
+    // Seed the cache from a genuine, uninjected identity read (the same
+    // production path installed-runtimes.mjs itself uses after a real
+    // verification pass) instead of hand-assembling path/realPath/
+    // binaryFingerprint the way the POSIX tests above do.
+    const identity = installedRuntimeExecutionIdentity(
+      { path: resolvedPath },
+      { platform: "win32" }
+    );
+    assert.ok(identity, "fixture must produce a genuine verified identity to seed the cache");
+    assert.equal(identity.version, expectedVersion);
+
+    const checkedAt = new Date().toISOString();
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        ...identity,
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        testedMinimumVersion: CLAUDE_BOUNDARY_MINIMUM_VERSION,
+        checkedAt,
+      },
+    });
+
+    const data = runDoctorJson(home, { PATH: npmDir, CAREERRAT_RUNTIME_SEARCH_DIRS: npmDir });
+    const claude = data.installedRuntimes.find((r) => r.id === "claude");
+    assert.ok(claude, "expected a claude entry in installedRuntimes");
+    assert.equal(claude.status, "supported engine");
+    assert.equal(claude.version, expectedVersion);
+    assert.equal(claude.boundaryProbePassed, true);
+    assert.equal(claude.boundaryProbeCheckedAt, checkedAt);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(parent, { recursive: true, force: true });
   }
 });
 

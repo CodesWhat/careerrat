@@ -9,7 +9,7 @@ import {
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 if (process.platform !== "win32") {
@@ -17,6 +17,7 @@ if (process.platform !== "win32") {
 }
 
 const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = join(desktopRoot, "..", "..");
 const desktopPackage = JSON.parse(readFileSync(join(desktopRoot, "package.json"), "utf8"));
 const distDir = join(desktopRoot, "dist");
 const expectedName = `CareerRat-${desktopPackage.version}-win-x64-Setup.exe`;
@@ -25,6 +26,27 @@ const installerPath = join(distDir, expectedName);
 if (!existsSync(installerPath)) {
   throw new Error(`Windows installer is missing: ${installerPath}`);
 }
+
+// installed-runtimes.mjs resolves runtime-probe-helper.mjs relative to its
+// own module URL (`new URL("./runtime-probe-helper.mjs", import.meta.url)`),
+// which means the helper only has to sit next to it wherever that file
+// lands. electron-builder's `extraResources` (electron-builder.yml) copies
+// the whole staged engine tree -- source included -- straight into
+// resources/careerrat unpacked, the same tree every other per-child helper
+// in this repo (runtime-process.mjs's taskkill spawn, update-core.mjs's
+// installer relaunch) already relies on being real files on disk rather
+// than asar entries. No asarUnpack rule is needed because extraResources
+// never goes through app.asar in the first place; this check exists so a
+// staging/electron-builder regression that broke that assumption (a moved
+// file, a filter that dropped it) fails the Windows gate instead of only
+// surfacing the first time a real user's Doctor probe silently comes back
+// unverified. The relative path is derived from the real repo layout
+// (rather than hardcoded) so it moves if installed-runtimes.mjs ever does.
+const runtimeProbeHelperSource = join(repoRoot, "src", "core", "ai", "runtime-probe-helper.mjs");
+if (!existsSync(runtimeProbeHelperSource)) {
+  throw new Error(`runtime-probe-helper.mjs source is missing: ${runtimeProbeHelperSource}`);
+}
+const runtimeProbeHelperRelativePath = relative(repoRoot, runtimeProbeHelperSource);
 
 const scratch = mkdtempSync(join(tmpdir(), "careerrat-windows-package-"));
 const installDir = join(scratch, "installed");
@@ -54,6 +76,23 @@ try {
   run(installerPath, ["/S", `/D=${installDir}`], "silent install");
   const appPath = join(installDir, "CareerRat.exe");
   if (!existsSync(appPath)) throw new Error(`installed app is missing: ${appPath}`);
+
+  // Doctor and every installed-runtime caller need runtime-probe-helper.mjs
+  // sitting next to the packaged installed-runtimes.mjs to run the Windows
+  // `--version` probe at all -- a missing or misplaced helper leaves every
+  // installed Windows runtime reporting unverified with no other packaged
+  // signal catching it (see the comment above runtimeProbeHelperRelativePath).
+  const packagedHelperPath = join(
+    installDir,
+    "resources",
+    "careerrat",
+    runtimeProbeHelperRelativePath
+  );
+  if (!existsSync(packagedHelperPath)) {
+    throw new Error(
+      `packaged app is missing runtime-probe-helper.mjs at the path installed-runtimes.mjs resolves: ${packagedHelperPath}`
+    );
+  }
 
   const smokeOutput = run(appPath, ["--smoke"], "installed app smoke");
   if (!/SMOKE OK\s+http:\/\/127\.0\.0\.1:\d+/.test(smokeOutput)) {
