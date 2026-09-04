@@ -431,6 +431,52 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.getOnboardingDraft).not.toHaveBeenCalled();
   });
 
+  it("keeps the preloaded voluntary-defaults prompt visible while onboard initialization settles", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    const pending = deferred();
+    const upgradeState = {
+      data: {
+        "form-defaults": {
+          voluntary_self_identification: {
+            enabled: false,
+            default_action: "leave_blank",
+            confirmed_at: null,
+            answers: {},
+          },
+        },
+        setup: { readiness: { search_ready: true } },
+        sourcing: {
+          firstSearchRun: { run: { status: "completed" } },
+          sourceSetup: { deterministicSources: { attempted: 5 } },
+        },
+      },
+      setupProgress: { complete: true, completedCount: 8, total: 8, items: [] },
+    };
+    api.initOnboard.mockReturnValue(pending.promise);
+
+    let view = rerender(module, api, { initialOnboardState: upgradeState });
+
+    expect(view.type).toBe(FirstRunExperience);
+    expect(view.type).not.toBe(BootScreen);
+    expect(view.props.stage).toBe("voluntary-defaults");
+
+    await flushEffects();
+    view = rerender(module, api, { initialOnboardState: upgradeState });
+
+    expect(view.type).toBe(FirstRunExperience);
+    expect(view.type).not.toBe(BootScreen);
+    expect(view.props.stage).toBe("voluntary-defaults");
+
+    pending.resolve({ ok: true });
+    await flushEffects();
+    view = rerender(module, api, { initialOnboardState: upgradeState });
+
+    expect(view.type).toBe(FirstRunExperience);
+    expect(view.type).not.toBe(BootScreen);
+    expect(view.props.stage).toBe("voluntary-defaults");
+  });
+
   it.each([
     {
       runtimeName: "ready",
