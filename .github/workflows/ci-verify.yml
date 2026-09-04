@@ -95,7 +95,7 @@ jobs:
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
-          corepack enable
+          corepack enable npm
           EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
           if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
@@ -123,7 +123,7 @@ jobs:
       # allowScripts will fail the install instead of being blocked with a
       # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm ci --strict-allow-scripts
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts
       - name: Core test suite
         run: npm test
       - name: Web UI test suite
@@ -152,7 +152,7 @@ jobs:
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
-          corepack enable
+          corepack enable npm
           EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
           if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
@@ -180,7 +180,7 @@ jobs:
       # allowScripts will fail the install instead of being blocked with a
       # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm ci --strict-allow-scripts
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts
       - name: Build the web app shell (apps/web)
         run: npm run build --workspace apps/web
 
@@ -218,7 +218,7 @@ jobs:
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
-          corepack enable
+          corepack enable npm
           EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
           if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
@@ -246,7 +246,7 @@ jobs:
       # allowScripts will fail the install instead of being blocked with a
       # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm ci --strict-allow-scripts
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts
       - name: Build the marketing site and docs (apps/website, apps/docs)
         run: npm run build --workspace apps/website
 
@@ -270,9 +270,10 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - name: Activate the repository-pinned npm release
+        shell: bash
         run: |
           set -euo pipefail
-          corepack enable
+          corepack enable npm
           EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
           if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
@@ -300,7 +301,7 @@ jobs:
       # allowScripts will fail the install instead of being blocked with a
       # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm ci --strict-allow-scripts
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts
       - name: Build the Windows x64 NSIS installer
         run: npm run dist:windows --workspace apps/desktop
       - name: Verify install, packaged smoke, and uninstall
@@ -337,7 +338,7 @@ jobs:
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
-          corepack enable
+          corepack enable npm
           EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
           if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
@@ -365,7 +366,7 @@ jobs:
       # allowScripts will fail the install instead of being blocked with a
       # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm ci --strict-allow-scripts
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts
       - name: Install the real Chromium test browser
         run: npx playwright install --with-deps chromium
       - name: Build the app used by the visual contract
@@ -483,7 +484,7 @@ jobs:
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
-          corepack enable
+          corepack enable npm
           EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
           if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
@@ -511,6 +512,6 @@ jobs:
       # allowScripts will fail the install instead of being blocked with a
       # warning").
       - name: Run approved install scripts (fails closed on anything unreviewed)
-        run: npm ci --strict-allow-scripts
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts
       - name: Knip check
         run: npx knip --no-progress --max-issues=0

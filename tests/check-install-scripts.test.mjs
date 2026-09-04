@@ -853,3 +853,76 @@ test("fails closed when npm-shrinkwrap.json is present at the repo root", async 
     removeFixtureRoot(root);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Stale-key matching under omit-lockfile-registry-resolved. [codex-305-r5]
+// ---------------------------------------------------------------------------
+
+test("[codex-305-r5] a direct exact-version denial with an omitted resolved field is not reported stale", async () => {
+  // Regression for the fifth adversarial review: stale-key matching always
+  // called `matches(node, key, false)`, so it never passed deny intent
+  // through. Under omit-lockfile-registry-resolved, a registry node with no
+  // `resolved` field has no trusted version (getTrustedRegistryIdentity
+  // falls back to the edge name only), and npm's own matchRegistry returns
+  // `failClosed` in that case: a deny (`false`) still matches and blocks the
+  // install, an allow (`true`) is refused. Passing a hardcoded `false`
+  // instead of `value === false` made this checker treat the same
+  // unverifiable-version denial as unmatched, wrongly reporting the policy
+  // key as stale.
+  const root = makeFixtureRoot();
+  try {
+    writeManifests(root, {
+      rootExtra: { dependencies: { trusted: "1.2.3" } },
+      packages: {
+        "node_modules/trusted": {
+          version: "1.2.3",
+          hasInstallScript: true,
+          // No `resolved`: the lockfile was produced with
+          // omit-lockfile-registry-resolved, so npm's own matcher has to
+          // fail closed rather than refuse to match.
+        },
+      },
+    });
+    const result = await checkInstallScripts({
+      allowScripts: { "trusted@1.2.3": false },
+      root,
+      lockOnly: true,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.staleKeys, []);
+    assert.deepEqual(result.uncovered, []);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});
+
+test("[codex-305-r5] an aliased exact-version denial with an omitted resolved field is not reported stale", async () => {
+  // Same fail-closed requirement, but through an npm alias
+  // (`"aliasedPkg": "npm:trusted@1.2.3"`). getTrustedRegistryIdentity's
+  // fallback (nameFromEdges) has to unwrap the alias's subSpec to reach the
+  // real registered name "trusted", same as npm's own isScriptAllowed.
+  const root = makeFixtureRoot();
+  try {
+    writeManifests(root, {
+      rootExtra: { dependencies: { aliasedPkg: "npm:trusted@1.2.3" } },
+      packages: {
+        "node_modules/aliasedPkg": {
+          name: "trusted",
+          version: "1.2.3",
+          hasInstallScript: true,
+          // No `resolved`, same as the direct case above.
+        },
+      },
+    });
+    const result = await checkInstallScripts({
+      allowScripts: { "trusted@1.2.3": false },
+      root,
+      lockOnly: true,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.staleKeys, []);
+    assert.deepEqual(result.uncovered, []);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});

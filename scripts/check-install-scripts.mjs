@@ -268,8 +268,13 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
   const staleKeyNodes = [...staleKeyTree.inventory.values()].filter((node) => !node.isProjectRoot);
 
   const staleKeys = [];
-  for (const key of Object.keys(allow)) {
-    const matchedAny = staleKeyNodes.some((node) => matches(node, key, false));
+  for (const [key, value] of Object.entries(allow)) {
+    // Pass deny intent so matchRegistry can fail closed on an unverifiable
+    // version (omit-lockfile-registry-resolved): a deny entry with no
+    // trusted version still counts as matched, mirroring npm's own
+    // isScriptAllowed semantics in script-allowed.js. Matching an allow
+    // entry (value === true) always fails open here, same as npm.
+    const matchedAny = staleKeyNodes.some((node) => matches(node, key, value === false));
     if (!matchedAny) staleKeys.push(key);
   }
   staleKeys.sort();

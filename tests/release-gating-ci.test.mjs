@@ -97,7 +97,21 @@ test("every npm ci job activates the pinned npm, installs with scripts disabled,
   for (const { name, index } of jobStarts) {
     const nextIndex = sortedStarts.find((i) => i > index) ?? workflow.length;
     const job = workflow.slice(index, nextIndex);
-    assert.match(job, /corepack enable/, `${name}: expected Corepack activation`);
+    // Codex review /tmp/codex-305-r5.md (finding 1): Corepack excludes npm
+    // unless the shim is explicitly named, so a bare `corepack enable`
+    // leaves Node 24's bundled npm active and the version assertion below
+    // fails before any install runs. Require the explicit `npm` argument
+    // and reject the ineffective bare form.
+    assert.match(
+      job,
+      /corepack enable npm\b/,
+      `${name}: expected \`corepack enable npm\`, not a bare Corepack activation`
+    );
+    assert.doesNotMatch(
+      job,
+      /corepack enable(?!\s+npm\b)/,
+      `${name}: \`corepack enable\` without the explicit \`npm\` argument does not activate the pinned npm`
+    );
     assert.match(
       job,
       /require\(['"]\.\/package\.json['"]\)\.packageManager/,
@@ -123,24 +137,60 @@ test("every npm ci job activates the pinned npm, installs with scripts disabled,
       /run:\s*npm run check:install-scripts/,
       `${name}: expected a check:install-scripts step`
     );
+    // Codex review /tmp/codex-305-r5.md (finding 4): `--strict-allow-scripts`
+    // alone does not neutralize `dangerously-allow-all-scripts` or
+    // `ignore-scripts`; either override, set by a future project config or
+    // an inherited environment, defeats the gate without changing this
+    // command. Require both explicit negations on the post-check install.
     assert.match(
       job,
-      /run:\s*npm ci --strict-allow-scripts/,
-      `${name}: expected \`npm ci --strict-allow-scripts\` to fully reinstall on the pinned npm and fail closed on the rest`
+      /run:\s*npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts/,
+      `${name}: expected \`npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts\` to fully reinstall on the pinned npm, fail closed on the rest, and refuse an inherited override`
     );
     assert.doesNotMatch(
       job,
       /run:\s*npm rebuild --strict-allow-scripts/,
       `${name}: \`npm rebuild\` does not replay root or Git-dependency lifecycle hooks; must use \`npm ci --strict-allow-scripts\` instead`
     );
-    const corepackAt = job.indexOf("corepack enable");
+    const corepackAt = job.indexOf("corepack enable npm");
     const ciAt = job.indexOf("npm ci --ignore-scripts");
     const checkAt = job.indexOf("npm run check:install-scripts");
-    const strictCiAt = job.indexOf("npm ci --strict-allow-scripts");
+    const strictCiAt = job.indexOf(
+      "npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts"
+    );
     assert.ok(
       corepackAt < ciAt && ciAt < checkAt && checkAt < strictCiAt,
       `${name}: expected corepack activation, then ignored-script install, then check, then strict install, in that order`
     );
+  }
+});
+
+test("the Windows activation step declares shell: bash so its multiline set -euo pipefail body runs under Bash, not PowerShell", async () => {
+  // Codex review /tmp/codex-305-r5.md (finding 2): windows-latest defaults
+  // to PowerShell, where `set -euo pipefail` is a syntax error, so the
+  // Corepack activation step (and every step relying on it) never ran.
+  // Any multiline step whose body starts with `set -euo pipefail` inside a
+  // job running on a Windows runner must declare `shell: bash`.
+  const workflow = await source(".github/workflows/ci-verify.yml");
+  const jobBlockPattern = /\n {2}([a-z][\w-]*):\n((?:(?!\n {2}[a-z][\w-]*:\n)[\s\S])*)/g;
+  const jobBlocks = [...workflow.matchAll(jobBlockPattern)];
+  const windowsJobs = jobBlocks.filter(([, , jobBody]) =>
+    /runs-on:\s*windows-latest/.test(jobBody)
+  );
+  assert.ok(windowsJobs.length > 0, "expected at least one windows-latest job in ci-verify.yml");
+
+  const stepPattern = /- name:[^\n]*\n((?:(?!\n\s*- name:)[\s\S])*)/g;
+  for (const [, jobName, jobBody] of windowsJobs) {
+    const pipefailSteps = [...jobBody.matchAll(stepPattern)]
+      .map(([, step]) => step)
+      .filter((step) => /run:\s*\|\s*\n\s*set -euo pipefail/.test(step));
+    for (const step of pipefailSteps) {
+      assert.match(
+        step,
+        /shell:\s*bash/,
+        `${jobName}: a multiline \`set -euo pipefail\` step on windows-latest must declare \`shell: bash\` or it runs under PowerShell and fails`
+      );
+    }
   }
 });
 
