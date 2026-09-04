@@ -106,10 +106,11 @@ jobs:
             echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
             exit 1
           fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
       - name: Install dependencies (scripts held back until allowScripts is checked)
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --no-bin-links
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
-        run: npm run check:install-scripts
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
       # npm rebuild has no root lifecycle phase (it skips prepublish,
       # preprepare, prepare, and postprepare) and only runs `prepare` for
       # Link nodes, so it never replays a regular Git dependency's approved
@@ -163,10 +164,11 @@ jobs:
             echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
             exit 1
           fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
       - name: Install dependencies (scripts held back until allowScripts is checked)
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --no-bin-links
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
-        run: npm run check:install-scripts
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
       # npm rebuild has no root lifecycle phase (it skips prepublish,
       # preprepare, prepare, and postprepare) and only runs `prepare` for
       # Link nodes, so it never replays a regular Git dependency's approved
@@ -229,10 +231,11 @@ jobs:
             echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
             exit 1
           fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
       - name: Install dependencies (scripts held back until allowScripts is checked)
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --no-bin-links
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
-        run: npm run check:install-scripts
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
       # npm rebuild has no root lifecycle phase (it skips prepublish,
       # preprepare, prepare, and postprepare) and only runs `prepare` for
       # Link nodes, so it never replays a regular Git dependency's approved
@@ -284,10 +287,11 @@ jobs:
             echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
             exit 1
           fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
       - name: Install dependencies (scripts held back until allowScripts is checked)
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --no-bin-links
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
-        run: npm run check:install-scripts
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
       # npm rebuild has no root lifecycle phase (it skips prepublish,
       # preprepare, prepare, and postprepare) and only runs `prepare` for
       # Link nodes, so it never replays a regular Git dependency's approved
@@ -349,10 +353,11 @@ jobs:
             echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
             exit 1
           fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
       - name: Install dependencies (scripts held back until allowScripts is checked)
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --no-bin-links
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
-        run: npm run check:install-scripts
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
       # npm rebuild has no root lifecycle phase (it skips prepublish,
       # preprepare, prepare, and postprepare) and only runs `prepare` for
       # Link nodes, so it never replays a regular Git dependency's approved
@@ -495,10 +500,11 @@ jobs:
             echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
             exit 1
           fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
       - name: Install dependencies (scripts held back until allowScripts is checked)
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --no-bin-links
       - name: Check allowScripts coverage (root package.json vs package-lock.json)
-        run: npm run check:install-scripts
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
       # npm rebuild has no root lifecycle phase (it skips prepublish,
       # preprepare, prepare, and postprepare) and only runs `prepare` for
       # Link nodes, so it never replays a regular Git dependency's approved

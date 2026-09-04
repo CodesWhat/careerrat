@@ -1,9 +1,152 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+
+import YAML from "yaml";
 
 async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
+}
+
+async function loadWorkflow() {
+  return YAML.parse(await source(".github/workflows/ci-verify.yml"));
+}
+
+// Every job that installs from the lockfile (as opposed to structure-guards
+// and qlty, which don't).
+const DEPENDENCY_JOB_IDS = [
+  "tests",
+  "web-build",
+  "website-build",
+  "windows-package-smoke",
+  "browser-application-prep",
+  "knip",
+];
+
+const STEP_NAMES = {
+  activate: "Activate the repository-pinned npm release",
+  stagingInstall: "Install dependencies (scripts held back until allowScripts is checked)",
+  checker: "Check allowScripts coverage (root package.json vs package-lock.json)",
+  strictReinstall: "Run approved install scripts (fails closed on anything unreviewed)",
+};
+
+// Codex review /tmp/codex-305-r6.md (finding 1): `npm ci --ignore-scripts`
+// still creates dependency bin links, and `npm run check:install-scripts`
+// prepends node_modules/.bin to PATH, so a dependency shipping a bin named
+// `node` could shadow the real interpreter and run before the checker ever
+// validates anything. `--no-bin-links` stops the links from being created,
+// and invoking the checker through the setup-node-resolved absolute path
+// (captured into $TRUSTED_NODE by the activation step, before any install)
+// means the checker never does a PATH lookup for `node` at all.
+const EXPECTED_STAGING_INSTALL_RUN = "npm ci --ignore-scripts --no-bin-links";
+const EXPECTED_CHECKER_RUN = '"$TRUSTED_NODE" scripts/check-install-scripts.mjs';
+// Codex review /tmp/codex-305-r5.md (finding 4): `--strict-allow-scripts`
+// alone does not neutralize `dangerously-allow-all-scripts` or
+// `ignore-scripts`; either override defeats the gate without changing this
+// command, so both explicit negations are part of the exact expected string.
+const EXPECTED_STRICT_REINSTALL_RUN =
+  "npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts";
+const TRUSTED_NODE_CAPTURE_LINE = 'echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"';
+
+// Locates a step by its exact `name:` field — a structural lookup against
+// the parsed workflow, not a text search — and returns both the step and
+// its position in the job's `steps` array. Throws if the job has no such
+// step, which is itself a real finding (a renamed or removed step).
+function findStep(steps, name, jobId) {
+  const index = steps.findIndex((step) => step?.name === name);
+  assert.notEqual(index, -1, `${jobId}: expected a step named "${name}"`);
+  return { step: steps[index], index };
+}
+
+// Codex review /tmp/codex-305-r6.md (finding 2): the old checks matched
+// command *prefixes* with regexes, so they still passed for
+// `npm ci --ignore-scripts --no-ignore-scripts`, a strict reinstall with
+// `--dangerously-allow-all-scripts` appended, or a trailing `|| true` —
+// npm applies the later, conflicting flag, and a trailing `|| true` erases
+// the exit code, so each of those defeats the gate while still matching a
+// prefix regex. This asserts the exact, complete `run` string for every
+// step in the install sequence, plus step order, against a job's already
+// structurally-parsed `steps` array. It's shared by the real-workflow test
+// below and by the negative-case tests, which mutate an in-memory clone of
+// the parsed job and assert this throws.
+function assertInstallSequence(steps, jobId) {
+  const { step: activate, index: activateIndex } = findStep(steps, STEP_NAMES.activate, jobId);
+  const { step: stagingInstall, index: stagingIndex } = findStep(
+    steps,
+    STEP_NAMES.stagingInstall,
+    jobId
+  );
+  const { step: checker, index: checkerIndex } = findStep(steps, STEP_NAMES.checker, jobId);
+  const { step: strictReinstall, index: strictIndex } = findStep(
+    steps,
+    STEP_NAMES.strictReinstall,
+    jobId
+  );
+
+  assert.match(
+    activate.run ?? "",
+    /corepack enable npm\b/,
+    `${jobId}: expected \`corepack enable npm\`, not a bare Corepack activation`
+  );
+  assert.doesNotMatch(
+    activate.run ?? "",
+    /corepack enable(?!\s+npm\b)/,
+    `${jobId}: \`corepack enable\` without the explicit \`npm\` argument does not activate the pinned npm`
+  );
+  assert.match(
+    activate.run ?? "",
+    /actual_npm="npm@\$\(npm --version\)"/,
+    `${jobId}: expected the activation step to assert the activated npm version`
+  );
+  assert.ok(
+    typeof activate.run === "string" && activate.run.includes(TRUSTED_NODE_CAPTURE_LINE),
+    `${jobId}: activation step must capture the setup-node-resolved node path into $TRUSTED_NODE, before any install runs`
+  );
+  assert.equal(
+    stagingInstall.run,
+    EXPECTED_STAGING_INSTALL_RUN,
+    `${jobId}: staging install must be exactly "${EXPECTED_STAGING_INSTALL_RUN}"`
+  );
+  assert.equal(
+    checker.run,
+    EXPECTED_CHECKER_RUN,
+    `${jobId}: checker step must invoke the trusted node binary directly by path, not through \`npm run\` (which prepends node_modules/.bin to PATH)`
+  );
+  assert.equal(
+    strictReinstall.run,
+    EXPECTED_STRICT_REINSTALL_RUN,
+    `${jobId}: strict reinstall must be exactly "${EXPECTED_STRICT_REINSTALL_RUN}"`
+  );
+  assert.ok(
+    activateIndex < stagingIndex && stagingIndex < checkerIndex && checkerIndex < strictIndex,
+    `${jobId}: expected activation, then staging install, then checker, then strict reinstall, in that order`
+  );
+}
+
+// Codex review /tmp/codex-305-r5.md (finding 2): windows-latest defaults to
+// PowerShell, where `set -euo pipefail` is a syntax error. The old check
+// matched `shell:\s*bash` against the step's raw text, which would also
+// match a comment saying `# shell: bash`. This checks the parsed step's
+// actual `shell` property.
+function assertPipefailStepsUseBashShell(job, jobId) {
+  const pipefailSteps = job.steps.filter(
+    (step) => typeof step?.run === "string" && step.run.trimStart().startsWith("set -euo pipefail")
+  );
+  assert.ok(
+    pipefailSteps.length > 0,
+    `${jobId}: expected at least one multiline \`set -euo pipefail\` step`
+  );
+  for (const step of pipefailSteps) {
+    assert.equal(
+      step.shell,
+      "bash",
+      `${jobId}: step "${step.name}" runs \`set -euo pipefail\` on windows-latest and must declare \`shell: bash\` structurally, or it runs under PowerShell and fails`
+    );
+  }
 }
 
 test("real Chromium application preparation and rendered UI geometry are an explicit required CI context", async () => {
@@ -53,144 +196,138 @@ test("all deterministic product builds are declared as protected contexts", asyn
   assert.doesNotMatch(workflow, /Non-gating for now/i);
 });
 
-test("every npm ci job activates the pinned npm, installs with scripts disabled, checks allowScripts, then reinstalls strictly", async () => {
-  // Codex review /tmp/codex-305-r3.md (finding 1): the workflow ran plain
-  // `npm ci` before the checker, so a newly-added dependency with no
-  // allowScripts entry got to run its install script before anything
-  // validated it.
-  //
-  // Codex review /tmp/codex-305-r4.md (findings 2 and 3): setup-node's
-  // bundled npm is not the pinned npm@12.0.2, so `--strict-allow-scripts`
-  // could be silently ignored and an older Pacote's Git fetcher could run a
-  // nested install during the ignored-script phase; and `npm rebuild` skips
-  // the root lifecycle phases (prepublish/preprepare/prepare/postprepare)
-  // and a regular Git dependency's own prepare hook, so it isn't a faithful
-  // replay of what `npm ci` would have run.
-  //
-  // Every job that installs from the lockfile must therefore: (1) activate
-  // the pinned npm via Corepack and assert its version, (2)
-  // `npm ci --ignore-scripts` so nothing runs yet, (3) run this repo's
-  // checker, (4) `npm ci --strict-allow-scripts`, a second full install on
-  // the now-pinned npm that replays every lifecycle phase a normal
-  // `npm ci` runs and fails closed on anything npm's own matcher still
-  // finds unreviewed. This must hold for every job, including the ones that
-  // only build an app (web-build, website-build) and the Windows smoke job,
-  // not just the `tests` job.
-  const workflow = await source(".github/workflows/ci-verify.yml");
-  const jobNames = [
-    "tests",
-    "web-build",
-    "website-build",
-    "windows-package-smoke",
-    "browser-application-prep",
-    "knip",
-  ];
-  const jobStarts = jobNames.map((name) => ({
-    name,
-    index: workflow.indexOf(`\n  ${name}:\n`),
-  }));
-  for (const { name, index } of jobStarts) {
-    assert.notEqual(index, -1, `expected a top-level "${name}:" job in ci-verify.yml`);
-  }
-  const sortedStarts = [...jobStarts].sort((a, b) => a.index - b.index).map((j) => j.index);
-
-  for (const { name, index } of jobStarts) {
-    const nextIndex = sortedStarts.find((i) => i > index) ?? workflow.length;
-    const job = workflow.slice(index, nextIndex);
-    // Codex review /tmp/codex-305-r5.md (finding 1): Corepack excludes npm
-    // unless the shim is explicitly named, so a bare `corepack enable`
-    // leaves Node 24's bundled npm active and the version assertion below
-    // fails before any install runs. Require the explicit `npm` argument
-    // and reject the ineffective bare form.
-    assert.match(
-      job,
-      /corepack enable npm\b/,
-      `${name}: expected \`corepack enable npm\`, not a bare Corepack activation`
-    );
-    assert.doesNotMatch(
-      job,
-      /corepack enable(?!\s+npm\b)/,
-      `${name}: \`corepack enable\` without the explicit \`npm\` argument does not activate the pinned npm`
-    );
-    assert.match(
-      job,
-      /require\(['"]\.\/package\.json['"]\)\.packageManager/,
-      `${name}: expected the activation step to read the pinned version from package.json`
-    );
-    assert.match(
-      job,
-      /actual_npm="npm@\$\(npm --version\)"/,
-      `${name}: expected the activation step to assert the activated npm version`
-    );
-    assert.match(
-      job,
-      /Corepack activated \$actual_npm instead of \$EXPECTED_NPM/,
-      `${name}: expected the activation step to fail the job on a version mismatch`
-    );
-    assert.match(
-      job,
-      /run:\s*npm ci --ignore-scripts/,
-      `${name}: expected \`npm ci --ignore-scripts\`, not a plain \`npm ci\` that can run an unreviewed script`
-    );
-    assert.match(
-      job,
-      /run:\s*npm run check:install-scripts/,
-      `${name}: expected a check:install-scripts step`
-    );
-    // Codex review /tmp/codex-305-r5.md (finding 4): `--strict-allow-scripts`
-    // alone does not neutralize `dangerously-allow-all-scripts` or
-    // `ignore-scripts`; either override, set by a future project config or
-    // an inherited environment, defeats the gate without changing this
-    // command. Require both explicit negations on the post-check install.
-    assert.match(
-      job,
-      /run:\s*npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts/,
-      `${name}: expected \`npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts\` to fully reinstall on the pinned npm, fail closed on the rest, and refuse an inherited override`
-    );
-    assert.doesNotMatch(
-      job,
-      /run:\s*npm rebuild --strict-allow-scripts/,
-      `${name}: \`npm rebuild\` does not replay root or Git-dependency lifecycle hooks; must use \`npm ci --strict-allow-scripts\` instead`
-    );
-    const corepackAt = job.indexOf("corepack enable npm");
-    const ciAt = job.indexOf("npm ci --ignore-scripts");
-    const checkAt = job.indexOf("npm run check:install-scripts");
-    const strictCiAt = job.indexOf(
-      "npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts"
-    );
-    assert.ok(
-      corepackAt < ciAt && ciAt < checkAt && checkAt < strictCiAt,
-      `${name}: expected corepack activation, then ignored-script install, then check, then strict install, in that order`
-    );
+test("every dependency-installing job activates the pinned npm, resolves a trusted node path, stages installs with scripts and bin-links disabled, checks allowScripts through that trusted node directly, then reinstalls strictly, in order", async () => {
+  // Codex review /tmp/codex-305-r3.md through /tmp/codex-305-r6.md: see the
+  // shared constants and assertInstallSequence() above for the history each
+  // exact string encodes. This test parses the workflow as YAML and checks
+  // every dependency-installing job's real, structured steps — not a text
+  // search — including the web-build/website-build/windows/knip jobs, not
+  // just `tests`.
+  const workflow = await loadWorkflow();
+  for (const jobId of DEPENDENCY_JOB_IDS) {
+    const job = workflow.jobs[jobId];
+    assert.ok(job, `expected a top-level "${jobId}" job in ci-verify.yml`);
+    assertInstallSequence(job.steps, jobId);
   }
 });
 
-test("the Windows activation step declares shell: bash so its multiline set -euo pipefail body runs under Bash, not PowerShell", async () => {
+test("every windows-latest job's multiline `set -euo pipefail` step declares shell: bash structurally", async () => {
   // Codex review /tmp/codex-305-r5.md (finding 2): windows-latest defaults
-  // to PowerShell, where `set -euo pipefail` is a syntax error, so the
-  // Corepack activation step (and every step relying on it) never ran.
-  // Any multiline step whose body starts with `set -euo pipefail` inside a
-  // job running on a Windows runner must declare `shell: bash`.
-  const workflow = await source(".github/workflows/ci-verify.yml");
-  const jobBlockPattern = /\n {2}([a-z][\w-]*):\n((?:(?!\n {2}[a-z][\w-]*:\n)[\s\S])*)/g;
-  const jobBlocks = [...workflow.matchAll(jobBlockPattern)];
-  const windowsJobs = jobBlocks.filter(([, , jobBody]) =>
-    /runs-on:\s*windows-latest/.test(jobBody)
-  );
-  assert.ok(windowsJobs.length > 0, "expected at least one windows-latest job in ci-verify.yml");
+  // to PowerShell, where `set -euo pipefail` is a syntax error. Discovers
+  // windows-latest jobs from the parsed `runs-on` field rather than
+  // hardcoding windows-package-smoke, so a future Windows job is covered
+  // automatically.
+  const workflow = await loadWorkflow();
+  const windowsJobIds = Object.entries(workflow.jobs)
+    .filter(([, job]) => job["runs-on"] === "windows-latest")
+    .map(([jobId]) => jobId);
+  assert.ok(windowsJobIds.length > 0, "expected at least one windows-latest job in ci-verify.yml");
+  for (const jobId of windowsJobIds) {
+    assertPipefailStepsUseBashShell(workflow.jobs[jobId], jobId);
+  }
+});
 
-  const stepPattern = /- name:[^\n]*\n((?:(?!\n\s*- name:)[\s\S])*)/g;
-  for (const [, jobName, jobBody] of windowsJobs) {
-    const pipefailSteps = [...jobBody.matchAll(stepPattern)]
-      .map(([, step]) => step)
-      .filter((step) => /run:\s*\|\s*\n\s*set -euo pipefail/.test(step));
-    for (const step of pipefailSteps) {
-      assert.match(
-        step,
-        /shell:\s*bash/,
-        `${jobName}: a multiline \`set -euo pipefail\` step on windows-latest must declare \`shell: bash\` or it runs under PowerShell and fails`
-      );
-    }
+test("negative case: a trailing --no-ignore-scripts on the staging install defeats the gate and must be rejected", async () => {
+  // npm applies the later, conflicting flag, so this override silently
+  // undoes --ignore-scripts. A prefix-matching regex would miss it; the
+  // exact-string check must not.
+  const workflow = await loadWorkflow();
+  const job = structuredClone(workflow.jobs.tests);
+  const { step } = findStep(job.steps, STEP_NAMES.stagingInstall, "tests");
+  step.run = `${step.run} --no-ignore-scripts`;
+  assert.throws(() => assertInstallSequence(job.steps, "tests"));
+});
+
+test("negative case: --dangerously-allow-all-scripts appended to the strict reinstall defeats the gate and must be rejected", async () => {
+  const workflow = await loadWorkflow();
+  const job = structuredClone(workflow.jobs.tests);
+  const { step } = findStep(job.steps, STEP_NAMES.strictReinstall, "tests");
+  step.run = `${step.run} --dangerously-allow-all-scripts`;
+  assert.throws(() => assertInstallSequence(job.steps, "tests"));
+});
+
+test("negative case: a trailing || true on the checker step swallows a failing exit code and must be rejected", async () => {
+  const workflow = await loadWorkflow();
+  const job = structuredClone(workflow.jobs.tests);
+  const { step } = findStep(job.steps, STEP_NAMES.checker, "tests");
+  step.run = `${step.run} || true`;
+  assert.throws(() => assertInstallSequence(job.steps, "tests"));
+});
+
+test("negative case: a missing shell property on the Windows activation step must be rejected", async () => {
+  const workflow = await loadWorkflow();
+  const job = structuredClone(workflow.jobs["windows-package-smoke"]);
+  const { step } = findStep(job.steps, STEP_NAMES.activate, "windows-package-smoke");
+  delete step.shell;
+  assert.throws(() => assertPipefailStepsUseBashShell(job, "windows-package-smoke"));
+});
+
+test("negative case: shell: bash present only in a comment does not satisfy the structural check", async () => {
+  // The old check matched `shell:\s*bash` against a step's raw text, which
+  // a comment saying `# shell: bash` would also match. This mutates the
+  // real workflow *text* (comments don't survive YAML.parse, so this has
+  // to happen before parsing) to replace the real `shell: bash` property
+  // with a comment of the same text, then proves the structural check
+  // still catches it.
+  const text = await source(".github/workflows/ci-verify.yml");
+  const realProperty =
+    "      - name: Activate the repository-pinned npm release\n        shell: bash\n";
+  const commentOnly =
+    "      - name: Activate the repository-pinned npm release\n        # shell: bash (not a real key — this line proves the check isn't text-based)\n";
+  assert.ok(
+    text.includes(realProperty),
+    "expected to find the real shell: bash property to mutate"
+  );
+  const mutatedText = text.replace(realProperty, commentOnly);
+  const workflow = YAML.parse(mutatedText);
+  const job = workflow.jobs["windows-package-smoke"];
+  assert.throws(() => assertPipefailStepsUseBashShell(job, "windows-package-smoke"));
+});
+
+test("hostile fixture: a node_modules/.bin/node shim cannot intercept the checker step's trusted, absolute-path node invocation", () => {
+  // Codex review /tmp/codex-305-r6.md (finding 1): proves the mechanism,
+  // not just the workflow text. A hostile `node` binary placed on PATH
+  // (what `npm run check:install-scripts` would produce, since npm run
+  // prepends node_modules/.bin to PATH) can shadow a bare `node` call. The
+  // fix is invoking the setup-node-resolved node by its captured absolute
+  // path instead of relying on a PATH lookup, which this fixture shows a
+  // hostile bin dir cannot intercept.
+  const root = mkdtempSync(join(tmpdir(), "bin-shadow-fixture-"));
+  try {
+    const binDir = join(root, "node_modules", ".bin");
+    mkdirSync(binDir, { recursive: true });
+    const markerPath = join(root, "hostile-ran.marker");
+    const hostileNodePath = join(binDir, "node");
+    writeFileSync(hostileNodePath, `#!/bin/sh\ntouch "${markerPath}"\nexit 1\n`);
+    chmodSync(hostileNodePath, 0o755);
+    const shadowedPath = `${binDir}:${process.env.PATH}`;
+
+    // Fixture sanity: on a PATH with the hostile bin dir prepended, a bare
+    // `node` call (what `npm run` would issue) runs the hostile binary.
+    rmSync(markerPath, { force: true });
+    spawnSync("bash", ["-c", "node"], { env: { ...process.env, PATH: shadowedPath }, cwd: root });
+    assert.equal(
+      existsSync(markerPath),
+      true,
+      "fixture sanity check failed: bare `node` on a shadowed PATH must run the hostile binary"
+    );
+
+    // The fix: invoking the trusted, absolute-path node (what $TRUSTED_NODE
+    // holds, captured by the activation step before any install ran) on
+    // the same shadowed PATH must not touch the hostile binary at all.
+    rmSync(markerPath, { force: true });
+    const trustedNode = process.execPath;
+    spawnSync("bash", ["-c", `"${trustedNode}" --version`], {
+      env: { ...process.env, PATH: shadowedPath },
+      cwd: root,
+    });
+    assert.equal(
+      existsSync(markerPath),
+      false,
+      "the trusted, absolute-path node invocation must not be shadowed by a hostile node_modules/.bin/node"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
