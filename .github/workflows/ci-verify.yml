@@ -58,6 +58,8 @@ jobs:
           node-version: 24
       - name: Structure guards (chat-first shell, CSS foundation, YAML, and release versions)
         run: node --test tests/static-dashboard-retirement.test.mjs tests/chat-first-foundation-style.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: npm run check:install-scripts
 
   # Full suite (`npm test`, i.e. `node --test 'tests/**/*.test.mjs'`) — the real gate,
   # not just the structure-guards subset. A handful of integration tests self-skip
