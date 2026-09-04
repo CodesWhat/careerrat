@@ -19,6 +19,7 @@ const listeners = new Set();
 let state = EMPTY_STATE;
 let receivedPush = false;
 let userChangedPreference = false;
+let installing = false;
 let dismissedDownloadVersion = null;
 
 function setState(next) {
@@ -45,6 +46,14 @@ function mergeBridgeState(next) {
 if (bridge) {
   bridge.onUpdate((next) => {
     receivedPush = true;
+    // Once the install has been accepted the renderer's install phase is
+    // terminal: a stale external push (the main process is tearing itself
+    // down) must not revive the Restart and install button.
+    if (installing && next && typeof next === "object") {
+      const { phase, ...rest } = next;
+      mergeBridgeState(rest);
+      return;
+    }
     mergeBridgeState(next);
   });
   bridge
@@ -69,6 +78,7 @@ function statusCopy(snapshot) {
       : "A CareerRat update is downloaded and ready to install.";
   }
   if (snapshot.phase === "current") return "CareerRat is up to date.";
+  if (snapshot.phase === "installing") return snapshot.message || "Restarting to install…";
   if (snapshot.phase === "error") {
     return (
       snapshot.message ||
@@ -85,7 +95,7 @@ async function setEnabled(enabled) {
   setState({ enabled: Boolean(enabled), saving: true });
   try {
     const next = await bridge.setEnabled(Boolean(enabled));
-    mergeBridgeState(next);
+    if (next && typeof next === "object") setState(next);
   } catch {
     setState({
       enabled: previous,
@@ -140,6 +150,9 @@ async function restartAndInstall() {
         phase: "error",
         message: "That update isn't ready to install yet. Check for updates again.",
       });
+    } else if (result?.accepted === true) {
+      installing = true;
+      setState({ phase: "installing", message: "Restarting to install…" });
     }
   } catch {
     setState({
@@ -166,7 +179,9 @@ export function useDesktopUpdate() {
             ? Boolean(snapshot.version) || snapshot.manual
             : snapshot.phase === "current"
               ? snapshot.manual
-              : snapshot.phase === "checking" && snapshot.manual;
+              : snapshot.phase === "installing"
+                ? true
+                : snapshot.phase === "checking" && snapshot.manual;
   const primaryLabel =
     snapshot.phase === "unsupported" && snapshot.downloadUrl
       ? "Windows release status"
@@ -197,7 +212,7 @@ export function useDesktopUpdate() {
       onPrimary:
         snapshot.phase === "ready"
           ? restartAndInstall
-          : snapshot.phase === "unsupported"
+          : snapshot.phase === "unsupported" || snapshot.phase === "installing"
             ? undefined
             : checkNow,
       onDismiss: dismissNotice,

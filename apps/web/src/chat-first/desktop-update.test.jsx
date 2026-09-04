@@ -181,6 +181,115 @@ describe("desktop update bridge", () => {
     delete globalThis.careerratDesktopUpdate;
   });
 
+  it("applies setEnabled's own response directly so a server-side rejection isn't hidden, while blocking an unrelated external push mid-call", async () => {
+    vi.resetModules();
+    let push;
+    let resolveSetEnabled;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveSetEnabled = resolve;
+          })
+      ),
+      checkNow: vi.fn(),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn(),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    push({ supported: true, phase: "idle", enabled: false });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.enabled).toBe(false);
+
+    const setEnabledPromise = captured.setEnabled(true);
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.enabled).toBe(true);
+
+    // An unrelated external push arrives while the call is in flight. It must
+    // not clobber the optimistic, in-flight preference.
+    push({ supported: true, phase: "idle", enabled: false, version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.enabled).toBe(true);
+
+    // The server rejects/coerces the toggle back to false for this very call.
+    resolveSetEnabled({ enabled: false });
+    await setEnabledPromise;
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.enabled).toBe(false);
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
+  it("moves to an installing phase when Restart and install is accepted, blocking a second click and a later external push from reviving the button", async () => {
+    vi.resetModules();
+    let push;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn(),
+      checkNow: vi.fn(),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    push({ supported: true, enabled: true, notify: true, phase: "ready", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({
+      visible: true,
+      kind: "ready",
+      primaryLabel: "Restart and install",
+    });
+
+    const onPrimary = captured.notice.onPrimary;
+    await onPrimary();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({
+      visible: true,
+      kind: "installing",
+      message: "Restarting to install…",
+      primaryLabel: null,
+    });
+    expect(captured.notice.onPrimary).toBeUndefined();
+
+    // A second click reuses the same handler reference obtained while the
+    // update was still "ready". It must not call the bridge again.
+    await onPrimary();
+    expect(globalThis.careerratDesktopUpdate.restartAndInstall).toHaveBeenCalledOnce();
+
+    // A stale external push reporting the old "ready" phase must not revive
+    // the button while the install is proceeding.
+    push({ supported: true, enabled: true, notify: true, phase: "ready", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({
+      visible: true,
+      kind: "installing",
+      primaryLabel: null,
+    });
+    expect(captured.notice.onPrimary).toBeUndefined();
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
   it("explains unsupported Windows updates without pretending to check", async () => {
     vi.resetModules();
     let push;
