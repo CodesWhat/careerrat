@@ -40,6 +40,30 @@ test("reports clean when every scripted package is covered and every pinned key 
   assert.deepEqual(result.uncovered, []);
 });
 
+test("throws when an allowScripts value is null (npm only recognizes a literal boolean)", () => {
+  assert.throws(
+    () =>
+      checkInstallScripts({
+        allowScripts: { ...cleanAllowScripts, "esbuild@0.28.2": null },
+        lockPackages: cleanLockPackages,
+        workspaces: fixtureWorkspaces,
+      }),
+    /allowScripts\["esbuild@0\.28\.2"\] must be strictly true or false/
+  );
+});
+
+test("throws when an allowScripts value is a string (npm only recognizes a literal boolean)", () => {
+  assert.throws(
+    () =>
+      checkInstallScripts({
+        allowScripts: { ...cleanAllowScripts, "esbuild@0.28.2": "true" },
+        lockPackages: cleanLockPackages,
+        workspaces: fixtureWorkspaces,
+      }),
+    /allowScripts\["esbuild@0\.28\.2"\] must be strictly true or false/
+  );
+});
+
 test("flags a stale pinned key when the lockfile no longer has that name@version", () => {
   const allowScripts = {
     ...cleanAllowScripts,
@@ -118,6 +142,37 @@ test("skips workspace entries and workspace symlinks", () => {
   assert.deepEqual(result.uncovered, []);
 });
 
+test("a negated workspace glob excludes a path an earlier positive glob matched", () => {
+  // ["packages/*", "!packages/vendor-*"] means packages/vendor-native is
+  // NOT a workspace (npm's own last-match-wins ordering), so a scripted
+  // file link that resolves there is a real dependency this checker must
+  // still inspect, not this repo's own package to skip.
+  const lockPackages = {
+    "": { name: "fixture-root", version: "1.0.0" },
+    "node_modules/@fixture/vendor-link": { resolved: "packages/vendor-native", link: true },
+    "packages/vendor-native": { version: "1.0.0", hasInstallScript: true },
+  };
+  const result = checkInstallScripts({
+    allowScripts: {},
+    lockPackages,
+    workspaces: ["packages/*", "!packages/vendor-*"],
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.uncovered, ["file:packages/vendor-native"]);
+});
+
+test("throws when a workspaces glob uses syntax this checker can't match faithfully", () => {
+  assert.throws(
+    () =>
+      checkInstallScripts({
+        allowScripts: {},
+        lockPackages: { "": { name: "fixture-root", version: "1.0.0" } },
+        workspaces: ["packages/{a,b}"],
+      }),
+    /syntax this checker can't match faithfully/
+  );
+});
+
 test("derives the package name from the lockfile path, honoring an alias override", () => {
   const lockPackages = {
     "node_modules/web-vitals-soft-navs": {
@@ -175,7 +230,9 @@ test("catches a scripted dependency nested under another dependency's node_modul
 test("follows a non-workspace file link to its target and inspects the target", () => {
   // A link node whose resolved target isn't one of root package.json's
   // declared workspaces (only apps/* here) is a plain `file:` dependency,
-  // not this repo's own package, it still needs allowScripts coverage.
+  // not this repo's own package, it still needs allowScripts coverage. Its
+  // coverage key is the link's own resolved path (npm's file/directory
+  // identity), never the target's name@version.
   const lockPackages = {
     ...cleanLockPackages,
     "node_modules/@fixture/file-link": { resolved: "packages/native-thing", link: true },
@@ -187,7 +244,36 @@ test("follows a non-workspace file link to its target and inspects the target", 
     workspaces: fixtureWorkspaces,
   });
   assert.equal(result.ok, false);
-  assert.deepEqual(result.uncovered, ["native-thing@9.9.9"]);
+  assert.deepEqual(result.uncovered, ["file:packages/native-thing"]);
+});
+
+test("a registry-style name@version key does not cover a file dependency (npm keys it by resolved path)", () => {
+  const lockPackages = {
+    ...cleanLockPackages,
+    "node_modules/@fixture/file-link": { resolved: "packages/native-thing", link: true },
+    "packages/native-thing": { version: "9.9.9", hasInstallScript: true },
+  };
+  const result = checkInstallScripts({
+    allowScripts: { ...cleanAllowScripts, "native-thing@9.9.9": true },
+    lockPackages,
+    workspaces: fixtureWorkspaces,
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.uncovered, ["file:packages/native-thing"]);
+});
+
+test("a file: policy key covers a file dependency by its resolved path", () => {
+  const lockPackages = {
+    ...cleanLockPackages,
+    "node_modules/@fixture/file-link": { resolved: "packages/native-thing", link: true },
+    "packages/native-thing": { version: "9.9.9", hasInstallScript: true },
+  };
+  const result = checkInstallScripts({
+    allowScripts: { ...cleanAllowScripts, "file:packages/native-thing": true },
+    lockPackages,
+    workspaces: fixtureWorkspaces,
+  });
+  assert.equal(result.ok, true);
 });
 
 test("fails closed when package-lock.json has no packages map (lockfileVersion 1 or malformed)", () => {
@@ -228,6 +314,66 @@ test("catches an implicit node-gyp install script from a binding.gyp on disk", (
     });
     assert.equal(result.ok, false);
     assert.deepEqual(result.uncovered, ["native-gyp-dep@1.0.0"]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("catches a prepare-only script on a non-registry (file) dependency", () => {
+  // The lockfile's hasInstallScript flag excludes prepare, and a registry
+  // install never runs it, but npm does run it for a file/directory
+  // dependency, so this checker has to read the installed package.json.
+  const fixtureRoot = makeFixtureRoot();
+  try {
+    mkdirSync(join(fixtureRoot, "node_modules"), { recursive: true });
+    const targetDir = join(fixtureRoot, "packages", "prepare-only-dep");
+    mkdirSync(targetDir, { recursive: true });
+    writeFileSync(
+      join(targetDir, "package.json"),
+      JSON.stringify({ name: "prepare-only-dep", version: "1.0.0", scripts: { prepare: "tsc" } })
+    );
+
+    const lockPackages = {
+      ...cleanLockPackages,
+      "node_modules/@fixture/prepare-only-link": {
+        resolved: "packages/prepare-only-dep",
+        link: true,
+      },
+      "packages/prepare-only-dep": { version: "1.0.0" }, // no hasInstallScript flag, no binding.gyp
+    };
+    const result = checkInstallScripts({
+      allowScripts: cleanAllowScripts,
+      lockPackages,
+      workspaces: fixtureWorkspaces,
+      root: fixtureRoot,
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.uncovered, ["file:packages/prepare-only-dep"]);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("throws when a non-registry dependency's installed package.json can't be read for a prepare check", () => {
+  const fixtureRoot = makeFixtureRoot();
+  try {
+    mkdirSync(join(fixtureRoot, "node_modules"), { recursive: true });
+    // packages/missing-dep is never created on disk.
+    const lockPackages = {
+      ...cleanLockPackages,
+      "node_modules/@fixture/missing-link": { resolved: "packages/missing-dep", link: true },
+      "packages/missing-dep": { version: "1.0.0" },
+    };
+    assert.throws(
+      () =>
+        checkInstallScripts({
+          allowScripts: cleanAllowScripts,
+          lockPackages,
+          workspaces: fixtureWorkspaces,
+          root: fixtureRoot,
+        }),
+      /could not find an installed package\.json/
+    );
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
