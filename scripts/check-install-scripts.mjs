@@ -12,12 +12,34 @@
 // (verified against this tree: `npm install-scripts ls` and the lockfile's
 // flag agree on every registry package here; the extra `prepare`-script
 // entries `ls` also reports only matter for non-registry sources, and this
-// repo has none).
-import { readFileSync } from "node:fs";
+// repo has none), OR'd with an on-disk `binding.gyp` check: npm synthesizes
+// `node-gyp rebuild` for a package that ships `binding.gyp` with no explicit
+// install script, and the lockfile has no flag for that. The disk check needs
+// `npm ci` to have already run, so it fails closed (non-zero exit) when
+// `node_modules` is missing unless `--lock-only` is passed; the CI step never
+// passes that flag.
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
+
+// Falls back to the installed path when a lockfile entry omits `name` (the
+// common case for an unaliased registry dependency, where npm leaves it
+// implicit because it matches the directory). Under a `node_modules/`
+// segment this recovers the real (possibly scoped) name the way npm's own
+// directory layout does; outside one (a workspace-like file-link target)
+// it's just the last path segment.
+function deriveNameFromPath(path) {
+  const nodeModulesAt = path.lastIndexOf("node_modules/");
+  if (nodeModulesAt !== -1) return path.slice(nodeModulesAt + "node_modules/".length);
+  const lastSlash = path.lastIndexOf("/");
+  return lastSlash === -1 ? path : path.slice(lastSlash + 1);
+}
+
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 // Splits an `allowScripts` object into the two key shapes npm's own
 // `install-scripts approve|deny` writes: a pinned `name@version` key (covers
@@ -37,26 +59,73 @@ function splitAllowScriptsKeys(allowScripts) {
   return { pinned, bareNames };
 }
 
+// Turns one root package.json `workspaces` glob (npm only ever uses simple
+// segments and `*`/`**`, never full minimatch) into a RegExp.
+function globToRegExp(glob) {
+  const pattern = glob
+    .split("/")
+    .map((segment) =>
+      segment === "**" ? ".*" : segment.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")
+    )
+    .join("/");
+  return new RegExp(`^${pattern}$`);
+}
+
+// A lockfile path counts as a real workspace member only when it matches
+// root package.json's `workspaces` globs (or is the root package itself,
+// `""`). That distinction matters because a `link: true` node can also point
+// at a plain `file:` dependency living outside `node_modules/` (e.g. a path
+// under `packages/` that isn't declared as a workspace), that target is an
+// installed dependency this check still needs to inspect, not a workspace to
+// skip.
+function collectWorkspacePaths(lockPackages, workspaces) {
+  const patterns = (workspaces ?? []).map(globToRegExp);
+  const set = new Set([""]);
+  for (const pkgPath of Object.keys(lockPackages)) {
+    if (pkgPath === "" || pkgPath.includes("node_modules/")) continue;
+    if (patterns.some((re) => re.test(pkgPath))) set.add(pkgPath);
+  }
+  return set;
+}
+
 // Walks package-lock.json's `packages` map and returns every installed
 // dependency's name/version, plus which `name@version` pairs declare an
-// install script. Workspace entries (the root `""` key and `apps/*`, which
-// don't live under `node_modules/`) and workspace symlinks (`link: true`)
-// are skipped: they're this repo's own packages, never something
-// `allowScripts` needs to cover.
-function collectInstalledPackages(lockPackages) {
+// install script (from the lockfile's `hasInstallScript` flag, or a
+// `binding.gyp` found on disk). Any path with a `node_modules/` segment
+// counts as installed, whether that's directly under the repo root, nested
+// under another dependency, or nested under a workspace member (e.g.
+// `apps/website/node_modules/@types/node`), only the bare workspace paths
+// themselves (`""`, `apps/*`, ...) are this repo's own packages and skipped.
+// A `link: true` node that resolves to a real workspace is skipped the same
+// way; a `link: true` node that resolves anywhere else (a `file:` dependency)
+// is followed to its target and that target is inspected instead.
+function collectInstalledPackages(lockPackages, { workspacePaths, checkBindingGyp }) {
   const installedVersions = new Map(); // name -> Set(version)
   const installedWithScripts = new Set(); // "name@version"
 
-  for (const [pkgPath, pkg] of Object.entries(lockPackages ?? {})) {
-    if (!pkgPath.startsWith("node_modules/") || pkg.link) continue;
-    const version = pkg.version;
+  for (const [pkgPath, pkg] of Object.entries(lockPackages)) {
+    if (!pkgPath.includes("node_modules/")) continue;
+
+    let inspectPath = pkgPath;
+    let inspectPkg = pkg;
+
+    if (pkg.link) {
+      const target = pkg.resolved;
+      if (target && workspacePaths.has(target)) continue;
+      if (!target || !lockPackages[target]) continue; // dangling or unresolved link
+      inspectPath = target;
+      inspectPkg = lockPackages[target];
+    }
+
+    const version = inspectPkg.version;
     if (!version) continue;
-    const name =
-      pkg.name ?? pkgPath.slice(pkgPath.lastIndexOf("node_modules/") + "node_modules/".length);
+    const name = inspectPkg.name ?? deriveNameFromPath(inspectPath);
 
     if (!installedVersions.has(name)) installedVersions.set(name, new Set());
     installedVersions.get(name).add(version);
-    if (pkg.hasInstallScript) installedWithScripts.add(`${name}@${version}`);
+
+    const hasScript = Boolean(inspectPkg.hasInstallScript) || checkBindingGyp(inspectPath);
+    if (hasScript) installedWithScripts.add(`${name}@${version}`);
   }
 
   return { installedVersions, installedWithScripts };
@@ -66,10 +135,58 @@ function collectInstalledPackages(lockPackages) {
 // package-lock.json's `packages` map, reports (a) stale pinned keys that
 // name a version no longer in the lockfile, and (b) installed packages with
 // an install script that no allowScripts entry (pinned or bare-name) covers.
-export function checkInstallScripts({ allowScripts, lockPackages }) {
+//
+// `root` and `workspaces` are optional and enable the on-disk checks: when
+// `root` is given, this also rejects a competing npm-shrinkwrap.json and, on
+// a present `node_modules`, folds in the binding.gyp scan; when `node_modules`
+// is absent it fails closed unless `lockOnly` is set. Callers that only want
+// the pure lockfile-vs-allowScripts comparison (tests, mainly) can omit
+// `root` entirely and none of that runs.
+export function checkInstallScripts({
+  allowScripts,
+  lockPackages,
+  root,
+  workspaces,
+  lockOnly = false,
+}) {
+  if (!isPlainObject(lockPackages)) {
+    throw new Error(
+      "package-lock.json has no packages map to check (lockfileVersion 1, or a malformed lockfile); " +
+        "this checker requires lockfileVersion >= 2. Regenerate the lockfile with a current npm."
+    );
+  }
+
+  if (root && existsSync(join(root, "npm-shrinkwrap.json"))) {
+    throw new Error(
+      "npm-shrinkwrap.json is present at the repo root; npm prefers it over package-lock.json during " +
+        "install, so this checker's package-lock.json read would validate a different graph than npm " +
+        "actually installs. It is not a canonical lockfile here, remove it, or fold its contents back " +
+        "into package-lock.json."
+    );
+  }
+
+  let checkBindingGyp = () => false;
+  if (root) {
+    const nodeModulesPresent = existsSync(join(root, "node_modules"));
+    if (!nodeModulesPresent && !lockOnly) {
+      throw new Error(
+        "node_modules is missing; this checker inspects installed packages on disk for implicit " +
+          "node-gyp scripts (binding.gyp) that package-lock.json can't show, so it must run after " +
+          "npm ci. Pass --lock-only to check the lockfile alone (not used in CI)."
+      );
+    }
+    if (nodeModulesPresent && !lockOnly) {
+      checkBindingGyp = (pkgPath) => existsSync(join(root, pkgPath, "binding.gyp"));
+    }
+  }
+
   const allow = allowScripts ?? {};
   const { pinned, bareNames } = splitAllowScriptsKeys(allow);
-  const { installedVersions, installedWithScripts } = collectInstalledPackages(lockPackages);
+  const workspacePaths = collectWorkspacePaths(lockPackages, workspaces);
+  const { installedVersions, installedWithScripts } = collectInstalledPackages(lockPackages, {
+    workspacePaths,
+    checkBindingGyp,
+  });
 
   const staleKeys = [];
   for (const key of pinned) {
@@ -93,13 +210,25 @@ export function checkInstallScripts({ allowScripts, lockPackages }) {
 }
 
 function main() {
+  const lockOnly = process.argv.slice(2).includes("--lock-only");
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
 
-  const { staleKeys, uncovered, ok } = checkInstallScripts({
-    allowScripts: pkg.allowScripts,
-    lockPackages: lock.packages,
-  });
+  let result;
+  try {
+    result = checkInstallScripts({
+      allowScripts: pkg.allowScripts,
+      lockPackages: lock.packages,
+      workspaces: pkg.workspaces,
+      root,
+      lockOnly,
+    });
+  } catch (err) {
+    console.error(`check:install-scripts: ${err.message}`);
+    process.exit(1);
+  }
+
+  const { staleKeys, uncovered, ok } = result;
 
   if (ok) {
     console.log(
