@@ -237,7 +237,7 @@ export function writeGuidedSetupOwnership({
 // write the file; the loser falls through to the same liveness/staleness
 // check as a normal admission against an existing record, and either
 // reclaims a dead/stale/malformed record and retries, or reports the
-// conflict. Returns `{ generation }` on success (the fencing token
+// conflict. Returns `{ generation }` on success (the fence value
 // confirmGuidedSetupOwnershipPid and clearGuidedSetupOwnership use to only
 // ever act on this request's own reservation), or `{ error }` when a live
 // claim already exists.
