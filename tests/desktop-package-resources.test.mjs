@@ -204,7 +204,15 @@ test("desktop updates stay native, typed, and install only after CareerRat shutd
   assert.match(main, /selfUpdateSupported:\s*app\.isPackaged[\s\S]*process\.platform === "darwin"/);
   assert.doesNotMatch(main, /shutdown\(\)\.finally\(/);
   assert.match(main, /shutdown\(\)\.then\([\s\S]*handOffToInstaller\(\)/);
-  assert.match(main, /function handOffToInstaller\(\)[\s\S]*updateController\?\.install\(\)/);
+  const helperStart = main.indexOf("function handOffToInstaller()");
+  const helperEnd = main.indexOf("\napp.on(", helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  const helper = main.slice(helperStart, helperEnd);
+  assert.match(helper, /updateController\?\.install\(\)/);
+  assert.match(
+    helper,
+    /before-quit-for-update[\s\S]*once\("error"[\s\S]*install\(\)[\s\S]*setTimeout/
+  );
   assert.match(main, /shutdown failed[\s\S]*app\.exit\(1\)/i);
   assert.match(updater, /autoInstallOnAppQuit\s*=\s*false/);
   assert.match(updater, /quitAndInstall\(false, true\)/);
