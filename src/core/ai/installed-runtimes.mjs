@@ -1393,6 +1393,7 @@ export async function probeInstalledRuntime(
         ready: true,
         action: null,
         version: runtimeVersion,
+        versionBoundaryState,
         capabilities: runtimeCapabilities,
         capabilityReason:
           capabilityReason || (runtimeCapabilities.taskTools ? null : UNVERIFIED_COMPLETION_REASON),
@@ -1464,6 +1465,7 @@ export async function probeInstalledRuntime(
       ready: true,
       action: null,
       version: runtimeVersion,
+      versionBoundaryState,
       capabilities: runtimeCapabilities,
       capabilityReason:
         capabilityReason ||

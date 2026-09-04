@@ -11,7 +11,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -145,6 +153,7 @@ test("doctor --json surfaces cached version and a passed boundary probe only whe
         version: "9.9.9",
         binaryFingerprint,
         capabilities: {},
+        versionBoundaryState: "at_or_above",
         checkedAt,
       },
     });
@@ -205,6 +214,167 @@ test("doctor --json treats a cached verification as stale once the on-disk binar
     assert.equal(claude.status, "supported engine");
     assert.equal(claude.version, null);
     assert.equal(claude.boundaryProbePassed, false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+  }
+});
+
+// Codex adversarial finding: Doctor persisted a cached verification whose
+// version-boundary probe was genuinely indeterminate (ambiguous `--version`
+// output) but still reported "boundary probe passed" from the mere presence
+// of a matching cache entry. A changed realPath is a separate, already-
+// covered staleness path (the fingerprint test above); this covers the
+// distinct case where the cache DOES match the on-disk binary but its
+// recorded boundary state was never conclusive.
+test("doctor --json reports an indeterminate cached boundary probe as unknown, never passed", () => {
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  try {
+    const claudePath = writeFakeBinary(registry, "claude");
+    const realPath = realpathSync(claudePath);
+    const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
+    const checkedAt = new Date().toISOString();
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        path: claudePath,
+        realPath,
+        version: "9.9.9",
+        binaryFingerprint,
+        capabilities: {},
+        versionBoundaryState: "indeterminate",
+        checkedAt,
+      },
+    });
+
+    const data = runDoctorJson(home, fakeRegistryEnv(registry));
+    const claude = data.installedRuntimes.find((r) => r.id === "claude");
+    assert.ok(claude);
+    assert.equal(claude.status, "supported engine");
+    assert.equal(claude.boundaryProbePassed, false);
+
+    const text = spawnSync(process.execPath, [join(ROOT, "src/cli/doctor.mjs")], {
+      cwd: ROOT,
+      env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
+      encoding: "utf8",
+    }).stdout;
+    assert.match(
+      text,
+      /- claude \(Claude Code\): supported engine, installed v9\.9\.9, boundary probe unknown \(checked/
+    );
+    assert.doesNotMatch(text, /boundary probe passed/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+  }
+});
+
+// Codex next-steps: a changed realPath with an otherwise-matching fingerprint
+// must still be treated as no cached verification at all — the identity
+// check requires BOTH to match, not just content. Fabricating a mismatched
+// realPath (rather than physically relocating the binary) isolates that one
+// field.
+test("doctor --json treats a cached verification as stale when only realPath has changed, even with a matching fingerprint", () => {
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  try {
+    const claudePath = writeFakeBinary(registry, "claude");
+    const realPath = realpathSync(claudePath);
+    const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        path: claudePath,
+        // Deliberately a different path than the binary's real one, with
+        // the correct fingerprint for that (different) binary's contents.
+        realPath: `${realPath}-relocated`,
+        version: "9.9.9",
+        binaryFingerprint,
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        checkedAt: new Date().toISOString(),
+      },
+    });
+
+    const data = runDoctorJson(home, fakeRegistryEnv(registry));
+    const claude = data.installedRuntimes.find((r) => r.id === "claude");
+    assert.ok(claude);
+    assert.equal(claude.status, "supported engine");
+    assert.equal(claude.version, null);
+    assert.equal(claude.boundaryProbePassed, false);
+    assert.equal(claude.boundaryProbeCheckedAt, null);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+  }
+});
+
+// Codex next-steps: detection never spawns a candidate binary, it only
+// checks what's on disk. A fake binary that WOULD prove itself if executed
+// (by writing a marker file) makes that assertion concrete instead of just
+// asserted in a comment.
+test("doctor never executes a discovered runtime binary during detection", () => {
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  const markerDir = mkdtempSync(join(tmpdir(), "careerrat-doctor-no-exec-"));
+  const markerFile = join(markerDir, "executed.marker");
+  try {
+    writeFakeBinary(registry, "claude", `#!/bin/sh\necho executed > "${markerFile}"\nexit 0\n`);
+
+    const data = runDoctorJson(home, fakeRegistryEnv(registry));
+    const claude = data.installedRuntimes.find((r) => r.id === "claude");
+    assert.ok(claude, "expected a claude entry in installedRuntimes");
+    assert.equal(claude.status, "supported engine");
+    assert.equal(existsSync(markerFile), false, "doctor must never execute the discovered binary");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+    rmSync(markerDir, { recursive: true, force: true });
+  }
+});
+
+// Closes the medium Codex finding: Doctor's "Installed AI runtimes" section
+// reads and SHA-256 hashes every discovered executable on every invocation.
+// The dashboard's guidance snapshot re-runs Doctor on a 30-second TTL and
+// only ever needs `agentGuidance`, which never depends on installedRuntimes
+// (see buildAgentGuidance's argument list in doctor.mjs) — so --guidance-only
+// must skip detection entirely rather than just hiding it from the output.
+test("doctor --guidance-only skips installed runtime detection entirely", () => {
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  try {
+    writeFakeBinary(registry, "claude");
+    const result = spawnSync(
+      process.execPath,
+      [join(ROOT, "src/cli/doctor.mjs"), "--json", "--guidance-only"],
+      {
+        cwd: ROOT,
+        env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
+        encoding: "utf8",
+      }
+    );
+    assert.ok(result.stdout, result.stderr || "doctor produced no stdout");
+    const data = JSON.parse(result.stdout);
+    assert.deepEqual(data.installedRuntimes, []);
+    assert.ok(data.agentGuidance, "guidance-only run must still produce agentGuidance");
+
+    const text = spawnSync(
+      process.execPath,
+      [join(ROOT, "src/cli/doctor.mjs"), "--guidance-only"],
+      {
+        cwd: ROOT,
+        env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
+        encoding: "utf8",
+      }
+    ).stdout;
+    assert.match(text, /Installed AI runtimes:\n- skipped \(--guidance-only\)\./);
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(registry, { recursive: true, force: true });

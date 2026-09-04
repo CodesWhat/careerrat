@@ -9,6 +9,17 @@ import {
 
 const INSTALLED_RUNTIME_SELECTION_RELPATH = ".internal/ai-runtime.json";
 
+// Tri-state, matching classifyRuntimeVersionBoundary/probeInstalledRuntime in
+// installed-runtimes.mjs. Anything that isn't one of the two conclusive
+// states — including a cache written before this field existed — sanitizes
+// to "indeterminate" rather than being dropped, so a missing value fails
+// closed to "unknown" instead of silently reading as a passed probe.
+const VERSION_BOUNDARY_STATES = new Set(["at_or_above", "below", "indeterminate"]);
+
+function sanitizeVersionBoundaryState(value) {
+  return VERSION_BOUNDARY_STATES.has(value) ? value : "indeterminate";
+}
+
 function sanitizeVerification(value, runtimeId) {
   if (!runtimeId || !value || typeof value !== "object") return null;
   const path = typeof value.path === "string" ? value.path.trim() : "";
@@ -28,7 +39,16 @@ function sanitizeVerification(value, runtimeId) {
     return null;
   }
   const capabilities = sanitizeInstalledRuntimeCapabilityEvidence(runtimeId, value.capabilities);
-  return { path, realPath, version, binaryFingerprint, capabilities, checkedAt };
+  const versionBoundaryState = sanitizeVersionBoundaryState(value.versionBoundaryState);
+  return {
+    path,
+    realPath,
+    version,
+    binaryFingerprint,
+    capabilities,
+    versionBoundaryState,
+    checkedAt,
+  };
 }
 
 export function loadInstalledRuntimeSelection({ repoRoot, env = process.env } = {}) {

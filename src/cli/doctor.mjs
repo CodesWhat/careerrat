@@ -43,6 +43,12 @@ const pathCtx = { repoRoot: root };
 const userPaths = resolveUserPaths(pathCtx);
 const args = process.argv.slice(2);
 const json = args.includes("--json");
+// Skips runtime detection (and the fingerprint hashing it does for every
+// discovered executable — hundreds of MB across Claude and Codex) and
+// selection loading. For a caller that only wants `agentGuidance`, which
+// never depends on installedRuntimes/runtimeSelection below. The CLI's own
+// `careerrat doctor` never passes this — only guidance-snapshot callers do.
+const guidanceOnly = args.includes("--guidance-only");
 // Matches companies.mjs's PUBLIC_PROVIDER_COUNT: excludes local-parser, the
 // one adopted id that is not a public network source adapter.
 const PUBLIC_PROVIDER_COUNT = CAREER_OPS_UPSTREAM.providerCount - 1;
@@ -187,8 +193,12 @@ const sessionBrowser = detectSession({ data: automationData, repoRoot: root });
 // binary found on disk right now (installed-runtimes.mjs only ever writes
 // that cache after a real probe has passed) — never from a fresh probe run
 // here.
-const installedRuntimes = detectInstalledRuntimes({ env: process.env });
-const runtimeSelection = loadInstalledRuntimeSelection(pathCtx);
+//
+// Skipped entirely in --guidance-only mode: detection reads and SHA-256
+// hashes every discovered executable, which is cheap once but not on a
+// 30-second dashboard refresh loop across hundreds of MB of installed CLIs.
+const installedRuntimes = guidanceOnly ? [] : detectInstalledRuntimes({ env: process.env });
+const runtimeSelection = guidanceOnly ? null : loadInstalledRuntimeSelection(pathCtx);
 
 // Bundled plugins (plugins/<name>/). Informational: a plugin needing a
 // consent capability is unaffected by this block, that's the automation
@@ -286,7 +296,7 @@ const result = {
       name: runtime.name,
       status: installedRuntimeStatusLabel(runtime),
       version: verification?.version ?? null,
-      boundaryProbePassed: Boolean(verification),
+      boundaryProbePassed: verification?.versionBoundaryState === "at_or_above",
       boundaryProbeCheckedAt: verification?.checkedAt ?? null,
     };
   }),
@@ -433,7 +443,11 @@ if (!automation.exists) {
 }
 
 console.log("Installed AI runtimes:");
-printInstalledRuntimes(installedRuntimes, runtimeSelection);
+if (guidanceOnly) {
+  console.log("- skipped (--guidance-only).");
+} else {
+  printInstalledRuntimes(installedRuntimes, runtimeSelection);
+}
 console.log("");
 
 {
@@ -734,9 +748,11 @@ function printInstalledRuntimes(runtimes, selection) {
     }
     const verification = installedRuntimeCachedVerification(runtime, selection);
     const versionText = verification ? `v${verification.version}` : "version unknown";
-    const boundaryText = verification
-      ? `boundary probe passed (checked ${verification.checkedAt})`
-      : "boundary probe not yet run";
+    const boundaryText = !verification
+      ? "boundary probe not yet run"
+      : verification.versionBoundaryState === "at_or_above"
+        ? `boundary probe passed (checked ${verification.checkedAt})`
+        : `boundary probe unknown (checked ${verification.checkedAt})`;
     console.log(
       `- ${runtime.id} (${runtime.name}): supported engine, installed ${versionText}, ${boundaryText}.`
     );

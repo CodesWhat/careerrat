@@ -114,6 +114,7 @@ function runtimeVerification(runtime) {
     version: runtime.version,
     binaryFingerprint: String(runtime.binaryFingerprint).toLowerCase(),
     capabilities: runtime.capabilities,
+    versionBoundaryState: runtime.versionBoundaryState || "indeterminate",
     checkedAt: new Date().toISOString(),
   };
 }

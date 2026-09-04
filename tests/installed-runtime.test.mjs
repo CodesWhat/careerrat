@@ -643,6 +643,7 @@ test("auth probe exposes only bounded readiness state, never CLI account output"
     ready: true,
     action: null,
     version: "0.149.1",
+    versionBoundaryState: "at_or_above",
     capabilities: {
       completion: true,
       structuredOutput: true,
@@ -1946,6 +1947,7 @@ test("Codex readiness depends on authentication rather than a complete-workflow 
     ready: true,
     action: null,
     version: "0.149.1",
+    versionBoundaryState: "at_or_above",
     capabilities: {
       completion: true,
       structuredOutput: true,

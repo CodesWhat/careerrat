@@ -31,11 +31,15 @@ export function loadAgentGuidanceSnapshot({ root, env = process.env } = {}) {
   // booted a whole new GUI app instance per dashboard request — each of
   // which served its own dashboard and spawned more (a GUI fork bomb).
   // A plain node parent ignores the variable entirely.
-  const result = spawnSync(process.execPath, [join(root, "src/cli/doctor.mjs"), "--json"], {
-    cwd: root,
-    env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
-    encoding: "utf8",
-  });
+  const result = spawnSync(
+    process.execPath,
+    [join(root, "src/cli/doctor.mjs"), "--json", "--guidance-only"],
+    {
+      cwd: root,
+      env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+      encoding: "utf8",
+    }
+  );
   if (result.error || !result.stdout) return null;
   return parseGuidance(result.stdout);
 }
@@ -44,7 +48,7 @@ function runDoctorAsync({ root, env }) {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      [join(root, "src/cli/doctor.mjs"), "--json"],
+      [join(root, "src/cli/doctor.mjs"), "--json", "--guidance-only"],
       {
         cwd: root,
         env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
