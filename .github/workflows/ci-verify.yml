@@ -185,10 +185,13 @@ jobs:
         shell: bash
         # The only runner that exercises the real win32 branches these files
         # gate on (cmd.exe interpreter resolution, the runtime-probe-helper
-        # spawn, ELECTRON_RUN_AS_NODE scoping around it). Everywhere else
-        # those branches are skipped, not run, so this is the one CI job
-        # that can actually catch a packaged-Windows regression in them.
-        run: node --test tests/installed-runtime.test.mjs tests/doctor-installed-runtimes.test.mjs
+        # spawn, ELECTRON_RUN_AS_NODE scoping around it). Both suites also
+        # carry POSIX-only fixtures (extensionless shim detection, /bin/bash
+        # subprocess cases) that only ever run on non-Windows CI, so this
+        # filters execution down to the cases named `[win32] ...` -- the
+        # ones actually gated to run only on native Windows -- instead of
+        # running either suite in full.
+        run: node --test --test-name-pattern "\[win32\]" tests/installed-runtime.test.mjs tests/doctor-installed-runtimes.test.mjs
       - name: Build the Windows x64 NSIS installer
         run: npm run dist:windows --workspace apps/desktop
       - name: Verify install, packaged smoke, and uninstall

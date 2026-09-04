@@ -1731,7 +1731,7 @@ test("runtime-probe-helper.mjs's runProbe strips ELECTRON_RUN_AS_NODE from the r
 // Without windowsVerbatimArguments reaching the helper's spawn, Node
 // re-quotes runtimeProcessInvocation's already-escaped `/c "..."` payload a
 // second time and cmd.exe never sees the intended command line.
-test("runtime-probe-helper.mjs runs a real .cmd shim through a spaced, metacharacter path on Windows intact", (t) => {
+test("[win32] runtime-probe-helper.mjs runs a real .cmd shim through a spaced, metacharacter path on Windows intact", (t) => {
   if (process.platform !== "win32") {
     t.skip("exercises real cmd.exe argument quoting; only meaningful on win32");
     return;

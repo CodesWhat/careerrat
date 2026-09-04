@@ -53,6 +53,24 @@ test("all deterministic product builds are declared as protected contexts", asyn
   assert.doesNotMatch(workflow, /Non-gating for now/i);
 });
 
+test("windows-package-smoke filters to win32-gated cases before building the installer", async () => {
+  const workflow = await source(".github/workflows/ci-verify.yml");
+  const job = workflow.slice(
+    workflow.indexOf("  windows-package-smoke:"),
+    workflow.indexOf("  browser-application-prep:")
+  );
+  const testStepIndex = job.search(
+    /node --test --test-name-pattern "\\\[win32\\\]" tests\/installed-runtime\.test\.mjs tests\/doctor-installed-runtimes\.test\.mjs/
+  );
+  const distWindowsIndex = job.indexOf("npm run dist:windows --workspace apps/desktop");
+  assert.notEqual(testStepIndex, -1, "the win32 test-name-pattern filter must be present");
+  assert.notEqual(distWindowsIndex, -1, "the dist:windows step must be present");
+  assert.ok(
+    testStepIndex < distWindowsIndex,
+    "the filtered installed-runtime identity tests must run before dist:windows"
+  );
+});
+
 test("paid native AI certification is separate from deterministic release gates", async () => {
   const [rootPackage, rootVerify, desktopVerify, desktopWorkflow] = await Promise.all([
     source("package.json"),
