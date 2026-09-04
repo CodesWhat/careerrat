@@ -8,6 +8,7 @@ import {
   buildAcpRuntimeInvocation,
   probeAcpRuntime,
   runAcpRuntime,
+  selectAcpAuthMethod,
 } from "../src/core/ai/acp-runtime.mjs";
 
 function hermesRuntime(extra = {}) {
@@ -707,6 +708,247 @@ test("runAcpRuntime surfaces ACP authentication setup before starting a session"
     { code: "RUNTIME_AUTH_REQUIRED" }
   );
   assert.equal(sessionStarted, false);
+});
+
+// The shape a real ACP agent advertises when it supports both a browser
+// sign-in and an API key: OAuth is listed first, so taking the first entry
+// strands a headless run until the request timeout.
+const OAUTH_FIRST_AUTH_METHODS = Object.freeze([
+  {
+    id: "oauth-personal",
+    name: "Log in with the provider",
+    description: "Log in with your provider account",
+  },
+  {
+    id: "fixture-api-key",
+    name: "Fixture API key",
+    description: "Use an API key with the Fixture developer API",
+    _meta: { "api-key": { provider: "fixture-provider" } },
+  },
+  {
+    id: "gateway",
+    name: "API gateway",
+    description: "Use a custom API gateway",
+  },
+]);
+
+function authenticatingAcpChild({ authMethods = [], credentialEnv = null, env = {} } = {}) {
+  const seen = { authenticated: [], sessionStarted: false };
+  const child = fakeAcpChild((message, send) => {
+    if (message.method === "initialize") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          protocolVersion: 1,
+          agentCapabilities: {},
+          agentInfo: { name: "fixture-agent", version: "1.0.0" },
+          authMethods,
+        },
+      });
+      return;
+    }
+    if (message.method === "authenticate") {
+      seen.authenticated.push(message.params?.methodId);
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+      return;
+    }
+    if (message.method === "session/new") {
+      seen.sessionStarted = true;
+      // Mirrors a real agent: authenticate accepts the credential method, and
+      // the missing key only surfaces when the session is created.
+      if (credentialEnv && !env[credentialEnv]) {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          error: { code: -32000, message: "Provider API key is missing or not configured." },
+        });
+        return;
+      }
+      send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "session-auth" } });
+      return;
+    }
+    if (message.method !== "session/prompt") return;
+    send({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: "session-auth",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "authenticated" },
+        },
+      },
+    });
+    send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  });
+  return { child, seen };
+}
+
+test("selectAcpAuthMethod ranks a satisfied credential ahead of an advertised OAuth method", () => {
+  const satisfied = selectAcpAuthMethod({
+    authMethods: OAUTH_FIRST_AUTH_METHODS,
+    env: { FIXTURE_API_KEY: "present" },
+    runtimeId: "fixture",
+    runtimeName: "Fixture CLI",
+  });
+  assert.equal(satisfied.method.id, "fixture-api-key");
+  assert.deepEqual(satisfied.credentialEnvironmentKeys, []);
+
+  const providerNamed = selectAcpAuthMethod({
+    authMethods: OAUTH_FIRST_AUTH_METHODS,
+    env: { FIXTURE_PROVIDER_API_KEY: "present" },
+    runtimeId: "fixture",
+  });
+  assert.equal(providerNamed.method.id, "fixture-api-key");
+
+  const unsatisfied = selectAcpAuthMethod({
+    authMethods: OAUTH_FIRST_AUTH_METHODS,
+    env: {},
+    runtimeId: "fixture",
+  });
+  assert.equal(unsatisfied.method.id, "fixture-api-key");
+  assert.equal(unsatisfied.credentialEnvironmentKeys[0], "FIXTURE_API_KEY");
+
+  const interactive = selectAcpAuthMethod({
+    authMethods: OAUTH_FIRST_AUTH_METHODS,
+    env: {},
+    runtimeId: "fixture",
+    interactive: true,
+  });
+  assert.equal(interactive.method.id, "oauth-personal");
+});
+
+test("selectAcpAuthMethod leaves single-method and terminal-only runtimes on their existing path", () => {
+  for (const method of OAUTH_FIRST_AUTH_METHODS) {
+    const only = selectAcpAuthMethod({ authMethods: [method], env: {}, runtimeId: "fixture" });
+    assert.equal(only.method.id, method.id);
+  }
+
+  const oauthOnly = selectAcpAuthMethod({
+    authMethods: [
+      { id: "oauth-personal", name: "Log in with the provider" },
+      { id: "oauth-device", name: "Sign in with a device code" },
+    ],
+    env: {},
+    runtimeId: "fixture",
+  });
+  assert.equal(oauthOnly.method.id, "oauth-personal");
+
+  const terminalOnly = selectAcpAuthMethod({
+    authMethods: [{ id: "fixture-setup", name: "Configure provider", type: "terminal" }],
+    env: {},
+    runtimeId: "fixture",
+    runtimeName: "Fixture CLI",
+  });
+  assert.equal(terminalOnly.method, undefined);
+  assert.equal(terminalOnly.error.code, "RUNTIME_AUTH_REQUIRED");
+  assert.match(terminalOnly.error.message, /^Fixture CLI needs provider setup/);
+});
+
+test("selectAcpAuthMethod reads a sign-in worded method as interactive, never as API-key advice", () => {
+  const signInCredentials = {
+    id: "account-login",
+    name: "Log in with your account credentials",
+    description: "Sign in with the account credentials you already use",
+  };
+  const mixed = selectAcpAuthMethod({
+    authMethods: [signInCredentials, { id: "gateway", name: "API gateway" }],
+    env: {},
+    runtimeId: "fixture",
+  });
+  assert.equal(mixed.method.id, "gateway");
+
+  const alone = selectAcpAuthMethod({
+    authMethods: [signInCredentials],
+    env: {},
+    runtimeId: "fixture",
+  });
+  assert.equal(alone.method.id, "account-login");
+  assert.deepEqual(alone.credentialEnvironmentKeys, []);
+
+  const evidenced = selectAcpAuthMethod({
+    authMethods: [signInCredentials, { id: "gateway", name: "API gateway" }],
+    env: { ACCOUNT_LOGIN_API_KEY: "present" },
+    runtimeId: "fixture",
+  });
+  assert.equal(evidenced.method.id, "account-login");
+});
+
+test("runAcpRuntime authenticates with the environment-satisfied method when OAuth is advertised first", async () => {
+  const env = { FIXTURE_API_KEY: "present" };
+  const { child, seen } = authenticatingAcpChild({
+    authMethods: OAUTH_FIRST_AUTH_METHODS,
+    credentialEnv: "FIXTURE_API_KEY",
+    env,
+  });
+
+  const result = await runAcpRuntime({
+    runtime: hermesRuntime({ id: "fixture", name: "Fixture CLI" }),
+    prompt: "hello",
+    cwd: "/safe/task",
+    env,
+    timeoutMs: 5000,
+    spawnImpl: () => child,
+  });
+
+  assert.equal(result.text, "authenticated");
+  assert.deepEqual(seen.authenticated, ["fixture-api-key"]);
+  assert.equal(seen.sessionStarted, true);
+});
+
+test("runAcpRuntime names the missing credential variable instead of stalling on OAuth", async () => {
+  const env = {};
+  const { child, seen } = authenticatingAcpChild({
+    authMethods: OAUTH_FIRST_AUTH_METHODS,
+    credentialEnv: "FIXTURE_API_KEY",
+    env,
+  });
+  const startedAt = Date.now();
+
+  await assert.rejects(
+    runAcpRuntime({
+      runtime: hermesRuntime({ id: "fixture", name: "Fixture CLI" }),
+      prompt: "hello",
+      cwd: "/safe/task",
+      env,
+      timeoutMs: 30000,
+      spawnImpl: () => child,
+    }),
+    (error) => {
+      assert.equal(error.code, "RUNTIME_AUTH_REQUIRED");
+      assert.equal(
+        error.message,
+        "Fixture CLI needs an API key before CareerRat can use it. Set FIXTURE_API_KEY, then check again."
+      );
+      assert.deepEqual(error.authEnvironmentKeys, ["FIXTURE_API_KEY", "FIXTURE_PROVIDER_API_KEY"]);
+      return true;
+    }
+  );
+  assert.deepEqual(seen.authenticated, ["fixture-api-key"]);
+  assert.ok(
+    Date.now() - startedAt < 10000,
+    "the handshake must fail fast, not wait for the timeout"
+  );
+  assert.equal(child.killed, true);
+});
+
+test("runAcpRuntime leaves a single advertised sign-in method unchanged", async () => {
+  const { child, seen } = authenticatingAcpChild({
+    authMethods: [{ id: "oauth-personal", name: "Log in with the provider" }],
+  });
+
+  const result = await runAcpRuntime({
+    runtime: hermesRuntime({ id: "fixture", name: "Fixture CLI" }),
+    prompt: "hello",
+    cwd: "/safe/task",
+    env: {},
+    timeoutMs: 5000,
+    spawnImpl: () => child,
+  });
+
+  assert.equal(result.text, "authenticated");
+  assert.deepEqual(seen.authenticated, ["oauth-personal"]);
 });
 
 test("runAcpRuntime bounds a stalled provider with timeout and cancellation", async () => {

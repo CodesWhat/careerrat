@@ -48,6 +48,124 @@ function hasToolArguments(toolCall) {
   );
 }
 
+// ACP tells a client which auth methods an agent offers, but not which of them
+// can finish without a person at the keyboard. A headless CareerRat run has no
+// channel for a browser sign-in, so picking one strands the handshake until the
+// request timeout. These patterns classify from what the agent advertised, so
+// every ACP runtime is read the same way and none is special-cased by id.
+const INTERACTIVE_AUTH_PATTERN =
+  /\b(oauth|openid|sso|browser)\b|\bdevice[\s_-]?code\b|\b(sign|log)[\s_-]?in\b/i;
+const CREDENTIAL_AUTH_PATTERN =
+  /\b(api[\s_-]?keys?|apikeys?|access[\s_-]?keys?|secrets?|credentials?)\b/i;
+const ENV_NAME_PATTERN = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g;
+
+function authMethodText(method) {
+  return [method?.id, method?.name, method?.description].filter(Boolean).join(" ");
+}
+
+// The protocol reserves terminal methods for a client that can run the agent's
+// own TUI, and forbids passing them to authenticate.
+function isTerminalAuthMethod(method) {
+  return method?.type === "terminal";
+}
+
+function isCredentialAuthMethod(method) {
+  const meta = method?._meta;
+  if (meta && typeof meta === "object" && meta["api-key"]) return true;
+  return CREDENTIAL_AUTH_PATTERN.test(authMethodText(method));
+}
+
+function isInteractiveAuthMethod(method) {
+  return INTERACTIVE_AUTH_PATTERN.test(authMethodText(method));
+}
+
+function environmentName(value) {
+  return String(value || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+}
+
+function credentialSuffixed(base) {
+  if (!base) return null;
+  return /_(KEY|SECRET|CREDENTIAL|CREDENTIALS)$/.test(base) ? base : `${base}_API_KEY`;
+}
+
+// Candidate variable names for a credential method, most specific first: any
+// name the agent spelled out, then the method id, then the provider it names in
+// _meta, then the runtime id. `gemini-api-key` resolves to GEMINI_API_KEY,
+// which is the variable the CLI itself reads.
+function credentialEnvironmentKeys(method, runtimeId) {
+  const spelled = [...authMethodText(method).matchAll(ENV_NAME_PATTERN)].map(([name]) => name);
+  const derived = [
+    environmentName(method?.id),
+    environmentName(method?._meta?.["api-key"]?.provider),
+    environmentName(runtimeId),
+  ].map(credentialSuffixed);
+  return [...new Set([...spelled, ...derived].filter(Boolean))];
+}
+
+function environmentKeySet(env, name) {
+  const value = env?.[name];
+  return typeof value === "string" && value.trim() !== "";
+}
+
+// Preference order: a credential method the environment already satisfies, then
+// any other non-interactive method, then an interactive one. Interactive rises
+// above the unsatisfied non-interactive methods only when the caller really has
+// a channel for it. A runtime that advertises nothing but interactive methods
+// still gets its first method tried, because a cached sign-in is invisible to
+// the protocol and refusing it would break runtimes that work today.
+export function selectAcpAuthMethod({
+  authMethods = [],
+  env = process.env,
+  runtimeId = null,
+  runtimeName = null,
+  interactive = false,
+} = {}) {
+  const label = runtimeName || runtimeId || "This AI tool";
+  const advertised = (Array.isArray(authMethods) ? authMethods : []).filter(
+    (method) => method && typeof method.id === "string" && method.id.trim()
+  );
+  const usable = advertised.filter((method) => !isTerminalAuthMethod(method));
+  if (!usable.length) {
+    return {
+      error: runtimeError(
+        `${label} needs provider setup before CareerRat can use it.`,
+        "RUNTIME_AUTH_REQUIRED",
+        { runtimeId }
+      ),
+    };
+  }
+  const classified = usable.map((method) => {
+    const credential = isCredentialAuthMethod(method);
+    const environmentKeys = credential ? credentialEnvironmentKeys(method, runtimeId) : [];
+    return {
+      method,
+      credential,
+      environmentKeys,
+      satisfied: environmentKeys.some((name) => environmentKeySet(env, name)),
+      interactive: isInteractiveAuthMethod(method),
+    };
+  });
+  // A set variable is hard evidence and outranks the wording either way. Short
+  // of that, a method that reads like a sign-in is treated as one, so a method
+  // describing itself as both never earns API-key advice it cannot act on.
+  const satisfied = classified.filter((entry) => entry.satisfied);
+  const interactiveEntries = classified.filter((entry) => !entry.satisfied && entry.interactive);
+  const remaining = classified.filter((entry) => !entry.satisfied && !entry.interactive);
+  const ordered = interactive
+    ? [...satisfied, ...interactiveEntries, ...remaining]
+    : [...satisfied, ...remaining, ...interactiveEntries];
+  const chosen = ordered[0];
+  const advisable = chosen.credential && !chosen.satisfied && !chosen.interactive;
+  return {
+    method: chosen.method,
+    credentialEnvironmentKeys: advisable ? chosen.environmentKeys : [],
+  };
+}
+
 export function buildAcpRuntimeInvocation({
   runtimeId,
   executablePath,
@@ -214,6 +332,7 @@ async function executeAcpRuntime({
   mcpServers = [],
   platform = process.platform,
   beforeSpawn,
+  interactiveAuth = false,
 } = {}) {
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No ACP runtime is selected.", "RUNTIME_NOT_SELECTED");
@@ -387,18 +506,39 @@ async function executeAcpRuntime({
         });
         initialization = initialized;
         const authMethods = Array.isArray(initialized?.authMethods) ? initialized.authMethods : [];
-        if (authMethods.length) {
-          const agentAuth = authMethods.find(({ type }) => type !== "terminal");
-          if (!agentAuth) {
+        // An agent can hold its key on disk as well as in the environment, and
+        // the protocol never says which. So the unsatisfied credential method is
+        // still attempted, and only the agent's own refusal is turned into the
+        // advice, which keeps a working on-disk setup working.
+        let credentialKeys = [];
+        const withCredentialAdvice = async (run) => {
+          if (!credentialKeys.length) return run();
+          try {
+            return await run();
+          } catch (error) {
+            // A rejected ACP request carries the numeric JSON-RPC code; only a
+            // CareerRat runtime code (a string) is already the right answer.
+            if (typeof error?.code === "string") throw error;
             throw runtimeError(
-              `${runtime.name || runtime.id} needs provider setup before CareerRat can use it.`,
+              `${runtime.name || runtime.id} needs an API key before CareerRat can use it. Set ${credentialKeys[0]}, then check again.`,
               "RUNTIME_AUTH_REQUIRED",
-              { runtimeId: runtime.id }
+              { runtimeId: runtime.id, authEnvironmentKeys: credentialKeys, cause: error }
             );
           }
-          const authenticated = await context.request(acp.methods.agent.authenticate, {
-            methodId: agentAuth.id,
+        };
+        if (authMethods.length) {
+          const selection = selectAcpAuthMethod({
+            authMethods,
+            env,
+            runtimeId: runtime.id,
+            runtimeName: runtime.name,
+            interactive: interactiveAuth,
           });
+          if (selection.error) throw selection.error;
+          credentialKeys = selection.credentialEnvironmentKeys;
+          const authenticated = await withCredentialAdvice(() =>
+            context.request(acp.methods.agent.authenticate, { methodId: selection.method.id })
+          );
           if (authenticated == null) {
             throw runtimeError(
               `${runtime.name || runtime.id} could not confirm its provider sign-in.`,
@@ -407,10 +547,12 @@ async function executeAcpRuntime({
             );
           }
         }
-        const session = await context.request(acp.methods.agent.session.new, {
-          cwd,
-          mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
-        });
+        const session = await withCredentialAdvice(() =>
+          context.request(acp.methods.agent.session.new, {
+            cwd,
+            mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
+          })
+        );
         sessionId = session.sessionId;
         if (probeOnly) return { stopReason: "probe_complete" };
         return context.request(acp.methods.agent.session.prompt, {
