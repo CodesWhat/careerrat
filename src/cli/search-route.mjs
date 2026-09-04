@@ -659,7 +659,24 @@ export function mountSearchRoutes({
         return { ok: false, resumable: true, run: started.run };
       }
       if (outcome?.run?.status === "failed") {
-        return { ok: false, run: outcome.run, error: outcome.run.error };
+        // Keep the child's partial value on a failed settlement (CR-29
+        // round 7): this used to return only `run`/`error`, discarding
+        // `outcome.value` — the raw runAiWebSearch result the sourcing
+        // worker's execute() staged as its settlement value (see the
+        // registerSourcingWorker definition above), which can carry
+        // offers/queryResults/failedIds recovery detail beyond what
+        // normalizeError's whitelist folds into `run.error`. Losing it here
+        // meant the durable search-execution record's `aiWeb` lane summary
+        // (persistLane's `result?.run?.summary ?? result?.value` fallback in
+        // workspace-agent.mjs) went null on every failed run instead of
+        // carrying that detail forward for a caller to inspect or retry
+        // against.
+        return {
+          ok: false,
+          run: outcome.run,
+          error: outcome.run.error,
+          value: outcome?.value ?? null,
+        };
       }
       return { ok: true, run: outcome?.run || started.run, value: outcome?.value ?? null };
     },

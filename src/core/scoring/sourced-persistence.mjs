@@ -1,11 +1,15 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { currencyCodePatternSource } from "../currency-format.mjs";
-import { dbExists, requireDb } from "../db/connection.mjs";
+import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../db/verbs/source-config.mjs";
-import { sourcedReconcilePolicyBatch, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import {
+  computeIdentityAliasMerge,
+  sourcedReconcilePolicyBatch,
+  sourcedUpsertBatch,
+} from "../db/verbs/sourced.mjs";
 import { readJobDescriptionArtifact } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
@@ -13,7 +17,6 @@ import { stringifyYaml } from "../profile/yaml.mjs";
 import { trimEdgeCharacter } from "../text/slug.mjs";
 import {
   addPostingIdentity,
-  identityAliasAdditions,
   identityKeysWithAliases,
   postingIdentityKeys,
 } from "./sourced-identity.mjs";
@@ -389,57 +392,49 @@ function contentAddressedJobCaptureRelPath(offer, content) {
 // something that isn't a plain file, so that failure surfaces here —
 // "abort before insertion" — never after a row has already committed to
 // reference it.
+//
+// The write itself is atomic (CR-29 round 7): content lands at a unique
+// PRIVATE sibling temp file first (never the shared final path — a raw
+// writeFileSync straight at `absPath` opens it with truncation semantics, so
+// a write that dies partway through — ENOSPC, EIO, a kill — could leave an
+// existing, already-referenced artifact empty or corrupt), then
+// `renameSync` swaps it onto `absPath` in one atomic filesystem op. fsync
+// isn't needed: a crash before the rename lands leaves the OLD content (or
+// nothing) at `absPath`, never a partial write, which is exactly the
+// "abort before insertion" contract above. If `absPath` already exists,
+// the write is skipped entirely rather than re-executed: the path is
+// content-addressed (contentAddressedJobCaptureRelPath), so an existing
+// file at this EXACT path can only be this same content, written by an
+// earlier run or a concurrent one — re-truncating it would risk the same
+// corruption this whole scheme exists to avoid, for no benefit. The size
+// check is a cheap sanity assertion, not a substitute for the path's own
+// content-addressing guarantee.
 function writeCanonicalCapturedJob({ repoRoot, env, offer, savedAt }) {
   const content = renderCapturedJob({ offer, savedAt });
   const relPath = contentAddressedJobCaptureRelPath(offer, content);
   const absPath = userPath({ repoRoot, env }, relPath);
-  if (existsSync(absPath) && !statSync(absPath).isFile()) {
-    throw new Error(`sourced-persistence: JD artifact path is blocked: ${relPath}`);
+  if (existsSync(absPath)) {
+    if (!statSync(absPath).isFile()) {
+      throw new Error(`sourced-persistence: JD artifact path is blocked: ${relPath}`);
+    }
+    const expectedSize = Buffer.byteLength(content, "utf8");
+    if (statSync(absPath).size !== expectedSize) {
+      throw new Error(
+        `sourced-persistence: JD artifact content mismatch at existing path: ${relPath}`
+      );
+    }
+    return { relPath, absPath };
   }
   mkdirSync(dirname(absPath), { recursive: true });
-  writeFileSync(absPath, content, "utf8");
-  return { relPath, absPath };
-}
-
-// True when SOME row currently committed in the DB (in this batch, an
-// earlier batch, or an earlier run entirely) references `relPath` as its
-// JD artifact. Used to decide whether a written-but-unaccepted artifact from
-// THIS batch is safe to delete (CR-29 round 6): because the path is content-
-// addressed, an identical offer resubmitted after an earlier partial
-// failure re-renders the exact same path, so this batch's own duplicate hit
-// or rollback must never delete a file a previously committed row still
-// depends on.
-function artifactPathIsReferenced({ repoRoot, env, relPath }) {
-  if (!dbExists({ repoRoot, env })) return false;
-  const db = requireDb({ repoRoot, env });
-  for (const table of ["applications", "sourced"]) {
-    for (const { data } of db.prepare(`SELECT data FROM ${table}`).all()) {
-      let row;
-      try {
-        row = JSON.parse(data);
-      } catch {
-        continue;
-      }
-      if (row?.artifacts?.jd === relPath) return true;
-    }
-  }
-  return false;
-}
-
-// Best-effort removal of a JD artifact this batch wrote but that ended up
-// with no committed row referencing it: a duplicate hit, a sibling offer's
-// pre-transaction write failure aborting the whole batch, or the whole
-// transaction rolling back. Always re-checks the DB before deleting (see
-// artifactPathIsReferenced) rather than trusting this batch's own
-// accepted-id bookkeeping alone. A failed cleanup here is disk bloat, never
-// a correctness problem, so it must never mask the real outcome.
-function discardUnreferencedCapturedJob({ repoRoot, env, relPath, absPath }) {
+  const tempPath = `${absPath}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   try {
-    if (artifactPathIsReferenced({ repoRoot, env, relPath })) return;
-    rmSync(absPath, { force: true });
-  } catch {
-    // best-effort
+    writeFileSync(tempPath, content, "utf8");
+    renameSync(tempPath, absPath);
+  } catch (err) {
+    rmSync(tempPath, { force: true });
+    throw err;
   }
+  return { relPath, absPath };
 }
 
 export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOString()) {
@@ -525,28 +520,6 @@ function persistScanOffersIfDb({
   return { ...persisted, rows };
 }
 
-// Merges `duplicate`'s identity keys onto `canonicalOffer` IN MEMORY (CR-29
-// round 4), for a duplicate whose match is another offer accepted earlier in
-// THIS SAME BATCH rather than an already-persisted DB row. sourcedMergeIdentityAlias
-// (the DB verb) only ever finds a match for a row that's already durable, so
-// calling it here — before the canonical offer has even reached
-// sourcedUpsertBatch — was always a silent no-op: the alias was dropped, and
-// a LATER capture carrying only the duplicate's other representation (e.g. a
-// HiringCafe-only republish with no outbound board URL) inserted as a second
-// row instead of resolving back to the canonical one. Mutating the offer
-// object directly means sourcedRowsFromScanOffers (see its aliasKeys
-// passthrough above) carries the merge into the row sourcedUpsertBatch
-// eventually inserts, so the canonical row is born already answering for it.
-function mergeOfferIdentityAlias(canonicalOffer, duplicate, seenPostingKeys, acceptedByKey) {
-  const additions = identityAliasAdditions(canonicalOffer, duplicate);
-  if (!additions.length) return;
-  canonicalOffer.aliasKeys = [...(canonicalOffer.aliasKeys || []), ...additions];
-  for (const key of additions) {
-    seenPostingKeys.add(key);
-    acceptedByKey.set(key, canonicalOffer);
-  }
-}
-
 // Read-only (CR-29 round 5): this used to call the sourcedMergeIdentityAliasBatch
 // DB verb directly for every offer matching an already-persisted row, which
 // committed that alias merge in its OWN transaction, before this batch's
@@ -559,43 +532,85 @@ function mergeOfferIdentityAlias(canonicalOffer, duplicate, seenPostingKeys, acc
 // (`persistedDuplicateOffers`) and merged by the caller inside
 // sourcedUpsertBatch's own guarded transaction (see its `duplicateOffers`
 // param) — including when they're the batch's only offers.
+//
+// Same-batch merges (an offer matching another offer ALREADY ACCEPTED this
+// batch, rather than a persisted row) now go through
+// computeIdentityAliasMerge — sourced.mjs's shared alias-merge ownership rule
+// (CR-29 round 7) — instead of a bespoke in-memory merge. Before round 7,
+// this picked the FIRST matching key's owner and blindly repointed every
+// other identity onto it: a bridge offer carrying one identity from each of
+// two otherwise-unrelated legitimate postings would merge their ownership,
+// discarding whichever posting lost that pick at the final upsert. The
+// shared rule instead resolves EVERY distinct owner among the offer's
+// matching keys and rejects the merge outright (a conflict, not a merge) the
+// moment there's more than one — the same guard mergeDuplicateIdentityAlias
+// already applies to a stored-row collision.
 function reconcileOffersBeforeCapture({ repoRoot, env, offers, dedupeCanonical }) {
-  if (!dedupeCanonical) return { offers, duplicates: 0, persistedDuplicateOffers: [] };
+  if (!dedupeCanonical) {
+    return { offers, duplicates: 0, persistedDuplicateOffers: [], conflicts: [] };
+  }
   const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
-  // Every identity key an offer ACCEPTED so far this batch answers for
-  // (its own keys plus any aliases already merged onto it), so a LATER
-  // duplicate in the same batch can be merged onto the right in-memory
-  // offer instead of falling through to the persisted-duplicate path below.
-  const acceptedByKey = new Map();
+  // Every identity key an offer ACCEPTED so far this batch answers for,
+  // indexed the same shape sourced.mjs's storedPostingIndex uses (an entry
+  // with `.row` and an `.ownerKey` computeIdentityAliasMerge's matchingOwners
+  // de-dupes on) so the shared ownership rule can run over EITHER kind of
+  // owner. The offer itself doubles as its own ownerKey: two keys resolving
+  // to the SAME accepted offer must collapse to one owner, and object
+  // identity does that with no extra bookkeeping — no table/id exists yet
+  // for an offer that hasn't reached sourcedUpsertBatch.
+  const acceptedIndex = new Map();
   const accepted = [];
   const persistedDuplicates = [];
+  const conflicts = [];
   let duplicates = 0;
   for (const offer of offers) {
     const matchingKeys = postingIdentityKeys(offer).filter((key) => seenPostingKeys.has(key));
     if (matchingKeys.length) {
       // Inspect EVERY matching key, not just the first (CR-29 round 5):
-      // a key seenPostingKeys knows about but acceptedByKey doesn't must
-      // belong to an already-PERSISTED row (acceptedByKey only ever gains
+      // a key seenPostingKeys knows about but acceptedIndex doesn't must
+      // belong to an already-PERSISTED row (acceptedIndex only ever gains
       // keys as this batch accepts offers), so persisted ownership wins
       // over an in-memory match — merging this offer's other identities
       // onto an in-batch offer's aliasKeys instead would let a row insert
       // that duplicates the persisted row's own identity, since the final
       // upsert only merges onto the target ITS OWN keys can find.
-      const persistedMatch = matchingKeys.find((key) => !acceptedByKey.has(key));
+      const persistedMatch = matchingKeys.find((key) => !acceptedIndex.has(key));
       if (persistedMatch) {
         persistedDuplicates.push(offer);
         continue;
       }
+      const { conflict, entry, additions } = computeIdentityAliasMerge(acceptedIndex, offer);
+      if (conflict) {
+        // More than one accepted offer this batch answers for one of
+        // `offer`'s identities: a bridge offer, not a genuine duplicate of
+        // either. Reject it outright — persist nothing for it, merge
+        // nothing onto either legitimate owner — rather than guess which
+        // one it belongs to.
+        conflicts.push(offer);
+        continue;
+      }
       duplicates++;
-      const canonicalOffer = acceptedByKey.get(matchingKeys[0]);
-      mergeOfferIdentityAlias(canonicalOffer, offer, seenPostingKeys, acceptedByKey);
+      if (additions.length) {
+        const canonicalOffer = entry.row;
+        canonicalOffer.aliasKeys = [...(canonicalOffer.aliasKeys || []), ...additions];
+        for (const key of additions) {
+          seenPostingKeys.add(key);
+          acceptedIndex.set(key, entry);
+        }
+      }
       continue;
     }
     addPostingIdentity(seenPostingKeys, offer);
-    for (const key of identityKeysWithAliases(offer)) acceptedByKey.set(key, offer);
+    const entry = { row: offer, ownerKey: offer };
+    for (const key of identityKeysWithAliases(offer)) acceptedIndex.set(key, entry);
     accepted.push(offer);
   }
-  return { offers: accepted, duplicates, persistedDuplicateOffers: persistedDuplicates };
+  return {
+    offers: accepted,
+    duplicates,
+    persistedDuplicateOffers: persistedDuplicates,
+    conflicts,
+  };
 }
 
 export function captureAndPersistOffersIfDb({
@@ -623,12 +638,17 @@ export function captureAndPersistOffersIfDb({
       ok: true,
       persistedRows: 0,
       duplicates: reconciled.duplicates,
+      conflicts: reconciled.conflicts.length,
+      conflictOffers: reconciled.conflicts,
       failed: 0,
+      failedIds: [],
+      failedOffers: [],
       offers: [],
       persisted: {
         created: 0,
         updated: 0,
         duplicates: 0,
+        conflicts: reconciled.conflicts.length,
         failed: 0,
         acceptedIds: [],
         failedIds: [],
@@ -645,24 +665,41 @@ export function captureAndPersistOffersIfDb({
   // artifacts.jd will reference inside the transaction, so a crash or
   // failure between this write and the transaction's commit can never
   // orphan a committed row — a retry just re-renders identical content to
-  // the identical path. The only cleanup needed afterward is for artifacts
-  // this batch wrote that DIDN'T end up referenced by any committed row
-  // (a duplicate hit, a sibling's pre-transaction failure aborting the
-  // whole batch, or the whole transaction rolling back) — see the
-  // discardUnreferencedCapturedJob loop below.
+  // the identical path.
+  //
+  // No cleanup runs afterward for artifacts this batch wrote that DIDN'T
+  // end up referenced by a committed row (a duplicate hit, a sibling's
+  // pre-transaction failure aborting the whole batch, or the whole
+  // transaction rolling back) — CR-29 round 7 removed the eager delete that
+  // used to run here. That delete raced a CONCURRENT run: it re-checked
+  // "does any row reference this path" right before unlinking, but nothing
+  // stopped a second process from committing a row against that same
+  // content-addressed path in the gap between that check and the unlink,
+  // leaving the second run's durable row pointing at a file this run had
+  // just deleted out from under it. A written-but-unreferenced final
+  // artifact left behind is harmless by construction: the path is
+  // content-addressed (contentAddressedJobCaptureRelPath) and therefore
+  // immutable, so an orphan is pure disk bloat, never a correctness problem
+  // — and a LATER run capturing the identical offer content re-derives the
+  // identical path and finds the file already there (see
+  // writeCanonicalCapturedJob's existing-path skip above), reusing it
+  // instead of writing a duplicate. Reclaiming that disk bloat, if it's ever
+  // worth doing, needs a separate out-of-band GC that can prove no row
+  // anywhere references a path before removing it — not a check-then-delete
+  // racing every other writer, which is the bug this removes.
   const acceptedOffersById = new Map();
-  const writtenById = new Map();
+  const offersById = new Map();
   const preWriteFailedIds = [];
   const preparedOffers = [];
   for (const offer of reconciled.offers) {
     const [row] = sourcedRowsFromScanOffers([offer], savedAt.toISOString());
     if (!row) continue;
     const id = String(row.id);
+    offersById.set(id, offer);
     try {
       const written = writeCanonicalCapturedJob({ repoRoot, env, offer, savedAt });
       const preparedOffer = offerWithArtifactPath(offer, written.relPath);
       acceptedOffersById.set(id, preparedOffer);
-      writtenById.set(id, written);
       preparedOffers.push(preparedOffer);
     } catch {
       preWriteFailedIds.push(id);
@@ -692,32 +729,41 @@ export function captureAndPersistOffersIfDb({
         persisted = err.result;
         pendingRethrow = err;
       } else {
-        // Nothing committed: every artifact this batch wrote is now
-        // unreferenced, unless an earlier run already committed a row at
-        // that exact content-addressed path.
-        for (const written of writtenById.values()) {
-          discardUnreferencedCapturedJob({ repoRoot, env, ...written });
-        }
+        // Nothing committed. Every artifact this batch wrote stays exactly
+        // where it landed (see the no-cleanup comment above) instead of
+        // being eagerly deleted.
         throw err;
       }
     }
   }
-
-  const acceptedIds = new Set((persisted?.acceptedIds || []).map(String));
-  for (const [id, written] of writtenById) {
-    if (!acceptedIds.has(id)) discardUnreferencedCapturedJob({ repoRoot, env, ...written });
-  }
   if (pendingRethrow) throw pendingRethrow;
 
+  const acceptedIds = new Set((persisted?.acceptedIds || []).map(String));
   const acceptedOffers = [...acceptedIds].map((id) => acceptedOffersById.get(id)).filter(Boolean);
   const failed = preWriteFailedIds.length + (persisted?.failed || 0);
   const failedIds = [...preWriteFailedIds, ...(persisted?.failedIds || [])];
+  // Bounded recovery metadata (CR-29 round 7): every failed offer's stable
+  // id plus its source URL, capped at 50 entries, so a caller further up the
+  // chain (the unified AI-search execution record, see search-route.mjs) can
+  // point a retry at the specific postings that never made it into the DB
+  // instead of only knowing a count.
+  const failedOffers = failedIds
+    .map((id) => {
+      const offer = offersById.get(id);
+      return offer ? { id, url: offer.url || null } : null;
+    })
+    .filter(Boolean)
+    .slice(0, 50);
+  const conflicts = reconciled.conflicts.length + (persisted?.conflicts || 0);
   return {
     ok: failed === 0,
     persistedRows: (persisted?.created || 0) + (persisted?.updated || 0),
     duplicates: reconciled.duplicates + (persisted?.duplicates || 0),
+    conflicts,
+    conflictOffers: reconciled.conflicts,
     failed,
     failedIds,
+    failedOffers,
     offers: acceptedOffers,
     persisted: { ...persisted, failed, failedIds },
   };

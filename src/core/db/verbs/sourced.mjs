@@ -32,13 +32,19 @@ function applicationNote(value) {
 // Index every applications[]/sourced[] identity key back to the row it came
 // from (table + id + the row itself), not just a flat membership Set, so a
 // duplicate hit during canonical dedupe can locate and patch the canonical
-// row's aliasKeys[], not merely detect the collision.
+// row's aliasKeys[], not merely detect the collision. `ownerKey` is the
+// de-duplication handle computeIdentityAliasMerge's matchingOwners() uses to
+// tell "two keys, same owner" from "two keys, two owners" — a plain
+// `${table}:${id}` string here, but any caller building its OWN index (e.g.
+// sourced-persistence.mjs's in-memory reconciliation, which has no table/id
+// to key on) can use anything with the same identity semantics, including
+// the owned object itself.
 function storedPostingIndex(db) {
   const index = new Map();
   for (const table of ["applications", "sourced"]) {
     for (const entry of db.prepare(`SELECT id, data FROM ${table}`).all()) {
       const row = JSON.parse(entry.data);
-      const entryRef = { table, id: entry.id, row };
+      const entryRef = { table, id: entry.id, row, ownerKey: `${table}:${entry.id}` };
       for (const key of identityKeysWithAliases(row)) index.set(key, entryRef);
     }
   }
@@ -91,53 +97,81 @@ function corroboratesSamePosting(row, duplicate) {
   return Boolean(rowSignature) && rowSignature === normalizedPostingSignature(duplicate);
 }
 
-// Every DISTINCT stored row `duplicate`'s offered identities (its own keys
-// plus any aliases already merged onto it) currently match in `index`.
+// Every DISTINCT owner `duplicate`'s offered identities (its own keys plus
+// any aliases already merged onto it) currently match in `index`. "Distinct"
+// is by `entry.ownerKey` (see storedPostingIndex above), not by entry object
+// identity, since the SAME owner is indexed once per identity key it holds
+// and must collapse back to one hit here regardless of which of its keys
+// matched.
 function matchingOwners(index, duplicate) {
   const owners = new Map();
   for (const key of identityKeysWithAliases(duplicate)) {
     const entry = index.get(key);
-    if (entry) owners.set(`${entry.table}:${entry.id}`, entry);
+    if (entry) owners.set(entry.ownerKey, entry);
   }
   return [...owners.values()];
 }
 
-// Merges `duplicate`'s identity keys onto whichever ALREADY-STORED row they
-// belong to, guarding against both identity LOSS and identity POISONING
-// (CR-29 round 6):
+// The shared alias-merge OWNERSHIP RULE (CR-29 round 7): decides whether
+// `duplicate` may attach its new identity keys onto whichever owner in
+// `index` already holds a matching one, guarding against both identity LOSS
+// and identity POISONING (CR-29 round 6) — and, as of round 7, applied
+// identically whether `index`'s owners are already-durable DB rows
+// (mergeDuplicateIdentityAlias below, operating on storedPostingIndex) or
+// offers merely accepted earlier in the SAME in-memory batch
+// (sourced-persistence.mjs's reconcileOffersBeforeCapture, which has no
+// table/id to key on and builds its own index over accepted offers instead).
+// A same-batch bridge offer carrying one identity from each of two
+// legitimately distinct postings is exactly as ambiguous as a stored-row
+// collision, and used to be resolved by blindly picking the FIRST matching
+// key's owner and repointing every other identity onto it — silently
+// discarding whichever of the two postings didn't win that pick.
 //
 // - If `duplicate`'s offered identities resolve to MORE THAN ONE distinct
-//   stored row, the offer is ambiguous — merging onto either one would
-//   repoint that row's aliasKeys onto a posting it may not be, and could
-//   silently orphan the other row's legitimate identity. Reject the merge
-//   entirely (`conflict: true`) and persist nothing for it.
-// - An addition already owned by a DIFFERENT row in `index` is never taken:
-//   a candidate addition is (by identityAliasAdditions' contract) a key the
-//   matched row doesn't already answer for, which is exactly the situation
-//   where it could belong to someone else; repointing it would steal it from
-//   the row that legitimately holds it.
+//   owner, the offer is ambiguous — merging onto either one would repoint
+//   that owner's aliasKeys onto a posting it may not be, and could silently
+//   orphan the other owner's legitimate identity. Reject the merge entirely
+//   (`conflict: true`) and let nothing persist for it.
+// - An addition already owned by a DIFFERENT owner in `index` is never
+//   taken: a candidate addition is (by identityAliasAdditions' contract) a
+//   key the matched owner doesn't already answer for, which is exactly the
+//   situation where it could belong to someone else; repointing it would
+//   steal it from the owner that legitimately holds it.
 // - Before attaching any surviving "unseen" addition, require basic posting
 //   corroboration (normalized company AND role agree) — see
 //   corroboratesSamePosting above.
 //
-// Returns `{ additions, conflict }`. `additions` is empty (never a merge)
-// whenever `conflict` is true, no candidate addition survives the
-// already-owned-elsewhere filter, or corroboration fails.
-function mergeDuplicateIdentityAlias(db, index, duplicate) {
+// Pure — never mutates `index` or `entry.row`. Returns `{ conflict, entry,
+// additions }`: `entry` is the single matched owner (null when there were
+// zero or multiple), and `additions` is empty (never a merge) whenever
+// `conflict` is true, no candidate addition survives the
+// already-owned-elsewhere filter, or corroboration fails. Callers apply the
+// additions however their own owner representation needs (a DB putRow for a
+// stored row, a direct in-place mutation for an in-memory offer) and update
+// `index` themselves once they have.
+export function computeIdentityAliasMerge(index, duplicate) {
   const owners = matchingOwners(index, duplicate);
-  if (owners.length === 0) return { additions: [], conflict: false };
-  if (owners.length > 1) {
-    return { additions: [], conflict: true };
-  }
+  if (owners.length === 0) return { conflict: false, entry: null, additions: [] };
+  if (owners.length > 1) return { conflict: true, entry: null, additions: [] };
   const [entry] = owners;
   const candidateAdditions = identityAliasAdditions(entry.row, duplicate);
   const safeAdditions = candidateAdditions.filter((key) => !index.has(key));
-  if (!safeAdditions.length) return { additions: [], conflict: false };
-  if (!corroboratesSamePosting(entry.row, duplicate)) return { additions: [], conflict: false };
-  entry.row = { ...entry.row, aliasKeys: [...rowAliasKeys(entry.row), ...safeAdditions] };
+  if (!safeAdditions.length) return { conflict: false, entry, additions: [] };
+  if (!corroboratesSamePosting(entry.row, duplicate))
+    return { conflict: false, entry, additions: [] };
+  return { conflict: false, entry, additions: safeAdditions };
+}
+
+// Merges `duplicate`'s identity keys onto whichever ALREADY-STORED row they
+// belong to, per computeIdentityAliasMerge's shared ownership rule above.
+// Returns `{ additions, conflict }`.
+function mergeDuplicateIdentityAlias(db, index, duplicate) {
+  const { conflict, entry, additions } = computeIdentityAliasMerge(index, duplicate);
+  if (conflict || !entry || !additions.length) return { additions: [], conflict };
+  entry.row = { ...entry.row, aliasKeys: [...rowAliasKeys(entry.row), ...additions] };
   putRow(db, entry.table, entry.id, entry.row);
-  for (const key of safeAdditions) index.set(key, entry);
-  return { additions: safeAdditions, conflict: false };
+  for (const key of additions) index.set(key, entry);
+  return { additions, conflict: false };
 }
 
 const ACTIVE_SOURCED_STATUSES = new Set(["sourced", "prospect", "saved", "gated"]);

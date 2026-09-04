@@ -286,6 +286,59 @@ test("unified AI starter reports app shutdown as resumable instead of completed"
   assert.equal(stored.status, "running");
 });
 
+test("unified AI starter keeps the child's partial value on a failed settlement instead of discarding it (CR-29 round 7)", async () => {
+  // Before round 7, a failed outcome returned only `run`/`error`, dropping
+  // `outcome.value` — the raw runAiWebSearch result the sourcing worker's
+  // execute() staged as its settlement value, which can carry
+  // offers/failedIds/failedOffers recovery detail beyond what
+  // normalizeError's whitelist folds into `run.error`.
+  const repoRoot = tempRepo();
+  let starterDefinition;
+  const failedValue = {
+    ok: false,
+    failed: 1,
+    failedIds: ["sourced-acme-example-1"],
+    offers: [],
+  };
+  const workspaceAgentRuntime = {
+    registerSourcingWorker() {},
+    registerAiWebSearchStarter(definition) {
+      starterDefinition = definition;
+    },
+    startSourcingWorker({ run }) {
+      return {
+        run,
+        promise: Promise.resolve({
+          run: {
+            ...run,
+            status: "failed",
+            error: {
+              code: "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED",
+              message: "Failed to persist 1 job description artifact(s).",
+              failedIds: ["sourced-acme-example-1"],
+            },
+          },
+          value: failedValue,
+        }),
+      };
+    },
+    async recordSearchStart() {},
+  };
+
+  mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime,
+    runAiWebSearch: async () => assert.fail("fixture must not run the provider directly"),
+  });
+
+  const result = await starterDefinition.start({ searchExecutionId: "search-artifact-failed" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.run.status, "failed");
+  assert.deepEqual(result.error.failedIds, ["sourced-acme-example-1"]);
+  assert.deepEqual(result.value, failedValue, "the child's partial value must survive a failure");
+});
+
 test("AI web-search generates candidate prompts automatically when none are saved", async () => {
   const repoRoot = tempRepo({ prompts: 0 });
   let searches = 0;

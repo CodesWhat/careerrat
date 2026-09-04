@@ -876,7 +876,11 @@ function assertKnownOptions(args) {
   }
 }
 
-function printSummary(summary, offers, cfg, limit) {
+// Exported (CR-29 round 7) so tests can exercise the summary-mode failure
+// sample directly rather than only through a spawned process — `main()`
+// itself, and every process.argv touch, stays behind the import.meta.url
+// entry guard below exactly as before; this is a pure formatting function.
+export function printSummary(summary, offers, cfg, limit) {
   if (summary.coldFamilies.length > 0) {
     console.log(`Cold-board lanes down-weighted: ${summary.coldFamilies.join(", ")}`);
   }
@@ -885,6 +889,18 @@ function printSummary(summary, offers, cfg, limit) {
   console.log(`Filtered by title: ${summary.filteredTitle}`);
   console.log(`Filtered by location: ${summary.filteredLocation}`);
   console.log(`Duplicates: ${summary.duplicates}`);
+  // Summary mode used to hide a persistence failure entirely — `ok`/
+  // `failed`/`failedIds` only ever showed up in the raw JSON output, so a
+  // human (or a cron log grepping this mode) had no way to see that offers
+  // were silently lost to a JD artifact-write failure. A bounded sample (up
+  // to 10 ids) is enough to point someone at what needs a retry without
+  // dumping the whole list.
+  if (summary.ok === false) {
+    const failedIds = Array.isArray(summary.failedIds) ? summary.failedIds : [];
+    const sample = failedIds.slice(0, 10);
+    const suffix = failedIds.length > sample.length ? ", …" : "";
+    console.log(`Failed to persist: ${summary.failed} (ids: ${sample.join(", ")}${suffix})`);
+  }
   if (summary.errors.length > 0) {
     console.log("Errors:");
     for (const error of summary.errors) console.log(`- ${error.company}: ${error.error}`);
@@ -919,6 +935,12 @@ async function main() {
     verify,
     limit,
   });
+
+  // A batch with JD artifact-write failures used to exit 0 in both output
+  // modes: the CLI only ever printed the result, so scheduled automation
+  // (a cron sweep, a CI job) had no process-level signal that offers were
+  // silently lost and needed a retry (CR-29 round 7).
+  if (summary.ok === false) process.exitCode = 1;
 
   const candidateConfig = loadCandidateConfig(pathCtx);
 

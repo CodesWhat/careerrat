@@ -123,7 +123,19 @@ function normalizeError(error) {
     if (typeof error.action === "string" && error.action.trim()) {
       result.action = error.action.trim();
     }
-    for (const key of ["failedPromptIds", "failedIds", "queryResults", "sources", "errors"]) {
+    // "failedOffers" (CR-29 round 7): bounded per-offer recovery metadata
+    // (id + source URL, capped at 50 — see
+    // sourced-persistence.mjs's captureAndPersistOffersIfDb) a caller can
+    // attach alongside `failedIds` so a durable run's error carries enough
+    // to retry a specific posting, not just a count.
+    for (const key of [
+      "failedPromptIds",
+      "failedIds",
+      "failedOffers",
+      "queryResults",
+      "sources",
+      "errors",
+    ]) {
       if (Array.isArray(error[key])) result[key] = clone(error[key]);
     }
     return result;

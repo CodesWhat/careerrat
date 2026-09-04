@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { runSourcedScan } from "../scripts/scan-sourced.mjs";
+import { printSummary, runSourcedScan } from "../scripts/scan-sourced.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   candidateConfigPatch,
@@ -2318,6 +2318,70 @@ test("a JD artifact-write failure during a DB-mode scan marks the run failed, ke
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// CLI exit code + summary-mode failure sample (CR-29 round 7): the CLI used
+// to exit 0 and (in --summary mode) print nothing at all about a batch with
+// JD artifact-write failures, so scheduled automation had no process-level
+// signal that offers were silently lost. printSummary is exported
+// specifically so this can be exercised directly rather than only through a
+// spawned process — see that export's own comment.
+// ---------------------------------------------------------------------------
+
+function captureConsoleLog(run) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(" "));
+  try {
+    run();
+  } finally {
+    console.log = original;
+  }
+  return lines;
+}
+
+test("printSummary stays silent about failures when the batch is clean", () => {
+  const summary = {
+    coldFamilies: [],
+    scanned: 1,
+    new: 1,
+    filteredTitle: 0,
+    filteredLocation: 0,
+    duplicates: 0,
+    ok: true,
+    failed: 0,
+    failedIds: [],
+    errors: [],
+  };
+  const lines = captureConsoleLog(() => printSummary(summary, [], {}, 0));
+  assert.ok(
+    !lines.some((line) => line.startsWith("Failed to persist")),
+    "a clean batch must not print a failure line"
+  );
+});
+
+test("printSummary reports a bounded (max 10) failure-id sample when the batch is not ok", () => {
+  const failedIds = Array.from({ length: 14 }, (_, index) => `sourced-acme-${index}`);
+  const summary = {
+    coldFamilies: [],
+    scanned: 14,
+    new: 0,
+    filteredTitle: 0,
+    filteredLocation: 0,
+    duplicates: 0,
+    ok: false,
+    failed: 14,
+    failedIds,
+    errors: [],
+  };
+  const lines = captureConsoleLog(() => printSummary(summary, [], {}, 0));
+  const failureLine = lines.find((line) => line.startsWith("Failed to persist"));
+  assert.ok(failureLine, "a failed batch must print a failure summary line");
+  assert.match(failureLine, /^Failed to persist: 14 \(ids: /);
+  for (const id of failedIds.slice(0, 10)) assert.ok(failureLine.includes(id));
+  for (const id of failedIds.slice(10)) assert.ok(!failureLine.includes(id));
+  assert.match(failureLine, /…\)$/, "the sample must show it was truncated");
 });
 
 test("runSourcedScan preserves a login-backed session JD without public rehydration", async () => {

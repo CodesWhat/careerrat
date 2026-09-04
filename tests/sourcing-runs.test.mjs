@@ -155,6 +155,32 @@ test("sourcingRunFail persists actionable error JSON", () => {
   assert.deepEqual(latest.run.error, failed.run.error);
 });
 
+test("sourcingRunFail's error normalization preserves bounded per-offer failure metadata (CR-29 round 7)", () => {
+  const repoRoot = tempRepo();
+  const started = sourcingRunStart({ repoRoot, purpose: "ai-web-search" });
+
+  const failedOffers = [
+    { id: "sourced-acme-example-1", url: "https://jobs.example.test/acme/example-1" },
+  ];
+  const failed = sourcingRunFail({
+    repoRoot,
+    id: started.run.id,
+    error: {
+      code: "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED",
+      message: "Failed to persist 1 job description artifact(s).",
+      action: "retry-failed",
+      failedIds: ["sourced-acme-example-1"],
+      failedOffers,
+    },
+  });
+
+  assert.deepEqual(failed.run.error.failedIds, ["sourced-acme-example-1"]);
+  assert.deepEqual(failed.run.error.failedOffers, failedOffers);
+
+  const latest = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" });
+  assert.deepEqual(latest.run.error.failedOffers, failedOffers);
+});
+
 test("duplicate first-search starts are idempotent while running and after completion", () => {
   const repoRoot = tempRepo();
   const first = sourcingRunStart({ repoRoot, purpose: "first-search" });
