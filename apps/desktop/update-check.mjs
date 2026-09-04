@@ -156,6 +156,10 @@ export function createDesktopUpdateController({
 
   updater.autoDownload = true;
   updater.autoInstallOnAppQuit = false;
+  // The install handoff in main.mjs waits for Electron's before-quit-for-update,
+  // which the native updater only emits on this path when it relaunches the
+  // app itself. Pin it rather than relying on the library default.
+  updater.autoRunAppAfterInstall = true;
   updater.allowPrerelease = false;
   updater.allowDowngrade = false;
   // electron-updater 6.8.9 applies requestHeaders after its generated staging
@@ -279,6 +283,10 @@ export function createDesktopUpdateController({
     if (!supported) return setRuntime({ manual: Boolean(manual) });
     if (!manual && !force && !saved.enabled) return getState();
     if (installAccepted) return getState();
+    // A downloaded update stays staged until it is installed. A routine
+    // check (timer, menu) must not replace it with a fresh check that can
+    // fail offline and leave the staged download uninstallable.
+    if (!force && runtime.phase === "ready") return getState();
     if (
       !force &&
       (runtime.phase === "checking" || runtime.phase === "downloading")

@@ -936,6 +936,13 @@ app.on("before-quit", (event) => {
     },
     (error) => {
       log(`shutdown failed: ${error?.message || error}`);
+      // The runtime is down either way. If the user asked for the update,
+      // still hand the quit to the installer instead of discarding a staged
+      // download because teardown overran its deadline.
+      if (installUpdateAfterShutdown && updateController?.install()) {
+        installHandoffStarted = true;
+        return;
+      }
       app.exit(1);
     }
   );

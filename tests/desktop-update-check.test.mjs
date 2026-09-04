@@ -54,6 +54,7 @@ describe("desktop updater controller", () => {
 
     assert.equal(updater.autoDownload, true);
     assert.equal(updater.autoInstallOnAppQuit, false);
+    assert.equal(updater.autoRunAppAfterInstall, true);
     assert.equal(updater.allowPrerelease, false);
     assert.equal(updater.allowDowngrade, false);
   });
@@ -165,6 +166,24 @@ describe("desktop updater controller", () => {
     assert.equal(state.manual, false);
     assert.equal(writes.at(-1).skippedVersion, "0.16.4");
     assert.equal(controller.install(), true);
+  });
+
+  it("keeps a staged download instead of starting a routine check", async () => {
+    const { controller, updater } = makeController();
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    assert.equal(controller.getState().phase, "ready");
+
+    const callsBefore = updater.checkCalls;
+
+    await controller.checkNow();
+    await controller.checkNow({ manual: true });
+
+    assert.equal(updater.checkCalls, callsBefore);
+    assert.equal(controller.getState().phase, "ready");
+    assert.equal(controller.getState().notify, true);
+
+    await controller.checkNow({ force: true });
+    assert.equal(updater.checkCalls, callsBefore + 1);
   });
 
   it("rechecks a downloaded update after restart before offering installation", async () => {

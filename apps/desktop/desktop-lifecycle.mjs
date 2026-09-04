@@ -26,7 +26,14 @@ export function shutdownDesktopRuntime(active) {
     // closes.
     await active.shutdownGuidedSetups();
     await active.browserSessionManager.shutdown();
-    await new Promise((resolve) => active.server.close(resolve));
+    // server.close waits for in-flight responses, and a renderer that
+    // reconnected its event stream mid-teardown holds one open forever. Drop
+    // the sockets so the close can settle.
+    await new Promise((resolve) => {
+      active.server.close(resolve);
+      active.server.closeIdleConnections?.();
+      active.server.closeAllConnections?.();
+    });
   })();
   shutdowns.set(active, promise);
   return promise;
