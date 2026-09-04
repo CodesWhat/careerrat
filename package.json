@@ -160,10 +160,13 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.251",
     "@biomejs/biome": "2.5.11",
+    "@npmcli/arborist": "10.0.2",
     "fast-check": "4.9.0",
     "knip": "6.33.0",
     "lefthook": "2.1.12",
+    "npm-package-arg": "14.0.0",
     "playwright": "1.62.1",
+    "semver": "7.8.5",
     "sharp": "0.35.4",
     "turbo": "2.10.12"
   },
