@@ -228,6 +228,7 @@ export function ingestCapturedSnapshot({
     env,
     offers: snapshot?.offers || [],
     savedAt: now,
+    dedupeCanonical: true,
   });
   if (!result) {
     throw new Error("capture ingest requires a CareerRat SQLite database");

@@ -15,6 +15,7 @@ import {
   stampSourceOffers,
 } from "../scripts/capture-search-sources.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
@@ -429,4 +430,70 @@ test("capture ingest skips invalid blank-company offers without writing JD artif
   assert.equal(result.persistedRows, 0);
   assert.equal(result.offers.length, 0);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/jobs")), false);
+});
+
+test("snapshot ingestion canonically dedupes a Workday posting against a row persisted under the old tenant-only key", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  // Simulates a row persisted before the CR-29 migration, when Workday
+  // identity was keyed on `workday:<tenant>:<req>` instead of the current
+  // `workday:<full-hostname>:<req>`. Seeded directly (dedupeCanonical off)
+  // so its stored id keeps the pre-migration shape; canonical dedupe on the
+  // read side must still recognize it by recomputing identity from its url.
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "workday:acme:jr12345",
+        company: "Acme",
+        role: "Senior Engineer",
+        status: "sourced",
+        source: "scanner",
+        channel: "board",
+        link: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+        loc: "Boston, MA",
+        base: "verify",
+        fitScore: 80,
+        fitBucket: "high",
+        fitBasis: "triage",
+        gate: "likely-keep",
+        sourcedAt: "2026-07-05T00:00:00Z",
+        updatedAt: "2026-07-05T00:00:00Z",
+        artifacts: {},
+      },
+    ],
+  });
+
+  // Re-ingested through the snapshot path (capture-board-snapshot /
+  // capture-search-sources) with a "-N" cross-site disambiguator suffix on
+  // the URL, using the new full-hostname key shape.
+  const result = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-06T00:00:00.000Z"),
+    snapshot: {
+      source: "workday-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Senior Engineer",
+          url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+          location: "Boston, MA",
+          source: "workday-browser",
+          rawText: "Own the platform roadmap for the Boston engineering team.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.persistedRows, 0);
+  assert.equal(result.duplicates, 1);
+  assert.equal(result.offers.length, 0);
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "workday:acme:jr12345");
 });
