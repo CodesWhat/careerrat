@@ -3,6 +3,7 @@
   "pages": [
     "architecture",
     "agent-contract",
+    "engines",
     "data-model",
     "configuration",
     "privacy",

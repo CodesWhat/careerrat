@@ -1,0 +1,63 @@
+---
+title: Why Only Two Supported Engines?
+description: Upstream projects list ten CLIs. CareerRat lists two. Here's the bar the other eight don't clear.
+---
+
+CareerRat's own runtime registry detects eleven AI CLIs: Claude Code, Codex,
+Gemini CLI, OpenCode, GitHub Copilot CLI, Qwen Code, Antigravity, Hermes
+Agent, Amp, Goose, and Droid. Only two, Claude Code and Codex, are supported.
+That gap looks like an oversight until you look at what "supported" checks.
+
+Other agent-CLI compatibility lists usually mean "can read a markdown file and
+run bare." CareerRat's `supported` flag means something stricter: the CLI has
+to accept a CareerRat-authored non-interactive permission boundary and prove,
+live, that it ran inside it. Four gates enforce that.
+
+## The four gates
+
+**The `supported` flag.** Each entry in the runtime registry
+(`src/core/ai/installed-runtimes.mjs`) carries a `supported: true` or `false`.
+Only `claude` and `codex` are `true`. Selecting an unsupported runtime is
+rejected outright, both in the settings route
+(`src/cli/installed-runtime-route.mjs`) and in the AI call router
+(`src/core/ai/call-ai.mjs`).
+
+**The per-protocol boundary.** A supported runtime doesn't just get invoked,
+it runs inside a locked-down sandbox CareerRat builds itself. Claude Code runs
+with `defaultMode: "dontAsk"`, `Bash`, `Edit`, `Write`, and `Agent` denied
+outright, and a `denyRead` allowlist that only opens the paths a skill needs.
+Codex runs with `--sandbox read-only`, `--ignore-user-config`,
+`--ignore-rules`, and a long list of disabled features (shell tool, browser
+use, computer use, multi-agent, plugins, and more). Neither CLI's default
+mode looks like this; CareerRat constructs it per call.
+
+**The completion receipt.** Before CareerRat trusts a runtime for real work,
+it runs a smoke test: ask the CLI, inside that same sandbox, to return one
+exact JSON object matching a fixed schema (`COMPLETION_SMOKE_SCHEMA`) with a
+single `receipt` field and nothing else. Only an exact match counts as proof
+the sandboxed invocation actually works, not just that the binary launches.
+
+**The binary fingerprint.** Every spawn is preceded by a SHA-256 hash check
+against the executable CareerRat resolved at detection time. If the binary on
+disk changed since detection, the identity check fails and the spawn is
+refused, every time, not just once at setup.
+
+A CLI clears "supported" only by passing all four, every time. That's a much
+higher bar than "has a CLI you can pipe a prompt into."
+
+## The other eight
+
+The rest of the registry exists for diagnostics, not workflows. Gemini CLI,
+OpenCode, GitHub Copilot CLI, and Hermes Agent have a real ACP transport
+wired in, so CareerRat can probe them and show readiness state, but each
+one's `acceptedCapabilities` is set to the no-workflow capability set: even a
+successful probe never unlocks completion, structured output, or task tools.
+Qwen Code, Antigravity, Amp, Goose, and Droid have no protocol adapter at
+all; asking CareerRat to run work through one of them hits a
+`RUNTIME_UNSUPPORTED` error.
+
+Building the four gates for a new engine is real, deliberate work: a
+permission boundary mapped onto that CLI's actual sandbox flags, proven by a
+completion receipt loop. A CLI that can read a markdown wrapper and be
+spawned bare is a different, weaker claim. CareerRat's docs try not to blur
+the two.
