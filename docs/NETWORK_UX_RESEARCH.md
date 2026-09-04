@@ -1,5 +1,20 @@
 # Network UX — research and the target shape
 
+## Retired 2026-09-04
+
+This is a research and recommendation doc for `NetworkPage.jsx`, which it called the canonical `/network`
+route. Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted `NetworkPage.jsx`
+along with the other Network route candidates. The chat-first workspace now supplies People through
+`apps/web/src/chat-first/WorkspaceBrowser.jsx`'s People panel, a single cross-application contact list rather
+than the four competing shapes this doc weighed.
+
+The research below is historical: it describes routes and components that no longer exist. Read it for the
+reasoning, not as a description of the running app.
+
+<!-- markdownlint-disable MD022 MD032 MD012 -->
+<!-- Everything below this point is the original research body, left untouched by the retirement
+     notice above; do not run a markdown formatter over it. -->
+
 Researched July 10, 2026. Companion to `CALENDAR_UX_RESEARCH.md` and `DASHBOARD_UX_RESEARCH.md`. This is a
 research and recommendation document — no code was changed to produce it.
 

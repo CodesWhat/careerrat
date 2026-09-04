@@ -1,5 +1,17 @@
 # Library UX — research and the target shape
 
+## Retired 2026-09-04
+
+This is a research and recommendation doc for `LibraryPage.jsx`, which it called the canonical `/library`
+route. Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted `LibraryPage.jsx`
+along with `LibraryV2Page.jsx` and `LibraryV3Page.jsx`. The chat-first workspace now supplies Files through
+`apps/web/src/chat-first/WorkspaceBrowser.jsx`'s Files panel. One correction to the analysis below: it says
+cross-job document aggregation exists nowhere in the app, but the chat-first Files panel now aggregates
+files across every application behind a "Job" filter, so that gap has closed.
+
+The research below is otherwise historical: it describes routes and components that no longer exist. Read it
+for the reasoning, not as a description of the running app.
+
 Researched July 10, 2026. Companion to `CALENDAR_UX_RESEARCH.md`. Three unshipped candidates exist —
 `LibraryPage.jsx` (canonical `/library`), `LibraryV2Page.jsx`, `LibraryV3Page.jsx` — none is the settled
 design. This doc settles it.
