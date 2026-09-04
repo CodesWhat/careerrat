@@ -334,6 +334,21 @@ export function createDesktopUpdateController({
   async function reconcileStartup() {
     if (!startupCheckPending) return getState();
     startupCheckPending = false;
+    // force bypasses saved.enabled, which exists so a manual check still
+    // runs while checks are off. Startup reconciliation is not manual: a
+    // candidate who downloaded an update and then turned checks off must
+    // not get a network call to GitHub on the very next launch.
+    if (!saved.enabled) {
+      // The synthetic `checking` phase set at startup exists only to
+      // coalesce checks onto this pending reconciliation. Skipping the
+      // reconciliation must not leave runtime stuck on it, or a later
+      // manual/scheduled check coalesces onto a request that never runs.
+      // Reset straight to idle rather than through setRuntime, so the
+      // persisted ready operation stays untouched for the ready-recheck
+      // logic once updates are re-enabled.
+      runtime = { ...IDLE_RUNTIME };
+      return emit();
+    }
     return checkNow({ force: true });
   }
 
