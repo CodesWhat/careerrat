@@ -88,6 +88,7 @@ export function sourcedUpsertBatch({
   guard,
   dedupeCanonical = false,
   prepareAcceptedRow,
+  commitAcceptedArtifact,
 } = {}) {
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error("sourcedUpsertBatch: rows must be a non-empty array");
@@ -105,8 +106,10 @@ export function sourcedUpsertBatch({
     let created = 0;
     let updated = 0;
     let duplicates = 0;
+    let failed = 0;
     let aliasesMerged = false;
     const acceptedIds = [];
+    const failedIds = [];
     const postingIndex = dedupeCanonical ? storedPostingIndex(db) : null;
     const seenPostingKeys = postingIndex ? new Set(postingIndex.keys()) : null;
     for (const { row, acceptedRow } of preparedRows) {
@@ -118,6 +121,22 @@ export function sourcedUpsertBatch({
           for (const key of additions) seenPostingKeys.add(key);
         }
         continue;
+      }
+      // The JD artifact (or any other caller-supplied side effect this row's
+      // acceptance depends on) is committed HERE — after the duplicate check
+      // decided this row wins its slot, but BEFORE putRow makes it durable
+      // (CR-29 round 4). A failure here means this offer is simply never
+      // accepted: its identity is never added to seenPostingKeys and no row
+      // is written, so a later retry (once whatever failed is fixed) sees a
+      // clean slate instead of a row that already claims a JD it never got.
+      if (typeof commitAcceptedArtifact === "function") {
+        try {
+          commitAcceptedArtifact(acceptedRow, row);
+        } catch {
+          failed++;
+          failedIds.push(String(row.id));
+          continue;
+        }
       }
       if (seenPostingKeys) addPostingIdentity(seenPostingKeys, row);
       const existed = Boolean(getRow(db, "sourced", acceptedRow.id));
@@ -132,7 +151,9 @@ export function sourcedUpsertBatch({
         created,
         updated,
         duplicates,
+        failed,
         acceptedIds,
+        failedIds,
         meta: null,
         event: null,
         analytics: null,
@@ -145,25 +166,51 @@ export function sourcedUpsertBatch({
       tags: [`count:${acceptedIds.length}`],
     });
     const analytics = refreshAnalytics(db);
-    return { created, updated, duplicates, acceptedIds, meta, event, analytics };
+    return { created, updated, duplicates, failed, acceptedIds, failedIds, meta, event, analytics };
   });
 }
 
 // sourcedMergeIdentityAlias({offer}): the standalone entry point for the
-// same alias-merge sourcedUpsertBatch does inline on a duplicate hit, for
-// callers that discard a duplicate BEFORE it ever reaches sourcedUpsertBatch
-// (sourced-persistence.mjs's pre-capture reconciliation drops known
-// duplicates early to skip the expensive JD-capture path, see CR-29 round
-// 3). No-op, no write, when `offer` doesn't match a stored row or adds
-// nothing new to it. Intentionally skips the activity-event log (an alias
-// merge is internal bookkeeping, not a user-visible change) but still bumps
-// meta when it writes, per the Data Write Contract.
+// same alias-merge sourcedUpsertBatch does inline on a duplicate hit, for a
+// caller merging a SINGLE offer that discarded a duplicate BEFORE it ever
+// reaches sourcedUpsertBatch. No-op, no write, when `offer` doesn't match a
+// stored row or adds nothing new to it. Intentionally skips the
+// activity-event log (an alias merge is internal bookkeeping, not a
+// user-visible change) but still bumps meta when it writes, per the Data
+// Write Contract. sourced-persistence.mjs's pre-capture reconciliation calls
+// the batched sourcedMergeIdentityAliasBatch below instead (CR-29 round 4):
+// calling this once per suppressed duplicate in a sweep rebuilt the whole
+// stored posting index and opened its own transaction/export every time.
 export function sourcedMergeIdentityAlias({ repoRoot, env, offer } = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const index = storedPostingIndex(db);
     const additions = mergeDuplicateIdentityAlias(db, index, offer);
     if (additions.length) bumpMeta(db);
     return { merged: additions.length > 0 };
+  });
+}
+
+// sourcedMergeIdentityAliasBatch({offers}) — the same alias merge as
+// sourcedMergeIdentityAlias, but for a WHOLE sweep's worth of pre-capture
+// duplicates in ONE call (CR-29 round 4): builds the stored posting index
+// ONCE instead of once per offer, applies every merge against it inside ONE
+// transaction, and bumps meta at most once (only when something actually
+// changed) instead of once per offer — matching sourcedUpsertBatch's own
+// "one sweep, one write" shape. Same no-activity-event contract as the
+// singular verb. A no-op, no db open at all, when `offers` is empty.
+export function sourcedMergeIdentityAliasBatch({ repoRoot, env, offers } = {}) {
+  if (!Array.isArray(offers) || offers.length === 0) {
+    return { merged: 0 };
+  }
+  return runVerb({ repoRoot, env }, (db) => {
+    const index = storedPostingIndex(db);
+    let merged = 0;
+    for (const offer of offers) {
+      const additions = mergeDuplicateIdentityAlias(db, index, offer);
+      if (additions.length) merged++;
+    }
+    if (merged) bumpMeta(db);
+    return { merged };
   });
 }
 

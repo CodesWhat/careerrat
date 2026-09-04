@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -15,7 +15,7 @@ import {
   stampSourceOffers,
 } from "../scripts/capture-search-sources.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
+import { ExportFailedError, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
@@ -725,4 +725,201 @@ test("a discarded HiringCafe bridge alias resolves a later HiringCafe-only inges
     .map((row) => JSON.parse(row.data));
   assert.equal(finalRows.length, 1);
   assert.equal(finalRows[0].id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+});
+
+test("a JD artifact-write failure leaves no dangling DB row, and a retry after the failure is fixed succeeds", () => {
+  // CR-29 round 4: the JD artifact write used to happen AFTER
+  // sourcedUpsertBatch's transaction (and the tracker.json/activity.jsonl
+  // export inside it) had already returned, so a write failure landed a
+  // durable row whose artifacts.jd pointed at a file that never got written.
+  // Reconciliation then rejected a retry of the same offer as a duplicate,
+  // permanently losing the description. The write is now committed INSIDE
+  // sourcedUpsertBatch, before that row's putRow — a failure there must
+  // leave NO row and NO claimed identity, so a retry (once whatever failed
+  // is fixed) inserts cleanly instead of bouncing off a phantom duplicate.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const offer = {
+    company: "Acme",
+    title: "JD Write Failure Role",
+    url: "https://example.test/jobs/jd-write-failure",
+    reqId: "explicit-jdfail-1",
+    rawText: "Body content for the write-failure regression.",
+  };
+  const jdRelPath = "workspace/jobs/acme-jd-write-failure-role-explicit-jdfail-1.md";
+  const jdAbsPath = userPath({ repoRoot }, jdRelPath);
+  // Block the deterministic artifact path with a DIRECTORY, so
+  // atomicWriteFile's write onto it throws EISDIR.
+  mkdirSync(jdAbsPath, { recursive: true });
+
+  const failed = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-04T12:00:00.000Z"),
+    snapshot: { source: "generic-browser", offers: [offer] },
+  });
+
+  assert.equal(failed.persistedRows, 0);
+  assert.equal(failed.offers.length, 0);
+  assert.equal(failed.persisted?.failed, 1);
+
+  const rowsAfterFailure = openDb({ repoRoot }).prepare("SELECT data FROM sourced").all();
+  assert.equal(rowsAfterFailure.length, 0, "a write failure must not leave a dangling row");
+
+  // Fix the failure (remove the blocking directory) and retry the exact
+  // same offer.
+  rmSync(jdAbsPath, { recursive: true, force: true });
+
+  const retried = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-04T12:05:00.000Z"),
+    snapshot: { source: "generic-browser", offers: [offer] },
+  });
+
+  assert.equal(retried.persistedRows, 1);
+  assert.equal(retried.offers.length, 1);
+  assert.equal(readFileSync(jdAbsPath, "utf8").includes("write-failure regression"), true);
+
+  const rowsAfterRetry = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(rowsAfterRetry.length, 1);
+  assert.equal(rowsAfterRetry[0].artifacts.jd, jdRelPath);
+});
+
+test("a tracker export failure still leaves the DB row and its already-written JD artifact consistent", () => {
+  // CR-29 round 4: proves the fix's ORDERING, not just the write-failure
+  // path above. The JD write now happens before the row commits, so by the
+  // time exportToTracker runs (outside the transaction, per runVerb) and
+  // fails, the row and its artifact are already both durable and
+  // consistent — unlike before, when the write ran only after export had
+  // already succeeded or thrown, and export throwing meant the fs write was
+  // never even attempted.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  // Force exportToTracker to fail: atomicWriteFile's rename/write onto an
+  // existing DIRECTORY at the tracker.json path throws EISDIR (same trick
+  // as tests/db-verb-export-integrity.test.mjs).
+  mkdirSync(userPath({ repoRoot }, "workspace/tracker.json"), { recursive: true });
+
+  const offer = {
+    company: "Acme",
+    title: "Export Failure Role",
+    url: "https://example.test/jobs/export-failure",
+    reqId: "explicit-exportfail-1",
+    rawText: "Body content for the export-failure regression.",
+  };
+
+  let caught;
+  try {
+    ingestCapturedSnapshot({
+      repoRoot,
+      now: new Date("2026-07-04T12:00:00.000Z"),
+      snapshot: { source: "generic-browser", offers: [offer] },
+    });
+  } catch (err) {
+    caught = err;
+  }
+
+  assert.ok(caught, "an export failure must not be swallowed as a silent success");
+  assert.ok(caught instanceof ExportFailedError);
+  assert.equal(caught.code, "EXPORT_FAILED");
+  assert.equal(caught.committed, true, "the db write already committed before export ran");
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(rows.length, 1, "the sourced row must still have committed");
+  const jdAbsPath = userPath({ repoRoot }, rows[0].artifacts.jd);
+  assert.equal(
+    readFileSync(jdAbsPath, "utf8").includes("export-failure regression"),
+    true,
+    "the JD artifact must already exist, since the write happens before the row commits"
+  );
+});
+
+test("two offers for the same posting in ONE batch (direct Workday, then a HiringCafe bridge) merge to one row whose aliases a later HiringCafe-only retry can still resolve", () => {
+  // CR-29 round 2/4: reconcileOffersBeforeCapture used to check every offer
+  // in a batch only against PERSISTED rows (buildDbSeenSets), so when the
+  // direct Workday offer and its HiringCafe bridge arrived in the SAME
+  // batch, the bridge was correctly recognized as a same-batch duplicate,
+  // but the alias merge (sourcedMergeIdentityAlias) looked it up in the DB,
+  // where the direct offer hadn't landed yet — a silent no-op. The bridge's
+  // aggregator reqId was then lost, and a LATER HiringCafe-only capture (no
+  // outbound Workday URL at all) inserted a second row instead of resolving
+  // back to the first.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const first = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-04T12:00:00.000Z"),
+    snapshot: {
+      source: "mixed-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Senior Engineer",
+          url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+          location: "Boston, MA",
+          source: "workday-browser",
+          rawText: "The direct Workday board capture.",
+        },
+        {
+          company: "Acme",
+          title: "Senior Engineer",
+          hiringCafeUrl: "https://hiring.cafe/job/swfwvwmaq6basefz",
+          url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+          reqId: "hiringcafe:swfwvwmaq6basefz",
+          location: "Boston, MA",
+          source: "hiringcafe-browser",
+          rawText: "The bridged HiringCafe capture, same batch as the direct one.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(first.persistedRows, 1);
+  assert.equal(first.duplicates, 1);
+
+  const afterFirstBatch = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(afterFirstBatch.length, 1, "one row for both same-batch representations");
+  assert.ok(
+    afterFirstBatch[0].aliasKeys?.includes("req:hiringcafe:swfwvwmaq6basefz"),
+    "the same-batch bridge's alias must be merged onto the accepted row"
+  );
+
+  const hiringCafeOnly = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-05T12:00:00.000Z"),
+    snapshot: {
+      source: "hiringcafe-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Senior Engineer",
+          url: "https://hiring.cafe/job/swfwvwmaq6basefz",
+          reqId: "hiringcafe:swfwvwmaq6basefz",
+          location: "Boston, MA",
+          source: "hiringcafe-browser",
+          rawText: "A later HiringCafe-only republish, no Workday URL at all.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(hiringCafeOnly.persistedRows, 0);
+  assert.equal(hiringCafeOnly.duplicates, 1);
+
+  const finalRows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(finalRows.length, 1, "still one row after the alias-only retry");
+  assert.equal(finalRows[0].id, afterFirstBatch[0].id);
 });

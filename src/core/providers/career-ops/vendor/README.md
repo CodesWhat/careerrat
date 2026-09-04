@@ -48,7 +48,12 @@ either replaced, extended, or added to them:
   so a direct board URL and the same posting republished on a second site
   never collapsed to one key. The guard's character class was broadened to
   accept hyphens/underscores throughout; behavior for every previously-passing
-  shape is unchanged.
+  shape is unchanged. A third local fix (CR-29 round 4) replaced that same
+  guard's single regex with an equivalent linear check
+  (`isRequisitionIdShaped`): the broadened character class made the pattern
+  catastrophically backtrack on a long failing base (~1.15s on a 2,000-char
+  probe), which is enough to block the event loop before a fetch timeout
+  would apply. The accepted/rejected shapes are unchanged.
 - `_types.js` (a CareerRat-local extension of the JSDoc `@typedef`s) gained
   upstream's new optional `dedupKey` on the `Provider` contract: a
   provider-scoped identifier used where URL normalization is too coarse (e.g.

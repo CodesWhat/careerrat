@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { after, test } from "node:test";
 
+import { buildRepoSeenIds } from "../scripts/delta-sourced.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
 import {
   buildOfferIdentitySet,
   diffSnapshotOffers,
@@ -13,6 +16,26 @@ import {
   renderDeltaMarkdown,
   summarizeDelta,
 } from "../src/core/scoring/sourced-delta.mjs";
+
+const cleanupRoots = [];
+
+function tempRepo() {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-sourced-delta-"));
+  cleanupRoots.push(repoRoot);
+  mkdirSync(join(repoRoot, "workspace"), { recursive: true });
+  return repoRoot;
+}
+
+after(() => {
+  closeAll();
+  for (const root of cleanupRoots.splice(0)) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  }
+});
 
 test("uses req ids before normalized URLs for stable offer identity", () => {
   assert.equal(
@@ -229,4 +252,78 @@ test("renders baseline deltas without a previous file path", () => {
 
   assert.match(markdown, /Previous: `empty baseline/);
   assert.match(markdown, /Acme/);
+});
+
+test("buildRepoSeenIds includes a persisted identity alias in DB mode, so a HiringCafe-only offer is not reported as repo-new", () => {
+  // CR-29 round 4: buildSeenSets' tracker.json/jobs-frontmatter projection
+  // only reads each row's link/co/role, so a persisted identity alias (added
+  // onto a canonical row's aliasKeys[] when an earlier duplicate's OTHER
+  // representation was folded onto it) never reached repoSeen through it,
+  // even though the alias is present on the exported row. A HiringCafe-only
+  // representation of an already-stored direct Workday posting would then
+  // show up under --repo-new-only even though DB ingestion already
+  // recognizes it as the same row.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "workday:acme.wd5.myworkdayjobs.com:jr12345",
+        company: "Acme",
+        role: "Senior Engineer",
+        status: "sourced",
+        source: "scanner",
+        channel: "board",
+        link: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+        loc: "Boston, MA",
+        base: "verify",
+        fitScore: 80,
+        fitBucket: "high",
+        fitBasis: "triage",
+        gate: "likely-keep",
+        sourcedAt: "2026-07-05T00:00:00Z",
+        updatedAt: "2026-07-05T00:00:00Z",
+        artifacts: {},
+        // Persisted by an earlier merge (sourcedMergeIdentityAliasBatch /
+        // sourcedUpsertBatch's own inline duplicate merge) when a bridged
+        // HiringCafe capture of this same posting was suppressed.
+        aliasKeys: ["req:hiringcafe:swfwvwmaq6basefz"],
+      },
+    ],
+  });
+
+  const seenIds = buildRepoSeenIds({ repoRoot });
+  assert.ok(
+    seenIds.has("hiringcafe:swfwvwmaq6basefz"),
+    "the persisted alias must participate in the DB-mode repo-seen set"
+  );
+
+  const delta = diffSnapshotOffers({
+    current: [
+      {
+        company: "Acme",
+        title: "Senior Engineer",
+        url: "https://hiring.cafe/job/swfwvwmaq6basefz",
+        reqId: "hiringcafe:swfwvwmaq6basefz",
+      },
+    ],
+    previous: [],
+    seenIds,
+  });
+
+  assert.equal(delta.newOffers.length, 1);
+  assert.equal(
+    delta.newOffers[0].repoDuplicate,
+    true,
+    "an alias-only representation of an already-stored row must not be reported as repo-new"
+  );
+});
+
+test("buildRepoSeenIds falls back to the legacy tracker.json builder when there is no DB", () => {
+  const repoRoot = tempRepo();
+  // No openDb() call: this repo has no SQLite database at all.
+  const seenIds = buildRepoSeenIds({ repoRoot });
+  assert.deepEqual(seenIds, new Set());
 });

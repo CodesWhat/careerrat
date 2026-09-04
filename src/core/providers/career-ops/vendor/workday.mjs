@@ -320,10 +320,38 @@ export function workdayDedupKey(job) {
   // Broadened to accept hyphens/underscores throughout while keeping the
   // constraint that a genuine reqId-shaped base has a digit and ends in 2+
   // trailing digits.
+  //
+  // CareerRat-local fix (2026-09-04, CR-29 round 4). That broadened check
+  // was still a single regex, `/^[a-z0-9_-]*\d[a-z0-9_-]*\d{2,}$/`: two
+  // overlapping `[a-z0-9_-]*` groups that can both consume the same digits,
+  // separated only by one mandatory `\d`. A long failing base (allowed
+  // characters throughout, no valid trailing-digit shape) makes the engine
+  // backtrack through every split point between the two groups — quadratic
+  // in the length of the run, and a 2,000-character probe measured at
+  // ~1.15s synchronously blocking the event loop before any fetch timeout
+  // applies. Replaced with isRequisitionIdShaped below: the same three
+  // conditions (allowed characters only, a 2+ digit trailing run, at least
+  // one more digit before that run) checked with fixed-cost regexes and a
+  // slice instead of backtracking search. Verified equivalent to the old
+  // pattern by exhaustive enumeration over both alphabets up to length 7
+  // (0 mismatches); every shape that previously passed (or failed) still
+  // does.
   const m = raw.match(/^(.*?)-(\d{1,2})$/);
-  const reqId = m && /^[a-z0-9_-]*\d[a-z0-9_-]*\d{2,}$/.test(m[1]) ? m[1] : raw;
+  const reqId = m && isRequisitionIdShaped(m[1]) ? m[1] : raw;
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
+}
+
+// Linear replacement for the old `/^[a-z0-9_-]*\d[a-z0-9_-]*\d{2,}$/` check
+// (see the CR-29 round 4 note above workdayDedupKey's use of this). A value
+// is requisition-ID-shaped when: every character is an allowed one, it ends
+// in a run of 2+ digits, and at least one further digit appears before that
+// trailing run.
+function isRequisitionIdShaped(value) {
+  if (!/^[a-z0-9_-]+$/.test(value)) return false;
+  if (value.length < 3) return false;
+  if (!/^\d{2}$/.test(value.slice(-2))) return false;
+  return /\d/.test(value.slice(0, -2));
 }
 
 export function parseWorkdayResponse(json, entry) {

@@ -6,7 +6,7 @@ import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../db/verbs/source-config.mjs";
 import {
-  sourcedMergeIdentityAlias,
+  sourcedMergeIdentityAliasBatch,
   sourcedReconcilePolicyBatch,
   sourcedUpsertBatch,
 } from "../db/verbs/sourced.mjs";
@@ -15,7 +15,12 @@ import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
 import { stringifyYaml } from "../profile/yaml.mjs";
 import { trimEdgeCharacter } from "../text/slug.mjs";
-import { addPostingIdentity, postingIdentityIsSeen } from "./sourced-identity.mjs";
+import {
+  addPostingIdentity,
+  identityAliasAdditions,
+  identityKeysWithAliases,
+  postingIdentityKeys,
+} from "./sourced-identity.mjs";
 import {
   extractCompBand,
   requalifyCanonicalOffers,
@@ -407,6 +412,13 @@ export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOStrin
       artifacts: offer.artifacts || {},
       note: compactNote(offer),
       ...(sourceMeta ? { sourceMeta } : {}),
+      // Carries forward any same-batch alias identities reconcileOffersBeforeCapture
+      // merged onto this offer (CR-29 round 4, see mergeOfferIdentityAlias below) so
+      // the freshly inserted row is born already answering for the duplicate's other
+      // identity, instead of only picking that up on a LATER stand-alone merge.
+      ...(Array.isArray(offer.aliasKeys) && offer.aliasKeys.length
+        ? { aliasKeys: offer.aliasKeys }
+        : {}),
       scanner: {
         reqId: offer.reqId || null,
         key: offer.key || null,
@@ -430,6 +442,7 @@ function persistScanOffersIfDb({
   guard,
   dedupeCanonical,
   prepareAcceptedRow,
+  commitAcceptedArtifact,
 } = {}) {
   if (!dbExists({ repoRoot, env })) return null;
   const rows = sourcedRowsFromScanOffers(offers, nowIso);
@@ -441,28 +454,66 @@ function persistScanOffersIfDb({
     guard,
     dedupeCanonical,
     prepareAcceptedRow,
+    commitAcceptedArtifact,
   });
   return { ...persisted, rows };
+}
+
+// Merges `duplicate`'s identity keys onto `canonicalOffer` IN MEMORY (CR-29
+// round 4), for a duplicate whose match is another offer accepted earlier in
+// THIS SAME BATCH rather than an already-persisted DB row. sourcedMergeIdentityAlias
+// (the DB verb) only ever finds a match for a row that's already durable, so
+// calling it here — before the canonical offer has even reached
+// sourcedUpsertBatch — was always a silent no-op: the alias was dropped, and
+// a LATER capture carrying only the duplicate's other representation (e.g. a
+// HiringCafe-only republish with no outbound board URL) inserted as a second
+// row instead of resolving back to the canonical one. Mutating the offer
+// object directly means sourcedRowsFromScanOffers (see its aliasKeys
+// passthrough above) carries the merge into the row sourcedUpsertBatch
+// eventually inserts, so the canonical row is born already answering for it.
+function mergeOfferIdentityAlias(canonicalOffer, duplicate, seenPostingKeys, acceptedByKey) {
+  const additions = identityAliasAdditions(canonicalOffer, duplicate);
+  if (!additions.length) return;
+  canonicalOffer.aliasKeys = [...(canonicalOffer.aliasKeys || []), ...additions];
+  for (const key of additions) {
+    seenPostingKeys.add(key);
+    acceptedByKey.set(key, canonicalOffer);
+  }
 }
 
 function reconcileOffersBeforeCapture({ repoRoot, env, offers, dedupeCanonical }) {
   if (!dedupeCanonical) return { offers, duplicates: 0 };
   const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
+  // Every identity key an offer ACCEPTED so far this batch answers for
+  // (its own keys plus any aliases already merged onto it), so a LATER
+  // duplicate in the same batch can be merged onto the right in-memory
+  // offer instead of falling through to the DB-only merge path below.
+  const acceptedByKey = new Map();
   const accepted = [];
+  const persistedDuplicates = [];
   let duplicates = 0;
   for (const offer of offers) {
-    if (postingIdentityIsSeen(offer, seenPostingKeys)) {
+    const matchKey = postingIdentityKeys(offer).find((key) => seenPostingKeys.has(key));
+    if (matchKey) {
       duplicates++;
-      // Persist the union of this discarded offer's identity keys onto
-      // whichever stored row it collided with (CR-29 round 3), so a LATER
-      // capture that only carries one of ITS other representations (e.g. an
-      // aggregator relisting with no outbound board URL) still resolves
-      // back to that same canonical row instead of inserting a duplicate.
-      sourcedMergeIdentityAlias({ repoRoot, env, offer });
+      const canonicalOffer = acceptedByKey.get(matchKey);
+      if (canonicalOffer) {
+        mergeOfferIdentityAlias(canonicalOffer, offer, seenPostingKeys, acceptedByKey);
+      } else {
+        // Matched an already-persisted DB row: batched below (CR-29 round 4)
+        // instead of one standalone sourcedMergeIdentityAlias call per
+        // offer, which rebuilt the whole stored posting index and opened
+        // its own transaction/export for every suppressed duplicate.
+        persistedDuplicates.push(offer);
+      }
       continue;
     }
     addPostingIdentity(seenPostingKeys, offer);
+    for (const key of identityKeysWithAliases(offer)) acceptedByKey.set(key, offer);
     accepted.push(offer);
+  }
+  if (persistedDuplicates.length) {
+    sourcedMergeIdentityAliasBatch({ repoRoot, env, offers: persistedDuplicates });
   }
   return { offers: accepted, duplicates };
 }
@@ -487,11 +538,13 @@ export function captureAndPersistOffersIfDb({
       ok: true,
       persistedRows: 0,
       duplicates: reconciled.duplicates,
+      failed: 0,
       offers: [],
       persisted: {
         created: 0,
         updated: 0,
         duplicates: 0,
+        failed: 0,
         acceptedIds: [],
       },
     };
@@ -503,8 +556,20 @@ export function captureAndPersistOffersIfDb({
   // them actually lands, so writing the deterministic artifact path
   // immediately here let a row that loses that check (e.g. the same
   // explicit reqId arriving with a changed URL/body) overwrite the winning
-  // row's already-accepted content. Only committed for ids that come back
-  // in persisted.acceptedIds below.
+  // row's already-accepted content.
+  //
+  // The actual write is committed from INSIDE sourcedUpsertBatch's write
+  // transaction (CR-29 round 4, via commitAcceptedArtifact below), right
+  // after the inner duplicate check decides a row IS the accepted one and
+  // before that row's putRow lands. Previously the write happened here,
+  // AFTER persistScanOffersIfDb (and the transaction/export inside it) had
+  // already returned — so a compatibility-export failure, or the write
+  // itself failing, left a durable row referencing a JD that was never
+  // written, and reconciliation would reject a retry as a duplicate,
+  // permanently losing the description. Committing pre-putRow means a write
+  // failure is caught by sourcedUpsertBatch and that row is simply never
+  // inserted (see commitAcceptedArtifact's try/catch there): no dangling
+  // row, and the identity stays unseen so a retry can still succeed.
   const pendingWritesById = new Map();
   const uncapturedRows = sourcedRowsFromScanOffers(reconciled.offers, savedAt.toISOString());
   const offerById = new Map(
@@ -528,10 +593,10 @@ export function captureAndPersistOffersIfDb({
       pendingWritesById.set(String(row.id), commit);
       return sourcedRowsFromScanOffers([preparedOffer], savedAt.toISOString())[0];
     },
+    commitAcceptedArtifact: (acceptedRow) => {
+      pendingWritesById.get(String(acceptedRow.id))?.();
+    },
   });
-  for (const id of persisted?.acceptedIds || []) {
-    pendingWritesById.get(String(id))?.();
-  }
   const acceptedOffers = (persisted?.acceptedIds || [])
     .map((id) => acceptedOffersById.get(String(id)))
     .filter(Boolean);
@@ -539,6 +604,7 @@ export function captureAndPersistOffersIfDb({
     ok: true,
     persistedRows: (persisted?.created || 0) + (persisted?.updated || 0),
     duplicates: reconciled.duplicates + (persisted?.duplicates || 0),
+    failed: persisted?.failed || 0,
     offers: acceptedOffers,
     persisted,
   };

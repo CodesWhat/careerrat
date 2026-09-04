@@ -2201,6 +2201,32 @@ test("dedupes cross-site disambiguators on requisition bases with internal hyphe
   assert.ok(directKeys.some((key) => aggregatorKeys.includes(key)));
 });
 
+test("workdayDedupKey resolves a long failing requisition base in bounded time (CR-29 round 4)", () => {
+  // The round-3 broadened shape check was one regex,
+  // /^[a-z0-9_-]*\d[a-z0-9_-]*\d{2,}$/: two overlapping `[a-z0-9_-]*` groups
+  // that can both consume the same digits, separated by one mandatory `\d`.
+  // A base that's entirely digits except for a single trailing non-digit
+  // never satisfies the pattern's `\d{2,}$` requirement no matter how the
+  // two groups split the string, so the engine backtracks through every
+  // split point before giving up — a 2,000-char probe measured ~1.15s, a
+  // 3,000-char probe ~3.9s, synchronously blocking the event loop before
+  // any fetch timeout applies. The linear replacement (isRequisitionIdShaped
+  // in workday.mjs) must resolve the same shape in bounded time regardless
+  // of length.
+  const failingBase = `${"9".repeat(4999)}x`; // 5,000 chars: all digits but the last
+  const url = `https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_${failingBase}-12`;
+
+  const start = process.hrtime.bigint();
+  const key = workdayDedupKey({ url });
+  const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+
+  assert.ok(elapsedMs < 50, `expected under 50ms, took ${elapsedMs}ms`);
+  // The base isn't requisition-ID-shaped (it doesn't end in 2+ digits), so
+  // the "-12" is kept as part of the requisition id rather than stripped as
+  // a cross-site disambiguator.
+  assert.equal(key, `workday:acme.wd5.myworkdayjobs.com:${failingBase}-12`);
+});
+
 test("extractReqId does not derive a requisition identity from a Workday board/portal root URL", () => {
   // CR-29 round 3: delegating every myworkdayjobs.com URL to workdayDedupKey
   // accepted board paths whose final segment merely contains an underscore

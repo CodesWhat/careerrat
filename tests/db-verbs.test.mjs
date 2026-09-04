@@ -12,6 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
 import { closeAll, dbFilePath, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { sourcedMergeIdentityAliasBatch } from "../src/core/db/verbs/sourced.mjs";
 import {
   activityAppend,
   analyticsRefresh,
@@ -1325,6 +1326,148 @@ test("sourcedUpsertBatch prepares rows before opening its write transaction", ()
   });
 
   assert.equal(prepared, true);
+});
+
+test("sourcedUpsertBatch commits the accepted artifact before putRow, and never inserts a row whose commit fails", () => {
+  // CR-29 round 4: the caller-supplied side effect a row's acceptance
+  // depends on (sourced-persistence.mjs's deferred JD artifact write) must
+  // run and succeed BEFORE that row is written, not after the whole batch's
+  // transaction has already committed. Proven two ways: order (the write
+  // callback fires before the row exists in the db) and failure isolation
+  // (a row whose commit throws is skipped entirely — no row, no acceptedIds
+  // entry — while the rest of the batch still lands).
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const order = [];
+  const result = sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      { id: "sourced-artifact-ok", company: "Artifact Co", role: "OK Role" },
+      { id: "sourced-artifact-fails", company: "Artifact Co", role: "Failing Role" },
+    ],
+    commitAcceptedArtifact(acceptedRow) {
+      order.push(`commit:${acceptedRow.id}`);
+      if (acceptedRow.id === "sourced-artifact-fails") {
+        throw new Error("simulated artifact write failure");
+      }
+    },
+  });
+
+  assert.equal(result.created, 1);
+  assert.equal(result.failed, 1);
+  assert.deepEqual(result.acceptedIds, ["sourced-artifact-ok"]);
+  assert.deepEqual(result.failedIds, ["sourced-artifact-fails"]);
+
+  assert.equal(
+    Boolean(db.prepare("SELECT id FROM sourced WHERE id = ?").get("sourced-artifact-ok")),
+    true
+  );
+  assert.equal(
+    Boolean(db.prepare("SELECT id FROM sourced WHERE id = ?").get("sourced-artifact-fails")),
+    false,
+    "a row whose artifact commit failed must never be persisted"
+  );
+
+  assert.deepEqual(order, ["commit:sourced-artifact-ok", "commit:sourced-artifact-fails"]);
+});
+
+test("sourcedMergeIdentityAliasBatch merges a whole batch of duplicates through one index build and one write", () => {
+  // CR-29 round 4: sourced-persistence.mjs used to call the standalone
+  // sourcedMergeIdentityAlias once PER suppressed duplicate, and each call
+  // rebuilt the entire stored posting index (a full read + JSON.parse of
+  // every applications/sourced row) and opened its own transaction/export.
+  // The batched verb must build that index exactly once for the whole call,
+  // regardless of how many duplicates it's merging.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-alpha",
+        company: "Acme",
+        role: "Alpha Engineer",
+        link: "https://jobs.example.test/acme/alpha",
+        fitScore: 70,
+      },
+      {
+        id: "sourced-beta",
+        company: "Acme",
+        role: "Beta Engineer",
+        link: "https://jobs.example.test/acme/beta",
+        fitScore: 70,
+      },
+      {
+        id: "sourced-gamma",
+        company: "Acme",
+        role: "Gamma Engineer",
+        link: "https://jobs.example.test/acme/gamma",
+        fitScore: 70,
+      },
+    ],
+  });
+  const beforeMeta = readMeta(db);
+
+  const duplicateOffers = [
+    {
+      company: "Acme",
+      title: "Alpha Engineer",
+      url: "https://jobs.example.test/acme/alpha",
+      reqId: "hiringcafe:alpha",
+    },
+    {
+      company: "Acme",
+      title: "Beta Engineer",
+      url: "https://jobs.example.test/acme/beta",
+      reqId: "hiringcafe:beta",
+    },
+    {
+      company: "Acme",
+      title: "Gamma Engineer",
+      url: "https://jobs.example.test/acme/gamma",
+      reqId: "hiringcafe:gamma",
+    },
+  ];
+
+  let indexQueries = 0;
+  const originalPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    if (/^SELECT id, data FROM (applications|sourced)$/.test(sql)) indexQueries++;
+    return originalPrepare(sql);
+  };
+  let result;
+  try {
+    result = sourcedMergeIdentityAliasBatch({ repoRoot, offers: duplicateOffers });
+  } finally {
+    db.prepare = originalPrepare;
+  }
+
+  assert.equal(result.merged, 3);
+  // storedPostingIndex issues exactly one SELECT per table (applications,
+  // sourced) — ONE index build for the whole batch, not one per duplicate
+  // (which would be 6 for 3 duplicates).
+  assert.equal(indexQueries, 2, "the posting index must be built exactly once for the batch");
+
+  const afterMeta = readMeta(db);
+  assert.equal(
+    afterMeta.version,
+    beforeMeta.version + 1,
+    "meta must bump exactly once for the whole batch, not once per duplicate"
+  );
+
+  const rows = db
+    .prepare("SELECT id, data FROM sourced ORDER BY id")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  for (const row of rows) {
+    assert.ok(
+      row.aliasKeys?.some((key) => key.startsWith("req:hiringcafe:")),
+      `${row.id} should have gained its HiringCafe alias`
+    );
+  }
 });
 
 test("sourced policy reconciliation rolls back when the active-search guard rejects the write", () => {
