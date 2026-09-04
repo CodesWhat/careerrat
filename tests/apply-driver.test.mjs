@@ -348,6 +348,54 @@ test("a text file disguised as a PDF is never uploaded to a required resume cont
   }
 });
 
+test("a .txt source with no PDF or DOCX is never auto-uploaded to a required resume control", async () => {
+  // Regression: uploadArtifacts falls back to artifacts.resume (the raw
+  // stored source) whenever no PDF or DOCX exists. That source is
+  // frequently a well-formed, non-corrupt .txt Markdown file — a valid
+  // export/registration artifact per validDocumentArtifact — but it was
+  // never meant to be handed to an ATS upload control directly.
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
+  try {
+    const resumePath = join(repoRoot, "workspace", "tailored", "resume.txt");
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(resumePath, "# Resume\n\nMarkdown source body.\n", "utf8");
+    const snapshot = {
+      origin: GREENHOUSE_URL,
+      pageText: 'Application form\n- button "Resume" [required, ref=e1]\nSubmit application',
+      refs: refsOf([
+        ["e1", "button", "Resume", true],
+        ["e2", "button", "Submit Application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([snapshot]);
+    const execute = makeDriver({ ops, repoRoot });
+
+    const result = await execute({
+      applicationId: "app-txt-source-only",
+      application: {
+        id: "app-txt-source-only",
+        link: GREENHOUSE_URL,
+        artifacts: { resume: "workspace/tailored/resume.txt" },
+      },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(result.session.uploadedCount, 0);
+    assert.equal(
+      log.some((entry) => entry.op === "upload"),
+      false
+    );
+    assert.equal(
+      result.session.unresolved.some((entry) => entry.label === "Resume"),
+      true
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("a text file disguised as a DOCX is never uploaded to a required Workday resume control", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
   try {

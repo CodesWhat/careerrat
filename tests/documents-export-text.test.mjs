@@ -203,6 +203,36 @@ test("renderResumeText resolves a bold link (bold inside) without leaking markdo
   assert.doesNotMatch(text, /[*[\]]/);
 });
 
+test("renderResumeText appends a mixed-formatting link label's URL once, not once per formatting run", () => {
+  // Regression: a link label with mixed plain/bold/italic text (e.g.
+  // "Read **Example** docs") recurses into three runs — plain, bold,
+  // plain — all stamped with the same href. Flattening run-by-run used to
+  // append the destination after every run instead of once per link.
+  const text = renderResumeText("[Read **Example** docs](https://example.com)\n");
+  assert.match(text, /^Read Example docs \(https:\/\/example\.com\)$/m);
+  const occurrences = text.match(/https:\/\/example\.com/g) || [];
+  assert.equal(occurrences.length, 1, "the destination must appear exactly once");
+});
+
+test("renderResumeText appends a mixed plain/italic/bold link label's URL once in body text", () => {
+  const text = renderResumeText(
+    "See the [full *architecture* review and **appendix**](https://example.com/doc) for details.\n"
+  );
+  assert.match(
+    text,
+    /^See the full architecture review and appendix \(https:\/\/example\.com\/doc\) for details\.$/m
+  );
+  const occurrences = text.match(/https:\/\/example\.com\/doc/g) || [];
+  assert.equal(occurrences.length, 1, "the destination must appear exactly once");
+});
+
+test("renderResumeText appends a mixed-formatting link label's URL once in a heading, uppercased and case-preserved", () => {
+  const text = renderResumeText("## [Read **Example** Docs](https://Example.com/Path)\n");
+  assert.match(text, /^READ EXAMPLE DOCS \(https:\/\/Example\.com\/Path\)$/m);
+  const occurrences = text.match(/https:\/\/Example\.com\/Path/g) || [];
+  assert.equal(occurrences.length, 1, "the destination must appear exactly once, case preserved");
+});
+
 // ---------------------------------------------------------------------------
 // Lists: a same-depth type change resets the ordered counter
 // ---------------------------------------------------------------------------

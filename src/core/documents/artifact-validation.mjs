@@ -57,3 +57,16 @@ export function validDocumentArtifact(path) {
     return false;
   }
 }
+
+// validDocumentArtifact accepts .txt so a plain-text export can be
+// registered and served, but the apply-driver's automatic-upload candidate
+// list falls back to artifacts.resume/coverLetter — the raw stored source,
+// which is frequently a .txt Markdown file — whenever no PDF or DOCX
+// exists. That source is meant for rendering, not for handing to an ATS
+// upload control. Restrict automatic-upload validation to the formats an
+// ATS actually accepts.
+export function validUploadArtifact(path) {
+  const extension = extname(String(path || "")).toLowerCase();
+  if (extension !== ".pdf" && extension !== ".docx") return false;
+  return validDocumentArtifact(path);
+}

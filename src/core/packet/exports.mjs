@@ -3,11 +3,13 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, extname, join, normalize, relative, sep } from "node:path";
+import { basename, dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { appRegisterPacketArtifacts as registerPacketArtifacts } from "../db/verbs.mjs";
@@ -19,8 +21,54 @@ function cleanText(value) {
   return String(value || "").trim();
 }
 
+function safeRealpath(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+// The confined text writer (writeTextArtifactConfined) returns a
+// realpath-canonical destination when it validates against a trusted root,
+// while PDF/DOCX destinations stay lexical (built from the lexical
+// workspaceDir). Relativizing a canonical absPath against a lexical
+// workspaceDir under a symlinked root (a symlinked CAREERRAT_HOME, or
+// macOS's /var-to-/private/var alias) produces workspace/../ segments that
+// registration rejects. Canonicalize both sides before deriving the stored
+// relative path so the comparison is apples to apples regardless of which
+// namespace either side started in.
 function workspaceDisplayPath(workspaceDir, absPath) {
-  return `workspace/${relative(workspaceDir, absPath).replaceAll(sep, "/")}`;
+  const canonicalWorkspaceDir = safeRealpath(workspaceDir);
+  const canonicalAbsPath = safeRealpath(absPath);
+  return `workspace/${relative(canonicalWorkspaceDir, canonicalAbsPath).replaceAll(sep, "/")}`;
+}
+
+// Probes the real filesystem rather than assuming by platform: a
+// case-sensitive volume can be mounted on macOS, and a case-insensitive one
+// mounted on Linux. Writes and immediately removes a uniquely named marker
+// file, then checks whether its upper-cased name resolves to the same file.
+function detectCaseInsensitiveFs(dir) {
+  const probeName = `.careerrat-fs-probe-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const probePath = join(dir, probeName);
+  try {
+    writeFileSync(probePath, "", { flag: "wx" });
+  } catch {
+    return false;
+  }
+  let insensitive = false;
+  try {
+    insensitive = existsSync(join(dir, probeName.toUpperCase()));
+  } catch {
+    insensitive = false;
+  } finally {
+    try {
+      unlinkSync(probePath);
+    } catch {
+      // best-effort cleanup of the probe file
+    }
+  }
+  return insensitive;
 }
 
 function stripWorkspacePrefix(value) {
@@ -48,6 +96,20 @@ const FORMAT_EXTENSION = { pdf: ".pdf", docx: ".docx", text: ".txt" };
 
 function outputKey(kind, format) {
   return `${kind}${FORMAT_SUFFIX[format] || "Pdf"}`;
+}
+
+// Merges a run's artifact deltas onto the prior manifest artifacts, but an
+// explicit `null` in `current` deletes the key instead of overwriting it
+// with null — the packet manifest schema requires artifact values to be
+// workspace-relative strings, so a cleared format key must vanish rather
+// than persist as a literal null.
+function mergeArtifacts(prior, current) {
+  const merged = { ...(prior || {}) };
+  for (const [key, value] of Object.entries(current || {})) {
+    if (value === null) delete merged[key];
+    else if (value !== undefined) merged[key] = value;
+  }
+  return merged;
 }
 
 function titleFor(app, kind) {
@@ -261,24 +323,66 @@ export async function exportPacketArtifacts({
   // colliding with its own text export) would overwrite that source. Check
   // the full set of stored source paths, not just the one being exported,
   // since a distinct source could also land there.
-  const sourcePaths = new Set(
+  //
+  // A lexical, case-sensitive string comparison misses two real collisions:
+  // a symlink alias whose lexical path differs from the source it points
+  // at, and an extension-case alias (resume.TXT vs resume.txt) on a
+  // case-insensitive filesystem. Compare canonical filesystem identity
+  // instead — realpath() for anything that exists, and canonical-parent +
+  // basename for a destination that doesn't exist yet (the common case for
+  // an export destination) — folded to lowercase when the workspace
+  // filesystem is itself case-insensitive.
+  const caseInsensitiveFs = detectCaseInsensitiveFs(workspaceDir);
+  const canonicalIdentity = (path) => {
+    let identity;
+    try {
+      identity = realpathSync(path);
+    } catch {
+      const parent = dirname(path);
+      let canonicalParent;
+      try {
+        canonicalParent = realpathSync(parent);
+      } catch {
+        canonicalParent = resolve(parent);
+      }
+      identity = join(canonicalParent, basename(path));
+    }
+    return caseInsensitiveFs ? identity.toLowerCase() : identity;
+  };
+  // Reserved identities start from every stored source path (an outBase
+  // must never collide with a source) and grow as each source in this
+  // batch picks its output base, so two sources that would otherwise
+  // resolve to the same destination (e.g. resumeSource=application.txt and
+  // coverLetterSource=application.md both stripping to "application")
+  // never both land on application-export.txt.
+  const reservedIdentities = new Set(
     sourceEntries(sources)
       .map(([, storedPath]) => resolveWorkspacePath(workspaceDir, storedPath))
       .filter(Boolean)
+      .map(canonicalIdentity)
   );
-  const collidesWithSource = (base) =>
+  const isReserved = (base) =>
     selectedFormats.some((format) => {
       const ext = FORMAT_EXTENSION[format];
-      return ext ? sourcePaths.has(`${base}${ext}`) : false;
+      return ext ? reservedIdentities.has(canonicalIdentity(`${base}${ext}`)) : false;
     });
-  const distinctOutBase = (base) => {
-    if (!collidesWithSource(base)) return base;
-    let candidate = `${base}-export`;
-    let suffix = 2;
-    while (collidesWithSource(candidate)) {
-      candidate = `${base}-export-${suffix}`;
-      suffix += 1;
+  const reserve = (base) => {
+    for (const format of selectedFormats) {
+      const ext = FORMAT_EXTENSION[format];
+      if (ext) reservedIdentities.add(canonicalIdentity(`${base}${ext}`));
     }
+  };
+  const distinctOutBase = (base) => {
+    let candidate = base;
+    if (isReserved(candidate)) {
+      candidate = `${base}-export`;
+      let suffix = 2;
+      while (isReserved(candidate)) {
+        candidate = `${base}-export-${suffix}`;
+        suffix += 1;
+      }
+    }
+    reserve(candidate);
     return candidate;
   };
 
@@ -316,6 +420,19 @@ export async function exportPacketArtifacts({
     // standalone (without generatePacket) still leaves the packet readable.
     artifacts[kind] = storedPath;
     artifacts[`${kind}GeneratedAt`] = generatedAt;
+    // Authoritative-format-request semantics: a run that processes `kind`
+    // owns every format key for that kind, not just the ones it was asked
+    // to produce. Seed an explicit null for pdf/docx/text here so a
+    // text-only or docx-only regeneration clears a stale resumePdf left
+    // over from an earlier run instead of merging on top of it — apply
+    // must not still be able to pick an artifact this run never produced.
+    // A format the loop below exports successfully overwrites its null
+    // with the real path; mergeArtifacts (manifest) and
+    // appRegisterPacketArtifacts (app row) both treat a surviving null as
+    // "delete this key".
+    for (const format of ["pdf", "docx", "text"]) {
+      artifacts[outputKey(kind, format)] = null;
+    }
     for (const format of ["pdf", "docx", "text"]) {
       const absPath = result[format];
       if (!selectedFormats.includes(format)) continue;
@@ -358,7 +475,7 @@ export async function exportPacketArtifacts({
     status: uploadReady ? "upload-ready" : "reviewable",
     gapCount: gaps.length,
     gaps,
-    artifacts: { ...(priorManifestForDb.artifacts || {}), ...artifacts },
+    artifacts: mergeArtifacts(priorManifestForDb.artifacts, artifacts),
   };
   const manifestPath = resolveWorkspacePath(workspaceDir, sources.packetManifest);
   if (manifestPath)

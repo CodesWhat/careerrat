@@ -2,13 +2,18 @@
 // node:test suite for validDocumentArtifact's plain-text branch
 // (src/core/documents/artifact-validation.mjs) — the UTF-8 decode check that
 // rejects a corrupt/binary .txt artifact registered under a text extension.
+// Also covers validUploadArtifact, the stricter sibling that restricts
+// apply-driver's automatic-upload candidates to pdf/docx only.
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { validDocumentArtifact } from "../src/core/documents/artifact-validation.mjs";
+import {
+  validDocumentArtifact,
+  validUploadArtifact,
+} from "../src/core/documents/artifact-validation.mjs";
 
 const cleanupRoots = [];
 
@@ -60,4 +65,35 @@ test("validDocumentArtifact rejects text containing a NUL byte", () => {
 test("validDocumentArtifact rejects an empty file", () => {
   const path = writeTxt(Buffer.alloc(0));
   assert.equal(validDocumentArtifact(path), false);
+});
+
+// ---------------------------------------------------------------------------
+// validUploadArtifact: restricts the apply-driver's automatic-upload
+// candidates to pdf/docx even though validDocumentArtifact accepts a valid
+// .txt export for rendering/registration.
+// ---------------------------------------------------------------------------
+
+test("validUploadArtifact rejects a well-formed .txt artifact that validDocumentArtifact accepts", () => {
+  // Regression: apply-driver's upload candidates fall back to
+  // artifacts.resume (the raw stored source, frequently a .txt Markdown
+  // file) whenever no PDF or DOCX exists. That source is fine to export
+  // and register, but was never meant to be handed to an ATS upload
+  // control as-is.
+  const path = writeTxt(Buffer.from("# Resume\n\nMarkdown source body.\n", "utf8"));
+  assert.equal(validDocumentArtifact(path), true, "still a valid export/registration artifact");
+  assert.equal(validUploadArtifact(path), false, "never a valid automatic-upload candidate");
+});
+
+test("validUploadArtifact accepts a well-formed PDF", () => {
+  const dir = tempDir();
+  const path = join(dir, "artifact.pdf");
+  writeFileSync(path, "%PDF-1.4\nfake pdf\n%%EOF\n", "utf8");
+  assert.equal(validUploadArtifact(path), true);
+});
+
+test("validUploadArtifact rejects a corrupt PDF the same way validDocumentArtifact does", () => {
+  const dir = tempDir();
+  const path = join(dir, "artifact.pdf");
+  writeFileSync(path, "not actually a pdf\n", "utf8");
+  assert.equal(validUploadArtifact(path), false);
 });

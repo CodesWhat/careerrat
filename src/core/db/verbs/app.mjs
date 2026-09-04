@@ -1065,13 +1065,20 @@ export function appRegisterPacketArtifacts({
     }
     validatePacketManifest(packetManifest);
 
-    const updatedArtifacts = {
-      ...(app.artifacts || {}),
-      ...Object.fromEntries(
-        Object.entries(artifacts).filter(([, value]) => value !== null && value !== undefined)
-      ),
-      packetGeneratedAt: nowIso(),
-    };
+    // An explicit null in `artifacts` deletes that key from the stored
+    // app row instead of being skipped: exportPacketArtifacts seeds null
+    // for a document kind's unrequested pdf/docx/text keys so a text-only
+    // or docx-only regeneration replaces the kind's artifacts rather than
+    // merging on top of a stale one (e.g. an old resumePdf that apply
+    // could otherwise still pick). A key simply absent from `artifacts`
+    // (undefined) is left untouched, same as before.
+    const updatedArtifacts = { ...(app.artifacts || {}) };
+    for (const [key, value] of Object.entries(artifacts)) {
+      if (value === undefined) continue;
+      if (value === null) delete updatedArtifacts[key];
+      else updatedArtifacts[key] = value;
+    }
+    updatedArtifacts.packetGeneratedAt = nowIso();
     if (note) updatedArtifacts.packetNote = note;
 
     const updated = { ...app, artifacts: updatedArtifacts, packetManifest };

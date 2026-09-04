@@ -5,11 +5,14 @@
 import assert from "node:assert/strict";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -632,6 +635,261 @@ test("exportPacketArtifacts picks a distinct output base instead of overwriting 
     resumeSource,
     "the exported text artifact is not the source itself"
   );
+});
+
+test("a text-only regeneration clears a prior resumePdf so apply cannot still select it", async () => {
+  // Regression for a round-four finding: exportPacketArtifacts used to
+  // merge a run's artifacts onto the prior manifest/app-row artifacts
+  // without clearing formats it didn't (re)produce, so an old resumePdf
+  // from an earlier PDF export survived a later text-only regeneration.
+  // apply-driver prefers resumePdf over resumeText, so the stale PDF could
+  // still be picked and submitted after the candidate asked for a
+  // text-only refresh.
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  const stalePdfPath = writeWorkspaceFile(repoRoot, "tailored/stale-resume.pdf", "%PDF-fake");
+  seedApp(repoRoot, {
+    ...sources,
+    resumePdf: stalePdfPath,
+    resumePdfGeneratedAt: "2026-07-01T00:00:00Z",
+  });
+  assert.equal(readApp(repoRoot).artifacts.resumePdf, stalePdfPath);
+
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.equal(
+    artifacts.resumePdf ?? null,
+    null,
+    "the stale PDF from before the text-only regeneration must not survive"
+  );
+  assert.equal(artifacts.resumeDocx ?? null, null);
+  assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+
+  const manifest = readApp(repoRoot).packetManifest;
+  assert.equal(
+    manifest.artifacts.resumePdf ?? null,
+    null,
+    "the packet manifest's own artifacts must also drop the stale PDF entry"
+  );
+});
+
+test("a docx-only regeneration clears a prior resumePdf the same way", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  const stalePdfPath = writeWorkspaceFile(repoRoot, "tailored/stale-resume.pdf", "%PDF-fake");
+  seedApp(repoRoot, { ...sources, resumePdf: stalePdfPath });
+
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    request: { formats: ["docx"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.equal(artifacts.resumePdf ?? null, null, "docx-only regeneration also clears the PDF");
+  assert.match(artifacts.resumeDocx, /^workspace\/tailored\/.+\.docx$/);
+});
+
+test("distinctOutBase treats an uppercase-extension source as the same filesystem destination its lowercase export would pick", async () => {
+  // Regression: a resumeSource stored with an uppercase extension
+  // (RESUME.TXT) is a distinct string from the lowercase "resume.txt" a
+  // text export naturally computes, but on a case-insensitive volume
+  // they're the same inode. The old lexical Set lookup missed this and
+  // would export straight over the source itself.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(repoRoot, "tailored/resume.TXT", "the original source\n");
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/case-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  seedApp(repoRoot, { resumeSource, packetManifest });
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const sourceAbsPath = join(repoRoot, resumeSource);
+  assert.equal(
+    readFileSync(sourceAbsPath, "utf8"),
+    "the original source\n",
+    "the uppercase-extension source is untouched, byte-for-byte"
+  );
+
+  // Only assert the collision-avoidance suffix on a case-insensitive
+  // filesystem (the default on macOS and Windows); on a case-sensitive
+  // volume "resume.TXT" and "resume.txt" are genuinely different files and
+  // no collision exists to avoid.
+  const caseInsensitiveVolume = existsSync(join(repoRoot, "workspace/tailored/RESUME.TXT"));
+  if (caseInsensitiveVolume) {
+    assert.notEqual(
+      `${calls[0].outBase}.txt`.toLowerCase(),
+      sourceAbsPath.toLowerCase(),
+      "the export destination is case-insensitively distinct from the source path"
+    );
+  }
+});
+
+test("distinctOutBase reserves a symlink alias pointing at the source, instead of overwriting the alias", async () => {
+  // Regression: a symlink that aliases the source under the export's
+  // natural destination name (e.g. resume.txt -> resume.md) is not itself
+  // a registered packet source, so the old lexical Set lookup — which only
+  // compared against stored source strings — never saw it and would have
+  // let the export write straight through the alias onto the source.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(repoRoot, "tailored/resume.md", "# Resume\n\nBody.\n");
+  const aliasPath = join(repoRoot, "workspace/tailored/resume.txt");
+  symlinkSync("resume.md", aliasPath);
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/link-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  seedApp(repoRoot, { resumeSource, packetManifest });
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(
+    readFileSync(join(repoRoot, resumeSource), "utf8"),
+    "# Resume\n\nBody.\n",
+    "the source's bytes must survive, even reached through the symlink alias"
+  );
+  const aliasStat = lstatSync(aliasPath);
+  assert.equal(
+    aliasStat.isSymbolicLink(),
+    true,
+    "the pre-existing symlink alias must survive untouched"
+  );
+  assert.equal(readlinkSync(aliasPath), "resume.md");
+  assert.notEqual(
+    `${calls[0].outBase}.txt`,
+    aliasPath,
+    "the export destination must not be the alias path itself"
+  );
+});
+
+test("resumeSource=application.txt and coverLetterSource=application.md do not both map to application-export.txt", async () => {
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/application.txt",
+    "resume source body\n"
+  );
+  const coverLetterSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/application.md",
+    "cover letter source body\n"
+  );
+  const packetManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/application-packet-manifest.json",
+    JSON.stringify({ appId: "app-export", generatedAt: "2026-07-06T14:00:00Z", uploadReady: true })
+  );
+  seedApp(repoRoot, { resumeSource, coverLetterSource, packetManifest });
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource, coverLetterSource },
+    request: { formats: ["text"] },
+    exportArtifact: fakeExporter(calls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(calls.length, 2);
+  const outBases = calls.map((call) => call.outBase);
+  assert.equal(new Set(outBases).size, 2, "each source must pick a distinct output base");
+
+  const artifacts = readApp(repoRoot).artifacts;
+  assert.notEqual(
+    artifacts.resumeText,
+    artifacts.coverLetterText,
+    "the two exports must not land on the same destination file"
+  );
+  assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+  assert.match(artifacts.coverLetterText, /^workspace\/tailored\/.+\.txt$/);
+});
+
+test("exportPacketArtifacts registers a text artifact through a symlinked workspace root", async () => {
+  // Regression for a round-four finding: writeTextArtifactConfined returns
+  // a realpath-canonical destination once it validates against a trusted
+  // root, but workspaceDisplayPath used to relativize that against the
+  // lexical workspaceDir. Under a symlinked workspace root (mirroring a
+  // symlinked CAREERRAT_HOME or macOS's /var-to-/private/var alias), that
+  // produced workspace/../ segments that registration rejects after the
+  // file and manifest were already written.
+  const realRoot = mkdtempSync(join(tmpdir(), "careerrat-packet-export-real-"));
+  cleanupRoots.push(realRoot);
+  const linkRoot = `${realRoot}-link`;
+  symlinkSync(realRoot, linkRoot);
+  cleanupRoots.push(linkRoot);
+  mkdirSync(join(realRoot, "workspace/tailored"), { recursive: true });
+
+  const sources = seedPacketSources(linkRoot);
+  seedApp(linkRoot, sources);
+  const { exportPacketArtifacts } = await importPacketExports();
+  // The real exportArtifact (not the fakeExporter test double) is required
+  // here: the fake writes straight to `${outBase}.txt` with no realpath
+  // involved, so it never exercises writeTextArtifactConfined's
+  // trusted-root canonicalization — the exact code path this regression is
+  // in. Text-only keeps this fast; no PDF/DOCX rendering is exercised.
+  const { exportArtifact: realExportArtifact } = await import("../src/core/documents/export.mjs");
+
+  const result = await exportPacketArtifacts({
+    repoRoot: linkRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: realExportArtifact,
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  assert.equal(result.registered.artifacts.resumeText.includes("../"), false);
+  assert.match(result.registered.artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
+
+  const artifacts = readApp(linkRoot).artifacts;
+  assert.match(artifacts.resumeText, /^workspace\/tailored\/.+\.txt$/);
 });
 
 test("appRegisterPacketArtifacts stamps source and export fields through the DB-owned write path", async () => {

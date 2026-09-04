@@ -752,21 +752,45 @@ ${body}
 // ---------------------------------------------------------------------------
 
 /**
+ * Collapse a run list into link groups: consecutive runs that share the
+ * same href (including a shared absence of one) merge into a single
+ * group's concatenated text. parseRuns stamps the same href onto every run
+ * a formatted link label recurses into (e.g. `[Read **Example**
+ * docs](url)` produces three runs — plain, bold, plain — all carrying the
+ * same href), so flattening run-by-run would repeat the destination once
+ * per run instead of once per link.
+ *
+ * @param {Array<{text: string, href?: string}>} runs
+ * @returns {Array<{text: string, href?: string}>}
+ */
+function groupRunsByLink(runs) {
+  const groups = [];
+  for (const run of runs || []) {
+    const href = run?.href || undefined;
+    const text = String(run?.text || "");
+    const last = groups[groups.length - 1];
+    if (last && last.href === href) last.text += text;
+    else groups.push({ href, text });
+  }
+  return groups;
+}
+
+/**
  * Flatten a run list (parseRuns output — the same inline model renderDocx
  * builds its WML from) to plain text. A link keeps its visible label and
- * appends the URL in parens so the destination survives losing markdown
- * syntax; every other run type (bold/italic/code/plain) already carries only
- * its bare text.
+ * appends the URL in parens once per link, after the label's final run, so
+ * the destination survives losing markdown syntax without repeating per
+ * formatting run; every other run type (bold/italic/code/plain) already
+ * carries only its bare text.
  *
  * @param {Array<{text: string, href?: string}>} runs
  * @returns {string}
  */
 function runsToPlainText(runs) {
-  return (runs || [])
-    .map((run) => {
-      const text = String(run?.text || "");
-      if (run?.href && run.href !== text) {
-        return text ? `${text} (${run.href})` : run.href;
+  return groupRunsByLink(runs)
+    .map(({ href, text }) => {
+      if (href && href !== text) {
+        return text ? `${text} (${href})` : href;
       }
       return text;
     })
@@ -774,24 +798,23 @@ function runsToPlainText(runs) {
 }
 
 /**
- * Same as runsToPlainText, but for heading text: uppercases each run's
- * visible label only, and never the link destination. A link destination
- * can be case-sensitive (path or query string), so the URL bytes must
- * survive uppercasing untouched.
+ * Same as runsToPlainText, but for heading text: uppercases each link
+ * group's visible label only, and never the link destination. A link
+ * destination can be case-sensitive (path or query string), so the URL
+ * bytes must survive uppercasing untouched.
  *
  * @param {Array<{text: string, href?: string}>} runs
  * @returns {string}
  */
 function headingRunsToPlainText(runs) {
-  return (runs || [])
-    .map((run) => {
-      const text = String(run?.text || "");
-      if (run?.href && run.href !== text) {
+  return groupRunsByLink(runs)
+    .map(({ href, text }) => {
+      if (href && href !== text) {
         const upperText = text.toUpperCase();
-        return upperText ? `${upperText} (${run.href})` : run.href;
+        return upperText ? `${upperText} (${href})` : href;
       }
       // Bare autolink (href === text): preserve the URL's own case.
-      if (run?.href) return text;
+      if (href) return text;
       return text.toUpperCase();
     })
     .join("");
