@@ -59,8 +59,9 @@ executable. Tool-bearing Claude Code runs are the exception: they check
 identity before the boundary-version probe, then check it again
 immediately before the workflow process spawns.
 
-A CLI clears "supported" by being listed as one in the registry, a static
-allowlist that doesn't get re-checked per request. Readiness is different,
+A CLI clears "supported" by being listed as one in the registry. That is a
+static policy decision, not something a probe can change, but normal routing
+still enforces the allowlist on every request. Readiness is different,
 and for Claude Code the version check is tri-state, not pass/fail. Basic
 readiness needs the CLI installed, signed in, and passing the completion
 receipt; a below-floor version (currently `2.1.241`) blocks readiness
