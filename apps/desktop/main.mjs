@@ -21,6 +21,7 @@
 
 import {
   app,
+  autoUpdater as nativeUpdater,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -205,10 +206,18 @@ let pdfRenderer = null;
 let win = null;
 let shuttingDown = false;
 let installUpdateAfterShutdown = false;
-// Set once the native installer owns the quit: from then on a before-quit is
-// the updater's own and must be allowed through.
+// Set when Electron's native updater announces it is about to quit for the
+// install (before-quit-for-update): from then on a before-quit is the
+// updater's own and must be allowed through. Until then a repeat quit is
+// held so it cannot exit the process underneath a Squirrel transfer that is
+// still in progress.
 let installHandoffStarted = false;
-const INSTALL_HANDOFF_WATCHDOG_MS = 30_000;
+// Bounds for the two waits a quit can get stuck in: runtime teardown (guided
+// setup cleanup alone is bounded at 8s) and the native install handoff.
+// Both end in a nonzero exit so the next launch reconciles the downloaded
+// update instead of leaving an unquittable app with its runtime torn down.
+const SHUTDOWN_DEADLINE_MS = 30_000;
+const INSTALL_HANDOFF_WATCHDOG_MS = 5 * 60_000;
 
 // Desktop update state. The native updater lives in the main process; the
 // renderer only receives typed progress and actions through the preload.
@@ -282,7 +291,23 @@ async function boot() {
   return { url, route };
 }
 
-async function shutdown() {
+// Runtime teardown raced against SHUTDOWN_DEADLINE_MS, so a stuck request,
+// server close or renderer teardown cannot leave an unquittable app.
+function shutdown() {
+  let deadline = null;
+  return Promise.race([
+    teardown(),
+    new Promise((_, reject) => {
+      deadline = setTimeout(
+        () => reject(new Error(`teardown exceeded ${SHUTDOWN_DEADLINE_MS}ms`)),
+        SHUTDOWN_DEADLINE_MS
+      );
+      deadline.unref?.();
+    }),
+  ]).finally(() => clearTimeout(deadline));
+}
+
+async function teardown() {
   // Disarm the update timer first: runtime teardown below can take several
   // seconds (guided-setup cleanup is bounded at 8s), and a check firing in
   // that window would flip a ready update back to "checking", so the
@@ -884,7 +909,9 @@ app.on("before-quit", (event) => {
         return;
       }
       try {
-        installHandoffStarted = true;
+        nativeUpdater.once("before-quit-for-update", () => {
+          installHandoffStarted = true;
+        });
         if (!updateController?.install()) {
           app.exit(1);
           return;
