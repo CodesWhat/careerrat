@@ -278,7 +278,20 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
     );
   }
 
-  const staleKeyNodes = [...staleKeyTree.inventory.values()].filter((node) => !node.isProjectRoot);
+  // Same eligibility filter collectUnreviewedScripts applies below (project
+  // root, workspaces, and linked workspace deps are managed by the workspace
+  // owner, not allowScripts) plus its bundled-node exclusion: npm never runs
+  // a bundled dependency's own install scripts and it can't be allowlisted
+  // (unreviewed-scripts.js), so a bundled package's script can't make a
+  // policy key "live" either. Without this, a broad approval that only
+  // happens to match a bundled scripted dependency (e.g. `foo: true` where
+  // `foo` ships bundled inside another package) stayed non-stale forever,
+  // even though npm's own strict-allow-scripts never consults it, and a
+  // future standalone `foo` with the same script would be silently
+  // pre-authorized by the retained approval.
+  const staleKeyNodes = [...staleKeyTree.inventory.values()].filter(
+    (node) => !node.isProjectRoot && !node.isWorkspace && !node.isLink && !node.inBundle
+  );
 
   // A policy key is only "matched" (not stale) by a node that currently
   // carries an install-relevant script. Matching on presence alone let a

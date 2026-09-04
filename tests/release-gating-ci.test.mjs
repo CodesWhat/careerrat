@@ -158,7 +158,35 @@ function assertInstallSequence(steps, jobId) {
 // line, or a chained `;`/`&&`/`(` boundary, or the start of a line inside a
 // multiline `run:` block; a line that's a pure `#`-comment is stripped first
 // so a comment mentioning "npm ci" doesn't count as one running.
-const EXECUTABLE_NPM_CI_PATTERN = /(?:^|[;&|(])\s*npm ci\b/gm;
+//
+// Codex review /tmp/codex-305-r8.md (finding 2): the previous version of this
+// pattern matched only the literal, single-spaced substring "npm ci" right
+// after a boundary character. `corepack npm ci`, `command npm ci`, `env
+// FOO=1 npm ci`, `npm --foreground-scripts ci`, and even doubled whitespace
+// (`npm  ci`) all evade it, so a job could add one of those forms and every
+// assertion here would keep passing while the install ran with no gate at
+// all. This now splits each step's run text into individual shell commands,
+// normalizes whitespace, strips prefixes that don't change what actually
+// executes, and only then checks whether what's left is an npm-ci
+// invocation (allowing npm options between `npm` and `ci`, but not an
+// unrelated subcommand like `npm run ci`).
+const COMMAND_SPLIT_PATTERN = /[;&|(]+|\n/g;
+
+// Leading prefixes that don't change whether `npm ci` actually runs, so they
+// have to be peeled off before matching: a bare environment-variable
+// assignment (`FOO=1 npm ci`), the `env` builtin (`env FOO=1 npm ci`), the
+// `command` builtin (`command npm ci`, often used to bypass a shell
+// alias/function), and `corepack` (`corepack npm ci`, which forwards
+// straight to the pinned npm). Applied in a loop so chained forms (`env
+// FOO=1 command corepack npm ci`) resolve too.
+const LEADING_PREFIX_PATTERN = /^(?:(?:env|command|corepack)\s+|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)/;
+
+// `npm`, then any number of flag-shaped tokens (`-x`, `--long`,
+// `--key=value`), then `ci` as its own word. Recognizes `npm
+// --foreground-scripts ci` alongside the plain `npm ci` without also
+// matching an unrelated subcommand or package script named "ci" (`npm run
+// ci` never reaches this pattern, since "run" isn't a flag token).
+const NPM_CI_INVOCATION_PATTERN = /^npm(?:\s+--?[\w][\w-]*(?:=\S+)?)*\s+ci\b/;
 
 function stripBashComments(run) {
   return run
@@ -167,12 +195,25 @@ function stripBashComments(run) {
     .join("\n");
 }
 
+// Collapses whitespace, then repeatedly strips a leading env-assignment /
+// `env` / `command` / `corepack` prefix until none remain.
+function normalizeCommandSegment(segment) {
+  let normalized = segment.replace(/\s+/g, " ").trim();
+  for (;;) {
+    const stripped = normalized.replace(LEADING_PREFIX_PATTERN, "").trim();
+    if (stripped === normalized) return normalized;
+    normalized = stripped;
+  }
+}
+
 function countExecutableNpmCi(steps) {
   let count = 0;
   for (const step of steps ?? []) {
     if (typeof step?.run !== "string") continue;
-    const matches = stripBashComments(step.run).match(EXECUTABLE_NPM_CI_PATTERN);
-    if (matches) count += matches.length;
+    const segments = stripBashComments(step.run).split(COMMAND_SPLIT_PATTERN);
+    for (const segment of segments) {
+      if (NPM_CI_INVOCATION_PATTERN.test(normalizeCommandSegment(segment))) count++;
+    }
   }
   return count;
 }
@@ -443,6 +484,41 @@ test("negative case: an extra npm ci inserted before the activation step defeats
   assert.throws(() => assertAllNpmCiJobsAreGated(mutated));
 });
 
+// Codex review /tmp/codex-305-r8.md (finding 2): the discovery pattern used
+// to match only the literal, single-spaced substring "npm ci". Each of these
+// forms is a real, common way to invoke npm ci that the old pattern missed
+// entirely, so a job (or an extra pre-gate step in an already-gated job)
+// using one of them would run completely unguarded while every check here
+// stayed green. Every case below is checked twice: once as a brand-new job
+// (proving dynamic discovery still finds it) and once as an extra step
+// spliced in before the activation step of an already-gated job (proving
+// the exact-count check still catches it, the same shape as the "extra npm
+// ci inserted before the activation step" case above).
+for (const [label, run] of [
+  ["corepack npm ci", "corepack npm ci"],
+  ["command npm ci", "command npm ci"],
+  ["env FOO=1 npm ci", "env FOO=1 npm ci"],
+  ["npm --foreground-scripts ci", "npm --foreground-scripts ci"],
+  ["doubled whitespace", "npm   ci"],
+]) {
+  test(`negative case: a new job running "${label}" is caught by dynamic discovery`, async () => {
+    const workflow = await loadWorkflow();
+    const mutated = structuredClone(workflow);
+    mutated.jobs["new-unguarded-job"] = {
+      "runs-on": "ubuntu-latest",
+      steps: [{ name: "Install dependencies", run }],
+    };
+    assert.throws(() => assertAllNpmCiJobsAreGated(mutated));
+  });
+
+  test(`negative case: an extra pre-gate step running "${label}" defeats the exact-count check`, async () => {
+    const workflow = await loadWorkflow();
+    const mutated = structuredClone(workflow);
+    mutated.jobs.tests.steps = [{ name: "Sneaky pre-install", run }, ...mutated.jobs.tests.steps];
+    assert.throws(() => assertAllNpmCiJobsAreGated(mutated));
+  });
+}
+
 test("hostile fixture: a node_modules/.bin/node shim cannot intercept the checker step's trusted, absolute-path node invocation", () => {
   // Codex review /tmp/codex-305-r6.md (finding 1): proves the mechanism,
   // not just the workflow text. A hostile `node` binary placed on PATH
@@ -608,6 +684,157 @@ test("fixture: a scriptless package's bin.node never reaches PATH while the stri
       recordedNode,
       shimPath,
       "the approved postinstall's bare `node` must not resolve to the hostile shim"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fixture: a workspace postinstall that resolves and runs a scriptless dependency's own bin entry survives the full strict-mode reinstall", () => {
+  // Codex review /tmp/codex-305-r8.md (finding 1). `apps/docs`'s postinstall
+  // used to be the bare string `fumadocs-mdx`, which only works when npm has
+  // already created a node_modules/.bin symlink for it. The strict reinstall
+  // step (ci-verify.yml's "Run approved install scripts") keeps
+  // --no-bin-links through the whole sequence — bin links are materialized
+  // afterward by a separate `npm rebuild --ignore-scripts` step, see the
+  // fixture above — so a bare `fumadocs-mdx` failed with command-not-found
+  // on every clean CI run, before that rebuild step ever got a chance to run.
+  //
+  // This reproduces the fix's actual mechanism (resolve the dependency's own
+  // declared `bin` entry off its package.json and run it directly with the
+  // current Node interpreter, the same approach apps/docs/scripts/
+  // postinstall.mjs now uses for fumadocs-mdx) end to end against the real
+  // npm CLI already resolved on PATH, through the exact sequence
+  // ci-verify.yml runs: staging install, then the full
+  // `--strict-allow-scripts --no-dangerously-allow-all-scripts
+  // --no-ignore-scripts --no-bin-links` reinstall. `bin-provider` here has no
+  // lifecycle script of its own (only `fumadocs-mdx`-style bare bin
+  // resolution is under test), and `docs-fixture`'s own postinstall is a
+  // workspace member's own script, which arborist's unreviewedScripts walk
+  // never gates (isWorkspace nodes are skipped, "managed by the workspace
+  // owner") — so no allowScripts entry is needed for either, matching how
+  // apps/docs's real postinstall runs today.
+  const root = mkdtempSync(join(tmpdir(), "docs-postinstall-fixture-"));
+  try {
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify(
+        {
+          name: "strict-bin-resolve-fixture",
+          version: "1.0.0",
+          private: true,
+          workspaces: ["packages/*"],
+        },
+        null,
+        2
+      )
+    );
+
+    const docsFixtureDir = join(root, "packages", "docs-fixture");
+    mkdirSync(docsFixtureDir, { recursive: true });
+    writeFileSync(
+      join(docsFixtureDir, "package.json"),
+      JSON.stringify(
+        {
+          name: "docs-fixture",
+          version: "1.0.0",
+          private: true,
+          dependencies: { "bin-provider": "file:../../vendor/bin-provider" },
+          scripts: { postinstall: "node ./postinstall.mjs" },
+        },
+        null,
+        2
+      )
+    );
+    writeFileSync(
+      join(docsFixtureDir, "postinstall.mjs"),
+      [
+        'import { readFileSync } from "node:fs";',
+        'import { spawnSync } from "node:child_process";',
+        'import { dirname, join } from "node:path";',
+        'import { fileURLToPath } from "node:url";',
+        "",
+        'const pkgJsonPath = fileURLToPath(import.meta.resolve("bin-provider/package.json"));',
+        'const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));',
+        'const binPath = join(dirname(pkgJsonPath), pkg.bin["bin-provider"]);',
+        'const result = spawnSync(process.execPath, [binPath], { stdio: "inherit" });',
+        "if (result.error) throw result.error;",
+        "process.exit(result.status ?? 1);",
+        "",
+      ].join("\n")
+    );
+
+    const binProviderDir = join(root, "vendor", "bin-provider");
+    mkdirSync(binProviderDir, { recursive: true });
+    writeFileSync(
+      join(binProviderDir, "package.json"),
+      JSON.stringify(
+        { name: "bin-provider", version: "1.0.0", bin: { "bin-provider": "./cli.js" } },
+        null,
+        2
+      )
+    );
+    const cliPath = join(binProviderDir, "cli.js");
+    writeFileSync(
+      cliPath,
+      '#!/usr/bin/env node\nrequire("fs").writeFileSync(process.env.CLI_RAN_MARKER, "ran");\n'
+    );
+    chmodSync(cliPath, 0o755);
+
+    const cliRanMarker = join(root, "cli-ran.marker");
+    const binDotBinEntry = join(root, "node_modules", ".bin", "bin-provider");
+    const env = { ...process.env, CLI_RAN_MARKER: cliRanMarker };
+
+    // Fixture setup only: generate a real lockfile for the workspace.
+    const lock = spawnSync("npm", ["install", "--package-lock-only", "--ignore-scripts"], {
+      cwd: root,
+      env,
+    });
+    assert.equal(lock.status, 0, `npm install --package-lock-only failed: ${lock.stderr}`);
+
+    // Step 1: the workflow's staging install (scripts and bin-links off).
+    const stage = spawnSync("npm", ["ci", "--ignore-scripts", "--no-bin-links"], {
+      cwd: root,
+      env,
+    });
+    assert.equal(stage.status, 0, `staging npm ci failed: ${stage.stderr}`);
+    assert.equal(existsSync(cliRanMarker), false, "no postinstall should have run yet");
+    assert.equal(
+      existsSync(binDotBinEntry),
+      false,
+      "the staging install must not create bin links"
+    );
+
+    // Step 2: the workflow's actual strict reinstall command, in full,
+    // including --strict-allow-scripts — the flag combination the fourth
+    // and fifth reviews established doesn't neutralize --no-bin-links, and
+    // that the checker's own allowScripts policy still has to tolerate.
+    const strict = spawnSync(
+      "npm",
+      [
+        "ci",
+        "--strict-allow-scripts",
+        "--no-dangerously-allow-all-scripts",
+        "--no-ignore-scripts",
+        "--no-bin-links",
+      ],
+      { cwd: root, env }
+    );
+    assert.equal(
+      strict.status,
+      0,
+      `strict reinstall must succeed with the docs-style postinstall present: ${strict.stderr}`
+    );
+    assert.equal(
+      existsSync(binDotBinEntry),
+      false,
+      "the strict reinstall must not create bin links either"
+    );
+    assert.equal(
+      existsSync(cliRanMarker),
+      true,
+      "the workspace postinstall must have resolved and run bin-provider's own bin entry " +
+        "without any node_modules/.bin link existing"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

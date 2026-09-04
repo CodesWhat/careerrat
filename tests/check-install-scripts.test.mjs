@@ -1020,3 +1020,56 @@ test("[codex-305-r5] an aliased exact-version denial with an omitted resolved fi
     removeFixtureRoot(root);
   }
 });
+
+test("[codex-305-r8] a broad approval that only matches a bundled scripted dependency is reported stale", async () => {
+  // Regression for the eighth adversarial review: stale-key liveness used to
+  // run getInstallScripts (and npm's own `matches`) against every non-root
+  // node, including bundled ones. npm's own collectUnreviewedScripts
+  // (unreviewed-scripts.js) skips bundled nodes entirely, because a bundled
+  // dependency's scripts never run and can never be allowlisted
+  // (isScriptAllowed returns null for any node.inBundle node,
+  // unconditionally). A git-spec key here still matched the bundled node
+  // directly (matchGit compares node.resolved, with no isRegistryDependency
+  // or inBundle gate of its own), so the key stayed "live" even though npm
+  // itself would never let this bundled node's script run under that
+  // approval. If a standalone (non-bundled) copy of the same git dependency
+  // is ever added, this retained approval would silently pre-authorize its
+  // install script without review. A bare registry-name key can't
+  // demonstrate this: a bundled node normally has no dependency edge of its
+  // own (bundleDependencies is just metadata, not an edge), so
+  // isRegistryDependency is false and a name/version key never matches it
+  // regardless of the inBundle filter. matchGit has no such gate, which is
+  // what makes it exploitable here. The fix excludes bundled (and
+  // workspace/link) nodes from the stale-key liveness candidates, same as
+  // npm's own eligibility.
+  const root = makeFixtureRoot();
+  try {
+    writeManifests(root, {
+      rootExtra: { dependencies: { "bundler-pkg": "1.0.0" } },
+      packages: {
+        "node_modules/bundler-pkg": {
+          version: "1.0.0",
+          resolved: "https://registry.npmjs.org/bundler-pkg/-/bundler-pkg-1.0.0.tgz",
+          bundleDependencies: ["bundled-native"],
+        },
+        "node_modules/bundler-pkg/node_modules/bundled-native": {
+          version: "9.9.9",
+          resolved:
+            "git+https://github.com/example/bundled-native.git#abcdef1234567890abcdef1234567890abcdef12",
+          hasInstallScript: true,
+          inBundle: true,
+        },
+      },
+    });
+    const result = await checkInstallScripts({
+      allowScripts: { "git+https://github.com/example/bundled-native.git": true },
+      root,
+      lockOnly: true,
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.staleKeys, ["git+https://github.com/example/bundled-native.git"]);
+    assert.deepEqual(result.uncovered, []);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});
