@@ -303,20 +303,35 @@ function sourceCoverageReceipt({ kind, label, company, url, result }) {
   return receipt;
 }
 
+// Returns the persisted offers PLUS whether the batch had any artifact-write
+// failures (CR-29 round 5): a failed row is neither "new" nor a genuine
+// "duplicate" — sourcedUpsertBatch never wrote it, so folding it into the
+// duplicate count (as persistedOffers.length shrinking used to imply) made a
+// lost posting look like ordinary dedupe instead of a write that needs a
+// retry. Callers gate source-watermark advancement on `failed === 0` so a
+// source whose offers hit a write failure gets re-scanned next sweep instead
+// of the failed posting silently aging out of retry range.
 function captureOffersForOutput({ repoRoot, env, offers, savedAt, guard }) {
   if (dbExists({ repoRoot, env })) {
-    return (
-      captureAndPersistOffersIfDb({
-        repoRoot,
-        env,
-        offers,
-        savedAt,
-        guard,
-        dedupeCanonical: true,
-      })?.offers || []
-    );
+    const persisted = captureAndPersistOffersIfDb({
+      repoRoot,
+      env,
+      offers,
+      savedAt,
+      guard,
+      dedupeCanonical: true,
+    });
+    return {
+      offers: persisted?.offers || [],
+      failed: persisted?.failed || 0,
+      failedIds: persisted?.failedIds || [],
+    };
   }
-  return offersWithCapturedJobs({ repoRoot, env, offers, savedAt });
+  return {
+    offers: offersWithCapturedJobs({ repoRoot, env, offers, savedAt }),
+    failed: 0,
+    failedIds: [],
+  };
 }
 
 const REJECTION_SAMPLE_LIMIT = 3;
@@ -719,9 +734,13 @@ export async function runSourcedScan({
           hiddenIds: [],
           skipped: false,
         };
-  const persistedOffers = write
+  const persistedResult = write
     ? standaloneConfigMode
-      ? offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt })
+      ? {
+          offers: offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt }),
+          failed: 0,
+          failedIds: [],
+        }
       : captureOffersForOutput({
           repoRoot,
           env,
@@ -729,9 +748,15 @@ export async function runSourcedScan({
           savedAt,
           guard: writeGuard,
         })
-    : filtered.kept;
+    : { offers: filtered.kept, failed: 0, failedIds: [] };
+  const persistedOffers = persistedResult.offers;
 
-  if (write && !standaloneConfigMode) {
+  // A source's watermark only advances when this run's write came back
+  // clean (CR-29 round 5): a batch with artifact-write failures must not
+  // let a lost posting fall behind the watermark, since that makes it
+  // unlikely to ever appear on retry — the source is re-scanned in full
+  // again next sweep instead.
+  if (write && !standaloneConfigMode && persistedResult.failed === 0) {
     ensureActive();
     for (const companySource of successfulCompanySources) {
       persistCompanySourceWatermark({
@@ -753,7 +778,10 @@ export async function runSourcedScan({
   }
 
   const outputOffers = persistedOffers.map((offer) => toOutputOffer(offer));
-  const persistenceDuplicates = Math.max(0, filtered.kept.length - outputOffers.length);
+  const persistenceDuplicates = Math.max(
+    0,
+    filtered.kept.length - outputOffers.length - persistedResult.failed
+  );
   const duplicateCount = filtered.duplicates.length + persistenceDuplicates;
   const titleBlockerCount = filtered.filteredTitle.filter(
     (offer) => offer.qualificationKind === "blocker"
@@ -801,7 +829,15 @@ export async function runSourcedScan({
       duplicateCount +
       filtered.invalid.length +
       (filtered.expired?.length || 0) +
-      filtered.overflow.length,
+      filtered.overflow.length +
+      persistedResult.failed,
+    // A batch with artifact-write failures marks the run as not fully clean
+    // (CR-29 round 5): `failed`/`failedIds` name the offers that never made
+    // it into the DB so a caller (and the source-watermark gate above) can
+    // tell "written" apart from "silently discarded as a duplicate."
+    ok: persistedResult.failed === 0,
+    failed: persistedResult.failed,
+    failedIds: persistedResult.failedIds,
     errors: scanned.errors,
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,

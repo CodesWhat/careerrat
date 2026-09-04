@@ -2226,6 +2226,99 @@ test("runSourcedScan materializes generated query-only HiringCafe sources", asyn
   }
 });
 
+test("a JD artifact-write failure during a DB-mode scan marks the run failed, keeps the offer's id in failedIds, and blocks source-watermark advancement", async () => {
+  // CR-29 round 5: sourcedUpsertBatch/captureAndPersistOffersIfDb already
+  // reported a JD write failure in `failed`/`failedIds`, but this
+  // production caller used to discard that data — the offer's disappearance
+  // from persistedOffers just shrank the duplicate count, so a lost posting
+  // looked exactly like ordinary dedupe, and the search source's watermark
+  // still advanced, making the lost posting unlikely to ever appear again.
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: [], negative: [] },
+        location_filter: null,
+        tracked_companies: [],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "HiringCafe",
+            source_type: "url-query",
+            label: "Blocked Artifact",
+            query: "Blocked Artifact",
+            enabled: true,
+            recency: { mode: "since-last-run", safetyMinutes: 30 },
+            searchState: { sortBy: "date" },
+          },
+        ],
+      },
+    });
+
+    // Precomputed deterministic JD path (sourced-persistence.mjs's
+    // jobCaptureRelPath: <company-slug>-<title-slug>-<reqId-slug>.md) for
+    // the offer captureBrowserSourceImpl returns below. sourced-scanner.mjs's
+    // qualification pass overwrites offer.reqId with extractReqId(url).id
+    // (dropping any explicit reqId an offer arrives with), so the URL has to
+    // be a Greenhouse-shaped one for the derived reqId — and therefore the
+    // artifact path — to be predictable. Blocking that path with a directory
+    // makes stageCapturedJob's write throw before any DB transaction opens.
+    const jdRelPath = "workspace/jobs/example-labs-blocked-artifact-role-greenhouse-1234567.md";
+    mkdirSync(userPath({ repoRoot }, jdRelPath), { recursive: true });
+
+    const before = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(before.searches[0].recency.lastRunAt, undefined);
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => ({
+        offers: [
+          {
+            company: "Example Labs",
+            title: "Blocked Artifact Role",
+            url: "https://boards.greenhouse.io/examplelabs/jobs/1234567",
+            location: "Remote",
+            bodyText: "Body for the blocked-artifact regression.",
+            source: "hiringcafe-browser",
+            sourceProvider: "hiringcafe",
+          },
+        ],
+        errors: [],
+        needsLogin: null,
+      }),
+      hydrateOfferImpl: async (offer) => offer,
+    });
+
+    assert.equal(summary.ok, false);
+    assert.equal(summary.failed, 1);
+    assert.deepEqual(summary.failedIds, ["sourced-example-labs-greenhouse-1234567"]);
+    assert.equal(summary.new, 0);
+    assert.equal(summary.duplicates, 0, "a write failure must not be reported as a duplicate");
+
+    const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+    assert.equal(rows.length, 0, "a failed JD write must not leave a dangling DB row");
+
+    const after = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(
+      after.searches[0].recency.lastRunAt,
+      undefined,
+      "a run with an artifact-write failure must not advance the source watermark"
+    );
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("runSourcedScan preserves a login-backed session JD without public rehydration", async () => {
   const repoRoot = tempRepo();
   const fullBody =

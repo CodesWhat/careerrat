@@ -8,9 +8,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
-import { closeAll, dbFilePath, openDb } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import { sourcedMergeIdentityAliasBatch } from "../src/core/db/verbs/sourced.mjs";
 import {
@@ -1303,74 +1302,123 @@ test("sourcedSetStatus patches status and note, refreshes analytics, and rejects
   );
 });
 
-test("sourcedUpsertBatch prepares rows before opening its write transaction", () => {
+test("sourcedUpsertBatch's guard(db) rejects a duplicate-only batch before any alias merge commits", () => {
+  // CR-29 round 5: a batch that's ALL duplicateOffers (no new/updated row to
+  // accept) used to skip sourcedUpsertBatch entirely — rows.length was 0, so
+  // the caller never opened this verb's transaction at all, and the alias
+  // merge ran through a separate, unguarded call. A superseded search's
+  // duplicate-only batch must be rejected by the SAME guard a rows-bearing
+  // batch would hit, with nothing committed.
   const repoRoot = tempRepo();
-  seedFixture(repoRoot);
-  let prepared = false;
-
-  sourcedUpsertBatch({
+  const db = openDb({ repoRoot });
+  const seeded = sourcedUpsertBatch({
     repoRoot,
-    rows: [{ id: "sourced-prepared-outside-transaction", company: "Prepared Co" }],
-    prepareAcceptedRow(row) {
-      const contender = new DatabaseSync(dbFilePath({ repoRoot }));
-      try {
-        contender.exec("PRAGMA busy_timeout = 1");
-        contender.exec("BEGIN IMMEDIATE");
-        contender.exec("ROLLBACK");
-        prepared = true;
-        return row;
-      } finally {
-        contender.close();
-      }
-    },
+    rows: [
+      {
+        id: "sourced-guard-canonical",
+        company: "Acme",
+        role: "Canonical Engineer",
+        link: "https://jobs.example.test/acme/guard-canonical",
+        fitScore: 70,
+      },
+    ],
   });
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-guard-canonical").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEvents = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+  assert.equal(seeded.created, 1);
 
-  assert.equal(prepared, true);
+  assert.throws(
+    () =>
+      sourcedUpsertBatch({
+        repoRoot,
+        duplicateOffers: [
+          {
+            company: "Acme",
+            title: "Canonical Engineer",
+            url: "https://jobs.example.test/acme/guard-canonical",
+            reqId: "hiringcafe:guard-rejected",
+          },
+        ],
+        guard: () => {
+          const error = new Error("the search is no longer active");
+          error.code = "SOURCING_RUN_NOT_ACTIVE";
+          throw error;
+        },
+      }),
+    (error) => error?.code === "SOURCING_RUN_NOT_ACTIVE"
+  );
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-guard-canonical").data
+  );
+  assert.deepEqual(after, before, "a rejected duplicate-only batch must not merge any alias");
+  assert.equal(db.prepare("SELECT version FROM meta WHERE id = 1").get().version, beforeMeta);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count,
+    beforeEvents
+  );
 });
 
-test("sourcedUpsertBatch commits the accepted artifact before putRow, and never inserts a row whose commit fails", () => {
-  // CR-29 round 4: the caller-supplied side effect a row's acceptance
-  // depends on (sourced-persistence.mjs's deferred JD artifact write) must
-  // run and succeed BEFORE that row is written, not after the whole batch's
-  // transaction has already committed. Proven two ways: order (the write
-  // callback fires before the row exists in the db) and failure isolation
-  // (a row whose commit throws is skipped entirely — no row, no acceptedIds
-  // entry — while the rest of the batch still lands).
+test("sourcedUpsertBatch's guard(db) rejects a mixed rows+duplicateOffers batch before either commits", () => {
+  // Same CR-29 round 5 contract, exercised with a batch that carries BOTH a
+  // new row AND a persisted-duplicate alias merge in one call: a guard
+  // rejection must roll back the whole transaction, not just the half it
+  // would have reached first.
   const repoRoot = tempRepo();
   seedFixture(repoRoot);
   const db = openDb({ repoRoot });
-
-  const order = [];
-  const result = sourcedUpsertBatch({
-    repoRoot,
-    rows: [
-      { id: "sourced-artifact-ok", company: "Artifact Co", role: "OK Role" },
-      { id: "sourced-artifact-fails", company: "Artifact Co", role: "Failing Role" },
-    ],
-    commitAcceptedArtifact(acceptedRow) {
-      order.push(`commit:${acceptedRow.id}`);
-      if (acceptedRow.id === "sourced-artifact-fails") {
-        throw new Error("simulated artifact write failure");
-      }
-    },
-  });
-
-  assert.equal(result.created, 1);
-  assert.equal(result.failed, 1);
-  assert.deepEqual(result.acceptedIds, ["sourced-artifact-ok"]);
-  assert.deepEqual(result.failedIds, ["sourced-artifact-fails"]);
-
-  assert.equal(
-    Boolean(db.prepare("SELECT id FROM sourced WHERE id = ?").get("sourced-artifact-ok")),
-    true
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me").data
   );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEvents = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+
+  assert.throws(
+    () =>
+      sourcedUpsertBatch({
+        repoRoot,
+        rows: [
+          {
+            id: "sourced-guard-mixed-new",
+            company: "Acme",
+            role: "Mixed Batch Engineer",
+            link: "https://jobs.example.test/acme/guard-mixed",
+          },
+        ],
+        duplicateOffers: [
+          {
+            company: "Umbrella",
+            title: "Coordinator",
+            url: "https://jobs.example.test/umbrella/guard-mixed-dup",
+            reqId: "hiringcafe:guard-mixed-rejected",
+          },
+        ],
+        guard: () => {
+          const error = new Error("the search is no longer active");
+          error.code = "SOURCING_RUN_NOT_ACTIVE";
+          throw error;
+        },
+      }),
+    (error) => error?.code === "SOURCING_RUN_NOT_ACTIVE"
+  );
+
   assert.equal(
-    Boolean(db.prepare("SELECT id FROM sourced WHERE id = ?").get("sourced-artifact-fails")),
+    Boolean(db.prepare("SELECT id FROM sourced WHERE id = ?").get("sourced-guard-mixed-new")),
     false,
-    "a row whose artifact commit failed must never be persisted"
+    "a rejected mixed batch must not insert its new row"
   );
-
-  assert.deepEqual(order, ["commit:sourced-artifact-ok", "commit:sourced-artifact-fails"]);
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me").data
+  );
+  assert.deepEqual(after, before, "a rejected mixed batch must not merge its duplicate's alias");
+  assert.equal(db.prepare("SELECT version FROM meta WHERE id = 1").get().version, beforeMeta);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count,
+    beforeEvents
+  );
 });
 
 test("sourcedMergeIdentityAliasBatch merges a whole batch of duplicates through one index build and one write", () => {
@@ -1468,6 +1516,68 @@ test("sourcedMergeIdentityAliasBatch merges a whole batch of duplicates through 
       `${row.id} should have gained its HiringCafe alias`
     );
   }
+});
+
+test("a second same-batch duplicate matching a canonical row by its ORIGINAL identity keeps the first duplicate's alias (CR-29 round 5)", () => {
+  // Before CR-29 round 5, storedPostingIndex's mergeDuplicateIdentityAlias
+  // replaced the matched entry with a brand-new {table,id,row} object and
+  // repointed only the NEWLY ADDED alias keys at it. A canonical row's
+  // ORIGINAL identity keys (its own url/reqId) kept pointing at the stale
+  // pre-merge entry. So: duplicate B merges alias B onto row A (fine), but
+  // duplicate C — matching the SAME row A by A's ORIGINAL url, not by B's
+  // alias — looked up that stale entry, computed its additions against a
+  // row that never saw B's merge, and overwrote aliasKeys with just
+  // [C], dropping B. The fix mutates the shared entry object in place so
+  // every one of A's identity keys, not just the newly added ones, sees
+  // every merge that happened before it.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-sequential-canonical",
+        company: "Acme",
+        role: "Sequential Engineer",
+        link: "https://jobs.example.test/acme/sequential-canonical",
+        fitScore: 70,
+      },
+    ],
+  });
+
+  // B and C both match the canonical row by its ORIGINAL url (not by each
+  // other's alias), processed within ONE sourcedUpsertBatch call so they
+  // share the SAME storedPostingIndex build.
+  sourcedUpsertBatch({
+    repoRoot,
+    duplicateOffers: [
+      {
+        company: "Acme",
+        title: "Sequential Engineer",
+        url: "https://jobs.example.test/acme/sequential-canonical",
+        reqId: "hiringcafe:sequential-b",
+      },
+      {
+        company: "Acme",
+        title: "Sequential Engineer",
+        url: "https://jobs.example.test/acme/sequential-canonical",
+        reqId: "hiringcafe:sequential-c",
+      },
+    ],
+  });
+
+  const row = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-sequential-canonical").data
+  );
+  assert.ok(
+    row.aliasKeys?.includes("req:hiringcafe:sequential-b"),
+    "the earlier same-batch alias merge must survive a later merge onto the same row"
+  );
+  assert.ok(
+    row.aliasKeys?.includes("req:hiringcafe:sequential-c"),
+    "the later same-batch alias merge must also be present"
+  );
 });
 
 test("sourced policy reconciliation rolls back when the active-search guard rejects the write", () => {

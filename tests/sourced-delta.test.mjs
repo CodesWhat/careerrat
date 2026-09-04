@@ -321,6 +321,78 @@ test("buildRepoSeenIds includes a persisted identity alias in DB mode, so a Hiri
   );
 });
 
+test("buildRepoSeenIds re-normalizes a persisted URL-only alias through sourced-delta's own normalizeUrl, so a differently-tracked republish is still recognized as repo-seen", () => {
+  // CR-29 round 5: seenPostingKeys' "url:" entries are normalized through
+  // sourced-identity.mjs's normalizePostingUrl (lowercases hostname, strips
+  // hash, strips a trailing pathname slash) — it does NOT strip tracking
+  // params. sourced-delta's own offerIdentityKeys normalizes every "url:"
+  // key it computes through normalizeUrl instead, which DOES strip
+  // utm_/trk/ref/gh_src/source params and a trailing slash of the whole
+  // string. Importing the DB's persisted url alias verbatim (the round-4
+  // fix, which only handled "req:" keys) would leave a tracking-param
+  // mismatch, so a persisted URL-only alias survives ingestion but still
+  // gets reported as repo-new here.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-url-alias-canonical",
+        company: "Acme",
+        role: "Platform Engineer",
+        status: "sourced",
+        source: "scanner",
+        channel: "board",
+        link: "https://acme.example.test/careers/platform-engineer",
+        loc: "Remote",
+        base: "verify",
+        fitScore: 75,
+        fitBucket: "high",
+        fitBasis: "triage",
+        gate: "likely-keep",
+        sourcedAt: "2026-07-05T00:00:00Z",
+        updatedAt: "2026-07-05T00:00:00Z",
+        artifacts: {},
+        // Persisted by an earlier merge for a differently-tracked republish
+        // of the same posting (e.g. a paid board link with tracking params
+        // this run's canonical dedupe folded onto the direct posting).
+        aliasKeys: [
+          "url:https://boards.example.test/careers/platform-engineer?utm_source=paid&utm_campaign=q3",
+        ],
+      },
+    ],
+  });
+
+  const seenIds = buildRepoSeenIds({ repoRoot });
+  assert.ok(
+    seenIds.has("url:https://boards.example.test/careers/platform-engineer"),
+    "the persisted URL alias must be re-normalized through sourced-delta's own normalizeUrl"
+  );
+
+  const delta = diffSnapshotOffers({
+    current: [
+      {
+        company: "Acme",
+        title: "Platform Engineer",
+        // Same board, no tracking params, a trailing slash normalizeUrl
+        // must also strip.
+        url: "https://boards.example.test/careers/platform-engineer/",
+      },
+    ],
+    previous: [],
+    seenIds,
+  });
+
+  assert.equal(delta.newOffers.length, 1);
+  assert.equal(
+    delta.newOffers[0].repoDuplicate,
+    true,
+    "a persisted URL-only alias must resolve a differently-tracked republish as repo-seen"
+  );
+});
+
 test("buildRepoSeenIds falls back to the legacy tracker.json builder when there is no DB", () => {
   const repoRoot = tempRepo();
   // No openDb() call: this repo has no SQLite database at all.

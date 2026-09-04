@@ -1,15 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { currencyCodePatternSource } from "../currency-format.mjs";
 import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets, readDbScannerRows } from "../db/scan-context.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../db/verbs/source-config.mjs";
-import {
-  sourcedMergeIdentityAliasBatch,
-  sourcedReconcilePolicyBatch,
-  sourcedUpsertBatch,
-} from "../db/verbs/sourced.mjs";
+import { sourcedReconcilePolicyBatch, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
 import { readJobDescriptionArtifact } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
@@ -321,7 +317,8 @@ function jobDescriptionIsPartial(offer, body = offerBodyText(offer)) {
 // Computes the deterministic JD artifact path + rendered content WITHOUT
 // touching disk. Split out of captureSourcedOfferJob so a caller that can't
 // yet promise this offer wins its slot (dedupeCanonical's inner duplicate
-// check, e.g.) can defer the actual write, see offerWithPendingCapturedJob.
+// check, e.g.) can defer the actual write; see stageCapturedJob below,
+// which stages content at a scratch path instead of writing here directly.
 function preparedCapturedJob({ repoRoot, env, offer, savedAt }) {
   const relPath = jobCaptureRelPath(offer);
   const absPath = userPath({ repoRoot, env }, relPath);
@@ -361,22 +358,76 @@ function offerWithCapturedJob({ repoRoot, env, offer, savedAt }) {
   return offerWithArtifactPath(offer, jd);
 }
 
-// Same shape as offerWithCapturedJob, but the JD artifact write is deferred:
-// the deterministic path lands in the returned offer's artifacts.jd exactly
-// as offerWithCapturedJob would set it, but the content isn't written to
-// disk until the caller invokes the returned `commit()`. Used by
-// captureAndPersistOffersIfDb's dedupeCanonical path (CR-29 round 3): the
-// caller there can't know until AFTER sourcedUpsertBatch's own duplicate
-// check whether this offer wins its deterministic path or loses it to an
-// already-accepted row with the same explicit reqId (different URL/body).
-// Committing unconditionally, as the immediate-write path does, let a
-// losing row's content silently overwrite the winner's artifact file.
-function offerWithPendingCapturedJob({ repoRoot, env, offer, savedAt }) {
-  const prepared = preparedCapturedJob({ repoRoot, env, offer, savedAt });
-  return {
-    preparedOffer: offerWithArtifactPath(offer, prepared.relPath),
-    commit: () => writeCapturedJob(prepared),
-  };
+let stagingSequence = 0;
+
+function stagedJobPath(absPath) {
+  stagingSequence += 1;
+  return `${absPath}.staging-${process.pid}-${Date.now()}-${stagingSequence}`;
+}
+
+// Stages a JD artifact's rendered content at a scratch path adjacent to its
+// final deterministic location, WITHOUT ever touching the final path itself
+// (CR-29 round 5). Used by captureAndPersistOffersIfDb's dedupeCanonical
+// path, BEFORE it ever opens a sourcedUpsertBatch transaction: the caller
+// can't know until AFTER that transaction's own fresh duplicate check
+// whether this offer wins its deterministic path or loses it to an
+// already-accepted row with the same explicit reqId (different URL/body),
+// so writing straight to the shared final path here (as the immediate-write
+// non-DB path does) could let a losing row's content overwrite the
+// winner's. Staging to an offer-exclusive scratch path instead means the
+// actual filesystem write never needs to happen inside — or even close to
+// — the DB transaction's writer lock; only the later finalize (a plain
+// rename, see finalizeStagedCapturedJob) touches the shared path, and only
+// for the offer that actually won it.
+//
+// Also verifies the final destination is actually usable (existsSync +
+// isFile, so a stale directory or other non-file at that exact path is
+// caught) so finalize — which runs AFTER a row has already committed —
+// can't discover a blocked destination for the first time post-commit.
+// That failure belongs HERE, before this offer is even considered for
+// insertion ("abort before insertion" if staging fails).
+function stageCapturedJob({ repoRoot, env, offer, savedAt }) {
+  const relPath = jobCaptureRelPath(offer);
+  const absPath = userPath({ repoRoot, env }, relPath);
+  const content = renderCapturedJob({ offer, savedAt });
+  const stagingAbsPath = stagedJobPath(absPath);
+  try {
+    mkdirSync(dirname(stagingAbsPath), { recursive: true });
+    writeFileSync(stagingAbsPath, content, "utf8");
+    if (existsSync(absPath) && !statSync(absPath).isFile()) {
+      throw new Error(`sourced-persistence: JD artifact path is blocked: ${relPath}`);
+    }
+  } catch (err) {
+    discardStagedCapturedJob({ stagingAbsPath });
+    throw err;
+  }
+  return { relPath, absPath, stagingAbsPath };
+}
+
+// Moves a staged artifact into its final deterministic location — the ONLY
+// filesystem write in the whole capture path that happens once a row is
+// KNOWN to have won its identity slot. Always called OUTSIDE any DB
+// transaction (CR-29 round 5): sourcedUpsertBatch's own guard(db)-protected
+// transaction does DB work only now, never fs I/O, so lock duration no
+// longer scales with batch size or document size.
+function finalizeStagedCapturedJob({ absPath, stagingAbsPath }) {
+  mkdirSync(dirname(absPath), { recursive: true });
+  renameSync(stagingAbsPath, absPath);
+}
+
+// Removes a staged artifact that never made it into a committed row: either
+// the whole batch's transaction rejected/rolled back (guard rejection, or
+// any other write failure — "remove unreferenced staged artifacts after a
+// rollback") or sourcedUpsertBatch's own duplicate check found this row's
+// identity already claimed by another row. Best-effort — a leftover staging
+// file is disk bloat, never a correctness problem, so a failed cleanup here
+// must never mask the real outcome.
+function discardStagedCapturedJob({ stagingAbsPath }) {
+  try {
+    rmSync(stagingAbsPath, { force: true });
+  } catch {
+    // best-effort
+  }
 }
 
 export function sourcedRowsFromScanOffers(offers, nowIso = new Date().toISOString()) {
@@ -438,23 +489,26 @@ function persistScanOffersIfDb({
   repoRoot,
   env,
   offers,
+  duplicateOffers,
   nowIso,
   guard,
   dedupeCanonical,
-  prepareAcceptedRow,
-  commitAcceptedArtifact,
 } = {}) {
   if (!dbExists({ repoRoot, env })) return null;
   const rows = sourcedRowsFromScanOffers(offers, nowIso);
-  if (rows.length === 0) return null;
+  const hasDuplicateOffers = Array.isArray(duplicateOffers) && duplicateOffers.length > 0;
+  // A duplicate-only batch (every offer matched an already-persisted row,
+  // nothing new/updated to accept) must still reach sourcedUpsertBatch: its
+  // guard(db) check and the alias merge itself both need to run inside that
+  // verb's own transaction (CR-29 round 5) rather than being skipped here.
+  if (rows.length === 0 && !hasDuplicateOffers) return null;
   const persisted = sourcedUpsertBatch({
     repoRoot,
     env,
     rows,
+    duplicateOffers,
     guard,
     dedupeCanonical,
-    prepareAcceptedRow,
-    commitAcceptedArtifact,
   });
   return { ...persisted, rows };
 }
@@ -481,41 +535,55 @@ function mergeOfferIdentityAlias(canonicalOffer, duplicate, seenPostingKeys, acc
   }
 }
 
+// Read-only (CR-29 round 5): this used to call the sourcedMergeIdentityAliasBatch
+// DB verb directly for every offer matching an already-persisted row, which
+// committed that alias merge in its OWN transaction, before this batch's
+// offers ever reached sourcedUpsertBatch's guard(db) check. A search
+// superseded by a fresher one could therefore still mutate persisted rows'
+// aliasKeys even though the guard would go on to reject its new/updated
+// rows moments later — and a batch that turned out to be ALL duplicates
+// bypassed the guard entirely, since sourcedUpsertBatch was never called for
+// an empty `rows` array. Persisted-row matches are now only COLLECTED here
+// (`persistedDuplicateOffers`) and merged by the caller inside
+// sourcedUpsertBatch's own guarded transaction (see its `duplicateOffers`
+// param) — including when they're the batch's only offers.
 function reconcileOffersBeforeCapture({ repoRoot, env, offers, dedupeCanonical }) {
-  if (!dedupeCanonical) return { offers, duplicates: 0 };
+  if (!dedupeCanonical) return { offers, duplicates: 0, persistedDuplicateOffers: [] };
   const { seenPostingKeys } = buildDbSeenSets({ repoRoot, env });
   // Every identity key an offer ACCEPTED so far this batch answers for
   // (its own keys plus any aliases already merged onto it), so a LATER
   // duplicate in the same batch can be merged onto the right in-memory
-  // offer instead of falling through to the DB-only merge path below.
+  // offer instead of falling through to the persisted-duplicate path below.
   const acceptedByKey = new Map();
   const accepted = [];
   const persistedDuplicates = [];
   let duplicates = 0;
   for (const offer of offers) {
-    const matchKey = postingIdentityKeys(offer).find((key) => seenPostingKeys.has(key));
-    if (matchKey) {
-      duplicates++;
-      const canonicalOffer = acceptedByKey.get(matchKey);
-      if (canonicalOffer) {
-        mergeOfferIdentityAlias(canonicalOffer, offer, seenPostingKeys, acceptedByKey);
-      } else {
-        // Matched an already-persisted DB row: batched below (CR-29 round 4)
-        // instead of one standalone sourcedMergeIdentityAlias call per
-        // offer, which rebuilt the whole stored posting index and opened
-        // its own transaction/export for every suppressed duplicate.
+    const matchingKeys = postingIdentityKeys(offer).filter((key) => seenPostingKeys.has(key));
+    if (matchingKeys.length) {
+      // Inspect EVERY matching key, not just the first (CR-29 round 5):
+      // a key seenPostingKeys knows about but acceptedByKey doesn't must
+      // belong to an already-PERSISTED row (acceptedByKey only ever gains
+      // keys as this batch accepts offers), so persisted ownership wins
+      // over an in-memory match — merging this offer's other identities
+      // onto an in-batch offer's aliasKeys instead would let a row insert
+      // that duplicates the persisted row's own identity, since the final
+      // upsert only merges onto the target ITS OWN keys can find.
+      const persistedMatch = matchingKeys.find((key) => !acceptedByKey.has(key));
+      if (persistedMatch) {
         persistedDuplicates.push(offer);
+        continue;
       }
+      duplicates++;
+      const canonicalOffer = acceptedByKey.get(matchingKeys[0]);
+      mergeOfferIdentityAlias(canonicalOffer, offer, seenPostingKeys, acceptedByKey);
       continue;
     }
     addPostingIdentity(seenPostingKeys, offer);
     for (const key of identityKeysWithAliases(offer)) acceptedByKey.set(key, offer);
     accepted.push(offer);
   }
-  if (persistedDuplicates.length) {
-    sourcedMergeIdentityAliasBatch({ repoRoot, env, offers: persistedDuplicates });
-  }
-  return { offers: accepted, duplicates };
+  return { offers: accepted, duplicates, persistedDuplicateOffers: persistedDuplicates };
 }
 
 export function captureAndPersistOffersIfDb({
@@ -533,7 +601,12 @@ export function captureAndPersistOffersIfDb({
     offers: Array.isArray(offers) ? offers : [],
     dedupeCanonical,
   });
-  if (!reconciled.offers.length) {
+  // A duplicate-only reconciliation (every offer matched an already-persisted
+  // row) still needs to reach sourcedUpsertBatch below (CR-29 round 5): the
+  // guard(db) check and the alias merge itself both run inside its
+  // transaction now, not a separate call before this function decided
+  // whether to bother opening one.
+  if (!reconciled.offers.length && !reconciled.persistedDuplicateOffers.length) {
     return {
       ok: true,
       persistedRows: 0,
@@ -546,66 +619,90 @@ export function captureAndPersistOffersIfDb({
         duplicates: 0,
         failed: 0,
         acceptedIds: [],
+        failedIds: [],
       },
     };
   }
+  // Every reconciled offer's JD artifact is STAGED here — a scratch-path
+  // write, never the shared deterministic path — BEFORE sourcedUpsertBatch
+  // ever opens its transaction (CR-29 round 5). An offer whose staging
+  // fails is excluded from the batch entirely: it never reaches the DB
+  // ("abort before insertion"), so it's neither a dangling row nor a
+  // silently-clobbered artifact. What used to be a deferred WRITE running
+  // from inside the transaction (via a commitAcceptedArtifact hook, CR-29
+  // round 4) is now a plain rename that runs AFTER the transaction has
+  // already resolved — see the finalize/discard loop below — so the
+  // transaction itself does DB work only and never holds the SQLite writer
+  // lock for filesystem I/O.
   const acceptedOffersById = new Map();
-  // JD artifact writes are deferred until each row's DB acceptance is known
-  // (CR-29 round 3): prepareAcceptedRow runs for every reconciled offer
-  // BEFORE sourcedUpsertBatch's own inner duplicate check decides which of
-  // them actually lands, so writing the deterministic artifact path
-  // immediately here let a row that loses that check (e.g. the same
-  // explicit reqId arriving with a changed URL/body) overwrite the winning
-  // row's already-accepted content.
-  //
-  // The actual write is committed from INSIDE sourcedUpsertBatch's write
-  // transaction (CR-29 round 4, via commitAcceptedArtifact below), right
-  // after the inner duplicate check decides a row IS the accepted one and
-  // before that row's putRow lands. Previously the write happened here,
-  // AFTER persistScanOffersIfDb (and the transaction/export inside it) had
-  // already returned — so a compatibility-export failure, or the write
-  // itself failing, left a durable row referencing a JD that was never
-  // written, and reconciliation would reject a retry as a duplicate,
-  // permanently losing the description. Committing pre-putRow means a write
-  // failure is caught by sourcedUpsertBatch and that row is simply never
-  // inserted (see commitAcceptedArtifact's try/catch there): no dangling
-  // row, and the identity stays unseen so a retry can still succeed.
-  const pendingWritesById = new Map();
-  const uncapturedRows = sourcedRowsFromScanOffers(reconciled.offers, savedAt.toISOString());
-  const offerById = new Map(
-    uncapturedRows.map((row, index) => [String(row.id), reconciled.offers[index]])
-  );
-  const persisted = persistScanOffersIfDb({
-    repoRoot,
-    env,
-    offers: reconciled.offers,
-    nowIso: savedAt.toISOString(),
-    guard,
-    dedupeCanonical,
-    prepareAcceptedRow: (row) => {
-      const { preparedOffer, commit } = offerWithPendingCapturedJob({
+  const stagedById = new Map();
+  const preStagingFailedIds = [];
+  const preparedOffers = [];
+  for (const offer of reconciled.offers) {
+    const [row] = sourcedRowsFromScanOffers([offer], savedAt.toISOString());
+    if (!row) continue;
+    const id = String(row.id);
+    try {
+      const staged = stageCapturedJob({ repoRoot, env, offer, savedAt });
+      const preparedOffer = offerWithArtifactPath(offer, staged.relPath);
+      acceptedOffersById.set(id, preparedOffer);
+      stagedById.set(id, staged);
+      preparedOffers.push(preparedOffer);
+    } catch {
+      preStagingFailedIds.push(id);
+    }
+  }
+
+  let persisted = null;
+  let pendingRethrow = null;
+  if (preparedOffers.length || reconciled.persistedDuplicateOffers.length) {
+    try {
+      persisted = persistScanOffersIfDb({
         repoRoot,
         env,
-        offer: offerById.get(String(row.id)),
-        savedAt,
+        offers: preparedOffers,
+        duplicateOffers: reconciled.persistedDuplicateOffers,
+        nowIso: savedAt.toISOString(),
+        guard,
+        dedupeCanonical,
       });
-      acceptedOffersById.set(String(row.id), preparedOffer);
-      pendingWritesById.set(String(row.id), commit);
-      return sourcedRowsFromScanOffers([preparedOffer], savedAt.toISOString())[0];
-    },
-    commitAcceptedArtifact: (acceptedRow) => {
-      pendingWritesById.get(String(acceptedRow.id))?.();
-    },
-  });
-  const acceptedOffers = (persisted?.acceptedIds || [])
-    .map((id) => acceptedOffersById.get(String(id)))
-    .filter(Boolean);
+    } catch (err) {
+      if (err?.code === "EXPORT_FAILED") {
+        // The db write already committed (runVerb's ExportFailedError
+        // contract) — only the tracker.json/activity.jsonl compatibility
+        // export failed AFTER it. The accepted rows' staged artifacts must
+        // still be finalized below before this rethrows, or a caller
+        // re-reading the now-durable row would find its artifacts.jd
+        // pointing at a file that was never actually finalized.
+        persisted = err.result;
+        pendingRethrow = err;
+      } else {
+        // Nothing committed: every staged artifact for this batch is now
+        // unreferenced ("remove unreferenced staged artifacts after a
+        // rollback").
+        for (const staged of stagedById.values()) discardStagedCapturedJob(staged);
+        throw err;
+      }
+    }
+  }
+
+  const acceptedIds = new Set((persisted?.acceptedIds || []).map(String));
+  for (const [id, staged] of stagedById) {
+    if (acceptedIds.has(id)) finalizeStagedCapturedJob(staged);
+    else discardStagedCapturedJob(staged);
+  }
+  if (pendingRethrow) throw pendingRethrow;
+
+  const acceptedOffers = [...acceptedIds].map((id) => acceptedOffersById.get(id)).filter(Boolean);
+  const failed = preStagingFailedIds.length + (persisted?.failed || 0);
+  const failedIds = [...preStagingFailedIds, ...(persisted?.failedIds || [])];
   return {
     ok: true,
     persistedRows: (persisted?.created || 0) + (persisted?.updated || 0),
     duplicates: reconciled.duplicates + (persisted?.duplicates || 0),
-    failed: persisted?.failed || 0,
+    failed,
+    failedIds,
     offers: acceptedOffers,
-    persisted,
+    persisted: { ...persisted, failed, failedIds },
   };
 }

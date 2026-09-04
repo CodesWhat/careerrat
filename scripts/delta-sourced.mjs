@@ -21,6 +21,7 @@ import {
   diffSnapshotOffers,
   latestSnapshotPair,
   loadSnapshot,
+  normalizeUrl,
   renderDeltaMarkdown,
   summarizeDelta,
 } from "../src/core/scoring/sourced-delta.mjs";
@@ -46,7 +47,26 @@ export function buildRepoSeenIds({ repoRoot = ROOT } = {}) {
   if (dbExists({ repoRoot })) {
     const { seenPostingKeys } = buildDbSeenSets({ repoRoot });
     for (const key of seenPostingKeys) {
-      if (key.startsWith("req:")) ids.add(key.slice(4).toLowerCase());
+      if (key.startsWith("req:")) {
+        ids.add(key.slice(4).toLowerCase());
+        continue;
+      }
+      // seenPostingKeys' own "url:" keys are normalized through
+      // sourced-identity.mjs's normalizePostingUrl (lowercases hostname,
+      // strips hash, strips a trailing pathname slash) — NOT the same
+      // normalization diffSnapshotOffers' own offerIdentityKeys applies via
+      // sourced-delta's normalizeUrl (also strips utm_/trk/ref/gh_src/source
+      // tracking params, and the trailing slash of the WHOLE string).
+      // Without re-normalizing here, a persisted URL-only alias (e.g. a
+      // HiringCafe republish this run's canonical dedupe folded onto a
+      // Workday row instead of persisting as its own row) would carry a
+      // tracking param diffSnapshotOffers' own key for that same offer
+      // never does, so the two `url:` keys would never match and the row
+      // would be reported as repo-new (CR-29 round 5).
+      if (key.startsWith("url:")) {
+        const normalized = normalizeUrl(key.slice(4));
+        if (normalized) ids.add(`url:${normalized.toLowerCase()}`);
+      }
     }
   }
   return ids;

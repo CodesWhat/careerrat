@@ -4,8 +4,6 @@ import {
   addPostingIdentity,
   identityAliasAdditions,
   identityKeysWithAliases,
-  postingIdentityIsSeen,
-  postingIdentityKeys,
   rowAliasKeys,
 } from "../../scoring/sourced-identity.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
@@ -55,16 +53,33 @@ function storedPostingIndex(db) {
 // makes reconciliation and sourcedUpsertBatch "consume" them. Returns the
 // newly-added keys (empty when the duplicate adds nothing new, the common
 // case), so the caller can fold them into its own in-flight seen set.
+//
+// Looks up `duplicate`'s match by identityKeysWithAliases (own keys PLUS any
+// aliasKeys already merged onto it), not just its own url/reqId (CR-29 round
+// 5): a duplicate whose OWN identity is new but whose aliasKeys already claim
+// a persisted row's identity (e.g. one absorbed by an in-batch offer before
+// reconciliation recognized the persisted row's ownership) must still resolve
+// to that persisted row, not silently fail to match.
+//
+// Mutates the matched entry's `.row` IN PLACE rather than replacing it with a
+// new object (CR-29 round 5): `index` maps every one of a stored posting's
+// identity keys to the SAME entry object, so every key set at storedPostingIndex
+// build time — not just the keys THIS merge happened to add — sees the
+// updated aliasKeys on its next lookup. Building a fresh `{table, id, row}`
+// per merge (the old behavior) only repointed the newly-added keys; the
+// posting's ORIGINAL keys still resolved to the stale pre-merge row, so a
+// later duplicate matching one of those original keys rebuilt `updatedRow`
+// from that stale row and overwrote (rather than accumulated with) the
+// earlier merge's aliasKeys.
 function mergeDuplicateIdentityAlias(db, index, duplicate) {
-  const matchKey = postingIdentityKeys(duplicate).find((key) => index.has(key));
+  const matchKey = identityKeysWithAliases(duplicate).find((key) => index.has(key));
   if (!matchKey) return [];
-  const { table, id, row } = index.get(matchKey);
-  const additions = identityAliasAdditions(row, duplicate);
+  const entry = index.get(matchKey);
+  const additions = identityAliasAdditions(entry.row, duplicate);
   if (!additions.length) return [];
-  const updatedRow = { ...row, aliasKeys: [...rowAliasKeys(row), ...additions] };
-  putRow(db, table, id, updatedRow);
-  const entryRef = { table, id, row: updatedRow };
-  for (const key of additions) index.set(key, entryRef);
+  entry.row = { ...entry.row, aliasKeys: [...rowAliasKeys(entry.row), ...additions] };
+  putRow(db, entry.table, entry.id, entry.row);
+  for (const key of additions) index.set(key, entry);
   return additions;
 }
 
@@ -74,46 +89,77 @@ function isActiveSourcedStatus(value) {
   return ACTIVE_SOURCED_STATUSES.has(String(value || "sourced").toLowerCase());
 }
 
-// sourcedUpsertBatch({rows}) — one sweep's worth of sourced rows, upserted in
-// ONE transaction with ONE activity event summarizing the batch (matching
-// search-jobs' own "one sweep, one write" shape rather than one event per
-// row). AGENTS.md lists "search-jobs ... when they add rows" among the
-// analytics-refreshing writes — refreshed here too, even though
+// sourcedUpsertBatch({rows, duplicateOffers}) — one sweep's worth of sourced
+// rows, upserted in ONE transaction with ONE activity event summarizing the
+// batch (matching search-jobs' own "one sweep, one write" shape rather than
+// one event per row). AGENTS.md lists "search-jobs ... when they add rows"
+// among the analytics-refreshing writes — refreshed here too, even though
 // buildReevaluationAnalytics only consumes applications[] today (a no-op
 // recompute), so the contract holds if that ever changes.
+//
+// `duplicateOffers` (CR-29 round 5) is a caller-precomputed list of offers
+// reconciliation already recognized as duplicates of an ALREADY-PERSISTED
+// row (see sourced-persistence.mjs's reconcileOffersBeforeCapture) — merged
+// here, INSIDE this verb's own guard(db)-protected transaction, instead of
+// through a separate unguarded call before this transaction even opens.
+// Reconciliation itself stays read-only: a superseded search's alias writes
+// must roll back with everything else when the guard rejects the batch, and
+// a batch that's ALL duplicates (no new/updated row to accept) must still
+// run the guard rather than skip straight past it. `rows` may be empty when
+// `duplicateOffers` carries the whole batch.
+//
+// This verb no longer takes a prepareAcceptedRow/commitAcceptedArtifact
+// hook (CR-29 round 5 removed both): a hook is, by construction, arbitrary
+// caller code running INSIDE this transaction, which is exactly the
+// "JD writes hold the SQLite writer lock" failure mode under fix here.
+// sourced-persistence.mjs now stages every JD artifact BEFORE calling this
+// verb and finalizes/discards it AFTER the verb returns (or throws), so this
+// transaction does DB work only — see captureAndPersistOffersIfDb.
 export function sourcedUpsertBatch({
   repoRoot,
   env,
   rows,
+  duplicateOffers,
   guard,
   dedupeCanonical = false,
-  prepareAcceptedRow,
-  commitAcceptedArtifact,
 } = {}) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    throw new Error("sourcedUpsertBatch: rows must be a non-empty array");
+  const hasRows = Array.isArray(rows) && rows.length > 0;
+  const hasDuplicateOffers = Array.isArray(duplicateOffers) && duplicateOffers.length > 0;
+  if (!hasRows && !hasDuplicateOffers) {
+    throw new Error("sourcedUpsertBatch: rows or duplicateOffers must be a non-empty array");
   }
-  const preparedRows = rows.map((row) => {
+  const preparedRows = (rows || []).map((row) => {
     if (!row?.id) throw new Error("sourcedUpsertBatch: every row needs an id");
-    const acceptedRow = typeof prepareAcceptedRow === "function" ? prepareAcceptedRow(row) : row;
-    if (!acceptedRow?.id || String(acceptedRow.id) !== String(row.id)) {
-      throw new Error("sourcedUpsertBatch: prepared rows must preserve their id");
-    }
-    return { row, acceptedRow };
+    return { row, acceptedRow: row };
   });
   return runVerb({ repoRoot, env }, (db) => {
     if (typeof guard === "function") guard(db);
     let created = 0;
     let updated = 0;
     let duplicates = 0;
-    let failed = 0;
+    const failed = 0;
     let aliasesMerged = false;
     const acceptedIds = [];
     const failedIds = [];
-    const postingIndex = dedupeCanonical ? storedPostingIndex(db) : null;
+    const postingIndex = dedupeCanonical || hasDuplicateOffers ? storedPostingIndex(db) : null;
     const seenPostingKeys = postingIndex ? new Set(postingIndex.keys()) : null;
+    if (hasDuplicateOffers) {
+      for (const offer of duplicateOffers) {
+        duplicates++;
+        const additions = mergeDuplicateIdentityAlias(db, postingIndex, offer);
+        if (additions.length) {
+          aliasesMerged = true;
+          for (const key of additions) seenPostingKeys.add(key);
+        }
+      }
+    }
     for (const { row, acceptedRow } of preparedRows) {
-      if (seenPostingKeys && postingIdentityIsSeen(row, seenPostingKeys)) {
+      // Checks identityKeysWithAliases (row's own url/reqId PLUS any
+      // aliasKeys reconciliation already merged onto it), not just its own
+      // url/reqId (CR-29 round 5): a row whose OWN identity is new but whose
+      // aliasKeys already claim a persisted row's identity must be caught
+      // here and merged, not inserted as a second row for that identity.
+      if (seenPostingKeys && identityKeysWithAliases(row).some((key) => seenPostingKeys.has(key))) {
         duplicates++;
         const additions = mergeDuplicateIdentityAlias(db, postingIndex, row);
         if (additions.length) {
@@ -122,22 +168,14 @@ export function sourcedUpsertBatch({
         }
         continue;
       }
-      // The JD artifact (or any other caller-supplied side effect this row's
-      // acceptance depends on) is committed HERE — after the duplicate check
-      // decided this row wins its slot, but BEFORE putRow makes it durable
-      // (CR-29 round 4). A failure here means this offer is simply never
-      // accepted: its identity is never added to seenPostingKeys and no row
-      // is written, so a later retry (once whatever failed is fixed) sees a
-      // clean slate instead of a row that already claims a JD it never got.
-      if (typeof commitAcceptedArtifact === "function") {
-        try {
-          commitAcceptedArtifact(acceptedRow, row);
-        } catch {
-          failed++;
-          failedIds.push(String(row.id));
-          continue;
-        }
-      }
+      // `failed`/`failedIds` stay at their initial value on this path (CR-29
+      // round 5): a row's side effects — its JD artifact, specifically — are
+      // now staged by the caller BEFORE this verb is even invoked (see
+      // captureAndPersistOffersIfDb), so a failure there means the row never
+      // reaches `rows` here at all. This verb still reports `failed`/
+      // `failedIds` in its return shape so a caller can fold its own
+      // pre-transaction failures into the same counters without a shape
+      // mismatch.
       if (seenPostingKeys) addPostingIdentity(seenPostingKeys, row);
       const existed = Boolean(getRow(db, "sourced", acceptedRow.id));
       putRow(db, "sourced", acceptedRow.id, acceptedRow);
@@ -177,10 +215,15 @@ export function sourcedUpsertBatch({
 // stored row or adds nothing new to it. Intentionally skips the
 // activity-event log (an alias merge is internal bookkeeping, not a
 // user-visible change) but still bumps meta when it writes, per the Data
-// Write Contract. sourced-persistence.mjs's pre-capture reconciliation calls
-// the batched sourcedMergeIdentityAliasBatch below instead (CR-29 round 4):
-// calling this once per suppressed duplicate in a sweep rebuilt the whole
-// stored posting index and opened its own transaction/export every time.
+// Write Contract. sourced-persistence.mjs's pre-capture reconciliation used
+// to call the batched sourcedMergeIdentityAliasBatch below for its whole
+// sweep's worth of persisted-duplicate offers; as of CR-29 round 5 it instead
+// hands them to sourcedUpsertBatch's own `duplicateOffers` param, so the
+// merge runs inside that verb's guard(db)-protected transaction rather than a
+// separate, unguarded one that could commit even when the guard would go on
+// to reject the batch's own new/updated rows. These standalone verbs remain
+// for any OTHER caller merging a duplicate (or a whole batch of them) outside
+// a sourcedUpsertBatch call.
 export function sourcedMergeIdentityAlias({ repoRoot, env, offer } = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const index = storedPostingIndex(db);

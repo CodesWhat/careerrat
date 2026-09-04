@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, test } from "node:test";
 
-import { sourcedRowsFromScanOffers } from "../src/core/scoring/sourced-persistence.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
+import {
+  captureAndPersistOffersIfDb,
+  sourcedRowsFromScanOffers,
+} from "../src/core/scoring/sourced-persistence.mjs";
 
 function offer(overrides = {}) {
   return {
@@ -12,6 +20,25 @@ function offer(overrides = {}) {
     ...overrides,
   };
 }
+
+const cleanupRoots = [];
+
+function tempRepo() {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-sourced-persistence-"));
+  cleanupRoots.push(repoRoot);
+  return repoRoot;
+}
+
+after(() => {
+  closeAll();
+  for (const root of cleanupRoots.splice(0)) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  }
+});
 
 test("sourced rows recover explicit base-pay and salary ranges from canonical bodies", () => {
   const rows = sourcedRowsFromScanOffers([
@@ -163,4 +190,54 @@ test("sourced rows preserve qualification unknowns and unverified search status"
 
   assert.deepEqual(row.scanner.qualificationUnknowns, ["compensation", "location"]);
   assert.equal(row.scanner.unverified, true);
+});
+
+test("captureAndPersistOffersIfDb stages every JD artifact BEFORE opening the DB transaction, so the transaction itself does no filesystem I/O (CR-29 round 5)", () => {
+  // JD writes used to happen INSIDE sourcedUpsertBatch's BEGIN IMMEDIATE
+  // transaction, so lock duration scaled with batch size and document size.
+  // The write is now staged (scratch path, plain writeFileSync) before this
+  // function ever calls sourcedUpsertBatch at all; only a rename happens
+  // after the transaction resolves. Proven directly here: `guard` runs
+  // INSIDE sourcedUpsertBatch's own transaction (right after BEGIN
+  // IMMEDIATE), so if every offer's staged file is already on disk by the
+  // time guard fires, the writes provably happened before the transaction
+  // opened, not during it.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+
+  const offers = ["alpha", "beta", "gamma", "delta", "epsilon"].map((slug) => ({
+    company: "Writer Contention Co",
+    title: `${slug} Engineer`,
+    url: `https://jobs.example.test/writer-contention/${slug}`,
+    reqId: `writer-contention-${slug}`,
+    rawText: `Body content for the writer-contention regression: ${slug}.`,
+  }));
+
+  let stagedFilesSeenByGuard = null;
+  const result = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers,
+    dedupeCanonical: true,
+    guard: () => {
+      stagedFilesSeenByGuard = existsSync(jobsDir)
+        ? readdirSync(jobsDir).filter((name) => name.includes(".staging-")).length
+        : 0;
+    },
+  });
+
+  assert.equal(
+    stagedFilesSeenByGuard,
+    offers.length,
+    "every offer's JD artifact must already be staged to disk before guard(db) — and therefore the write transaction — runs"
+  );
+  assert.equal(result.persistedRows, offers.length);
+  assert.equal(result.failed, 0);
+
+  // Every staged scratch file must be gone once the batch resolves: the
+  // winners were renamed to their final deterministic path, and none lost
+  // their slot here (dedupeCanonical, all distinct identities), so nothing
+  // should remain to discard either.
+  const remainingStagingFiles = readdirSync(jobsDir).filter((name) => name.includes(".staging-"));
+  assert.deepEqual(remainingStagingFiles, []);
 });

@@ -2552,7 +2552,14 @@ export async function runAiWebSearch({
       message: `Saving ${survivors.length} qualified job${survivors.length === 1 ? "" : "s"}…`,
     });
   }
-  const persistedOffers = survivors.length
+  // A batch with artifact-write failures (CR-29 round 5) is neither "new"
+  // nor a genuine "duplicate": sourcedUpsertBatch never wrote that row, so
+  // folding it into `duplicates` (as persistedOffers.length shrinking used
+  // to imply) made a lost posting look like ordinary dedupe instead of a
+  // write that needs a retry. `failed`/`failedIds` name those offers
+  // explicitly so a caller can tell "written" apart from "silently
+  // discarded."
+  const persisted = survivors.length
     ? captureAndPersistOffersIfDb({
         repoRoot,
         env,
@@ -2560,9 +2567,12 @@ export async function runAiWebSearch({
         savedAt,
         guard: writeGuard,
         dedupeCanonical: true,
-      })?.offers || []
-    : [];
-  duplicates += Math.max(0, survivors.length - persistedOffers.length);
+      })
+    : null;
+  const persistedOffers = persisted?.offers || [];
+  const persistedFailed = persisted?.failed || 0;
+  const persistedFailedIds = persisted?.failedIds || [];
+  duplicates += Math.max(0, survivors.length - persistedOffers.length - persistedFailed);
 
   return {
     searched: selected.length,
@@ -2581,6 +2591,9 @@ export async function runAiWebSearch({
     fetchedPostingDecisions,
     partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
     unreadable: captureFailures.length,
+    ok: persistedFailed === 0,
+    failed: persistedFailed,
+    failedIds: persistedFailedIds,
     errors: promptErrors,
     warnings,
     validationFailures,

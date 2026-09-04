@@ -3207,6 +3207,42 @@ test("runAiWebSearch keeps likely-cut only when canonical scoring finds a cut fl
   assert.match(saved.note, /cut-risk-heavy-travel/);
 });
 
+test("a JD artifact-write failure during an AI web search marks the run failed and keeps the offer's id in failedIds", async () => {
+  // CR-29 round 5: captureAndPersistOffersIfDb already reported a JD write
+  // failure in `failed`/`failedIds`, but this production caller used to
+  // discard that data — the offer's disappearance from persistedOffers just
+  // shrank the duplicate count, so a lost posting looked like ordinary
+  // dedupe instead of a write that needs a retry.
+  const repoRoot = repo({ prompts: 1 });
+  // Precomputed deterministic JD path (sourced-persistence.mjs's
+  // jobCaptureRelPath: <company-slug>-<title-slug>-<reqId-slug>.md) for
+  // role()'s default url, https://jobs.lever.co/acme/req-1, whose extracted
+  // reqId is lever:req-1. Blocking it with a directory makes
+  // stageCapturedJob's write throw before any DB transaction opens.
+  const jdRelPath = "workspace/jobs/acme-ai-applied-ai-engineer-lever-req-1.md";
+  mkdirSync(userPath({ repoRoot }, jdRelPath), { recursive: true });
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [role({ rule_flags: [] })],
+      queries_run: [{ prompt_id: "p1", query: "ai jobs" }],
+    }),
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failed, 1);
+  assert.deepEqual(result.failedIds, ["sourced-acme-ai-lever-req-1"]);
+  assert.equal(result.new, 0);
+  assert.deepEqual(
+    readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search"),
+    [],
+    "a failed JD write must not leave a dangling DB row"
+  );
+});
+
 test("runAiWebSearch recovers bounded source receipts for roles deduped before persistence", async () => {
   const repoRoot = repo({ prompts: 1 });
   const duplicateUrl = "https://jobs.lever.co/acme/req-1";
