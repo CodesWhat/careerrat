@@ -24,6 +24,7 @@ import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { validUploadArtifact } from "../src/core/documents/artifact-validation.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
@@ -1104,6 +1105,98 @@ test("a partial export reserves a plain-key registered artifact, not just its *S
     artifacts.resumeText,
     coverLetterPlainPath,
     "the resume text artifact must not point at the plain-key cover-letter artifact"
+  );
+});
+
+test("a partial export reserves format-specific artifacts belonging to omitted document kinds", async () => {
+  // Regression: reservedIdentities only ever reserved the plain
+  // resume/coverLetter/answers keys and their *Source counterparts for an
+  // omitted kind, never the format-specific keys the export loop itself
+  // produces (resumePdf, resumeDocx, resumeText, ...). A same-stem full
+  // export followed by a partial export of a different kind could
+  // silently rename over a surviving resume PDF while artifacts.resumePdf
+  // kept pointing at the now-overwritten file, and apply-driver's upload
+  // selection would then hand the overwritten file to an ATS as the resume.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/same-stem.md",
+    "# Resume\n\nOriginal resume source body.\n"
+  );
+  const coverLetterSource = writeWorkspaceFile(
+    repoRoot,
+    // Shares resumeSource's stripped base ("same-stem") once each
+    // source's own extension is removed, so the two kinds' natural
+    // outBase collide.
+    "tailored/same-stem.txt",
+    "Dear Hiring Team,\n\nCover letter source body.\n"
+  );
+  seedApp(repoRoot, { resumeSource, coverLetterSource });
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  // Full export: both kinds compete for the same natural outBase. The
+  // in-run collision avoidance covered by an earlier regression pushes
+  // the cover letter onto a distinct "-export" destination.
+  const fullCalls = [];
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { resumeSource, coverLetterSource },
+    request: { formats: ["pdf"] },
+    exportArtifact: fakeExporter(fullCalls),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const afterFull = readApp(repoRoot).artifacts;
+  const resumePdfPath = afterFull.resumePdf;
+  assert.match(resumePdfPath, /^workspace\/tailored\/.+\.pdf$/);
+  const resumePdfAbs = join(repoRoot, resumePdfPath);
+  const resumePdfBytesBefore = readFileSync(resumePdfAbs);
+
+  // Partial: regenerate only the cover letter, same stem. resumeSource is
+  // omitted from this call entirely, but the resume PDF from the prior
+  // full export is still registered and still live on disk.
+  const partialCalls = [];
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    packetSources: { coverLetterSource },
+    request: { formats: ["pdf"] },
+    exportArtifact: fakeExporter(partialCalls),
+    now: () => new Date("2026-07-06T16:00:00Z"),
+  });
+
+  const afterPartial = readApp(repoRoot).artifacts;
+  assert.equal(
+    afterPartial.resumePdf,
+    resumePdfPath,
+    "the resume PDF pointer must survive an unrelated partial export untouched"
+  );
+  assert.deepEqual(
+    readFileSync(resumePdfAbs),
+    resumePdfBytesBefore,
+    "the resume PDF's bytes must be byte-for-byte unchanged"
+  );
+  assert.notEqual(
+    `${partialCalls[0].outBase}.pdf`,
+    resumePdfAbs,
+    "the cover-letter-only export must not target the resume's own destination"
+  );
+
+  // apply-driver's uploadArtifacts selection (src/core/apply/apply-driver.mjs)
+  // walks [resumePdf, resumeDocx, resume] through validUploadArtifact and
+  // picks the first hit. Mirror that selection here to confirm it still
+  // resolves to the untouched resume PDF, not an overwritten file a
+  // regression would have produced.
+  const uploadCandidate = [afterPartial.resumePdf, afterPartial.resumeDocx, afterPartial.resume]
+    .map((stored) => stored && join(repoRoot, stored))
+    .find((candidate) => candidate && validUploadArtifact(candidate));
+  assert.equal(
+    uploadCandidate,
+    resumePdfAbs,
+    "apply-driver's upload selection must still pick the surviving resume PDF"
   );
 });
 

@@ -335,3 +335,60 @@ test("renderResumeText keeps an explicit hard break intact alongside a bold span
   const text = renderResumeText("123 Main Street  \n**Anytown, ST 00000**\n");
   assert.equal(text, "123 Main Street\nAnytown, ST 00000");
 });
+
+// ---------------------------------------------------------------------------
+// List item continuation lines: a soft-wrapped line indented under a list
+// item belongs to that item's text, not a detached paragraph.
+// ---------------------------------------------------------------------------
+
+test("renderResumeText joins an indented continuation line into the same unordered bullet", () => {
+  const text = renderResumeText("- Led migration across\n  three regions.\n");
+  assert.equal(text, "- Led migration across three regions.");
+});
+
+test("renderResumeText joins an indented continuation line into the same ordered item", () => {
+  const text = renderResumeText("1. Led migration across\n   three regions.\n");
+  assert.equal(text, "1. Led migration across three regions.");
+});
+
+test("renderResumeText preserves an explicit hard break inside a list item's continuation", () => {
+  const text = renderResumeText("- Line one  \n  Line two.\n");
+  assert.equal(text, "- Line one\nLine two.");
+});
+
+test("renderResumeText ends a list item's continuation at a blank line instead of merging past it", () => {
+  const text = renderResumeText("- Led migration across\n\nSeparate paragraph.\n");
+  assert.equal(text, "- Led migration across\n\nSeparate paragraph.");
+});
+
+test("renderResumeText treats an indented continuation as its own nested item, not a merge, once it matches a list marker", () => {
+  const text = renderResumeText("- Parent item\n  - Nested item\n");
+  const lines = text.split("\n");
+  assert.deepEqual(lines, ["- Parent item", "  - Nested item"]);
+});
+
+// ---------------------------------------------------------------------------
+// parseRuns scaling: a paragraph with many inline constructs must parse in
+// O(n), not the O(n^2) the old repeated-regex-scan-over-a-shrinking-suffix
+// approach produced (reported at ~7.7s for a 256 KB paragraph).
+// ---------------------------------------------------------------------------
+
+test("renderResumeText parses a paragraph with many inline constructs, at scale, well under a second", () => {
+  const unit =
+    "Built **cross-region** payments *fast* using `redis` and a [status page](https://example.com/status) to track it. ";
+  const repeats = Math.ceil((256 * 1024) / unit.length);
+  const md = unit.repeat(repeats);
+  assert.ok(md.length >= 256 * 1024);
+
+  const start = Date.now();
+  const text = renderResumeText(md);
+  const elapsedMs = Date.now() - start;
+
+  assert.doesNotMatch(
+    text,
+    /\*\*|`|\[|\]/,
+    "every inline construct resolves; none leaks its markdown syntax"
+  );
+  assert.match(text, /status page \(https:\/\/example\.com\/status\)/);
+  assert.ok(elapsedMs < 500, `expected parsing to finish well under a second, took ${elapsedMs}ms`);
+});

@@ -91,6 +91,13 @@ function sourceKind(sourceKey) {
   return "resume";
 }
 
+// The registry of document kinds this export path knows how to produce.
+// Reservation logic below enumerates every per-format artifact key from
+// this list (via outputKey) rather than hand-listing resumePdf,
+// resumeDocx, resumeText, coverLetterPdf, ... individually, so a future
+// kind added here is automatically covered.
+const DOCUMENT_KINDS = ["resume", "coverLetter", "answers"];
+
 const FORMAT_SUFFIX = { pdf: "Pdf", docx: "Docx", text: "Text" };
 const FORMAT_EXTENSION = { pdf: ".pdf", docx: ".docx", text: ".txt" };
 
@@ -371,13 +378,34 @@ export async function exportPacketArtifacts({
   // pointer with no `coverLetterSource`), and if its stem collides with an
   // exported resume's outBase, an unreserved plain-key artifact would get
   // silently overwritten while its pointer still referenced it.
-  const plainArtifactPaths = ["resume", "coverLetter", "answers"]
-    .map((key) => app.artifacts?.[key])
+  const plainArtifactPaths = DOCUMENT_KINDS.map((key) => app.artifacts?.[key]).filter(
+    (value) => typeof value === "string" && value.trim()
+  );
+  // A partial export also omits whole document kinds (e.g. a
+  // cover-letter-only call never touches "resume"). Every PDF, DOCX, and
+  // text artifact already registered on the application row for an
+  // omitted kind (resumePdf, resumeDocx, resumeText, coverLetterPdf, ...)
+  // is just as live and readable as the plain-key/*Source artifacts
+  // reserved above — none of those cover the format-specific keys — so an
+  // omitted kind's format artifacts must be reserved too, or a partial
+  // export's outBase can silently rename over a surviving resume (or
+  // cover letter, or answers) render while its pointer keeps referencing
+  // the now-overwritten file. Enumerated from the DOCUMENT_KINDS/
+  // SUPPORTED_EXPORT_FORMATS registries rather than a hand list, so a
+  // future kind or format is automatically covered.
+  const exportingKinds = new Set(
+    sourceEntries(sources).map(([sourceKey]) => sourceKind(sourceKey))
+  );
+  const omittedKindFormatPaths = DOCUMENT_KINDS.filter((kind) => !exportingKinds.has(kind))
+    .flatMap((kind) =>
+      [...SUPPORTED_EXPORT_FORMATS].map((format) => app.artifacts?.[outputKey(kind, format)])
+    )
     .filter((value) => typeof value === "string" && value.trim());
   const reservedIdentities = new Set(
     [...sourceEntries(sources), ...sourceEntries(packetSourcesFromApp(app))]
       .map(([, storedPath]) => storedPath)
       .concat(plainArtifactPaths)
+      .concat(omittedKindFormatPaths)
       .map((storedPath) => resolveWorkspacePath(workspaceDir, storedPath))
       .filter(Boolean)
       .map(canonicalIdentity)

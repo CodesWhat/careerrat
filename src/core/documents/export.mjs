@@ -1480,6 +1480,13 @@ function parseMdBlocks(markdown) {
   // block boundary is crossed so a later plain line always starts a fresh
   // paragraph instead of merging across one.
   let paragraphOpen = false;
+  // The most recently pushed "li" block, while a following properly
+  // indented line may still extend its text (a soft-wrapped continuation
+  // like "- Led migration across\n  three regions."), or null once a
+  // blank line or any other block construct ends it. Mirrors paragraphOpen
+  // above, but tracks the block itself rather than a boolean since the
+  // continuation branch appends directly onto it.
+  let openListItem = null;
 
   const listItemDepth = (indent) => {
     while (listIndentStack.length > 0 && indent < listIndentStack[listIndentStack.length - 1]) {
@@ -1510,11 +1517,13 @@ function parseMdBlocks(markdown) {
       blocks.push({ type: "codeblock", lines: codeLines });
       listIndentStack.length = 0;
       paragraphOpen = false;
+      openListItem = null;
       continue;
     }
 
     if (line.trim() === "") {
       paragraphOpen = false;
+      openListItem = null;
       continue;
     }
 
@@ -1524,6 +1533,7 @@ function parseMdBlocks(markdown) {
       blocks.push({ type: "heading", level: hm[1].length, runs: parseRuns(hm[2].trim()) });
       listIndentStack.length = 0;
       paragraphOpen = false;
+      openListItem = null;
       continue;
     }
 
@@ -1532,30 +1542,53 @@ function parseMdBlocks(markdown) {
       blocks.push({ type: "hr" });
       listIndentStack.length = 0;
       paragraphOpen = false;
+      openListItem = null;
       continue;
     }
 
-    // Unordered list
+    // Unordered list. Like a paragraph, an item's raw text accumulates
+    // across a following properly indented continuation line (see the
+    // continuation branch below, right before the regular-paragraph
+    // fallthrough) and is only handed to parseRuns once, in the
+    // finalization pass, so an inline construct spanning the join
+    // resolves correctly. contentIndent (the column the item's own text
+    // starts at) is what a continuation line's indent gets compared
+    // against.
     const ulm = line.match(/^(\s*)[-*]\s+(.*)/);
     if (ulm) {
       const depth = listItemDepth(ulm[1].length);
-      blocks.push({ type: "li", ordered: false, depth, runs: parseRuns(ulm[2]) });
+      const hardBreakMatch = ulm[2].match(/(?: {2,}|\\)$/);
+      const li = {
+        type: "li",
+        ordered: false,
+        depth,
+        raw: hardBreakMatch ? ulm[2].slice(0, hardBreakMatch.index) : ulm[2],
+        hardBreakPending: Boolean(hardBreakMatch),
+        contentIndent: ulm[0].length - ulm[2].length,
+      };
+      blocks.push(li);
       paragraphOpen = false;
+      openListItem = li;
       continue;
     }
 
-    // Ordered list
+    // Ordered list — same continuation-accumulation shape as unordered.
     const olm = line.match(/^(\s*)(\d+)\.\s+(.*)/);
     if (olm) {
       const depth = listItemDepth(olm[1].length);
-      blocks.push({
+      const hardBreakMatch = olm[3].match(/(?: {2,}|\\)$/);
+      const li = {
         type: "li",
         ordered: true,
         depth,
         start: Number(olm[2]),
-        runs: parseRuns(olm[3]),
-      });
+        raw: hardBreakMatch ? olm[3].slice(0, hardBreakMatch.index) : olm[3],
+        hardBreakPending: Boolean(hardBreakMatch),
+        contentIndent: olm[0].length - olm[3].length,
+      };
+      blocks.push(li);
       paragraphOpen = false;
+      openListItem = li;
       continue;
     }
 
@@ -1579,6 +1612,7 @@ function parseMdBlocks(markdown) {
         });
         listIndentStack.length = 0;
         paragraphOpen = false;
+        openListItem = null;
         continue;
       }
     }
@@ -1586,6 +1620,7 @@ function parseMdBlocks(markdown) {
     // Blockquote
     if (/^>\s?/.test(line)) {
       listIndentStack.length = 0;
+      openListItem = null;
       const bqRuns = [];
       let j = i;
       while (j < lines.length && /^>\s?/.test(lines[j])) {
@@ -1597,6 +1632,29 @@ function parseMdBlocks(markdown) {
       blocks.push({ type: "blockquote", runs: bqRuns });
       paragraphOpen = false;
       continue;
+    }
+
+    // List item continuation — a soft-wrapped line like
+    // "- Led migration across\n  three regions." belongs to the item
+    // above it, not a detached paragraph, as long as it's indented at
+    // least two spaces or matches the item's own content indent exactly.
+    // Joined the same way a paragraph joins its lines: a soft break folds
+    // to a single space, an explicit hard break (trailing two-or-more
+    // spaces or a backslash) survives as a literal break. A blank line or
+    // any other block construct already cleared openListItem above, so
+    // reaching here with it still set means this line is eligible.
+    if (openListItem) {
+      const indentMatch = line.match(/^(\s*)/);
+      const indent = indentMatch[1].length;
+      if (indent >= 2 || indent === openListItem.contentIndent) {
+        const hardBreakMatch = line.match(/(?: {2,}|\\)$/);
+        const lineText = (hardBreakMatch ? line.slice(0, hardBreakMatch.index) : line).slice(
+          indent
+        );
+        openListItem.raw += (openListItem.hardBreakPending ? BREAK_MARKER : " ") + lineText;
+        openListItem.hardBreakPending = Boolean(hardBreakMatch);
+        continue;
+      }
     }
 
     // Regular paragraph line — CommonMark folds every run of consecutive
@@ -1629,19 +1687,22 @@ function parseMdBlocks(markdown) {
       });
     }
     paragraphOpen = true;
+    openListItem = null;
     listIndentStack.length = 0;
   }
 
-  // Finalize every paragraph block: parse its fully assembled raw text
-  // (soft breaks already folded to spaces, hard breaks marked with
-  // BREAK_MARKER) through parseRuns exactly once, so an inline construct
-  // spanning a soft break resolves correctly. parseRuns splits BREAK_MARKER
-  // back out into its own { break: true } run (see pushPlainText below).
+  // Finalize every paragraph and list-item block: parse its fully
+  // assembled raw text (soft breaks already folded to spaces, hard breaks
+  // marked with BREAK_MARKER) through parseRuns exactly once, so an inline
+  // construct spanning a soft break resolves correctly. parseRuns splits
+  // BREAK_MARKER back out into its own { break: true } run (see
+  // pushPlainText below).
   for (const block of blocks) {
-    if (block.type === "para") {
+    if (block.type === "para" || block.type === "li") {
       block.runs = parseRuns(block.raw);
       delete block.raw;
       delete block.hardBreakPending;
+      delete block.contentIndent;
     }
   }
 
@@ -1649,68 +1710,63 @@ function parseMdBlocks(markdown) {
 }
 
 /**
- * Find the earliest `[text](destination)` link in `s`, scanning the
- * destination with a balanced-parenthesis, backslash-escape-aware walk so a
- * destination containing `(...)` groups (or an escaped paren) is captured
- * whole instead of truncating at the first `)`.
+ * Find a `[text](destination)` link anchored exactly at `text[start]`
+ * (caller guarantees `text[start] === "["`), scanning the destination with
+ * a balanced-parenthesis, backslash-escape-aware walk so a destination
+ * containing `(...)` groups (or an escaped paren) is captured whole instead
+ * of truncating at the first `)`.
  *
- * @param {string} s
- * @returns {{index: number, length: number, text: string, href: string}|null}
+ * `nextCloseBracket` is a precomputed, index-by-index lookup of the next
+ * `]` at or after a given position (or -1). Without it, finding the close
+ * bracket for a `[` with no real link is an O(remaining length) scan, and
+ * many literal, unpaired `[` characters before the same distant `]` (or
+ * before none at all) turn that into O(n^2) across the whole call.
+ *
+ * @param {string} text
+ * @param {number} start
+ * @param {Int32Array} nextCloseBracket
+ * @returns {{length: number, text: string, href: string}|null}
  */
-function findLinkMatch(s) {
-  let searchFrom = 0;
-  while (searchFrom < s.length) {
-    const openBracket = s.indexOf("[", searchFrom);
-    if (openBracket === -1) return null;
-    const closeBracket = s.indexOf("]", openBracket);
-    if (closeBracket === -1) return null;
-    if (s[closeBracket + 1] !== "(") {
-      searchFrom = openBracket + 1;
+function matchLinkAt(text, start, nextCloseBracket) {
+  const closeBracket = nextCloseBracket[start + 1];
+  if (closeBracket === -1 || text[closeBracket + 1] !== "(") return null;
+
+  let depth = 0;
+  let href = "";
+  let matched = false;
+  let j = closeBracket + 1;
+  for (; j < text.length; j++) {
+    const ch = text[j];
+    if (ch === "\\" && j + 1 < text.length) {
+      href += text[j + 1];
+      j++;
       continue;
     }
-
-    let depth = 0;
-    let href = "";
-    let matched = false;
-    let j = closeBracket + 1;
-    for (; j < s.length; j++) {
-      const ch = s[j];
-      if (ch === "\\" && j + 1 < s.length) {
-        href += s[j + 1];
+    if (ch === "(") {
+      depth++;
+      if (depth > 1) href += ch;
+      continue;
+    }
+    if (ch === ")") {
+      depth--;
+      if (depth === 0) {
+        matched = true;
         j++;
-        continue;
-      }
-      if (ch === "(") {
-        depth++;
-        if (depth > 1) href += ch;
-        continue;
-      }
-      if (ch === ")") {
-        depth--;
-        if (depth === 0) {
-          matched = true;
-          j++;
-          break;
-        }
-        href += ch;
-        continue;
+        break;
       }
       href += ch;
-    }
-
-    if (!matched) {
-      searchFrom = openBracket + 1;
       continue;
     }
-
-    return {
-      index: openBracket,
-      length: j - openBracket,
-      text: s.slice(openBracket + 1, closeBracket),
-      href,
-    };
+    href += ch;
   }
-  return null;
+
+  if (!matched) return null;
+
+  return {
+    length: j - start,
+    text: text.slice(start + 1, closeBracket),
+    href,
+  };
 }
 
 /**
@@ -1732,90 +1788,153 @@ function pushPlainText(runs, text) {
 }
 
 /**
+ * Find the index of a delimiter's close, starting the search at `from`, or
+ * -1 if there isn't a valid one. Mirrors the content class a delimiter
+ * pattern like `\*\*([^*]+)\*\*` enforces: the content between open and
+ * close must be non-empty and must not itself contain `excludeChar`, so the
+ * scan stops at the FIRST occurrence of `excludeChar` at or after `from`
+ * and either confirms it starts `closeToken` there or fails outright — it
+ * never continues scanning past it looking for a later, valid one. That
+ * keeps every call bounded by the gap to the nearest `excludeChar`
+ * occurrence rather than the remaining length of the whole text, which is
+ * what makes the outer cursor scan in parseRuns O(n) instead of O(n^2).
+ *
+ * @param {string} text
+ * @param {number} from
+ * @param {string} closeToken
+ * @param {string} excludeChar
+ * @returns {number}
+ */
+function findDelimiterClose(text, from, closeToken, excludeChar) {
+  let j = from;
+  while (j < text.length && text[j] !== excludeChar) j++;
+  if (j >= text.length || j === from) return -1;
+  return text.startsWith(closeToken, j) ? j : -1;
+}
+
+/**
  * Parse inline markdown into runs: bold, italic, code, links, plain text.
+ *
+ * A single left-to-right cursor walk over `text`: at each position, try
+ * each delimiter type anchored exactly there (matching the same priority
+ * order — code, bold**, bold__, italic*, italic_, link — the old
+ * repeated-regex-scan approach used), and fall back to plain text and
+ * advance by one character when none match. This never re-slices or
+ * re-scans an already-visited prefix the way repeatedly searching a
+ * shrinking "remaining" suffix with regexes does, so a paragraph with many
+ * inline constructs parses in O(n) instead of O(n^2).
  *
  * @param {string} text
  * @returns {Run[]}
  */
 function parseRuns(text) {
   const runs = [];
+  const n = text.length;
 
-  // Tokenise: backtick code, **bold**, __bold__, *italic*, _italic_. Links
-  // are matched separately by findLinkMatch (see below) so a destination
-  // with balanced parens or backslash escapes stays in one run.
-  const patterns = [
-    { re: /`([^`]+)`/, type: "code" },
-    { re: /\*\*([^*]+)\*\*/, type: "bold" },
-    { re: /__([^_]+)__/, type: "bold" },
-    { re: /\*([^*]+)\*/, type: "italic" },
-    { re: /_([^_]+)_/, type: "italic" },
-  ];
-
-  let remaining = text;
-  while (remaining.length > 0) {
-    // Find earliest match across all patterns plus the link scanner
-    let earliest = null;
-    let earliestIdx = Infinity;
-    let earliestLen = 0;
-
-    for (const p of patterns) {
-      const m = p.re.exec(remaining);
-      if (m && m.index < earliestIdx) {
-        earliest = { m, type: p.type };
-        earliestIdx = m.index;
-        earliestLen = m[0].length;
-      }
-    }
-
-    const link = findLinkMatch(remaining);
-    if (link && link.index < earliestIdx) {
-      earliest = { m: link, type: "link" };
-      earliestIdx = link.index;
-      earliestLen = link.length;
-    }
-
-    if (!earliest) {
-      pushPlainText(runs, remaining);
-      break;
-    }
-
-    // Plain text before match
-    if (earliestIdx > 0) {
-      pushPlainText(runs, remaining.slice(0, earliestIdx));
-    }
-
-    const { m, type } = earliest;
-    if (type === "code") {
-      // Code spans stay opaque: no recursion, the literal text is the run.
-      // A hard break can't land inside real backtick-delimited source (it
-      // would have to survive as a raw newline mid-span, which markdown
-      // doesn't produce), but if BREAK_MARKER ever does end up here, fold
-      // it back to a literal newline rather than leaking the sentinel.
-      runs.push({ text: m[1].split(BREAK_MARKER).join("\n"), code: true });
-    } else if (type === "link") {
-      // The destination stays opaque, but the visible label can itself
-      // contain bold/italic (e.g. [**Example**](url)) — parse it
-      // recursively and stamp the href onto every resulting run so the
-      // label's own formatting survives alongside the link.
-      for (const run of parseRuns(m.text)) {
-        runs.push({ ...run, href: run.href || m.href });
-      }
-    } else if (type === "bold") {
-      // The visible content can itself contain a link or the other
-      // emphasis marker (e.g. **[Example](url)**) — parse recursively and
-      // merge the bold flag onto every resulting run.
-      for (const run of parseRuns(m[1])) {
-        runs.push({ ...run, bold: true });
-      }
-    } else if (type === "italic") {
-      for (const run of parseRuns(m[1])) {
-        runs.push({ ...run, italic: true });
-      }
-    }
-
-    remaining = remaining.slice(earliestIdx + earliestLen);
+  // One backward pass giving an O(1) "next ']' at or after i" lookup for
+  // every position — see matchLinkAt's doc comment for why this matters.
+  const nextCloseBracket = new Int32Array(n + 1);
+  nextCloseBracket[n] = -1;
+  for (let k = n - 1; k >= 0; k--) {
+    nextCloseBracket[k] = text[k] === "]" ? k : nextCloseBracket[k + 1];
   }
 
+  let plainStart = 0;
+  let i = 0;
+  const flushPlain = (end) => {
+    if (end > plainStart) pushPlainText(runs, text.slice(plainStart, end));
+  };
+
+  while (i < n) {
+    const ch = text[i];
+
+    if (ch === "`") {
+      const close = findDelimiterClose(text, i + 1, "`", "`");
+      if (close !== -1) {
+        flushPlain(i);
+        // Code spans stay opaque: no recursion, the literal text is the
+        // run. A hard break can't land inside real backtick-delimited
+        // source (it would have to survive as a raw newline mid-span,
+        // which markdown doesn't produce), but if BREAK_MARKER ever does
+        // end up here, fold it back to a literal newline rather than
+        // leaking the sentinel.
+        runs.push({
+          text: text
+            .slice(i + 1, close)
+            .split(BREAK_MARKER)
+            .join("\n"),
+          code: true,
+        });
+        i = close + 1;
+        plainStart = i;
+        continue;
+      }
+    }
+
+    if (ch === "*" && text[i + 1] === "*") {
+      const close = findDelimiterClose(text, i + 2, "**", "*");
+      if (close !== -1) {
+        flushPlain(i);
+        // The visible content can itself contain a link or the other
+        // emphasis marker (e.g. **[Example](url)**) — parse recursively
+        // and merge the bold flag onto every resulting run.
+        for (const run of parseRuns(text.slice(i + 2, close))) runs.push({ ...run, bold: true });
+        i = close + 2;
+        plainStart = i;
+        continue;
+      }
+    }
+    if (ch === "_" && text[i + 1] === "_") {
+      const close = findDelimiterClose(text, i + 2, "__", "_");
+      if (close !== -1) {
+        flushPlain(i);
+        for (const run of parseRuns(text.slice(i + 2, close))) runs.push({ ...run, bold: true });
+        i = close + 2;
+        plainStart = i;
+        continue;
+      }
+    }
+
+    if (ch === "*") {
+      const close = findDelimiterClose(text, i + 1, "*", "*");
+      if (close !== -1) {
+        flushPlain(i);
+        for (const run of parseRuns(text.slice(i + 1, close))) runs.push({ ...run, italic: true });
+        i = close + 1;
+        plainStart = i;
+        continue;
+      }
+    }
+    if (ch === "_") {
+      const close = findDelimiterClose(text, i + 1, "_", "_");
+      if (close !== -1) {
+        flushPlain(i);
+        for (const run of parseRuns(text.slice(i + 1, close))) runs.push({ ...run, italic: true });
+        i = close + 1;
+        plainStart = i;
+        continue;
+      }
+    }
+
+    if (ch === "[") {
+      const link = matchLinkAt(text, i, nextCloseBracket);
+      if (link) {
+        flushPlain(i);
+        // The destination stays opaque, but the visible label can itself
+        // contain bold/italic (e.g. [**Example**](url)) — parse it
+        // recursively and stamp the href onto every resulting run so the
+        // label's own formatting survives alongside the link.
+        for (const run of parseRuns(link.text)) runs.push({ ...run, href: run.href || link.href });
+        i += link.length;
+        plainStart = i;
+        continue;
+      }
+    }
+
+    i++;
+  }
+
+  flushPlain(n);
   return runs;
 }
 
