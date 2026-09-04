@@ -38,6 +38,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
+import { isWithinRuntimePath } from "./runtime-path-policy.mjs";
 import {
   runtimeProcessIdentityFiles,
   runtimeProcessInvocation,
@@ -1490,14 +1491,6 @@ function existingCanonicalPath(path) {
 
 const RUNTIME_READ_BOUNDARY_INVALID = "RUNTIME_READ_BOUNDARY_INVALID";
 
-function isWithin(root, candidate) {
-  const remainder = relative(root, candidate);
-  return (
-    remainder === "" ||
-    (!remainder.startsWith(`..${sep}`) && remainder !== ".." && !isAbsolute(remainder))
-  );
-}
-
 function exactApprovedReadPaths({ repoRoot, env, skill, approvedReadPaths, runtimeId } = {}) {
   const rootSegments = EXACT_READ_ROOTS[skill];
   if (
@@ -1531,8 +1524,8 @@ function exactApprovedReadPaths({ repoRoot, env, skill, approvedReadPaths, runti
     if (
       !canonical ||
       !isFile ||
-      !isWithin(lexicalAllowedRoot, lexical) ||
-      !isWithin(canonicalAllowedRoot, canonical) ||
+      !isWithinRuntimePath(lexicalAllowedRoot, lexical) ||
+      !isWithinRuntimePath(canonicalAllowedRoot, canonical) ||
       canonical !== expectedCanonical
     ) {
       throw runtimeError(
