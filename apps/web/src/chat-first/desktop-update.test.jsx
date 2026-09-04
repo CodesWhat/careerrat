@@ -77,14 +77,27 @@ describe("desktop update bridge", () => {
       primaryLabel: "Restart and install",
     });
 
-    await captured.notice.onPrimary();
-    expect(globalThis.careerratDesktopUpdate.restartAndInstall).toHaveBeenCalledOnce();
+    // Exercise the Settings actions while an update is merely ready, not
+    // installing, so both actually reach the bridge.
     await captured.setEnabled(false);
     await captured.checkNow();
     expect(globalThis.careerratDesktopUpdate.checkNow).toHaveBeenCalledOnce();
 
     renderToStaticMarkup(<Consumer />);
     expect(captured.status).toBe("CareerRat is up to date.");
+
+    // Back to a ready update to exercise the downloaded-update action itself.
+    push({
+      supported: true,
+      notify: true,
+      enabled: true,
+      phase: "ready",
+      version: "0.16.4",
+      progress: 100,
+    });
+    renderToStaticMarkup(<Consumer />);
+    await captured.notice.onPrimary();
+    expect(globalThis.careerratDesktopUpdate.restartAndInstall).toHaveBeenCalledOnce();
 
     delete globalThis.careerratDesktopUpdate;
   });
@@ -290,6 +303,135 @@ describe("desktop update bridge", () => {
     delete globalThis.careerratDesktopUpdate;
   });
 
+  it("latches installing synchronously so two clicks before the bridge resolves fire only one restart request", async () => {
+    vi.resetModules();
+    let push;
+    let resolveRestart;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn(),
+      checkNow: vi.fn(),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveRestart = resolve;
+          })
+      ),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    push({ supported: true, enabled: true, notify: true, phase: "ready", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    const onPrimary = captured.notice.onPrimary;
+
+    // Two activations before either bridge call resolves: the latch has to
+    // apply before the first `await`, not after it, or both reach the IPC.
+    const first = onPrimary();
+    const second = onPrimary();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing", primaryLabel: null });
+    expect(globalThis.careerratDesktopUpdate.restartAndInstall).toHaveBeenCalledOnce();
+
+    resolveRestart({ accepted: true });
+    await Promise.all([first, second]);
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing" });
+    expect(globalThis.careerratDesktopUpdate.restartAndInstall).toHaveBeenCalledOnce();
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
+  it("shows the installing notice with no Restart button when a fresh module rehydrates mid-install", async () => {
+    vi.resetModules();
+    let push;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn(),
+      checkNow: vi.fn(),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn(),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    // This module instance never called restartAndInstall itself: the
+    // "installing" phase arrives purely as a push, as it would for a
+    // renderer that (re)mounted after main already accepted the install.
+    push({
+      supported: true,
+      enabled: true,
+      phase: "installing",
+      message: "Restarting to install…",
+      version: "0.16.4",
+    });
+    renderToStaticMarkup(<Consumer />);
+
+    expect(captured.notice).toMatchObject({
+      visible: true,
+      kind: "installing",
+      message: "Restarting to install…",
+      primaryLabel: null,
+    });
+    expect(captured.notice.onPrimary).toBeUndefined();
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
+  it("guards the Settings toggle and check-now action while installing, without calling the bridge", async () => {
+    vi.resetModules();
+    let push;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn().mockResolvedValue({ enabled: false }),
+      checkNow: vi.fn().mockResolvedValue({ supported: true, enabled: true, phase: "current" }),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn(),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    // A fresh module that never called restartAndInstall itself, rehydrated
+    // mid-install via a push, must still guard both Settings actions.
+    push({ supported: true, enabled: true, phase: "installing", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+
+    await captured.setEnabled(false);
+    await captured.checkNow();
+
+    expect(globalThis.careerratDesktopUpdate.setEnabled).not.toHaveBeenCalled();
+    expect(globalThis.careerratDesktopUpdate.checkNow).not.toHaveBeenCalled();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing" });
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
   it("surfaces a real error pushed mid-install instead of leaving the notice stuck", async () => {
     vi.resetModules();
     let push;
@@ -336,7 +478,7 @@ describe("desktop update bridge", () => {
     delete globalThis.careerratDesktopUpdate;
   });
 
-  it("releases the installing latch after a rejected restart so later pushes still apply", async () => {
+  it("releases the installing latch only via an authoritative push, never via checkNow while installing", async () => {
     vi.resetModules();
     let push;
     globalThis.careerratDesktopUpdate = {
@@ -348,10 +490,7 @@ describe("desktop update bridge", () => {
       setEnabled: vi.fn(),
       checkNow: vi.fn().mockResolvedValue({ supported: true, enabled: true, phase: "ready" }),
       skipVersion: vi.fn(),
-      restartAndInstall: vi
-        .fn()
-        .mockResolvedValueOnce({ accepted: true })
-        .mockResolvedValueOnce({ accepted: false }),
+      restartAndInstall: vi.fn().mockResolvedValue({ accepted: true }),
     };
     const module = await loadDesktopUpdate();
     let captured;
@@ -366,21 +505,35 @@ describe("desktop update bridge", () => {
     renderToStaticMarkup(<Consumer />);
     expect(captured.notice).toMatchObject({ kind: "installing" });
 
-    // A direct checkNow response is authoritative: it can move the phase
-    // back to "ready", which is what makes restartAndInstall callable again.
+    // checkNow is inert while installing: it must not race the bridge or
+    // downgrade the authoritative phase.
     await captured.checkNow();
+    expect(globalThis.careerratDesktopUpdate.checkNow).not.toHaveBeenCalled();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing" });
+
+    // Only a genuine failure push releases the latch.
+    push({
+      supported: true,
+      phase: "error",
+      errorKind: "install",
+      message: "CareerRat couldn't finish the update. Try again. Your current version still works.",
+    });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "error", primaryLabel: "Try again" });
+
+    // checkNow now runs for real, since the latch is released.
+    await captured.notice.onPrimary();
+    expect(globalThis.careerratDesktopUpdate.checkNow).toHaveBeenCalledOnce();
     renderToStaticMarkup(<Consumer />);
     expect(captured.notice).toMatchObject({ kind: "ready" });
 
+    // The latch is fully released: restartAndInstall is callable again, not
+    // stuck rejecting because of the earlier accepted call.
     await captured.notice.onPrimary();
+    expect(globalThis.careerratDesktopUpdate.restartAndInstall).toHaveBeenCalledTimes(2);
     renderToStaticMarkup(<Consumer />);
-    expect(captured.notice).toMatchObject({ kind: "error" });
-
-    // A later authoritative push must still apply; the installing latch
-    // must not have survived the rejected restart.
-    push({ supported: true, enabled: true, phase: "current" });
-    renderToStaticMarkup(<Consumer />);
-    expect(captured.notice).toMatchObject({ kind: "current" });
+    expect(captured.notice).toMatchObject({ kind: "installing" });
 
     delete globalThis.careerratDesktopUpdate;
   });

@@ -33,10 +33,11 @@ export function nextUpdateCheckDelay({
   phase = null,
 } = {}) {
   if (!enabled) return null;
-  // A downloaded update is staged until it is installed. checkNow is a no-op
-  // in that state and leaves lastCheckedAt alone, so re-arming from an
-  // expired timestamp would spin the timer at zero delay.
-  if (phase === "ready") return null;
+  // A downloaded update is staged until it is installed, and an accepted
+  // install is already quitting the app. checkNow is a no-op in both states
+  // and leaves lastCheckedAt alone, so re-arming from an expired timestamp
+  // would spin the timer at zero delay.
+  if (phase === "ready" || phase === "installing") return null;
   // A check or download still in flight past its deadline (long sleep, a
   // stalled transfer) also coalesces without touching lastCheckedAt. Re-arm
   // with a retry delay instead of zero so the scheduler cannot spin.
@@ -353,11 +354,25 @@ export function createDesktopUpdateController({
     // repeat request during teardown must not trigger a second app quit.
     if (!supported || installAccepted || runtime.phase !== "ready") return false;
     installAccepted = true;
+    // The accepted install is now authoritative: getState(), pushes, and the
+    // direct responses of setEnabled and checkNow must all report it so a
+    // stale "ready" can't resurface the Restart and install action while the
+    // app is quitting to install.
+    setRuntime({
+      phase: "installing",
+      progress: null,
+      errorKind: null,
+      message: null,
+    });
     return true;
   }
 
   function install() {
-    if (!supported || runtime.phase !== "ready") return false;
+    // "ready" covers a direct install without going through acceptInstall;
+    // "installing" covers the normal post-accept path, where acceptInstall
+    // has already advanced the phase past "ready" before quit-and-install
+    // actually runs.
+    if (!supported || (runtime.phase !== "ready" && runtime.phase !== "installing")) return false;
     updater.quitAndInstall(false, true);
     return true;
   }

@@ -36,8 +36,24 @@ function getSnapshot() {
   return state;
 }
 
+function acceptsInstallAuthority(next) {
+  // The "installing" phase is authoritative and terminal from any source
+  // (a push, or a direct setEnabled/checkNow/restartAndInstall response):
+  // only a genuine failure may leave it, so a stale ready/checking/
+  // downloading response can't revive the Restart and install button
+  // mid-install.
+  if (state.phase === "installing" && next.phase !== "installing" && next.phase !== "error") {
+    return false;
+  }
+  // Applying any other phase (including a genuine failure) releases the
+  // local latch so the user can retry.
+  if (next.phase && next.phase !== "installing") installing = false;
+  return true;
+}
+
 function mergeBridgeState(next) {
   if (!next || typeof next !== "object") return;
+  if (!acceptsInstallAuthority(next)) return;
   const merged = { ...next };
   if (userChangedPreference) delete merged.enabled;
   setState(merged);
@@ -46,21 +62,6 @@ function mergeBridgeState(next) {
 if (bridge) {
   bridge.onUpdate((next) => {
     receivedPush = true;
-    // Once the install has been accepted the renderer's install phase is
-    // terminal for stale pre-install phases: a stale external push (the
-    // main process is tearing itself down) must not revive the Restart and
-    // install button. A real failure is authoritative even mid-install, so
-    // it always applies and releases the latch for recovery.
-    if (installing && next && typeof next === "object") {
-      if (next.phase === "error") {
-        installing = false;
-        mergeBridgeState(next);
-        return;
-      }
-      const { phase, ...rest } = next;
-      mergeBridgeState(rest);
-      return;
-    }
     mergeBridgeState(next);
   });
   bridge
@@ -96,19 +97,27 @@ function statusCopy(snapshot) {
 }
 
 async function setEnabled(enabled) {
-  if (!bridge) return;
+  // An accepted install is authoritative: the toggle is inert while it's in
+  // flight rather than racing the bridge with a stale request.
+  if (!bridge || installing || state.phase === "installing") return;
   const previous = state.enabled;
   userChangedPreference = true;
   setState({ enabled: Boolean(enabled), saving: true });
   try {
     const next = await bridge.setEnabled(Boolean(enabled));
-    if (next && typeof next === "object") setState(next);
+    // Applied directly (not through mergeBridgeState) so this call's own
+    // response isn't filtered by the userChangedPreference guard, which
+    // exists only to protect this optimistic update from an unrelated
+    // external push racing it. A stale installing phase is still guarded.
+    if (next && typeof next === "object" && acceptsInstallAuthority(next)) setState(next);
   } catch {
-    setState({
-      enabled: previous,
-      phase: "error",
-      message: "CareerRat couldn't save that update setting. Try again.",
-    });
+    if (state.phase !== "installing") {
+      setState({
+        enabled: previous,
+        phase: "error",
+        message: "CareerRat couldn't save that update setting. Try again.",
+      });
+    }
   } finally {
     userChangedPreference = false;
     setState({ saving: false });
@@ -116,21 +125,22 @@ async function setEnabled(enabled) {
 }
 
 async function checkNow() {
-  if (!bridge || state.supported === false) return;
+  // An accepted install is authoritative: "check now" is inert while it's
+  // in flight rather than racing the bridge with a stale request.
+  if (!bridge || state.supported === false || installing || state.phase === "installing") return;
   setState({ phase: "checking", manual: true, message: null, errorKind: null });
   try {
     const next = await bridge.checkNow();
-    // A direct checkNow response is authoritative and supersedes any
-    // in-flight install lifecycle, so later pushes aren't stripped forever.
-    installing = false;
     mergeBridgeState(next);
   } catch {
-    setState({
-      phase: "error",
-      manual: true,
-      errorKind: "network",
-      message: "CareerRat couldn't check for an update. Check your connection and try again.",
-    });
+    if (state.phase !== "installing") {
+      setState({
+        phase: "error",
+        manual: true,
+        errorKind: "network",
+        message: "CareerRat couldn't check for an update. Check your connection and try again.",
+      });
+    }
   }
 }
 
@@ -153,7 +163,12 @@ async function dismissNotice() {
 }
 
 async function restartAndInstall() {
-  if (!bridge || state.phase !== "ready") return;
+  if (!bridge || installing || state.phase !== "ready") return;
+  // Latch synchronously, before the bridge call resolves: a second
+  // activation before this one settles must see the latch already applied
+  // and no-op, not fire a second IPC request.
+  installing = true;
+  setState({ phase: "installing", message: "Restarting to install…" });
   try {
     const result = await bridge.restartAndInstall();
     if (result?.accepted === false) {
@@ -162,9 +177,6 @@ async function restartAndInstall() {
         phase: "error",
         message: "That update isn't ready to install yet. Check for updates again.",
       });
-    } else if (result?.accepted === true) {
-      installing = true;
-      setState({ phase: "installing", message: "Restarting to install…" });
     }
   } catch {
     installing = false;
