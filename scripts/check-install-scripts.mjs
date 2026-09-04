@@ -25,6 +25,19 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import Arborist from "@npmcli/arborist";
+// The same install-relevant-script enumerator `collectUnreviewedScripts`
+// itself calls (explicit preinstall/install/postinstall, prepare on a
+// non-registry source, and the synthetic node-gyp hook for an on-disk
+// binding.gyp) — reused below to decide whether a policy key's matched node
+// is still live, not just present. It reads `node.path` off the filesystem
+// directly for the node-gyp check, so calling it on a *virtual*-tree node
+// still finds a real on-disk binding.gyp when the package is actually
+// installed (actual-tree implicit scripts), while a lockfile
+// `hasInstallScript: true` flag with no script body on disk still resolves
+// to a non-empty sentinel (see install-scripts.js's own fallback), which is
+// what makes a virtual-tree-only platform-specific package still count as
+// live.
+import { getInstallScripts } from "@npmcli/arborist/lib/install-scripts.js";
 // Deep imports into @npmcli/arborist's internals, not its public API
 // (`lib/index.js` only exports the Arborist class). Both files are pure,
 // dependency-free `module.exports` (no state tied to an Arborist instance),
@@ -267,6 +280,19 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
 
   const staleKeyNodes = [...staleKeyTree.inventory.values()].filter((node) => !node.isProjectRoot);
 
+  // A policy key is only "matched" (not stale) by a node that currently
+  // carries an install-relevant script. Matching on presence alone let a
+  // broad approval (`foo: true`) survive after `foo` dropped its script,
+  // silently pre-authorizing whatever lifecycle code a future version of
+  // `foo` reintroduces. getInstallScripts is the same enumerator
+  // collectUnreviewedScripts uses below for the uncovered check, so "live"
+  // here means the same thing npm's own `--strict-allow-scripts` would run.
+  const liveStaleKeyNodes = [];
+  for (const node of staleKeyNodes) {
+    const scripts = await getInstallScripts(node);
+    if (Object.keys(scripts).length > 0) liveStaleKeyNodes.push(node);
+  }
+
   const staleKeys = [];
   for (const [key, value] of Object.entries(allow)) {
     // Pass deny intent so matchRegistry can fail closed on an unverifiable
@@ -274,7 +300,7 @@ export async function checkInstallScripts({ allowScripts, root, lockOnly = false
     // trusted version still counts as matched, mirroring npm's own
     // isScriptAllowed semantics in script-allowed.js. Matching an allow
     // entry (value === true) always fails open here, same as npm.
-    const matchedAny = staleKeyNodes.some((node) => matches(node, key, value === false));
+    const matchedAny = liveStaleKeyNodes.some((node) => matches(node, key, value === false));
     if (!matchedAny) staleKeys.push(key);
   }
   staleKeys.sort();

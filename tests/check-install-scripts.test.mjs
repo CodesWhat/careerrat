@@ -855,6 +855,100 @@ test("fails closed when npm-shrinkwrap.json is present at the repo root", async 
 });
 
 // ---------------------------------------------------------------------------
+// Stale-key liveness: a key is only "matched" by a node that currently
+// carries an install-relevant script, not merely one that still exists.
+// [codex-305-r7]
+// ---------------------------------------------------------------------------
+
+test("[codex-305-r7] a key for a package that removed its install script is flagged stale even though the package is still installed", async () => {
+  const root = makeFixtureRoot();
+  try {
+    writeManifests(root, {
+      rootExtra: { dependencies: { "formerly-scripted": "2.0.0" } },
+      packages: {
+        "node_modules/formerly-scripted": {
+          version: "2.0.0",
+          resolved: "https://registry.npmjs.org/formerly-scripted/-/formerly-scripted-2.0.0.tgz",
+          // No hasInstallScript: this version dropped its postinstall, but
+          // the broad approval below was never pruned.
+        },
+      },
+    });
+    const result = await checkInstallScripts({
+      allowScripts: { "formerly-scripted@2.0.0": true },
+      root,
+      lockOnly: true,
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.staleKeys, ["formerly-scripted@2.0.0"]);
+    assert.deepEqual(result.uncovered, []);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});
+
+test("[codex-305-r7] the same key is live again once the package reintroduces an install script", async () => {
+  const root = makeFixtureRoot();
+  try {
+    writeManifests(root, {
+      rootExtra: { dependencies: { "formerly-scripted": "2.0.0" } },
+      packages: {
+        "node_modules/formerly-scripted": {
+          version: "2.0.0",
+          resolved: "https://registry.npmjs.org/formerly-scripted/-/formerly-scripted-2.0.0.tgz",
+          hasInstallScript: true,
+        },
+      },
+    });
+    const result = await checkInstallScripts({
+      allowScripts: { "formerly-scripted@2.0.0": true },
+      root,
+      lockOnly: true,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.staleKeys, []);
+    assert.deepEqual(result.uncovered, []);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});
+
+test("[codex-305-r7] stale-key liveness honors an actual-tree implicit node-gyp script even without a lockfile hasInstallScript flag", async () => {
+  // The lockfile entry below carries no hasInstallScript at all (as if
+  // written before npm started recording the flag, or hand-edited); only
+  // the real on-disk binding.gyp proves the key is still live. Stale-key
+  // matching runs against the virtual tree, but getInstallScripts reads
+  // node.path off the filesystem directly, so it still finds the real file.
+  const root = makeFixtureRoot();
+  try {
+    writeManifests(root, {
+      rootExtra: { dependencies: { "gyp-dep": "1.0.0" } },
+      packages: {
+        "node_modules/gyp-dep": {
+          version: "1.0.0",
+          resolved: "https://registry.npmjs.org/gyp-dep/-/gyp-dep-1.0.0.tgz",
+        },
+      },
+    });
+    const dir = writeInstalledPackage(root, "node_modules/gyp-dep", {
+      name: "gyp-dep",
+      version: "1.0.0",
+    });
+    writeFileSync(join(dir, "binding.gyp"), "{}");
+
+    const result = await checkInstallScripts({
+      allowScripts: { "gyp-dep@1.0.0": true },
+      root,
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.staleKeys, []);
+    assert.deepEqual(result.uncovered, []);
+  } finally {
+    removeFixtureRoot(root);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Stale-key matching under omit-lockfile-registry-resolved. [codex-305-r5]
 // ---------------------------------------------------------------------------
 
