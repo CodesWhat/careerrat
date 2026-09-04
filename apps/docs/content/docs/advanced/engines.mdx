@@ -52,10 +52,11 @@ ignored them could still pass.
 **The binary fingerprint.** Before CareerRat runs real work through a
 runtime, it re-checks a SHA-256 hash of the executable against the one it
 resolved at detection time. If the binary on disk changed since detection,
-the identity check fails and the workflow execution is refused. Version
-checks, authentication probes, ACP probes, and sign-in launches don't repeat
-this check; it's enforced right before a workflow runs, not on every process
-CareerRat spawns.
+the identity check fails and the workflow execution is refused. Settings,
+authentication, and ACP probes don't independently fingerprint the
+executable. Tool-bearing Claude Code runs are the exception: they check
+identity before the boundary-version probe, then check it again
+immediately before the workflow process spawns.
 
 A CLI clears "supported" by being listed as one in the registry, a static
 allowlist that doesn't get re-checked per request. Readiness is different:
@@ -64,13 +65,17 @@ in, and return a passing completion receipt, all four together. Only the
 completion receipt is cached, for 24 hours; the version and sign-in checks
 run every time and are never skipped just because a cached receipt exists.
 That 24-hour TTL governs the settings route's own smoke-probe reuse, not
-how long a selected runtime stays trusted for real work. When Settings
-probes a runtime, it persists the resulting capabilities alongside the
-executable's identity (path, version, and binary fingerprint). Normal AI
-routing reuses that persisted evidence for as long as the current
-executable's identity still matches what was probed, with no separate
-check of how old the probe is and no repeated sign-in. Probing the runtime
-again from Settings replaces the persisted evidence and its timestamp.
+how long a selected runtime stays trusted for real work. Settings persists
+capability evidence, alongside the executable's identity (path, version,
+and binary fingerprint), only when a runtime is selected, auto-selected as
+the sole ready runtime, or re-probed while it's already the selected
+runtime. Probing a runtime that isn't currently selected is diagnostic
+only: it shows the CLI's readiness in Settings but leaves no evidence
+behind for normal AI routing to reuse. Normal AI routing reuses persisted
+evidence for as long as the current executable's identity still matches
+what was probed, with no separate check of how old the probe is and no
+repeated sign-in. Probing the currently selected runtime again from
+Settings replaces its persisted evidence and timestamp.
 Running a real workflow reapplies more checks on top of that: normal AI
 routing rechecks `supported`, every runner validates the runtime's
 capabilities before it will spawn anything, the permission boundary is
@@ -96,8 +101,10 @@ Code, Antigravity, Amp, Goose, and Droid have no protocol adapter at all.
 Asking CareerRat to run work through any unsupported runtime on those two
 paths is rejected before an invocation is ever built: the settings route
 returns `RUNTIME_NOT_SUPPORTED`, and normal AI routing returns a generic
-route failure that the caller turns into a plain error, not a coded one.
-`RUNTIME_COMPLETION_UNSUPPORTED` is a different, lower-level check: it comes
+route-failure result that `callAI` throws as a plain, uncoded error;
+workflow callers that catch it, such as the skill runtime, chat runtime,
+intake route, and workspace-agent route, may then label it `NO_AI_ROUTE`
+themselves. `RUNTIME_COMPLETION_UNSUPPORTED` is a different, lower-level check: it comes
 from a runner's own capability assertion when something asks it to spawn a
 runtime directly, bypassing normal routing. That guarantee covers those two
 paths, not every way CareerRat's own code can call a runtime; the
