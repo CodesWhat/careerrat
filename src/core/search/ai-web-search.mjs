@@ -2594,6 +2594,7 @@ export async function runAiWebSearch({
     ok: persistedFailed === 0,
     failed: persistedFailed,
     failedIds: persistedFailedIds,
+    failedOffers: persisted?.failedOffers || [],
     errors: promptErrors,
     warnings,
     validationFailures,
