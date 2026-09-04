@@ -99,6 +99,26 @@ describe("desktop updater controller: accepted install is authoritative", () => 
     assert.deepEqual(updater.installCalls, [[false, true]]);
   });
 
+  it("keeps the operation persisted as ready while installing, so a failed handoff still reconciles on relaunch", () => {
+    const { controller, updater, writes } = makeController();
+    updater.emit("update-downloaded", { version: "0.16.4" });
+    const writesBeforeAccept = writes.length;
+
+    assert.equal(controller.acceptInstall(), true);
+
+    // acceptInstall() must not persist operation:null: a failed native
+    // handoff would otherwise lose the staged update on relaunch.
+    assert.equal(writes.length, writesBeforeAccept);
+    assert.deepEqual(writes.at(-1).operation, { phase: "ready", version: "0.16.4" });
+
+    // Simulate a relaunch after the native handoff never completed: rebuild
+    // a controller from the persisted state and confirm startup
+    // reconciliation is still pending rather than lost.
+    const rebuilt = makeController({ persisted: writes.at(-1) });
+    assert.equal(rebuilt.controller.needsStartupCheck(), true);
+    assert.equal(rebuilt.controller.getState().phase, "checking");
+  });
+
   it("treats installing like ready for scheduling: no next check is armed", () => {
     const delay = nextUpdateCheckDelay({
       phase: "installing",

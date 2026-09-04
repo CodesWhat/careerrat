@@ -594,4 +594,103 @@ describe("desktop update bridge", () => {
 
     delete globalThis.careerratDesktopUpdate;
   });
+
+  it("makes dismissal a no-op for a locally accepted install, keeping the latch closed against a stale ready push", async () => {
+    vi.resetModules();
+    let push;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn().mockResolvedValue({ enabled: false }),
+      checkNow: vi.fn().mockResolvedValue({ supported: true, enabled: true, phase: "ready" }),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    push({ supported: true, enabled: true, notify: true, phase: "ready", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    await captured.notice.onPrimary();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing" });
+
+    await captured.notice.onDismiss();
+    expect(globalThis.careerratDesktopUpdate.skipVersion).not.toHaveBeenCalled();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ visible: true, kind: "installing" });
+
+    // A stale external push reporting the old "ready" phase still must not
+    // revive the button after the no-op dismissal.
+    push({ supported: true, enabled: true, notify: true, phase: "ready", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing" });
+
+    // The Settings guards are still closed too.
+    await captured.setEnabled(false);
+    await captured.checkNow();
+    expect(globalThis.careerratDesktopUpdate.setEnabled).not.toHaveBeenCalled();
+    expect(globalThis.careerratDesktopUpdate.checkNow).not.toHaveBeenCalled();
+
+    delete globalThis.careerratDesktopUpdate;
+  });
+
+  it("makes dismissal a no-op for a rehydrated installing state, with no local restartAndInstall call to have latched it", async () => {
+    vi.resetModules();
+    let push;
+    globalThis.careerratDesktopUpdate = {
+      getState: vi.fn().mockResolvedValue(null),
+      onUpdate: vi.fn((callback) => {
+        push = callback;
+        return () => {};
+      }),
+      setEnabled: vi.fn().mockResolvedValue({ enabled: false }),
+      checkNow: vi.fn().mockResolvedValue({ supported: true, enabled: true, phase: "ready" }),
+      skipVersion: vi.fn(),
+      restartAndInstall: vi.fn(),
+    };
+    const module = await loadDesktopUpdate();
+    let captured;
+    function Consumer() {
+      captured = module.useDesktopUpdate();
+      return null;
+    }
+
+    // This module instance never called restartAndInstall itself: the
+    // "installing" phase arrives purely as a push, as it would for a
+    // renderer that (re)mounted after main already accepted the install.
+    push({
+      supported: true,
+      enabled: true,
+      phase: "installing",
+      message: "Restarting to install…",
+      version: "0.16.4",
+    });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ visible: true, kind: "installing" });
+
+    await captured.notice.onDismiss();
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ visible: true, kind: "installing" });
+
+    // A stale ready push must still be rejected: the rehydrated push latched
+    // locally too, not just via state.phase.
+    push({ supported: true, enabled: true, notify: true, phase: "ready", version: "0.16.4" });
+    renderToStaticMarkup(<Consumer />);
+    expect(captured.notice).toMatchObject({ kind: "installing" });
+
+    await captured.setEnabled(false);
+    await captured.checkNow();
+    expect(globalThis.careerratDesktopUpdate.setEnabled).not.toHaveBeenCalled();
+    expect(globalThis.careerratDesktopUpdate.checkNow).not.toHaveBeenCalled();
+
+    delete globalThis.careerratDesktopUpdate;
+  });
 });

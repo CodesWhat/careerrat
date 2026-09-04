@@ -41,13 +41,21 @@ function acceptsInstallAuthority(next) {
   // (a push, or a direct setEnabled/checkNow/restartAndInstall response):
   // only a genuine failure may leave it, so a stale ready/checking/
   // downloading response can't revive the Restart and install button
-  // mid-install.
-  if (state.phase === "installing" && next.phase !== "installing" && next.phase !== "error") {
+  // mid-install. The local latch is checked alongside state.phase so a
+  // rehydrated or push-only "installing" (this module never itself called
+  // restartAndInstall) still rejects a stale phase even before setState has
+  // applied it.
+  const latched = installing || state.phase === "installing";
+  if (latched && next.phase !== "installing" && next.phase !== "error") {
     return false;
   }
+  // Any authoritative incoming "installing" (locally accepted or
+  // rehydrated/pushed from elsewhere) latches locally too, so dismissal and
+  // the Settings guards see it even before setState has applied it.
+  if (next.phase === "installing") installing = true;
   // Applying any other phase (including a genuine failure) releases the
   // local latch so the user can retry.
-  if (next.phase && next.phase !== "installing") installing = false;
+  else if (next.phase) installing = false;
   return true;
 }
 
@@ -145,6 +153,11 @@ async function checkNow() {
 }
 
 async function dismissNotice() {
+  // An accepted install is authoritative and non-dismissible: dismissing it
+  // would write phase idle outside acceptsInstallAuthority, releasing the
+  // guards that block a stale ready push and a second setEnabled/checkNow
+  // call while the native handoff is in flight.
+  if (installing || state.phase === "installing") return;
   if (state.phase === "unsupported") {
     setState({ manual: false });
     return;

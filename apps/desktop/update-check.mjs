@@ -211,7 +211,13 @@ export function createDesktopUpdateController({
 
   function setRuntime(next) {
     runtime = { ...runtime, ...next };
-    const nextOperation = savedOperation(runtime);
+    // "installing" is not itself a recoverable staging phase: it means the
+    // native handoff is in flight, not finished. Persist it as the ready
+    // operation it still is until quitAndInstall actually succeeds, so a
+    // failed or interrupted handoff still reconciles as a staged download
+    // on the next launch instead of vanishing.
+    const persistedPhase = runtime.phase === "installing" ? "ready" : runtime.phase;
+    const nextOperation = savedOperation({ ...runtime, phase: persistedPhase });
     if (JSON.stringify(nextOperation) !== JSON.stringify(saved.operation)) {
       saved = { ...saved, operation: nextOperation };
       persist(saved);
