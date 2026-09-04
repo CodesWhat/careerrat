@@ -27,8 +27,13 @@ export function nextUpdateCheckDelay({
   initialDelayMs = 0,
   intervalMs = CHECK_INTERVAL_MS,
   maxDelayMs = MAX_TIMER_DELAY_MS,
+  phase = null,
 } = {}) {
   if (!enabled) return null;
+  // A downloaded update is staged until it is installed. checkNow is a no-op
+  // in that state and leaves lastCheckedAt alone, so re-arming from an
+  // expired timestamp would spin the timer at zero delay.
+  if (phase === "ready") return null;
   if (
     lastCheckedAt === null ||
     lastCheckedAt === undefined ||

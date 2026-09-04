@@ -550,6 +550,7 @@ function scheduleNextUpdateCheck() {
   if (shuttingDown) return;
   if (!updateController?.getState().supported) return;
   const delay = nextUpdateCheckDelay({
+    phase: updateController.getState().phase,
     enabled: updateState.enabled,
     lastCheckedAt: updateState.lastCheckedAt,
     initialDelayMs: UPDATE_CHECK_INITIAL_DELAY_MS,
@@ -892,6 +893,37 @@ app.on("window-all-closed", () => {
 // server teardown. Closing the last window on
 // darwin does NOT reach here (see window-all-closed above); the app and its
 // server stay alive in the dock until an actual quit.
+// Hands the quit to the native installer. Used by both shutdown outcomes so
+// the handoff signal, the error path and the watchdog are always registered
+// before install() runs. installHandoffStarted is set only by the native
+// updater's own before-quit-for-update, never here.
+function handOffToInstaller() {
+  try {
+    nativeUpdater.once("before-quit-for-update", () => {
+      installHandoffStarted = true;
+    });
+    autoUpdater.once("error", (error) => {
+      log(`update install failed: ${error?.message || error}`);
+      app.exit(1);
+    });
+    if (!updateController?.install()) {
+      app.exit(1);
+      return;
+    }
+    // The native handoff after quitAndInstall is asynchronous, and the
+    // controller ignores updater events once an install is accepted. A
+    // handoff that neither quits nor errors gets a bounded watchdog so the
+    // next launch's startup reconciliation can retry the downloaded update.
+    setTimeout(() => {
+      log("update install handoff did not quit in time");
+      app.exit(1);
+    }, INSTALL_HANDOFF_WATCHDOG_MS).unref?.();
+  } catch (error) {
+    log(`update install failed: ${error?.message || error}`);
+    app.exit(1);
+  }
+}
+
 app.on("before-quit", (event) => {
   // A repeat quit (Cmd+Q again, a second restart request) while teardown is
   // in flight must not let Electron exit underneath the pending install. Once
@@ -908,39 +940,15 @@ app.on("before-quit", (event) => {
         app.exit(0);
         return;
       }
-      try {
-        nativeUpdater.once("before-quit-for-update", () => {
-          installHandoffStarted = true;
-        });
-        if (!updateController?.install()) {
-          app.exit(1);
-          return;
-        }
-        // The native handoff after quitAndInstall is asynchronous, and the
-        // controller ignores updater events once an install is accepted.
-        // A failure here must still end the process so the next launch's
-        // startup reconciliation can retry the downloaded update, and a
-        // handoff that neither quits nor errors gets a bounded watchdog.
-        autoUpdater.once("error", (error) => {
-          log(`update install failed: ${error?.message || error}`);
-          app.exit(1);
-        });
-        setTimeout(() => {
-          log("update install handoff did not quit in time");
-          app.exit(1);
-        }, INSTALL_HANDOFF_WATCHDOG_MS).unref?.();
-      } catch (error) {
-        log(`update install failed: ${error?.message || error}`);
-        app.exit(1);
-      }
+      handOffToInstaller();
     },
     (error) => {
       log(`shutdown failed: ${error?.message || error}`);
       // The runtime is down either way. If the user asked for the update,
       // still hand the quit to the installer instead of discarding a staged
       // download because teardown overran its deadline.
-      if (installUpdateAfterShutdown && updateController?.install()) {
-        installHandoffStarted = true;
+      if (installUpdateAfterShutdown) {
+        handOffToInstaller();
         return;
       }
       app.exit(1);

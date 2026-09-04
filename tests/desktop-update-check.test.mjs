@@ -390,4 +390,12 @@ describe("next update check delay", () => {
       CHECK_INTERVAL_MS - 1000
     );
   });
+
+  it("does not re-arm while a downloaded update is staged", () => {
+    const now = Date.parse("2026-08-26T20:00:00Z");
+    const pastDue = now - CHECK_INTERVAL_MS - 1;
+    assert.equal(nextUpdateCheckDelay({ lastCheckedAt: pastDue, now }), 0);
+    assert.equal(nextUpdateCheckDelay({ lastCheckedAt: pastDue, now, phase: "ready" }), null);
+    assert.equal(nextUpdateCheckDelay({ lastCheckedAt: pastDue, now, phase: "current" }), 0);
+  });
 });
