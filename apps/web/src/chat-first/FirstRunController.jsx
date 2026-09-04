@@ -323,9 +323,14 @@ export function FirstRunController({
   // depends on which branch that probe took. When App already loaded a state
   // that stops at the voluntary-defaults choice, that choice is the first
   // frame; the runtime probe is skipped on that path anyway.
-  const [bootProbePending, setBootProbePending] = useState(
-    () => !(initialOnboardState && setupNeedsVoluntaryDefaults(initialOnboardState))
+  // A preloaded workspace that only needs the voluntary-defaults confirmation
+  // never probes engines on mount, so it must never show the boot screen:
+  // flipping the flag on and back off would flash the prompt, then the boot
+  // screen, then the prompt again.
+  const bootProbeSkipped = Boolean(
+    initialOnboardState && setupNeedsVoluntaryDefaults(initialOnboardState)
   );
+  const [bootProbePending, setBootProbePending] = useState(!bootProbeSkipped);
   const [engineError, setEngineError] = useState(null);
   const [firstSearchRetryAvailable, setFirstSearchRetryAvailable] = useState(false);
   const [companyOperation, setCompanyOperation] = useState(null);
@@ -479,7 +484,7 @@ export function FirstRunController({
 
   useEffect(() => {
     let cancelled = false;
-    setBootProbePending(true);
+    if (!bootProbeSkipped) setBootProbePending(true);
     void (async () => {
       try {
         await api.initOnboard();
@@ -511,7 +516,7 @@ export function FirstRunController({
     return () => {
       cancelled = true;
     };
-  }, [advanceOnboard, api, initialOnboardState, updateMessages]);
+  }, [advanceOnboard, api, bootProbeSkipped, initialOnboardState, updateMessages]);
 
   useEffect(() => {
     const id = readCompanyDiscoveryOperationId(operationStorage);
