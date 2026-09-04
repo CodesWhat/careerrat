@@ -361,7 +361,7 @@ test("desktop main runs native acceptance through bounded normal boot and clean 
   assert.doesNotMatch(main, /shutdown\(\)\.finally\(/);
   assert.match(
     main,
-    /shutdown\(\)\.then\([\s\S]*updateController\?\.install\(\)[\s\S]*,[\s\S]*shutdown failed[\s\S]*app\.exit\(1\)/i,
+    /shutdown\(\)\.then\([\s\S]*handOffToInstaller\(\)[\s\S]*,[\s\S]*shutdown failed[\s\S]*handOffToInstaller\(\)[\s\S]*app\.exit\(1\)/i,
     "a rejected shutdown must exit without entering the install branch"
   );
 });
