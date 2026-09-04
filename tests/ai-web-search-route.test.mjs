@@ -9,6 +9,7 @@ import { after, test } from "node:test";
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
 import { createWorkspaceAgentRuntime } from "../src/core/agent/workspace-agent.mjs";
 import { writeAIPreferences } from "../src/core/ai/ai-preferences.mjs";
+import { installedRuntimeBoundaryPolicyMinimum } from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourcingRunLatest } from "../src/core/db/verbs.mjs";
@@ -565,6 +566,12 @@ test("AI web-search route freezes verified installed-runtime evidence for durabl
       verification: {
         ...executable.evidence,
         capabilities: VERIFIED_RUNTIME_CAPABILITIES,
+        // Boundary-gated capabilities (exactRead, publicWeb) only rehydrate
+        // when the cache was tested against the runtime's *current* policy
+        // minimum (see installedRuntimeBoundaryEvidenceCurrent) — claude has
+        // one, codex doesn't, so this is null there.
+        versionBoundaryState: "at_or_above",
+        testedMinimumVersion: installedRuntimeBoundaryPolicyMinimum(runtimeId),
         checkedAt: "2026-08-27T16:00:00.000Z",
       },
     });
