@@ -38,6 +38,7 @@ export {
   artifactReservationClaim,
   artifactReservationOwner,
   artifactReservationRelease,
+  artifactReservationReleaseAll,
 } from "./artifact-reservations.mjs";
 export { calendarBusyUpsert, calendarWriteAppend } from "./calendar.mjs";
 export {

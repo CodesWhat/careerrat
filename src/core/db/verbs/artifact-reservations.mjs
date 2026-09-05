@@ -76,3 +76,18 @@ export function artifactReservationRelease({ repoRoot, env, path, applicationId 
     String(applicationId)
   );
 }
+
+// Unconditionally clears every reservation row, regardless of owner. A
+// reservation only means something inside a live export invocation — it is
+// released by that invocation's own finally block once the batch finishes,
+// success or failure. A row that's still there at workspace boot can only
+// belong to a process that never got to run that finally block (crashed,
+// force-killed, power loss), so it is by definition abandoned. Callers MUST
+// invoke this once per workspace startup, after acquiring exclusive
+// workspace-runtime ownership and before any worker resumes, so an
+// abandoned reservation never outlives the process that took it and blocks
+// a future application from exporting to the same destination.
+export function artifactReservationReleaseAll({ repoRoot, env } = {}) {
+  const db = requireDb({ repoRoot, env });
+  db.prepare("DELETE FROM artifact_reservations").run();
+}
