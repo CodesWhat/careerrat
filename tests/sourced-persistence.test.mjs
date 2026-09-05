@@ -16,6 +16,7 @@ import { after, test } from "node:test";
 
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { extractReqId } from "../src/core/scoring/sourced-identity.mjs";
 import {
   captureAndPersistOffersIfDb,
   sourcedRowsFromScanOffers,
@@ -697,4 +698,60 @@ test("a blocked temp-file write leaves an existing final artifact byte-identical
     [relPath.replace("workspace/jobs/", "")],
     "no temp file may survive a blocked write"
   );
+});
+
+test("stableSourcedId leaves a short identity's persisted ID byte-identical (CR-29 round 10)", () => {
+  // Regression guard for the collision fix below: an identity that never
+  // needed truncation must keep producing the exact ID existing rows were
+  // already persisted under, not gain a digest suffix it doesn't need.
+  const rows = sourcedRowsFromScanOffers([
+    offer({ reqId: "workday:acme.wd1.myworkdayjobs.com:req0001" }),
+  ]);
+  assert.equal(rows[0].id, "sourced-acme-workday-acme-wd1-myworkdayjobs-com-req0001");
+});
+
+test("two Workday requisitions under a maximum-length tenant hostname persist as distinct rows with no conflict (CR-29 round 10)", () => {
+  // The reqId stableSourcedId slugs is "workday:<hostname>:<reqid>". A
+  // maximum-length (63-character) Workday tenant label pushes the hostname
+  // alone past the 80-character slug limit, so REQ0001 and REQ0002 used to
+  // truncate to the identical slug and silently collide on the persisted
+  // row ID: the second put overwrote the first with no conflict reported.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const tenant = "a".repeat(63);
+  const url1 = `https://${tenant}.wd5.myworkdayjobs.com/en-US/External/job/USA-Remote/Staff-Engineer_REQ0001`;
+  const url2 = `https://${tenant}.wd5.myworkdayjobs.com/en-US/External/job/USA-Remote/Staff-Engineer_REQ0002`;
+  const reqOne = offer({
+    title: "Staff Engineer",
+    url: url1,
+    reqId: extractReqId(url1).id,
+    rawText: "Body content for REQ0001.",
+  });
+  const reqTwo = offer({
+    title: "Staff Engineer",
+    url: url2,
+    reqId: extractReqId(url2).id,
+    rawText: "Body content for REQ0002.",
+  });
+
+  assert.notEqual(reqOne.reqId, reqTwo.reqId, "the two requisitions must carry distinct reqIds");
+
+  const result = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [reqOne, reqTwo],
+    dedupeCanonical: true,
+  });
+
+  assert.equal(result.persistedRows, 2, "both requisitions must persist");
+  assert.equal(result.conflicts, 0, "distinct requisitions must never be reported as a conflict");
+  assert.equal(result.failed, 0);
+  assert.equal(result.ok, true);
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT id FROM sourced")
+    .all()
+    .map((row) => row.id);
+  assert.equal(rows.length, 2, "neither requisition may overwrite the other's row");
+  assert.equal(new Set(rows).size, 2, "the two persisted IDs must be distinct");
 });

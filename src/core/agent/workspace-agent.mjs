@@ -10949,10 +10949,18 @@ export function createWorkspaceAgentRuntime({
       return { ok: false, resumable: true, run: outcome?.run || null };
     }
     if (outcome?.run?.status === "failed") {
+      // Keep outcome.value on a failed run too (CR-29 round 10): persistLane
+      // compacts `result?.run?.summary ?? result?.value` into the durable
+      // parent lane summary, and a recovered child reconstructs its outcome
+      // as `{ run, value: run.summary }` (see reconcileOrphanedSourcingRuns
+      // below). Dropping value here discarded conflicts/failedOffers a
+      // failed AI-web run had already reported, even once the run itself
+      // carries them (see sourcingRunFail's summary argument).
       return {
         ok: false,
         run: outcome.run,
         error: outcome.run.error || { message: "The search failed before it finished." },
+        value: outcome?.value ?? null,
       };
     }
     return { ok: true, run: outcome?.run || null, value: outcome?.value ?? null };

@@ -384,6 +384,105 @@ test("restart reattaches the exact running AI child and settles its parent execu
   await runtime.shutdownSourcingWorkers();
 });
 
+test("restart recovery preserves a failed AI-web child's conflicts and failed offers in the durable parent lane summary (CR-29 round 10)", async () => {
+  // Simulates a crash between the AI-web worker settling as failed
+  // (sourcingRunFail) and the in-process coordinator persisting its own
+  // lane summary onto the durable search execution: the execution's aiWeb
+  // lane is still "running" on disk even though the underlying sourcing run
+  // already failed. Before this fix, sourcingRunFail always stored
+  // `summary: null`, and workerLaneResult dropped a failed outcome's value
+  // too, so reconcileOrphanedSourcingRuns's `{ run, value: run.summary }`
+  // reconstruction had nothing to compact and the parent lane lost both the
+  // conflict and the failed-offer detail permanently.
+  const repoRoot = tempRepo();
+  const manual = sourcingRunStart({
+    repoRoot,
+    env: {},
+    purpose: "manual-search",
+    inputFingerprint: "restart-failed-ai",
+    metadata: { searchExecutionId: "search-restart-failed-ai" },
+  }).run;
+  const completedManual = sourcingRunComplete({
+    repoRoot,
+    env: {},
+    id: manual.id,
+    summary: { scanned: 2, presented: 1 },
+  }).run;
+  searchExecutionEnsure({
+    repoRoot,
+    env: {},
+    id: "search-restart-failed-ai",
+    deterministicRunId: completedManual.id,
+  });
+  searchExecutionSetLane({
+    repoRoot,
+    env: {},
+    id: "search-restart-failed-ai",
+    lane: "deterministic",
+    status: "completed",
+    runId: completedManual.id,
+    summary: completedManual.summary,
+  });
+
+  const ai = sourcingRunStart({
+    repoRoot,
+    env: {},
+    purpose: "ai-web-search",
+    inputFingerprint: "restart-failed-ai",
+    metadata: { searchExecutionId: "search-restart-failed-ai" },
+  }).run;
+  const failedIds = ["sourced-acme-restart-failed"];
+  const failedOffers = [
+    { id: "sourced-acme-restart-failed", url: "https://jobs.example.test/acme/restart-failed" },
+  ];
+  const conflictOffers = [
+    {
+      company: "Acme",
+      title: "Bridge Role",
+      url: "https://jobs.example.test/acme/restart-bridge",
+    },
+  ];
+  // The worker manager settles the run as failed BEFORE the crash — the
+  // durable write sourcingRunFail's `summary` argument now makes, mirroring
+  // sourcing-worker-manager.mjs's settleSuccessfulExecution.
+  sourcingRunFail({
+    repoRoot,
+    env: {},
+    id: ai.id,
+    error: {
+      code: "AI_WEB_SEARCH_IDENTITY_CONFLICT",
+      message: "Found 1 identity conflict(s) that could not be reconciled.",
+      failedIds,
+      failedOffers,
+      conflicts: 1,
+      conflictOffers,
+    },
+    summary: { failed: 1, failedIds, failedOffers, conflicts: 1, conflictOffers },
+  });
+  // The crash happens before this write, so the durable execution's aiWeb
+  // lane is still "running" on disk even though the child already failed.
+  searchExecutionSetLane({
+    repoRoot,
+    env: {},
+    id: "search-restart-failed-ai",
+    lane: "aiWeb",
+    status: "running",
+    runId: ai.id,
+  });
+
+  const runtime = createWorkspaceAgentRuntime({ repoRoot, env: {} });
+  runtime.recoverOrphanedSourcingRuns();
+  const execution = await runtime.waitForUnifiedSearch("search-restart-failed-ai");
+
+  assert.equal(execution.lanes.aiWeb.status, "failed");
+  assert.equal(execution.lanes.aiWeb.summary.failed, 1);
+  assert.deepEqual(execution.lanes.aiWeb.summary.failedIds, failedIds);
+  assert.deepEqual(execution.lanes.aiWeb.summary.failedOffers, failedOffers);
+  assert.equal(execution.lanes.aiWeb.summary.conflicts, 1);
+  assert.deepEqual(execution.lanes.aiWeb.summary.conflictOffers, conflictOffers);
+  await runtime.shutdownSourcingWorkers();
+});
+
 test("unified execution persists a bounded receipt while the AI child keeps full detail", async () => {
   const repoRoot = tempRepo();
   const fullSummary = {

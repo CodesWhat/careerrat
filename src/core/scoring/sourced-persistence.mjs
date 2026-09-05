@@ -151,17 +151,44 @@ export function sourcedPolicyDigest({ config, locationPolicy } = {}) {
     .digest("hex");
 }
 
+const SLUG_LIMIT = 80;
+const SLUG_DIGEST_LENGTH = 12;
+
 function slug(value, fallback = "unknown") {
   const collapsed = String(value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-");
-  const normalized = trimEdgeCharacter(collapsed, "-").slice(0, 80);
+  const normalized = trimEdgeCharacter(collapsed, "-").slice(0, SLUG_LIMIT);
   return normalized || fallback;
+}
+
+// Same normalization as slug(), but a value that collapses to longer than
+// the 80-character limit gets truncated to leave room for a "-" plus a
+// 12-hex-character SHA-256 digest of `identitySource` (the untruncated
+// value the slug was derived from), instead of a bare truncation. Two
+// identities that only diverge past the limit (e.g. a Workday reqId whose
+// hostname alone is a maximum-length tenant label) would otherwise collapse
+// to the same slug and silently collide on the persisted row ID (CR-29
+// round 10). A value that already fits comes back byte-identical to slug().
+function collisionSafeSlug(value, fallback, identitySource) {
+  const collapsed = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  const normalized = trimEdgeCharacter(collapsed, "-");
+  if (normalized.length <= SLUG_LIMIT) return normalized || fallback;
+  const digest = createHash("sha256")
+    .update(String(identitySource ?? value ?? ""))
+    .digest("hex")
+    .slice(0, SLUG_DIGEST_LENGTH);
+  const room = SLUG_LIMIT - SLUG_DIGEST_LENGTH - 1;
+  const truncated = trimEdgeCharacter(normalized.slice(0, room), "-");
+  return `${truncated}-${digest}`;
 }
 
 function stableSourcedId(offer) {
   const company = slug(offer?.company || offer?.source);
-  if (offer?.reqId) return `sourced-${company}-${slug(offer.reqId, "req")}`;
+  if (offer?.reqId)
+    return `sourced-${company}-${collisionSafeSlug(offer.reqId, "req", offer.reqId)}`;
   const hash = createHash("sha256")
     .update([offer?.url, offer?.company, offer?.title].filter(Boolean).join("|"))
     .digest("hex")
