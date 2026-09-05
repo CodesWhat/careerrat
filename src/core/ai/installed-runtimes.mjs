@@ -735,7 +735,28 @@ function readRegularFileBytes(path) {
   }
 }
 
-function runtimeBinaryFingerprint(
+// Windows filesystems are case-insensitive, so two resolutions of the same
+// on-disk file can differ only in casing without being different files at
+// all; folding to lowercase there keeps both the read-cache and the digest
+// input stable against that. POSIX filesystems are case-sensitive, so a case
+// difference there IS a different path and must stay significant.
+function normalizeChainPathKey(filePath, platform) {
+  return platform === "win32" ? String(filePath).toLowerCase() : String(filePath);
+}
+
+// Per-file breakdown behind runtimeBinaryFingerprint's aggregate digest:
+// ordered `{ role, realPath, sha256 }` entries for every file
+// runtimeProcessIdentityFiles resolves for `path` (launcher, wrapper,
+// interpreter, payload — or the single "executable" role for a
+// non-delegating binary or self-contained script). Exported so a persisted
+// verification can carry the same breakdown (installed-runtime-route.mjs's
+// runtimeVerification) and so a later mismatch can be attributed to the
+// specific role that changed (installedRuntimeExecutionMismatchRole) rather
+// than only reporting that the aggregate digest no longer matches. Returns
+// null (fail closed) whenever any resolved file's role, path, or bytes can't
+// be established — a chain that can't be read in full is not a chain this
+// function will vouch for any part of.
+export function runtimeExecutionChainDigests(
   path,
   {
     env = process.env,
@@ -744,40 +765,130 @@ function runtimeBinaryFingerprint(
   } = {}
 ) {
   try {
-    if (platform === "win32" && /\.(?:bat|cmd)$/i.test(String(path || ""))) {
-      const resolvedBytes = new Map();
-      const readIdentityFile = (filePath) => {
-        const bytes = readFileSync(filePath);
-        resolvedBytes.set(String(filePath).toLowerCase(), bytes);
-        return bytes;
-      };
-      const files = runtimeIdentityFilesImpl(path, {
-        env,
-        platform,
-        readFileImpl: readIdentityFile,
-      });
-      if (!Array.isArray(files) || files.length < 3) return null;
-      const hash = createHash("sha256").update("careerrat-runtime-chain-v1\0");
-      const seenRoles = new Set();
-      for (const file of files) {
-        const role = String(file?.role || "").trim();
-        const filePath = String(file?.path || "").trim();
-        if (!role || !filePath || seenRoles.has(role)) return null;
-        seenRoles.add(role);
-        const bytes = resolvedBytes.get(filePath.toLowerCase()) || readIdentityFile(filePath);
-        hash.update(`${role}\0${filePath.toLowerCase()}\0${bytes.length}\0`).update(bytes);
-      }
-      if (!seenRoles.has("launcher") || !seenRoles.has("wrapper") || !seenRoles.has("payload")) {
-        return null;
-      }
-      return hash.digest("hex");
+    const resolvedBytes = new Map();
+    const readIdentityFile = (filePath) => {
+      const bytes = readFileSync(filePath);
+      resolvedBytes.set(normalizeChainPathKey(filePath, platform), bytes);
+      return bytes;
+    };
+    const files = runtimeIdentityFilesImpl(path, {
+      env,
+      platform,
+      readFileImpl: readIdentityFile,
+    });
+    if (!Array.isArray(files) || files.length === 0) return null;
+
+    // The common case: a compiled binary or a self-contained script (e.g.
+    // `#!/usr/bin/env node`) with no further indirection to resolve. This
+    // preserves the plain sha256-of-the-file's-own-bytes digest CareerRat
+    // has always used for this case, unchanged, so an existing cached
+    // fingerprint for a non-delegating executable keeps matching.
+    if (files.length === 1 && files[0]?.role === "executable") {
+      const filePath = String(files[0].path || "").trim();
+      if (!filePath) return null;
+      const bytes = readRegularFileBytes(filePath);
+      if (bytes === null) return null;
+      return [
+        {
+          role: "executable",
+          realPath: normalizeChainPathKey(filePath, platform),
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        },
+      ];
     }
-    const bytes = readRegularFileBytes(path);
-    if (bytes === null) return null;
-    return createHash("sha256").update(bytes).digest("hex");
+
+    const seenRoles = new Set();
+    const chain = [];
+    for (const file of files) {
+      const role = String(file?.role || "").trim();
+      const filePath = String(file?.path || "").trim();
+      if (!role || !filePath || seenRoles.has(role)) return null;
+      seenRoles.add(role);
+      const key = normalizeChainPathKey(filePath, platform);
+      const bytes = resolvedBytes.get(key) || readIdentityFile(filePath);
+      chain.push({ role, realPath: key, sha256: createHash("sha256").update(bytes).digest("hex") });
+    }
+    if (!seenRoles.has("launcher") || !seenRoles.has("wrapper") || !seenRoles.has("payload")) {
+      return null;
+    }
+    return chain;
   } catch {
     return null;
   }
+}
+
+// The stored fingerprint for a non-delegating executable stays the plain
+// sha256 of its own bytes (see runtimeExecutionChainDigests above); for a
+// resolved multi-role chain it becomes a digest OVER the ordered per-file
+// digests instead — by design a different value from any single file's own
+// bytes, so a selection cached under the old launcher-only digest (from
+// before this function covered the whole chain) simply fails to match and
+// re-verifies once. That's the correct, safe behavior for the transition,
+// not a bug to work around. The field name and 64-hex shape are unchanged
+// either way, so every existing caller and persisted selection keeps
+// working.
+function runtimeBinaryFingerprint(
+  path,
+  {
+    env = process.env,
+    platform = process.platform,
+    runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+  } = {}
+) {
+  const chain = runtimeExecutionChainDigests(path, { env, platform, runtimeIdentityFilesImpl });
+  if (!chain) return null;
+  if (chain.length === 1 && chain[0].role === "executable") return chain[0].sha256;
+  const hash = createHash("sha256").update("careerrat-runtime-chain-v1\0");
+  for (const file of chain) {
+    hash.update(`${file.role}\0${file.realPath}\0${file.sha256}\0`);
+  }
+  return hash.digest("hex");
+}
+
+// Read-only diagnostic, never used for authorization: attributes a
+// binaryFingerprint mismatch to the specific chain role that changed, so
+// Doctor can report *why* a cached verification no longer matches ("the
+// payload changed") instead of only that it doesn't. Compares each cached
+// per-file digest (persisted alongside binaryFingerprint — see
+// runtime-selection.mjs's chainFiles) against a fresh read of the same role
+// right now. Returns the first role that no longer resolves, no longer
+// resolves to the same real path, or no longer hashes the same, or null when
+// nothing here can explain the mismatch (no cached breakdown to compare
+// against, or the wrapper itself can't currently be resolved at all).
+export function installedRuntimeExecutionMismatchRole(
+  runtime,
+  cachedVerification,
+  {
+    env = process.env,
+    platform = process.platform,
+    runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+  } = {}
+) {
+  const chainFiles = Array.isArray(cachedVerification?.chainFiles)
+    ? cachedVerification.chainFiles
+    : null;
+  if (!chainFiles || chainFiles.length === 0) return null;
+  const path = String(runtime?.path || "").trim();
+  if (!path) return null;
+  const currentRealPath = existingCanonicalPath(path);
+  if (!currentRealPath) return "wrapper";
+  const files = runtimeIdentityFilesImpl(currentRealPath, { env, platform });
+  if (!Array.isArray(files)) return "wrapper";
+  const currentByRole = new Map(files.map((file) => [String(file?.role || ""), file]));
+  for (const expected of chainFiles) {
+    const role = String(expected?.role || "");
+    const current = currentByRole.get(role);
+    if (!current?.path) return role;
+    const currentRealFilePath = existingCanonicalPath(current.path);
+    if (!currentRealFilePath) return role;
+    const key = normalizeChainPathKey(currentRealFilePath, platform);
+    if (key !== String(expected.realPath || "")) return role;
+    const bytes = readRegularFileBytes(currentRealFilePath);
+    if (bytes === null) return role;
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (digest !== String(expected.sha256 || "").toLowerCase()) return role;
+  }
+  return null;
 }
 
 export function installedRuntimeExecutionIdentity(
@@ -859,6 +970,13 @@ export function installedRuntimeExecutionIdentity(
         // interpreter resolution is done once, here, via
         // resolveWindowsCommandInterpreter, and handed straight to the
         // helper as argv, never re-derived inside it.
+        //
+        // Same accepted hash-to-spawn window as the POSIX branch's own
+        // comment below: there is no fexecve/execveat equivalent on Windows
+        // either, and a staged, already-hashed copy would break a resolved
+        // npm-shim .cmd the same way it would a POSIX one. This ordering
+        // defends a stale cached verification, not a writer racing this
+        // exact call.
         const invocation = runtimeProcessInvocation(path, ["--version"], {
           env: childEnv,
           platform,
@@ -943,6 +1061,26 @@ export function installedRuntimeExecutionIdentity(
           }
         }
       } else {
+        // The hash just computed above (resolvedFingerprint) and the spawn
+        // below are two separate syscalls, not one atomic operation, so
+        // there is necessarily a window between them a local writer with
+        // permission to replace this same path could exploit. That window
+        // is accepted per platform, not closed, because there is no
+        // portable way to bind a spawn to already-hashed bytes: fexecve (or
+        // execveat with AT_EMPTY_PATH), which spawns an already-open,
+        // already-verified file descriptor instead of re-resolving a path,
+        // exists on Linux but not on macOS; and staging a hashed copy to
+        // spawn instead of the original breaks any script launcher (the
+        // POSIX npm-shim shape runtimeProcessIdentityFiles recognizes
+        // included) that resolves its own payload or sibling files relative
+        // to its own real path, since a staged copy's path is no longer
+        // that path. What this hash-then-spawn ordering actually defends
+        // against — and does defend against — is a STALE cached
+        // verification: the whole point of expectedFingerprint above is
+        // that a same-path replacement made at any point before this call
+        // is caught here, before the spawn ever runs, rather than trusted
+        // on a moments-old cached digest. It is not, and cannot portably be,
+        // a defense against a writer racing this exact call.
         const invocation = runtimeProcessInvocation(path, ["--version"], {
           env: childEnv,
           platform,

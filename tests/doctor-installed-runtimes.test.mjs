@@ -39,6 +39,7 @@ import {
   findInstalledExecutable,
   INSTALLED_RUNTIME_DEFINITIONS,
   installedRuntimeExecutionIdentity,
+  runtimeExecutionChainDigests,
 } from "../src/core/ai/installed-runtimes.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 
@@ -1001,6 +1002,148 @@ test("doctor never executes a replacement binary whose identity mismatches the c
       existsSync(markerFile),
       false,
       "doctor must never execute a binary whose identity mismatches the cache"
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
+    rmSync(markerDir, { recursive: true, force: true });
+  }
+});
+
+// CR42 regression: Doctor's cache matcher used to fingerprint only the
+// launcher path itself (installedRuntimeExecutionIdentity), so a POSIX
+// script launcher whose own bytes stay identical could delegate to a
+// replaced payload without the cached binaryFingerprint ever noticing.
+// runtimeProcessIdentityFiles now resolves the whole launcher chain for a
+// recognized npm-shim shape, and runtimeBinaryFingerprint hashes every file
+// in it — this drives doctor.mjs end to end against a real POSIX shim
+// fixture whose payload gets replaced with a marker executable after the
+// cache is seeded, on both the normal path and --guidance-only (which must
+// skip runtime detection, and therefore any spawn, entirely).
+test("doctor never executes a replaced payload behind an unchanged POSIX npm-shim launcher", (t) => {
+  if (process.platform === "win32") {
+    t.skip("exercises the POSIX shim grammar; only meaningful off win32");
+    return;
+  }
+  const home = tempHome();
+  const registry = tempFakeRegistry();
+  const markerDir = mkdtempSync(join(tmpdir(), "careerrat-doctor-posix-shim-no-exec-"));
+  const markerFile = join(markerDir, "executed.marker");
+  try {
+    // The wrapper has to sit directly in `registry` (flat) for
+    // findInstalledExecutable to detect it there, same as every other fixture
+    // in this file — unlike the standalone runtime-process.mjs unit test,
+    // which puts the wrapper in its own "bin" subdirectory, so the payload
+    // reference here descends into "lib/..." from the wrapper's own
+    // directory instead of ascending out of a sibling "bin" first.
+    const libDir = join(registry, "lib", "node_modules", "codex-fixture", "bin");
+    mkdirSync(libDir, { recursive: true });
+    const wrapper = join(registry, "codex");
+    const payload = join(libDir, "codex-fixture.js");
+    const payloadReference = "lib/node_modules/codex-fixture/bin/codex-fixture.js";
+    writeFileSync(
+      wrapper,
+      [
+        "#!/bin/sh",
+        'basedir=$(dirname "$(echo "$0" | sed -e \'s,\\\\,/,g\')")',
+        "",
+        "case `uname` in",
+        '    *CYGWIN*|*MINGW*|*MSYS*) basedir=`cygpath -w "$basedir"`;;',
+        "esac",
+        "",
+        'if [ -x "$basedir/node" ]; then',
+        `  exec "$basedir/node"  "$basedir/${payloadReference}" "$@"`,
+        "else",
+        `  exec node  "$basedir/${payloadReference}" "$@"`,
+        "fi",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+    chmodSync(wrapper, 0o755);
+    writeFileSync(payload, "console.log('codex-fixture 1.0.0');\n", "utf8");
+    chmodSync(payload, 0o755);
+    // fakeRegistryEnv restricts PATH to the registry directory alone, so the
+    // shim's own `if -x "$basedir/node"` branch has to find a real node
+    // right next to the wrapper — otherwise re-resolving the chain (inside
+    // doctor.mjs's own subprocess, which inherits this same restricted PATH)
+    // fails for an unrelated reason (no interpreter resolves at all) instead
+    // of the payload-content mismatch this test means to exercise. A symlink
+    // (not a byte copy) keeps this host's own dynamically-linked node
+    // resolving its sibling libnode dylib via its real, unmoved location.
+    symlinkSync(process.execPath, join(registry, "node"));
+
+    // Seed the cache from a genuine, uninjected identity read (the same
+    // production path installed-runtimes.mjs itself uses after a real
+    // verification pass), with the resolved chain's per-file digests riding
+    // along on the persisted verification too (chainFiles), same as
+    // installed-runtime-route.mjs's own runtimeVerification writer.
+    const identity = installedRuntimeExecutionIdentity({ path: wrapper }, {});
+    assert.ok(identity, "fixture must produce a genuine verified identity to seed the cache");
+    assert.equal(identity.version, "1.0.0");
+    const chainFiles = runtimeExecutionChainDigests(identity.realPath);
+    assert.ok(chainFiles, "fixture must resolve a real launcher chain");
+
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "codex",
+      providerFallback: false,
+      verification: {
+        ...identity,
+        chainFiles,
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        testedMinimumVersion: null,
+        checkedAt: new Date().toISOString(),
+      },
+    });
+
+    // Replace the payload with a marker executable, launcher bytes
+    // untouched, standing in for a delegated payload swap.
+    writeFileSync(payload, `#!/bin/sh\necho executed > "${markerFile}"\nexit 0\n`, "utf8");
+    chmodSync(payload, 0o755);
+
+    const data = runDoctorJson(home, fakeRegistryEnv(registry));
+    const codex = data.installedRuntimes.find((r) => r.id === "codex");
+    assert.ok(codex);
+    assert.equal(codex.status, "supported engine");
+    assert.equal(codex.version, null, "a chain fingerprint mismatch must invalidate the cache");
+    assert.equal(codex.boundaryProbePassed, false);
+    assert.equal(
+      codex.unverifiedReason,
+      "The payload changed since CareerRat last verified this CLI."
+    );
+    assert.equal(
+      existsSync(markerFile),
+      false,
+      "doctor must never execute a payload whose identity mismatches the cache"
+    );
+
+    const text = spawnSync(process.execPath, [join(ROOT, "src/cli/doctor.mjs")], {
+      cwd: ROOT,
+      env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
+      encoding: "utf8",
+    }).stdout;
+    assert.match(text, /unverified: the payload changed since CareerRat last verified this CLI\./);
+
+    // The guidance-only path skips runtime detection (and therefore any
+    // spawn) entirely — assert that holds even with a live mismatch cached.
+    const guidanceResult = spawnSync(
+      process.execPath,
+      [join(ROOT, "src/cli/doctor.mjs"), "--json", "--guidance-only"],
+      {
+        cwd: ROOT,
+        env: { ...process.env, CAREERRAT_HOME: home, ...fakeRegistryEnv(registry) },
+        encoding: "utf8",
+      }
+    );
+    const guidanceData = JSON.parse(guidanceResult.stdout);
+    assert.deepEqual(guidanceData.installedRuntimes, []);
+    assert.equal(
+      existsSync(markerFile),
+      false,
+      "guidance-only must never execute the replaced payload either"
     );
   } finally {
     rmSync(home, { recursive: true, force: true });
