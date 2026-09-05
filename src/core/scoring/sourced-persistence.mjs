@@ -178,11 +178,18 @@ function slug(value, fallback = "unknown") {
 // nothing else generates that exact colon/dot structure for a different
 // identity.
 function identityNormalizationChanged(raw, normalized) {
-  const canonical = raw
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^[-_]+|[-_]+$/g, "");
-  return canonical !== normalized;
+  const collapsed = raw.toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+  // Edge trim as a loop rather than /^[-_]+|[-_]+$/, which CodeQL flags as
+  // polynomial backtracking on long runs of separators.
+  let start = 0;
+  let end = collapsed.length;
+  while (start < end && isSlugSeparator(collapsed[start])) start += 1;
+  while (end > start && isSlugSeparator(collapsed[end - 1])) end -= 1;
+  return collapsed.slice(start, end) !== normalized;
+}
+
+function isSlugSeparator(character) {
+  return character === "-" || character === "_";
 }
 
 // Same normalization as slug(), but appends a "-" plus a 12-hex-character
