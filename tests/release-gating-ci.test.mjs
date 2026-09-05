@@ -543,14 +543,95 @@ function joinLineContinuations(run) {
   return run.replace(LINE_CONTINUATION_PATTERN, " ");
 }
 
-// Leading prefixes that don't change whether `npm ci` actually runs, so they
-// have to be peeled off before matching: a bare environment-variable
-// assignment (`FOO=1 npm ci`), the `env` builtin (`env FOO=1 npm ci`), the
-// `command` builtin (`command npm ci`, often used to bypass a shell
-// alias/function), and `corepack` (`corepack npm ci`, which forwards
-// straight to the pinned npm). Applied in a loop so chained forms (`env
-// FOO=1 command corepack npm ci`) resolve too.
-const LEADING_PREFIX_PATTERN = /^(?:(?:env|command|corepack)\s+|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)/;
+// Codex review /tmp/codex-305-r14.md (finding 2): the old prefix stripper
+// ran a regex over the segment's raw text, before any quoting-aware
+// tokenization happened at all. `\S*` after a `NAME=` doesn't know a space
+// can sit inside a quoted assignment value, so
+// `NODE_OPTIONS="--max-old-space-size=4096 --trace-warnings" npm ci` matched
+// the wrong amount of text and never reached `npm`; a raw-text regex also
+// has no notion of "the first *word* of this segment", so `if npm ci; then
+// echo ok; fi` (a control word, not a wrapper command, ahead of `npm`) and
+// `time npm ci` (a wrapper never in the old three-name list) both left
+// `tokens[0] !== "npm"` and were invisible to discovery. Fix: tokenize the
+// segment first (tokenizeShellWords, quote- and escape-aware), then peel
+// prefixes off the resulting *token array* — an assignment token, a shell
+// control word, or a transparent wrapper command — in a loop, so chained
+// forms keep resolving and a value hiding inside a quoted token can never
+// be mistaken for a boundary. See unwrapToCommandTokens, below.
+//
+// Shell keywords that can precede a command word without changing which
+// command actually runs (`if npm ci; then ...; fi` still runs `npm ci`).
+const SHELL_CONTROL_WORDS = new Set([
+  "if",
+  "then",
+  "else",
+  "elif",
+  "while",
+  "until",
+  "do",
+  "!",
+  "{",
+  "}",
+]);
+
+// Commands that forward their remaining argv straight through to the
+// command they wrap, without changing whether `npm ci` actually runs:
+// `time`/`command`/`exec`/`nohup` take no argument of their own before the
+// wrapped command; `corepack` forwards straight to the pinned npm release
+// (`corepack npm ci`). `nice` and `env` are handled separately, below,
+// since each can consume its own leading options first.
+const SIMPLE_TRANSPARENT_WRAPPERS = new Set(["time", "command", "exec", "nohup", "corepack"]);
+
+const ASSIGNMENT_TOKEN_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+function isAssignmentToken(token) {
+  return typeof token === "string" && ASSIGNMENT_TOKEN_PATTERN.test(token);
+}
+
+// Repeatedly strips a leading assignment token, shell control word, or
+// transparent wrapper command (each already split into its own token by
+// tokenizeShellWords, so a value hiding inside a quoted token can never be
+// mistaken for one) off the front of an already-tokenized segment, until
+// only the real command word and its own arguments remain. Chained forms
+// (`env FOO=1 command corepack npm ci`) resolve because the loop keeps
+// going until nothing further peels off.
+function unwrapToCommandTokens(tokens) {
+  let remaining = tokens;
+  for (;;) {
+    const head = remaining[0];
+    if (head === undefined) return remaining;
+    if (isAssignmentToken(head) || SHELL_CONTROL_WORDS.has(head)) {
+      remaining = remaining.slice(1);
+      continue;
+    }
+    if (SIMPLE_TRANSPARENT_WRAPPERS.has(head)) {
+      remaining = remaining.slice(1);
+      continue;
+    }
+    // `nice` takes its own optional `-n N` niceness argument before the
+    // command it wraps (`nice -n 10 npm ci`); with no `-n`, it wraps the
+    // very next token directly (`nice npm ci`).
+    if (head === "nice") {
+      remaining = remaining[1] === "-n" ? remaining.slice(3) : remaining.slice(1);
+      continue;
+    }
+    // `env` takes its own options (`-i`, `-u NAME`, ...) and any number of
+    // `NAME=value` assignment tokens before the command it wraps
+    // (`env FOO=1 npm ci`, `env -i FOO=1 npm ci`). Neither changes whether
+    // the wrapped command actually runs.
+    if (head === "env") {
+      remaining = remaining.slice(1);
+      while (
+        remaining.length > 0 &&
+        (isAssignmentToken(remaining[0]) || remaining[0].startsWith("-"))
+      ) {
+        remaining = remaining.slice(1);
+      }
+      continue;
+    }
+    return remaining;
+  }
+}
 
 // Codex review /tmp/codex-305-r9.md (finding 1): npm global options can take
 // their value as a SEPARATE token (`npm --prefix . ci`, `npm --workspace
@@ -665,15 +746,13 @@ function stripBashComments(run) {
     .join("\n");
 }
 
-// Collapses whitespace, then repeatedly strips a leading env-assignment /
-// `env` / `command` / `corepack` prefix until none remain.
+// Collapses whitespace. Prefix stripping (assignments, control words,
+// transparent wrappers) happens later, token-wise, inside
+// isExecutableNpmCiSegment itself (see unwrapToCommandTokens) — never here,
+// against raw text, where a quoted value can hide a space a naive regex
+// would mistake for a token boundary.
 function normalizeCommandSegment(segment) {
-  let normalized = segment.replace(/\s+/g, " ").trim();
-  for (;;) {
-    const stripped = normalized.replace(LEADING_PREFIX_PATTERN, "").trim();
-    if (stripped === normalized) return normalized;
-    normalized = stripped;
-  }
+  return segment.replace(/\s+/g, " ").trim();
 }
 
 // Codex review /tmp/codex-305-r9.md through /tmp/codex-305-r12.md: this used
@@ -702,12 +781,29 @@ function normalizeCommandSegment(segment) {
 // canonical command, so `npm clean-install`, `npm ic`, `npm install-cl`,
 // and `npm installClean` are all recognized exactly like `npm ci`, and an
 // unrelated subcommand (`npm run ci`, where `remain[0]` is `"run"`, not a
-// bare `ci` anywhere in the tokens) still fails to match.
+// bare `ci` anywhere in the tokens) still fails to match. `tokens[0]` is
+// checked for `"npm"` only after unwrapToCommandTokens has peeled off any
+// leading assignment, control word, or transparent wrapper (Codex review
+// /tmp/codex-305-r14.md, finding 2) — a raw-text prefix regex applied
+// before tokenization can't tell a quoted value's embedded space from a
+// real token boundary, and has no notion of "the first word" at all.
+//
+// Codex review /tmp/codex-305-r14.md (finding 1): `derefNpmCommand` can
+// resolve a command word to `"install-ci-test"`, not just `"ci"` — that's
+// npm's own canonical name for the `cit`/`clean-install-test`/`sit`
+// command family, which npm's own implementation runs by calling `ci`
+// internally (with `--ci` mode plus a `test` run-script appended). A
+// classifier that only ever accepted the exact canonical command `"ci"`
+// missed all four spellings of that family, even though every one of them
+// executes the same lifecycle-script-bearing install `ci` does. Fix:
+// accept either canonical command as a clean install.
+const CLEAN_INSTALL_COMMANDS = new Set(["ci", "install-ci-test"]);
+
 function isExecutableNpmCiSegment(segment) {
-  const tokens = tokenizeShellWords(segment);
+  const tokens = unwrapToCommandTokens(tokenizeShellWords(segment));
   if (tokens[0] !== "npm") return false;
   const parsed = parseNpmArgv(tokens.slice(1));
-  return derefNpmCommand(parsed.argv.remain[0]) === "ci";
+  return CLEAN_INSTALL_COMMANDS.has(derefNpmCommand(parsed.argv.remain[0]));
 }
 
 function countExecutableNpmCi(steps) {
@@ -1033,6 +1129,23 @@ test("negative case: an extra npm ci inserted before the activation step defeats
 // isExecutableNpmCiSegment and npm12CommandList (Codex review
 // /tmp/codex-305-r13.md) for why a hand-rolled classifier could never
 // close every one of these shapes at once.
+//
+// Codex review /tmp/codex-305-r14.md (finding 1): npm's `install-ci-test`
+// command family (`cit`, `clean-install-test`, `sit`, and the canonical
+// name itself) runs `ci` internally, so all four count as a clean install
+// even though none of them spell the token `ci` anywhere. Covered here at
+// the workflow level (a new job, and an extra pre-gate step) for every
+// spelling; a direct classifier-level check lives in its own test below.
+//
+// Codex review /tmp/codex-305-r14.md (finding 2): prefix handling used to
+// run a raw-text regex ahead of tokenization, so it had no notion of "the
+// first word" and no idea a quoted value could contain a space. A quoted
+// assignment value with an embedded space
+// (`NODE_OPTIONS="--max-old-space-size=4096 --trace-warnings" npm ci`), a
+// shell control word ahead of the command (`if npm ci; then echo ok; fi`),
+// and a wrapper never in the old three-name list (`time npm ci`) each left
+// `npm` out of reach. Fixed by unwrapToCommandTokens operating on the
+// already-tokenized segment instead.
 for (const [label, run] of [
   ["corepack npm ci", "corepack npm ci"],
   ["command npm ci", "command npm ci"],
@@ -1052,6 +1165,16 @@ for (const [label, run] of [
   ["npm ic", "npm ic"],
   ["npm -dC . ci", "npm -dC . ci"],
   ["npm --enjoy-by quoted DATE ci", 'npm --enjoy-by "2020-01-01 00:00" ci'],
+  ["npm cit", "npm cit"],
+  ["npm clean-install-test", "npm clean-install-test"],
+  ["npm sit", "npm sit"],
+  ["npm install-ci-test", "npm install-ci-test"],
+  [
+    "a quoted NODE_OPTIONS assignment with an embedded space",
+    'NODE_OPTIONS="--max-old-space-size=4096 --trace-warnings" npm ci',
+  ],
+  ["an if/then/fi control-flow wrapper", "if npm ci; then echo ok; fi"],
+  ["the time builtin", "time npm ci"],
 ]) {
   test(`negative case: a new job running "${label}" is caught by dynamic discovery`, async () => {
     const workflow = await loadWorkflow();
@@ -1211,6 +1334,46 @@ test("[codex-305-r13] splitShellSegments treats parentheses and shell operators 
     isExecutableNpmCiSegment('npm --registry "https://registry.example/a?x=1&y=2" ci'),
     true
   );
+});
+
+// Codex review /tmp/codex-305-r14.md (finding 1): direct classifier-level
+// check that `install-ci-test` and every one of its aliases (`cit`,
+// `clean-install-test`, `sit`) count as a clean install, not just the
+// canonical command `install-ci-test` written out in full — each
+// dereferences to that same canonical command, which npm's own
+// implementation runs by calling `ci` internally.
+test("[codex-305-r14] isExecutableNpmCiSegment treats npm's install-ci-test command family as a clean install", () => {
+  assert.equal(derefNpmCommand("cit"), "install-ci-test");
+  assert.equal(derefNpmCommand("clean-install-test"), "install-ci-test");
+  assert.equal(derefNpmCommand("sit"), "install-ci-test");
+  assert.equal(derefNpmCommand("install-ci-test"), "install-ci-test");
+  for (const run of ["npm cit", "npm clean-install-test", "npm sit", "npm install-ci-test"]) {
+    assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
+  }
+});
+
+// Codex review /tmp/codex-305-r14.md (finding 2): direct classifier-level
+// checks for unwrapToCommandTokens itself. A quoted assignment value with
+// an embedded space, a shell control word ahead of the command (already
+// split to its own segment here — splitShellSegments, exercised separately
+// below, is what turns "if npm ci; then echo ok; fi" into this segment in
+// the first place), and a wrapper (`time`) never in the old three-name
+// prefix list must all still resolve to the real `npm ci` underneath;
+// `npm run ci` and `npm run cit` (an unrelated `run` subcommand, not the
+// bare command itself) and `echo npm ci` (an unrelated command that merely
+// prints the words `npm ci`) must keep failing to match.
+test("[codex-305-r14] isExecutableNpmCiSegment unwraps assignments, control words, and transparent wrappers token-wise", () => {
+  for (const run of [
+    'NODE_OPTIONS="--max-old-space-size=4096 --trace-warnings" npm ci',
+    "if npm ci",
+    "time npm ci",
+    "env FOO=1 npm ci",
+  ]) {
+    assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
+  }
+  assert.equal(isExecutableNpmCiSegment("npm run ci"), false);
+  assert.equal(isExecutableNpmCiSegment("npm run cit"), false);
+  assert.equal(isExecutableNpmCiSegment("echo npm ci"), false);
 });
 
 // Codex review /tmp/codex-305-r13.md (finding 1): the same two forms,
