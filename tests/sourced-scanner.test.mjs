@@ -2201,6 +2201,57 @@ test("dedupes cross-site disambiguators on requisition bases with internal hyphe
   assert.ok(directKeys.some((key) => aggregatorKeys.includes(key)));
 });
 
+test("workdayDedupKey keeps a two-digit trailing sequence number as part of the requisition id (CR-29 round 12)", () => {
+  // Codex review of PR #304: the disambiguator match (`-\d{1,2}$`) treated
+  // ANY one- or two-digit trailing group as Workday's cross-site republish
+  // suffix once the base looked requisition-shaped. "R-2024-12" and
+  // "R-2024-13" are two DIFFERENT requisitions (year + sequence), but both
+  // stripped to the identical "workday:<host>:r-2024" base and collided —
+  // the second batch upsert silently overwrote the first. Every documented
+  // real disambiguator (PR #3446) is a single digit, so only a one-digit
+  // trailing group is still treated as one; two-or-more digits now always
+  // stay part of the requisition id.
+  const keyTwelve = workdayDedupKey({
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_R-2024-12",
+  });
+  const keyThirteen = workdayDedupKey({
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_R-2024-13",
+  });
+  assert.equal(keyTwelve, "workday:acme.wd5.myworkdayjobs.com:r-2024-12");
+  assert.equal(keyThirteen, "workday:acme.wd5.myworkdayjobs.com:r-2024-13");
+  assert.notEqual(keyTwelve, keyThirteen);
+
+  // Same-host batch dedupe (scan.mjs's canonicalizeAndDedupe/dedupKey
+  // consumer) must keep both postings distinct end to end, not just at the
+  // key-derivation level.
+  const jobs = [
+    {
+      title: "Senior Engineer (2024-12)",
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_R-2024-12",
+      company: "Acme",
+      location: "Boston, MA",
+    },
+    {
+      title: "Senior Engineer (2024-13)",
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_R-2024-13",
+      company: "Acme",
+      location: "Boston, MA",
+    },
+  ];
+  const keys = new Set(jobs.map((job) => workdayDedupKey(job)));
+  assert.equal(keys.size, 2, "both requisitions must dedupe to distinct keys");
+
+  // A genuine single-digit cross-site disambiguator must still collapse —
+  // this fix narrows the digit count, it doesn't remove the mechanism.
+  const unsuffixed = workdayDedupKey({
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+  });
+  const suffixedTwo = workdayDedupKey({
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+  });
+  assert.equal(unsuffixed, suffixedTwo);
+});
+
 test("workdayDedupKey resolves a long failing requisition base in bounded time (CR-29 round 4)", () => {
   // The round-3 broadened shape check was one regex,
   // /^[a-z0-9_-]*\d[a-z0-9_-]*\d{2,}$/: two overlapping `[a-z0-9_-]*` groups

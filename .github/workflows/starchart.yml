@@ -18,7 +18,7 @@ name: Star Chart Refresh
 # through a normal PR (#148 has the history).
 #
 # `branch` names the active integration line and rotates with it at each
-# version cut (dev/v0.13 -> dev/v0.14 -> ...); the reusable workflow refuses
+# version cut (dev/v0.16 -> dev/v0.17 -> ...); the reusable workflow refuses
 # main by design, since a committed artifact must never mutate under a tag.
 #
 # All generation, hardening, and commit-back logic lives in the pinned
@@ -36,6 +36,6 @@ jobs:
       contents: write
     uses: CodesWhat/.github/.github/workflows/starchart-refresh.yml@11004e42d7d19e86eb3b7777c467ec9522b784e1 # promoted to main 2026-08-21
     with:
-      branch: dev/v0.13
+      branch: dev/v0.16
       accent: "#1290de"
       output-path: apps/website/public/star-history.svg

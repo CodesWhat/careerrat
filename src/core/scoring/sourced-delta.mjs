@@ -107,15 +107,45 @@ export function buildOfferIdentitySet(offers = []) {
   return set;
 }
 
+// Diffs `current` against `previous` with a real one-to-one (key -> owner)
+// match instead of flattened key SETS (CR-29 round 13, Codex review of PR
+// #304). Flattened sets only asked "does ANY previous offer hold one of this
+// current offer's keys" — so a current row bridging previous posting A's
+// aggregator ID and previous posting B's Workday URL matched SOME key for
+// EACH, counted as one clean carry, and left BOTH A and B off the removed
+// list (zero removals) even though the bridge can't actually be a
+// continuation of both distinct postings at once.
+//
+// previousOwnerByKey below maps each identity key to the SPECIFIC previous
+// offer that holds it (an index, not a boolean), so a current offer's match
+// resolves to the actual SET of distinct previous owners it touches:
+//   - zero owners  -> new
+//   - one owner, not already claimed by an earlier current offer -> carried
+//     (that previous owner is matched: excluded from removedOffers)
+//   - more than one distinct owner, OR its one owner already claimed by an
+//     earlier current offer -> a conflict, never a clean carry. When a
+//     multi-owner bridge's owners aren't ALL already claimed, the first
+//     still-unclaimed one is marked matched (one of the previous postings
+//     really did keep publishing under a representation this row also
+//     carries — we just can't tell WHICH, so claiming one slot rather than
+//     both keeps removal counting honest about the others).
+// removedOffers is then every previous offer whose index never got matched.
 export function diffSnapshotOffers({ current = [], previous = [], seenIds = new Set() }) {
   const previousKeySets = previous.map(offerIdentityKeys);
-  const previousKeys = new Set(previousKeySets.flat());
   const currentKeySets = current.map(offerIdentityKeys);
-  const currentKeys = new Set(currentKeySets.flat());
   const repoSeen = seenIds instanceof Set ? seenIds : new Set(seenIds || []);
+
+  const previousOwnerByKey = new Map();
+  previousKeySets.forEach((keys, index) => {
+    for (const key of keys) if (!previousOwnerByKey.has(key)) previousOwnerByKey.set(key, index);
+  });
 
   const newOffers = [];
   const carriedOffers = [];
+  const conflictOffers = [];
+  const matchedPreviousIndexes = new Set();
+  const claimedPreviousIndexes = new Set();
+
   current.forEach((offer, index) => {
     const keys = currentKeySets[index];
     const enriched = {
@@ -123,19 +153,47 @@ export function diffSnapshotOffers({ current = [], previous = [], seenIds = new 
       deltaId: offerIdentity(offer),
       repoDuplicate: keys.some((key) => repoSeen.has(key)),
     };
-    if (keys.some((key) => previousKeys.has(key))) carriedOffers.push(enriched);
-    else newOffers.push(enriched);
+    const owners = new Set();
+    for (const key of keys) {
+      const ownerIndex = previousOwnerByKey.get(key);
+      if (ownerIndex !== undefined) owners.add(ownerIndex);
+    }
+    if (owners.size === 0) {
+      newOffers.push(enriched);
+      return;
+    }
+    if (owners.size === 1) {
+      const [ownerIndex] = owners;
+      if (!claimedPreviousIndexes.has(ownerIndex)) {
+        claimedPreviousIndexes.add(ownerIndex);
+        matchedPreviousIndexes.add(ownerIndex);
+        carriedOffers.push(enriched);
+        return;
+      }
+    } else {
+      for (const ownerIndex of owners) {
+        if (!claimedPreviousIndexes.has(ownerIndex)) {
+          claimedPreviousIndexes.add(ownerIndex);
+          matchedPreviousIndexes.add(ownerIndex);
+          break;
+        }
+      }
+    }
+    // Either a multi-owner bridge, or its single owner was already claimed
+    // by an earlier current offer — ambiguous either way.
+    conflictOffers.push(enriched);
   });
 
   const removedOffers = previous
     .map((offer, index) => ({
       offer: { ...offer, deltaId: offerIdentity(offer) },
+      index,
       keys: previousKeySets[index],
     }))
-    .filter(({ keys }) => keys.length && !keys.some((key) => currentKeys.has(key)))
+    .filter(({ index, keys }) => keys.length && !matchedPreviousIndexes.has(index))
     .map(({ offer }) => offer);
 
-  return { current, previous, newOffers, carriedOffers, removedOffers };
+  return { current, previous, newOffers, carriedOffers, removedOffers, conflictOffers };
 }
 
 export function summarizeDelta(delta) {
@@ -146,6 +204,7 @@ export function summarizeDelta(delta) {
     newAfterRepoDedupe: delta.newOffers.filter((offer) => !offer.repoDuplicate).length,
     carried: delta.carriedOffers.length,
     removed: delta.removedOffers.length,
+    conflicts: (delta.conflictOffers || []).length,
   };
 }
 
