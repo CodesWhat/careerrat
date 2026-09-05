@@ -4,6 +4,34 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Export a resume as plain text from the app, alongside PDF and DOCX. The
+  file lands in your Downloads folder and the export dialog names it.
+- A new Engines page in the docs explains why Claude Code and Codex are the
+  two supported engines, what each readiness check looks for, and what
+  happens when an installed engine is too old.
+
+### Changed
+
+- Workday postings are keyed by their requisition id the same way in search
+  and in deduplication, so the same job no longer shows up twice when it is
+  reached through two URLs.
+- CI now fails when the install-script allowlist drifts from the dependency
+  tree, so a dependency bump can no longer run an unreviewed install script.
+
+### Fixed
+
+- Search runs that hit a persistence conflict now report it instead of
+  claiming success, and the affected postings survive a restart.
+- Long Workday hostnames no longer cause two different requisitions to share
+  one stored row.
+- The Doctor check verifies the engine binary it is about to run, not a
+  cached copy, and on Windows it cleans up the engine's whole process tree
+  when a version probe hangs.
+
 ## [0.18.1] - 2026-09-03
 
 ### Changed
