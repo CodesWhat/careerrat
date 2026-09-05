@@ -33,10 +33,11 @@ export function nextUpdateCheckDelay({
   phase = null,
 } = {}) {
   if (!enabled) return null;
-  // A downloaded update is staged until it is installed. checkNow is a no-op
-  // in that state and leaves lastCheckedAt alone, so re-arming from an
-  // expired timestamp would spin the timer at zero delay.
-  if (phase === "ready") return null;
+  // A downloaded update is staged until it is installed, and an accepted
+  // install is already quitting the app. checkNow is a no-op in both states
+  // and leaves lastCheckedAt alone, so re-arming from an expired timestamp
+  // would spin the timer at zero delay.
+  if (phase === "ready" || phase === "installing") return null;
   // A check or download still in flight past its deadline (long sleep, a
   // stalled transfer) also coalesces without touching lastCheckedAt. Re-arm
   // with a retry delay instead of zero so the scheduler cannot spin.
@@ -210,7 +211,13 @@ export function createDesktopUpdateController({
 
   function setRuntime(next) {
     runtime = { ...runtime, ...next };
-    const nextOperation = savedOperation(runtime);
+    // "installing" is not itself a recoverable staging phase: it means the
+    // native handoff is in flight, not finished. Persist it as the ready
+    // operation it still is until quitAndInstall actually succeeds, so a
+    // failed or interrupted handoff still reconciles as a staged download
+    // on the next launch instead of vanishing.
+    const persistedPhase = runtime.phase === "installing" ? "ready" : runtime.phase;
+    const nextOperation = savedOperation({ ...runtime, phase: persistedPhase });
     if (JSON.stringify(nextOperation) !== JSON.stringify(saved.operation)) {
       saved = { ...saved, operation: nextOperation };
       persist(saved);
@@ -334,6 +341,21 @@ export function createDesktopUpdateController({
   async function reconcileStartup() {
     if (!startupCheckPending) return getState();
     startupCheckPending = false;
+    // force bypasses saved.enabled, which exists so a manual check still
+    // runs while checks are off. Startup reconciliation is not manual: a
+    // candidate who downloaded an update and then turned checks off must
+    // not get a network call to GitHub on the very next launch.
+    if (!saved.enabled) {
+      // The synthetic `checking` phase set at startup exists only to
+      // coalesce checks onto this pending reconciliation. Skipping the
+      // reconciliation must not leave runtime stuck on it, or a later
+      // manual/scheduled check coalesces onto a request that never runs.
+      // Reset straight to idle rather than through setRuntime, so the
+      // persisted ready operation stays untouched for the ready-recheck
+      // logic once updates are re-enabled.
+      runtime = { ...IDLE_RUNTIME };
+      return emit();
+    }
     return checkNow({ force: true });
   }
 
@@ -353,11 +375,25 @@ export function createDesktopUpdateController({
     // repeat request during teardown must not trigger a second app quit.
     if (!supported || installAccepted || runtime.phase !== "ready") return false;
     installAccepted = true;
+    // The accepted install is now authoritative: getState(), pushes, and the
+    // direct responses of setEnabled and checkNow must all report it so a
+    // stale "ready" can't resurface the Restart and install action while the
+    // app is quitting to install.
+    setRuntime({
+      phase: "installing",
+      progress: null,
+      errorKind: null,
+      message: null,
+    });
     return true;
   }
 
   function install() {
-    if (!supported || runtime.phase !== "ready") return false;
+    // "ready" covers a direct install without going through acceptInstall;
+    // "installing" covers the normal post-accept path, where acceptInstall
+    // has already advanced the phase past "ready" before quit-and-install
+    // actually runs.
+    if (!supported || (runtime.phase !== "ready" && runtime.phase !== "installing")) return false;
     updater.quitAndInstall(false, true);
     return true;
   }

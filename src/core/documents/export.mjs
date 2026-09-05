@@ -1,16 +1,106 @@
-// export.mjs — render tailored artifacts (resume, cover letter, packet) to PDF or DOCX.
-// PDF via Playwright Chromium; DOCX via pandoc → soffice → hand-rolled OOXML,
-// detected in that priority order. Preview fragments are sanitized server-side.
+// export.mjs — render tailored artifacts (resume, cover letter, packet) to
+// PDF, DOCX, or plain text. PDF via Playwright Chromium; DOCX via pandoc →
+// soffice → hand-rolled OOXML, detected in that priority order; plain text
+// via renderResumeText, built on the same block/run content model as DOCX.
+// Preview fragments are sanitized server-side.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import sanitizeHtml from "sanitize-html";
 
 const repoRoot = join(fileURLToPath(new URL("../../..", import.meta.url)));
+
+// exportArtifact is the one shared entry point every caller (the CLI
+// script, packet/exports.mjs's batch export, tests) funnels a Markdown
+// source through, so a size cap here bounds every format's parsing cost —
+// including parseMdBlocks/parseRuns' per-paragraph allocations, the DOCX
+// OOXML writer, and the ATS PDF HTML build — at the door, rather than each
+// caller having to remember to check first. 2 MiB comfortably covers any
+// real resume/cover-letter/answers markdown source; a paragraph beyond that
+// is a bug or an attack, not a legitimate export.
+export const MARKDOWN_SOURCE_MAX_BYTES = 2 * 1024 * 1024;
+
+function assertMarkdownSourceSize(markdown) {
+  const byteLength = Buffer.byteLength(String(markdown ?? ""), "utf8");
+  if (byteLength > MARKDOWN_SOURCE_MAX_BYTES) {
+    const err = new Error(
+      `exportArtifact: markdown source is ${byteLength} bytes, which exceeds the ${MARKDOWN_SOURCE_MAX_BYTES}-byte export limit.`
+    );
+    err.code = "MARKDOWN_SOURCE_TOO_LARGE";
+    throw err;
+  }
+}
+
+// The byte cap above bounds total input size, but not its STRUCTURE: a
+// source built from hundreds of thousands of tiny paragraphs stays well
+// under 2 MiB while still exploding into a proportionally huge retained
+// object graph once parseMdBlocks/parseRuns turn every line into its own
+// line/block/run entry (measured: ~699k tiny paragraphs pushed RSS to
+// ~695 MiB). A structural budget on line count, checked before any block
+// is built, catches that shape regardless of byte size. 50,000 lines
+// comfortably covers any real resume/cover-letter/answers markdown source.
+export const MARKDOWN_SOURCE_MAX_LINES = 50_000;
+
+function assertMarkdownLineCount(markdown) {
+  const lineCount = String(markdown ?? "").split(/\r?\n/).length;
+  if (lineCount > MARKDOWN_SOURCE_MAX_LINES) {
+    const err = new Error(
+      `exportArtifact: markdown source has ${lineCount} lines, which exceeds the ${MARKDOWN_SOURCE_MAX_LINES}-line export limit.`
+    );
+    err.code = "MARKDOWN_SOURCE_TOO_LARGE";
+    throw err;
+  }
+}
+
+// Reads `path` fully as utf8, but fstat()s the ALREADY-OPEN file descriptor
+// before reading its bytes and rejects anything over `maxBytes` — a
+// path-based statSync-then-readFileSync pair leaves a symlink-swap window
+// between the size check and the read; fstat on the same fd the read then
+// uses has none. Shared so every caller reading an export source straight
+// off disk (packet export's batch loop; any future direct caller) enforces
+// the byte cap before allocating a buffer for the full file, rather than
+// after. exportArtifact's own assertMarkdownSourceSize (above) stays as the
+// guard for a caller that hands it markdown already in memory rather than
+// a path.
+export function readBoundedSource(path, maxBytes = MARKDOWN_SOURCE_MAX_BYTES) {
+  const fd = openSync(path, "r");
+  try {
+    const { size } = fstatSync(fd);
+    if (size > maxBytes) {
+      const err = new Error(
+        `readBoundedSource: "${path}" is ${size} bytes, which exceeds the ${maxBytes}-byte export limit.`
+      );
+      err.code = "MARKDOWN_SOURCE_TOO_LARGE";
+      throw err;
+    }
+    const buffer = Buffer.alloc(size);
+    let offset = 0;
+    while (offset < size) {
+      const bytesRead = readSync(fd, buffer, offset, size - offset, offset);
+      if (bytesRead <= 0) break;
+      offset += bytesRead;
+    }
+    return buffer.toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
 const ARTIFACT_HTML_TAGS = [
   "h1",
   "h2",
@@ -162,16 +252,61 @@ export function normalizeAtsText(text) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Count the run of consecutive backslashes in `str` ending immediately
+ * before `index` (exclusive). Used to decide whether a pipe is escaped: an
+ * odd-length run means the last backslash escapes the pipe (the rest pair
+ * off), an even-length run (including zero) means the backslashes only
+ * escape each other and the pipe is a real delimiter.
+ *
+ * @param {string} str
+ * @param {number} index
+ * @returns {number}
+ */
+function backslashRunLengthBefore(str, index) {
+  let count = 0;
+  let i = index - 1;
+  while (i >= 0 && str[i] === "\\") {
+    count++;
+    i--;
+  }
+  return count;
+}
+
+/**
  * Split a pipe-table row into trimmed cell strings. Outer pipes are optional.
+ * Escape-aware: a backslash-escaped pipe (`\|`) is a literal pipe inside a
+ * cell, not a column separator, and the backslash is removed from the
+ * output cell text. Escaping follows backslash-run parity — `\|` escapes,
+ * `\\|` does not (the two backslashes escape each other), `\\\|` escapes
+ * again — for both internal pipes and the optional outer trailing pipe.
  *
  * @param {string} line
  * @returns {string[]}
  */
 function splitPipeRow(line) {
   const s = line.trim();
-  const inner = s.startsWith("|") ? s.slice(1) : s;
-  const cells = inner.endsWith("|") ? inner.slice(0, -1).split("|") : inner.split("|");
-  return cells.map((c) => c.trim());
+  const hasOuterLeading = s.startsWith("|");
+  let inner = hasOuterLeading ? s.slice(1) : s;
+  const hasOuterTrailing =
+    inner.endsWith("|") && backslashRunLengthBefore(inner, inner.length - 1) % 2 === 0;
+  if (hasOuterTrailing) inner = inner.slice(0, -1);
+
+  const cells = [];
+  let current = "";
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === "\\" && inner[i + 1] === "|" && backslashRunLengthBefore(inner, i + 1) % 2 === 1) {
+      current += "|";
+      i++;
+    } else if (ch === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
 }
 
 /**
@@ -701,6 +836,187 @@ ${body}
 }
 
 // ---------------------------------------------------------------------------
+// renderResumeText
+// ---------------------------------------------------------------------------
+
+/**
+ * Collapse a run list into link groups: consecutive runs that share the
+ * same href (including a shared absence of one) merge into a single
+ * group's concatenated text. parseRuns stamps the same href onto every run
+ * a formatted link label recurses into (e.g. `[Read **Example**
+ * docs](url)` produces three runs — plain, bold, plain — all carrying the
+ * same href), so flattening run-by-run would repeat the destination once
+ * per run instead of once per link.
+ *
+ * @param {Array<{text: string, href?: string}>} runs
+ * @returns {Array<{text: string, href?: string}>}
+ */
+function groupRunsByLink(runs) {
+  const groups = [];
+  for (const run of runs || []) {
+    const href = run?.href || undefined;
+    const text = String(run?.text || "");
+    const last = groups[groups.length - 1];
+    if (last && last.href === href) last.text += text;
+    else groups.push({ href, text });
+  }
+  return groups;
+}
+
+/**
+ * Flatten a run list (parseRuns output — the same inline model renderDocx
+ * builds its WML from) to plain text. A link keeps its visible label and
+ * appends the URL in parens once per link, after the label's final run, so
+ * the destination survives losing markdown syntax without repeating per
+ * formatting run; every other run type (bold/italic/code/plain) already
+ * carries only its bare text.
+ *
+ * @param {Array<{text: string, href?: string}>} runs
+ * @returns {string}
+ */
+function runsToPlainText(runs) {
+  return groupRunsByLink(runs)
+    .map(({ href, text }) => {
+      if (href && href !== text) {
+        return text ? `${text} (${href})` : href;
+      }
+      return text;
+    })
+    .join("");
+}
+
+/**
+ * Same as runsToPlainText, but for heading text: uppercases each link
+ * group's visible label only, and never the link destination. A link
+ * destination can be case-sensitive (path or query string), so the URL
+ * bytes must survive uppercasing untouched.
+ *
+ * @param {Array<{text: string, href?: string}>} runs
+ * @returns {string}
+ */
+function headingRunsToPlainText(runs) {
+  return groupRunsByLink(runs)
+    .map(({ href, text }) => {
+      if (href && href !== text) {
+        const upperText = text.toUpperCase();
+        return upperText ? `${upperText} (${href})` : href;
+      }
+      // Bare autolink (href === text): preserve the URL's own case.
+      if (href) return text;
+      return text.toUpperCase();
+    })
+    .join("");
+}
+
+/**
+ * Strip a leading ATX heading marker (`#` through `######` followed by
+ * whitespace, with up to 3 leading spaces) from a fenced-code-block line.
+ * The whitespace after the marker may be spaces or tabs, matching the ATX
+ * heading spec's own whitespace rule. Fenced content is otherwise copied
+ * verbatim into the plain-text output, but a fenced line that looks exactly
+ * like an ATX heading would leak as live heading syntax once the fence
+ * markers themselves are dropped. This keeps the plain-text renderer's
+ * no-heading-syntax contract intact while leaving every other character of
+ * the line untouched.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+function stripFencedAtxMarker(line) {
+  const m = line.match(/^( {0,3})(#{1,6})([ \t]+)(.*)$/);
+  return m ? `${m[1]}${m[4]}` : line;
+}
+
+/**
+ * Render a résumé/cover-letter/packet markdown string to plain text for
+ * application-form paste boxes and .txt downloads: no markdown syntax
+ * (headings, bold, tables, backticks, pipes), UTF-8, no smart quotes or em
+ * dashes, unwrapped lines (paste boxes reflow on their own). Sections are
+ * separated by a single blank line, with headings rendered in uppercase.
+ * Built on parseMdBlocks/parseRuns — the same content model renderDocx uses —
+ * so section order always matches the DOCX and ATS PDF output for the same
+ * markdown source.
+ *
+ * @param {string} markdown
+ * @returns {string}
+ */
+export function renderResumeText(markdown) {
+  const blocks = parseMdBlocks(normalizeAtsText(String(markdown ?? "")));
+  const lines = [];
+  let previousType = null;
+  // Per-level ordered-list counters, indexed by depth. Reset in full
+  // whenever a list run breaks (previousType !== "li"); entering a deeper
+  // level resets that level's counter to its own start number, and
+  // returning to a shallower level continues that level's counter from
+  // where it left off, matching how nested numbered lists actually read.
+  // listTypes tracks whether the active list at each depth is "ordered" or
+  // "unordered", so a same-depth switch between the two (e.g. an ordered
+  // list, an intervening bullet, then another ordered list) also resets
+  // the counter instead of resuming a list that already ended.
+  let listCounters = [];
+  let listTypes = [];
+  let lastListDepth = -1;
+
+  function pushBlank() {
+    if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("");
+  }
+
+  for (const block of blocks) {
+    if (block.type === "heading") {
+      pushBlank();
+      lines.push(headingRunsToPlainText(block.runs));
+      pushBlank();
+    } else if (block.type === "para") {
+      if (previousType === "para" || previousType === "li" || previousType === "blockquote") {
+        pushBlank();
+      }
+      lines.push(runsToPlainText(block.runs));
+    } else if (block.type === "li") {
+      if (previousType !== "li") {
+        pushBlank();
+        listCounters = [];
+        listTypes = [];
+        lastListDepth = -1;
+      }
+      const depth = block.depth || 0;
+      const indent = "  ".repeat(depth);
+      let prefix = "- ";
+      if (block.ordered) {
+        const isNewListAtDepth =
+          depth > lastListDepth ||
+          listCounters[depth] === undefined ||
+          listTypes[depth] !== "ordered";
+        listCounters[depth] = isNewListAtDepth ? (block.start ?? 1) : listCounters[depth] + 1;
+        listTypes[depth] = "ordered";
+        prefix = `${listCounters[depth]}. `;
+      } else {
+        listTypes[depth] = "unordered";
+      }
+      lastListDepth = depth;
+      lines.push(`${indent}${prefix}${runsToPlainText(block.runs)}`);
+    } else if (block.type === "blockquote") {
+      pushBlank();
+      lines.push(runsToPlainText(block.runs));
+    } else if (block.type === "table") {
+      pushBlank();
+      lines.push(block.headers.map(runsToPlainText).join("   "));
+      for (const row of block.rows) lines.push(row.map(runsToPlainText).join("   "));
+    } else if (block.type === "codeblock") {
+      pushBlank();
+      for (const codeLine of block.lines) lines.push(stripFencedAtxMarker(codeLine));
+    } else if (block.type === "hr") {
+      pushBlank();
+    }
+    previousType = block.type;
+  }
+
+  while (lines.length > 0 && lines[0] === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // renderPdf
 // ---------------------------------------------------------------------------
 
@@ -1222,16 +1538,53 @@ function buildStylesXml() {
 /**
  * @typedef {{ type: 'heading', level: number, runs: Run[] }
  *           |{ type: 'para', runs: Run[] }
- *           |{ type: 'li', ordered: boolean, runs: Run[] }
+ *           |{ type: 'li', ordered: boolean, depth: number, start?: number, runs: Run[] }
  *           |{ type: 'hr' }
  *           |{ type: 'blockquote', runs: Run[] }
  *           |{ type: 'table', headers: Run[][], rows: Run[][][] }} Block
- * @typedef {{ text: string, bold?: boolean, italic?: boolean, code?: boolean, href?: string }} Run
+ * @typedef {{ text: string, bold?: boolean, italic?: boolean, code?: boolean, href?: string, break?: boolean }} Run
  */
+
+// Sentinel inserted in place of an explicit hard break while a paragraph's
+// lines are assembled into one raw string (see the paragraph-building loop
+// in parseMdBlocks below). No markdown pattern parseRuns matches contains
+// U+E000 (Private Use Area), so it always survives parseRuns as opaque
+// plain text and can be split back out into its own break run afterward,
+// unlike a literal "\n", which the code-span/link/emphasis regexes below
+// don't treat specially and would otherwise leave embedded in a run's text.
+const BREAK_MARKER = "";
 
 function parseMdBlocks(markdown) {
   const lines = markdown.split(/\r?\n/);
   const blocks = [];
+  // Stack of indentation widths, one per active nesting level, used to
+  // derive each list item's depth. Reset whenever a non-list block breaks
+  // the run of list items (blank lines alone do not break it).
+  const listIndentStack = [];
+  // Whether the most recently pushed block is a "para" that a following
+  // plain line may still extend. CommonMark treats every run of
+  // consecutive non-blank plain lines as a single paragraph — a blank
+  // line, or any other block construct, ends it. Cleared everywhere a
+  // block boundary is crossed so a later plain line always starts a fresh
+  // paragraph instead of merging across one.
+  let paragraphOpen = false;
+  // The most recently pushed "li" block, while a following properly
+  // indented line may still extend its text (a soft-wrapped continuation
+  // like "- Led migration across\n  three regions."), or null once a
+  // blank line or any other block construct ends it. Mirrors paragraphOpen
+  // above, but tracks the block itself rather than a boolean since the
+  // continuation branch appends directly onto it.
+  let openListItem = null;
+
+  const listItemDepth = (indent) => {
+    while (listIndentStack.length > 0 && indent < listIndentStack[listIndentStack.length - 1]) {
+      listIndentStack.pop();
+    }
+    if (listIndentStack.length === 0 || indent > listIndentStack[listIndentStack.length - 1]) {
+      listIndentStack.push(indent);
+    }
+    return listIndentStack.length - 1;
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -1250,35 +1603,80 @@ function parseMdBlocks(markdown) {
       }
       i = j; // skip the closing fence
       blocks.push({ type: "codeblock", lines: codeLines });
+      listIndentStack.length = 0;
+      paragraphOpen = false;
+      openListItem = null;
       continue;
     }
 
-    if (line.trim() === "") continue;
+    if (line.trim() === "") {
+      paragraphOpen = false;
+      openListItem = null;
+      continue;
+    }
 
     // ATX heading
     const hm = line.match(/^(#{1,6})\s+(.*)/);
     if (hm) {
       blocks.push({ type: "heading", level: hm[1].length, runs: parseRuns(hm[2].trim()) });
+      listIndentStack.length = 0;
+      paragraphOpen = false;
+      openListItem = null;
       continue;
     }
 
     // Horizontal rule
     if (/^(\s*[-*_]){3,}\s*$/.test(line)) {
       blocks.push({ type: "hr" });
+      listIndentStack.length = 0;
+      paragraphOpen = false;
+      openListItem = null;
       continue;
     }
 
-    // Unordered list
-    const ulm = line.match(/^\s*[-*]\s+(.*)/);
+    // Unordered list. Like a paragraph, an item's raw text accumulates
+    // across a following properly indented continuation line (see the
+    // continuation branch below, right before the regular-paragraph
+    // fallthrough) and is only handed to parseRuns once, in the
+    // finalization pass, so an inline construct spanning the join
+    // resolves correctly. contentIndent (the column the item's own text
+    // starts at) is what a continuation line's indent gets compared
+    // against.
+    const ulm = line.match(/^(\s*)[-*]\s+(.*)/);
     if (ulm) {
-      blocks.push({ type: "li", ordered: false, runs: parseRuns(ulm[1]) });
+      const depth = listItemDepth(ulm[1].length);
+      const hardBreakMatch = ulm[2].match(/(?: {2,}|\\)$/);
+      const li = {
+        type: "li",
+        ordered: false,
+        depth,
+        raw: hardBreakMatch ? ulm[2].slice(0, hardBreakMatch.index) : ulm[2],
+        hardBreakPending: Boolean(hardBreakMatch),
+        contentIndent: ulm[0].length - ulm[2].length,
+      };
+      blocks.push(li);
+      paragraphOpen = false;
+      openListItem = li;
       continue;
     }
 
-    // Ordered list
-    const olm = line.match(/^\s*\d+\.\s+(.*)/);
+    // Ordered list — same continuation-accumulation shape as unordered.
+    const olm = line.match(/^(\s*)(\d+)\.\s+(.*)/);
     if (olm) {
-      blocks.push({ type: "li", ordered: true, runs: parseRuns(olm[1]) });
+      const depth = listItemDepth(olm[1].length);
+      const hardBreakMatch = olm[3].match(/(?: {2,}|\\)$/);
+      const li = {
+        type: "li",
+        ordered: true,
+        depth,
+        start: Number(olm[2]),
+        raw: hardBreakMatch ? olm[3].slice(0, hardBreakMatch.index) : olm[3],
+        hardBreakPending: Boolean(hardBreakMatch),
+        contentIndent: olm[0].length - olm[3].length,
+      };
+      blocks.push(li);
+      paragraphOpen = false;
+      openListItem = li;
       continue;
     }
 
@@ -1300,12 +1698,17 @@ function parseMdBlocks(markdown) {
           headers: headerCells.map(parseRuns),
           rows: bodyRows,
         });
+        listIndentStack.length = 0;
+        paragraphOpen = false;
+        openListItem = null;
         continue;
       }
     }
 
     // Blockquote
     if (/^>\s?/.test(line)) {
+      listIndentStack.length = 0;
+      openListItem = null;
       const bqRuns = [];
       let j = i;
       while (j < lines.length && /^>\s?/.test(lines[j])) {
@@ -1315,74 +1718,402 @@ function parseMdBlocks(markdown) {
       }
       i = j - 1;
       blocks.push({ type: "blockquote", runs: bqRuns });
+      paragraphOpen = false;
       continue;
     }
 
-    // Regular paragraph line
-    blocks.push({ type: "para", runs: parseRuns(line) });
+    // List item continuation — a soft-wrapped line like
+    // "- Led migration across\n  three regions." belongs to the item
+    // above it, not a detached paragraph, as long as it's indented at
+    // least two spaces or matches the item's own content indent exactly.
+    // Joined the same way a paragraph joins its lines: a soft break folds
+    // to a single space, an explicit hard break (trailing two-or-more
+    // spaces or a backslash) survives as a literal break. A blank line or
+    // any other block construct already cleared openListItem above, so
+    // reaching here with it still set means this line is eligible.
+    if (openListItem) {
+      const indentMatch = line.match(/^(\s*)/);
+      const indent = indentMatch[1].length;
+      if (indent >= 2 || indent === openListItem.contentIndent) {
+        const hardBreakMatch = line.match(/(?: {2,}|\\)$/);
+        const lineText = (hardBreakMatch ? line.slice(0, hardBreakMatch.index) : line).slice(
+          indent
+        );
+        openListItem.raw += (openListItem.hardBreakPending ? BREAK_MARKER : " ") + lineText;
+        openListItem.hardBreakPending = Boolean(hardBreakMatch);
+        continue;
+      }
+    }
+
+    // Regular paragraph line — CommonMark folds every run of consecutive
+    // non-blank plain lines into one paragraph. When one is already open
+    // (paragraphOpen, cleared at every block boundary above), extend it
+    // instead of starting a new "para" block: an explicit hard break
+    // (a line ending in two-or-more spaces, or a backslash) survives as a
+    // literal in-paragraph line break, and every other join is a soft
+    // break folded to a single space, matching markdownToHtml's own
+    // soft/hard-break handling for the same markdown.
+    //
+    // The paragraph's raw text accumulates across every line here and is
+    // only handed to parseRuns once, in the finalization pass below (after
+    // the line loop). Calling parseRuns per line and joining the resulting
+    // runs afterward, the prior approach, can never match an inline
+    // construct (bold, italic, code, a link) whose delimiters land on
+    // different source lines, since each line was parsed in isolation
+    // before either delimiter's partner existed.
+    const hardBreakMatch = line.match(/(?: {2,}|\\)$/);
+    const lineText = hardBreakMatch ? line.slice(0, hardBreakMatch.index) : line;
+    const openParagraph = paragraphOpen ? blocks[blocks.length - 1] : null;
+    if (openParagraph) {
+      openParagraph.raw += (openParagraph.hardBreakPending ? BREAK_MARKER : " ") + lineText;
+      openParagraph.hardBreakPending = Boolean(hardBreakMatch);
+    } else {
+      blocks.push({
+        type: "para",
+        raw: lineText,
+        hardBreakPending: Boolean(hardBreakMatch),
+      });
+    }
+    paragraphOpen = true;
+    openListItem = null;
+    listIndentStack.length = 0;
+  }
+
+  // Finalize every paragraph and list-item block: parse its fully
+  // assembled raw text (soft breaks already folded to spaces, hard breaks
+  // marked with BREAK_MARKER) through parseRuns exactly once, so an inline
+  // construct spanning a soft break resolves correctly. parseRuns splits
+  // BREAK_MARKER back out into its own { break: true } run (see
+  // pushPlainText below).
+  for (const block of blocks) {
+    if (block.type === "para" || block.type === "li") {
+      block.runs = parseRuns(block.raw);
+      delete block.raw;
+      delete block.hardBreakPending;
+      delete block.contentIndent;
+    }
   }
 
   return blocks;
 }
 
 /**
+ * Build an escape-aware prefix-sum array over `text`: `ps[i]` is the running
+ * total of +1 for every unescaped `(` and -1 for every unescaped `)` in
+ * `text[0, i)`. A backslash and the character it escapes are walked as one
+ * unit contributing 0 to the sum (mirroring matchLinkAt's own escape
+ * handling exactly), so `ps` never counts an escaped paren as a real
+ * delimiter.
+ *
+ * For any index `p` where `text[p] === "("`, the local "depth relative to a
+ * fresh scan starting at p" at later index `k` is exactly `ps[k + 1] -
+ * ps[p]`, a plain algebraic identity since both sides accumulate the same
+ * per-character deltas. That depth first returns to 0 at the smallest `m >
+ * p` with `ps[m] === ps[p]`, i.e. the destination's matching close
+ * parenthesis is a pure prefix-sum lookup rather than a fresh rescan.
+ *
+ * @param {string} text
+ * @returns {Int32Array} length `text.length + 1`
+ */
+function parenDeltaPrefixSums(text) {
+  const n = text.length;
+  const ps = new Int32Array(n + 1);
+  let i = 0;
+  while (i < n) {
+    const ch = text[i];
+    if (ch === "\\" && i + 1 < n) {
+      ps[i + 1] = ps[i];
+      ps[i + 2] = ps[i];
+      i += 2;
+      continue;
+    }
+    ps[i + 1] = ps[i] + (ch === "(" ? 1 : ch === ")" ? -1 : 0);
+    i += 1;
+  }
+  return ps;
+}
+
+/**
+ * For every index `i` in `ps`, find the nearest later index `i' > i` with
+ * `ps[i'] === ps[i]`, or -1 if there isn't one. One backward pass with a
+ * value-to-most-recent-index bucket array gives every position's answer in
+ * O(1) amortized. Paired with parenDeltaPrefixSums, this turns "does this
+ * `(` have a matching `)` before EOF, and where" into a single array lookup
+ * instead of a scan to the end of the text, so a paragraph with many
+ * unterminated destinations stays linear instead of quadratic.
+ *
+ * @param {Int32Array} ps
+ * @returns {Int32Array} length `ps.length`
+ */
+function nextEqualPrefixSum(ps) {
+  const n = ps.length;
+  const next = new Int32Array(n).fill(-1);
+  // ps values range over [-(n - 1), n - 1]; offset by n so every value maps
+  // to a non-negative bucket index.
+  const lastSeenAt = new Int32Array(2 * n + 1).fill(-1);
+  for (let i = n - 1; i >= 0; i--) {
+    const bucket = ps[i] + n;
+    next[i] = lastSeenAt[bucket];
+    lastSeenAt[bucket] = i;
+  }
+  return next;
+}
+
+/**
+ * Find a `[text](destination)` link anchored exactly at `text[start]`
+ * (caller guarantees `text[start] === "["`), resolving the destination's
+ * escape-aware balanced-parenthesis span so a destination containing
+ * `(...)` groups (or an escaped paren) is captured whole instead of
+ * truncating at the first `)`.
+ *
+ * `nextCloseBracket` is a precomputed, index-by-index lookup of the next
+ * `]` at or after a given position (or -1); without it, finding the close
+ * bracket for a `[` with no real link is an O(remaining length) scan.
+ * `nextEqualParenDelta` (see parenDeltaPrefixSums and nextEqualPrefixSum)
+ * locates the destination's matching close parenthesis, or confirms there
+ * isn't one, in O(1) rather than rescanning the rest of the text for every
+ * candidate `(` -- the fix for the case that used to make many unterminated
+ * links quadratic.
+ *
+ * @param {string} text
+ * @param {number} start
+ * @param {Int32Array} nextCloseBracket
+ * @param {Int32Array} nextEqualParenDelta
+ * @returns {{length: number, text: string, href: string}|null}
+ */
+function matchLinkAt(text, start, nextCloseBracket, nextEqualParenDelta) {
+  const closeBracket = nextCloseBracket[start + 1];
+  if (closeBracket === -1 || text[closeBracket + 1] !== "(") return null;
+
+  const scanStart = closeBracket + 1;
+  const matchEnd = nextEqualParenDelta[scanStart];
+  if (matchEnd === -1) return null;
+
+  // matchEnd - 1 is guaranteed to be the destination's real, unescaped
+  // closing parenthesis (parenDelta only transitions to a repeated value at
+  // a genuine unescaped delimiter), so the outer "(" at scanStart and the
+  // outer ")" at matchEnd - 1 are excluded from href the same way the old
+  // depth-tracking loop excluded them; every other character, including a
+  // nested "(" or ")", is literal destination text once escapes resolve.
+  let href = "";
+  for (let j = scanStart; j < matchEnd; j++) {
+    const ch = text[j];
+    if (ch === "\\" && j + 1 < matchEnd) {
+      href += text[j + 1];
+      j++;
+      continue;
+    }
+    if (j === scanStart || j === matchEnd - 1) continue;
+    href += ch;
+  }
+
+  return {
+    length: matchEnd - start,
+    text: text.slice(start + 1, closeBracket),
+    href,
+  };
+}
+
+/**
+ * Push `text` onto `runs`, splitting out any embedded BREAK_MARKER into its
+ * own `{ break: true }` run instead of leaving the sentinel character in
+ * plain text. A run of consecutive markers (a hard break can never repeat
+ * in practice, but this stays correct if it does) produces one break run
+ * per marker with no empty text run between them.
+ *
+ * @param {Run[]} runs
+ * @param {string} text
+ */
+function pushPlainText(runs, text) {
+  const segments = text.split(BREAK_MARKER);
+  segments.forEach((segment, index) => {
+    if (segment) runs.push({ text: segment });
+    if (index < segments.length - 1) runs.push({ text: "\n", break: true });
+  });
+}
+
+/**
+ * Find the index of a delimiter's close, starting the search at `from`, or
+ * -1 if there isn't a valid one. Mirrors the content class a delimiter
+ * pattern like `\*\*([^*]+)\*\*` enforces: the content between open and
+ * close must be non-empty and must not itself contain `excludeChar`, so the
+ * scan stops at the FIRST occurrence of `excludeChar` at or after `from`
+ * and either confirms it starts `closeToken` there or fails outright — it
+ * never continues scanning past it looking for a later, valid one. That
+ * keeps every call bounded by the gap to the nearest `excludeChar`
+ * occurrence rather than the remaining length of the whole text, which is
+ * what makes the outer cursor scan in parseRuns O(n) instead of O(n^2).
+ *
+ * @param {string} text
+ * @param {number} from
+ * @param {string} closeToken
+ * @param {string} excludeChar
+ * @returns {number}
+ */
+function findDelimiterClose(text, from, closeToken, excludeChar) {
+  let j = from;
+  while (j < text.length && text[j] !== excludeChar) j++;
+  if (j >= text.length || j === from) return -1;
+  return text.startsWith(closeToken, j) ? j : -1;
+}
+
+// Every inline construct parseRuns recognizes is anchored on one of these
+// characters (code/link brackets/emphasis markers) or the hard-break
+// sentinel. A paragraph containing none of them can only ever produce the
+// single plain-text run flushPlain(n) would have built anyway, so testing
+// for their presence once up front is a correct O(n) substitute for running
+// the full cursor walk — and, more importantly, for the O(n) Int32Array
+// allocations below it. Plain prose (the common case for a resume/cover
+// letter paragraph) is exactly the shape this skips the slow path for.
+const PARSE_RUNS_DELIMITER_PATTERN = /[*_`[\]()\u{e000}]/u;
+
+/**
  * Parse inline markdown into runs: bold, italic, code, links, plain text.
+ *
+ * A single left-to-right cursor walk over `text`: at each position, try
+ * each delimiter type anchored exactly there (matching the same priority
+ * order — code, bold**, bold__, italic*, italic_, link — the old
+ * repeated-regex-scan approach used), and fall back to plain text and
+ * advance by one character when none match. This never re-slices or
+ * re-scans an already-visited prefix the way repeatedly searching a
+ * shrinking "remaining" suffix with regexes does, so a paragraph with many
+ * inline constructs parses in O(n) instead of O(n^2).
  *
  * @param {string} text
  * @returns {Run[]}
  */
 function parseRuns(text) {
+  if (!PARSE_RUNS_DELIMITER_PATTERN.test(text)) {
+    // No code/emphasis/link marker and no hard-break sentinel: the whole
+    // string is exactly one plain-text run, the same result flushPlain(n)
+    // below would build via pushPlainText, but without allocating any of
+    // the O(n)-sized lookup structures a delimiter-free paragraph never
+    // needs. A multi-megabyte plain paragraph (a long summary, a pasted
+    // block of prose) used to allocate several input-sized Int32Arrays for
+    // nothing.
+    return text ? [{ text }] : [];
+  }
+
   const runs = [];
+  const n = text.length;
 
-  // Tokenise: backtick code, [text](url), **bold**, __bold__, *italic*, _italic_
-  // We walk through the string with a simple state machine.
-  const patterns = [
-    { re: /`([^`]+)`/, type: "code" },
-    { re: /\[([^\]]*)\]\(([^)]*)\)/, type: "link" },
-    { re: /\*\*([^*]+)\*\*/, type: "bold" },
-    { re: /__([^_]+)__/, type: "bold" },
-    { re: /\*([^*]+)\*/, type: "italic" },
-    { re: /_([^_]+)_/, type: "italic" },
-  ];
+  // One backward pass giving an O(1) "next ']' at or after i" lookup for
+  // every position — see matchLinkAt's doc comment for why this matters.
+  // Only built when the text actually contains a "[": a paragraph with
+  // bold/italic/code but no link never needs the link-matching structures
+  // at all.
+  const hasLink = text.includes("[");
+  let nextCloseBracket = null;
+  let nextEqualParenDelta = null;
+  if (hasLink) {
+    nextCloseBracket = new Int32Array(n + 1);
+    nextCloseBracket[n] = -1;
+    for (let k = n - 1; k >= 0; k--) {
+      nextCloseBracket[k] = text[k] === "]" ? k : nextCloseBracket[k + 1];
+    }
+    // Same idea for a link destination's matching close parenthesis: resolve
+    // every position's answer once, up front, instead of letting matchLinkAt
+    // rescan the remaining text for each candidate "(" it's asked about.
+    const parenDelta = parenDeltaPrefixSums(text);
+    nextEqualParenDelta = nextEqualPrefixSum(parenDelta);
+  }
 
-  let remaining = text;
-  while (remaining.length > 0) {
-    // Find earliest match across all patterns
-    let earliest = null;
-    let earliestIdx = Infinity;
+  let plainStart = 0;
+  let i = 0;
+  const flushPlain = (end) => {
+    if (end > plainStart) pushPlainText(runs, text.slice(plainStart, end));
+  };
 
-    for (const p of patterns) {
-      const m = p.re.exec(remaining);
-      if (m && m.index < earliestIdx) {
-        earliest = { m, type: p.type };
-        earliestIdx = m.index;
+  while (i < n) {
+    const ch = text[i];
+
+    if (ch === "`") {
+      const close = findDelimiterClose(text, i + 1, "`", "`");
+      if (close !== -1) {
+        flushPlain(i);
+        // Code spans stay opaque: no recursion, the literal text is the
+        // run. A hard break can't land inside real backtick-delimited
+        // source (it would have to survive as a raw newline mid-span,
+        // which markdown doesn't produce), but if BREAK_MARKER ever does
+        // end up here, fold it back to a literal newline rather than
+        // leaking the sentinel.
+        runs.push({
+          text: text
+            .slice(i + 1, close)
+            .split(BREAK_MARKER)
+            .join("\n"),
+          code: true,
+        });
+        i = close + 1;
+        plainStart = i;
+        continue;
       }
     }
 
-    if (!earliest) {
-      runs.push({ text: remaining });
-      break;
+    if (ch === "*" && text[i + 1] === "*") {
+      const close = findDelimiterClose(text, i + 2, "**", "*");
+      if (close !== -1) {
+        flushPlain(i);
+        // The visible content can itself contain a link or the other
+        // emphasis marker (e.g. **[Example](url)**) — parse recursively
+        // and merge the bold flag onto every resulting run.
+        for (const run of parseRuns(text.slice(i + 2, close))) runs.push({ ...run, bold: true });
+        i = close + 2;
+        plainStart = i;
+        continue;
+      }
+    }
+    if (ch === "_" && text[i + 1] === "_") {
+      const close = findDelimiterClose(text, i + 2, "__", "_");
+      if (close !== -1) {
+        flushPlain(i);
+        for (const run of parseRuns(text.slice(i + 2, close))) runs.push({ ...run, bold: true });
+        i = close + 2;
+        plainStart = i;
+        continue;
+      }
     }
 
-    // Plain text before match
-    if (earliestIdx > 0) {
-      runs.push({ text: remaining.slice(0, earliestIdx) });
+    if (ch === "*") {
+      const close = findDelimiterClose(text, i + 1, "*", "*");
+      if (close !== -1) {
+        flushPlain(i);
+        for (const run of parseRuns(text.slice(i + 1, close))) runs.push({ ...run, italic: true });
+        i = close + 1;
+        plainStart = i;
+        continue;
+      }
+    }
+    if (ch === "_") {
+      const close = findDelimiterClose(text, i + 1, "_", "_");
+      if (close !== -1) {
+        flushPlain(i);
+        for (const run of parseRuns(text.slice(i + 1, close))) runs.push({ ...run, italic: true });
+        i = close + 1;
+        plainStart = i;
+        continue;
+      }
     }
 
-    const { m, type } = earliest;
-    if (type === "code") {
-      runs.push({ text: m[1], code: true });
-    } else if (type === "link") {
-      runs.push({ text: m[1], href: m[2] });
-    } else if (type === "bold") {
-      runs.push({ text: m[1], bold: true });
-    } else if (type === "italic") {
-      runs.push({ text: m[1], italic: true });
+    if (ch === "[") {
+      const link = hasLink ? matchLinkAt(text, i, nextCloseBracket, nextEqualParenDelta) : null;
+      if (link) {
+        flushPlain(i);
+        // The destination stays opaque, but the visible label can itself
+        // contain bold/italic (e.g. [**Example**](url)) — parse it
+        // recursively and stamp the href onto every resulting run so the
+        // label's own formatting survives alongside the link.
+        for (const run of parseRuns(link.text)) runs.push({ ...run, href: run.href || link.href });
+        i += link.length;
+        plainStart = i;
+        continue;
+      }
     }
 
-    remaining = remaining.slice(earliestIdx + m[0].length);
+    i++;
   }
 
+  flushPlain(n);
   return runs;
 }
 
@@ -1400,19 +2131,24 @@ function escXml(s) {
 function runsToWml(runs) {
   return runs
     .map((run) => {
-      const text = escXml(run.text || "");
-      // Preserve leading/trailing spaces with xml:space
-      const needsSpace = /^\s|\s$/.test(run.text || "");
-      const tAttr = needsSpace ? ' xml:space="preserve"' : "";
-
       let rPr = "";
       if (run.bold) rPr += "<w:b/>";
       if (run.italic) rPr += "<w:i/>";
       if (run.code) rPr += '<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>';
       // Links: underline + blue color
       if (run.href) rPr += '<w:u w:val="single"/><w:color w:val="1155CC"/>';
-
       const rPrBlock = rPr ? `<w:rPr>${rPr}</w:rPr>` : "";
+
+      // WordprocessingML has no text-based line break: a raw newline inside
+      // <w:t> is just whitespace to Word, never a forced break. A hard
+      // break run (see BREAK_MARKER/pushPlainText above) must therefore
+      // become an explicit <w:br/>, not a <w:t> containing "\n".
+      if (run.break) return `      <w:r>${rPrBlock}<w:br/></w:r>`;
+
+      const text = escXml(run.text || "");
+      // Preserve leading/trailing spaces with xml:space
+      const needsSpace = /^\s|\s$/.test(run.text || "");
+      const tAttr = needsSpace ? ' xml:space="preserve"' : "";
       return `      <w:r>${rPrBlock}<w:t${tAttr}>${text}</w:t></w:r>`;
     })
     .join("\n");
@@ -1422,15 +2158,18 @@ function runsToWml(runs) {
 function cellRunsToWml(runs) {
   return runs
     .map((run) => {
-      const text = escXml(run.text || "");
-      const needsSpace = /^\s|\s$/.test(run.text || "");
-      const tAttr = needsSpace ? ' xml:space="preserve"' : "";
       let rPr = "";
       if (run.bold) rPr += "<w:b/>";
       if (run.italic) rPr += "<w:i/>";
       if (run.code) rPr += '<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>';
       if (run.href) rPr += '<w:u w:val="single"/><w:color w:val="1155CC"/>';
       const rPrBlock = rPr ? `<w:rPr>${rPr}</w:rPr>` : "";
+
+      if (run.break) return `          <w:r>${rPrBlock}<w:br/></w:r>`;
+
+      const text = escXml(run.text || "");
+      const needsSpace = /^\s|\s$/.test(run.text || "");
+      const tAttr = needsSpace ? ' xml:space="preserve"' : "";
       return `          <w:r>${rPrBlock}<w:t${tAttr}>${text}</w:t></w:r>`;
     })
     .join("\n");
@@ -1664,33 +2403,224 @@ function dosDateTime(date) {
  * @param {{
  *   markdown: string,
  *   outBase: string,          e.g. "/path/to/Resume" (no extension)
- *   formats: Array<'pdf'|'docx'>,
+ *   formats: Array<'pdf'|'docx'|'text'>,
  *   title?: string,
  *   ats?: boolean             render the PDF with the ATS-safe standard font stack and
  *                             scrub bidi/hidden-text channels from both the PDF and DOCX
  * }} opts
- * @returns {Promise<{ pdf?: string, docx?: string, docxTool?: string, docxLabel?: string }>}
+ * @returns {Promise<{ pdf?: string, docx?: string, docxTool?: string, docxLabel?: string, text?: string }>}
  */
+/**
+ * Write the rendered text artifact to `${outBase}.txt`, confined to a
+ * caller-trusted root and safe against an existing symlink sitting at the
+ * destination.
+ *
+ * outBase must be a non-empty absolute path. Deriving outBase by
+ * extension-stripping an extensionless source (`full.slice(0,
+ * -extname(full).length)`) is a classic negative-zero bug: `extname()`
+ * returns `""`, `-"".length` is `-0`, and `String.prototype.slice(0, -0)`
+ * behaves like `slice(0, 0)`, producing `""` rather than the whole string.
+ * An empty/relative outBase is rejected here rather than silently writing
+ * `.txt` under process.cwd().
+ *
+ * When the caller passes `root` (the trusted packet/workspace root), both
+ * `root` and the destination's parent directory are resolved with
+ * realpath() and the canonical parent must sit inside the canonical root.
+ * A lexical containment check alone is self-referential (the "packet
+ * directory" it checks against is just dirname(outBase) again) and does
+ * nothing to stop a symlinked ancestor — e.g. workspace/tailored pointing
+ * outside the workspace — from redirecting the write. Without `root`, the
+ * check falls back to the old lexical containment for callers that
+ * haven't adopted a trusted root yet.
+ *
+ * The write itself goes to a freshly created, uniquely named sibling file
+ * in the validated canonical parent (`wx`, which fails if it already
+ * exists, so two concurrent exports can't clobber each other's temp file)
+ * and is then renamed into place: rename() replaces whatever sits at the
+ * destination path, including an existing symlink, without ever opening
+ * or following it, so a symlink planted at the destination can't redirect
+ * the write outside the confined directory.
+ *
+ * @param {string} outBase
+ * @param {string} text
+ * @param {string} [root] trusted packet/workspace root the destination must resolve inside
+ * @returns {string} the destination path
+ */
+// Shared by every format (text, pdf, docx): resolve `destPath`'s parent
+// against a caller-trusted `root` with realpath() on both sides, so a
+// symlinked ancestor (e.g. workspace/tailored pointing entirely outside the
+// workspace) can't redirect the write — a lexical containment check alone is
+// self-referential (the "packet directory" it checks against is just
+// dirname(destPath) again) and catches nothing. Without `root`, falls back
+// to the old lexical containment for callers that haven't adopted a trusted
+// root yet (the CLI script, which writes next to its own input file).
+// `formatLabel` only changes the thrown error text ("PDF"/"DOCX"/"text").
+function confineExportDestination(destPath, root, formatLabel) {
+  const parentDir = dirname(destPath);
+  let confinedParent = resolve(parentDir);
+
+  if (root != null) {
+    if (!root || !isAbsolute(root)) {
+      throw new Error(
+        `exportArtifact: root must be a non-empty absolute path, got ${JSON.stringify(root)}`
+      );
+    }
+    let canonicalRoot;
+    let canonicalParent;
+    try {
+      canonicalRoot = realpathSync(root);
+    } catch {
+      throw new Error(`exportArtifact: trusted root does not exist: ${root}`);
+    }
+    try {
+      canonicalParent = realpathSync(parentDir);
+    } catch {
+      throw new Error(
+        `exportArtifact: ${formatLabel} export destination directory does not exist: ${parentDir}`
+      );
+    }
+    if (
+      canonicalParent !== canonicalRoot &&
+      !canonicalParent.startsWith(`${canonicalRoot}${sep}`)
+    ) {
+      throw new Error(
+        `exportArtifact: ${formatLabel} export destination escapes the trusted root: ${destPath}`
+      );
+    }
+    confinedParent = canonicalParent;
+  } else {
+    const resolvedDest = resolve(destPath);
+    if (resolvedDest !== confinedParent && !resolvedDest.startsWith(`${confinedParent}${sep}`)) {
+      throw new Error(
+        `exportArtifact: ${formatLabel} export destination escapes the packet directory: ${destPath}`
+      );
+    }
+  }
+
+  return join(confinedParent, basename(destPath));
+}
+
+// PDF and DOCX rendering (renderPdf/renderDocx below) write through a
+// third-party tool (Playwright, pandoc, soffice) or a raw fs write directly
+// to whatever path they're handed — none of them know about a trusted root,
+// and a couple (Playwright's page.pdf({path}), a plain writeFileSync) will
+// happily follow a symlink sitting at that path. The text writer never had
+// this problem because it always renders to a fresh randomly-named sibling
+// and rename()s into place; renderFormatConfined below gives PDF/DOCX the
+// same guarantee. A destination that is ALREADY a symlink (dangling or not)
+// is refused outright rather than silently replaced — unlike the text
+// writer's older, more permissive path, a PDF/DOCX destination that turns
+// out to be a symlink is far more likely to be a sign of tampering than of
+// a legitimate prior export, since nothing in this codebase ever creates
+// one on purpose.
+function refuseSymlinkDestination(finalDestPath, formatLabel) {
+  let stat;
+  try {
+    stat = lstatSync(finalDestPath);
+  } catch {
+    return;
+  }
+  if (stat.isSymbolicLink()) {
+    throw new Error(
+      `exportArtifact: ${formatLabel} export destination is a symlink, refusing to write: ${finalDestPath}`
+    );
+  }
+}
+
+// A confined temp sibling that KEEPS the destination's own extension
+// (`.export-tmp-<pid>-<ts>-<rand>-resume.docx`, not
+// `resume.docx.tmp-<rand>`): pandoc infers its output format from the `-o`
+// path's extension (renderDocxViaPandoc passes no explicit `--to`), so a
+// temp name that lost the `.docx` suffix would silently change what pandoc
+// writes.
+function confinedTempSiblingPath(finalDestPath) {
+  return join(
+    dirname(finalDestPath),
+    `.export-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}-${basename(finalDestPath)}`
+  );
+}
+
+// Render one PDF or DOCX format through `render(tmpPath)` into a confined,
+// uniquely-named sibling of the validated final destination, then rename()
+// into place — the same write-elsewhere-then-atomically-replace pattern
+// writeTextArtifactConfined already uses, so a renderer that follows
+// symlinks or partially writes on failure never touches the real
+// destination path directly.
+async function renderFormatConfined({ destPath, root, formatLabel, render }) {
+  if (!destPath || !isAbsolute(destPath)) {
+    throw new Error(
+      `exportArtifact: outBase must be a non-empty absolute path, got ${JSON.stringify(destPath)}`
+    );
+  }
+  const finalDestPath = confineExportDestination(destPath, root, formatLabel);
+  refuseSymlinkDestination(finalDestPath, formatLabel);
+  const tmpPath = confinedTempSiblingPath(finalDestPath);
+  let info;
+  try {
+    info = await render(tmpPath);
+  } catch (err) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // best-effort: the renderer may never have created the file
+    }
+    throw err;
+  }
+  renameSync(tmpPath, finalDestPath);
+  return { finalDestPath, info };
+}
+
+function writeTextArtifactConfined(outBase, text, root) {
+  if (!outBase || !isAbsolute(outBase)) {
+    throw new Error(
+      `exportArtifact: outBase must be a non-empty absolute path, got ${JSON.stringify(outBase)}`
+    );
+  }
+
+  const destPath = `${outBase}.txt`;
+  const finalDestPath = confineExportDestination(destPath, root, "text");
+  const tmpPath = `${finalDestPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  writeFileSync(tmpPath, text, { encoding: "utf8", flag: "wx" });
+  renameSync(tmpPath, finalDestPath);
+  return finalDestPath;
+}
+
 export async function exportArtifact({
   markdown,
   outBase,
   formats,
   title = "Document",
   ats = false,
+  root,
 }) {
+  assertMarkdownSourceSize(markdown);
+  assertMarkdownLineCount(markdown);
   const result = {};
 
   for (const fmt of formats) {
     if (fmt === "pdf") {
-      const pdfPath = `${outBase}.pdf`;
-      await renderPdf({ markdown, outPath: pdfPath, title, ats });
-      result.pdf = pdfPath;
+      const { finalDestPath } = await renderFormatConfined({
+        destPath: `${outBase}.pdf`,
+        root,
+        formatLabel: "PDF",
+        render: (tmpPath) => renderPdf({ markdown, outPath: tmpPath, title, ats }),
+      });
+      result.pdf = finalDestPath;
     } else if (fmt === "docx") {
-      const docxPath = `${outBase}.docx`;
-      const info = await renderDocx({ markdown, outPath: docxPath, title, ats });
-      result.docx = docxPath;
+      let info;
+      const { finalDestPath } = await renderFormatConfined({
+        destPath: `${outBase}.docx`,
+        root,
+        formatLabel: "DOCX",
+        render: async (tmpPath) => {
+          info = await renderDocx({ markdown, outPath: tmpPath, title, ats });
+        },
+      });
+      result.docx = finalDestPath;
       result.docxTool = info.tool;
       result.docxLabel = info.label;
+    } else if (fmt === "text") {
+      result.text = writeTextArtifactConfined(outBase, renderResumeText(markdown), root);
     }
   }
 

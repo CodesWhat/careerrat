@@ -19,6 +19,7 @@ const listeners = new Set();
 let state = EMPTY_STATE;
 let receivedPush = false;
 let userChangedPreference = false;
+let installing = false;
 let dismissedDownloadVersion = null;
 
 function setState(next) {
@@ -35,8 +36,32 @@ function getSnapshot() {
   return state;
 }
 
+function acceptsInstallAuthority(next) {
+  // The "installing" phase is authoritative and terminal from any source
+  // (a push, or a direct setEnabled/checkNow/restartAndInstall response):
+  // only a genuine failure may leave it, so a stale ready/checking/
+  // downloading response can't revive the Restart and install button
+  // mid-install. The local latch is checked alongside state.phase so a
+  // rehydrated or push-only "installing" (this module never itself called
+  // restartAndInstall) still rejects a stale phase even before setState has
+  // applied it.
+  const latched = installing || state.phase === "installing";
+  if (latched && next.phase !== "installing" && next.phase !== "error") {
+    return false;
+  }
+  // Any authoritative incoming "installing" (locally accepted or
+  // rehydrated/pushed from elsewhere) latches locally too, so dismissal and
+  // the Settings guards see it even before setState has applied it.
+  if (next.phase === "installing") installing = true;
+  // Applying any other phase (including a genuine failure) releases the
+  // local latch so the user can retry.
+  else if (next.phase) installing = false;
+  return true;
+}
+
 function mergeBridgeState(next) {
   if (!next || typeof next !== "object") return;
+  if (!acceptsInstallAuthority(next)) return;
   const merged = { ...next };
   if (userChangedPreference) delete merged.enabled;
   setState(merged);
@@ -69,6 +94,7 @@ function statusCopy(snapshot) {
       : "A CareerRat update is downloaded and ready to install.";
   }
   if (snapshot.phase === "current") return "CareerRat is up to date.";
+  if (snapshot.phase === "installing") return snapshot.message || "Restarting to install…";
   if (snapshot.phase === "error") {
     return (
       snapshot.message ||
@@ -79,19 +105,27 @@ function statusCopy(snapshot) {
 }
 
 async function setEnabled(enabled) {
-  if (!bridge) return;
+  // An accepted install is authoritative: the toggle is inert while it's in
+  // flight rather than racing the bridge with a stale request.
+  if (!bridge || installing || state.phase === "installing") return;
   const previous = state.enabled;
   userChangedPreference = true;
   setState({ enabled: Boolean(enabled), saving: true });
   try {
     const next = await bridge.setEnabled(Boolean(enabled));
-    mergeBridgeState(next);
+    // Applied directly (not through mergeBridgeState) so this call's own
+    // response isn't filtered by the userChangedPreference guard, which
+    // exists only to protect this optimistic update from an unrelated
+    // external push racing it. A stale installing phase is still guarded.
+    if (next && typeof next === "object" && acceptsInstallAuthority(next)) setState(next);
   } catch {
-    setState({
-      enabled: previous,
-      phase: "error",
-      message: "CareerRat couldn't save that update setting. Try again.",
-    });
+    if (state.phase !== "installing") {
+      setState({
+        enabled: previous,
+        phase: "error",
+        message: "CareerRat couldn't save that update setting. Try again.",
+      });
+    }
   } finally {
     userChangedPreference = false;
     setState({ saving: false });
@@ -99,21 +133,31 @@ async function setEnabled(enabled) {
 }
 
 async function checkNow() {
-  if (!bridge || state.supported === false) return;
+  // An accepted install is authoritative: "check now" is inert while it's
+  // in flight rather than racing the bridge with a stale request.
+  if (!bridge || state.supported === false || installing || state.phase === "installing") return;
   setState({ phase: "checking", manual: true, message: null, errorKind: null });
   try {
-    mergeBridgeState(await bridge.checkNow());
+    const next = await bridge.checkNow();
+    mergeBridgeState(next);
   } catch {
-    setState({
-      phase: "error",
-      manual: true,
-      errorKind: "network",
-      message: "CareerRat couldn't check for an update. Check your connection and try again.",
-    });
+    if (state.phase !== "installing") {
+      setState({
+        phase: "error",
+        manual: true,
+        errorKind: "network",
+        message: "CareerRat couldn't check for an update. Check your connection and try again.",
+      });
+    }
   }
 }
 
 async function dismissNotice() {
+  // An accepted install is authoritative and non-dismissible: dismissing it
+  // would write phase idle outside acceptsInstallAuthority, releasing the
+  // guards that block a stale ready push and a second setEnabled/checkNow
+  // call while the native handoff is in flight.
+  if (installing || state.phase === "installing") return;
   if (state.phase === "unsupported") {
     setState({ manual: false });
     return;
@@ -132,16 +176,23 @@ async function dismissNotice() {
 }
 
 async function restartAndInstall() {
-  if (!bridge || state.phase !== "ready") return;
+  if (!bridge || installing || state.phase !== "ready") return;
+  // Latch synchronously, before the bridge call resolves: a second
+  // activation before this one settles must see the latch already applied
+  // and no-op, not fire a second IPC request.
+  installing = true;
+  setState({ phase: "installing", message: "Restarting to install…" });
   try {
     const result = await bridge.restartAndInstall();
     if (result?.accepted === false) {
+      installing = false;
       setState({
         phase: "error",
         message: "That update isn't ready to install yet. Check for updates again.",
       });
     }
   } catch {
+    installing = false;
     setState({
       phase: "error",
       message:
@@ -166,7 +217,9 @@ export function useDesktopUpdate() {
             ? Boolean(snapshot.version) || snapshot.manual
             : snapshot.phase === "current"
               ? snapshot.manual
-              : snapshot.phase === "checking" && snapshot.manual;
+              : snapshot.phase === "installing"
+                ? true
+                : snapshot.phase === "checking" && snapshot.manual;
   const primaryLabel =
     snapshot.phase === "unsupported" && snapshot.downloadUrl
       ? "Windows release status"
@@ -197,7 +250,7 @@ export function useDesktopUpdate() {
       onPrimary:
         snapshot.phase === "ready"
           ? restartAndInstall
-          : snapshot.phase === "unsupported"
+          : snapshot.phase === "unsupported" || snapshot.phase === "installing"
             ? undefined
             : checkNow,
       onDismiss: dismissNotice,

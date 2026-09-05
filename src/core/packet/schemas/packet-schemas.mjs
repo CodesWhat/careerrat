@@ -216,6 +216,9 @@ export const packetManifestSchema = {
         resumeDocx: workspacePath,
         coverLetterDocx: workspacePath,
         answersDocx: workspacePath,
+        resumeText: workspacePath,
+        coverLetterText: workspacePath,
+        answersText: workspacePath,
         packetManifest: workspacePath,
         // Plain keys the read path (GET /api/packet, isGatedIn) and the
         // older appRegisterArtifact write path key off — generate/export

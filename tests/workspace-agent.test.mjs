@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
 
@@ -80,6 +80,20 @@ function tempRepo() {
   cleanupRoots.push(repoRoot);
   openDb({ repoRoot, env: {} });
   return repoRoot;
+}
+
+// A fixture-only resume PDF: exportPacketArtifacts/confirmOneOffScreeningAnswer
+// both derive upload readiness from hasUploadableResumeArtifact, which
+// requires a real .pdf or .docx on disk (validUploadArtifact checks magic
+// bytes, not just the extension). A fixture that only seeds answersSource
+// with no resume at all is unrealistic -- a real application only reaches
+// the answer-confirmation stage after tailor-application already produced a
+// resume -- so tests asserting an exact uploadReady/gaps outcome need one.
+function seedResumePdfArtifact(repoRoot, relPath) {
+  const full = join(repoRoot, "workspace", relPath);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(full, "%PDF-1.4\nfake resume\n%%EOF\n", "utf8");
+  return `workspace/${relPath}`;
 }
 
 function seedApplication(repoRoot, overrides = {}) {
@@ -7694,6 +7708,7 @@ test("user-supplied screening pairs resolve the exact live gaps and leave only f
   const answerPath = "workspace/tailored/curri-user-answers.md";
   mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
   writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  const resumePdfPath = seedResumePdfArtifact(repoRoot, "tailored/curri-user-resume.pdf");
   const answerGaps = [
     {
       kind: "answers",
@@ -7725,7 +7740,7 @@ test("user-supplied screening pairs resolve the exact live gaps and leave only f
     role: "Senior Software Engineer",
     status: "reviewed-hold",
     evaluation: { gate: "keep", fitScore: 87 },
-    artifacts: { answersSource: answerPath },
+    artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
     packetManifest: {
       applicationId: "app-temporal",
       generatedAt: "2026-08-24T18:40:48.594Z",
@@ -7733,7 +7748,7 @@ test("user-supplied screening pairs resolve the exact live gaps and leave only f
       status: "reviewable",
       gapCount: 4,
       gaps: [coverLetterGap, ...answerGaps],
-      artifacts: { answersSource: answerPath },
+      artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
     },
   });
   const questionText =
@@ -7770,6 +7785,7 @@ test("free-form job chat durably confirms exact user-supplied screening pairs in
   const answerPath = "workspace/tailored/curri-live-user-answers.md";
   mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
   writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  const resumePdfPath = seedResumePdfArtifact(repoRoot, "tailored/curri-live-user-resume.pdf");
   const questions = [
     ["q-linkedin", "LinkedIn URL*", "https://www.linkedin.com/in/riley-chen-careerrat-qa"],
     ["q-why", "Why do you want to work here?*", "I want to improve construction logistics."],
@@ -7782,7 +7798,7 @@ test("free-form job chat durably confirms exact user-supplied screening pairs in
     role: "Senior Software Engineer",
     status: "reviewed-hold",
     evaluation: { gate: "keep", fitScore: 87 },
-    artifacts: { answersSource: answerPath },
+    artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
     packetManifest: {
       applicationId: "app-temporal",
       generatedAt: "2026-08-24T18:40:48.594Z",
@@ -7795,7 +7811,7 @@ test("free-form job chat durably confirms exact user-supplied screening pairs in
         questionId,
         message: `Answer “${question}”.`,
       })),
-      artifacts: { answersSource: answerPath },
+      artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
     },
   });
   const text = questions.map(([, question, answer]) => `${question}: ${answer}`).join("\n");
@@ -7910,12 +7926,13 @@ test("free-form job chat durably corrects one uniquely matching confirmed screen
     ].join("\n"),
     "utf8"
   );
+  const resumePdfPath = seedResumePdfArtifact(repoRoot, "tailored/curri-corrected-resume.pdf");
   seedApplication(repoRoot, {
     company: "Curri",
     role: "Senior Software Engineer",
     status: "reviewed-hold",
     evaluation: { gate: "keep", fitScore: 87 },
-    artifacts: { answersSource: answerPath },
+    artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
     packetManifest: {
       applicationId: "app-temporal",
       generatedAt: "2026-08-24T18:40:48.594Z",
@@ -7931,7 +7948,7 @@ test("free-form job chat durably corrects one uniquely matching confirmed screen
           confirmedAt: "2026-08-24T18:41:00.000Z",
         },
       ],
-      artifacts: { answersSource: answerPath },
+      artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
     },
   });
   const text = "LinkedIn Profile: https://www.linkedin.com/in/riley-chen-careerrat-qa-fixture.";
@@ -8107,11 +8124,12 @@ test("confirming a job-specific screening answer clears its packet gap and unblo
   const answerPath = "workspace/tailored/temporal-answers.md";
   mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
   writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  const resumePdfPath = seedResumePdfArtifact(repoRoot, "tailored/temporal-resume.pdf");
   seedApplication(
     repoRoot,
     preparedPacketOverrides(repoRoot, {
       evaluation: { gate: "keep", fitScore: 92 },
-      artifacts: { answersSource: answerPath },
+      artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
       packetManifest: {
         applicationId: "app-temporal",
         generatedAt: "2026-08-24T12:00:00.000Z",
@@ -8126,7 +8144,7 @@ test("confirming a job-specific screening answer clears its packet gap and unblo
             message: "Answer “Why do you want to work at Temporal Labs?”.",
           },
         ],
-        artifacts: { answersSource: answerPath },
+        artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
       },
     })
   );
