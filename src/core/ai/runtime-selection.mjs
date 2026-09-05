@@ -3,11 +3,23 @@ import { dirname } from "node:path";
 
 import { userPath } from "../paths/workspace.mjs";
 import {
+  installedRuntimeBoundaryPolicyMinimum,
   isSupportedInstalledRuntime,
   sanitizeInstalledRuntimeCapabilityEvidence,
 } from "./installed-runtimes.mjs";
 
 const INSTALLED_RUNTIME_SELECTION_RELPATH = ".internal/ai-runtime.json";
+
+// Tri-state, matching classifyRuntimeVersionBoundary/probeInstalledRuntime in
+// installed-runtimes.mjs. Anything that isn't one of the two conclusive
+// states — including a cache written before this field existed — sanitizes
+// to "indeterminate" rather than being dropped, so a missing value fails
+// closed to "unknown" instead of silently reading as a passed probe.
+const VERSION_BOUNDARY_STATES = new Set(["at_or_above", "below", "indeterminate"]);
+
+function sanitizeVersionBoundaryState(value) {
+  return VERSION_BOUNDARY_STATES.has(value) ? value : "indeterminate";
+}
 
 function sanitizeVerification(value, runtimeId) {
   if (!runtimeId || !value || typeof value !== "object") return null;
@@ -28,7 +40,78 @@ function sanitizeVerification(value, runtimeId) {
     return null;
   }
   const capabilities = sanitizeInstalledRuntimeCapabilityEvidence(runtimeId, value.capabilities);
-  return { path, realPath, version, binaryFingerprint, capabilities, checkedAt };
+  const versionBoundaryState = sanitizeVersionBoundaryState(value.versionBoundaryState);
+  // The minimum version the boundary probe was actually run against, so a
+  // reader can tell a cached "at_or_above" apart from one tested against a
+  // since-raised policy floor. Missing on a cache written before this field
+  // existed, or on a runtime with no boundary policy at all (e.g. codex) —
+  // both sanitize to null rather than being treated as a match.
+  const testedMinimumVersion =
+    typeof value.testedMinimumVersion === "string" && value.testedMinimumVersion.trim()
+      ? value.testedMinimumVersion.trim()
+      : null;
+  return {
+    path,
+    realPath,
+    version,
+    binaryFingerprint,
+    capabilities,
+    versionBoundaryState,
+    testedMinimumVersion,
+    checkedAt,
+  };
+}
+
+// Whether a cached verification still identifies the exact binary CareerRat
+// is about to use right now: same runtime id, same launcher path, same
+// resolved binary (realPath + fingerprint), and the same live version. A
+// launcher path can stay unchanged while it delegates to an updated payload
+// underneath, so version has to be checked against a fresh read of the
+// runtime rather than trusted from the cache — callers get that fresh read
+// from installedRuntimeExecutionIdentity() and pass it in as
+// `currentIdentity`. This is the one cache-identity check both Doctor's
+// cache matcher and the AI router's rehydration use, so they can no longer
+// disagree about what counts as still-current.
+export function installedRuntimeVerificationCurrent(runtime, verification, currentIdentity) {
+  if (!runtime?.id || !verification || !currentIdentity) return false;
+  return (
+    verification.path === currentIdentity.path &&
+    verification.realPath === currentIdentity.realPath &&
+    verification.version === currentIdentity.version &&
+    verification.binaryFingerprint === currentIdentity.binaryFingerprint
+  );
+}
+
+// Whether a cached verification's boundary-gated capability evidence
+// (exactRead, publicWeb) was tested against the runtime's *current* policy
+// minimum, not a floor CareerRat has since raised. A runtime with no
+// boundary policy (e.g. codex) always trusts its evidence; one with a
+// policy only trusts evidence tested against exactly the minimum in force
+// right now, so a policy-floor bump makes an old passing probe stop
+// covering the boundary-gated capabilities until it's re-run.
+export function installedRuntimeBoundaryEvidenceCurrent(runtimeId, verification) {
+  const policyMinimum = installedRuntimeBoundaryPolicyMinimum(runtimeId);
+  if (!policyMinimum) return true;
+  return (
+    Boolean(verification?.testedMinimumVersion) &&
+    verification.testedMinimumVersion === policyMinimum
+  );
+}
+
+// The capability evidence from a cached verification that's still safe to
+// rehydrate for execution: null when the verification no longer identifies
+// the runtime's current binary (installedRuntimeVerificationCurrent), and
+// with the boundary-gated capabilities (exactRead, publicWeb) stripped when
+// they were tested against a policy minimum CareerRat has since raised
+// (installedRuntimeBoundaryEvidenceCurrent) — so a policy bump can never let
+// the router keep granting exactRead/publicWeb access it would no longer
+// verify from scratch.
+export function trustedInstalledRuntimeCapabilityEvidence(runtime, verification, currentIdentity) {
+  if (!installedRuntimeVerificationCurrent(runtime, verification, currentIdentity)) return null;
+  const capabilities = verification.capabilities;
+  if (!capabilities) return null;
+  if (installedRuntimeBoundaryEvidenceCurrent(runtime.id, verification)) return capabilities;
+  return { ...capabilities, exactRead: false, publicWeb: false };
 }
 
 export function loadInstalledRuntimeSelection({ repoRoot, env = process.env } = {}) {

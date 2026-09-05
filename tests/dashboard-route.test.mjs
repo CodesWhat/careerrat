@@ -40,6 +40,7 @@ import { loadModes } from "../src/core/profile/modes.mjs";
 import {
   createAgentGuidanceSnapshotLoader,
   loadAgentGuidanceSnapshot,
+  loadAgentGuidanceSnapshotAsync,
 } from "../src/core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
 import { loadLibrarySnapshot } from "../src/core/tracker/library-snapshot.mjs";
@@ -220,6 +221,52 @@ test("loadAgentGuidanceSnapshot forces Electron's child into Node mode and prese
     electronRunAsNode: "1",
     callerEnv: "preserved",
   });
+});
+
+// Regression for the dashboard's repeated-hashing finding: every Doctor
+// invocation detects installed AI runtimes by reading and SHA-256 hashing
+// each discovered executable (hundreds of MB across Claude and Codex). The
+// dashboard's guidance snapshot only ever needs `agentGuidance`, which never
+// depends on that detection, so both guidance-snapshot callers must pass
+// doctor.mjs a flag that skips it. This stubs doctor.mjs to record its own
+// argv instead of spying on detectInstalledRuntimes directly, since doctor.mjs
+// always runs as a spawned child process (see the module comment above) —
+// asserting the caller passes `--guidance-only` is the equivalent proof that
+// the real detection/fingerprint path is never reached from this caller.
+test("loadAgentGuidanceSnapshot passes --guidance-only so Doctor skips runtime detection", () => {
+  const repoRoot = tempRepo();
+  mkdirSync(join(repoRoot, "src/cli"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "src/cli/doctor.mjs"),
+    `console.log(JSON.stringify({ agentGuidance: { argv: process.argv.slice(2) } }));\n`
+  );
+
+  const snapshot = loadAgentGuidanceSnapshot({ root: repoRoot, env: {} });
+
+  assert.ok(
+    snapshot.argv.includes("--guidance-only"),
+    "expected doctor.mjs to receive --guidance-only"
+  );
+  assert.ok(snapshot.argv.includes("--json"), "expected doctor.mjs to still receive --json");
+});
+
+// Same regression as above, for the async path (loadAgentGuidanceSnapshotAsync)
+// that dashboard-route.mjs actually calls on its 30-second guidance TTL.
+test("loadAgentGuidanceSnapshotAsync's real runDoctor passes --guidance-only too", async () => {
+  const repoRoot = tempRepo();
+  mkdirSync(join(repoRoot, "src/cli"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "src/cli/doctor.mjs"),
+    `console.log(JSON.stringify({ agentGuidance: { argv: process.argv.slice(2) } }));\n`
+  );
+
+  const snapshot = await loadAgentGuidanceSnapshotAsync({ root: repoRoot, env: {} });
+
+  assert.ok(
+    snapshot.argv.includes("--guidance-only"),
+    "expected doctor.mjs to receive --guidance-only"
+  );
+  assert.ok(snapshot.argv.includes("--json"), "expected doctor.mjs to still receive --json");
 });
 
 test("dashboard agent guidance loads asynchronously with one shared refresh per root", async () => {

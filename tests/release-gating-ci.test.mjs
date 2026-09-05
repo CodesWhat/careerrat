@@ -19,6 +19,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -994,6 +995,24 @@ test("all deterministic product builds are declared as protected contexts", asyn
   assert.doesNotMatch(workflow, /Non-gating for now/i);
 });
 
+test("windows-package-smoke filters to win32-gated cases before building the installer", async () => {
+  const workflow = await source(".github/workflows/ci-verify.yml");
+  const job = workflow.slice(
+    workflow.indexOf("  windows-package-smoke:"),
+    workflow.indexOf("  browser-application-prep:")
+  );
+  const testStepIndex = job.search(
+    /node --test --test-name-pattern "\\\[win32\\\]" tests\/installed-runtime\.test\.mjs tests\/doctor-installed-runtimes\.test\.mjs/
+  );
+  const distWindowsIndex = job.indexOf("npm run dist:windows --workspace apps/desktop");
+  assert.notEqual(testStepIndex, -1, "the win32 test-name-pattern filter must be present");
+  assert.notEqual(distWindowsIndex, -1, "the dist:windows step must be present");
+  assert.ok(
+    testStepIndex < distWindowsIndex,
+    "the filtered installed-runtime identity tests must run before dist:windows"
+  );
+});
+
 test("every dependency-installing job activates the pinned npm, resolves a trusted node path, stages installs with scripts and bin-links disabled, checks allowScripts through that trusted node directly, then reinstalls strictly, in order", async () => {
   // Codex review /tmp/codex-305-r3.md through /tmp/codex-305-r6.md: see the
   // shared constants and assertInstallSequence() above for the history each
@@ -1584,11 +1603,14 @@ test("[codex-305-r12] the loader still works with COREPACK_HOME pointed at an em
     output.definitionCount > 0,
     "expected the real loader to return npm's own option definitions"
   );
-  const projectNpmcliConfigDir = fileURLToPath(
-    new URL("../node_modules/@npmcli/config/", import.meta.url)
+  // Compared through realpath on both sides: a git worktree in this repo
+  // symlinks node_modules to the main checkout, so the loader's resolved
+  // path is the link target, not the worktree path.
+  const projectNpmcliConfigDir = realpathSync(
+    fileURLToPath(new URL("../node_modules/@npmcli/config/", import.meta.url))
   );
   assert.ok(
-    output.resolvedPath.startsWith(projectNpmcliConfigDir),
+    realpathSync(output.resolvedPath).startsWith(projectNpmcliConfigDir),
     `expected the loader to resolve under this project's own ${projectNpmcliConfigDir}, got: ${output.resolvedPath}`
   );
   const npmVersion = pinnedNpmVersion();

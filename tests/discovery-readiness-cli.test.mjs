@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize, sourceConfigPut } from "../src/core/db/verbs.mjs";
 
@@ -609,5 +620,93 @@ test("CLI output lines that mention flags use ASCII hyphen separators", () => {
     assert.deepEqual(offenders, []);
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// Codex review: `careerrat next` only ever consumes doctor's agentGuidance,
+// which never depends on installedRuntimes, so it must run doctor with
+// --guidance-only rather than paying for full runtime detection (and the
+// fingerprint hashing and live --version spawn that can do) on every
+// handoff check.
+//
+// Codex adversarial finding (round 5): a fresh test home has no cached
+// runtime verification, so without a cache in place doctor never fingerprints
+// anything regardless of --guidance-only (runtimeFingerprintId only gets set
+// when a cached selection exists) — a regression passed even with the flag
+// removed from next.mjs. A cached Claude selection whose path/realPath/
+// binaryFingerprint match a real fixture binary forces doctor to actually
+// reach detection once --guidance-only no longer skips it.
+//
+// Codex adversarial finding (round 9): the original fixture used an
+// executable FIFO to prove this, banking on fingerprinting it blocking
+// forever with no writer connected. installed-runtimes.mjs's
+// readRegularFileBytes now opens nonblocking and rejects anything that
+// isn't a regular file, so a FIFO returns "unknown identity" instantly
+// instead of hanging — removing --guidance-only stopped changing this
+// test's outcome at all, silently. The fixture below is a real executable
+// that writes an invocation marker file and prints a version string, so the
+// guard this test actually needs — "next's full guidance-only pass never
+// executes a detected runtime binary" — is checked directly against
+// whether the marker exists, not against a hang.
+test("careerrat next runs doctor with --guidance-only and never executes a detected runtime binary", (t) => {
+  if (process.platform === "win32") {
+    t.skip("shell script fixture is POSIX-only");
+    return;
+  }
+  const home = tempHome();
+  const registry = mkdtempSync(join(tmpdir(), "careerrat-next-registry-"));
+  const markerFile = join(registry, "invoked.marker");
+  try {
+    const claudePath = join(registry, "claude");
+    writeFileSync(claudePath, `#!/bin/sh\necho invoked > "${markerFile}"\necho "9.9.9"\n`, "utf8");
+    chmodSync(claudePath, 0o755);
+    const realPath = realpathSync(claudePath);
+    const binaryFingerprint = createHash("sha256").update(readFileSync(realPath)).digest("hex");
+
+    // A cached Claude selection whose path/realPath/binaryFingerprint match
+    // this fixture exactly, so detection's non-executing identity check
+    // agrees with the cache and — if --guidance-only ever stopped
+    // short-circuiting detection — doctor would go on to actually spawn
+    // this binary's `--version`, writing the marker.
+    writeInstalledRuntimeSelection({
+      repoRoot: ROOT,
+      env: { CAREERRAT_HOME: home },
+      runtimeId: "claude",
+      providerFallback: false,
+      verification: {
+        path: claudePath,
+        realPath,
+        version: "9.9.9",
+        binaryFingerprint,
+        capabilities: {},
+        versionBoundaryState: "at_or_above",
+        checkedAt: new Date().toISOString(),
+      },
+    });
+
+    const result = spawnSync(process.execPath, [join(ROOT, "src/cli/next.mjs"), "--json"], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        CAREERRAT_HOME: home,
+        PATH: registry,
+        CAREERRAT_RUNTIME_SEARCH_DIRS: registry,
+      },
+      encoding: "utf8",
+      timeout: 5000,
+    });
+
+    assert.equal(result.signal, null, "careerrat next must not hang");
+    assert.equal(result.status, 0, result.stderr || "careerrat next exited non-zero");
+    const data = JSON.parse(result.stdout);
+    assert.ok(data.agentGuidance, "next --json must still produce agentGuidance");
+    assert.equal(
+      existsSync(markerFile),
+      false,
+      "careerrat next must never execute a detected runtime binary via doctor --guidance-only"
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(registry, { recursive: true, force: true });
   }
 });
