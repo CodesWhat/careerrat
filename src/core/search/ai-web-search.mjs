@@ -2552,7 +2552,14 @@ export async function runAiWebSearch({
       message: `Saving ${survivors.length} qualified job${survivors.length === 1 ? "" : "s"}…`,
     });
   }
-  const persistedOffers = survivors.length
+  // A batch with artifact-write failures (CR-29 round 5) is neither "new"
+  // nor a genuine "duplicate": sourcedUpsertBatch never wrote that row, so
+  // folding it into `duplicates` (as persistedOffers.length shrinking used
+  // to imply) made a lost posting look like ordinary dedupe instead of a
+  // write that needs a retry. `failed`/`failedIds` name those offers
+  // explicitly so a caller can tell "written" apart from "silently
+  // discarded."
+  const persisted = survivors.length
     ? captureAndPersistOffersIfDb({
         repoRoot,
         env,
@@ -2560,9 +2567,30 @@ export async function runAiWebSearch({
         savedAt,
         guard: writeGuard,
         dedupeCanonical: true,
-      })?.offers || []
-    : [];
-  duplicates += Math.max(0, survivors.length - persistedOffers.length);
+      })
+    : null;
+  const persistedOffers = persisted?.offers || [];
+  const persistedFailed = persisted?.failed || 0;
+  const persistedFailedIds = persisted?.failedIds || [];
+  // Identity conflicts (CR-29 round 8): captureAndPersistOffersIfDb already
+  // separates a bridge offer spanning more than one distinct owner from an
+  // ordinary duplicate — it's rejected outright, persisted nowhere, merged
+  // onto neither owner. Folding it into `duplicates` here (as the old
+  // subtraction did, by omission) reported a dangerous multi-owner bridge as
+  // routine dedupe, with no durable signal that reconciliation refused it.
+  const persistedConflicts = persisted?.conflicts || 0;
+  duplicates += Math.max(
+    0,
+    survivors.length - persistedOffers.length - persistedFailed - persistedConflicts
+  );
+  // Bounded, sanitized sample (company/title/url only, cap 10) of the
+  // rejected conflict offers — enough to point a caller at what needs
+  // manual reconciliation without the summary carrying full offer bodies.
+  const conflictOffers = (persisted?.conflictOffers || []).slice(0, 10).map((offer) => ({
+    company: offer?.company || null,
+    title: offer?.title || null,
+    url: offer?.url || null,
+  }));
 
   return {
     searched: selected.length,
@@ -2581,6 +2609,12 @@ export async function runAiWebSearch({
     fetchedPostingDecisions,
     partial: persistedOffers.filter((offer) => offer.bodyPartial === true).length,
     unreadable: captureFailures.length,
+    ok: persistedFailed === 0 && persistedConflicts === 0,
+    failed: persistedFailed,
+    failedIds: persistedFailedIds,
+    failedOffers: persisted?.failedOffers || [],
+    conflicts: persistedConflicts,
+    conflictOffers,
     errors: promptErrors,
     warnings,
     validationFailures,

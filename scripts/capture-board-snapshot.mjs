@@ -3,36 +3,71 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-import { chromium } from "playwright";
+import { chromium as defaultChromium } from "playwright";
 
 import { defaultProfileRoot } from "../src/core/automation/session.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { captureAndPersistOffersIfDb } from "../src/core/scoring/sourced-persistence.mjs";
 import { extractReqId } from "../src/core/scoring/sourced-scanner.mjs";
 
-const args = process.argv.slice(2);
-const provider = (valueAfter("--provider") || "generic").toLowerCase();
-const url = valueAfter("--url") || defaultUrl(provider);
-const waitForUser =
-  args.includes("--login") || args.includes("--manual") || !args.includes("--no-manual");
-const limit = Number(valueAfter("--limit") || 250);
-const outPath = valueAfter("--out");
-const ingest = args.includes("--ingest");
-const profileRoot =
-  valueAfter("--profile-root") || defaultProfileRoot({ repoRoot: ROOT, env: process.env });
-const browserChannel = (
-  valueAfter("--browser") ||
-  valueAfter("--channel") ||
-  process.env.BOARD_BROWSER ||
-  "chromium"
-).toLowerCase();
+function valueAfter(args, flag) {
+  const index = args.indexOf(flag);
+  return index === -1 ? null : args[index + 1];
+}
 
-if (args.includes("--help")) {
-  console.log(`Usage:
+function defaultUrl(providerName) {
+  if (providerName === "hiringcafe") return "https://hiring.cafe/";
+  if (providerName === "linkedin") return "https://www.linkedin.com/jobs/";
+  return "about:blank";
+}
+
+function timestamp(date) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+}
+
+// Prints a bounded failed-id list and/or identity-conflict summary and exits
+// nonzero without touching the snapshot file or any row
+// captureAndPersistOffersIfDb already committed (CR-29 round 6, extended
+// round 9 to conflicts): a JD artifact-write failure aborts only the offers
+// it touched before the DB transaction ever opens, so the snapshot above and
+// every successfully persisted row stay intact for a rerun. A conflict-only
+// result (failed: 0, conflicts > 0) must ALSO exit nonzero and name the
+// conflict — captureAndPersistOffersIfDb's `ok` now requires both counts be
+// zero, so this reporter can no longer assume `failed` is the only reason
+// it was called.
+export function reportIngestFailure(result) {
+  const failed = Number(result.failed || 0);
+  if (failed > 0) {
+    const shown = (result.failedIds || []).slice(0, 10);
+    console.error(
+      `Failed to persist ${failed} offer(s): ${shown.join(", ")}${
+        result.failedIds.length > shown.length ? ", ..." : ""
+      }`
+    );
+  }
+  const conflicts = Number(result.conflicts || 0);
+  if (conflicts > 0) {
+    const conflictOffers = Array.isArray(result.conflictOffers) ? result.conflictOffers : [];
+    console.error(
+      `Found ${conflicts} identity conflict(s) that could not be reconciled${
+        conflictOffers.length
+          ? ` (e.g. ${conflictOffers[0].company}: ${conflictOffers[0].title})`
+          : ""
+      }`
+    );
+  }
+  console.error(
+    "The snapshot file above and every successfully committed row are still intact; rerun with --ingest once the failure is fixed."
+  );
+  process.exitCode = 1;
+}
+
+function helpText(profileRoot) {
+  return `Usage:
   npm run capture:board -- --provider hiringcafe --url "https://hiring.cafe/..." --login --browser chrome
   npm run capture:board -- --provider linkedin --url "https://www.linkedin.com/jobs/search/?keywords=..." --login --browser chrome
 
@@ -54,72 +89,100 @@ Workflow:
   3. Press Enter in this terminal when the results list is ready.
   4. Use --ingest in DB workspaces so captured offers become sourced rows immediately.
      In legacy workspaces, commit the generated scan-results JSON if it should become the next delta baseline.
-`);
-  process.exit(0);
+`;
 }
 
-const scanResultsDir = userPath({ repoRoot: ROOT }, "workspace/scan-results");
-mkdirSync(scanResultsDir, { recursive: true });
-mkdirSync(profileRoot, { recursive: true });
+export async function runCli(
+  argv = process.argv.slice(2),
+  { chromiumModule = defaultChromium } = {}
+) {
+  const args = argv;
+  const provider = (valueAfter(args, "--provider") || "generic").toLowerCase();
+  const url = valueAfter(args, "--url") || defaultUrl(provider);
+  const waitForUser =
+    args.includes("--login") || args.includes("--manual") || !args.includes("--no-manual");
+  const limit = Number(valueAfter(args, "--limit") || 250);
+  const outPath = valueAfter(args, "--out");
+  const ingest = args.includes("--ingest");
+  const profileRoot =
+    valueAfter(args, "--profile-root") || defaultProfileRoot({ repoRoot: ROOT, env: process.env });
+  const browserChannel = (
+    valueAfter(args, "--browser") ||
+    valueAfter(args, "--channel") ||
+    process.env.BOARD_BROWSER ||
+    "chromium"
+  ).toLowerCase();
 
-const userDataDir = join(profileRoot, provider);
-const launchOptions = {
-  headless: false,
-  viewport: { width: 1440, height: 1100 },
-};
-if (browserChannel !== "chromium") {
-  launchOptions.channel = browserChannel;
-}
-const context = await chromium.launchPersistentContext(userDataDir, {
-  ...launchOptions,
-});
-
-try {
-  const page = context.pages()[0] || (await context.newPage());
-  if (url) await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-
-  if (waitForUser) {
-    const rl = createInterface({ input, output });
-    await rl.question(
-      `Log in / choose saved search / set last-24h filters for ${provider}, then press Enter here to capture...`
-    );
-    rl.close();
+  if (args.includes("--help")) {
+    console.log(helpText(profileRoot));
+    return;
   }
 
-  await settle(page);
-  const offers = await extractOffers(page, provider);
-  const now = new Date();
-  const snapshot = {
-    source: `${provider}-playwright`,
-    provider,
-    generatedAt: now.toISOString(),
-    url: page.url(),
-    scanned: offers.length,
-    offers: offers.slice(0, limit).map((offer) => {
-      const req = extractReqId(offer.url || offer.hiringCafeUrl || "");
-      return {
-        ...offer,
-        source: `${provider}-playwright`,
-        reqId: offer.reqId || req.id || "",
-      };
-    }),
+  const scanResultsDir = userPath({ repoRoot: ROOT }, "workspace/scan-results");
+  mkdirSync(scanResultsDir, { recursive: true });
+  mkdirSync(profileRoot, { recursive: true });
+
+  const userDataDir = join(profileRoot, provider);
+  const launchOptions = {
+    headless: false,
+    viewport: { width: 1440, height: 1100 },
   };
-
-  const out = outPath || join(scanResultsDir, `${provider}-browser-${timestamp(now)}.json`);
-  writeFileSync(out, JSON.stringify(snapshot, null, 2));
-  console.log(`Wrote ${out}`);
-  console.log(`Captured ${snapshot.offers.length} offers from ${provider}`);
-  if (ingest) {
-    const result = captureAndPersistOffersIfDb({
-      repoRoot: ROOT,
-      offers: snapshot.offers,
-      savedAt: now,
-    });
-    if (!result) throw new Error("capture ingest requires a CareerRat SQLite database");
-    console.log(`Ingested ${result.persistedRows} captured offers into SQLite sourced rows`);
+  if (browserChannel !== "chromium") {
+    launchOptions.channel = browserChannel;
   }
-} finally {
-  await context.close();
+  const context = await chromiumModule.launchPersistentContext(userDataDir, {
+    ...launchOptions,
+  });
+
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    if (url) await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+
+    if (waitForUser) {
+      const rl = createInterface({ input, output });
+      await rl.question(
+        `Log in / choose saved search / set last-24h filters for ${provider}, then press Enter here to capture...`
+      );
+      rl.close();
+    }
+
+    await settle(page);
+    const offers = await extractOffers(page, provider);
+    const now = new Date();
+    const snapshot = {
+      source: `${provider}-playwright`,
+      provider,
+      generatedAt: now.toISOString(),
+      url: page.url(),
+      scanned: offers.length,
+      offers: offers.slice(0, limit).map((offer) => {
+        const req = extractReqId(offer.url || offer.hiringCafeUrl || "");
+        return {
+          ...offer,
+          source: `${provider}-playwright`,
+          reqId: offer.reqId || req.id || "",
+        };
+      }),
+    };
+
+    const out = outPath || join(scanResultsDir, `${provider}-browser-${timestamp(now)}.json`);
+    writeFileSync(out, JSON.stringify(snapshot, null, 2));
+    console.log(`Wrote ${out}`);
+    console.log(`Captured ${snapshot.offers.length} offers from ${provider}`);
+    if (ingest) {
+      const result = captureAndPersistOffersIfDb({
+        repoRoot: ROOT,
+        offers: snapshot.offers,
+        savedAt: now,
+        dedupeCanonical: true,
+      });
+      if (!result) throw new Error("capture ingest requires a CareerRat SQLite database");
+      console.log(`Ingested ${result.persistedRows} captured offers into SQLite sourced rows`);
+      if (!result.ok) reportIngestFailure(result);
+    }
+  } finally {
+    await context.close();
+  }
 }
 
 // NOTE: The DOM extractors below (extractLinkedIn, extractHiringCafe, extractGeneric) have
@@ -263,17 +326,9 @@ function bestLine(lines, pattern) {
   return lines.find((line) => pattern.test(line)) || "";
 }
 
-function valueAfter(flag) {
-  const index = args.indexOf(flag);
-  return index === -1 ? null : args[index + 1];
-}
-
-function defaultUrl(providerName) {
-  if (providerName === "hiringcafe") return "https://hiring.cafe/";
-  if (providerName === "linkedin") return "https://www.linkedin.com/jobs/";
-  return "about:blank";
-}
-
-function timestamp(date) {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runCli().catch((error) => {
+    console.error(error?.stack || error?.message || error);
+    process.exitCode = 1;
+  });
 }

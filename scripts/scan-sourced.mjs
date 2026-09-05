@@ -303,20 +303,48 @@ function sourceCoverageReceipt({ kind, label, company, url, result }) {
   return receipt;
 }
 
+// Returns the persisted offers PLUS whether the batch had any artifact-write
+// failures (CR-29 round 5): a failed row is neither "new" nor a genuine
+// "duplicate" — sourcedUpsertBatch never wrote it, so folding it into the
+// duplicate count (as persistedOffers.length shrinking used to imply) made a
+// lost posting look like ordinary dedupe instead of a write that needs a
+// retry. Callers gate source-watermark advancement on `failed === 0` so a
+// source whose offers hit a write failure gets re-scanned next sweep instead
+// of the failed posting silently aging out of retry range.
+//
+// Also carries `conflicts`/`conflictOffers` (CR-29 round 8): captureAndPersistOffersIfDb
+// already reports a bridge offer spanning more than one distinct owner as a
+// conflict rather than a duplicate, but this caller used to drop that
+// distinction on the floor — a dangerous multi-owner bridge folded straight
+// into the ordinary duplicate count, with no durable signal that
+// reconciliation actually refused to persist it. Callers gate
+// source-watermark advancement on `conflicts === 0` too, the same as
+// `failed === 0`.
 function captureOffersForOutput({ repoRoot, env, offers, savedAt, guard }) {
   if (dbExists({ repoRoot, env })) {
-    return (
-      captureAndPersistOffersIfDb({
-        repoRoot,
-        env,
-        offers,
-        savedAt,
-        guard,
-        dedupeCanonical: true,
-      })?.offers || []
-    );
+    const persisted = captureAndPersistOffersIfDb({
+      repoRoot,
+      env,
+      offers,
+      savedAt,
+      guard,
+      dedupeCanonical: true,
+    });
+    return {
+      offers: persisted?.offers || [],
+      failed: persisted?.failed || 0,
+      failedIds: persisted?.failedIds || [],
+      conflicts: persisted?.conflicts || 0,
+      conflictOffers: persisted?.conflictOffers || [],
+    };
   }
-  return offersWithCapturedJobs({ repoRoot, env, offers, savedAt });
+  return {
+    offers: offersWithCapturedJobs({ repoRoot, env, offers, savedAt }),
+    failed: 0,
+    failedIds: [],
+    conflicts: 0,
+    conflictOffers: [],
+  };
 }
 
 const REJECTION_SAMPLE_LIMIT = 3;
@@ -349,6 +377,21 @@ function rejectionSample(entry, fallbackReason) {
     sample.provider = boundedDiagnosticText(entry.provider, 60);
   }
   return sample;
+}
+
+const CONFLICT_OFFER_SAMPLE_LIMIT = 10;
+
+// Bounded, sanitized sample of the offers captureAndPersistOffersIfDb
+// rejected as identity conflicts (CR-29 round 8) — company/title/url only,
+// the same shape rejectionSample above uses for the other rejection buckets,
+// so a caller can see WHICH postings need manual reconciliation without the
+// summary carrying full offer bodies.
+function conflictOfferSample(offer = {}) {
+  return {
+    company: boundedDiagnosticText(offer.company, 160),
+    title: boundedDiagnosticText(offer.title || offer.role, 240),
+    url: boundedDiagnosticText(offer.url || offer.link, 500),
+  };
 }
 
 function buildRejectionSamples(filtered) {
@@ -719,9 +762,15 @@ export async function runSourcedScan({
           hiddenIds: [],
           skipped: false,
         };
-  const persistedOffers = write
+  const persistedResult = write
     ? standaloneConfigMode
-      ? offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt })
+      ? {
+          offers: offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt }),
+          failed: 0,
+          failedIds: [],
+          conflicts: 0,
+          conflictOffers: [],
+        }
       : captureOffersForOutput({
           repoRoot,
           env,
@@ -729,9 +778,21 @@ export async function runSourcedScan({
           savedAt,
           guard: writeGuard,
         })
-    : filtered.kept;
+    : { offers: filtered.kept, failed: 0, failedIds: [], conflicts: 0, conflictOffers: [] };
+  const persistedOffers = persistedResult.offers;
 
-  if (write && !standaloneConfigMode) {
+  // A source's watermark only advances when this run's write came back
+  // clean (CR-29 round 5, extended round 8 to cover conflicts too): a batch
+  // with artifact-write failures OR identity conflicts must not let a lost
+  // (or ambiguously-owned) posting fall behind the watermark, since that
+  // makes it unlikely to ever appear on retry — the source is re-scanned in
+  // full again next sweep instead.
+  if (
+    write &&
+    !standaloneConfigMode &&
+    persistedResult.failed === 0 &&
+    persistedResult.conflicts === 0
+  ) {
     ensureActive();
     for (const companySource of successfulCompanySources) {
       persistCompanySourceWatermark({
@@ -753,7 +814,15 @@ export async function runSourcedScan({
   }
 
   const outputOffers = persistedOffers.map((offer) => toOutputOffer(offer));
-  const persistenceDuplicates = Math.max(0, filtered.kept.length - outputOffers.length);
+  // Conflicts are neither "new" nor a genuine duplicate either (CR-29 round
+  // 8, same reasoning as `failed` above): a bridge offer spanning more than
+  // one distinct owner gets rejected outright, not written and not merged
+  // onto either owner, so it must be subtracted here too or it silently
+  // reads as an ordinary duplicate.
+  const persistenceDuplicates = Math.max(
+    0,
+    filtered.kept.length - outputOffers.length - persistedResult.failed - persistedResult.conflicts
+  );
   const duplicateCount = filtered.duplicates.length + persistenceDuplicates;
   const titleBlockerCount = filtered.filteredTitle.filter(
     (offer) => offer.qualificationKind === "blocker"
@@ -801,7 +870,24 @@ export async function runSourcedScan({
       duplicateCount +
       filtered.invalid.length +
       (filtered.expired?.length || 0) +
-      filtered.overflow.length,
+      filtered.overflow.length +
+      persistedResult.failed +
+      persistedResult.conflicts,
+    // A batch with artifact-write failures marks the run as not fully clean
+    // (CR-29 round 5): `failed`/`failedIds` name the offers that never made
+    // it into the DB so a caller (and the source-watermark gate above) can
+    // tell "written" apart from "silently discarded as a duplicate." Round 8
+    // extends the same treatment to identity conflicts: a bridge offer
+    // spanning more than one distinct owner is rejected outright, and must
+    // mark the run not-clean the same way a write failure does rather than
+    // settle silently as an ordinary duplicate.
+    ok: persistedResult.failed === 0 && persistedResult.conflicts === 0,
+    failed: persistedResult.failed,
+    failedIds: persistedResult.failedIds,
+    conflicts: persistedResult.conflicts,
+    conflictOffers: (persistedResult.conflictOffers || [])
+      .slice(0, CONFLICT_OFFER_SAMPLE_LIMIT)
+      .map(conflictOfferSample),
     errors: scanned.errors,
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
@@ -840,7 +926,11 @@ function assertKnownOptions(args) {
   }
 }
 
-function printSummary(summary, offers, cfg, limit) {
+// Exported (CR-29 round 7) so tests can exercise the summary-mode failure
+// sample directly rather than only through a spawned process — `main()`
+// itself, and every process.argv touch, stays behind the import.meta.url
+// entry guard below exactly as before; this is a pure formatting function.
+export function printSummary(summary, offers, cfg, limit) {
   if (summary.coldFamilies.length > 0) {
     console.log(`Cold-board lanes down-weighted: ${summary.coldFamilies.join(", ")}`);
   }
@@ -849,6 +939,28 @@ function printSummary(summary, offers, cfg, limit) {
   console.log(`Filtered by title: ${summary.filteredTitle}`);
   console.log(`Filtered by location: ${summary.filteredLocation}`);
   console.log(`Duplicates: ${summary.duplicates}`);
+  // Summary mode used to hide a persistence failure entirely — `ok`/
+  // `failed`/`failedIds` only ever showed up in the raw JSON output, so a
+  // human (or a cron log grepping this mode) had no way to see that offers
+  // were silently lost to a JD artifact-write failure. A bounded sample (up
+  // to 10 ids) is enough to point someone at what needs a retry without
+  // dumping the whole list.
+  if (summary.ok === false) {
+    const failedIds = Array.isArray(summary.failedIds) ? summary.failedIds : [];
+    const sample = failedIds.slice(0, 10);
+    const suffix = failedIds.length > sample.length ? ", …" : "";
+    console.log(`Failed to persist: ${summary.failed} (ids: ${sample.join(", ")}${suffix})`);
+  }
+  if (summary.conflicts > 0) {
+    const conflictOffers = Array.isArray(summary.conflictOffers) ? summary.conflictOffers : [];
+    console.log(
+      `Identity conflicts (not persisted): ${summary.conflicts}${
+        conflictOffers.length
+          ? ` (e.g. ${conflictOffers[0].company}: ${conflictOffers[0].title})`
+          : ""
+      }`
+    );
+  }
   if (summary.errors.length > 0) {
     console.log("Errors:");
     for (const error of summary.errors) console.log(`- ${error.company}: ${error.error}`);
@@ -883,6 +995,12 @@ async function main() {
     verify,
     limit,
   });
+
+  // A batch with JD artifact-write failures used to exit 0 in both output
+  // modes: the CLI only ever printed the result, so scheduled automation
+  // (a cron sweep, a CI job) had no process-level signal that offers were
+  // silently lost and needed a retry (CR-29 round 7).
+  if (summary.ok === false) process.exitCode = 1;
 
   const candidateConfig = loadCandidateConfig(pathCtx);
 

@@ -485,6 +485,38 @@ test("Workday marks a missing requisition expired instead of borrowing another b
   assert.match(result.liveness.reason, /workday board no longer lists requisition JR99999/i);
 });
 
+test("a Workday board root URL is never misreported as a missing/expired requisition", async () => {
+  // CR-29 round 3: extractReqId used to derive a bogus requisition id
+  // ("career_site") from a board/portal root URL's underscored last path
+  // segment even though it names no specific posting. Fed through the same
+  // path as the "missing requisition" test above, that made
+  // resolveViaProviderBoard treat the board itself as a requisition search
+  // that came up empty: reported "expired" instead of falling through to
+  // ordinary resolution.
+  const boardUrl = "https://acme.wd5.myworkdayjobs.com/External_Career_Site";
+  const result = await resolveJobUrl(boardUrl, {
+    resolveHost: publicResolver,
+    fetchImpl: async (requestedUrl) => {
+      const requested = new URL(String(requestedUrl));
+      if (requested.pathname === "/wday/cxs/acme/External_Career_Site/jobs") {
+        return jsonResponse({
+          total: 1,
+          jobPostings: [
+            {
+              title: "Assistant General Manager",
+              externalPath: "/job/New-York-NY/Assistant-General-Manager_JR12269",
+              locationsText: "New York, NY",
+            },
+          ],
+        });
+      }
+      return htmlResponse(LONG_ACTIVE_JD, { finalUrl: boardUrl });
+    },
+  });
+
+  assert.notEqual(result.liveness?.result, "expired");
+});
+
 test("canonical ATS recovery cannot change a known requisition identity", async () => {
   const sourceUrl = "https://job-boards.greenhouse.io/acme/jobs/111111";
   const unrelatedUrl = "https://job-boards.greenhouse.io/acme/jobs/222222";

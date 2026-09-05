@@ -9,10 +9,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 
-import { closeAll } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { readDbScannerRows } from "../src/core/db/scan-context.mjs";
 import {
   candidateConfigPatch,
@@ -3205,6 +3205,122 @@ test("runAiWebSearch keeps likely-cut only when canonical scoring finds a cut fl
   const [saved] = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
   assert.equal(saved.gate, "likely-cut");
   assert.match(saved.note, /cut-risk-heavy-travel/);
+});
+
+test("a JD artifact-write failure during an AI web search marks the run failed and keeps the offer's id in failedIds", async () => {
+  // CR-29 round 5: captureAndPersistOffersIfDb already reported a JD write
+  // failure in `failed`/`failedIds`, but this production caller used to
+  // discard that data — the offer's disappearance from persistedOffers just
+  // shrank the duplicate count, so a lost posting looked like ordinary
+  // dedupe instead of a write that needs a retry.
+  const repoRoot = repo({ prompts: 1 });
+  // JD artifacts land at a content-addressed final path (sourced-
+  // persistence.mjs's contentAddressedJobCaptureRelPath: <company-slug>-
+  // <title-slug>-<content-digest>.md, CR-29 round 6), so the exact filename
+  // can't be predicted ahead of rendering. Block EVERY artifact write
+  // instead: making "workspace/jobs" itself a plain FILE means
+  // mkdirSync(dirname(absPath), { recursive: true }) throws for any offer,
+  // since an ancestor path component exists but isn't a directory — the
+  // write throws before any DB transaction opens.
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  mkdirSync(dirname(jobsDir), { recursive: true });
+  writeFileSync(jobsDir, "");
+
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [role({ rule_flags: [] })],
+      queries_run: [{ prompt_id: "p1", query: "ai jobs" }],
+    }),
+    resolveJobUrlImpl: canonicalResolver(),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failed, 1);
+  assert.deepEqual(result.failedIds, ["sourced-acme-ai-lever-req-1"]);
+  assert.equal(result.new, 0);
+  assert.deepEqual(
+    readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search"),
+    [],
+    "a failed JD write must not leave a dangling DB row"
+  );
+});
+
+test("an identity conflict discovered only at persistence time settles the AI search as not-clean, not an ordinary duplicate (CR-29 round 8)", async () => {
+  // runAiWebSearch's OWN pre-persistence dedup (preliminaryPostingKeys/
+  // seenPostingKeys, both snapshotted from the DB once at the top of this
+  // function) can only catch a collision against rows that already existed
+  // BEFORE the run started. captureAndPersistOffersIfDb re-reads the DB
+  // fresh inside its own dedupeCanonical reconciliation, so a row written
+  // mid-run (a concurrent/interleaved writer, or here, deliberately seeded
+  // from inside the hydration hook to simulate one) is invisible to this
+  // function's own pre-checks but very much visible there. Before this fix,
+  // this production caller didn't look at `conflicts` at all: the offer's
+  // absence from `persistedOffers` just shrank the duplicate count, so an
+  // ambiguous multi-owner bridge read as routine dedupe.
+  const repoRoot = repo({ prompts: 1 });
+  candidateSetupInitialize({ repoRoot });
+
+  let seeded = false;
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [
+        role({
+          company: "Bridge Co",
+          title: "Bridge Role",
+          url: "https://boards.greenhouse.io/bridgeco/jobs/9999999",
+        }),
+      ],
+      queries_run: [{ prompt_id: "p1", query: "ai jobs" }],
+    }),
+    resolveJobUrlImpl: async (url) => {
+      // Two rows that predate a canonicalization fix can already share one
+      // identity key in the DB (see tests/db-verbs.test.mjs's
+      // storedPostingIndex regression) — here, a Greenhouse requisition id
+      // both picked up as an ALIAS from an earlier merge, not their own URL,
+      // seeded here (mid-hydration) rather than before the call so this
+      // function's own pre-persistence dedup never sees it.
+      if (!seeded) {
+        seeded = true;
+        sourcedUpsertBatch({
+          repoRoot,
+          rows: [
+            {
+              id: "sourced-legacy-conflict-owner-a",
+              company: "Legacy Corp A",
+              role: "Legacy Role A",
+              link: "https://jobs.example.test/legacy-corp-a/role",
+              fitScore: 70,
+              aliasKeys: ["req:greenhouse:9999999"],
+            },
+            {
+              id: "sourced-legacy-conflict-owner-b",
+              company: "Legacy Corp B",
+              role: "Legacy Role B",
+              link: "https://jobs.example.test/legacy-corp-b/role",
+              fitScore: 70,
+              aliasKeys: ["req:greenhouse:9999999"],
+            },
+          ],
+        });
+      }
+      return specificResolution(url);
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.new, 0, "the ambiguous bridge must not persist as a new row");
+  assert.equal(result.duplicates, 0, "a conflict must not be reported as an ordinary duplicate");
+  assert.equal(result.conflicts, 1);
+  assert.equal(result.conflictOffers.length, 1);
+  assert.equal(result.conflictOffers[0].company, "Bridge Co");
+  assert.equal(result.conflictOffers[0].url, "https://boards.greenhouse.io/bridgeco/jobs/9999999");
+
+  const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+  assert.equal(rows.length, 2, "only the two pre-seeded legacy rows may exist");
 });
 
 test("runAiWebSearch recovers bounded source receipts for roles deduped before persistence", async () => {

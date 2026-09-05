@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { userPath } from "../paths/workspace.mjs";
+import { postingIdentityKeys } from "./sourced-identity.mjs";
 import { extractReqId } from "./sourced-scanner.mjs";
 
 export function loadSnapshot(path) {
@@ -53,6 +54,13 @@ export function latestSnapshotPair({
   };
 }
 
+// A single stable label for one offer, kept for callers that just want ONE
+// display id (deltaId, logging). Explicit reqId wins, then a URL-derived
+// provider key, then a normalized-URL/company+title fallback: the FIRST
+// match, in that order. Diffing/dedupe use offerIdentityKeys below instead:
+// this single-label reduction is exactly what let a posting carried both
+// directly (URL-derived key) and through an aggregator (its own reqId)
+// report as two different postings (CR-29 round 3).
 export function offerIdentity(offer) {
   if (offer?.reqId) return String(offer.reqId).toLowerCase();
   const req = extractReqId(offer?.url || offer?.hiringCafeUrl || "");
@@ -64,27 +72,68 @@ export function offerIdentity(offer) {
   return company && title ? `role:${company}::${title}` : "";
 }
 
+// The full identity-key SET for one offer, used for every diff/dedupe
+// membership check below (previous-vs-current, and repo seenIds). Unlike
+// offerIdentity, this keeps every key a posting resolves to: an aggregator's
+// own reqId (e.g. hiringcafe:x) AND a URL-derived provider key (e.g.
+// Workday's tenant-scoped requisition id) when postingIdentityKeys says they
+// diverge, so two representations of the same posting match by
+// INTERSECTION instead of only agreeing when one happens to win the
+// single-label reduction above. Kept in the same raw (unprefixed) shape
+// offerIdentity has always produced, since seenIds (buildOfferIdentitySet's
+// callers, and callers that pass their own seenIds) is an external contract
+// built on that shape.
+export function offerIdentityKeys(offer) {
+  const keys = new Set();
+  // postingIdentityKeys only looks at row.url/row.link: snapshot offers
+  // (unlike DB rows) can carry ONLY hiringCafeUrl with no outbound url at
+  // all, so fall back to it for identity purposes exactly like offerIdentity
+  // above already does; offer.url still wins whenever it's present.
+  const withUrlFallback = offer?.url ? offer : { ...offer, url: offer?.hiringCafeUrl };
+  for (const key of postingIdentityKeys(withUrlFallback)) {
+    if (key.startsWith("req:")) keys.add(key.slice(4));
+  }
+  const url = normalizeUrl(offer?.url || offer?.hiringCafeUrl || "");
+  if (url) keys.add(`url:${url}`);
+  if (keys.size) return [...keys];
+  const company = normalizeText(offer?.company);
+  const title = normalizeText(offer?.title || offer?.role);
+  return company && title ? [`role:${company}::${title}`] : [];
+}
+
 export function buildOfferIdentitySet(offers = []) {
-  return new Set(offers.map(offerIdentity).filter(Boolean));
+  const set = new Set();
+  for (const offer of offers) for (const key of offerIdentityKeys(offer)) set.add(key);
+  return set;
 }
 
 export function diffSnapshotOffers({ current = [], previous = [], seenIds = new Set() }) {
-  const previousIds = buildOfferIdentitySet(previous);
-  const currentIds = buildOfferIdentitySet(current);
+  const previousKeySets = previous.map(offerIdentityKeys);
+  const previousKeys = new Set(previousKeySets.flat());
+  const currentKeySets = current.map(offerIdentityKeys);
+  const currentKeys = new Set(currentKeySets.flat());
   const repoSeen = seenIds instanceof Set ? seenIds : new Set(seenIds || []);
 
   const newOffers = [];
   const carriedOffers = [];
-  for (const offer of current) {
-    const id = offerIdentity(offer);
-    const enriched = { ...offer, deltaId: id, repoDuplicate: id ? repoSeen.has(id) : false };
-    if (id && previousIds.has(id)) carriedOffers.push(enriched);
+  current.forEach((offer, index) => {
+    const keys = currentKeySets[index];
+    const enriched = {
+      ...offer,
+      deltaId: offerIdentity(offer),
+      repoDuplicate: keys.some((key) => repoSeen.has(key)),
+    };
+    if (keys.some((key) => previousKeys.has(key))) carriedOffers.push(enriched);
     else newOffers.push(enriched);
-  }
+  });
 
   const removedOffers = previous
-    .map((offer) => ({ ...offer, deltaId: offerIdentity(offer) }))
-    .filter((offer) => offer.deltaId && !currentIds.has(offer.deltaId));
+    .map((offer, index) => ({
+      offer: { ...offer, deltaId: offerIdentity(offer) },
+      keys: previousKeySets[index],
+    }))
+    .filter(({ keys }) => keys.length && !keys.some((key) => currentKeys.has(key)))
+    .map(({ offer }) => offer);
 
   return { current, previous, newOffers, carriedOffers, removedOffers };
 }

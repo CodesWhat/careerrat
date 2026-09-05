@@ -895,6 +895,27 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
     zeroResults: Number(summary.new || 0) === 0,
     deterministicSources: clone(deterministicSources),
+    // runSourcedScan already reports a JD artifact-write failure in
+    // ok/failed/failedIds (CR-29 round 5), but this normalizer used to drop
+    // all three — runFirstSearchInBackground below settled the run as
+    // completed regardless, leaving the watermark blocked with no visible
+    // failed run to retry (CR-29 round 6).
+    ok: summary.ok !== false,
+    failed: Number(summary.failed || 0),
+    failedIds: clone(Array.isArray(summary.failedIds) ? summary.failedIds : []),
+    // Round 9: runSourcedScan also reports identity conflicts separately
+    // from artifact failures (`conflicts`/`conflictOffers` — a bridge offer
+    // spanning more than one distinct owner, rejected outright rather than
+    // written). This normalizer used to drop both, so a conflict-only scan
+    // (ok: false, failed: 0, conflicts > 0) settled below with a
+    // "Failed to persist 0 job description artifact(s)" message that named
+    // the wrong subsystem and lost the affected postings with no recovery
+    // detail. Bounded at 50, same cap sourced-persistence.mjs's own
+    // failedOffers uses.
+    conflicts: Number(summary.conflicts || 0),
+    conflictOffers: clone(
+      (Array.isArray(summary.conflictOffers) ? summary.conflictOffers : []).slice(0, 50)
+    ),
   };
 }
 
@@ -1319,6 +1340,51 @@ export async function runFirstSearchInBackground({
       errorCount: Array.isArray(summary.errors) ? summary.errors.length : 0,
     });
     const normalizedSummary = normalizeRunSummary(summary, deterministicSources);
+    // A JD artifact-write failure means a posting this scan found never
+    // actually landed durably (CR-29 round 6): settling the run as
+    // "completed" anyway would let the source watermark advance behind a
+    // lost posting, and there'd be no failed run for onboarding to offer a
+    // retry against. Both the shared-worker path (settle: false, settled by
+    // sourcing-worker-manager off this settlement) and the direct path
+    // below must treat it as a failure, carrying failedIds so a retry knows
+    // what it's for.
+    if (normalizedSummary.ok === false) {
+      // Round 9: a conflict-only scan (failed: 0, conflicts > 0) must never
+      // settle as SOURCED_ARTIFACT_WRITE_FAILED with "Failed to persist 0
+      // job description artifact(s)" — that names the wrong subsystem and
+      // drops the conflict count/sample entirely. SOURCED_IDENTITY_CONFLICT
+      // covers the pure-conflict case; a mix of both failure classes keeps
+      // the artifact-write code (matching search-route.mjs's
+      // AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED/AI_WEB_SEARCH_IDENTITY_CONFLICT
+      // pairing) but names both in the message.
+      const message =
+        normalizedSummary.conflicts > 0
+          ? normalizedSummary.failed > 0
+            ? `Failed to persist ${normalizedSummary.failed} job description artifact(s) and found ${normalizedSummary.conflicts} identity conflict(s) that could not be reconciled.`
+            : `Found ${normalizedSummary.conflicts} identity conflict(s) that could not be reconciled.`
+          : `Failed to persist ${normalizedSummary.failed} job description artifact(s).`;
+      const artifactFailureError = {
+        code:
+          normalizedSummary.failed > 0
+            ? "SOURCED_ARTIFACT_WRITE_FAILED"
+            : "SOURCED_IDENTITY_CONFLICT",
+        message,
+        failedIds: normalizedSummary.failedIds,
+        conflicts: normalizedSummary.conflicts,
+        conflictOffers: normalizedSummary.conflictOffers,
+      };
+      if (!settle) {
+        return {
+          settlement: { status: "failed", error: artifactFailureError },
+          value: summary,
+        };
+      }
+      return sourcingRunFail({
+        ...pathCtx,
+        id: runId,
+        error: artifactFailureError,
+      }).run;
+    }
     if (!settle) {
       return {
         settlement: { status: "completed", summary: normalizedSummary },

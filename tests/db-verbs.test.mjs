@@ -8,10 +8,13 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
-import { closeAll, dbFilePath, openDb } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import {
+  sourcedMergeIdentityAlias,
+  sourcedMergeIdentityAliasBatch,
+} from "../src/core/db/verbs/sourced.mjs";
 import {
   activityAppend,
   analyticsRefresh,
@@ -1303,29 +1306,576 @@ test("sourcedSetStatus patches status and note, refreshes analytics, and rejects
   );
 });
 
-test("sourcedUpsertBatch prepares rows before opening its write transaction", () => {
+test("sourcedUpsertBatch's guard(db) rejects a duplicate-only batch before any alias merge commits", () => {
+  // CR-29 round 5: a batch that's ALL duplicateOffers (no new/updated row to
+  // accept) used to skip sourcedUpsertBatch entirely — rows.length was 0, so
+  // the caller never opened this verb's transaction at all, and the alias
+  // merge ran through a separate, unguarded call. A superseded search's
+  // duplicate-only batch must be rejected by the SAME guard a rows-bearing
+  // batch would hit, with nothing committed.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  const seeded = sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-guard-canonical",
+        company: "Acme",
+        role: "Canonical Engineer",
+        link: "https://jobs.example.test/acme/guard-canonical",
+        fitScore: 70,
+      },
+    ],
+  });
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-guard-canonical").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEvents = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+  assert.equal(seeded.created, 1);
+
+  assert.throws(
+    () =>
+      sourcedUpsertBatch({
+        repoRoot,
+        duplicateOffers: [
+          {
+            company: "Acme",
+            title: "Canonical Engineer",
+            url: "https://jobs.example.test/acme/guard-canonical",
+            reqId: "hiringcafe:guard-rejected",
+          },
+        ],
+        guard: () => {
+          const error = new Error("the search is no longer active");
+          error.code = "SOURCING_RUN_NOT_ACTIVE";
+          throw error;
+        },
+      }),
+    (error) => error?.code === "SOURCING_RUN_NOT_ACTIVE"
+  );
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-guard-canonical").data
+  );
+  assert.deepEqual(after, before, "a rejected duplicate-only batch must not merge any alias");
+  assert.equal(db.prepare("SELECT version FROM meta WHERE id = 1").get().version, beforeMeta);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count,
+    beforeEvents
+  );
+});
+
+test("sourcedUpsertBatch's guard(db) rejects a mixed rows+duplicateOffers batch before either commits", () => {
+  // Same CR-29 round 5 contract, exercised with a batch that carries BOTH a
+  // new row AND a persisted-duplicate alias merge in one call: a guard
+  // rejection must roll back the whole transaction, not just the half it
+  // would have reached first.
   const repoRoot = tempRepo();
   seedFixture(repoRoot);
-  let prepared = false;
+  const db = openDb({ repoRoot });
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+  const beforeEvents = db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count;
+
+  assert.throws(
+    () =>
+      sourcedUpsertBatch({
+        repoRoot,
+        rows: [
+          {
+            id: "sourced-guard-mixed-new",
+            company: "Acme",
+            role: "Mixed Batch Engineer",
+            link: "https://jobs.example.test/acme/guard-mixed",
+          },
+        ],
+        duplicateOffers: [
+          {
+            company: "Umbrella",
+            title: "Coordinator",
+            url: "https://jobs.example.test/umbrella/guard-mixed-dup",
+            reqId: "hiringcafe:guard-mixed-rejected",
+          },
+        ],
+        guard: () => {
+          const error = new Error("the search is no longer active");
+          error.code = "SOURCING_RUN_NOT_ACTIVE";
+          throw error;
+        },
+      }),
+    (error) => error?.code === "SOURCING_RUN_NOT_ACTIVE"
+  );
+
+  assert.equal(
+    Boolean(db.prepare("SELECT id FROM sourced WHERE id = ?").get("sourced-guard-mixed-new")),
+    false,
+    "a rejected mixed batch must not insert its new row"
+  );
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me").data
+  );
+  assert.deepEqual(after, before, "a rejected mixed batch must not merge its duplicate's alias");
+  assert.equal(db.prepare("SELECT version FROM meta WHERE id = 1").get().version, beforeMeta);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM activity_events").get().count,
+    beforeEvents
+  );
+});
+
+test("sourcedMergeIdentityAliasBatch merges a whole batch of duplicates through one index build and one write", () => {
+  // CR-29 round 4: sourced-persistence.mjs used to call the standalone
+  // sourcedMergeIdentityAlias once PER suppressed duplicate, and each call
+  // rebuilt the entire stored posting index (a full read + JSON.parse of
+  // every applications/sourced row) and opened its own transaction/export.
+  // The batched verb must build that index exactly once for the whole call,
+  // regardless of how many duplicates it's merging.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
 
   sourcedUpsertBatch({
     repoRoot,
-    rows: [{ id: "sourced-prepared-outside-transaction", company: "Prepared Co" }],
-    prepareAcceptedRow(row) {
-      const contender = new DatabaseSync(dbFilePath({ repoRoot }));
-      try {
-        contender.exec("PRAGMA busy_timeout = 1");
-        contender.exec("BEGIN IMMEDIATE");
-        contender.exec("ROLLBACK");
-        prepared = true;
-        return row;
-      } finally {
-        contender.close();
-      }
+    rows: [
+      {
+        id: "sourced-alpha",
+        company: "Acme",
+        role: "Alpha Engineer",
+        link: "https://jobs.example.test/acme/alpha",
+        fitScore: 70,
+      },
+      {
+        id: "sourced-beta",
+        company: "Acme",
+        role: "Beta Engineer",
+        link: "https://jobs.example.test/acme/beta",
+        fitScore: 70,
+      },
+      {
+        id: "sourced-gamma",
+        company: "Acme",
+        role: "Gamma Engineer",
+        link: "https://jobs.example.test/acme/gamma",
+        fitScore: 70,
+      },
+    ],
+  });
+  const beforeMeta = readMeta(db);
+
+  const duplicateOffers = [
+    {
+      company: "Acme",
+      title: "Alpha Engineer",
+      url: "https://jobs.example.test/acme/alpha",
+      reqId: "hiringcafe:alpha",
+    },
+    {
+      company: "Acme",
+      title: "Beta Engineer",
+      url: "https://jobs.example.test/acme/beta",
+      reqId: "hiringcafe:beta",
+    },
+    {
+      company: "Acme",
+      title: "Gamma Engineer",
+      url: "https://jobs.example.test/acme/gamma",
+      reqId: "hiringcafe:gamma",
+    },
+  ];
+
+  let indexQueries = 0;
+  const originalPrepare = db.prepare.bind(db);
+  db.prepare = (sql) => {
+    if (/^SELECT id, data FROM (applications|sourced)$/.test(sql)) indexQueries++;
+    return originalPrepare(sql);
+  };
+  let result;
+  try {
+    result = sourcedMergeIdentityAliasBatch({ repoRoot, offers: duplicateOffers });
+  } finally {
+    db.prepare = originalPrepare;
+  }
+
+  assert.equal(result.merged, 3);
+  // storedPostingIndex issues exactly one SELECT per table (applications,
+  // sourced) — ONE index build for the whole batch, not one per duplicate
+  // (which would be 6 for 3 duplicates).
+  assert.equal(indexQueries, 2, "the posting index must be built exactly once for the batch");
+
+  const afterMeta = readMeta(db);
+  assert.equal(
+    afterMeta.version,
+    beforeMeta.version + 1,
+    "meta must bump exactly once for the whole batch, not once per duplicate"
+  );
+
+  const rows = db
+    .prepare("SELECT id, data FROM sourced ORDER BY id")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  for (const row of rows) {
+    assert.ok(
+      row.aliasKeys?.some((key) => key.startsWith("req:hiringcafe:")),
+      `${row.id} should have gained its HiringCafe alias`
+    );
+  }
+});
+
+test("a second same-batch duplicate matching a canonical row by its ORIGINAL identity keeps the first duplicate's alias (CR-29 round 5)", () => {
+  // Before CR-29 round 5, storedPostingIndex's mergeDuplicateIdentityAlias
+  // replaced the matched entry with a brand-new {table,id,row} object and
+  // repointed only the NEWLY ADDED alias keys at it. A canonical row's
+  // ORIGINAL identity keys (its own url/reqId) kept pointing at the stale
+  // pre-merge entry. So: duplicate B merges alias B onto row A (fine), but
+  // duplicate C — matching the SAME row A by A's ORIGINAL url, not by B's
+  // alias — looked up that stale entry, computed its additions against a
+  // row that never saw B's merge, and overwrote aliasKeys with just
+  // [C], dropping B. The fix mutates the shared entry object in place so
+  // every one of A's identity keys, not just the newly added ones, sees
+  // every merge that happened before it.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-sequential-canonical",
+        company: "Acme",
+        role: "Sequential Engineer",
+        link: "https://jobs.example.test/acme/sequential-canonical",
+        fitScore: 70,
+      },
+    ],
+  });
+
+  // B and C both match the canonical row by its ORIGINAL url (not by each
+  // other's alias), processed within ONE sourcedUpsertBatch call so they
+  // share the SAME storedPostingIndex build.
+  sourcedUpsertBatch({
+    repoRoot,
+    duplicateOffers: [
+      {
+        company: "Acme",
+        title: "Sequential Engineer",
+        url: "https://jobs.example.test/acme/sequential-canonical",
+        reqId: "hiringcafe:sequential-b",
+      },
+      {
+        company: "Acme",
+        title: "Sequential Engineer",
+        url: "https://jobs.example.test/acme/sequential-canonical",
+        reqId: "hiringcafe:sequential-c",
+      },
+    ],
+  });
+
+  const row = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-sequential-canonical").data
+  );
+  assert.ok(
+    row.aliasKeys?.includes("req:hiringcafe:sequential-b"),
+    "the earlier same-batch alias merge must survive a later merge onto the same row"
+  );
+  assert.ok(
+    row.aliasKeys?.includes("req:hiringcafe:sequential-c"),
+    "the later same-batch alias merge must also be present"
+  );
+});
+
+test("mergeDuplicateIdentityAlias rejects an offer whose identities resolve to MORE THAN ONE stored row (CR-29 round 6)", () => {
+  // A malformed aggregator card can pair one posting's URL with an unrelated
+  // posting's reqId. If that offer's identities resolve to two DIFFERENT
+  // stored rows, merging onto either one would repoint aliasKeys onto a
+  // posting it may not be. The merge must be rejected outright — reported as
+  // a conflict, nothing persisted for it.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-conflict-owner-a",
+        company: "Acme",
+        role: "Conflict Role",
+        link: "https://jobs.example.test/acme/conflict-a",
+        fitScore: 70,
+      },
+      {
+        id: "sourced-conflict-owner-b",
+        company: "Acme",
+        role: "Conflict Role",
+        link: "https://jobs.example.test/acme/conflict-b",
+        fitScore: 70,
+        aliasKeys: ["req:conflict-shared-req"],
+      },
+    ],
+  });
+  const beforeA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-conflict-owner-a").data
+  );
+  const beforeB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-conflict-owner-b").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+
+  const result = sourcedMergeIdentityAlias({
+    repoRoot,
+    offer: {
+      company: "Acme",
+      title: "Conflict Role",
+      url: "https://jobs.example.test/acme/conflict-a",
+      reqId: "conflict-shared-req",
     },
   });
 
-  assert.equal(prepared, true);
+  assert.equal(result.merged, false);
+  assert.equal(result.conflict, true);
+
+  const afterA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-conflict-owner-a").data
+  );
+  const afterB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-conflict-owner-b").data
+  );
+  assert.deepEqual(afterA, beforeA, "the conflicting merge must not touch either owner's row");
+  assert.deepEqual(afterB, beforeB, "the conflicting merge must not touch either owner's row");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeMeta,
+    "a rejected conflict must not bump meta"
+  );
+});
+
+test("storedPostingIndex resolves EVERY distinct owner a shared identity key maps to, not just the last one indexed (CR-29 round 8)", () => {
+  // A key derivation fix can make two rows that were previously indexed
+  // under DIFFERENT keys canonicalize to the SAME key going forward — two
+  // legacy Workday rows captured before a requisition-key fix, for
+  // instance. storedPostingIndex used to map each key straight to a single
+  // owning entry, so the SECOND row's scan silently overwrote the FIRST
+  // row's ownership of that key in the index. A bridge offer touching that
+  // key then resolved to exactly one owner and could be merged onto it,
+  // instead of being recognized as ambiguous across both legacy rows.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  // No dedupeCanonical here (matches the round-6 conflict seed above): this
+  // simulates two rows a prior, pre-fix canonicalization already let land
+  // as distinct rows sharing one identity key, not today's dedupe path.
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-legacy-owner-a",
+        company: "Acme",
+        role: "Legacy Role A",
+        link: "https://jobs.example.test/acme/legacy-a",
+        fitScore: 70,
+        aliasKeys: ["req:legacy-shared-req"],
+      },
+      {
+        id: "sourced-legacy-owner-b",
+        company: "Acme",
+        role: "Legacy Role B",
+        link: "https://jobs.example.test/acme/legacy-b",
+        fitScore: 70,
+        aliasKeys: ["req:legacy-shared-req"],
+      },
+    ],
+  });
+  const beforeA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-legacy-owner-a").data
+  );
+  const beforeB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-legacy-owner-b").data
+  );
+  const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+
+  const result = sourcedMergeIdentityAlias({
+    repoRoot,
+    offer: {
+      company: "Acme",
+      title: "Bridge Role",
+      url: "https://jobs.example.test/acme/legacy-bridge",
+      reqId: "legacy-shared-req",
+    },
+  });
+
+  assert.equal(result.merged, false);
+  assert.equal(result.conflict, true, "a key shared by two distinct legacy rows must conflict");
+
+  const afterA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-legacy-owner-a").data
+  );
+  const afterB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-legacy-owner-b").data
+  );
+  assert.deepEqual(afterA, beforeA, "neither legacy owner may be mutated by the ambiguous bridge");
+  assert.deepEqual(afterB, beforeB, "neither legacy owner may be mutated by the ambiguous bridge");
+  assert.equal(
+    db.prepare("SELECT version FROM meta WHERE id = 1").get().version,
+    beforeMeta,
+    "a rejected conflict must not bump meta"
+  );
+});
+
+test("mergeDuplicateIdentityAlias never attaches an unseen alias without company+role corroboration (CR-29 round 6)", () => {
+  // A single-owner match on one shared key is not proof the offer describes
+  // the SAME posting as the row it matched. Before attaching a NEW identity
+  // key onto that row, company and role must also agree.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-uncorroborated-owner",
+        company: "Acme",
+        role: "Real Role",
+        link: "https://jobs.example.test/acme/uncorroborated",
+        fitScore: 70,
+      },
+    ],
+  });
+  const before = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-uncorroborated-owner").data
+  );
+
+  const result = sourcedMergeIdentityAlias({
+    repoRoot,
+    offer: {
+      // Matches the row's own url (single owner, no conflict) but claims a
+      // DIFFERENT company/role — a mismatch that must block the new
+      // req: key from being attached.
+      company: "Wrongco",
+      title: "Wrong Role",
+      url: "https://jobs.example.test/acme/uncorroborated",
+      reqId: "hiringcafe:uncorroborated-new",
+    },
+  });
+
+  assert.equal(result.merged, false);
+  assert.equal(result.conflict, false);
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-uncorroborated-owner").data
+  );
+  assert.deepEqual(after, before, "an uncorroborated alias must not be attached");
+});
+
+test("mergeDuplicateIdentityAlias attaches a new alias once company+role corroborate the match (CR-29 round 6)", () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-corroborated-owner",
+        company: "Acme",
+        role: "Real Role",
+        link: "https://jobs.example.test/acme/corroborated",
+        fitScore: 70,
+      },
+    ],
+  });
+
+  const result = sourcedMergeIdentityAlias({
+    repoRoot,
+    offer: {
+      company: "Acme",
+      title: "Real Role",
+      url: "https://jobs.example.test/acme/corroborated",
+      reqId: "hiringcafe:corroborated-new",
+    },
+  });
+
+  assert.equal(result.merged, true);
+  assert.equal(result.conflict, false);
+
+  const after = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-corroborated-owner").data
+  );
+  assert.ok(
+    after.aliasKeys?.includes("req:hiringcafe:corroborated-new"),
+    "a corroborated new identity must be attached as an alias"
+  );
+});
+
+test("a key an earlier duplicate in the SAME batch just claimed is never repointed onto a later duplicate's row (CR-29 round 6)", () => {
+  // The multi-owner conflict guard runs against the ONE shared
+  // storedPostingIndex a whole batch's worth of duplicates merges through
+  // (sourcedMergeIdentityAliasBatch), so an alias a batch's EARLIER
+  // duplicate just attached to row A must still block a LATER duplicate in
+  // that same batch from repointing that same key onto a different row B —
+  // not just a key owned since before the batch started.
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-repoint-a",
+        company: "Acme",
+        role: "Repoint Role",
+        link: "https://jobs.example.test/acme/repoint-a",
+        fitScore: 70,
+      },
+      {
+        id: "sourced-repoint-b",
+        company: "Acme",
+        role: "Repoint Role",
+        link: "https://jobs.example.test/acme/repoint-b",
+        fitScore: 70,
+      },
+    ],
+  });
+
+  const result = sourcedMergeIdentityAliasBatch({
+    repoRoot,
+    offers: [
+      {
+        // Matches row A by its own url alone; attaches a NEW, previously
+        // unowned req: key onto A.
+        company: "Acme",
+        title: "Repoint Role",
+        url: "https://jobs.example.test/acme/repoint-a",
+        reqId: "shared-later-req",
+      },
+      {
+        // Matches row B by its own url, but also carries the SAME req: key
+        // the first offer just attached to A moments ago in this batch —
+        // now a second, conflicting owner for that key.
+        company: "Acme",
+        title: "Repoint Role",
+        url: "https://jobs.example.test/acme/repoint-b",
+        reqId: "shared-later-req",
+      },
+    ],
+  });
+
+  assert.equal(result.merged, 1, "only the first offer's merge succeeds");
+  assert.equal(result.conflicts, 1, "the second offer's repoint attempt is rejected as a conflict");
+
+  const rowA = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-repoint-a").data
+  );
+  const rowB = JSON.parse(
+    db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-repoint-b").data
+  );
+  assert.ok(
+    rowA.aliasKeys?.includes("req:shared-later-req"),
+    "row A keeps the key it legitimately claimed first"
+  );
+  assert.equal(
+    Boolean(rowB.aliasKeys?.includes("req:shared-later-req")),
+    false,
+    "row B must never receive a key already claimed by a different row in this same batch"
+  );
 });
 
 test("sourced policy reconciliation rolls back when the active-search guard rejects the write", () => {
