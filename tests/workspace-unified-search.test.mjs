@@ -404,6 +404,15 @@ test("unified execution persists a bounded receipt while the AI child keeps full
       promptId: `prompt-${index}`,
       output: "Full provider response. ".repeat(100),
     })),
+    // CR-29 round 9: conflicts/conflictOffers must be bounded the same way
+    // failedIds/failedOffers already are, so a max-shape execution with a
+    // large conflict sample still stays under the size bound below.
+    conflicts: 60,
+    conflictOffers: Array.from({ length: 120 }, (_, index) => ({
+      company: `Conflict Co ${index}`,
+      title: `Conflict Role ${index}`,
+      url: `https://example.com/conflicts/${index}`,
+    })),
   };
   const runtime = createWorkspaceAgentRuntime({
     repoRoot,
@@ -467,6 +476,8 @@ test("unified execution persists a bounded receipt while the AI child keeps full
   assert.equal(Object.hasOwn(execution.lanes.aiWeb.summary, "offers"), false);
   assert.equal(Object.hasOwn(execution.lanes.aiWeb.summary, "sources"), false);
   assert.equal(Object.hasOwn(execution.lanes.aiWeb.summary, "queryResults"), false);
+  assert.equal(execution.lanes.aiWeb.summary.conflicts, 60);
+  assert.equal(execution.lanes.aiWeb.summary.conflictOffers.length, 50);
   assert.ok(Buffer.byteLength(JSON.stringify(execution), "utf8") < 65_536);
   assert.equal(child.summary.offers.length, 120);
   assert.equal(child.summary.sources.length, 120);
@@ -558,6 +569,96 @@ test("a failed AI-web child's failedIds/failedOffers survive compaction into the
   assert.deepEqual(reloaded.lanes.aiWeb.summary.failedOffers, failedOffers);
   assert.deepEqual(reloaded.lanes.aiWeb.error.failedIds, failedIds);
   assert.deepEqual(reloaded.lanes.aiWeb.error.failedOffers, failedOffers);
+  await runtime.shutdownSourcingWorkers();
+});
+
+test("a conflict-only AI-web child's conflicts/conflictOffers survive compaction into the durable parent execution, reloaded from SQLite (CR-29 round 9)", async () => {
+  // Same gap as the failedIds/failedOffers regression above, but for
+  // identity conflicts: compactSearchExecutionReceipt and
+  // search-executions.mjs's own error normalization both dropped
+  // `conflicts`/`conflictOffers` entirely, even though the child's own
+  // sourcing-run record already kept them (sourcing-runs.mjs's
+  // normalizeError, CR-29 round 8). Reloading the parent execution after a
+  // conflict-only AI-web lane had no way to name the conflicting postings —
+  // only the child runId, with nothing pointing at the conflict itself.
+  const repoRoot = tempRepo();
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startManualSearchImpl: async ({ searchExecutionId }) => ({
+      ok: true,
+      run: sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "manual-search",
+        inputFingerprint: searchExecutionId,
+        metadata: { searchExecutionId },
+      }).run,
+    }),
+    runSearchInBackgroundImpl: async ({ runId }) => ({
+      id: runId,
+      purpose: "manual-search",
+      status: "completed",
+      summary: { scanned: 2, presented: 1 },
+    }),
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
+  });
+
+  const conflictOffers = [
+    { company: "Acme", title: "Bridge Role", url: "https://jobs.example.test/acme/bridge" },
+  ];
+  runtime.registerAiWebSearchStarter({
+    isAvailable: () => true,
+    start: async ({ searchExecutionId, onStarted }) => {
+      const started = sourcingRunStart({
+        repoRoot,
+        env: {},
+        purpose: "ai-web-search",
+        inputFingerprint: searchExecutionId,
+        metadata: { searchExecutionId },
+      }).run;
+      onStarted?.(started);
+      const error = {
+        code: "AI_WEB_SEARCH_IDENTITY_CONFLICT",
+        message: "Found 1 identity conflict(s) that could not be reconciled.",
+        conflicts: 1,
+        conflictOffers,
+      };
+      const failed = sourcingRunFail({ repoRoot, env: {}, id: started.id, error }).run;
+      return {
+        ok: false,
+        run: failed,
+        error: failed.error,
+        value: { failed: 0, conflicts: 1, conflictOffers },
+      };
+    },
+  });
+
+  await runtime.executeIntent({
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: { purpose: "manual-search", searchExecutionId: "search-conflict-recovery" },
+    },
+  });
+  await runtime.waitForUnifiedSearch("search-conflict-recovery");
+
+  // Reload straight from SQLite (not the in-memory coordination promise's
+  // own return value) to prove the fields survive the actual DB round trip.
+  const reloaded = searchExecutionGet({
+    repoRoot,
+    env: {},
+    id: "search-conflict-recovery",
+  }).execution;
+
+  assert.equal(reloaded.lanes.aiWeb.status, "failed");
+  assert.equal(reloaded.lanes.aiWeb.summary.conflicts, 1);
+  assert.deepEqual(reloaded.lanes.aiWeb.summary.conflictOffers, conflictOffers);
+  assert.equal(reloaded.lanes.aiWeb.error.conflicts, 1);
+  assert.deepEqual(reloaded.lanes.aiWeb.error.conflictOffers, conflictOffers);
+  // The execution-size bound (see the max-shape test above) must hold for a
+  // conflict-only lane too, not just an artifact-write failure.
+  assert.ok(Buffer.byteLength(JSON.stringify(reloaded), "utf8") < 65_536);
   await runtime.shutdownSourcingWorkers();
 });
 

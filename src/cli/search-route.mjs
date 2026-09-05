@@ -242,25 +242,43 @@ export function mountSearchRoutes({
             value: result,
           };
         }
-        return {
-          settlement: {
-            status: "failed",
-            error: {
-              code: "AI_WEB_SEARCH_QUERIES_FAILED",
-              message:
-                result.errors?.[0] ||
-                "Every selected AI web-search prompt failed or had no reported query coverage.",
-              action: "retry-failed",
-              failedPromptIds,
-              failedIds: result.failedIds || [],
-              failedOffers: result.failedOffers || [],
-              queryResults: result.queryResults || [],
-              sources: result.sources || [],
-              errors: result.errors || [],
+        {
+          // A prompt marked failed doesn't stop OTHER selected prompts'
+          // valid roles from proceeding through hydration and persistence
+          // (CR-29 round 9), where they can independently hit an identity
+          // conflict — allSelectedPromptsFailed only means every prompt
+          // failed its own query coverage, not that nothing reached
+          // captureAndPersistOffersIfDb. Dropping conflicts/conflictOffers
+          // here (as before) lost that independent reconciliation failure
+          // entirely once the queries-failed branch below took over.
+          const conflictCount = Number(result?.conflicts || 0);
+          const baseMessage =
+            result.errors?.[0] ||
+            "Every selected AI web-search prompt failed or had no reported query coverage.";
+          const message =
+            conflictCount > 0
+              ? `${baseMessage} Also found ${conflictCount} identity conflict(s) that could not be reconciled.`
+              : baseMessage;
+          return {
+            settlement: {
+              status: "failed",
+              error: {
+                code: "AI_WEB_SEARCH_QUERIES_FAILED",
+                message,
+                action: "retry-failed",
+                failedPromptIds,
+                failedIds: result.failedIds || [],
+                failedOffers: result.failedOffers || [],
+                conflicts: conflictCount,
+                conflictOffers: result.conflictOffers || [],
+                queryResults: result.queryResults || [],
+                sources: result.sources || [],
+                errors: result.errors || [],
+              },
             },
-          },
-          value: result,
-        };
+            value: result,
+          };
+        }
       } catch (error) {
         if (signal.aborted) throw signal.reason || error;
         return {

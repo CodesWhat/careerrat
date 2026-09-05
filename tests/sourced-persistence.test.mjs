@@ -491,6 +491,12 @@ test("a same-batch bridge offer spanning two legitimate postings is rejected as 
   assert.equal(result.conflicts, 1, "the bridge offer must be counted as a conflict");
   assert.equal(result.conflictOffers.length, 1);
   assert.equal(result.conflictOffers[0].url, bridge.url);
+  // CR-29 round 9: `ok` used to look only at `failed`, so a conflict-only
+  // batch (zero artifact failures, one rejected bridge offer) reported
+  // ok:true — both snapshot CLIs trusted that flag and exited 0 despite the
+  // unresolved conflict.
+  assert.equal(result.failed, 0, "this batch has no artifact-write failures");
+  assert.equal(result.ok, false, "a conflict alone must still mark the batch not-ok");
 
   const rows = openDb({ repoRoot })
     .prepare("SELECT data FROM sourced")

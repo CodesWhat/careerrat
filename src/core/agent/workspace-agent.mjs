@@ -2464,6 +2464,7 @@ function compactSearchExecutionReceipt(summary) {
     "warningCount",
     "captureFailureCount",
     "failed",
+    "conflicts",
   ];
   const receipt = {};
   for (const key of numericKeys) {
@@ -2484,6 +2485,21 @@ function compactSearchExecutionReceipt(summary) {
   if (Array.isArray(summary.failedOffers)) {
     receipt.failedOffers = summary.failedOffers.slice(0, 50).map((offer) => ({
       id: offer?.id != null ? String(offer.id) : null,
+      url: offer?.url ? String(offer.url).slice(0, 500) : null,
+    }));
+  }
+  // Bounded identity-conflict recovery detail (CR-29 round 9), the same
+  // treatment failedIds/failedOffers got in round 8: an AI-search child
+  // reports a conflict-only result (see ai-web-search.mjs's conflictOffers,
+  // already company/title/url and capped at 10) same as a write failure,
+  // but this compactor dropped both fields when folding the child result
+  // into the durable PARENT search execution's `summary` — reloading the
+  // parent then had no way to name which postings hit an identity conflict,
+  // only a bare count buried in `conflicts`.
+  if (Array.isArray(summary.conflictOffers)) {
+    receipt.conflictOffers = summary.conflictOffers.slice(0, 50).map((offer) => ({
+      company: offer?.company ? String(offer.company).slice(0, 160) : null,
+      title: offer?.title ? String(offer.title).slice(0, 240) : null,
       url: offer?.url ? String(offer.url).slice(0, 500) : null,
     }));
   }

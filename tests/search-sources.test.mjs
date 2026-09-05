@@ -1096,3 +1096,37 @@ test("capture-board-snapshot's reportIngestFailure and capture-search-sources' r
     assert.match(lines[0], /, \.\.\.$/, "a list longer than 10 ids must end with an ellipsis");
   }
 });
+
+test("a conflict-only capture result (failed: 0, conflicts > 0) still sets a nonzero exit code and names the conflict, in both snapshot CLIs (CR-29 round 9)", () => {
+  // Round 9: captureAndPersistOffersIfDb's `ok` now requires
+  // `failed === 0 && conflicts === 0`, so a conflict-only ingest (nothing
+  // failed to write, but a bridge offer was rejected as ambiguous) also
+  // reaches these reporters. Before this fix neither reporter said
+  // anything about conflicts at all, so a caller checking stderr for
+  // "Failed to persist" would see nothing and assume a clean run.
+  const conflictOnlyResult = {
+    failed: 0,
+    failedIds: [],
+    conflicts: 1,
+    conflictOffers: [
+      { company: "Acme", title: "Bridge Role", url: "https://jobs.example.test/acme/bridge" },
+    ],
+  };
+
+  const board = withStubbedConsoleError(() => reportIngestFailure(conflictOnlyResult));
+  const searchSources = withStubbedConsoleError(() =>
+    reportSnapshotIngestFailure(conflictOnlyResult)
+  );
+
+  for (const { lines, exitCode } of [board, searchSources]) {
+    assert.equal(exitCode, 1, "a conflict-only result must still exit nonzero");
+    assert.ok(
+      !lines.some((line) => /Failed to persist/.test(line)),
+      "no artifact failures occurred, so no 'Failed to persist' line should print"
+    );
+    assert.ok(
+      lines.some((line) => /identity conflict/i.test(line) && line.includes("Acme")),
+      "the conflict line must name the conflicting offer"
+    );
+  }
+});

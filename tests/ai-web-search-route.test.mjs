@@ -504,6 +504,51 @@ test("AI web-search route persists exact failed prompts and accepts retry prompt
   assert.equal(durable.error.sources[0].url, "https://jobs.example.test");
 });
 
+test("AI web-search route names both an incomplete query and a persistence conflict when the run's every selected prompt failed but a role from another query still hit an identity conflict (CR-29 round 9)", async () => {
+  // allSelectedPromptsFailed only means every SELECTED prompt failed its
+  // own query coverage — it says nothing about whether valid roles from
+  // another query already reached hydration and persistence, where they
+  // can independently trip an identity conflict. The AI_WEB_SEARCH_QUERIES_
+  // FAILED branch used to drop conflicts/conflictOffers entirely, losing
+  // that independent reconciliation failure once this branch took over.
+  const repoRoot = tempRepo();
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 0,
+      new: 0,
+      duplicates: 0,
+      errors: ["search timed out"],
+      failedPromptIds: ["p1"],
+      conflicts: 1,
+      conflictOffers: [
+        { company: "Acme", title: "Bridge Role", url: "https://jobs.example.test/acme/bridge" },
+      ],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find AI roles",
+          status: "failed",
+          queries: [{ query: "AI jobs", status: "failed", error: "search timed out" }],
+          error: "search timed out",
+        },
+      ],
+      sources: [{ url: "https://jobs.example.test", status: "failed", error: "timeout" }],
+    }),
+  })(request('{"promptIds":["p1"]}'), res);
+
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "failed");
+  assert.equal(durable.error.code, "AI_WEB_SEARCH_QUERIES_FAILED");
+  assert.deepEqual(durable.error.failedPromptIds, ["p1"]);
+  assert.equal(durable.error.conflicts, 1);
+  assert.equal(durable.error.conflictOffers.length, 1);
+  assert.equal(durable.error.conflictOffers[0].company, "Acme");
+  assert.match(durable.error.message, /identity conflict/i);
+});
+
 test("AI web-search route durably warns when only an auxiliary top-up query failed", async () => {
   const repoRoot = tempRepo();
   const res = response();

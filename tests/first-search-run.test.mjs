@@ -11,6 +11,7 @@ import {
   companyBoardResolutionUpsert,
   sourceConfigGet,
   sourceConfigPut,
+  sourcedUpsertBatch,
   sourcingRunComplete,
   sourcingRunLatest,
   sourcingRunStart,
@@ -1525,6 +1526,146 @@ test("a JD artifact-write failure settles the SHARED-WORKER (settle: false) path
   assert.deepEqual(result.settlement.error.failedIds, ["sourced-acme-lever-ai-engineer"]);
   // settle:false never touches the durable run itself — the caller (the
   // sourcing worker manager) owns settling it off this settlement.
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
+});
+
+// A same-batch offer that bridges two already-persisted rows sharing one
+// identity key (a Greenhouse requisition id both picked up as an ALIAS from
+// an earlier merge, not their own URL) settles the scan as an identity
+// conflict, not an artifact-write failure — see scan-sourced.test.mjs's own
+// round-8 regression for why filterAndDedupeOffers's same-run dedupe can't
+// catch this itself. Used by both the DIRECT and SHARED-WORKER conflict
+// tests below (CR-29 round 9).
+function seedConflictBridgeSources(repoRoot) {
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-legacy-conflict-owner-a",
+        company: "Legacy Corp A",
+        role: "Legacy Role A",
+        link: "https://jobs.example.test/legacy-corp-a/role",
+        fitScore: 70,
+        aliasKeys: ["req:greenhouse:9999999"],
+      },
+      {
+        id: "sourced-legacy-conflict-owner-b",
+        company: "Legacy Corp B",
+        role: "Legacy Role B",
+        link: "https://jobs.example.test/legacy-corp-b/role",
+        fitScore: 70,
+        aliasKeys: ["req:greenhouse:9999999"],
+      },
+    ],
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "HiringCafe",
+          source_type: "url-query",
+          label: "Bridge Conflict",
+          query: "Bridge Conflict",
+          enabled: true,
+          recency: { mode: "since-last-run", safetyMinutes: 30 },
+          searchState: { sortBy: "date" },
+        },
+      ],
+    },
+  });
+}
+
+const conflictBridgeCaptureImpl = async () => ({
+  offers: [
+    {
+      company: "Bridge Co",
+      title: "Bridge Role",
+      url: "https://boards.greenhouse.io/bridgeco/jobs/9999999",
+      location: "Remote",
+      bodyText: "Body for the identity-conflict regression.",
+      source: "hiringcafe-browser",
+      sourceProvider: "hiringcafe",
+    },
+  ],
+  errors: [],
+  needsLogin: null,
+});
+
+// runFirstSearchInBackground always runs runSourcedScan with `verify: true`,
+// so the bridge offer's URL gets a real liveness fetch before it ever
+// reaches reconciliation. This stands in for a live posting page (status
+// 200, no expired/listing/bot-wall pattern, >=300 chars of body content) so
+// the offer survives liveness and actually reaches captureAndPersistOffersIfDb.
+const conflictBridgeFetchImpl = async () =>
+  new Response(`<html><body>${"Job posting content. ".repeat(20)}</body></html>`, {
+    status: 200,
+  });
+
+test("an identity conflict (no artifact-write failure) settles the DIRECT (settle: true) path as SOURCED_IDENTITY_CONFLICT, not SOURCED_ARTIFACT_WRITE_FAILED, and carries conflicts/conflictOffers", async () => {
+  // CR-29 round 9: normalizeRunSummary used to drop `conflicts`/
+  // `conflictOffers` entirely, so a conflict-only scan (ok: false,
+  // failed: 0, conflicts: 1) settled as SOURCED_ARTIFACT_WRITE_FAILED with
+  // the message "Failed to persist 0 job description artifact(s)" — naming
+  // the wrong subsystem and losing the conflict recovery detail.
+  const repoRoot = tempRepo();
+  seedConflictBridgeSources(repoRoot);
+
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    captureBrowserSourceImpl: conflictBridgeCaptureImpl,
+    fetchImpl: conflictBridgeFetchImpl,
+  });
+
+  const failed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error.code, "SOURCED_IDENTITY_CONFLICT");
+  assert.doesNotMatch(failed.error.message, /Failed to persist 0/);
+  assert.match(failed.error.message, /1 identity conflict/);
+  assert.equal(failed.error.conflicts, 1);
+  assert.equal(failed.error.conflictOffers.length, 1);
+  assert.equal(
+    failed.error.conflictOffers[0].url,
+    "https://boards.greenhouse.io/bridgeco/jobs/9999999"
+  );
+  assert.deepEqual(failed.error.failedIds, []);
+
+  const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+  assert.equal(rows.length, 2, "only the two pre-seeded legacy rows may exist");
+});
+
+test("an identity conflict (no artifact-write failure) settles the SHARED-WORKER (settle: false) path the same way, without touching the durable run", async () => {
+  const repoRoot = tempRepo();
+  seedConflictBridgeSources(repoRoot);
+
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  const result = await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    settle: false,
+    captureBrowserSourceImpl: conflictBridgeCaptureImpl,
+    fetchImpl: conflictBridgeFetchImpl,
+  });
+
+  assert.equal(result.settlement.status, "failed");
+  assert.equal(result.settlement.error.code, "SOURCED_IDENTITY_CONFLICT");
+  assert.doesNotMatch(result.settlement.error.message, /Failed to persist 0/);
+  assert.equal(result.settlement.error.conflicts, 1);
+  assert.equal(result.settlement.error.conflictOffers.length, 1);
   assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
 });
 

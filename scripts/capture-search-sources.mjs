@@ -217,18 +217,37 @@ export async function captureSearchSources({
   };
 }
 
-// Prints a bounded failed-id list and exits nonzero without touching the
-// snapshot file or any row captureAndPersistOffersIfDb already committed
-// (CR-29 round 6): a JD artifact-write failure aborts only the offers it
-// touched before the DB transaction ever opens, so the snapshot above and
-// every successfully persisted row stay intact for a rerun.
+// Prints a bounded failed-id list and/or identity-conflict summary and exits
+// nonzero without touching the snapshot file or any row
+// captureAndPersistOffersIfDb already committed (CR-29 round 6, extended
+// round 9 to conflicts): a JD artifact-write failure aborts only the offers
+// it touched before the DB transaction ever opens, so the snapshot above and
+// every successfully persisted row stay intact for a rerun. A conflict-only
+// ingest (failed: 0, conflicts > 0) must ALSO exit nonzero and name the
+// conflict — ingestCapturedSnapshot's `ok` now requires both counts be
+// zero, so this reporter can no longer assume `failed` is the only reason
+// it was called.
 export function reportSnapshotIngestFailure(ingest) {
-  const shown = (ingest.failedIds || []).slice(0, 10);
-  console.error(
-    `Failed to persist ${ingest.failed} offer(s): ${shown.join(", ")}${
-      ingest.failedIds.length > shown.length ? ", ..." : ""
-    }`
-  );
+  const failed = Number(ingest.failed || 0);
+  if (failed > 0) {
+    const shown = (ingest.failedIds || []).slice(0, 10);
+    console.error(
+      `Failed to persist ${failed} offer(s): ${shown.join(", ")}${
+        ingest.failedIds.length > shown.length ? ", ..." : ""
+      }`
+    );
+  }
+  const conflicts = Number(ingest.conflicts || 0);
+  if (conflicts > 0) {
+    const conflictOffers = Array.isArray(ingest.conflictOffers) ? ingest.conflictOffers : [];
+    console.error(
+      `Found ${conflicts} identity conflict(s) that could not be reconciled${
+        conflictOffers.length
+          ? ` (e.g. ${conflictOffers[0].company}: ${conflictOffers[0].title})`
+          : ""
+      }`
+    );
+  }
   console.error(
     "The snapshot file above and every successfully committed row are still intact; rerun with --ingest once the failure is fixed."
   );

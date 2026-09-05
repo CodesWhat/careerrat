@@ -774,7 +774,14 @@ export function captureAndPersistOffersIfDb({
   // had nothing behind it whenever every conflict was DB-level.
   const conflictOffers = [...reconciled.conflicts, ...(persisted?.conflictOffers || [])];
   return {
-    ok: failed === 0,
+    // Round 9: a conflict-only batch (failed === 0, conflicts > 0) used to
+    // report ok:true — a posting rejected because more than one persisted
+    // row claims its identity landed nowhere, yet both snapshot CLIs below
+    // (scripts/capture-search-sources.mjs, scripts/capture-board-snapshot.mjs)
+    // and every other production caller trust this flag to decide whether
+    // to exit nonzero. `conflicts` must gate `ok` the same way `failed`
+    // always has.
+    ok: failed === 0 && conflicts === 0,
     persistedRows: (persisted?.created || 0) + (persisted?.updated || 0),
     duplicates: reconciled.duplicates + (persisted?.duplicates || 0),
     conflicts,
