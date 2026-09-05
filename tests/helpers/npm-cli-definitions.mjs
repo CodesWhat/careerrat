@@ -1,6 +1,7 @@
 // npm-cli-definitions.mjs — the real loader for npm's own @npmcli/config
-// option and shorthand definitions, plus the classification helpers that
-// turn them into a value-taking-flag set. Extracted out of
+// option and shorthand definitions, plus parseNpmArgv, which hands them
+// straight to npm's own argument parser (`nopt`) instead of re-deriving
+// npm's option-classification rules by hand. Extracted out of
 // release-gating-ci.test.mjs (Codex review /tmp/codex-305-r12.md, finding
 // 2) so the empty-COREPACK_HOME regression there can spawn a fresh node
 // process that imports and calls this ACTUAL module, instead of a
@@ -12,6 +13,7 @@
 // nothing about loadNpmConfigDefinitions itself.
 
 import { createRequire } from "node:module";
+import nopt from "nopt";
 
 const require = createRequire(import.meta.url);
 
@@ -47,48 +49,51 @@ export function installedNpmConfigVersion() {
   return require("@npmcli/config/package.json").version;
 }
 
-// npm's own boolean-flag type shapes (@npmcli/config's Definition.type):
-// either the bare `Boolean` constructor, or an array whose only non-`null`
-// member is `Boolean` (npm uses `null` in a type array to mean "also
-// accepts being unset", e.g. `workspaces`'s `[null, Boolean]` — still a
-// standalone flag, not a value-taking one). Anything else in the type
-// (String, Number, Array, an enumerated set of string literals like
-// `install-strategy`'s `['hoisted', 'nested', 'shallow', 'linked']`, ...)
-// means the option consumes a value. Verified against the pinned npm
-// 12.0.2's own node_modules/@npmcli/config/lib/definitions/definitions.js:
-// `foreground-scripts: { type: Boolean }` (pure), `workspaces: { type:
-// [null, Boolean] }` (pure, confirmed boolean-only in practice: `npm test
-// --workspaces` never consumes a following token as its value), `omit:
-// { type: [Array, 'dev', 'optional', 'peer'] }` (value-taking).
-export function isPureBooleanOptionType(type) {
-  if (type === Boolean || type === null) return true;
-  if (Array.isArray(type)) return type.every((t) => t === Boolean || t === null);
-  return false;
+// Codex review /tmp/codex-305-r13.md (findings 3 and 4): the hand-rolled
+// value-taking-option classifier this file used to export
+// (isPureBooleanOptionType / computeNpmValueOptions) reduced every npm
+// option's `type` to a binary "always consumes a following token" versus
+// "never does", then had its own caller re-derive grouped-short expansion
+// and shorthand precedence on top of that binary set by hand. Real npm
+// options don't fit a binary split: `foreground-scripts` is `type:
+// Boolean` but still consumes an explicit `true`/`false` token when one is
+// given (`npm --foreground-scripts true ci`), and `-ca cert.pem` /
+// `-call x` are exact, multi-letter option names of their own (`-c`
+// doesn't exist standalone the way the old grouped-short expander assumed
+// every multi-letter dash token must be one-character-per-flag), so the
+// hand-rolled classifier either ate the wrong token or expanded the wrong
+// thing and walked straight past the `ci` that followed. npm's own CLI
+// resolves every one of these correctly because it never classifies
+// options itself at all — it hands the exact same `types`/`shorthands`
+// definitions this module already loads straight to `nopt`, npm's own
+// parser (`nopt` is already in the lockfile as @npmcli/config's own
+// parser dependency; pinned here as a direct, exact devDependency at the
+// same version, see package.json). Fix: stop re-deriving option
+// classification by hand and call the real parser with the real
+// definitions instead.
+//
+// `nopt(types, shorthands, argv, 0)` parses `argv` (the tokens after the
+// leading `npm` token itself, not including it — the `0` means "don't
+// slice off a node/script-path prefix, `argv` is already just the
+// arguments") against `types` (each definition's own `type` shape, keyed
+// by long option name, exactly as npm's own CLI builds it from these same
+// definitions) and `shorthands` (@npmcli/config's own standalone alias
+// table, loaded alongside `definitions` above). `parsed.argv.remain` is
+// whatever positional
+// (non-option) tokens are left once every recognized option and its value
+// (if any) have been consumed — for an npm invocation, `remain[0]` is the
+// command word, exactly as npm's own CLI reads it off its own parsed argv
+// before resolving it through cmd-list.js's `deref` (see
+// tests/release-gating-ci.test.mjs's derefNpmCommand for that half).
+export function buildNpmOptionTypes(definitions) {
+  const types = {};
+  for (const [key, def] of Object.entries(definitions)) {
+    types[key] = def.type;
+  }
+  return types;
 }
 
-// Codex review /tmp/codex-305-r10.md (finding 2): the nine-entry hand list
-// that used to live here only covered the options this repo's workflow
-// happened to use. Any other npm 12 global option that takes a
-// separate-token value hid an unguarded `npm ci` just as completely. Fix:
-// load the *real* value-taking option set from the pinned npm's own
-// @npmcli/config definitions (npm's own source of truth for which options
-// take a value, `type` !== a purely-boolean shape) instead of
-// hand-listing it, so a future npm option is covered automatically the
-// next time the pin moves.
-export function computeNpmValueOptions(definitions) {
-  const flags = new Set();
-  for (const [key, def] of Object.entries(definitions)) {
-    if (isPureBooleanOptionType(def.type)) continue;
-    flags.add(`--${key}`);
-    for (const short of [].concat(def.short ?? [])) {
-      flags.add(`-${short}`);
-    }
-  }
-  if (flags.size === 0) {
-    throw new Error(
-      "npm-cli-definitions.mjs: @npmcli/config's definitions loaded but produced no " +
-        "value-taking options"
-    );
-  }
-  return flags;
+export function parseNpmArgv(argv) {
+  const { definitions, shorthands } = loadNpmConfigDefinitions();
+  return nopt(buildNpmOptionTypes(definitions), shorthands, argv, 0);
 }

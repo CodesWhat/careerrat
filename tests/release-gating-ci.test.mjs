@@ -1,3 +1,16 @@
+// Threat model for the workflow-discovery classifier below
+// (splitShellSegments, isExecutableNpmCiSegment, derefNpmCommand,
+// discoverJobsWithExecutableNpmCi, and friends): it exists to catch an
+// accidental, unguarded `npm ci` a maintainer adds to a `run:` step on
+// ci-verify.yml, a workflow file that only changes through ordinary,
+// human-reviewed pull requests. It is not a sandbox against a hostile edit
+// to that workflow — a `run:` step already executes arbitrary shell, so
+// anyone who can edit ci-verify.yml at all can run any command they like
+// regardless of how thorough this classifier is (an `eval`, a decoded
+// script, a binary that itself shells out to npm, ...). Its job is
+// catching the honest-maintainer mistake, not defending against a
+// malicious one.
+
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -17,14 +30,13 @@ import { fileURLToPath } from "node:url";
 
 import YAML from "yaml";
 
-// installedNpmConfigVersion and resolveNpmConfigDefinitionsPath aren't
-// called from this file directly — the empty-COREPACK_HOME regression
-// further down imports them itself, inside a freshly spawned node
-// process, so it exercises the exact same helper module this file uses.
-import {
-  computeNpmValueOptions,
-  loadNpmConfigDefinitions,
-} from "./helpers/npm-cli-definitions.mjs";
+// loadNpmConfigDefinitions, installedNpmConfigVersion, and
+// resolveNpmConfigDefinitionsPath aren't called from this file directly —
+// parseNpmArgv (below) already calls loadNpmConfigDefinitions itself, and
+// the empty-COREPACK_HOME regression further down imports all three itself,
+// inside a freshly spawned node process, so it exercises the exact same
+// helper module this file uses.
+import { parseNpmArgv } from "./helpers/npm-cli-definitions.mjs";
 
 async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -63,16 +75,235 @@ const NPM_BUNDLED_NPMCLI_CONFIG_VERSION = {
 // parsed command against the literal string "ci" — a `run:` line using
 // one of them installed with lifecycle scripts unguarded while every
 // check here still passed, since isExecutableNpmCiSegment only ever
-// accepted the exact token "ci". Verified against the published
-// npm@12.0.2 package's own lib/utils/cmd-list.js: its `aliases` table
-// maps `clean-install`, `ic`, `install-clean`, and `isntall-clean` (a
-// deliberate npm typo alias, not a mistake in this list) directly to
-// canonical command "ci". The abbreviation chains built from `commands`
-// (`insta`, `instal`, ...) resolve to "install" instead and are
-// correctly excluded. Kept next to NPM_BUNDLED_NPMCLI_CONFIG_VERSION so a
-// future npm bump prompts re-checking this set against that release's
-// own cmd-list.js.
-const NPM_CI_COMMAND_ALIASES = new Set(["clean-install", "ic", "install-clean", "isntall-clean"]);
+// accepted the exact token "ci".
+//
+// Codex review /tmp/codex-305-r13.md (finding 2): a four-entry exact-alias
+// set still missed the rest of npm's own resolution: npm normalizes
+// camelCase to kebab-case before matching anything, resolves an
+// unambiguous *prefix* of the combined commands+aliases list (so
+// `install-cl`, a prefix of the alias `install-clean`, still resolves to
+// `ci`), and even a typo like `isntall-cl` resolves the same way, because
+// npm derives its abbreviation table from the same alias keys and
+// forwards a resolved alias through `aliases` again in case the
+// abbreviation itself lands on another alias rather than a canonical
+// command. `installClean` (camelCase) is the same evasion in a different
+// spelling. None of that is exact-alias matching; it's npm's own `deref`
+// (lib/utils/cmd-list.js). Fix: reproduce `deref`'s exact steps —
+// camelCase-to-kebab normalization, an exact command, an exact alias
+// (itself followed recursively, since an abbreviation can resolve onto
+// another alias), then a unique-prefix match over commands and aliases
+// together — rather than a hand-picked alias set that can only ever cover
+// the spellings someone thought to add.
+//
+// npm12CommandList.commands and .aliases are copied verbatim from the
+// published npm@12.0.2 package's own lib/utils/cmd-list.js (fetched from
+// https://registry.npmjs.org/npm/-/npm-12.0.2.tgz, `commands` and
+// `aliases` exports), the same release this repo's package.json pins via
+// `packageManager`. A future npm bump must refresh both arrays from that
+// release's own cmd-list.js, the same discipline
+// NPM_BUNDLED_NPMCLI_CONFIG_VERSION already requires for @npmcli/config.
+const npm12CommandList = {
+  commands: [
+    "access",
+    "approve-scripts",
+    "audit",
+    "bugs",
+    "cache",
+    "ci",
+    "completion",
+    "config",
+    "dedupe",
+    "deny-scripts",
+    "deprecate",
+    "diff",
+    "dist-tag",
+    "docs",
+    "doctor",
+    "edit",
+    "exec",
+    "explain",
+    "explore",
+    "find-dupes",
+    "fund",
+    "get",
+    "help",
+    "help-search",
+    "init",
+    "install",
+    "install-ci-test",
+    "install-scripts",
+    "install-test",
+    "link",
+    "ll",
+    "login",
+    "logout",
+    "ls",
+    "org",
+    "outdated",
+    "owner",
+    "pack",
+    "patch",
+    "ping",
+    "pkg",
+    "prefix",
+    "profile",
+    "prune",
+    "publish",
+    "query",
+    "rebuild",
+    "repo",
+    "restart",
+    "root",
+    "run",
+    "sbom",
+    "search",
+    "set",
+    "stage",
+    "start",
+    "stop",
+    "team",
+    "test",
+    "token",
+    "trust",
+    "undeprecate",
+    "uninstall",
+    "unpublish",
+    "update",
+    "version",
+    "view",
+    "whoami",
+  ],
+  aliases: {
+    author: "owner",
+    home: "docs",
+    issues: "bugs",
+    info: "view",
+    show: "view",
+    find: "search",
+    add: "install",
+    unlink: "uninstall",
+    remove: "uninstall",
+    rm: "uninstall",
+    r: "uninstall",
+    un: "uninstall",
+    rb: "rebuild",
+    list: "ls",
+    ln: "link",
+    create: "init",
+    i: "install",
+    it: "install-test",
+    cit: "install-ci-test",
+    u: "update",
+    up: "update",
+    c: "config",
+    s: "search",
+    se: "search",
+    tst: "test",
+    t: "test",
+    ddp: "dedupe",
+    v: "view",
+    "run-script": "run",
+    "clean-install": "ci",
+    "clean-install-test": "install-ci-test",
+    x: "exec",
+    why: "explain",
+    la: "ll",
+    verison: "version",
+    ic: "ci",
+    innit: "init",
+    in: "install",
+    ins: "install",
+    inst: "install",
+    insta: "install",
+    instal: "install",
+    isnt: "install",
+    isnta: "install",
+    isntal: "install",
+    isntall: "install",
+    "install-clean": "ci",
+    "isntall-clean": "ci",
+    hlep: "help",
+    "dist-tags": "dist-tag",
+    upgrade: "update",
+    udpate: "update",
+    rum: "run",
+    sit: "install-ci-test",
+    urn: "run",
+    ogr: "org",
+  },
+};
+
+// Codex review /tmp/codex-305-r13.md (finding 2): reproduces the `abbrev`
+// package's own algorithm (already vendored transitively — it's `nopt`'s
+// own dependency, see node_modules/abbrev — but not declared directly by
+// this repo, so it's reproduced here rather than imported off a path
+// nothing in package.json actually pins) exactly as npm's own
+// lib/utils/cmd-list.js calls it: `abbrev(commands.concat(Object.keys(
+// aliases)))` computes, for every string in that combined list, the
+// shortest prefix that identifies it uniquely among all of them (plus the
+// string itself, mapped to itself). A prefix shared by two or more
+// entries — `install-c`, a prefix of both `install-ci-test` and the alias
+// `install-clean` — is deliberately absent from the result, exactly as
+// npm's own CLI leaves it unresolved rather than guessing.
+function computeAbbreviations(list) {
+  const sorted = [...list].sort((a, b) => (a === b ? 0 : a > b ? 1 : -1));
+  const abbreviations = {};
+  let prev = "";
+  for (let index = 0; index < sorted.length; index += 1) {
+    const current = sorted[index];
+    const next = sorted[index + 1] ?? "";
+    if (current === next) continue;
+    let nextMatches = true;
+    let prevMatches = true;
+    let sharedLength = 0;
+    for (; sharedLength < current.length; sharedLength += 1) {
+      const char = current[sharedLength];
+      nextMatches = nextMatches && char === next[sharedLength];
+      prevMatches = prevMatches && char === prev[sharedLength];
+      if (!nextMatches && !prevMatches) {
+        sharedLength += 1;
+        break;
+      }
+    }
+    prev = current;
+    if (sharedLength === current.length) {
+      abbreviations[current] = current;
+      continue;
+    }
+    for (let end = sharedLength, prefix = current.slice(0, end); end <= current.length; end += 1) {
+      abbreviations[prefix] = current;
+      prefix += current[end] ?? "";
+    }
+  }
+  return abbreviations;
+}
+
+// Codex review /tmp/codex-305-r13.md (finding 2): reproduces npm's own
+// `deref` (lib/utils/cmd-list.js) step for step: normalize camelCase to
+// kebab-case, then an exact command, then an exact alias, then (since an
+// abbreviation can itself land on another alias, e.g. `install-cl` ->
+// `install-clean` -> `ci`) follow the alias table again in a loop until it
+// stops resolving to a further alias, and only fall back to the
+// unique-prefix abbreviation table if none of those matched. Returns
+// `undefined` for an ambiguous or unrecognized command word, exactly as
+// npm's own CLI does (it then prints "Unknown command" rather than running
+// anything).
+function derefNpmCommand(commandWord) {
+  if (!commandWord) return undefined;
+  const kebabCased = /[A-Z]/.test(commandWord)
+    ? commandWord.replace(/([A-Z])/g, (letter) => `-${letter.toLowerCase()}`)
+    : commandWord;
+  if (npm12CommandList.commands.includes(kebabCased)) return kebabCased;
+  if (npm12CommandList.aliases[kebabCased]) return npm12CommandList.aliases[kebabCased];
+  const abbreviations = computeAbbreviations(
+    npm12CommandList.commands.concat(Object.keys(npm12CommandList.aliases))
+  );
+  let resolved = abbreviations[kebabCased];
+  while (resolved && npm12CommandList.aliases[resolved]) {
+    resolved = npm12CommandList.aliases[resolved];
+  }
+  return resolved;
+}
 
 async function loadWorkflow() {
   return YAML.parse(await source(".github/workflows/ci-verify.yml"));
@@ -224,7 +455,80 @@ function assertInstallSequence(steps, jobId) {
 // executes, and only then checks whether what's left is an npm-ci
 // invocation (allowing npm options between `npm` and `ci`, but not an
 // unrelated subcommand like `npm run ci`).
-const COMMAND_SPLIT_PATTERN = /[;&|(]+|\n/g;
+//
+// Codex review /tmp/codex-305-r13.md (finding 1): a plain regex `.split`
+// over the raw run text has no idea a character sits inside a quoted
+// string, so `npm --registry "https://registry.example/a?x=1&y=2" ci`'s
+// embedded `&` cut the string in half mid-quote, corrupting the segment
+// tokenizeShellWords was then handed; and the regex's char class included
+// an opening `(` but never a closing `)`, so a subshelled `(npm ci)` split
+// into `npm ci)` — a segment whose last token is the four-character string
+// "ci)", which never equals "ci". Fix: a quote- and escape-aware scanner
+// (splitShellSegments, below) that only treats `&&`, `||`, `;`, `|`, a
+// newline, `(`, or `)` as a segment boundary when none of them sit inside
+// a single- or double-quoted string or right after a backslash escape —
+// the same quoting rules tokenizeShellWords applies to each resulting
+// segment's own tokens — and drops the parentheses themselves instead of
+// gluing them onto whatever token follows, so a subshell's contents
+// surface as ordinary, unwrapped segments.
+const SHELL_SEGMENT_BOUNDARY_CHARS = new Set([";", "|", "&", "(", ")"]);
+
+function splitShellSegments(text) {
+  const segments = [];
+  let current = "";
+  let quote = null; // null, "'", or '"'
+  let i = 0;
+  while (i < text.length) {
+    const char = text[i];
+    if (quote === "'") {
+      // Single quotes are fully literal in bash: no escape sequence closes
+      // or interrupts them, only the matching quote itself.
+      current += char;
+      if (char === "'") quote = null;
+      i += 1;
+      continue;
+    }
+    if (quote === '"') {
+      // Inside double quotes, bash recognizes a backslash escape only
+      // before \" \\ \$ or a backtick; any other character (including one
+      // of the boundary characters above) is entirely literal.
+      if (char === "\\" && '"\\$`'.includes(text[i + 1])) {
+        current += char + text[i + 1];
+        i += 2;
+        continue;
+      }
+      current += char;
+      if (char === '"') quote = null;
+      i += 1;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      current += char;
+      i += 1;
+      continue;
+    }
+    // Outside quotes, a backslash escapes the very next character: that
+    // character can't be a boundary, even if it would otherwise be one.
+    if (char === "\\" && i + 1 < text.length) {
+      current += char + text[i + 1];
+      i += 2;
+      continue;
+    }
+    if (char === "\n" || SHELL_SEGMENT_BOUNDARY_CHARS.has(char)) {
+      // A doubled `&&` or `||` is one logical boundary, not two.
+      if ((char === "&" || char === "|") && text[i + 1] === char) i += 1;
+      segments.push(current);
+      current = "";
+      i += 1;
+      continue;
+    }
+    current += char;
+    i += 1;
+  }
+  segments.push(current);
+  return segments;
+}
 
 // Codex review /tmp/codex-305-r9.md (finding 1): a backslash immediately
 // before a line ending (LF or CRLF) is bash's own line-continuation syntax,
@@ -254,81 +558,37 @@ const LEADING_PREFIX_PATTERN = /^(?:(?:env|command|corepack)\s+|[A-Za-z_][A-Za-z
 // only `--key=value` flags never consumes the separate value token, so it
 // never reaches `ci` and misses the invocation entirely.
 //
-// Codex review /tmp/codex-305-r10.md (finding 2): the nine-entry hand list
-// that used to live here only covered the options this repo's workflow
-// happened to use. Any other npm 12 global option that takes a
-// separate-token value hid an unguarded `npm ci` just as completely:
-// `npm --omit dev ci` walks the option-token loop, doesn't recognize
-// `--omit` as value-taking, so the loop stops at "dev" (no leading `-`),
-// and the trailing check compares "dev" against "ci" instead of ever
-// reaching the real `ci` token. `npm --install-strategy hoisted ci`,
-// `npm --location project ci`, and `npm --allow-git root ci` are the same
-// evasion shape. A hand list can't be complete by construction; it can
-// only be complete by accident until the next option that isn't on it.
+// Codex review /tmp/codex-305-r10.md through /tmp/codex-305-r12.md: a hand
+// list of value-taking flags, then a hand-derived shorthand-expansion step,
+// then a hand-derived grouped-short-option expansion step, were each added
+// on top of the last to close one more evasion shape npm's own option
+// parsing already covers (a full value-taking-option set derived from real
+// definitions, standalone shorthand aliases, POSIX-style grouped short
+// options). Each fix closed the shape it was written for and left the next
+// one open.
 //
-// Fix: load the *real* value-taking option set from the pinned npm's own
-// @npmcli/config definitions (npm's own source of truth for which options
-// take a value, `type` !== a purely-boolean shape) instead of
-// hand-listing it, so a future npm option is covered automatically the
-// next time the pin moves. See ./helpers/npm-cli-definitions.mjs for
-// loadNpmConfigDefinitions and computeNpmValueOptions themselves (a
-// plain devDependency require, not a filesystem probe) — moved there
-// (Codex review /tmp/codex-305-r12.md, finding 2) so the empty-COREPACK_HOME
-// regression further down can import and exercise the real loader from a
-// freshly spawned process.
-const { definitions: NPM_DEFINITIONS, shorthands: NPM_SHORTHANDS } = loadNpmConfigDefinitions();
-
-const NPM_VALUE_OPTIONS = computeNpmValueOptions(NPM_DEFINITIONS);
-
-// Codex review /tmp/codex-305-r11.md (finding 2): the option-token loop
-// below only ever consulted each definition's own `short` field (a
-// single-letter shortcut for that same flag, e.g. `-w` for `--workspace`).
-// npm also defines a separate table of *standalone* aliases
-// (@npmcli/config's `shorthands` export, definitions/index.js) that expand
-// to a completely different flag, sometimes with a value already baked in:
-// `reg` -> `['--registry']` (rename only, still value-taking) and
-// `enjoy-by` -> `['--before']` (same shape) let `npm --reg URL ci` and
-// `npm --enjoy-by DATE ci` walk straight past the old loop, since neither
-// `--reg` nor `--enjoy-by` was ever a key in `definitions.js` itself, so
-// the loop treated them as bare (non-consuming) flags and stopped one
-// token too early — landing on the option's value ("URL"/"DATE") instead
-// of the `ci` that followed it, and failing the whole match. Other aliases
-// bake their value directly into the expansion instead of taking a
-// separate token at all (`d` -> `['--loglevel', 'info']`, so `-d` alone
-// consumes nothing further from argv).
-//
-// Fix: before classifying an option token, look it up (stripped of its
-// leading dash(es), since npm's alias table itself has no dashes) in this
-// same `shorthands` export and, if it matches, classify the *expansion*
-// instead: a single-element expansion is a plain rename, so whether it
-// consumes a following value token is decided by NPM_VALUE_OPTIONS same as
-// any other flag; a multi-element expansion already supplies its value, so
-// it consumes nothing further.
-function expandNpmShorthand(token) {
-  const bareName = token.replace(/^--?/, "");
-  return NPM_SHORTHANDS[bareName] ?? null;
-}
-
-// Codex review /tmp/codex-305-r12.md (finding 1): grouped short options
-// (POSIX-style glomming of several single-character flags onto one dash,
-// e.g. `-dC .` for `-d -C .`) evaded expandNpmShorthand entirely, since
-// "dC" is never itself a key in npm's shorthands table — only "d" and "C"
-// are. npm's own parser (nopt's resolveShort, in the nopt version
-// @npmcli/config bundles) accepts this form specifically when EVERY
-// character of the token (after its single leading dash) is itself a
-// single-character shorthand key, and expands it by concatenating each
-// character's own expansion in order: `-dC` becomes `--loglevel info
-// --prefix`, the exact three-token sequence isExecutableNpmCiSegment
-// below splices back into the stream and re-walks, so each piece gets
-// the same single/multi-element handling as any other shorthand
-// expansion (see expandNpmShorthand's own comment above) without needing
-// separate consumption logic here.
-function expandGroupedShortOptions(token) {
-  if (!/^-[^-]/.test(token) || token.length < 3) return null;
-  const characters = token.slice(1).split("");
-  if (!characters.every((char) => Object.hasOwn(NPM_SHORTHANDS, char))) return null;
-  return characters.flatMap((char) => NPM_SHORTHANDS[char]);
-}
+// Codex review /tmp/codex-305-r13.md (findings 3 and 4): two shapes an
+// always-value-taking/never-value-taking split can't model at all, no
+// matter how the value-taking set is derived: `foreground-scripts` is
+// `type: Boolean` but still consumes an explicit `true`/`false` token when
+// one is given (`npm --foreground-scripts true ci`), and `-ca`/`-call` are
+// each an *exact*, multi-letter option name in their own right (`-ca` is a
+// real shorthand, not "the boolean `-c` glommed with the boolean `-a`"),
+// so a grouped-short expander that assumes every multi-letter single-dash
+// token must be one-character-per-flag expands the wrong thing and never
+// reaches `ci`. npm's own CLI gets every one of these right because it
+// never re-derives option classification by hand at all — every npm
+// command line, including `ci` itself, is parsed by handing the exact same
+// `types`/`shorthands` definitions this module already loads straight to
+// `nopt`, npm's own argument parser (already in the lockfile as
+// @npmcli/config's own parser dependency; pinned here as a direct, exact
+// devDependency at that same version — see package.json). Fix: stop
+// re-deriving option classification by hand in every shape it can take,
+// and call the real parser with the real definitions instead. See
+// ./helpers/npm-cli-definitions.mjs's parseNpmArgv for the loader/parser
+// call itself (kept there, alongside loadNpmConfigDefinitions, so the
+// empty-COREPACK_HOME regression further down can import and exercise it
+// from a freshly spawned process).
 
 // Codex review /tmp/codex-305-r12.md (finding 1): the option-token loop
 // used to split each segment on bare whitespace
@@ -416,70 +676,45 @@ function normalizeCommandSegment(segment) {
   }
 }
 
-// Codex review /tmp/codex-305-r9.md (finding 1): argv-aware replacement for
-// the old `NPM_CI_INVOCATION_PATTERN` regex, which could only recognize a
-// `--key=value` flag and never consumed a separate-token option value. Walks
-// whitespace-separated tokens: `npm`, then any run of option tokens (each
-// consuming its own separate value token when it's a known value-taking
-// option, per NPM_VALUE_OPTIONS), then requires `ci` as the next bare token.
-// A subcommand like "run" in `npm run ci` isn't option-shaped (no leading
-// `-`), so the walk stops there and the final check against "ci" fails.
+// Codex review /tmp/codex-305-r9.md through /tmp/codex-305-r12.md: this used
+// to be a hand-written argv walk — recognizing `--key=value`, then a
+// dynamically-loaded value-taking-option set, then npm's standalone
+// shorthand aliases, then POSIX-style grouped short options, each layered
+// on top of the last as a new evasion shape surfaced. See the comment above
+// npm12CommandList (Codex review /tmp/codex-305-r13.md, finding 2) and the
+// one above the old `NPM_DEFINITIONS`/`NPM_SHORTHANDS` destructure (finding
+// 3) for the two shapes that kept being possible no matter how the hand
+// walk was extended.
 //
-// Codex review /tmp/codex-305-r11.md (finding 2): before consulting
-// NPM_VALUE_OPTIONS directly, first expand the token through npm's own
-// standalone shorthand table (expandNpmShorthand above) — a bare rename
-// (`--reg` -> `--registry`) is then classified exactly like the real flag
-// it stands for, and an alias whose expansion already bakes in a value
-// (`-d` -> `--loglevel info`) consumes nothing further from argv, since
-// nothing about it came from a separate token in the actual command line.
-//
-// Codex review /tmp/codex-305-r12.md (finding 1): rather than special-case
-// how many tokens each *kind* of expansion consumes (single-element vs.
-// multi-element, as the old inline arithmetic did), a matched expansion
-// — whether from a plain shorthand or from expandGroupedShortOptions'
-// grouped form — is spliced back into the token stream in place of the
-// token it replaced, and the loop re-walks from the same index. This is
-// the same mechanism npm's own parser (nopt) uses: it lets a multi-element
-// expansion's own baked-in words resolve themselves on the next pass
-// (`--loglevel` immediately followed by its own `info`) and lets a
-// trailing single-element rename fall through to the ordinary
-// NPM_VALUE_OPTIONS check and consume whatever real token follows it,
-// without this loop needing to know which case it's in up front. The
-// parsed command is then resolved through npm's own command aliases
-// (NPM_CI_COMMAND_ALIASES) before comparing against "ci", so
-// `npm clean-install`/`npm ic` are recognized exactly like `npm ci`.
+// Fix: parse with the real parser instead of re-deriving its behavior.
+// `parseNpmArgv` (./helpers/npm-cli-definitions.mjs) hands the tokens after
+// `npm` straight to `nopt` with npm's own real option definitions and
+// shorthand table, so every one of `--key=value`, a separate-token value,
+// a boolean option that still consumes an explicit `true`/`false`, a
+// standalone shorthand alias (plain rename or one that bakes in its own
+// value), and a grouped or exact-named short option all resolve exactly as
+// npm's own CLI resolves them — because it's the same parser. Whatever
+// `nopt` leaves in `argv.remain` after consuming every option and its
+// value is the same positional argv npm's own CLI would see, and
+// `remain[0]` is the command word npm would resolve next. `derefNpmCommand`
+// then reproduces npm's own `deref` (cmd-list.js) to resolve that word —
+// including an alias, an abbreviation, or a camelCase spelling — to a
+// canonical command, so `npm clean-install`, `npm ic`, `npm install-cl`,
+// and `npm installClean` are all recognized exactly like `npm ci`, and an
+// unrelated subcommand (`npm run ci`, where `remain[0]` is `"run"`, not a
+// bare `ci` anywhere in the tokens) still fails to match.
 function isExecutableNpmCiSegment(segment) {
   const tokens = tokenizeShellWords(segment);
   if (tokens[0] !== "npm") return false;
-  let i = 1;
-  while (i < tokens.length && tokens[i].startsWith("-")) {
-    const token = tokens[i];
-    if (token.includes("=")) {
-      i += 1;
-      continue;
-    }
-    const expansion = expandNpmShorthand(token) ?? expandGroupedShortOptions(token);
-    if (expansion) {
-      tokens.splice(i, 1, ...expansion);
-      continue;
-    }
-    if (NPM_VALUE_OPTIONS.has(token)) {
-      i += 2;
-    } else {
-      i += 1;
-    }
-  }
-  const command = tokens[i];
-  return command === "ci" || NPM_CI_COMMAND_ALIASES.has(command);
+  const parsed = parseNpmArgv(tokens.slice(1));
+  return derefNpmCommand(parsed.argv.remain[0]) === "ci";
 }
 
 function countExecutableNpmCi(steps) {
   let count = 0;
   for (const step of steps ?? []) {
     if (typeof step?.run !== "string") continue;
-    const segments = stripBashComments(joinLineContinuations(step.run)).split(
-      COMMAND_SPLIT_PATTERN
-    );
+    const segments = splitShellSegments(stripBashComments(joinLineContinuations(step.run)));
     for (const segment of segments) {
       if (isExecutableNpmCiSegment(normalizeCommandSegment(segment))) count++;
     }
@@ -778,28 +1013,26 @@ test("negative case: an extra npm ci inserted before the activation step defeats
 // Codex review /tmp/codex-305-r10.md (finding 2): the four cases below are
 // the same separate-valued-option evasion, but for options the old
 // nine-entry hand list didn't cover at all (`--omit`, `--install-strategy`,
-// `--location`, `--allow-git`), proving the dynamically-loaded flag set
-// (computeNpmValueOptions, over the real @npmcli/config definitions) closes
-// the gap a hand list can't.
+// `--location`, `--allow-git`).
 //
 // Codex review /tmp/codex-305-r11.md (finding 2): `--reg` and `--enjoy-by`
-// are npm's own *standalone* aliases for `--registry` and `--before` (see
-// expandNpmShorthand) — neither is a key in `definitions.js` itself, so
-// they evaded the option-token loop entirely until it started expanding
-// through npm's `shorthands` table first.
+// are npm's own *standalone* aliases for `--registry` and `--before` —
+// neither is a key in `definitions.js` itself.
 //
 // Codex review /tmp/codex-305-r12.md (finding 1): three more evasion
-// shapes, all still executing the real `npm ci` while defeating the old
-// classifier. `npm clean-install` and `npm ic` are npm's own command
-// aliases (see NPM_CI_COMMAND_ALIASES) — no `ci` token ever appears, so
-// the old literal `tokens[i] === "ci"` check could never match either
-// one. `npm -dC . ci` is a grouped short option (`-d` and `-C` glommed
-// onto one dash; see expandGroupedShortOptions) that the old loop
-// treated as a single unrecognized token and gave up on one token too
-// early. `npm --enjoy-by "2020-01-01 00:00" ci` is the shell-quoting
-// evasion (see tokenizeShellWords) — the old bare `.split(/\s+/)`
-// split the quoted value's internal space into two tokens, landing on
-// "00:00" instead of the real `ci` two tokens later.
+// shapes. `npm clean-install` and `npm ic` are npm's own command aliases
+// (see npm12CommandList) — no `ci` token ever appears. `npm -dC . ci` is a
+// grouped short option (`-d` and `-C` glommed onto one dash). `npm
+// --enjoy-by "2020-01-01 00:00" ci` is the shell-quoting evasion (see
+// tokenizeShellWords).
+//
+// All of the above are now resolved by handing the real tokens to the
+// real parser (parseNpmArgv, over nopt and npm's own definitions) and
+// resolving the resulting command word through npm's own deref
+// (derefNpmCommand, over npm12CommandList) — see the comments above
+// isExecutableNpmCiSegment and npm12CommandList (Codex review
+// /tmp/codex-305-r13.md) for why a hand-rolled classifier could never
+// close every one of these shapes at once.
 for (const [label, run] of [
   ["corepack npm ci", "corepack npm ci"],
   ["command npm ci", "command npm ci"],
@@ -841,12 +1074,14 @@ for (const [label, run] of [
 test("[codex-305-r10] isExecutableNpmCiSegment recognizes every dynamically-loaded value-taking npm option, and still rejects npm run ci", () => {
   // Direct unit-level check on the segment matcher itself (the workflow-level
   // loop above only ever exercises it indirectly, through YAML fixtures).
-  // The four new forms prove loadNpmValueTakingFlags actually replaced the
-  // old nine-entry hand list rather than just adding to it: none of `--omit`,
-  // `--install-strategy`, `--location`, or `--allow-git` were in that list.
-  // `npm run ci` is kept as a direct, permanent negative case per the tenth
-  // review's fix note ("keep the npm run ci negative case") since it was
-  // previously only guaranteed by the function's shape, never asserted.
+  // The four new forms prove the real parser (parseNpmArgv, over nopt and
+  // npm's own definitions) recognizes options a hand-picked list never
+  // could: none of `--omit`, `--install-strategy`, `--location`, or
+  // `--allow-git` were in the original nine-entry hand list, and none need
+  // a special case now, since nopt classifies them off the real
+  // definitions. `npm run ci` is kept as a direct, permanent negative case
+  // since `remain[0]` is `"run"`, not `"ci"`, and `derefNpmCommand("run")`
+  // resolves to the canonical command `"run"`, not `"ci"`.
   for (const run of [
     "npm --omit dev ci",
     "npm --install-strategy hoisted ci",
@@ -858,46 +1093,45 @@ test("[codex-305-r10] isExecutableNpmCiSegment recognizes every dynamically-load
   assert.equal(isExecutableNpmCiSegment("npm run ci"), false);
 });
 
-test("[codex-305-r11] isExecutableNpmCiSegment expands npm's own standalone shorthand aliases before classifying", () => {
-  // `--reg` and `--enjoy-by` are rename-only aliases (their expansion is a
-  // single element, `['--registry']`/`['--before']`) for two definitions
-  // that do take a value, so both must still consume their following
-  // token and reach the real `ci`.
+test("[codex-305-r11] isExecutableNpmCiSegment resolves npm's own standalone shorthand aliases before classifying", () => {
+  // `--reg` and `--enjoy-by` are rename-only shorthand aliases (npm's own
+  // `shorthands` table expands them to `['--registry']`/`['--before']`) for
+  // two definitions that do take a value; nopt resolves the alias and
+  // consumes the following token as that value, reaching the real `ci`.
   for (const run of ["npm --reg https://registry.example.com ci", "npm --enjoy-by 2020-01-01 ci"]) {
     assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
   }
-  // `-d` is npm's alias for `--loglevel info` — a multi-element expansion
-  // that already bakes its value in, so it must consume nothing further
-  // from argv; `ci` right after it is still the next real token, not `-d`'s
-  // value.
+  // `-d` is npm's shorthand alias for `--loglevel info` — a multi-element
+  // expansion that already bakes its value in, so nopt consumes nothing
+  // further from argv for it; `ci` right after it is still the next real
+  // token, not `-d`'s value.
   assert.equal(isExecutableNpmCiSegment("npm -d ci"), true);
 });
 
 test("[codex-305-r12] isExecutableNpmCiSegment resolves npm's own command aliases to ci", () => {
   // Verified against the published npm@12.0.2 package's own
-  // lib/utils/cmd-list.js `aliases` table (see NPM_CI_COMMAND_ALIASES):
-  // all four resolve to canonical command "ci", not to a bare "ci" token
-  // anywhere in the run string.
+  // lib/utils/cmd-list.js `aliases` table (see npm12CommandList): all four
+  // resolve, through derefNpmCommand, to canonical command "ci", not to a
+  // bare "ci" token anywhere in the run string.
   for (const run of ["npm clean-install", "npm ic", "npm install-clean", "npm isntall-clean"]) {
     assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
   }
 });
 
-test("[codex-305-r12] isExecutableNpmCiSegment expands grouped short options letter by letter", () => {
+test("[codex-305-r12] isExecutableNpmCiSegment resolves grouped short options the same way npm's own parser does", () => {
   // `-dC .` gloms `-d` (multi-element: `--loglevel info`, self-contained)
   // and `-C` (single-element rename for `--prefix`, value-taking) onto one
-  // dash. Both must resolve in order, with `-C`'s expansion still
-  // consuming the real `.` token, to reach the real `ci`.
+  // dash. nopt expands both in order, with `-C`'s expansion still
+  // consuming the real `.` token, reaching the real `ci`.
   assert.equal(isExecutableNpmCiSegment("npm -dC . ci"), true);
   // A grouped token where every character is a real single-char shorthand
   // but the group itself doesn't end on a value-taking expansion (`-f` is
   // the boolean `--force`) must not swallow an unrelated following token.
   assert.equal(isExecutableNpmCiSegment("npm -gf ci"), true);
   // Not every multi-letter, single-dash token is a valid grouped option —
-  // "-xz" has no shorthand keys "x" or "z" at all, so expandGroupedShortOptions
-  // must decline it (returning null, not a bogus partial expansion) and
-  // fall through to ordinary, non-consuming option handling, which still
-  // finds "ci" as the very next token.
+  // "-xz" has no shorthand keys "x" or "z" at all, so nopt treats the whole
+  // token as a single unrecognized flag (consuming nothing further) and
+  // still finds "ci" as the very next token.
   assert.equal(isExecutableNpmCiSegment("npm -xz ci"), true);
 });
 
@@ -911,6 +1145,103 @@ test("[codex-305-r12] isExecutableNpmCiSegment tokenizes shell quoting instead o
   assert.equal(isExecutableNpmCiSegment("npm --enjoy-by '2020-01-01 00:00' ci"), true);
   assert.equal(isExecutableNpmCiSegment("npm --enjoy-by 2020-01-01\\ 00:00 ci"), true);
 });
+
+// Codex review /tmp/codex-305-r13.md (finding 3): `--color` and
+// `--foreground-scripts` are both `type: Boolean` definitions, but neither
+// is *purely* boolean in how npm's own parser treats them: `nopt` still
+// consumes an explicit `true`/`false` token that immediately follows a
+// Boolean option, since a Boolean option's value can be spelled out
+// instead of implied. A binary "does this option ever take a value"
+// classifier gets both of these wrong no matter which way it's set: as
+// value-taking, `npm --color ci` (no explicit value) wrongly consumes
+// `ci` as `--color`'s value; as non-value-taking, `npm --foreground-scripts
+// true ci` wrongly leaves `true` as the command word. Only asking the real
+// parser gets both right, because it's the same conditional consumption
+// npm's own CLI performs.
+test("[codex-305-r13] isExecutableNpmCiSegment resolves a Boolean option's conditional value consumption the way nopt does", () => {
+  assert.equal(isExecutableNpmCiSegment("npm --color ci"), true);
+  assert.equal(isExecutableNpmCiSegment("npm --foreground-scripts true ci"), true);
+});
+
+// Codex review /tmp/codex-305-r13.md (finding 4): `-ca` and `-call` are
+// each an exact, multi-letter shorthand/option spelling in their own
+// right, not "every character is its own single-letter flag" the way
+// `-dC` is. A grouped-short expander that expands every multi-letter
+// single-dash token character-by-character, without first checking
+// whether the *whole* token already names something real, expands `-ca`
+// into two single-letter flags and consumes the wrong following word,
+// walking straight past the real `ci`. nopt itself checks the exact,
+// full-length spelling first (see its own `resolveShort`), exactly like
+// npm's CLI does, so both resolve to their own real options.
+test("[codex-305-r13] isExecutableNpmCiSegment resolves an exact multi-letter option name before considering it as a grouped short option", () => {
+  assert.equal(isExecutableNpmCiSegment("npm -ca cert.pem ci"), true);
+  assert.equal(isExecutableNpmCiSegment("npm -call x ci"), true);
+});
+
+// Codex review /tmp/codex-305-r13.md (finding 2): derefNpmCommand's own
+// regressions, isolated from the option-parsing half of
+// isExecutableNpmCiSegment. `install-cl` and the deliberate typo
+// `isntall-cl` are both unambiguous prefixes of the alias `install-clean`
+// (no other command or alias shares that prefix), which itself resolves to
+// `ci`; `installClean` is the same alias spelled camelCase. An ambiguous
+// prefix — `install-c` is a prefix of both the command `install-ci-test`
+// and the alias `install-clean` — must resolve to nothing, exactly as
+// npm's own CLI declines to guess.
+test("[codex-305-r13] derefNpmCommand reproduces npm's own command-word resolution, including ambiguous prefixes", () => {
+  assert.equal(derefNpmCommand("install-cl"), "ci");
+  assert.equal(derefNpmCommand("isntall-cl"), "ci");
+  assert.equal(derefNpmCommand("installClean"), "ci");
+  assert.equal(derefNpmCommand("install-c"), undefined);
+  assert.equal(isExecutableNpmCiSegment("npm install-cl"), true);
+  assert.equal(isExecutableNpmCiSegment("npm isntall-cl"), true);
+  assert.equal(isExecutableNpmCiSegment("npm installClean"), true);
+  assert.equal(isExecutableNpmCiSegment("npm install-c"), false);
+});
+
+// Codex review /tmp/codex-305-r13.md (finding 1): splitShellSegments's own
+// regressions. `(npm ci)` is a subshelled invocation: the parentheses are
+// boundaries that get stripped rather than glued onto a token, so the
+// inner segment is a bare "npm ci", not "npm ci)". The registry URL's
+// embedded `&` (`x=1&y=2`) sits inside a double-quoted token, so it must
+// not be mistaken for the `&`/`&&` operator and split the command in half.
+test("[codex-305-r13] splitShellSegments treats parentheses and shell operators as boundaries only outside quotes", () => {
+  assert.equal(isExecutableNpmCiSegment("(npm ci)"), false);
+  assert.deepEqual(splitShellSegments("(npm ci)"), ["", "npm ci", ""]);
+  assert.equal(
+    isExecutableNpmCiSegment('npm --registry "https://registry.example/a?x=1&y=2" ci'),
+    true
+  );
+});
+
+// Codex review /tmp/codex-305-r13.md (finding 1): the same two forms,
+// exercised through the workflow-level discovery path (a real YAML `run:`
+// step, comment-stripped and normalized) rather than calling
+// isExecutableNpmCiSegment directly, since splitShellSegments runs before
+// isExecutableNpmCiSegment ever sees a segment.
+for (const [label, run] of [
+  ["a subshelled npm ci", "(npm ci)"],
+  [
+    "a quoted registry URL with an embedded ampersand",
+    'npm --registry "https://registry.example/a?x=1&y=2" ci',
+  ],
+]) {
+  test(`negative case: a new job running "${label}" is caught by dynamic discovery`, async () => {
+    const workflow = await loadWorkflow();
+    const mutated = structuredClone(workflow);
+    mutated.jobs["new-unguarded-job"] = {
+      "runs-on": "ubuntu-latest",
+      steps: [{ name: "Install dependencies", run }],
+    };
+    assert.throws(() => assertAllNpmCiJobsAreGated(mutated));
+  });
+
+  test(`negative case: an extra pre-gate step running "${label}" defeats the exact-count check`, async () => {
+    const workflow = await loadWorkflow();
+    const mutated = structuredClone(workflow);
+    mutated.jobs.tests.steps = [{ name: "Sneaky pre-install", run }, ...mutated.jobs.tests.steps];
+    assert.throws(() => assertAllNpmCiJobsAreGated(mutated));
+  });
+}
 
 // Codex review /tmp/codex-305-r11.md (finding 1): keeps the @npmcli/config
 // devDependency pin (package.json) honest against the npm version actually
