@@ -13,6 +13,19 @@ import test from "node:test";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
+// CI's pinned npm 12.0.2 shapes `npm pack --json`'s output differently from
+// the npm this repo's contributors run locally (verified: npm 11.19.0 here
+// emits a top-level array `[{...}]`; npm 12.0.2, against this same
+// workspaces-root package.json, emits a top-level object keyed by package
+// name, `{"careerrat": {...}}`). `const [pkg] = JSON.parse(...)` array-
+// destructures the parsed JSON directly, so under npm 12.0.2 that throws
+// "TypeError: object is not iterable" instead of ever reaching the
+// assertions below. Accepting either shape holds this test on both without
+// weakening what it actually checks.
+function firstPackedPackage(json) {
+  return Array.isArray(json) ? json[0] : Object.values(json)[0];
+}
+
 test("npm pack ships the bundled example-echo plugin (manifest + entry)", () => {
   // --ignore-scripts skips the "prepack" build of apps/web — this test only
   // cares about which paths package.json's `files` allowlist ships, not
@@ -22,7 +35,7 @@ test("npm pack ships the bundled example-echo plugin (manifest + entry)", () => 
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  const [pkg] = JSON.parse(result.stdout);
+  const pkg = firstPackedPackage(JSON.parse(result.stdout));
   const paths = pkg.files.map((f) => f.path);
   assert.ok(
     paths.includes("plugins/example-echo/manifest.json"),
