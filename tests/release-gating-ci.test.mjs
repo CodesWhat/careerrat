@@ -589,10 +589,22 @@ const SHELL_CONTROL_WORDS = new Set([
 // the wrapper isn't executing anything at all (`command -v`/`-V`) — so an
 // option's operand is only ever consumed as that option's own operand,
 // never mistaken for the wrapped command.
+// Extension (attached short-option operands): a short, operand-taking
+// wrapper option can also carry its operand glued onto the same token
+// instead of as a following one — `env -uNODE_OPTIONS npm ci`, `env -C.
+// npm ci`, `nice -n10 npm ci`, `exec -afoo npm ci` are all real, POSIX-
+// legal spellings of the same options `stripWrapperOptions` already
+// recognizes in their separate-token form. `operandAttachedShort` names,
+// per wrapper, which of its short option flags allow this; a token that
+// starts with one of them and is longer than it is treated as that option
+// plus its attached operand, consuming just the one token (the operand
+// never gets its own slot). This is distinct from `operandAttachable`
+// above, which is the long-option `--name=value` form.
 const WRAPPER_OPTION_TABLES = {
   env: {
     operand: new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]),
     operandAttachable: new Set(["--unset", "--chdir"]),
+    operandAttachedShort: new Set(["-u", "-C"]),
     flag: new Set(["-i", "--ignore-environment", "-0", "-v", "--null", "--debug"]),
     allowsAssignments: true,
   },
@@ -609,12 +621,14 @@ const WRAPPER_OPTION_TABLES = {
   },
   exec: {
     operand: new Set(["-a"]),
+    operandAttachedShort: new Set(["-a"]),
     flag: new Set(["-c", "-l"]),
   },
   nohup: {},
   nice: {
     operand: new Set(["-n", "--adjustment"]),
     operandAttachable: new Set(["--adjustment"]),
+    operandAttachedShort: new Set(["-n"]),
   },
 };
 
@@ -637,6 +651,20 @@ const NICE_LEGACY_ADJUSTMENT_PATTERN = /^-\d+$/;
 // unconsumed, head and all, so the caller's `tokens[0] !== "npm"` check
 // fails on the option itself rather than treating whatever follows it as
 // an executed command.
+// True when `head` is one of `wrapperName`'s own short options with its
+// operand glued directly onto the same token (`-uNODE_OPTIONS`, `-C.`,
+// `-n10`, `-afoo`) rather than as a separate following token. Only ever
+// matches a token strictly longer than the bare flag, so the exact flag on
+// its own (`-u`) is left to the `operand` branch above it, which consumes
+// the next token as the operand instead.
+function hasAttachedShortOperand(table, head) {
+  if (!table.operandAttachedShort) return false;
+  for (const shortFlag of table.operandAttachedShort) {
+    if (head.length > shortFlag.length && head.startsWith(shortFlag)) return true;
+  }
+  return false;
+}
+
 function stripWrapperOptions(wrapperName, tokens) {
   const table = WRAPPER_OPTION_TABLES[wrapperName];
   let remaining = tokens;
@@ -651,6 +679,10 @@ function stripWrapperOptions(wrapperName, tokens) {
     }
     if (table.operand?.has(head)) {
       remaining = remaining.slice(2);
+      continue;
+    }
+    if (hasAttachedShortOperand(table, head)) {
+      remaining = remaining.slice(1);
       continue;
     }
     const equalsIndex = head.indexOf("=");
@@ -865,29 +897,217 @@ function normalizeCommandSegment(segment) {
 // accept either canonical command as a clean install.
 const CLEAN_INSTALL_COMMANDS = new Set(["ci", "install-ci-test"]);
 
-function isExecutableNpmCiSegment(segment) {
-  const tokens = unwrapToCommandTokens(tokenizeShellWords(segment));
-  if (tokens[0] !== "npm") return false;
-  const parsed = parseNpmArgv(tokens.slice(1));
-  return CLEAN_INSTALL_COMMANDS.has(derefNpmCommand(parsed.argv.remain[0]));
+// Gap 2: the clean-install set above is only the two commands the approved
+// gated sequence itself uses. npm's own install/rebuild family is bigger,
+// and every member of it can run a dependency's install-time lifecycle
+// scripts (preinstall/install/postinstall/prepare) the same way `ci` does —
+// `install` (and every alias `derefNpmCommand` already resolves it
+// through), `install-test`, `rebuild`, `update`, `dedupe`, `link`, and
+// `prune`. A `run:` step invoking any of these outside the approved
+// sequence is exactly as unreviewed an install as a bare extra `npm ci`.
+const LIFECYCLE_SCRIPT_COMMANDS = new Set([
+  "ci",
+  "install",
+  "install-test",
+  "install-ci-test",
+  "rebuild",
+  "update",
+  "dedupe",
+  "link",
+  "prune",
+]);
+
+// Gap 4: launcher spellings other than the bare `npm` token — the Windows
+// shim names Corepack/npm itself installs (`npm.cmd`, `npm.exe`,
+// `npm.ps1`), and a full path to the launcher (POSIX `.../npm`, Windows
+// `...\npm.cmd`) rather than a bare command-name lookup on PATH.
+const NPM_LAUNCHER_EXACT_NAMES = new Set(["npm", "npm.cmd", "npm.exe", "npm.ps1"]);
+
+function isNpmLauncherToken(token) {
+  if (typeof token !== "string") return false;
+  if (NPM_LAUNCHER_EXACT_NAMES.has(token)) return true;
+  return token.endsWith("/npm") || token.endsWith("\\npm.cmd");
 }
 
-function countExecutableNpmCi(steps) {
+// `npx npm ci` runs the "npm" package through npx, forwarding `ci` as npm's
+// own argv — a real, if roundabout, way to reach `npm ci`. `npmx ci` (an
+// unrelated command that merely starts with the same four letters) and
+// `pnpm ci` (a different package manager entirely) must not match either
+// form. Returns the argv npm itself would see (everything after the
+// launcher), or `undefined` if `tokens` isn't an npm invocation at all.
+function unwrapNpmInvocationTokens(tokens) {
+  if (isNpmLauncherToken(tokens[0])) return tokens.slice(1);
+  if (tokens[0] === "npx" && isNpmLauncherToken(tokens[1])) return tokens.slice(2);
+  return undefined;
+}
+
+// Gap 3: statically known values in npm's command position. A `run:` step
+// can spell the command word as a GitHub Actions expression reading the
+// *env* context (`${{ env.NAME }}`) or the *matrix* context (`${{
+// matrix.NAME }}`), or as a plain shell reference to an environment
+// variable (`$NAME`, `"$NAME"`, `${NAME}`). Every one of these is exactly
+// as statically knowable as a literal token when the workflow itself pins
+// the value ahead of time — at the workflow, job, or step `env`, or in the
+// job's own `strategy.matrix` — so they're resolved rather than left
+// opaque (which would silently classify every one of them as "not an
+// install", the wrong default for a gate that exists to fail closed).
+//
+// The `${{ }}` forms are resolved as a text substitution over the whole
+// segment, before tokenizing — GitHub Actions itself expands `${{ }}`
+// against the workflow's own context before the shell in `run:` ever sees
+// the script text (it's not shell syntax), so it can and does span
+// internal whitespace exactly as written in real workflow YAML
+// (`${{ env.NPM_CMD }}`); a token-level check would see that as three
+// separate whitespace-split tokens and never recognize it as one
+// expression. The plain shell forms (`$NAME`, `${NAME}`) are real shell
+// syntax with no internal whitespace, so those stay a token-level check,
+// resolved once the segment's already been tokenized.
+const GHA_EXPRESSION_PATTERN = /\$\{\{\s*([^}]+?)\s*\}\}/g;
+const SHELL_ENV_VAR_REFERENCE = /^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/;
+
+function looksDynamic(token) {
+  return typeof token === "string" && token.includes("$");
+}
+
+function failUnresolvableDynamicValue(value, context) {
+  const location =
+    context?.jobId && context?.stepName
+      ? `job "${context.jobId}", step "${context.stepName}"`
+      : "an unidentified job/step";
+  assert.fail(
+    `${location}: command-position value "${value}" is dynamic and this classifier has no static ` +
+      "source for it (not the workflow/job/step env, and not the job's strategy.matrix); " +
+      "failing closed instead of assuming it isn't an install"
+  );
+}
+
+// Every literal variant `text` could statically expand to: normally just
+// `[text]` unchanged (no `${{ }}` expression present at all), or, when one
+// or more resolvable expressions are present, every combination of their
+// resolved values substituted in (more than one candidate only when a
+// matrix axis lists more than one value — checked as every one of them,
+// since a workflow run picks one matrix combination per job instance but
+// this classifier doesn't know which; an axis of `[ci, test]` means an
+// install for either value is a real thing this job's matrix can run).
+// Fails the enclosing test closed (via failUnresolvableDynamicValue) for
+// any `${{ }}` expression that isn't `env.NAME`/`matrix.NAME`, or names a
+// variable that isn't actually declared anywhere in scope.
+function expandGhaExpressions(text, context) {
+  let variants = [text];
+  for (const match of text.matchAll(GHA_EXPRESSION_PATTERN)) {
+    const [expression, body] = match;
+    const envMatch = /^env\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(body);
+    const matrixMatch = /^matrix\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(body);
+    let values;
+    if (envMatch) {
+      const envChain = context?.envChain ?? {};
+      if (!Object.hasOwn(envChain, envMatch[1])) failUnresolvableDynamicValue(expression, context);
+      values = [String(envChain[envMatch[1]])];
+    } else if (matrixMatch) {
+      const matrix = context?.matrix ?? {};
+      if (!Object.hasOwn(matrix, matrixMatch[1])) failUnresolvableDynamicValue(expression, context);
+      const value = matrix[matrixMatch[1]];
+      values = (Array.isArray(value) ? value : [value]).map(String);
+    } else {
+      failUnresolvableDynamicValue(expression, context);
+    }
+    variants = variants.flatMap((variant) =>
+      values.map((value) => variant.split(expression).join(value))
+    );
+  }
+  return variants;
+}
+
+// The command word's every statically-resolvable candidate value: itself,
+// unless it's a plain shell variable reference, in which case whatever
+// that variable resolves to in the env chain (or a closed failure if it
+// isn't declared there).
+function resolveNpmCommandWord(parsed, context) {
+  const commandWord = parsed.argv.remain[0];
+  if (!looksDynamic(commandWord)) return [commandWord];
+  const match = SHELL_ENV_VAR_REFERENCE.exec(commandWord);
+  const envChain = context?.envChain ?? {};
+  if (match && Object.hasOwn(envChain, match[1])) return [String(envChain[match[1]])];
+  return failUnresolvableDynamicValue(commandWord, context);
+}
+
+function matchesAnyCommand(candidates, targetCommands) {
+  return candidates.some((candidate) => targetCommands.has(derefNpmCommand(candidate)));
+}
+
+function isExecutableNpmCiSegment(segment, context) {
+  return expandGhaExpressions(segment, context).some((variant) => {
+    const tokens = unwrapToCommandTokens(tokenizeShellWords(variant));
+    const argv = unwrapNpmInvocationTokens(tokens);
+    if (!argv) return false;
+    const parsed = parseNpmArgv(argv);
+    return matchesAnyCommand(resolveNpmCommandWord(parsed, context), CLEAN_INSTALL_COMMANDS);
+  });
+}
+
+// Gap 2's broader classifier: true only when the segment both resolves to
+// one of npm's install/rebuild family AND actually runs lifecycle scripts
+// for it — `--ignore-scripts` (the staging install, and the approved
+// bin-link step's `npm rebuild --ignore-scripts`) holds every one of them
+// back, so neither is a script-executing install even though `rebuild` is
+// a member of the family. The strict reinstall (`--no-ignore-scripts`) is
+// the one invocation per gated job that's supposed to trip this.
+function isExecutableNpmLifecycleScriptSegment(segment, context) {
+  return expandGhaExpressions(segment, context).some((variant) => {
+    const tokens = unwrapToCommandTokens(tokenizeShellWords(variant));
+    const argv = unwrapNpmInvocationTokens(tokens);
+    if (!argv) return false;
+    const parsed = parseNpmArgv(argv);
+    if (!matchesAnyCommand(resolveNpmCommandWord(parsed, context), LIFECYCLE_SCRIPT_COMMANDS)) {
+      return false;
+    }
+    return parsed["ignore-scripts"] !== true;
+  });
+}
+
+// Builds the static resolution context (gap 3) for one step of one job: the
+// env chain merged workflow -> job -> step (closest scope wins, GitHub
+// Actions' own precedence), and the job's own strategy.matrix, if any.
+function buildDynamicResolutionContext(workflow, jobId, step) {
+  const job = workflow.jobs[jobId];
+  return {
+    envChain: { ...workflow.env, ...job.env, ...step.env },
+    matrix: job.strategy?.matrix ?? {},
+    jobId,
+    stepName: step.name,
+  };
+}
+
+function countMatchingNpmSegments(workflow, jobId, classify) {
+  const job = workflow.jobs[jobId];
   let count = 0;
-  for (const step of steps ?? []) {
+  for (const step of job.steps ?? []) {
     if (typeof step?.run !== "string") continue;
+    const context = buildDynamicResolutionContext(workflow, jobId, step);
     const segments = splitShellSegments(stripBashComments(joinLineContinuations(step.run)));
     for (const segment of segments) {
-      if (isExecutableNpmCiSegment(normalizeCommandSegment(segment))) count++;
+      if (classify(normalizeCommandSegment(segment), context)) count++;
     }
   }
   return count;
 }
 
+function countExecutableNpmCi(workflow, jobId) {
+  return countMatchingNpmSegments(workflow, jobId, isExecutableNpmCiSegment);
+}
+
+function countExecutableNpmLifecycleScripts(workflow, jobId) {
+  return countMatchingNpmSegments(workflow, jobId, isExecutableNpmLifecycleScriptSegment);
+}
+
 function discoverJobsWithExecutableNpmCi(workflow) {
-  return Object.entries(workflow.jobs)
-    .filter(([, job]) => countExecutableNpmCi(job.steps) > 0)
-    .map(([jobId]) => jobId);
+  return Object.keys(workflow.jobs).filter((jobId) => countExecutableNpmCi(workflow, jobId) > 0);
+}
+
+function discoverJobsWithExecutableNpmLifecycleScript(workflow) {
+  return Object.keys(workflow.jobs).filter(
+    (jobId) => countExecutableNpmLifecycleScripts(workflow, jobId) > 0
+  );
 }
 
 // Shared by the real-workflow discovery test and its negative cases: proves
@@ -900,11 +1120,39 @@ function assertAllNpmCiJobsAreGated(workflow) {
   for (const jobId of jobIds) {
     const job = workflow.jobs[jobId];
     assertInstallSequence(job.steps, jobId);
-    const total = countExecutableNpmCi(job.steps);
+    const total = countExecutableNpmCi(workflow, jobId);
     assert.equal(
       total,
       2,
       `${jobId}: expected exactly 2 executable "npm ci" invocations (staging install + strict reinstall), found ${total}`
+    );
+  }
+}
+
+// Gap 2's discovery-level assertion: every job that actually runs a
+// dependency's install-time lifecycle scripts through any member of npm's
+// install/rebuild family — not just `ci` — must be one of the known
+// dependency-installing jobs, and must run exactly one such invocation
+// (the approved strict reinstall; the staging install and the bin-link
+// step are both `--ignore-scripts` and so don't count). Anything else
+// tripping this — a bare `npm install`, `npm rebuild` without
+// `--ignore-scripts`, `npm update`, `npm dedupe`, `npm link`, `npm
+// prune`, ... anywhere outside that one step — is an unreviewed install.
+function assertNoUnguardedLifecycleScriptInstalls(workflow) {
+  const jobIds = discoverJobsWithExecutableNpmLifecycleScript(workflow).sort();
+  assert.deepEqual(
+    jobIds,
+    [...DEPENDENCY_JOB_IDS].sort(),
+    "every job that runs a dependency's install-time lifecycle scripts must be a known " +
+      "dependency-installing job, gated by the approved sequence"
+  );
+  for (const jobId of jobIds) {
+    const total = countExecutableNpmLifecycleScripts(workflow, jobId);
+    assert.equal(
+      total,
+      1,
+      `${jobId}: expected exactly 1 npm invocation that actually runs dependency lifecycle ` +
+        `scripts (the approved strict reinstall), found ${total}`
     );
   }
 }
@@ -1049,6 +1297,80 @@ test("every job with an executable npm ci install is discovered and runs exactly
       "a new job with its own npm ci needs the approved sequence too"
   );
   assertAllNpmCiJobsAreGated(workflow);
+});
+
+// Gap 2: broadens discovery beyond the clean-install set (`ci`,
+// `install-ci-test`) to every npm command that runs a dependency's
+// install-time lifecycle scripts — `install`, `install-test`, `rebuild`,
+// `update`, `dedupe`, `link`, `prune` — and asserts none of them run
+// unguarded outside the approved sequence's single script-executing step
+// (the strict reinstall). The staging install and the bin-link step
+// (`npm rebuild --ignore-scripts`) both hold scripts back, so neither
+// counts even though `rebuild` is now in the discovered family.
+test("every npm command that runs dependency lifecycle scripts is discovered, not only clean installs", async () => {
+  const workflow = await loadWorkflow();
+  assertNoUnguardedLifecycleScriptInstalls(workflow);
+});
+
+for (const [label, run] of [
+  ["install", "npm install"],
+  ["the i alias", "npm i"],
+  ["the add alias", "npm add"],
+  ["the isntall typo alias", "npm isntall"],
+  ["the in alias", "npm in"],
+  ["the ins alias", "npm ins"],
+  ["the inst alias", "npm inst"],
+  ["the insta alias", "npm insta"],
+  ["the instal alias", "npm instal"],
+  ["the isnt alias", "npm isnt"],
+  ["the isnta alias", "npm isnta"],
+  ["the isntal alias", "npm isntal"],
+  ["install-test", "npm install-test"],
+  ["the it alias", "npm it"],
+  ["rebuild without --ignore-scripts", "npm rebuild"],
+  ["the rb alias without --ignore-scripts", "npm rb"],
+  ["update", "npm update"],
+  ["the up alias", "npm up"],
+  ["the upgrade alias", "npm upgrade"],
+  ["the udpate typo alias", "npm udpate"],
+  ["dedupe", "npm dedupe"],
+  ["the ddp alias", "npm ddp"],
+  ["link", "npm link"],
+  ["the ln alias", "npm ln"],
+  ["prune", "npm prune"],
+]) {
+  test(`negative case: a new job running "npm ${label}" outside the gated sequence is caught by lifecycle-script discovery`, async () => {
+    const workflow = await loadWorkflow();
+    const mutated = structuredClone(workflow);
+    mutated.jobs["new-unguarded-job"] = {
+      "runs-on": "ubuntu-latest",
+      steps: [{ name: "Install dependencies", run }],
+    };
+    assert.throws(() => assertNoUnguardedLifecycleScriptInstalls(mutated));
+  });
+
+  test(`negative case: an extra pre-gate step running "npm ${label}" defeats the lifecycle-script exact-count check`, async () => {
+    const workflow = await loadWorkflow();
+    const mutated = structuredClone(workflow);
+    mutated.jobs.tests.steps = [{ name: "Sneaky pre-install", run }, ...mutated.jobs.tests.steps];
+    assert.throws(() => assertNoUnguardedLifecycleScriptInstalls(mutated));
+  });
+}
+
+test("negative case: npm run ci, npm run install, and the approved npm rebuild --ignore-scripts bin-link step are not unguarded lifecycle-script installs", async () => {
+  // `npm run ci`/`npm run install` never reach an install-family command
+  // word at all (`remain[0]` is `"run"`), and the approved bin-link step's
+  // `--ignore-scripts` means `rebuild` never actually runs a lifecycle
+  // script. None of the three should ever trip lifecycle-script discovery.
+  const workflow = await loadWorkflow();
+  for (const run of ["npm run ci", "npm run install", "npm rebuild --ignore-scripts"]) {
+    const mutated = structuredClone(workflow);
+    mutated.jobs.tests.steps = [{ name: "Sneaky pre-install", run }, ...mutated.jobs.tests.steps];
+    assert.doesNotThrow(
+      () => assertNoUnguardedLifecycleScriptInstalls(mutated),
+      `"${run}" must not be flagged`
+    );
+  }
 });
 
 test("every windows-latest job's Bash-syntax steps declare shell: bash structurally", async () => {
@@ -1490,6 +1812,12 @@ test("[codex-305-r15] isExecutableNpmCiSegment tells a wrapper's own option oper
     "nice -n 10 npm ci",
     "nice -10 npm ci",
     "time env FOO=1 npm ci",
+    // Extension: the same options, with their operand attached to the same
+    // token instead of following as a separate one.
+    "env -uNODE_OPTIONS npm ci",
+    "env -C. npm ci",
+    "nice -n10 npm ci",
+    "exec -afoo npm ci",
   ]) {
     assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
   }
@@ -1499,6 +1827,121 @@ test("[codex-305-r15] isExecutableNpmCiSegment tells a wrapper's own option oper
   assert.equal(isExecutableNpmCiSegment("command -v npm ci"), false);
   assert.equal(isExecutableNpmCiSegment("command -V npm"), false);
   assert.equal(isExecutableNpmCiSegment("env --unset=npm ci"), false);
+});
+
+// Gap 4: launcher spellings other than the bare `npm` token on PATH — the
+// Windows shim names, a full path to the launcher, and `npx npm ci`
+// (running the "npm" package through npx, forwarding `ci` as its argv).
+// `npmx ci` and `pnpm ci` are both a different command entirely and must
+// stay negative.
+test("[gap-4] isExecutableNpmCiSegment recognizes npm launcher spellings other than the bare npm token", () => {
+  for (const run of [
+    "npm.cmd ci",
+    "npm.exe ci",
+    "npm.ps1 ci",
+    "/usr/local/bin/npm ci",
+    '"C:\\Program Files\\nodejs\\npm.cmd" ci',
+    "npx npm ci",
+  ]) {
+    assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
+  }
+  assert.equal(isExecutableNpmCiSegment("npmx ci"), false);
+  assert.equal(isExecutableNpmCiSegment("pnpm ci"), false);
+});
+
+// Gap 3: statically known values in npm's command position. `NPM_CMD`
+// (env) and `cmd` (matrix) are resolved from the context
+// isExecutableNpmCiSegment/isExecutableNpmLifecycleScriptSegment are given
+// directly, rather than through a full workflow fixture, to isolate the
+// resolution logic itself from the workflow-level plumbing (exercised
+// separately below).
+test("[gap-3] isExecutableNpmCiSegment resolves statically known env and matrix values in npm's command position", () => {
+  assert.equal(
+    isExecutableNpmCiSegment("npm ${{ env.NPM_CMD }}", { envChain: { NPM_CMD: "ci" } }),
+    true
+  );
+  assert.equal(isExecutableNpmCiSegment("npm $NPM_CMD", { envChain: { NPM_CMD: "ci" } }), true);
+  assert.equal(isExecutableNpmCiSegment('npm "$NPM_CMD"', { envChain: { NPM_CMD: "ci" } }), true);
+  assert.equal(isExecutableNpmCiSegment("npm ${NPM_CMD}", { envChain: { NPM_CMD: "ci" } }), true);
+  // A matrix axis listing multiple values is checked as every one of them —
+  // any single combination running an install is enough to flag the job.
+  assert.equal(
+    isExecutableNpmCiSegment("npm ${{ matrix.cmd }}", { matrix: { cmd: ["ci", "test"] } }),
+    true
+  );
+  assert.equal(
+    isExecutableNpmCiSegment("npm ${{ matrix.cmd }}", { matrix: { cmd: ["test", "lint"] } }),
+    false
+  );
+});
+
+test("[gap-3] isExecutableNpmLifecycleScriptSegment resolves statically known env values in npm's command position", () => {
+  assert.equal(
+    isExecutableNpmLifecycleScriptSegment("npm ${{ env.NPM_CMD }}", {
+      envChain: { NPM_CMD: "install" },
+    }),
+    true
+  );
+});
+
+test("[gap-3] a dynamic command-position value with no static source fails the test closed", () => {
+  assert.throws(
+    () =>
+      isExecutableNpmCiSegment("npm ${{ inputs.cmd }}", {
+        jobId: "example-job",
+        stepName: "Run it",
+      }),
+    /example-job.*Run it/s
+  );
+  // An env/matrix name that isn't actually declared anywhere in scope is
+  // exactly as unresolvable as one that doesn't exist as an expression
+  // form at all.
+  assert.throws(() =>
+    isExecutableNpmCiSegment("npm ${{ env.UNDECLARED }}", {
+      envChain: {},
+      jobId: "j",
+      stepName: "s",
+    })
+  );
+});
+
+// Gap 3, exercised through the real workflow-discovery path: a job/step's
+// own `env`, a job's `strategy.matrix`, and an unresolvable expression each
+// resolve (or fail closed) exactly the same way once threaded through
+// buildDynamicResolutionContext instead of being handed in directly.
+test("[gap-3] a job-level env value in npm's command position is resolved by workflow-level discovery", async () => {
+  const workflow = await loadWorkflow();
+  const mutated = structuredClone(workflow);
+  mutated.jobs["new-unguarded-job"] = {
+    "runs-on": "ubuntu-latest",
+    env: { NPM_CMD: "ci" },
+    steps: [{ name: "Install dependencies", run: "npm ${{ env.NPM_CMD }}" }],
+  };
+  assert.throws(() => assertAllNpmCiJobsAreGated(mutated));
+});
+
+test("[gap-3] a job's strategy.matrix value in npm's command position is resolved by workflow-level discovery", async () => {
+  const workflow = await loadWorkflow();
+  const mutated = structuredClone(workflow);
+  mutated.jobs["new-unguarded-job"] = {
+    "runs-on": "ubuntu-latest",
+    strategy: { matrix: { cmd: ["ci", "test"] } },
+    steps: [{ name: "Install dependencies", run: "npm ${{ matrix.cmd }}" }],
+  };
+  assert.throws(() => assertAllNpmCiJobsAreGated(mutated));
+});
+
+test("[gap-3] an unresolvable dynamic command-position value fails the workflow-level discovery test closed, naming the job and step", async () => {
+  const workflow = await loadWorkflow();
+  const mutated = structuredClone(workflow);
+  mutated.jobs["new-unguarded-job"] = {
+    "runs-on": "ubuntu-latest",
+    steps: [{ name: "Install dependencies", run: "npm ${{ inputs.cmd }}" }],
+  };
+  assert.throws(
+    () => discoverJobsWithExecutableNpmCi(mutated),
+    /new-unguarded-job.*Install dependencies/s
+  );
 });
 
 // Codex review /tmp/codex-305-r13.md (finding 1): the same two forms,
