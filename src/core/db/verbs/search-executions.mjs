@@ -69,6 +69,16 @@ function normalizedError(error) {
         url: offer?.url ? String(offer.url).slice(0, 500) : null,
       }))
     : undefined;
+  // Plain-count/marker pass-through (CR-29 round 14): workspace-agent.mjs's
+  // compactSearchExecutionLaneError stopped duplicating failedIds/
+  // failedOffers/conflictOffers onto the error object (they now live on the
+  // lane's `summary` only, which this verb clones unfiltered) and instead
+  // hands this a bare `failed` count plus `truncated: true` whenever
+  // samples were dropped. Neither had an allowlisted home here before, so
+  // they'd otherwise vanish silently on this exact write this fix depends
+  // on.
+  const failed = Number.isFinite(Number(error.failed)) ? Number(error.failed) : undefined;
+  const truncated = error.truncated === true ? true : undefined;
   return {
     ...(error.code ? { code: String(error.code).slice(0, 120) } : {}),
     message: String(error.message || error).slice(0, 1000),
@@ -79,11 +89,13 @@ function normalizedError(error) {
     // name which postings never made it into the DB after a failed lane.
     ...(failedIds ? { failedIds } : {}),
     ...(failedOffers ? { failedOffers } : {}),
+    ...(failed != null ? { failed } : {}),
     // Round 9: same reasoning, extended to identity conflicts — a
     // conflict-only child result used to reload as a parent lane with no
     // conflict count or sample at all, even though the child runId (still
     // present elsewhere on the lane) let a caller chase it down indirectly.
     ...(conflicts != null ? { conflicts } : {}),
+    ...(truncated ? { truncated: true } : {}),
     ...(conflictOffers ? { conflictOffers } : {}),
   };
 }

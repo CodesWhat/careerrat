@@ -302,11 +302,11 @@ export function workdayDedupKey(job) {
   const underscoreIdx = lastSegment.indexOf('_');
   if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
   const raw = lastSegment.slice(underscoreIdx + 1).toLowerCase();
-  // Only treat a trailing "-N" as Workday's cross-site disambiguator when what
-  // precedes it is already requisition-ID-shaped on its own (a leading digit,
-  // 2+ trailing digits, hyphens/underscores allowed in between), otherwise
-  // the hyphen digits ARE the requisition ID and must be kept, e.g. Walmart's
-  // "R-2593225" (credit: ronanime-arch, PR #3446).
+  // Only treat a trailing "-N" as Workday's cross-site disambiguator when
+  // what precedes it is already requisition-ID-shaped on its own (a leading
+  // digit, 2+ trailing digits, hyphens/underscores allowed in between),
+  // otherwise the hyphen digits ARE the requisition ID and must be kept,
+  // e.g. Walmart's "R-2593225" (credit: ronanime-arch, PR #3446).
   //
   // CareerRat-local fix (2026-09-04, CR-29 round 3). The shape check used to
   // forbid hyphens/underscores between the leading letters and the first
@@ -336,7 +336,22 @@ export function workdayDedupKey(job) {
   // pattern by exhaustive enumeration over both alphabets up to length 7
   // (0 mismatches); every shape that previously passed (or failed) still
   // does.
-  const m = raw.match(/^(.*?)-(\d{1,2})$/);
+  //
+  // CareerRat-local fix (2026-09-05, CR-29 round 12). The disambiguator
+  // itself was matched as `-\d{1,2}$` — ANY one- or two-digit trailing
+  // group, stripped whenever the base alone looked requisition-shaped. Every
+  // real-world disambiguator Workday actually emits is a small single digit
+  // (2nd/3rd/4th republish; PR #3446's own examples never go past "-3"), but
+  // a genuine requisition id can end in a two-digit SEQUENCE NUMBER that is
+  // part of the id itself, not a disambiguator — "R-2024-12" and "R-2024-13"
+  // are two DIFFERENT requisitions (year + sequence), yet both are
+  // requisition-shaped once their trailing "-12"/"-13" is stripped, so they
+  // silently collapsed to the identical "workday:<host>:r-2024" key and one
+  // upsert overwrote the other (Codex review of PR #304). Narrowed to a
+  // single trailing digit (`-\d$`): still collapses every documented
+  // cross-site disambiguator case, but a two-or-more-digit trailing group is
+  // now always kept as part of the requisition id instead of guessed away.
+  const m = raw.match(/^(.*?)-(\d)$/);
   const reqId = m && isRequisitionIdShaped(m[1]) ? m[1] : raw;
   if (!reqId) return null;
   return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;

@@ -162,26 +162,56 @@ function slug(value, fallback = "unknown") {
   return normalized || fallback;
 }
 
-// Same normalization as slug(), but a value that collapses to longer than
-// the 80-character limit gets truncated to leave room for a "-" plus a
-// 12-hex-character SHA-256 digest of `identitySource` (the untruncated
-// value the slug was derived from), instead of a bare truncation. Two
-// identities that only diverge past the limit (e.g. a Workday reqId whose
-// hostname alone is a maximum-length tenant label) would otherwise collapse
-// to the same slug and silently collide on the persisted row ID (CR-29
-// round 10). A value that already fits comes back byte-identical to slug().
-function collisionSafeSlug(value, fallback, identitySource) {
-  const collapsed = String(value || "")
+// True when collapsing `raw` into a slug erased a distinction that could
+// plausibly collide with a DIFFERENT real identity's slug (CR-29 round 11).
+// The regex collapse (`[^a-z0-9]+` -> "-") treats "_" exactly like "-", but
+// those two characters are the ONE class of separator real reqIds actually
+// alternate between for the same logical value (Workday's own
+// "jr_2024_00123" vs "jr-2024-00123", both meaning the same requisition) —
+// so an underscore anywhere in `raw` means the collapse is lossy in a way
+// that can actually happen twice. Structural delimiters our own code
+// generates (":", ".", "/", whitespace — see workdayDedupKey's
+// "workday:<host>:<reqid>" template) are collapsed here the SAME way
+// `normalized` collapses them, so a plain "workday:host:req0001"-shaped
+// value comes back identical to `normalized` and is correctly treated as
+// lossless: nothing else would ever collapse to that same slug, because
+// nothing else generates that exact colon/dot structure for a different
+// identity.
+function identityNormalizationChanged(raw, normalized) {
+  const canonical = raw
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-");
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  return canonical !== normalized;
+}
+
+// Same normalization as slug(), but appends a "-" plus a 12-hex-character
+// SHA-256 digest of `identitySource` (the untruncated value the slug was
+// derived from) whenever normalization LOST information that could
+// plausibly collide with a different identity's slug — not only when the
+// 80-character limit forced truncation (CR-29 round 10 only covered that
+// case). "workday:acme.wd1.myworkdayjobs.com:jr_2024_00123" and
+// "...:jr-2024-00123" both collapse to the identical short slug well under
+// the limit; without this, the second upsert silently overwrote the first
+// (CR-29 round 11). A value whose normalization is provably lossless (see
+// identityNormalizationChanged above) still comes back byte-identical to
+// the old slug()-only behavior, so already-persisted short IDs are
+// unaffected.
+function collisionSafeSlug(value, fallback, identitySource) {
+  const raw = String(value || "");
+  const collapsed = raw.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const normalized = trimEdgeCharacter(collapsed, "-");
-  if (normalized.length <= SLUG_LIMIT) return normalized || fallback;
+  if (!normalized) return fallback;
+  const needsDigest =
+    normalized.length > SLUG_LIMIT || identityNormalizationChanged(raw, normalized);
+  if (!needsDigest) return normalized;
   const digest = createHash("sha256")
     .update(String(identitySource ?? value ?? ""))
     .digest("hex")
     .slice(0, SLUG_DIGEST_LENGTH);
   const room = SLUG_LIMIT - SLUG_DIGEST_LENGTH - 1;
-  const truncated = trimEdgeCharacter(normalized.slice(0, room), "-");
+  const truncated =
+    normalized.length > room ? trimEdgeCharacter(normalized.slice(0, room), "-") : normalized;
   return `${truncated}-${digest}`;
 }
 

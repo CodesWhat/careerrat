@@ -329,10 +329,38 @@ export function sourcedUpsertBatch({
       // `failedIds` in its return shape so a caller can fold its own
       // pre-transaction failures into the same counters without a shape
       // mismatch.
+      // Same-ID conflict guard (CR-29 round 11): stableSourcedId's
+      // collision-safe slug (sourced-persistence.mjs) makes an accidental ID
+      // collision between two DISTINCT identities far rarer, but "far rarer"
+      // isn't "impossible" — a caller could still hand this verb a
+      // pre-built row.id directly, or a legitimate hash-based fallback ID
+      // could coincide. A put whose id ALREADY belongs to a stored row with
+      // a completely disjoint identity key set (no url/reqId/company-role-
+      // location overlap at all) is never a genuine update of that row —
+      // it's two unrelated postings sharing an ID by accident — and must be
+      // rejected as a conflict instead of silently overwriting the existing
+      // row's data. A row with NO identity keys at all (either side) can't
+      // be proven disjoint, so it falls through to the existing overwrite
+      // behavior rather than being blocked on an unprovable guess.
+      const existingRow = getRow(db, "sourced", acceptedRow.id);
+      if (existingRow) {
+        const incomingKeys = identityKeysWithAliases(row);
+        const existingKeys = identityKeysWithAliases(existingRow);
+        const disjointIdentity =
+          incomingKeys.length > 0 &&
+          existingKeys.length > 0 &&
+          !incomingKeys.some((key) => existingKeys.includes(key));
+        if (disjointIdentity) {
+          conflicts++;
+          if (conflictOffers.length < CONFLICT_OFFER_SAMPLE_LIMIT) {
+            conflictOffers.push(conflictOfferSample(row));
+          }
+          continue;
+        }
+      }
       if (seenPostingKeys) addPostingIdentity(seenPostingKeys, row);
-      const existed = Boolean(getRow(db, "sourced", acceptedRow.id));
       putRow(db, "sourced", acceptedRow.id, acceptedRow);
-      if (existed) updated++;
+      if (existingRow) updated++;
       else created++;
       acceptedIds.push(String(acceptedRow.id));
     }

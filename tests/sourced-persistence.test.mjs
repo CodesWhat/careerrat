@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { extractReqId } from "../src/core/scoring/sourced-identity.mjs";
 import {
@@ -754,4 +755,123 @@ test("two Workday requisitions under a maximum-length tenant hostname persist as
     .map((row) => row.id);
   assert.equal(rows.length, 2, "neither requisition may overwrite the other's row");
   assert.equal(new Set(rows).size, 2, "the two persisted IDs must be distinct");
+});
+
+test("captureAndPersistOffersIfDb persists underscore and hyphen requisition-id spellings as two distinct rows (CR-29 round 11)", () => {
+  // Codex review of PR #304: collisionSafeSlug only appended its
+  // collision-avoiding digest suffix once a slug exceeded the 80-character
+  // limit. "workday:acme.wd1.myworkdayjobs.com:jr_2024_00123" and
+  // "...:jr-2024-00123" are both well under that limit and both collapse
+  // (regex-collapsing "_" and "-" alike) to the identical short slug, so the
+  // second upsert silently overwrote the first with no conflict reported.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const underscoreOffer = offer({
+    title: "Staff Engineer",
+    url: "https://jobs.example.test/acme/staff-engineer-underscore",
+    reqId: "workday:acme.wd1.myworkdayjobs.com:jr_2024_00123",
+    rawText: "Body for the underscore-separated requisition.",
+  });
+  const hyphenOffer = offer({
+    title: "Staff Engineer",
+    url: "https://jobs.example.test/acme/staff-engineer-hyphen",
+    reqId: "workday:acme.wd1.myworkdayjobs.com:jr-2024-00123",
+    rawText: "Body for the hyphen-separated requisition.",
+  });
+
+  const result = captureAndPersistOffersIfDb({
+    repoRoot,
+    offers: [underscoreOffer, hyphenOffer],
+    dedupeCanonical: true,
+  });
+
+  assert.equal(result.persistedRows, 2, "both requisition-id spellings must persist");
+  assert.equal(
+    result.conflicts,
+    0,
+    "distinct requisition ids must never be reported as a conflict"
+  );
+  assert.equal(result.failed, 0);
+  assert.equal(result.ok, true);
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT id FROM sourced")
+    .all()
+    .map((row) => row.id);
+  assert.equal(
+    rows.length,
+    2,
+    "the hyphen-separated requisition must not overwrite the underscore-separated one's row"
+  );
+  assert.equal(new Set(rows).size, 2, "the two persisted IDs must be distinct");
+});
+
+test("sourcedUpsertBatch rejects a same-ID put whose identity is disjoint from the stored row, instead of overwriting it (CR-29 round 11)", () => {
+  // A collision-safe slug makes an accidental same-ID collision between two
+  // UNRELATED postings far rarer, but not impossible (a caller can still
+  // hand this verb a pre-built row.id directly). Guard the write itself:
+  // when an incoming row's id already belongs to a stored row whose
+  // identity keys share nothing with it, that's two different postings
+  // sharing an ID by accident, not a genuine update — reject it as a
+  // conflict rather than silently discarding the original row's data.
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const originalRow = {
+    id: "sourced-collision-test",
+    company: "Acme",
+    role: "Staff Engineer",
+    status: "sourced",
+    source: "scanner",
+    channel: "board",
+    link: "https://jobs.example.test/acme/original-posting",
+    loc: "Remote",
+    base: "verify",
+    fitScore: 80,
+    fitBucket: "high",
+    fitBasis: "triage",
+    gate: "likely-keep",
+    sourcedAt: "2026-07-05T00:00:00Z",
+    updatedAt: "2026-07-05T00:00:00Z",
+    artifacts: {},
+  };
+  sourcedUpsertBatch({ repoRoot, rows: [originalRow] });
+
+  const collidingRow = {
+    id: "sourced-collision-test",
+    company: "Beta",
+    role: "Totally Different Role",
+    status: "sourced",
+    source: "scanner",
+    channel: "board",
+    link: "https://jobs.example.test/beta/unrelated-posting",
+    loc: "Remote",
+    base: "verify",
+    fitScore: 60,
+    fitBucket: "med",
+    fitBasis: "triage",
+    gate: "review",
+    sourcedAt: "2026-07-06T00:00:00Z",
+    updatedAt: "2026-07-06T00:00:00Z",
+    artifacts: {},
+  };
+
+  const result = sourcedUpsertBatch({ repoRoot, rows: [collidingRow] });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 0);
+  assert.equal(
+    result.conflicts,
+    1,
+    "a disjoint-identity same-ID put must be reported as a conflict"
+  );
+  assert.deepEqual(result.acceptedIds, []);
+
+  const stored = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced WHERE id = ?")
+    .get("sourced-collision-test");
+  const storedRow = JSON.parse(stored.data);
+  assert.equal(storedRow.company, "Acme", "the original row must survive untouched");
+  assert.equal(storedRow.link, "https://jobs.example.test/acme/original-posting");
 });
