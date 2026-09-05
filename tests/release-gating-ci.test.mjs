@@ -574,13 +574,48 @@ const SHELL_CONTROL_WORDS = new Set([
   "}",
 ]);
 
-// Commands that forward their remaining argv straight through to the
-// command they wrap, without changing whether `npm ci` actually runs:
-// `time`/`command`/`exec`/`nohup` take no argument of their own before the
-// wrapped command; `corepack` forwards straight to the pinned npm release
-// (`corepack npm ci`). `nice` and `env` are handled separately, below,
-// since each can consume its own leading options first.
-const SIMPLE_TRANSPARENT_WRAPPERS = new Set(["time", "command", "exec", "nohup", "corepack"]);
+// Codex review /tmp/codex-305-r15.md (the one finding): blindly stripping
+// every dash-prefixed token in front of a wrapper's command (the prior
+// approach) can't tell a wrapper's own option operand from the wrapped
+// command itself. `env -u npm ci` has `npm` as `-u`'s operand (the
+// variable being unset) and `ci` as the real command `env` runs — not
+// `npm ci` at all — while `env -u NODE_OPTIONS npm ci`, `time -p npm ci`,
+// `command -p npm ci`, `exec -c npm ci`, and `nohup -- npm ci` all reach a
+// real `npm ci` that a blind strip missed because it never accounted for
+// an option consuming its own operand token. Fix: give each wrapper an
+// explicit table of its own options — which ones take an operand (as a
+// following token, or attached with `=`), which take none, and which mean
+// the wrapper isn't executing anything at all (`command -v`/`-V`) — so an
+// option's operand is only ever consumed as that option's own operand,
+// never mistaken for the wrapped command.
+const WRAPPER_OPTION_TABLES = {
+  env: {
+    operand: new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]),
+    operandAttachable: new Set(["--unset", "--chdir"]),
+    flag: new Set(["-i", "--ignore-environment", "-0", "-v", "--null", "--debug"]),
+    allowsAssignments: true,
+  },
+  time: {
+    operand: new Set(["-f", "--format", "-o", "--output"]),
+    operandAttachable: new Set(["--format", "--output"]),
+    flag: new Set(["-p", "-a", "-v", "-q"]),
+  },
+  command: {
+    flag: new Set(["-p"]),
+    // `-v`/`-V` describe the command instead of running it, so anything
+    // after one is inert, not a clean install.
+    notExecuting: new Set(["-v", "-V"]),
+  },
+  exec: {
+    operand: new Set(["-a"]),
+    flag: new Set(["-c", "-l"]),
+  },
+  nohup: {},
+  nice: {
+    operand: new Set(["-n", "--adjustment"]),
+    operandAttachable: new Set(["--adjustment"]),
+  },
+};
 
 const ASSIGNMENT_TOKEN_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
@@ -588,13 +623,60 @@ function isAssignmentToken(token) {
   return typeof token === "string" && ASSIGNMENT_TOKEN_PATTERN.test(token);
 }
 
-// Repeatedly strips a leading assignment token, shell control word, or
-// transparent wrapper command (each already split into its own token by
-// tokenizeShellWords, so a value hiding inside a quoted token can never be
-// mistaken for one) off the front of an already-tokenized segment, until
-// only the real command word and its own arguments remain. Chained forms
-// (`env FOO=1 command corepack npm ci`) resolve because the loop keeps
-// going until nothing further peels off.
+// `nice`'s legacy niceness form (`nice -10 npm ci`): a bare dash followed
+// only by digits, distinct from every named option any wrapper defines.
+const NICE_LEGACY_ADJUSTMENT_PATTERN = /^-\d+$/;
+
+// Consumes exactly the given wrapper's own options — and, for `env`, its
+// leading `NAME=value` assignments — off the front of `tokens`, looping so
+// any order or repetition of them resolves. Stops at `--` (end of
+// options, consumed) or the first token that isn't one of the wrapper's
+// own — which is the wrapped command word, left untouched for the caller.
+// `notExecuting` options (`command -v`/`-V`) return `tokens` completely
+// unconsumed, head and all, so the caller's `tokens[0] !== "npm"` check
+// fails on the option itself rather than treating whatever follows it as
+// an executed command.
+function stripWrapperOptions(wrapperName, tokens) {
+  const table = WRAPPER_OPTION_TABLES[wrapperName];
+  let remaining = tokens;
+  for (;;) {
+    const head = remaining[0];
+    if (head === undefined) return remaining;
+    if (head === "--") return remaining.slice(1);
+    if (table.notExecuting?.has(head)) return remaining;
+    if (table.flag?.has(head)) {
+      remaining = remaining.slice(1);
+      continue;
+    }
+    if (table.operand?.has(head)) {
+      remaining = remaining.slice(2);
+      continue;
+    }
+    const equalsIndex = head.indexOf("=");
+    if (equalsIndex !== -1 && table.operandAttachable?.has(head.slice(0, equalsIndex))) {
+      remaining = remaining.slice(1);
+      continue;
+    }
+    if (wrapperName === "nice" && NICE_LEGACY_ADJUSTMENT_PATTERN.test(head)) {
+      remaining = remaining.slice(1);
+      continue;
+    }
+    if (table.allowsAssignments && isAssignmentToken(head)) {
+      remaining = remaining.slice(1);
+      continue;
+    }
+    return remaining;
+  }
+}
+
+// Repeatedly strips a leading assignment token, shell control word,
+// `corepack` (which forwards straight to the pinned npm release with no
+// options of its own), or one of the option-bearing wrappers above (each
+// already split into its own token by tokenizeShellWords, so a value
+// hiding inside a quoted token can never be mistaken for one) off the
+// front of an already-tokenized segment, until only the real command word
+// and its own arguments remain. Chained forms (`time env FOO=1 npm ci`)
+// resolve because the loop keeps going until nothing further peels off.
 function unwrapToCommandTokens(tokens) {
   let remaining = tokens;
   for (;;) {
@@ -604,29 +686,12 @@ function unwrapToCommandTokens(tokens) {
       remaining = remaining.slice(1);
       continue;
     }
-    if (SIMPLE_TRANSPARENT_WRAPPERS.has(head)) {
+    if (head === "corepack") {
       remaining = remaining.slice(1);
       continue;
     }
-    // `nice` takes its own optional `-n N` niceness argument before the
-    // command it wraps (`nice -n 10 npm ci`); with no `-n`, it wraps the
-    // very next token directly (`nice npm ci`).
-    if (head === "nice") {
-      remaining = remaining[1] === "-n" ? remaining.slice(3) : remaining.slice(1);
-      continue;
-    }
-    // `env` takes its own options (`-i`, `-u NAME`, ...) and any number of
-    // `NAME=value` assignment tokens before the command it wraps
-    // (`env FOO=1 npm ci`, `env -i FOO=1 npm ci`). Neither changes whether
-    // the wrapped command actually runs.
-    if (head === "env") {
-      remaining = remaining.slice(1);
-      while (
-        remaining.length > 0 &&
-        (isAssignmentToken(remaining[0]) || remaining[0].startsWith("-"))
-      ) {
-        remaining = remaining.slice(1);
-      }
+    if (Object.hasOwn(WRAPPER_OPTION_TABLES, head)) {
+      remaining = stripWrapperOptions(head, remaining.slice(1));
       continue;
     }
     return remaining;
@@ -1175,6 +1240,19 @@ for (const [label, run] of [
   ],
   ["an if/then/fi control-flow wrapper", "if npm ci; then echo ok; fi"],
   ["the time builtin", "time npm ci"],
+  // Codex review /tmp/codex-305-r15.md: option-bearing wrapper forms a
+  // blind dash-strip missed because it never told a wrapper's own option
+  // operand apart from the wrapped command — see WRAPPER_OPTION_TABLES and
+  // stripWrapperOptions above.
+  ["env with a short unset option", "env -u NODE_OPTIONS npm ci"],
+  ["env with a chdir option", "env -C . npm ci"],
+  ["time with the -p option", "time -p npm ci"],
+  ["command with the -p option", "command -p npm ci"],
+  ["exec with the -c option", "exec -c npm ci"],
+  ["nohup with an explicit end-of-options marker", "nohup -- npm ci"],
+  ["nice with a long adjustment option", "nice -n 10 npm ci"],
+  ["nice with the legacy numeric adjustment form", "nice -10 npm ci"],
+  ["nested time and env wrappers", "time env FOO=1 npm ci"],
 ]) {
   test(`negative case: a new job running "${label}" is caught by dynamic discovery`, async () => {
     const workflow = await loadWorkflow();
@@ -1374,6 +1452,34 @@ test("[codex-305-r14] isExecutableNpmCiSegment unwraps assignments, control word
   assert.equal(isExecutableNpmCiSegment("npm run ci"), false);
   assert.equal(isExecutableNpmCiSegment("npm run cit"), false);
   assert.equal(isExecutableNpmCiSegment("echo npm ci"), false);
+});
+
+// Codex review /tmp/codex-305-r15.md: direct classifier-level checks for
+// stripWrapperOptions itself. Each positive form has an option consuming
+// its own operand ahead of the real `npm ci`; each negative form has `npm`
+// itself sitting where an option's operand goes, so the wrapper's actual
+// command word is something else entirely (`ci` alone, or nothing that
+// runs at all).
+test("[codex-305-r15] isExecutableNpmCiSegment tells a wrapper's own option operand apart from the command it wraps", () => {
+  for (const run of [
+    "env -u NODE_OPTIONS npm ci",
+    "env -C . npm ci",
+    "time -p npm ci",
+    "command -p npm ci",
+    "exec -c npm ci",
+    "nohup -- npm ci",
+    "nice -n 10 npm ci",
+    "nice -10 npm ci",
+    "time env FOO=1 npm ci",
+  ]) {
+    assert.equal(isExecutableNpmCiSegment(run), true, `expected "${run}" to be recognized`);
+  }
+  // `npm` is the operand of `-u`/`-v`/`-V`, not the wrapper's own command,
+  // in every one of these — so none of them run `npm ci` at all.
+  assert.equal(isExecutableNpmCiSegment("env -u npm ci"), false);
+  assert.equal(isExecutableNpmCiSegment("command -v npm ci"), false);
+  assert.equal(isExecutableNpmCiSegment("command -V npm"), false);
+  assert.equal(isExecutableNpmCiSegment("env --unset=npm ci"), false);
 });
 
 // Codex review /tmp/codex-305-r13.md (finding 1): the same two forms,
