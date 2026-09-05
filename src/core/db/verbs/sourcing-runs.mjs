@@ -123,8 +123,28 @@ function normalizeError(error) {
     if (typeof error.action === "string" && error.action.trim()) {
       result.action = error.action.trim();
     }
-    for (const key of ["failedPromptIds", "queryResults", "sources", "errors"]) {
+    // "failedOffers" (CR-29 round 7): bounded per-offer recovery metadata
+    // (id + source URL, capped at 50 — see
+    // sourced-persistence.mjs's captureAndPersistOffersIfDb) a caller can
+    // attach alongside `failedIds` so a durable run's error carries enough
+    // to retry a specific posting, not just a count.
+    for (const key of [
+      "failedPromptIds",
+      "failedIds",
+      "failedOffers",
+      "queryResults",
+      "sources",
+      "errors",
+      // "conflictOffers" (CR-29 round 8): the same bounded per-offer shape
+      // as failedOffers, but for identity conflicts — a bridge offer
+      // spanning more than one distinct owner, rejected outright rather
+      // than a write failure. See captureAndPersistOffersIfDb.
+      "conflictOffers",
+    ]) {
       if (Array.isArray(error[key])) result[key] = clone(error[key]);
+    }
+    if (Number.isFinite(Number(error.conflicts))) {
+      result.conflicts = Number(error.conflicts);
     }
     return result;
   }
@@ -181,14 +201,23 @@ function runningLeaseExpired(run, nowMs = Date.now()) {
   return Number.isFinite(updatedMs) && nowMs - updatedMs > SOURCING_RUN_LEASE_MS;
 }
 
-function failRun(db, current, error, { preserveUpdatedAt = false } = {}) {
+function failRun(db, current, error, { preserveUpdatedAt = false, summary } = {}) {
   const now = nextTimestampIso(current.updated_at);
   return updateRun(db, {
     ...clone(current),
     status: SOURCING_RUN_STATUSES.FAILED,
     completed_at: now,
     updated_at: preserveUpdatedAt ? current.updated_at : now,
-    summary: null,
+    // A failed run used to always land with summary: null, even when its
+    // caller already had the child's bounded result in hand (e.g. an AI-web
+    // search worker that reported conflicts/failedOffers before settling as
+    // failed). Restart recovery reconstructs a terminal run's in-memory
+    // outcome as `{ run, value: run.summary }` (workspace-agent.mjs's
+    // reconcileOrphanedSourcingRuns), so a null summary meant that detail
+    // was unrecoverable across a restart even though it was available at
+    // fail time (CR-29 round 10). Callers that don't have one still pass
+    // nothing through, which keeps this null exactly as before.
+    summary: summary !== undefined ? clone(summary) : null,
     error: normalizeError(error),
   });
 }
@@ -399,7 +428,7 @@ export function sourcingRunProgress({ repoRoot, env, id, progress } = {}) {
   });
 }
 
-export function sourcingRunFail({ repoRoot, env, id, error } = {}) {
+export function sourcingRunFail({ repoRoot, env, id, error, summary } = {}) {
   const runId = assertRunId(id, "sourcingRunFail");
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
@@ -410,6 +439,6 @@ export function sourcingRunFail({ repoRoot, env, id, error } = {}) {
     if (TERMINAL_STATUSES.has(current.status)) {
       throw makeError(`sourcing run is already ${current.status}: ${runId}`, "CONFLICT");
     }
-    return { ok: true, run: failRun(db, current, error) };
+    return { ok: true, run: failRun(db, current, error, { summary }) };
   });
 }

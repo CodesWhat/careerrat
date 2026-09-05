@@ -286,6 +286,59 @@ test("unified AI starter reports app shutdown as resumable instead of completed"
   assert.equal(stored.status, "running");
 });
 
+test("unified AI starter keeps the child's partial value on a failed settlement instead of discarding it (CR-29 round 7)", async () => {
+  // Before round 7, a failed outcome returned only `run`/`error`, dropping
+  // `outcome.value` — the raw runAiWebSearch result the sourcing worker's
+  // execute() staged as its settlement value, which can carry
+  // offers/failedIds/failedOffers recovery detail beyond what
+  // normalizeError's whitelist folds into `run.error`.
+  const repoRoot = tempRepo();
+  let starterDefinition;
+  const failedValue = {
+    ok: false,
+    failed: 1,
+    failedIds: ["sourced-acme-example-1"],
+    offers: [],
+  };
+  const workspaceAgentRuntime = {
+    registerSourcingWorker() {},
+    registerAiWebSearchStarter(definition) {
+      starterDefinition = definition;
+    },
+    startSourcingWorker({ run }) {
+      return {
+        run,
+        promise: Promise.resolve({
+          run: {
+            ...run,
+            status: "failed",
+            error: {
+              code: "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED",
+              message: "Failed to persist 1 job description artifact(s).",
+              failedIds: ["sourced-acme-example-1"],
+            },
+          },
+          value: failedValue,
+        }),
+      };
+    },
+    async recordSearchStart() {},
+  };
+
+  mountedRoutesFor({
+    repoRoot,
+    workspaceAgentRuntime,
+    runAiWebSearch: async () => assert.fail("fixture must not run the provider directly"),
+  });
+
+  const result = await starterDefinition.start({ searchExecutionId: "search-artifact-failed" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.run.status, "failed");
+  assert.deepEqual(result.error.failedIds, ["sourced-acme-example-1"]);
+  assert.deepEqual(result.value, failedValue, "the child's partial value must survive a failure");
+});
+
 test("AI web-search generates candidate prompts automatically when none are saved", async () => {
   const repoRoot = tempRepo({ prompts: 0 });
   let searches = 0;
@@ -451,6 +504,51 @@ test("AI web-search route persists exact failed prompts and accepts retry prompt
   assert.equal(durable.error.sources[0].url, "https://jobs.example.test");
 });
 
+test("AI web-search route names both an incomplete query and a persistence conflict when the run's every selected prompt failed but a role from another query still hit an identity conflict (CR-29 round 9)", async () => {
+  // allSelectedPromptsFailed only means every SELECTED prompt failed its
+  // own query coverage — it says nothing about whether valid roles from
+  // another query already reached hydration and persistence, where they
+  // can independently trip an identity conflict. The AI_WEB_SEARCH_QUERIES_
+  // FAILED branch used to drop conflicts/conflictOffers entirely, losing
+  // that independent reconciliation failure once this branch took over.
+  const repoRoot = tempRepo();
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 0,
+      new: 0,
+      duplicates: 0,
+      errors: ["search timed out"],
+      failedPromptIds: ["p1"],
+      conflicts: 1,
+      conflictOffers: [
+        { company: "Acme", title: "Bridge Role", url: "https://jobs.example.test/acme/bridge" },
+      ],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find AI roles",
+          status: "failed",
+          queries: [{ query: "AI jobs", status: "failed", error: "search timed out" }],
+          error: "search timed out",
+        },
+      ],
+      sources: [{ url: "https://jobs.example.test", status: "failed", error: "timeout" }],
+    }),
+  })(request('{"promptIds":["p1"]}'), res);
+
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "failed");
+  assert.equal(durable.error.code, "AI_WEB_SEARCH_QUERIES_FAILED");
+  assert.deepEqual(durable.error.failedPromptIds, ["p1"]);
+  assert.equal(durable.error.conflicts, 1);
+  assert.equal(durable.error.conflictOffers.length, 1);
+  assert.equal(durable.error.conflictOffers[0].company, "Acme");
+  assert.match(durable.error.message, /identity conflict/i);
+});
+
 test("AI web-search route durably warns when only an auxiliary top-up query failed", async () => {
   const repoRoot = tempRepo();
   const res = response();
@@ -493,6 +591,45 @@ test("AI web-search route durably warns when only an auxiliary top-up query fail
   assert.deepEqual(durable.summary.errors, []);
   assert.deepEqual(durable.summary.warnings, [warning]);
   assert.equal(durable.summary.queryResults[0].queries[1].error, warning);
+});
+
+test("AI web-search route marks the run failed when a successful prompt still lost its posting to a JD artifact-write failure (CR-29 round 6)", async () => {
+  // A successful prompt followed by a JD staging failure used to settle as
+  // a completed run: the worker only checked whether EVERY selected prompt
+  // failed, ignoring runAiWebSearch's own ok/failed/failedIds. That
+  // suppressed retry despite the lost posting.
+  const repoRoot = tempRepo();
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 1,
+      new: 0,
+      presented: 0,
+      duplicates: 0,
+      errors: [],
+      failedPromptIds: [],
+      ok: false,
+      failed: 1,
+      failedIds: ["sourced-acme-example-1"],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find AI roles",
+          status: "completed",
+          queries: [{ query: "AI roles", status: "completed", error: null }],
+        },
+      ],
+      sources: [{ url: "https://jobs.example.test/role", status: "completed" }],
+    }),
+  })(request(), res);
+
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "failed");
+  assert.equal(durable.error.code, "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED");
+  assert.deepEqual(durable.error.failedIds, ["sourced-acme-example-1"]);
+  assert.deepEqual(durable.error.failedPromptIds, []);
 });
 
 test("AI web-search route preserves candidate-safe provider-cap guidance", async () => {

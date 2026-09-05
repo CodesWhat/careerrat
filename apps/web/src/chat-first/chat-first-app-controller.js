@@ -155,6 +155,27 @@ export function packetExportReceipt(response) {
     list(userFacing[kind]).filter((file) => file && typeof file === "object")
   );
   if (!files.length) return null;
+  // A plain-text export now gets the same deferred Downloads copy PDFs
+  // always had, so it can lead with the Downloads file name instead of the
+  // bare workspace-relative path the old receipt showed for text — the
+  // workspace path still follows as a secondary line. Falls through to the
+  // general receipt below if the Downloads copy itself failed (no
+  // downloadsPath), since there's nothing in Downloads to point at.
+  if (files.length === 1 && files[0].format === "text" && files[0].downloadsPath) {
+    const file = files[0];
+    const name = String(file.name || "the export").trim();
+    const workspacePath = String(file.path || "").trim();
+    return {
+      title: "Export complete",
+      artifact: {
+        kind: "Export receipt",
+        text: [
+          `Saved to your Downloads folder as ${name}.`,
+          ...(workspacePath && workspacePath !== name ? ["", workspacePath] : []),
+        ].join("\n"),
+      },
+    };
+  }
   const blocks = files.map((file, index) => {
     const name = String(file.name || file.path || `Export ${index + 1}`).trim();
     const path = String(file.downloadsPath || file.path || "").trim();
