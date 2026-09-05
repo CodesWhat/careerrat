@@ -16,10 +16,17 @@ import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import {
   appListArtifactRegistrations,
+  artifactReservationClaim,
+  artifactReservationOwner,
+  artifactReservationRelease,
   appRegisterPacketArtifacts as registerPacketArtifacts,
 } from "../db/verbs.mjs";
 import { validDocumentArtifact } from "../documents/artifact-validation.mjs";
-import { exportArtifact as documentExportArtifact } from "../documents/export.mjs";
+import {
+  exportArtifact as documentExportArtifact,
+  MARKDOWN_SOURCE_MAX_BYTES,
+  readBoundedSource,
+} from "../documents/export.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 
 function cleanText(value) {
@@ -51,6 +58,44 @@ function canonicalDestinationPath(path) {
     canonicalParent = resolve(parent);
   }
   return join(canonicalParent, basename(path));
+}
+
+// Resolves `parentDir`'s REAL filesystem identity -- creating it first if it
+// doesn't exist yet, since a brand-new tailored directory or a not-yet-
+// created packet manifest directory both legitimately don't exist before
+// this call -- and rejects unless that real path sits inside `realRoot`.
+// A lexical workspaceDir-prefix check (resolveWorkspacePath's `startsWith`)
+// is exactly what a symlinked tailored directory defeats: the symlink's own
+// path reads as "inside" the workspace right up until the OS follows it, so
+// only a post-symlink comparison closes the gap.
+function assertDestinationParentConfined(parentDir, realRoot) {
+  mkdirSync(parentDir, { recursive: true });
+  let realParent;
+  try {
+    realParent = realpathSync(parentDir);
+  } catch (err) {
+    const wrapped = new Error(
+      `export destination parent could not be resolved: ${err?.message || err}`
+    );
+    wrapped.code = "EXPORT_DESTINATION_UNSAFE";
+    throw wrapped;
+  }
+  if (realParent !== realRoot && !realParent.startsWith(`${realRoot}${sep}`)) {
+    const err = new Error(`export destination escapes the workspace root: ${parentDir}`);
+    err.code = "EXPORT_DESTINATION_UNSAFE";
+    throw err;
+  }
+  return realParent;
+}
+
+// Canonicalizes `path` against `realRoot`, rejecting any escape, and
+// returning ONLY the validated real form. Every promotion (a per-format
+// document render, the packet manifest) must write through this return
+// value rather than the original lexical `path`, so a symlinked ancestor
+// discovered anywhere along the way can never redirect the actual write.
+function confineDestination(path, realRoot) {
+  const realParent = assertDestinationParentConfined(dirname(path), realRoot);
+  return join(realParent, basename(path));
 }
 
 // Relativizing a canonical absPath against a lexical workspaceDir under a
@@ -303,6 +348,12 @@ export async function exportPacketArtifacts({
   formats,
   uploadRequirements = [],
   exportArtifact = documentExportArtifact,
+  // Test-only fault-injection seam for the packet manifest's own write
+  // (decision 6's rollback ordering): defaults to the real write. A real
+  // ENOSPC/quota/permission failure is exercised this way in tests since
+  // the staged sibling's random suffix can't otherwise be predicted or
+  // reliably provoked to fail on demand.
+  writeManifestFile = (path, content) => writeFileSync(path, content, "utf8"),
   now = () => new Date(),
 } = {}) {
   const id = cleanText(applicationId || appId);
@@ -319,6 +370,11 @@ export async function exportPacketArtifacts({
     uploadRequirements,
   });
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
+  // Resolved ONCE, before any rendering or promotion, and reused for every
+  // destination this batch touches (decision 1). A lexical workspaceDir
+  // check can't see a symlinked ancestor; comparing against the real root
+  // is what actually confines a promotion.
+  const realWorkspaceRoot = safeRealpath(workspaceDir);
   const storedManifest = readStoredManifest(workspaceDir, sources.packetManifest);
   const priorManifest =
     app.packetManifest && Object.keys(app.packetManifest).length
@@ -349,6 +405,15 @@ export async function exportPacketArtifacts({
   const downloadsErrors = [];
   const exportGaps = [];
   const generatedAt = now().toISOString();
+  // Canonical workspace-relative paths this call has reserved via the
+  // synchronous DB reservation (decision 2) -- always released in the outer
+  // finally below, on every exit path, success or failure.
+  const reservedPaths = [];
+  // Downloads copies queued during rendering but not yet performed
+  // (decision 5): { entry, finalPath } pairs, executed only once
+  // registration durably commits, so a batch that fails after this point
+  // never mutates Downloads at all.
+  const pendingDownloads = [];
 
   // Every export format writes to `${outBase}${ext}`, so an outBase that
   // lands on a source path (e.g. a resume.txt source stripped to "resume"
@@ -531,9 +596,39 @@ export async function exportPacketArtifacts({
   // the manifest/db still describe the previous (now-stale-on-disk) state.
   const stagingDir = join(workspaceDir, `.export-staging-${process.pid}-${randomToken()}`);
   mkdirSync(stagingDir, { recursive: true });
-  const pendingPromotions = []; // { stagedPath, finalPath }
+  const pendingPromotions = []; // { stagedPath, finalPath, displayPath }
+  // Declared here (rather than down at the promotion site) so the
+  // confinement + ownership + reservation check below can run before ANY
+  // rendering starts, and so the promotion/write section further down
+  // reuses the exact same validated path instead of re-deriving it.
+  let manifestPath = null;
+  let manifestDisplayPath = null;
 
   try {
+    // ---- Packet manifest destination: confinement + ownership (decisions 1/3) ----
+    // Resolved and validated up front, before any source renders, so a
+    // manifest path that escapes the workspace root or collides with
+    // another application's registration is rejected before this batch
+    // does any work at all -- not discovered only once the render loop
+    // reaches the manifest write at the very end.
+    if (sources.packetManifest) {
+      const rawManifestPath = resolveWorkspacePath(workspaceDir, sources.packetManifest);
+      if (rawManifestPath) {
+        manifestPath = confineDestination(rawManifestPath, realWorkspaceRoot);
+        const manifestIdentity = canonicalIdentity(manifestPath);
+        if (isForeignOwned(manifestIdentity)) {
+          const err = new Error(
+            `packet manifest destination is owned by another application: ${sources.packetManifest}`
+          );
+          err.code = "ARTIFACT_OWNED_BY_ANOTHER_APPLICATION";
+          throw err;
+        }
+        manifestDisplayPath = workspaceDisplayPath(workspaceDir, manifestPath);
+        artifactReservationClaim({ repoRoot, env, path: manifestDisplayPath, applicationId: id });
+        reservedPaths.push(manifestDisplayPath);
+      }
+    }
+
     for (const [sourceKey, storedPath] of sourceEntries(sources)) {
       const full = resolveWorkspacePath(workspaceDir, storedPath);
       if (!full || !existsSync(full)) {
@@ -541,7 +636,13 @@ export async function exportPacketArtifacts({
         err.code = "NOT_FOUND";
         throw err;
       }
-      const markdown = readFileSync(full, "utf8");
+      // Bounded read (decision 8): fstat-checks the source's on-disk size
+      // before ever reading its bytes, so an oversized source is rejected
+      // before this call allocates a big buffer or blocks the event loop —
+      // exportArtifact's own assertMarkdownSourceSize (documents/export.mjs)
+      // still guards any OTHER caller that hands it markdown already in
+      // memory.
+      const markdown = readBoundedSource(full, MARKDOWN_SOURCE_MAX_BYTES);
       const kind = sourceKind(sourceKey);
       // extname() returns "" for an extensionless source, and
       // full.slice(0, -"".length) is full.slice(0, -0). Because -0 === 0 in
@@ -551,7 +652,28 @@ export async function exportPacketArtifacts({
       // outBase instead of collapsing to an empty (and therefore relative,
       // process.cwd()-anchored) base.
       const sourceExt = extname(full);
-      const outBase = distinctOutBase(sourceExt ? full.slice(0, -sourceExt.length) : full, kind);
+      const rawOutBase = distinctOutBase(sourceExt ? full.slice(0, -sourceExt.length) : full, kind);
+      // Confinement (decision 1): validated and canonicalized BEFORE any
+      // rendering happens for this source, so a symlinked tailored
+      // directory is rejected here rather than only once promotion tries
+      // to rename into it.
+      const outBase = confineDestination(rawOutBase, realWorkspaceRoot);
+      // Ownership reservation (decision 2): every format this batch will
+      // produce for this source claims its destination synchronously,
+      // BEFORE the asynchronous render below starts, so a concurrent
+      // export for a DIFFERENT application racing on the same destination
+      // fails atomically here instead of both promoting into the same
+      // path once rendering finishes.
+      const formatDestinations = new Map(); // format -> { finalPath, displayPath }
+      for (const format of selectedFormats) {
+        const ext = FORMAT_EXTENSION[format];
+        if (!ext) continue;
+        const finalPath = `${outBase}${ext}`;
+        const displayPath = workspaceDisplayPath(workspaceDir, finalPath);
+        artifactReservationClaim({ repoRoot, env, path: displayPath, applicationId: id });
+        reservedPaths.push(displayPath);
+        formatDestinations.set(format, { finalPath, displayPath });
+      }
       // sourceEntries(sources) yields at most one entry per DOCUMENT_KINDS
       // kind (resumeSource/coverLetterSource/answersSource each map to a
       // distinct kind), so `kind` alone is a unique, stable staging
@@ -599,27 +721,24 @@ export async function exportPacketArtifacts({
           });
           continue;
         }
-        // The real destination this staged render is bound for — computed
-        // here (not derived from the staged path) so artifacts[key] and
-        // pendingPromotions always agree on where promotion will land it.
-        const finalPath = `${outBase}${FORMAT_EXTENSION[format]}`;
+        // The real destination this staged render is bound for — already
+        // computed and reserved above (not derived from the staged path)
+        // so artifacts[key] and pendingPromotions always agree on where
+        // promotion will land it.
+        const { finalPath, displayPath } = formatDestinations.get(format);
         const key = outputKey(kind, format);
-        artifacts[key] = workspaceDisplayPath(workspaceDir, finalPath);
-        pendingPromotions.push({ stagedPath, finalPath });
+        artifacts[key] = displayPath;
+        pendingPromotions.push({ stagedPath, finalPath, displayPath });
         const entry = { format, path: artifacts[key], name: basename(finalPath) };
         if (format === "pdf") {
-          // Reads from the STAGED file: the final destination doesn't exist
-          // yet (promotion hasn't happened), but the staged render is
-          // already complete and byte-identical to what promotion will
-          // move into place.
-          const copy = copyPdfToDownloads({
-            env,
-            company: app.company,
-            kind,
-            absPath: stagedPath,
-          });
-          if (copy?.ok) entry.downloadsPath = copy.path;
-          else if (copy && !copy.ok) downloadsErrors.push({ kind, format, message: copy.error });
+          // Downloads publish (decision 5): queued, not performed here. The
+          // copy itself only runs once registration durably commits, and
+          // reads from `finalPath` (the promoted file), not the staged
+          // one — by the time the deferred copy runs, promotion has
+          // already renamed the staged file into place, so the staging
+          // copy no longer exists. A batch that fails before registration
+          // commits must leave Downloads completely untouched.
+          pendingDownloads.push({ entry, kind, finalPath });
         }
         userFacing[kind].push(entry);
       }
@@ -636,7 +755,6 @@ export async function exportPacketArtifacts({
     // through db registration fails.
     const fileBackups = []; // { finalPath, backupPath }
     const newFilePaths = [];
-    let manifestPath = null;
     let manifestBackupPath = null;
     let manifestIsNew = false;
     let manifestTouched = false;
@@ -779,15 +897,54 @@ export async function exportPacketArtifacts({
         artifacts: mergedArtifacts,
       };
 
-      manifestPath = resolveWorkspacePath(workspaceDir, sources.packetManifest);
+      // manifestPath was already resolved and confined against the real
+      // workspace root before rendering began (decisions 1/3) — reused
+      // as-is here rather than re-derived from the lexical stored path.
       if (manifestPath) {
         manifestIsNew = !existsSync(manifestPath);
         if (!manifestIsNew) {
           manifestBackupPath = `${manifestPath}.bak-${randomToken()}`;
           renameSync(manifestPath, manifestBackupPath);
         }
-        writeFileSync(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`, "utf8");
+        // Manifest rollback (decision 6): the displacement (or "there was
+        // no predecessor") is durable BEFORE the write is even attempted,
+        // not after it succeeds — an ENOSPC/quota/permission failure
+        // partway through the write must still find manifestTouched=true
+        // so rollbackPromotion restores the backup instead of stranding it
+        // under a random name with the canonical path missing or partial.
+        // The write itself goes to a staged sibling and is only renamed
+        // into place once fully written, so a failure never leaves a
+        // truncated file at the canonical path; any partial staged output
+        // is removed before the error propagates to rollbackPromotion.
         manifestTouched = true;
+        const stagedManifestPath = `${manifestPath}.tmp-${randomToken()}`;
+        try {
+          writeManifestFile(stagedManifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`);
+          renameSync(stagedManifestPath, manifestPath);
+        } catch (writeErr) {
+          try {
+            unlinkSync(stagedManifestPath);
+          } catch {
+            // best-effort cleanup of the partial staged write
+          }
+          throw writeErr;
+        }
+      }
+
+      // Ownership reservation revalidation (decision 2): closes the window
+      // between this batch's early reservations and this, its final
+      // durable write — every destination this batch claimed must still
+      // be reserved by THIS application right before that claim becomes
+      // permanent via appRegisterPacketArtifacts.
+      for (const path of reservedPaths) {
+        const owner = artifactReservationOwner({ repoRoot, env, path });
+        if (owner !== id) {
+          const err = new Error(
+            `export destination "${path}" is no longer reserved by this application`
+          );
+          err.code = "ARTIFACT_OWNED_BY_ANOTHER_APPLICATION";
+          throw err;
+        }
       }
 
       registered = await appRegisterPacketArtifacts({
@@ -827,6 +984,22 @@ export async function exportPacketArtifacts({
       }
     }
 
+    // Downloads publish (decision 5): performed ONLY now, after promotion
+    // and registration have both durably committed. Reads from `finalPath`
+    // (the promoted file, real destination) rather than the vacated
+    // staging path. Never fatal to the export itself — a copy failure here
+    // is recorded the same way it always was, via downloadsErrors.
+    for (const { entry, kind, finalPath } of pendingDownloads) {
+      const copy = copyPdfToDownloads({
+        env,
+        company: app.company,
+        kind,
+        absPath: finalPath,
+      });
+      if (copy?.ok) entry.downloadsPath = copy.path;
+      else if (copy && !copy.ok) downloadsErrors.push({ kind, format: "pdf", message: copy.error });
+    }
+
     return {
       appId: id,
       applicationId: id,
@@ -841,6 +1014,19 @@ export async function exportPacketArtifacts({
       rmSync(stagingDir, { recursive: true, force: true });
     } catch {
       // best-effort cleanup
+    }
+    // Reservations are ephemeral (decision 2): released on every exit path,
+    // success or failure. A successful export's permanent claim now lives
+    // in the application row itself (appRegisterPacketArtifacts, above),
+    // which appListArtifactRegistrations reads for every FUTURE export's
+    // foreign-ownership check — this batch's own reservations have nothing
+    // left to protect once the call is over.
+    for (const path of reservedPaths) {
+      try {
+        artifactReservationRelease({ repoRoot, env, path, applicationId: id });
+      } catch {
+        // best-effort cleanup
+      }
     }
   }
 }

@@ -34,6 +34,11 @@ export {
   appOperationRetryStart,
   appOperationStart,
 } from "./app-operations.mjs";
+export {
+  artifactReservationClaim,
+  artifactReservationOwner,
+  artifactReservationRelease,
+} from "./artifact-reservations.mjs";
 export { calendarBusyUpsert, calendarWriteAppend } from "./calendar.mjs";
 export {
   authorizationDeclared,

@@ -1069,6 +1069,20 @@ test("a renderer failure after the first successful render leaves prior files an
   ]);
   const { exportPacketArtifacts } = await importPacketExports();
 
+  // Downloads publish (decision 5): a pre-existing Downloads copy must
+  // survive byte-for-byte when a LATER render in the same batch fails —
+  // the resume's own render (and its would-be Downloads copy) must never
+  // reach Downloads at all once cover letter crashes the whole batch.
+  const downloadsEnv = tempDownloadsEnv();
+  const priorDownloadsPath = join(
+    downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
+    "Acme",
+    "Acme - Resume.pdf"
+  );
+  mkdirSync(dirname(priorDownloadsPath), { recursive: true });
+  const priorDownloadsContent = "%PDF-1.4\nprior downloads copy\n%%EOF\n";
+  writeFileSync(priorDownloadsPath, priorDownloadsContent, "utf8");
+
   const renderCalls = [];
   const crashingExportArtifact = async ({ outBase, formats, title }) => {
     renderCalls.push(title);
@@ -1089,13 +1103,24 @@ test("a renderer failure after the first successful render leaves prior files an
     () =>
       exportPacketArtifacts({
         repoRoot,
-        env: tempDownloadsEnv(),
+        env: downloadsEnv,
         appId: "app-export",
         request: { formats: ["pdf"] },
         exportArtifact: crashingExportArtifact,
         now: () => new Date("2026-07-06T15:00:00Z"),
       }),
     /simulated renderer crash for cover letter/
+  );
+
+  assert.equal(
+    readFileSync(priorDownloadsPath, "utf8"),
+    priorDownloadsContent,
+    "a batch that fails after a successful resume render must leave Downloads completely untouched"
+  );
+  assert.deepEqual(
+    readdirSync(dirname(priorDownloadsPath)),
+    ["Acme - Resume.pdf"],
+    "no fresh or archived copy should appear in Downloads for a failed batch"
   );
 
   // The resume render succeeded and answers was never even attempted
@@ -1175,12 +1200,25 @@ test("a registration failure restores the prior files and pointers", async () =>
   const priorManifestFileContent = readFileSync(manifestFull, "utf8");
   const { exportPacketArtifacts } = await importPacketExports();
 
+  // Downloads publish (decision 5): a pre-existing Downloads copy must
+  // survive byte-for-byte when the render+promotion succeed but the
+  // durable DB registration afterward fails.
+  const downloadsEnv = tempDownloadsEnv();
+  const priorDownloadsPath = join(
+    downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
+    "Acme",
+    "Acme - Resume.pdf"
+  );
+  mkdirSync(dirname(priorDownloadsPath), { recursive: true });
+  const priorDownloadsContent = "%PDF-1.4\nprior downloads copy\n%%EOF\n";
+  writeFileSync(priorDownloadsPath, priorDownloadsContent, "utf8");
+
   const calls = [];
   await assert.rejects(
     () =>
       exportPacketArtifacts({
         repoRoot,
-        env: tempDownloadsEnv(),
+        env: downloadsEnv,
         appId: "app-export",
         packetSources: {
           resumeSource: sources.resumeSource,
@@ -1198,6 +1236,16 @@ test("a registration failure restores the prior files and pointers", async () =>
     readFileSync(join(repoRoot, priorResumePdf), "utf8"),
     "%PDF-1.4\nprior resume\n%%EOF\n",
     "the promoted resume PDF must be rolled back to its pre-call backup"
+  );
+  assert.equal(
+    readFileSync(priorDownloadsPath, "utf8"),
+    priorDownloadsContent,
+    "a registration failure after a successful render+promotion must leave Downloads completely untouched"
+  );
+  assert.deepEqual(
+    readdirSync(dirname(priorDownloadsPath)),
+    ["Acme - Resume.pdf"],
+    "no fresh or archived copy should appear in Downloads when registration fails"
   );
   assert.equal(
     readFileSync(manifestFull, "utf8"),
@@ -2144,4 +2192,335 @@ test("packet export owner delegates to existing document export helpers without 
   assert.match(source, /documents\/export\.mjs|exportArtifact/);
   assert.doesNotMatch(source, /\bnpm\s+(?:i|install)\b|\bnpx\s+playwright\s+install\b/);
   assert.doesNotMatch(source, /\bplaywright-core\b|@playwright\/test/);
+});
+
+// ---------------------------------------------------------------------------
+// Round-eleven Codex review: confinement, ownership, and bounded-read gaps.
+// ---------------------------------------------------------------------------
+
+test("exportPacketArtifacts rejects a symlinked tailored directory that escapes the workspace root, leaving the outside sentinel untouched", async () => {
+  // Decision 1: a lexical workspaceDir-prefix check can't see a symlinked
+  // ancestor -- resolveWorkspacePath's `startsWith` check reads the
+  // symlink's OWN path as "inside" the workspace, right up until the OS
+  // actually follows it. Every final destination's parent must be
+  // canonicalized against the REAL workspace root before any rendering
+  // starts, and rejected the moment it resolves outside.
+  const repoRoot = tempRepo();
+  const outsideRoot = mkdtempSync(join(tmpdir(), "careerrat-packet-export-outside-"));
+  cleanupRoots.push(outsideRoot);
+  const sentinelPath = join(outsideRoot, "sentinel.txt");
+  const sentinelContent = "must not be touched\n";
+  writeFileSync(sentinelPath, sentinelContent, "utf8");
+
+  const linkedTailoredDir = join(repoRoot, "workspace/tailored/escaped-app");
+  symlinkSync(outsideRoot, linkedTailoredDir);
+
+  const resumeSourceAbs = join(linkedTailoredDir, "resume.md");
+  writeFileSync(resumeSourceAbs, "# Escaped\n\nBody.\n", "utf8");
+  const resumeSource = "workspace/tailored/escaped-app/resume.md";
+
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-escape",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeSource },
+    },
+  ]);
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await assert.rejects(
+    () =>
+      exportPacketArtifacts({
+        repoRoot,
+        env: tempDownloadsEnv(),
+        appId: "app-escape",
+        packetSources: { resumeSource },
+        request: { formats: ["text"] },
+        exportArtifact: fakeExporter(calls),
+        now: () => new Date("2026-07-06T15:00:00Z"),
+      }),
+    (err) => {
+      assert.equal(err.code, "EXPORT_DESTINATION_UNSAFE");
+      return true;
+    }
+  );
+
+  assert.equal(
+    calls.length,
+    0,
+    "no render should be attempted for a destination that escapes the workspace root"
+  );
+  assert.equal(
+    readFileSync(sentinelPath, "utf8"),
+    sentinelContent,
+    "the sentinel outside the workspace must survive byte-for-byte"
+  );
+
+  const artifacts = readApp(repoRoot, "app-escape").artifacts;
+  assert.equal(artifacts.resumeText, undefined, "no export pointer should have been registered");
+});
+
+test("exportPacketArtifacts rejects a packet manifest destination already owned by another application", async () => {
+  // Decision 3: the cross-application owner index already includes
+  // packetManifest registrations, but the manifest write itself never
+  // consulted it -- so two applications sharing (or stale-pointing at) the
+  // same manifest path let exporting either one silently overwrite the
+  // other's canonical manifest. The manifest destination must go through
+  // the same foreign-ownership check as every other destination.
+  const repoRoot = tempRepo();
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-manifest-resume.md",
+    "# Acme Staff Engineer\n\nEvidence-backed resume body.\n"
+  );
+  const sharedManifestContent = JSON.stringify({
+    appId: "app-other-owner",
+    generatedAt: "2026-07-06T14:00:00Z",
+    uploadReady: true,
+  });
+  const sharedManifest = writeWorkspaceFile(
+    repoRoot,
+    "tailored/shared-manifest.json",
+    sharedManifestContent
+  );
+
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeSource, packetManifest: sharedManifest },
+    },
+    {
+      id: "app-other-owner",
+      company: "Globex",
+      role: "Principal Engineer",
+      status: "reviewed-hold",
+      artifacts: { packetManifest: sharedManifest },
+    },
+  ]);
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await assert.rejects(
+    () =>
+      exportPacketArtifacts({
+        repoRoot,
+        env: tempDownloadsEnv(),
+        appId: "app-export",
+        packetSources: { resumeSource, packetManifest: sharedManifest },
+        request: { formats: ["text"] },
+        exportArtifact: fakeExporter(calls),
+        now: () => new Date("2026-07-06T15:00:00Z"),
+      }),
+    (err) => {
+      assert.equal(err.code, "ARTIFACT_OWNED_BY_ANOTHER_APPLICATION");
+      return true;
+    }
+  );
+
+  assert.equal(
+    calls.length,
+    0,
+    "no render should be attempted when the manifest destination is foreign-owned"
+  );
+  assert.equal(
+    readFileSync(join(repoRoot, sharedManifest), "utf8"),
+    sharedManifestContent,
+    "the foreign-owned manifest must survive byte-for-byte"
+  );
+
+  const artifacts = readApp(repoRoot, "app-export").artifacts;
+  assert.equal(artifacts.resumeText, undefined, "no export pointer should have been registered");
+});
+
+test("a concurrent export for a different application racing on the same destination fails with an ownership error", async () => {
+  // Decision 2: the pre-render foreign-ownership check reads a snapshot of
+  // the owner index taken once at call start, so two exports racing on the
+  // SAME destination (here, two applications sharing one resumeSource, so
+  // both compute the identical outBase) can both see the destination as
+  // available before either one has registered anything. The transactional
+  // DB reservation is the actual enforcement: it's claimed synchronously,
+  // BEFORE the asynchronous render starts, so the second racer fails
+  // atomically instead of both promoting into the same path once rendering
+  // finishes.
+  const repoRoot = tempRepo();
+  const sharedResumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/race-shared-resume.md",
+    "# Shared Resume\n\nBody shared by two applications.\n"
+  );
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-race-a",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeSource: sharedResumeSource },
+    },
+    {
+      id: "app-race-b",
+      company: "Globex",
+      role: "Principal Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeSource: sharedResumeSource },
+    },
+  ]);
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  let releaseA;
+  const pausedUntil = new Promise((resolve) => {
+    releaseA = resolve;
+  });
+  const pausedExporter = async (args) => {
+    await pausedUntil;
+    return fakeExporter([])(args);
+  };
+
+  // Calling (not yet awaiting) exportPacketArtifacts runs app-race-a's
+  // function body SYNCHRONOUSLY up to its first await -- which, by
+  // construction, is the paused render call -- so by the time this line
+  // returns, app-race-a's reservation for the shared destination is
+  // already committed in the DB.
+  const promiseA = exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-race-a",
+    packetSources: { resumeSource: sharedResumeSource },
+    request: { formats: ["text"] },
+    exportArtifact: pausedExporter,
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const callsB = [];
+  await assert.rejects(
+    () =>
+      exportPacketArtifacts({
+        repoRoot,
+        env: tempDownloadsEnv(),
+        appId: "app-race-b",
+        packetSources: { resumeSource: sharedResumeSource },
+        request: { formats: ["text"] },
+        exportArtifact: fakeExporter(callsB),
+        now: () => new Date("2026-07-06T15:00:00Z"),
+      }),
+    (err) => {
+      assert.equal(err.code, "ARTIFACT_OWNED_BY_ANOTHER_APPLICATION");
+      return true;
+    }
+  );
+  assert.equal(callsB.length, 0, "app-race-b must never render once the destination is reserved");
+
+  // Release app-race-a's paused render and let it finish -- the first
+  // racer's export must complete successfully despite the second racer's
+  // failed attempt.
+  releaseA();
+  const resultA = await promiseA;
+  assert.match(resultA.artifacts.resumeText, /race-shared-resume/);
+
+  const artifactsB = readApp(repoRoot, "app-race-b").artifacts;
+  assert.equal(artifactsB.resumeText, undefined, "app-race-b must not have registered anything");
+});
+
+test("a manifest write failure restores the prior manifest with no stray backup", async () => {
+  // Decision 6: manifestTouched used to flip to true only AFTER the write
+  // succeeded, so an ENOSPC/quota/permission failure during the write
+  // itself skipped rollbackPromotion's manifest-restore branch entirely --
+  // stranding the pre-existing manifest under a random backup name with
+  // the canonical path missing. Displacement must be durable BEFORE the
+  // write is attempted, so a write failure still triggers a full restore.
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot, "manifest-write-fail");
+  seedApp(repoRoot, sources);
+  const manifestFull = join(repoRoot, sources.packetManifest);
+  const priorManifestFileContent = readFileSync(manifestFull, "utf8");
+  const manifestDir = dirname(manifestFull);
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  const calls = [];
+  const failingWriteManifestFile = () => {
+    const err = new Error("simulated ENOSPC while writing the packet manifest");
+    err.code = "ENOSPC";
+    throw err;
+  };
+
+  await assert.rejects(
+    () =>
+      exportPacketArtifacts({
+        repoRoot,
+        env: tempDownloadsEnv(),
+        appId: "app-export",
+        packetSources: {
+          resumeSource: sources.resumeSource,
+          packetManifest: sources.packetManifest,
+        },
+        request: { formats: ["text"] },
+        exportArtifact: fakeExporter(calls),
+        writeManifestFile: failingWriteManifestFile,
+        now: () => new Date("2026-07-06T15:00:00Z"),
+      }),
+    /simulated ENOSPC/
+  );
+
+  assert.equal(
+    readFileSync(manifestFull, "utf8"),
+    priorManifestFileContent,
+    "the original manifest must be restored at the canonical path"
+  );
+  const strayFiles = readdirSync(manifestDir).filter(
+    (name) => name.includes(".bak-") || name.includes(".tmp-")
+  );
+  assert.deepEqual(strayFiles, [], "no stray backup or staged temp file should survive");
+
+  const appAfter = readApp(repoRoot, "app-export");
+  assert.deepEqual(appAfter.artifacts, sources);
+});
+
+test("exportPacketArtifacts rejects an oversized packet source before calling the exporter", async () => {
+  // Decision 8: packet export's own read of the source file used to be an
+  // unbounded readFileSync, so a very large source was fully read into
+  // memory before exportArtifact's own byte-cap guard ever ran. The
+  // bounded reader must fstat the source and reject it before the exporter
+  // is ever invoked.
+  const repoRoot = tempRepo();
+  const oversizedContent = "a".repeat(3 * 1024 * 1024);
+  const resumeSource = writeWorkspaceFile(
+    repoRoot,
+    "tailored/oversized-resume.md",
+    oversizedContent
+  );
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-oversized",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: { resumeSource },
+    },
+  ]);
+  const calls = [];
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await assert.rejects(
+    () =>
+      exportPacketArtifacts({
+        repoRoot,
+        env: tempDownloadsEnv(),
+        appId: "app-oversized",
+        packetSources: { resumeSource },
+        request: { formats: ["text"] },
+        exportArtifact: fakeExporter(calls),
+        now: () => new Date("2026-07-06T15:00:00Z"),
+      }),
+    (err) => {
+      assert.equal(err.code, "MARKDOWN_SOURCE_TOO_LARGE");
+      return true;
+    }
+  );
+
+  assert.equal(calls.length, 0, "the exporter must never be called for an oversized source");
 });

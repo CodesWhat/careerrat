@@ -1535,6 +1535,55 @@ test("appListArtifactRegistrations still reports a registration whose underlying
   ]);
 });
 
+// Regression (decision 7 / finding "owner index omits supported artifact
+// registrations"): appRegisterArtifact accepts arbitrary kinds, including
+// "jd" -- but the owner index's classifier used to recognize only a fixed
+// set of packet-specific keys (resume/coverLetter/answers plus their
+// Source/Pdf/Docx/Text suffixes and packetManifest) and silently dropped
+// everything else. A "jd" registration was therefore invisible to
+// appListArtifactRegistrations, so ANOTHER application's export could claim
+// the exact path a jd artifact already lived at. Every remaining
+// string-valued artifact key must now be indexed as a plain path, not just
+// the ones this domain happened to already know about.
+test("appListArtifactRegistrations indexes a jd artifact registered through appRegisterArtifact", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-jd-owner",
+      company: "Initrode",
+      role: "Architect",
+      status: "reviewed-hold",
+      artifacts: {},
+    },
+  });
+  appRegisterArtifact({
+    repoRoot,
+    id: "app-jd-owner",
+    kind: "jd",
+    path: "workspace/tailored/app-jd-owner/jd.md",
+  });
+
+  const registrations = appListArtifactRegistrations({ repoRoot });
+  const jdRegistration = registrations.find(
+    (r) => r.path === "workspace/tailored/app-jd-owner/jd.md"
+  );
+  assert.deepEqual(jdRegistration, {
+    applicationId: "app-jd-owner",
+    kind: "jd",
+    format: "plain",
+    path: "workspace/tailored/app-jd-owner/jd.md",
+  });
+
+  // The GeneratedAt stamp appRegisterArtifact stamps alongside the path must
+  // still never surface as a bogus "path" registration.
+  assert.equal(
+    registrations.some((r) => r.path === "jdGeneratedAt" || /^\d{4}-\d{2}-\d{2}T/.test(r.path)),
+    false
+  );
+});
+
 // activityAppend is the one domain-action-shaped verb that does NOT bump the
 // freshness stamp (verbs/activity.mjs: "logging alone isn't a tracker.json
 // data change") — same carve-out as analyticsRefresh, just for a different

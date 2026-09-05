@@ -1105,13 +1105,25 @@ export function appRegisterPacketArtifacts({
 // packet/exports.mjs so this read-only db-layer verb has no dependency on
 // the packet layer that calls it.
 const ARTIFACT_KEY_FORMAT_SUFFIX = { Pdf: "pdf", Docx: "docx", Text: "text" };
-const PLAIN_ARTIFACT_KINDS = new Set(["resume", "coverLetter", "answers"]);
+
+// The one registry of `application.artifacts` keys that are metadata, not a
+// workspace path — kept here, next to classifyArtifactKey, so there is
+// exactly one place that decides what the owner index should ignore. Every
+// OTHER string-valued key is indexed as a path (decision 7): the prior
+// approach kept an allowlist of known PATH kinds (resume/coverLetter/
+// answers) and silently dropped everything else, so a supported kind this
+// registry didn't already know about — appRegisterArtifact's arbitrary
+// `kind` (e.g. "jd"), or any future one — was invisible to the owner index
+// and could be silently claimed as another application's export
+// destination.
+const ARTIFACT_METADATA_KEY_SUFFIXES = ["GeneratedAt", "Note", "CapturedAt"];
 
 // Classifies one `application.artifacts` key into the {kind, format} an
 // artifact-path owner index needs, or returns null for a key that isn't a
 // path at all (packetGeneratedAt, resumeGeneratedAt, packetNote, ...).
 function classifyArtifactKey(key) {
   if (key === "packetManifest") return { kind: "packetManifest", format: "manifest" };
+  if (ARTIFACT_METADATA_KEY_SUFFIXES.some((suffix) => key.endsWith(suffix))) return null;
   if (key.endsWith("Source")) {
     return { kind: key.slice(0, -"Source".length), format: "source" };
   }
@@ -1120,8 +1132,11 @@ function classifyArtifactKey(key) {
       return { kind: key.slice(0, -suffix.length), format };
     }
   }
-  if (PLAIN_ARTIFACT_KINDS.has(key)) return { kind: key, format: "plain" };
-  return null;
+  // Any remaining string-valued artifact key is a path this domain has no
+  // dedicated format suffix for — index it as a plain path (e.g. "jd", or
+  // a future kind registered via appRegisterArtifact) rather than silently
+  // excluding it from the owner index.
+  return { kind: key, format: "plain" };
 }
 
 // appListArtifactRegistrations({repoRoot, env}) — the cross-application

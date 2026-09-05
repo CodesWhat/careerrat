@@ -19,7 +19,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import JSZip from "jszip";
-import { exportArtifact, MARKDOWN_SOURCE_MAX_BYTES } from "../src/core/documents/export.mjs";
+import {
+  exportArtifact,
+  MARKDOWN_SOURCE_MAX_BYTES,
+  MARKDOWN_SOURCE_MAX_LINES,
+} from "../src/core/documents/export.mjs";
 
 const cleanupRoots = [];
 
@@ -114,6 +118,41 @@ test("exportArtifact rejects a markdown source over the export size limit before
   );
 
   assert.equal(existsSync(`${outBase}.txt`), false, "no file was written for an oversized source");
+});
+
+// ---------------------------------------------------------------------------
+// Markdown source structural (line-count) budget: the byte cap above bounds
+// total input size, but not its STRUCTURE. A source built from hundreds of
+// thousands of tiny paragraphs stays well under 2 MiB while still exploding
+// into a proportionally huge retained line/block/run object graph once
+// parseMdBlocks/parseRuns run. A near-byte-limit alternating text-and-blank-
+// line document is the pathological shape: tiny total bytes, huge line
+// count, and it must be rejected quickly, before any block is built.
+// ---------------------------------------------------------------------------
+
+test("exportArtifact rejects a markdown source over the export line-count limit before writing anything", async () => {
+  const packetDir = tempDir("careerrat-export-too-many-lines-");
+  const outBase = join(packetDir, "resume");
+  // Alternating "a\n" / "\n" pairs: two lines per iteration, each pair only
+  // 2 bytes, so this document sails well under MARKDOWN_SOURCE_MAX_BYTES
+  // while still landing well past MARKDOWN_SOURCE_MAX_LINES.
+  const pairCount = Math.ceil(MARKDOWN_SOURCE_MAX_LINES / 2) + 1000;
+  const markdown = "a\n\n".repeat(pairCount);
+  assert.ok(Buffer.byteLength(markdown, "utf8") < MARKDOWN_SOURCE_MAX_BYTES);
+  assert.ok(markdown.split(/\r?\n/).length > MARKDOWN_SOURCE_MAX_LINES);
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    () => exportArtifact({ markdown, outBase, formats: ["text"] }),
+    /exceeds the .* export limit/
+  );
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(existsSync(`${outBase}.txt`), false, "no file was written for an over-limit source");
+  assert.ok(
+    elapsedMs < 2000,
+    `rejection must be quick, before any block-building work runs (took ${elapsedMs}ms)`
+  );
 });
 
 test("exportArtifact writes the text artifact inside the packet directory", async () => {

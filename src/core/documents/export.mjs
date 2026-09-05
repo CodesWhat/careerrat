@@ -6,8 +6,12 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  closeSync,
+  fstatSync,
   lstatSync,
+  openSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   unlinkSync,
@@ -39,6 +43,61 @@ function assertMarkdownSourceSize(markdown) {
     );
     err.code = "MARKDOWN_SOURCE_TOO_LARGE";
     throw err;
+  }
+}
+
+// The byte cap above bounds total input size, but not its STRUCTURE: a
+// source built from hundreds of thousands of tiny paragraphs stays well
+// under 2 MiB while still exploding into a proportionally huge retained
+// object graph once parseMdBlocks/parseRuns turn every line into its own
+// line/block/run entry (measured: ~699k tiny paragraphs pushed RSS to
+// ~695 MiB). A structural budget on line count, checked before any block
+// is built, catches that shape regardless of byte size. 50,000 lines
+// comfortably covers any real resume/cover-letter/answers markdown source.
+export const MARKDOWN_SOURCE_MAX_LINES = 50_000;
+
+function assertMarkdownLineCount(markdown) {
+  const lineCount = String(markdown ?? "").split(/\r?\n/).length;
+  if (lineCount > MARKDOWN_SOURCE_MAX_LINES) {
+    const err = new Error(
+      `exportArtifact: markdown source has ${lineCount} lines, which exceeds the ${MARKDOWN_SOURCE_MAX_LINES}-line export limit.`
+    );
+    err.code = "MARKDOWN_SOURCE_TOO_LARGE";
+    throw err;
+  }
+}
+
+// Reads `path` fully as utf8, but fstat()s the ALREADY-OPEN file descriptor
+// before reading its bytes and rejects anything over `maxBytes` — a
+// path-based statSync-then-readFileSync pair leaves a symlink-swap window
+// between the size check and the read; fstat on the same fd the read then
+// uses has none. Shared so every caller reading an export source straight
+// off disk (packet export's batch loop; any future direct caller) enforces
+// the byte cap before allocating a buffer for the full file, rather than
+// after. exportArtifact's own assertMarkdownSourceSize (above) stays as the
+// guard for a caller that hands it markdown already in memory rather than
+// a path.
+export function readBoundedSource(path, maxBytes = MARKDOWN_SOURCE_MAX_BYTES) {
+  const fd = openSync(path, "r");
+  try {
+    const { size } = fstatSync(fd);
+    if (size > maxBytes) {
+      const err = new Error(
+        `readBoundedSource: "${path}" is ${size} bytes, which exceeds the ${maxBytes}-byte export limit.`
+      );
+      err.code = "MARKDOWN_SOURCE_TOO_LARGE";
+      throw err;
+    }
+    const buffer = Buffer.alloc(size);
+    let offset = 0;
+    while (offset < size) {
+      const bytesRead = readSync(fd, buffer, offset, size - offset, offset);
+      if (bytesRead <= 0) break;
+      offset += bytesRead;
+    }
+    return buffer.toString("utf8");
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -2535,6 +2594,7 @@ export async function exportArtifact({
   root,
 }) {
   assertMarkdownSourceSize(markdown);
+  assertMarkdownLineCount(markdown);
   const result = {};
 
   for (const fmt of formats) {
