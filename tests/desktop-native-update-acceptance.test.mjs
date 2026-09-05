@@ -201,6 +201,50 @@ test("native update acceptance drives the updater and leaves a one-shot restart 
   });
 });
 
+test("native update acceptance never leaves a restart marker behind a failed install request", async () => {
+  const acceptance = await optionalImport("../apps/desktop/native-update-acceptance.mjs");
+  assert.ok(acceptance, "the packaged acceptance helper must exist");
+  const fixture = acceptanceFixture();
+  const resolved = acceptance.resolveNativeUpdateAcceptance({
+    argv: [`--native-update-acceptance=${fixture.requestPath}`],
+    isPackaged: true,
+    platform: "darwin",
+    currentVersion: "0.16.2",
+    userDataDir: fixture.userDataDir,
+    acceptancePublicKey,
+  });
+  const updater = {
+    setFeedURL() {},
+  };
+
+  await assert.rejects(
+    acceptance.beginNativeUpdateAcceptance({
+      acceptance: resolved,
+      updater,
+      createController(options) {
+        return {
+          async checkNow() {
+            options.push({ phase: "ready", version: "0.16.3" });
+          },
+          install() {
+            return false;
+          },
+        };
+      },
+      requestInstall() {
+        return false;
+      },
+    }),
+    /could not start the native installer/i
+  );
+
+  assert.equal(
+    existsSync(resolved.pointerPath),
+    false,
+    "a failed install request must not leave a restart marker for the next launch"
+  );
+});
+
 test("prior packaged app seeds canonical candidate state through its normal local server", async () => {
   const acceptance = await optionalImport("../apps/desktop/native-update-acceptance.mjs");
   assert.ok(acceptance, "the packaged acceptance helper must exist");
