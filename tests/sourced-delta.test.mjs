@@ -140,7 +140,60 @@ test("summarizes delta counts separately from repo dedupe", () => {
     newAfterRepoDedupe: 0,
     carried: 1,
     removed: 0,
+    conflicts: 0,
   });
+});
+
+test("a current row bridging two distinct previous postings is a conflict, not a clean carry, and leaves the unclaimed previous posting removed (CR-29 round 13)", () => {
+  // Codex review of PR #304: diffSnapshotOffers used to test membership
+  // against FLATTENED key sets, so a current row carrying one identity from
+  // previous posting A (an aggregator reqId) and another from previous
+  // posting B (a direct Workday URL) matched "some previous key" twice and
+  // was reported as one clean carry — zero removals, even though it can't
+  // actually be a continuation of BOTH distinct postings at once.
+  const previous = [
+    {
+      company: "Acme",
+      title: "Senior Engineer",
+      url: "https://hiring.cafe/job/aggregator-id-a",
+      reqId: "hiringcafe:aggregator-id-a",
+    },
+    {
+      company: "Beta",
+      title: "Staff Engineer",
+      url: "https://beta.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Staff-Engineer_JR99999",
+    },
+  ];
+  const current = [
+    {
+      company: "Acme",
+      title: "Senior Engineer",
+      // Bridges A's own aggregator reqId with B's Workday URL.
+      reqId: "hiringcafe:aggregator-id-a",
+      url: "https://beta.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Staff-Engineer_JR99999",
+    },
+  ];
+
+  const delta = diffSnapshotOffers({ current, previous });
+  const summary = summarizeDelta(delta);
+
+  assert.equal(summary.previous, 2);
+  assert.equal(summary.current, 1);
+  assert.equal(summary.conflicts, 1);
+  assert.equal(delta.carriedOffers.length, 0, "a multi-owner bridge is never a clean carry");
+  assert.equal(delta.newOffers.length, 0);
+  assert.deepEqual(
+    delta.conflictOffers.map((offer) => offer.company),
+    ["Acme"]
+  );
+  // The aggregator reqId key is checked first (postingIdentityKeys' req:
+  // keys precede its url: key), so posting A is the one claimed as matched
+  // and posting B is the one left with no current representation at all.
+  assert.deepEqual(
+    delta.removedOffers.map((offer) => offer.company),
+    ["Beta"]
+  );
+  assert.equal(summary.removed, 1);
 });
 
 test("offerIdentityKeys keeps both an aggregator's own reqId and its URL-derived Workday key", () => {
