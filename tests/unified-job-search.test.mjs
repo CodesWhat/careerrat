@@ -126,6 +126,61 @@ test("keeps deterministic results when AI top-up fails", async () => {
   });
 });
 
+test("marks the AI lane failed on a JD artifact-write failure, not just when every prompt failed (CR-29 round 6)", async () => {
+  const { runUnifiedJobSearch } = await loadSubject();
+
+  const result = await runUnifiedJobSearch({
+    searchExecutionId: "search-ai-artifact-failed",
+    runDeterministic: async () => ({ ok: true, offers: [{ id: "configured-result" }] }),
+    runAiWeb: async () => ({
+      ok: false,
+      failed: 1,
+      failedIds: ["sourced-acme-example-1"],
+      error: "Failed to persist 1 job description artifact(s).",
+    }),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, true);
+  assert.deepEqual(result.lanes.deterministic, {
+    status: "succeeded",
+    result: { ok: true, offers: [{ id: "configured-result" }] },
+  });
+  assert.equal(result.lanes.aiWeb.status, "failed");
+  assert.deepEqual(result.lanes.aiWeb.result.failedIds, ["sourced-acme-example-1"]);
+});
+
+test("the parent execution record carries failedIds and bounded per-offer recovery metadata through a child artifact failure (CR-29 round 7)", async () => {
+  // src/cli/search-route.mjs's unified AI starter used to discard the
+  // child's `value` whenever its run failed, so by the time a real search
+  // execution reached this level, `result.lanes.aiWeb.result` would already
+  // be missing failedIds/failedOffers even though runUnifiedJobSearch itself
+  // is a pure passthrough. This locks the passthrough contract directly: as
+  // long as `runAiWeb` resolves with the recovery metadata attached (the
+  // starter's job, fixed separately), the parent record must carry all of
+  // it through untouched.
+  const { runUnifiedJobSearch } = await loadSubject();
+
+  const failedOffers = [
+    { id: "sourced-acme-example-1", url: "https://jobs.example.test/acme/example-1" },
+  ];
+  const result = await runUnifiedJobSearch({
+    searchExecutionId: "search-ai-recovery-metadata",
+    runDeterministic: async () => ({ ok: true, offers: [{ id: "configured-result" }] }),
+    runAiWeb: async () => ({
+      ok: false,
+      failed: 1,
+      failedIds: ["sourced-acme-example-1"],
+      failedOffers,
+      error: "Failed to persist 1 job description artifact(s).",
+    }),
+  });
+
+  assert.equal(result.lanes.aiWeb.status, "failed");
+  assert.deepEqual(result.lanes.aiWeb.result.failedIds, ["sourced-acme-example-1"]);
+  assert.deepEqual(result.lanes.aiWeb.result.failedOffers, failedOffers);
+});
+
 test("does not start AI top-up after deterministic cancellation", async () => {
   const { runUnifiedJobSearch } = await loadSubject();
   const controller = new AbortController();

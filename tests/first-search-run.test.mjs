@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
@@ -11,6 +11,7 @@ import {
   companyBoardResolutionUpsert,
   sourceConfigGet,
   sourceConfigPut,
+  sourcedUpsertBatch,
   sourcingRunComplete,
   sourcingRunLatest,
   sourcingRunStart,
@@ -1419,6 +1420,253 @@ test("completed search runs preserve bounded rejection evidence", async () => {
       provider: "lever",
     },
   ]);
+});
+
+test("a JD artifact-write failure settles the DIRECT (settle: true) path as failed, keeps failedIds, and still allows a retry run", async () => {
+  // CR-29 round 6: runSourcedScan already reported the write failure in
+  // ok/failed/failedIds, but normalizeRunSummary dropped all three and
+  // runFirstSearchInBackground settled the run as "completed" regardless —
+  // the source watermark stayed blocked with no visible failed run to
+  // retry against.
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: { title_filter: {}, location_filter: null, searches: [] },
+  });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  // Block EVERY JD artifact write: making "workspace/jobs" itself a plain
+  // FILE means the write's mkdirSync(dirname(absPath)) throws for any
+  // offer, since an ancestor path component exists but isn't a directory.
+  mkdirSync(dirname(jobsDir), { recursive: true });
+  writeFileSync(jobsDir, "");
+
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    fetchImpl: async () =>
+      leverResponse({ title: "AI Engineer", url: "https://jobs.lever.co/acme/ai-engineer" }),
+  });
+
+  const failed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error.code, "SOURCED_ARTIFACT_WRITE_FAILED");
+  assert.deepEqual(failed.error.failedIds, ["sourced-acme-lever-ai-engineer"]);
+
+  // A failed run must still allow a retry to be started once the failure is
+  // fixed.
+  rmSync(jobsDir, { force: true });
+  const retry = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    retryFailed: true,
+    inputFingerprint: started.run.metadata.inputFingerprint,
+  });
+  assert.equal(retry.reused, false);
+  assert.notEqual(retry.run.id, started.run.id);
+
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: retry.run.id,
+    fetchImpl: async () =>
+      leverResponse({ title: "AI Engineer", url: "https://jobs.lever.co/acme/ai-engineer" }),
+  });
+  const completed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.summary.new, 1);
+});
+
+test("a JD artifact-write failure settles the SHARED-WORKER (settle: false) path as failed and keeps failedIds", async () => {
+  // Same failure mode as the direct-settle test above, but through the
+  // settle:false branch createWorkspaceAgentRuntime's sourcing workers use
+  // (they settle terminal state themselves off `result.settlement`).
+  const repoRoot = tempRepo();
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: { title_filter: {}, location_filter: null, searches: [] },
+  });
+  const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+  mkdirSync(dirname(jobsDir), { recursive: true });
+  writeFileSync(jobsDir, "");
+
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  const result = await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    settle: false,
+    fetchImpl: async () =>
+      leverResponse({ title: "AI Engineer", url: "https://jobs.lever.co/acme/ai-engineer" }),
+  });
+
+  assert.equal(result.settlement.status, "failed");
+  assert.equal(result.settlement.error.code, "SOURCED_ARTIFACT_WRITE_FAILED");
+  assert.deepEqual(result.settlement.error.failedIds, ["sourced-acme-lever-ai-engineer"]);
+  // settle:false never touches the durable run itself — the caller (the
+  // sourcing worker manager) owns settling it off this settlement.
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
+});
+
+// A same-batch offer that bridges two already-persisted rows sharing one
+// identity key (a Greenhouse requisition id both picked up as an ALIAS from
+// an earlier merge, not their own URL) settles the scan as an identity
+// conflict, not an artifact-write failure — see scan-sourced.test.mjs's own
+// round-8 regression for why filterAndDedupeOffers's same-run dedupe can't
+// catch this itself. Used by both the DIRECT and SHARED-WORKER conflict
+// tests below (CR-29 round 9).
+function seedConflictBridgeSources(repoRoot) {
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-legacy-conflict-owner-a",
+        company: "Legacy Corp A",
+        role: "Legacy Role A",
+        link: "https://jobs.example.test/legacy-corp-a/role",
+        fitScore: 70,
+        aliasKeys: ["req:greenhouse:9999999"],
+      },
+      {
+        id: "sourced-legacy-conflict-owner-b",
+        company: "Legacy Corp B",
+        role: "Legacy Role B",
+        link: "https://jobs.example.test/legacy-corp-b/role",
+        fitScore: 70,
+        aliasKeys: ["req:greenhouse:9999999"],
+      },
+    ],
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: null,
+      tracked_companies: [],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "HiringCafe",
+          source_type: "url-query",
+          label: "Bridge Conflict",
+          query: "Bridge Conflict",
+          enabled: true,
+          recency: { mode: "since-last-run", safetyMinutes: 30 },
+          searchState: { sortBy: "date" },
+        },
+      ],
+    },
+  });
+}
+
+const conflictBridgeCaptureImpl = async () => ({
+  offers: [
+    {
+      company: "Bridge Co",
+      title: "Bridge Role",
+      url: "https://boards.greenhouse.io/bridgeco/jobs/9999999",
+      location: "Remote",
+      bodyText: "Body for the identity-conflict regression.",
+      source: "hiringcafe-browser",
+      sourceProvider: "hiringcafe",
+    },
+  ],
+  errors: [],
+  needsLogin: null,
+});
+
+// runFirstSearchInBackground always runs runSourcedScan with `verify: true`,
+// so the bridge offer's URL gets a real liveness fetch before it ever
+// reaches reconciliation. This stands in for a live posting page (status
+// 200, no expired/listing/bot-wall pattern, >=300 chars of body content) so
+// the offer survives liveness and actually reaches captureAndPersistOffersIfDb.
+const conflictBridgeFetchImpl = async () =>
+  new Response(`<html><body>${"Job posting content. ".repeat(20)}</body></html>`, {
+    status: 200,
+  });
+
+test("an identity conflict (no artifact-write failure) settles the DIRECT (settle: true) path as SOURCED_IDENTITY_CONFLICT, not SOURCED_ARTIFACT_WRITE_FAILED, and carries conflicts/conflictOffers", async () => {
+  // CR-29 round 9: normalizeRunSummary used to drop `conflicts`/
+  // `conflictOffers` entirely, so a conflict-only scan (ok: false,
+  // failed: 0, conflicts: 1) settled as SOURCED_ARTIFACT_WRITE_FAILED with
+  // the message "Failed to persist 0 job description artifact(s)" — naming
+  // the wrong subsystem and losing the conflict recovery detail.
+  const repoRoot = tempRepo();
+  seedConflictBridgeSources(repoRoot);
+
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    captureBrowserSourceImpl: conflictBridgeCaptureImpl,
+    fetchImpl: conflictBridgeFetchImpl,
+  });
+
+  const failed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error.code, "SOURCED_IDENTITY_CONFLICT");
+  assert.doesNotMatch(failed.error.message, /Failed to persist 0/);
+  assert.match(failed.error.message, /1 identity conflict/);
+  assert.equal(failed.error.conflicts, 1);
+  assert.equal(failed.error.conflictOffers.length, 1);
+  assert.equal(
+    failed.error.conflictOffers[0].url,
+    "https://boards.greenhouse.io/bridgeco/jobs/9999999"
+  );
+  assert.deepEqual(failed.error.failedIds, []);
+
+  const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+  assert.equal(rows.length, 2, "only the two pre-seeded legacy rows may exist");
+});
+
+test("an identity conflict (no artifact-write failure) settles the SHARED-WORKER (settle: false) path the same way, without touching the durable run", async () => {
+  const repoRoot = tempRepo();
+  seedConflictBridgeSources(repoRoot);
+
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  const result = await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    settle: false,
+    captureBrowserSourceImpl: conflictBridgeCaptureImpl,
+    fetchImpl: conflictBridgeFetchImpl,
+  });
+
+  assert.equal(result.settlement.status, "failed");
+  assert.equal(result.settlement.error.code, "SOURCED_IDENTITY_CONFLICT");
+  assert.doesNotMatch(result.settlement.error.message, /Failed to persist 0/);
+  assert.equal(result.settlement.error.conflicts, 1);
+  assert.equal(result.settlement.error.conflictOffers.length, 1);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run.status, "running");
 });
 
 test("background first search publishes a growing found count before completion", async () => {

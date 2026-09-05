@@ -189,29 +189,96 @@ export function mountSearchRoutes({
           : [];
         const allSelectedPromptsFailed =
           Number(result?.searched || 0) > 0 && failedPromptIds.length >= Number(result.searched);
-        if (!allSelectedPromptsFailed) {
+        // A successful prompt can still lose its posting to a JD
+        // artifact-write failure downstream (CR-29 round 6): runAiWebSearch
+        // already reports that in result.ok/result.failed/result.failedIds,
+        // but this worker used to only look at whether EVERY prompt failed,
+        // so a partial persistence failure settled as a completed run —
+        // suppressing retry despite the lost posting. failedIds (row ids,
+        // distinct from failedPromptIds above) is carried into the run's
+        // error so a caller can see exactly what needs retrying.
+        const hasArtifactFailures = result?.ok === false || Number(result?.failed || 0) > 0;
+        if (!allSelectedPromptsFailed && !hasArtifactFailures) {
           return {
             settlement: { status: "completed", summary: result },
             value: result,
           };
         }
-        return {
-          settlement: {
-            status: "failed",
-            error: {
-              code: "AI_WEB_SEARCH_QUERIES_FAILED",
-              message:
-                result.errors?.[0] ||
-                "Every selected AI web-search prompt failed or had no reported query coverage.",
-              action: "retry-failed",
-              failedPromptIds,
-              queryResults: result.queryResults || [],
-              sources: result.sources || [],
-              errors: result.errors || [],
+        if (!allSelectedPromptsFailed) {
+          // Identity conflicts (CR-29 round 8) settle a run as not-clean the
+          // same way an artifact-write failure does (see result.ok above),
+          // but a conflict is neither written nor a genuine duplicate — the
+          // message and code below distinguish it from an ordinary write
+          // failure so a caller (and its retry copy) points at the right
+          // remediation.
+          const failedCount = Number(result.failed || 0);
+          const conflictCount = Number(result.conflicts || 0);
+          const message =
+            conflictCount > 0
+              ? failedCount > 0
+                ? `Failed to persist ${failedCount} job description artifact(s) and found ${conflictCount} identity conflict(s) that could not be reconciled.`
+                : `Found ${conflictCount} identity conflict(s) that could not be reconciled.`
+              : `Failed to persist ${failedCount} job description artifact(s).`;
+          return {
+            settlement: {
+              status: "failed",
+              error: {
+                code:
+                  failedCount > 0
+                    ? "AI_WEB_SEARCH_ARTIFACT_WRITE_FAILED"
+                    : "AI_WEB_SEARCH_IDENTITY_CONFLICT",
+                message,
+                action: "retry-failed",
+                failedPromptIds,
+                failedIds: result.failedIds || [],
+                failedOffers: result.failedOffers || [],
+                conflicts: conflictCount,
+                conflictOffers: result.conflictOffers || [],
+                queryResults: result.queryResults || [],
+                sources: result.sources || [],
+                errors: result.errors || [],
+              },
             },
-          },
-          value: result,
-        };
+            value: result,
+          };
+        }
+        {
+          // A prompt marked failed doesn't stop OTHER selected prompts'
+          // valid roles from proceeding through hydration and persistence
+          // (CR-29 round 9), where they can independently hit an identity
+          // conflict — allSelectedPromptsFailed only means every prompt
+          // failed its own query coverage, not that nothing reached
+          // captureAndPersistOffersIfDb. Dropping conflicts/conflictOffers
+          // here (as before) lost that independent reconciliation failure
+          // entirely once the queries-failed branch below took over.
+          const conflictCount = Number(result?.conflicts || 0);
+          const baseMessage =
+            result.errors?.[0] ||
+            "Every selected AI web-search prompt failed or had no reported query coverage.";
+          const message =
+            conflictCount > 0
+              ? `${baseMessage} Also found ${conflictCount} identity conflict(s) that could not be reconciled.`
+              : baseMessage;
+          return {
+            settlement: {
+              status: "failed",
+              error: {
+                code: "AI_WEB_SEARCH_QUERIES_FAILED",
+                message,
+                action: "retry-failed",
+                failedPromptIds,
+                failedIds: result.failedIds || [],
+                failedOffers: result.failedOffers || [],
+                conflicts: conflictCount,
+                conflictOffers: result.conflictOffers || [],
+                queryResults: result.queryResults || [],
+                sources: result.sources || [],
+                errors: result.errors || [],
+              },
+            },
+            value: result,
+          };
+        }
       } catch (error) {
         if (signal.aborted) throw signal.reason || error;
         return {
@@ -631,7 +698,24 @@ export function mountSearchRoutes({
         return { ok: false, resumable: true, run: started.run };
       }
       if (outcome?.run?.status === "failed") {
-        return { ok: false, run: outcome.run, error: outcome.run.error };
+        // Keep the child's partial value on a failed settlement (CR-29
+        // round 7): this used to return only `run`/`error`, discarding
+        // `outcome.value` — the raw runAiWebSearch result the sourcing
+        // worker's execute() staged as its settlement value (see the
+        // registerSourcingWorker definition above), which can carry
+        // offers/queryResults/failedIds recovery detail beyond what
+        // normalizeError's whitelist folds into `run.error`. Losing it here
+        // meant the durable search-execution record's `aiWeb` lane summary
+        // (persistLane's `result?.run?.summary ?? result?.value` fallback in
+        // workspace-agent.mjs) went null on every failed run instead of
+        // carrying that detail forward for a caller to inspect or retry
+        // against.
+        return {
+          ok: false,
+          run: outcome.run,
+          error: outcome.run.error,
+          value: outcome?.value ?? null,
+        };
       }
       return { ok: true, run: outcome?.run || started.run, value: outcome?.value ?? null };
     },

@@ -1,5 +1,24 @@
 # Calendar UX — research and the target shape
 
+## Retired 2026-09-04
+
+This is a research and recommendation doc for `CalendarNextPage.jsx`, which the July 10, 2026 decision note
+below made `/calendar`. Commit `a85a9e96` renamed `CalendarNextPage.jsx` to `CalendarPage.jsx` that same day.
+Commit `16a66b06` ("feat(web)!: replace the app with the chat-first workspace") deleted `CalendarPage.jsx`,
+that renamed successor, along with the rest of the page-based UI. The chat-first workspace now supplies Schedule
+through `apps/web/src/chat-first/WorkspaceBrowser.jsx`'s Schedule panel. One correction to the analysis below:
+it says the page renders `event.export` and `event.done` per event; the chat-first Schedule panel only reads
+`event.export` to gate one shared "Add to calendar" action, and that shared action exports only the first
+exportable event in the list, not the whole list. It does not render an `event.done` state at all. Per-event
+export selection remains an unresolved gap.
+
+The research below is otherwise historical: it describes routes and components that no longer exist. Read it
+for the reasoning, not as a description of the running app.
+
+<!-- markdownlint-disable MD022 MD032 MD012 -->
+<!-- Everything below this point is the original research body, left untouched by the retirement
+     notice above; do not run a markdown formatter over it. -->
+
 Researched July 10, 2026. Companion to `DASHBOARD_UX_RESEARCH.md`.
 
 **Decision (July 10, 2026):** `CalendarNextPage.jsx` — the agenda-first shape below — is `/calendar`. The

@@ -794,6 +794,15 @@ export function FilesPanel({
               >
                 Export
               </button>
+              {file.packetKind ? (
+                <button
+                  type="button"
+                  className="cf-button cf-button--outline"
+                  onClick={() => onExportFile?.(file.id, "text")}
+                >
+                  Plain text (.txt)
+                </button>
+              ) : null}
             </article>
           ))
         ) : (

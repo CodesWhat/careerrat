@@ -12,8 +12,9 @@ const UNRESOLVABLE_ROLE_FAMILIES = new Set(["other", "uncategorized"]);
 function normalizeFamily(value) {
   return String(value || "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join("-");
 }
 
 function dedupeCaseInsensitive(list) {

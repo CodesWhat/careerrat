@@ -3,7 +3,7 @@ import { isAbsolute, join, normalize, relative, sep } from "node:path";
 
 import { mayRun } from "../automation/consent.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
-import { validDocumentArtifact } from "../documents/artifact-validation.mjs";
+import { validUploadArtifact } from "../documents/artifact-validation.mjs";
 import {
   capturePacketQuestions,
   classifySelfIdentificationQuestion,
@@ -399,6 +399,23 @@ function browserInterventionBlockers(snapshot) {
   return [...new Set(blockers)];
 }
 
+// The apply driver's own resume-candidate keys (uploadArtifacts below), in
+// priority-agnostic form: packet/exports.mjs and the answer-confirmation
+// readiness recompute (one-off-answer.mjs) both need "is there ANY
+// uploadable resume on this application" as an independent, always-checked
+// gap — not derived from whichever other gaps happen to be open — and both
+// need it to mean exactly what the apply driver will actually pick from at
+// submit time, not a second, drifting definition of "uploadable."
+const RESUME_ARTIFACT_KEYS = ["resumePdf", "resumeDocx", "resume"];
+
+export function hasUploadableResumeArtifact({ repoRoot, env, artifacts } = {}) {
+  const source = artifacts || {};
+  return RESUME_ARTIFACT_KEYS.some((key) => {
+    const candidate = safeWorkspaceArtifact(repoRoot, env, source[key]);
+    return Boolean(candidate && validUploadArtifact(candidate));
+  });
+}
+
 function uploadArtifacts({ repoRoot, env, application, postingUrl }) {
   const artifacts = application?.artifacts || {};
   const workday = /(?:^|\.)myworkday(?:jobs)?\.com$/i.test(
@@ -420,7 +437,7 @@ function uploadArtifacts({ repoRoot, env, application, postingUrl }) {
     Object.entries(candidates).map(([kind, values]) => {
       const path = values
         .map((stored) => safeWorkspaceArtifact(repoRoot, env, stored))
-        .find((candidate) => candidate && validDocumentArtifact(candidate));
+        .find((candidate) => candidate && validUploadArtifact(candidate));
       return [kind, path || null];
     })
   );

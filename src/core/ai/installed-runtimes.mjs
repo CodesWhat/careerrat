@@ -164,9 +164,13 @@ const INSTALLED_CHILD_ENV_KEYS = Object.freeze([
   "NODE_EXTRA_CA_CERTS",
 ]);
 
-export function buildInstalledRuntimeChildEnv({ env = process.env } = {}) {
+// The base allowlist carries no provider credential, so one CLI can never read
+// another's. A runtime that documents its own credential variables gets exactly
+// those added on top, and only when it is the runtime being launched.
+export function buildInstalledRuntimeChildEnv({ env = process.env, runtimeId = null } = {}) {
   const childEnv = {};
-  for (const key of INSTALLED_CHILD_ENV_KEYS) {
+  const runtimeKeys = runtimeId ? installedRuntimeDefinition(runtimeId)?.authEnvKeys || [] : [];
+  for (const key of [...INSTALLED_CHILD_ENV_KEYS, ...runtimeKeys]) {
     if (env[key] !== undefined) childEnv[key] = env[key];
   }
   return childEnv;
@@ -209,6 +213,16 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     acpArgs: Object.freeze(["--acp"]),
     binaries: ["gemini"],
     commandShape: "gemini --acp",
+    // Variables the Gemini CLI itself reads for its non-interactive auth
+    // methods: GEMINI_API_KEY for the Gemini Developer API, the rest for
+    // Vertex AI. Verified against gemini-cli 0.58.0.
+    authEnvKeys: Object.freeze([
+      "GEMINI_API_KEY",
+      "GOOGLE_API_KEY",
+      "GOOGLE_CLOUD_PROJECT",
+      "GOOGLE_CLOUD_LOCATION",
+      "GOOGLE_GENAI_USE_VERTEXAI",
+    ]),
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "Make sure you're signed in.",
     installUrl: "https://github.com/google-gemini/gemini-cli",
@@ -1516,7 +1530,7 @@ export async function probeInstalledRuntime(
   }
   const definition = installedRuntimeDefinition(runtime.id);
   if (!definition) return { status: "unsupported", ready: false, action: null };
-  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const childEnv = buildInstalledRuntimeChildEnv({ env, runtimeId: runtime.id });
   let runtimeVersion = null;
   let capabilityOverrides = {};
   let capabilityReason = null;
@@ -1578,7 +1592,7 @@ export async function probeInstalledRuntime(
   if (definition.protocol === "acp") {
     try {
       await probeAcpRuntimeImpl({
-        runtime: { ...runtime, acpArgs: definition.acpArgs },
+        runtime: { ...runtime, name: definition.name, acpArgs: definition.acpArgs },
         cwd,
         env: childEnv,
         timeoutMs,
@@ -1628,7 +1642,15 @@ export async function probeInstalledRuntime(
       };
     } catch (error) {
       if (error?.code === "RUNTIME_AUTH_REQUIRED") {
-        return { status: "authentication_required", ready: false, action: "start_sign_in" };
+        // The handshake knows which variable this agent wants, so carry that
+        // sentence through instead of leaving the user with a sign-in button
+        // that cannot help.
+        return {
+          status: "authentication_required",
+          ready: false,
+          action: "start_sign_in",
+          probeMessage: error.message || null,
+        };
       }
       return { status: "probe_failed", ready: false, action: "retry" };
     }
@@ -2864,7 +2886,7 @@ export async function runInstalledRuntime({
     : [];
   const toolBearing = providerTools.length > 0;
   assertRuntimeCapabilities({ runtime, definition, skill, tools: providerTools, outputSchema });
-  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const childEnv = buildInstalledRuntimeChildEnv({ env, runtimeId: runtime.id });
   const assertExecutionIdentity = () =>
     assertInstalledRuntimeExecutionIdentity(runtime, {
       env: childEnv,
@@ -2939,7 +2961,7 @@ export async function runInstalledRuntime({
         stagedReadPath,
       });
       return await runAcpRuntimeImpl({
-        runtime: { ...runtime, acpArgs: definition.acpArgs },
+        runtime: { ...runtime, name: definition.name, acpArgs: definition.acpArgs },
         prompt: installedPrompt,
         cwd: skillCwd || taskCwd || cwd,
         tools: providerTools,
@@ -3275,7 +3297,7 @@ export async function runInstalledRuntimeStream({
     outputSchema,
     streaming: true,
   });
-  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const childEnv = buildInstalledRuntimeChildEnv({ env, runtimeId: runtime.id });
   const assertExecutionIdentity = () =>
     assertInstalledRuntimeExecutionIdentity(runtime, {
       env: childEnv,
@@ -3351,7 +3373,7 @@ export async function runInstalledRuntimeStream({
         stagedReadPath,
       });
       return await runAcpRuntimeImpl({
-        runtime: { ...runtime, acpArgs: definition.acpArgs },
+        runtime: { ...runtime, name: definition.name, acpArgs: definition.acpArgs },
         prompt: installedPrompt,
         cwd: skillCwd || taskCwd || cwd,
         tools: providerTools,

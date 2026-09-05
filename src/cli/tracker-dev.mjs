@@ -49,6 +49,7 @@ import {
   sourceRelationshipsInApp,
   syncStatusesInApp,
 } from "../core/automation/browser-workflows.mjs";
+import { artifactReservationReleaseAll } from "../core/db/verbs/artifact-reservations.mjs";
 import { createDeepIngestAppOperationKinds } from "../core/deep-ingest/app-operations.mjs";
 import {
   COMPANY_DISCOVERY_OPERATION_KIND,
@@ -766,6 +767,19 @@ export function createDevServer({
 
     try {
       runtimeOwnership = acquireWorkspaceRuntimeOwnership({ repoRoot, env });
+      // A reservation only means something inside a live export invocation --
+      // any row still here at boot belonged to a process that never got to
+      // release it (crash, force-kill, power loss). Reclaim every row now,
+      // before any worker below resumes, so an abandoned reservation can
+      // never block a future export to the same destination. Mirrors
+      // appOperations.recoverOrphans()'s own NO_DATABASE handling just
+      // below: first-run setup boots before any workspace database exists
+      // at all, so "nothing to reclaim yet" is success, not a boot failure.
+      try {
+        artifactReservationReleaseAll({ repoRoot, env });
+      } catch (error) {
+        if (error?.code !== "NO_DATABASE") throw error;
+      }
       const recoveredAppOperations = appOperations.recoverOrphans();
       await recoverOnboardingSearchPromptOperations({
         appOperations,

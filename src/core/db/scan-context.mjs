@@ -72,20 +72,21 @@ function toTrackerSourced(row = {}) {
   };
 }
 
-function addSeenRow(row, { seenUrls, seenReqIds, seenCompanyRoles, seenPostingKeys }) {
+function addSeenRow(row, { seenUrls, seenReqIds, seenCompanyRoles }) {
   const link = row.link || "";
   if (link) {
     seenUrls.add(link);
     addReqId(seenReqIds, link);
   }
   if (row.co && row.role) seenCompanyRoles.add(normalizeCompanyRoleKey(row.co, row.role));
-  addPostingIdentity(seenPostingKeys, row);
 }
 
 export function buildDbSeenSets({ repoRoot, env } = {}) {
   const db = requireDb({ repoRoot, env });
-  const apps = readDbRows(db, "applications").map(toTrackerApp);
-  const sourced = readDbRows(db, "sourced").map(toTrackerSourced);
+  const rawApps = readDbRows(db, "applications");
+  const rawSourced = readDbRows(db, "sourced");
+  const apps = rawApps.map(toTrackerApp);
+  const sourced = rawSourced.map(toTrackerSourced);
   const tracker = { apps, sourced };
 
   const seenUrls = new Set();
@@ -93,7 +94,16 @@ export function buildDbSeenSets({ repoRoot, env } = {}) {
   const seenCompanyRoles = new Set();
   const seenPostingKeys = new Set();
   for (const row of [...apps, ...sourced]) {
-    addSeenRow(row, { seenUrls, seenReqIds, seenCompanyRoles, seenPostingKeys });
+    addSeenRow(row, { seenUrls, seenReqIds, seenCompanyRoles });
+  }
+  // seenPostingKeys is built from the RAW rows, not the toTrackerApp/
+  // toTrackerSourced projections above: those projections only carry the
+  // dashboard-display fields (co/role/link/...) and drop scanner.reqId /
+  // aliasKeys, so a row with an explicit aggregator reqId (or a persisted
+  // identity alias, see sourced-identity.mjs's aliasKeys) would silently
+  // lose that identity here and only match by its bare URL (CR-29 round 3).
+  for (const row of [...rawApps, ...rawSourced]) {
+    addPostingIdentity(seenPostingKeys, row);
   }
 
   return { seenUrls, seenReqIds, seenCompanyRoles, seenPostingKeys, tracker };

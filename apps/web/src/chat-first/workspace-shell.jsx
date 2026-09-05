@@ -49,9 +49,11 @@ function UpdateNotice({ update }) {
           {update.primaryLabel}
         </button>
       ) : null}
-      <button type="button" onClick={update.onDismiss}>
-        {update.kind === "ready" ? "Later" : "Dismiss"}
-      </button>
+      {update.kind === "installing" ? null : (
+        <button type="button" onClick={update.onDismiss}>
+          {update.kind === "ready" ? "Later" : "Dismiss"}
+        </button>
+      )}
     </div>
   );
 }

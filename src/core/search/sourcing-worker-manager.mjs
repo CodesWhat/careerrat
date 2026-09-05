@@ -24,7 +24,18 @@ function settleSuccessfulExecution({ repoRoot, env, run, result }) {
   const value = Object.hasOwn(result || {}, "value") ? result.value : result;
   if (settlement?.status === "failed") {
     return {
-      run: sourcingRunFail({ repoRoot, env, id: run.id, error: settlement.error }).run,
+      // Keep the child's bounded result on the durable run record itself,
+      // not just in this in-process outcome (CR-29 round 10): a crash
+      // between this settle and the caller persisting its own lane summary
+      // otherwise loses conflicts/failedOffers permanently, since restart
+      // recovery reconstructs the outcome from `run.summary` alone.
+      run: sourcingRunFail({
+        repoRoot,
+        env,
+        id: run.id,
+        error: settlement.error,
+        summary: settlement?.summary ?? value ?? null,
+      }).run,
       value,
     };
   }

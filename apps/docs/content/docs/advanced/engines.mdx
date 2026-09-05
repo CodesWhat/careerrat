@@ -1,0 +1,132 @@
+---
+title: Why Only Two Supported Engines?
+description: Upstream projects list ten CLIs. CareerRat lists two. Here's the bar the other nine don't clear.
+---
+
+CareerRat's own runtime registry detects eleven AI CLIs: Claude Code, Codex,
+Gemini CLI, OpenCode, GitHub Copilot CLI, Qwen Code, Antigravity, Hermes
+Agent, Amp, Goose, and Droid. Only two, Claude Code and Codex, are supported.
+That gap looks like an oversight until you look at what "supported" means,
+and what else CareerRat checks before it will actually use a CLI.
+
+Other agent-CLI compatibility lists usually mean "can read a markdown file and
+run bare." CareerRat's `supported` flag means something stricter, but it is a
+static design decision, not a live check. It marks a CLI that CareerRat has
+built an accepted adapter and a non-interactive permission boundary for.
+Claude Code and Codex stay `supported` even if the CLI is not installed, the
+user is not signed in, the installed version is below CareerRat's version
+floor, or the completion probe fails. Four checks decide whether a supported
+CLI is actually usable right now.
+
+## The four gates
+
+**The `supported` flag.** Each entry in the runtime registry
+(`src/core/ai/installed-runtimes.mjs`) carries a `supported: true` or `false`.
+Only `claude` and `codex` are `true`. Selecting an unsupported runtime is
+rejected outright, both in the settings route
+(`src/cli/installed-runtime-route.mjs`) and in the AI call router
+(`src/core/ai/call-ai.mjs`).
+
+**The per-protocol boundary.** A supported runtime doesn't just get invoked,
+it runs inside a locked-down sandbox CareerRat builds itself. Claude Code runs
+with `defaultMode: "dontAsk"`, `Bash`, `Edit`, `Write`, and `Agent` denied
+outright, and a blanket `denyRead` rule (`//**`) paired with an `allowRead`
+list holding only the paths the skill needs. Codex runs with
+`--sandbox read-only`, `--ignore-user-config`, `--ignore-rules`, and a long
+list of disabled features (shell tool, browser use, computer use,
+multi-agent, plugins, and more). Neither CLI's default mode looks like this;
+CareerRat constructs it per call.
+
+**The completion receipt.** Before CareerRat trusts a runtime for real work,
+it runs a smoke test: ask the CLI, inside that same sandbox, to return one
+exact JSON object matching a fixed schema (`COMPLETION_SMOKE_SCHEMA`) with a
+single `receipt` field and nothing else. The probe requests no tools and
+reads no candidate or workspace files. Both probes run inside a scratch
+working directory CareerRat creates for the probe itself. Codex also gets a
+temporary schema file; Claude Code receives the same schema inline through
+`--json-schema`. Neither CLI sees anything that belongs to the candidate. An exact match
+proves the CLI can complete a bounded, structured request under the
+configured sandbox. It doesn't independently
+exercise every deny rule; a CLI that accepted the sandbox flags but quietly
+ignored them could still pass.
+
+**The binary fingerprint.** Before CareerRat runs real work through a
+runtime, it re-checks a SHA-256 hash of the executable against the one it
+resolved at detection time. If the binary on disk changed since detection,
+the identity check fails and the workflow execution is refused. Settings,
+authentication, and ACP probes don't independently fingerprint the
+executable. Tool-bearing Claude Code runs are the exception: they check
+identity before the boundary-version probe, then check it again
+immediately before the workflow process spawns.
+
+A CLI clears "supported" by being listed as one in the registry. That is a
+static policy decision, not something a probe can change, but normal routing
+still enforces the allowlist on every request. Readiness is different,
+and for Claude Code the version check is tri-state, not pass/fail. Basic
+readiness needs the CLI installed, signed in, and passing the completion
+receipt; a conclusive below-floor result (a clean version probe reporting
+a version under `2.1.241`) blocks readiness outright. An indeterminate
+boundary read (the version probe exited abnormally but still printed a
+parseable version, even one under the floor) can remain selectable with
+reduced capabilities, while a CLI that reports no parseable version at all
+fails the completion receipt and is not selectable. The `2.1.241`
+boundary itself is enforced separately, only on tool-bearing runs.
+Only the completion receipt is cached, for 24 hours; the version and sign-in checks
+run every time and are never skipped just because a cached receipt exists.
+That 24-hour TTL governs the settings route's own smoke-probe reuse, not
+how long a selected runtime stays trusted for real work. Settings persists
+capability evidence, alongside the executable's identity (path, version,
+and binary fingerprint), only when a runtime is selected, auto-selected as
+the sole ready runtime, or re-probed while it's already the selected
+runtime. Probing a runtime that isn't currently selected is diagnostic
+only: it shows the CLI's readiness in Settings but leaves no evidence
+behind for normal AI routing to reuse. Normal AI routing reuses persisted
+evidence for as long as the current executable's identity still matches
+what was probed, with no separate check of how old the probe is and no
+repeated sign-in. Probing the currently selected runtime again from
+Settings replaces its persisted evidence and timestamp.
+Running a real workflow reapplies more checks on top of that: normal AI
+routing rechecks `supported`, every runner validates the runtime's
+capabilities before it will spawn anything, the permission boundary is
+rebuilt for that call, tool-bearing runs repeat the version-floor check,
+and the binary fingerprint (the executable's identity) is checked
+immediately before the workflow runs.
+
+## The other nine
+
+The rest of the registry exists for diagnostics, not workflows. Detecting a
+CLI is filesystem-based: CareerRat looks for the CLI's installed executable
+on disk and never calls out over ACP to find it. Gemini CLI, OpenCode,
+GitHub Copilot CLI, and Hermes Agent do have a real ACP transport wired in,
+built for future acceptance testing, but CareerRat doesn't use it yet:
+settings shows each of the four as `detected_unverified` and never runs the
+readiness probe against them, so there's no probed readiness state to see.
+Their `acceptedCapabilities` is set to the no-workflow capability set, but
+that's policy metadata describing what a runtime would be allowed to do,
+not the reason these four are excluded today. What actually keeps every one
+of the nine out of real work, on the settings route and CareerRat's normal
+AI routing, is the same `supported: false` flag from the registry. Qwen
+Code, Antigravity, Amp, Goose, and Droid have no protocol adapter at all.
+Asking CareerRat to run work through any unsupported runtime on those two
+paths is rejected before an invocation is ever built. The settings route
+checks availability before support: an unsupported runtime that isn't even
+installed returns `RUNTIME_NOT_AVAILABLE`; `RUNTIME_NOT_SUPPORTED` only comes
+back once the runtime is detected and available. Normal AI routing returns a generic
+route-failure result that `callAI` throws as a plain, uncoded error;
+workflow callers that catch it, such as the skill runtime, chat runtime,
+intake route, and workspace-agent route, may then label it `NO_AI_ROUTE`
+themselves. `RUNTIME_COMPLETION_UNSUPPORTED` is a different, lower-level check: it comes
+from a runner's own capability assertion when something asks it to spawn a
+runtime directly, bypassing normal routing. That guarantee covers those two
+paths, not every way CareerRat's own code can call a runtime; the
+lower-level runner functions don't check `supported` themselves.
+
+Building the four gates for a new engine is real, deliberate work: a
+permission boundary mapped onto that CLI's actual sandbox flags, plus a
+completion receipt loop that verifies the CLI can complete a bounded,
+structured request using the configured invocation. The permission boundary
+itself is established by the adapter implementation and its acceptance
+tests, not by the receipt; the receipt shows the CLI can finish a scoped
+task, not that it honors every sandbox flag. A CLI that can read a markdown
+wrapper and be spawned bare is a different, weaker claim. CareerRat's docs
+try not to blur the two.

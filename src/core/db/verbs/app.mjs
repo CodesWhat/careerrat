@@ -18,6 +18,7 @@ import { packetManifestSchema } from "../../packet/schemas/packet-schemas.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { classifyStage, isKnownStatusLabel } from "../../tracker/dashboard.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
+import { requireDb } from "../connection.mjs";
 import { completeSubmitGatesForApplicationInDb, ensureJobThreadInDb } from "./chat-first.mjs";
 import {
   bumpMeta,
@@ -1065,13 +1066,20 @@ export function appRegisterPacketArtifacts({
     }
     validatePacketManifest(packetManifest);
 
-    const updatedArtifacts = {
-      ...(app.artifacts || {}),
-      ...Object.fromEntries(
-        Object.entries(artifacts).filter(([, value]) => value !== null && value !== undefined)
-      ),
-      packetGeneratedAt: nowIso(),
-    };
+    // An explicit null in `artifacts` deletes that key from the stored
+    // app row instead of being skipped: exportPacketArtifacts seeds null
+    // for a document kind's unrequested pdf/docx/text keys so a text-only
+    // or docx-only regeneration replaces the kind's artifacts rather than
+    // merging on top of a stale one (e.g. an old resumePdf that apply
+    // could otherwise still pick). A key simply absent from `artifacts`
+    // (undefined) is left untouched, same as before.
+    const updatedArtifacts = { ...(app.artifacts || {}) };
+    for (const [key, value] of Object.entries(artifacts)) {
+      if (value === undefined) continue;
+      if (value === null) delete updatedArtifacts[key];
+      else updatedArtifacts[key] = value;
+    }
+    updatedArtifacts.packetGeneratedAt = nowIso();
     if (note) updatedArtifacts.packetNote = note;
 
     const updated = { ...app, artifacts: updatedArtifacts, packetManifest };
@@ -1089,4 +1097,81 @@ export function appRegisterPacketArtifacts({
     });
     return { id, meta, event, artifacts: updatedArtifacts, packetManifest };
   });
+}
+
+// Every per-format output key this domain produces ends in one of these
+// suffixes (outputKey(kind, format) in packet/exports.mjs: resumePdf,
+// coverLetterDocx, answersText, ...). Kept here rather than imported from
+// packet/exports.mjs so this read-only db-layer verb has no dependency on
+// the packet layer that calls it.
+const ARTIFACT_KEY_FORMAT_SUFFIX = { Pdf: "pdf", Docx: "docx", Text: "text" };
+
+// The one registry of `application.artifacts` keys that are metadata, not a
+// workspace path — kept here, next to classifyArtifactKey, so there is
+// exactly one place that decides what the owner index should ignore. Every
+// OTHER string-valued key is indexed as a path (decision 7): the prior
+// approach kept an allowlist of known PATH kinds (resume/coverLetter/
+// answers) and silently dropped everything else, so a supported kind this
+// registry didn't already know about — appRegisterArtifact's arbitrary
+// `kind` (e.g. "jd"), or any future one — was invisible to the owner index
+// and could be silently claimed as another application's export
+// destination.
+const ARTIFACT_METADATA_KEY_SUFFIXES = ["GeneratedAt", "Note", "CapturedAt"];
+
+// Classifies one `application.artifacts` key into the {kind, format} an
+// artifact-path owner index needs, or returns null for a key that isn't a
+// path at all (packetGeneratedAt, resumeGeneratedAt, packetNote, ...).
+function classifyArtifactKey(key) {
+  if (key === "packetManifest") return { kind: "packetManifest", format: "manifest" };
+  if (ARTIFACT_METADATA_KEY_SUFFIXES.some((suffix) => key.endsWith(suffix))) return null;
+  if (key.endsWith("Source")) {
+    return { kind: key.slice(0, -"Source".length), format: "source" };
+  }
+  for (const [suffix, format] of Object.entries(ARTIFACT_KEY_FORMAT_SUFFIX)) {
+    if (key.length > suffix.length && key.endsWith(suffix)) {
+      return { kind: key.slice(0, -suffix.length), format };
+    }
+  }
+  // Any remaining string-valued artifact key is a path this domain has no
+  // dedicated format suffix for — index it as a plain path (e.g. "jd", or
+  // a future kind registered via appRegisterArtifact) rather than silently
+  // excluding it from the owner index.
+  return { kind: key, format: "plain" };
+}
+
+// appListArtifactRegistrations({repoRoot, env}) — the cross-application
+// owner index packet/exports.mjs needs before it can reuse a destination
+// path: every source/output/manifest path ANY application currently
+// registers, tagged with which application registered it and what kind +
+// format it is. A same-application readback (app.artifacts alone) can only
+// ever answer "did I register this path" — it cannot answer "did somebody
+// else," so a shared or foreign-registered destination looked unowned and
+// was reused/overwritten. Read-only: no transaction, no meta bump, no
+// activity event.
+export function appListArtifactRegistrations({ repoRoot, env } = {}) {
+  const db = requireDb({ repoRoot, env });
+  const rows = db.prepare("SELECT id, data FROM applications ORDER BY rowid ASC").all();
+  const registrations = [];
+  for (const row of rows) {
+    let app;
+    try {
+      app = JSON.parse(row.data);
+    } catch {
+      continue;
+    }
+    const applicationId = String(app?.id ?? row.id);
+    const artifacts = app?.artifacts || {};
+    for (const [key, value] of Object.entries(artifacts)) {
+      if (typeof value !== "string" || !value.trim()) continue;
+      const classified = classifyArtifactKey(key);
+      if (!classified) continue;
+      registrations.push({
+        applicationId,
+        kind: classified.kind,
+        format: classified.format,
+        path: value,
+      });
+    }
+  }
+  return registrations;
 }

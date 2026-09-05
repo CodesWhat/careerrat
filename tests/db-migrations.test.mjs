@@ -54,9 +54,9 @@ test("re-running against a db already at the latest version is a no-op", () => {
   assert.equal(after, before, "no new _migrations rows on a no-op re-run");
 });
 
-test("migration 010-018 preserve workspace state through unified search executions", () => {
+test("migration 010-019 preserve workspace state through artifact reservations", () => {
   assert.deepEqual(
-    ALL_MIGRATIONS.slice(-9).map((migration) => [migration.id, migration.name]),
+    ALL_MIGRATIONS.slice(-10).map((migration) => [migration.id, migration.name]),
     [
       [10, "workspace-agent"],
       [11, "linkedin-profile-proposals"],
@@ -67,6 +67,7 @@ test("migration 010-018 preserve workspace state through unified search executio
       [16, "app-operations"],
       [17, "remove-retired-form-fields"],
       [18, "search-executions"],
+      [19, "artifact-reservations"],
     ]
   );
 });

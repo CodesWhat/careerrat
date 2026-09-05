@@ -439,6 +439,7 @@ export function mountInstalledRuntimeRoutes({
         ok: false,
         code: "RUNTIME_AUTH_REQUIRED",
         action: "start_sign_in",
+        ...(runtime.probeMessage ? { error: runtime.probeMessage } : {}),
       });
       return;
     }

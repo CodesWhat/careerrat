@@ -2772,6 +2772,7 @@ test("a supported ACP runtime whose transport handshake fails stays not-ready wi
       status: "authentication_required",
       ready: false,
       action: "start_sign_in",
+      probeMessage: "needs sign-in",
     });
 
     assert.equal(completionCalls, 0);
@@ -4881,6 +4882,25 @@ test("buildInstalledRuntimeChildEnv retains only process/auth paths, locale, and
     CAREERRAT_HOME: "/Users/morgan/CareerRat",
     ANTHROPIC_MODEL: "claude-sonnet",
     CLAUDE_CONFIG_DIR: "/Users/morgan/.config/claude",
+  });
+});
+
+test("buildInstalledRuntimeChildEnv forwards a runtime's own credential variables and nobody else's", () => {
+  const env = {
+    PATH: "/usr/bin",
+    GEMINI_API_KEY: "sentinel-gemini",
+    GOOGLE_API_KEY: "sentinel-google",
+    ANTHROPIC_API_KEY: "sentinel-anthropic",
+    OPENAI_API_KEY: "sentinel-openai",
+  };
+  assert.deepEqual(buildInstalledRuntimeChildEnv({ env }), { PATH: "/usr/bin" });
+  assert.deepEqual(buildInstalledRuntimeChildEnv({ env, runtimeId: "gemini" }), {
+    PATH: "/usr/bin",
+    GEMINI_API_KEY: "sentinel-gemini",
+    GOOGLE_API_KEY: "sentinel-google",
+  });
+  assert.deepEqual(buildInstalledRuntimeChildEnv({ env, runtimeId: "claude" }), {
+    PATH: "/usr/bin",
   });
 });
 

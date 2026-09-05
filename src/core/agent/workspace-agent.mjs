@@ -2463,11 +2463,45 @@ function compactSearchExecutionReceipt(summary) {
     "failedPromptCount",
     "warningCount",
     "captureFailureCount",
+    "failed",
+    "conflicts",
   ];
   const receipt = {};
   for (const key of numericKeys) {
     const value = Number(summary[key]);
     if (Number.isFinite(value)) receipt[key] = value;
+  }
+  // Bounded failed-offer recovery detail (CR-29 round 8): a durable parent
+  // search execution used to drop `failedIds`/`failedOffers` entirely when
+  // compacting the child's raw result into its own `summary`, even though
+  // the child's own sourcing-run record (sourcing-runs.mjs's normalizeError)
+  // already keeps them. Reloading the parent execution after a failed AI-web
+  // lane then had no way to name which postings never made it into the DB —
+  // only a count. Capped at 50, same bound sourced-persistence.mjs's own
+  // failedOffers uses.
+  if (Array.isArray(summary.failedIds)) {
+    receipt.failedIds = summary.failedIds.slice(0, 50).map((id) => String(id));
+  }
+  if (Array.isArray(summary.failedOffers)) {
+    receipt.failedOffers = summary.failedOffers.slice(0, 50).map((offer) => ({
+      id: offer?.id != null ? String(offer.id) : null,
+      url: offer?.url ? String(offer.url).slice(0, 500) : null,
+    }));
+  }
+  // Bounded identity-conflict recovery detail (CR-29 round 9), the same
+  // treatment failedIds/failedOffers got in round 8: an AI-search child
+  // reports a conflict-only result (see ai-web-search.mjs's conflictOffers,
+  // already company/title/url and capped at 10) same as a write failure,
+  // but this compactor dropped both fields when folding the child result
+  // into the durable PARENT search execution's `summary` — reloading the
+  // parent then had no way to name which postings hit an identity conflict,
+  // only a bare count buried in `conflicts`.
+  if (Array.isArray(summary.conflictOffers)) {
+    receipt.conflictOffers = summary.conflictOffers.slice(0, 50).map((offer) => ({
+      company: offer?.company ? String(offer.company).slice(0, 160) : null,
+      title: offer?.title ? String(offer.title).slice(0, 240) : null,
+      url: offer?.url ? String(offer.url).slice(0, 500) : null,
+    }));
   }
   const arrayCounts = {
     offers: "offerCount",
@@ -4710,7 +4744,7 @@ export async function executeWorkspaceIntent({
       const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const formats = Array.isArray(input.formats)
         ? [...new Set(input.formats.map((value) => String(value).toLowerCase()))].filter((value) =>
-            ["pdf", "docx"].includes(value)
+            ["pdf", "docx", "text"].includes(value)
           )
         : ["pdf"];
       const operation = await exportDocumentsImpl({
@@ -4721,7 +4755,7 @@ export async function executeWorkspaceIntent({
         exportArtifact: packetExportArtifact,
       });
       const artifacts = operation.artifacts || {};
-      const fileCount = Object.keys(artifacts).filter((key) => /(Pdf|Docx)$/.test(key)).length;
+      const fileCount = Object.keys(artifacts).filter((key) => /(Pdf|Docx|Text)$/.test(key)).length;
       const downloadsErrors = Array.isArray(operation.downloadsErrors)
         ? operation.downloadsErrors
         : [];
@@ -10915,10 +10949,18 @@ export function createWorkspaceAgentRuntime({
       return { ok: false, resumable: true, run: outcome?.run || null };
     }
     if (outcome?.run?.status === "failed") {
+      // Keep outcome.value on a failed run too (CR-29 round 10): persistLane
+      // compacts `result?.run?.summary ?? result?.value` into the durable
+      // parent lane summary, and a recovered child reconstructs its outcome
+      // as `{ run, value: run.summary }` (see reconcileOrphanedSourcingRuns
+      // below). Dropping value here discarded conflicts/failedOffers a
+      // failed AI-web run had already reported, even once the run itself
+      // carries them (see sourcingRunFail's summary argument).
       return {
         ok: false,
         run: outcome.run,
         error: outcome.run.error || { message: "The search failed before it finished." },
+        value: outcome?.value ?? null,
       };
     }
     return { ok: true, run: outcome?.run || null, value: outcome?.value ?? null };
