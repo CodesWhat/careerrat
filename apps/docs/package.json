@@ -6,7 +6,7 @@
     "dev": "next dev --port 3003",
     "build": "next build && node ../../scripts/harden-static-html.mjs out --allow-posthog-proxy",
     "start": "next start",
-    "postinstall": "fumadocs-mdx"
+    "postinstall": "node ./scripts/postinstall.mjs"
   },
   "dependencies": {
     "@fontsource/archivo": "^5.3.0",
