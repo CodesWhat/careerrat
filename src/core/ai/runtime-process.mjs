@@ -26,7 +26,7 @@ function escapeWindowsArgument(value, doubleEscapeMetaCharacters) {
 export function runtimeProcessInvocation(
   command,
   args,
-  { env = process.env, platform = process.platform } = {}
+  { env = process.env, platform = process.platform, resolveInterpreter } = {}
 ) {
   const sourceArgs = Array.isArray(args) ? [...args] : [];
   if (platform !== "win32" || !WINDOWS_BATCH_EXTENSION.test(String(command || ""))) {
@@ -44,8 +44,22 @@ export function runtimeProcessInvocation(
     escapeWindowsCommand(commandText),
     ...sourceArgs.map((argument) => escapeWindowsArgument(argument, doubleEscapeMetaCharacters)),
   ].join(" ");
+  // Callers that already carry an execution-identity guarantee (today, only
+  // installedRuntimeExecutionIdentity's own `--version` probe) pass
+  // resolveInterpreter so the exact same absolute cmd.exe path used to build
+  // that guarantee is also the one that gets spawned, never a bare
+  // "cmd.exe" that Windows would resolve against cwd/PATH on its own. Every
+  // other caller keeps the historical COMSPEC-or-literal behavior; widening
+  // this resolution to them is CR42's hash-to-spawn-window work, not this
+  // fix's.
+  const interpreter = resolveInterpreter
+    ? resolveInterpreter()
+    : String(env.COMSPEC || env.ComSpec || "cmd.exe");
+  if (!interpreter) {
+    throw new TypeError("Unable to resolve the Windows command interpreter (cmd.exe).");
+  }
   return {
-    command: String(env.COMSPEC || env.ComSpec || "cmd.exe"),
+    command: interpreter,
     args: ["/d", "/s", "/v:off", "/c", `"${shellCommand}"`],
     options: { windowsVerbatimArguments: true },
   };
@@ -65,7 +79,31 @@ function canonicalPath(path, realpathImpl) {
   }
 }
 
-function resolveWindowsExecutable(command, { env, realpathImpl, includeSystemCmd = false }) {
+// The one place that decides which cmd.exe is "the" Windows command
+// interpreter: COMSPEC if it's set and actually resolves, else the canonical
+// SystemRoot\System32\cmd.exe, else null. No PATH search, ever. A bare
+// "cmd.exe" handed to spawn would let Windows' own executable search (which
+// checks the current directory before PATH) run a decoy sitting ahead of the
+// real one. Every consumer that needs "the" interpreter, the npm-shim
+// identity chain below and installedRuntimeExecutionIdentity's own
+// `--version` probe, calls this exact function so the path that gets
+// fingerprinted is provably the same path that gets spawned. Callers must
+// fail closed (no spawn) when this returns null.
+export function resolveWindowsCommandInterpreter({
+  env = process.env,
+  realpathImpl = realpathSync,
+} = {}) {
+  const comspec = windowsEnvValue(env, "COMSPEC");
+  if (comspec) {
+    const resolved = canonicalPath(comspec, realpathImpl);
+    if (resolved) return resolved;
+  }
+  const systemRoot = windowsEnvValue(env, "SystemRoot") || windowsEnvValue(env, "WINDIR");
+  if (!systemRoot) return null;
+  return canonicalPath(win32.join(systemRoot, "System32", "cmd.exe"), realpathImpl);
+}
+
+function resolveWindowsExecutable(command, { env, realpathImpl }) {
   const value = String(command || "").trim();
   if (!value || WINDOWS_LINE_BREAK.test(value)) return null;
   if (win32.isAbsolute(value) || /[\\/]/.test(value)) {
@@ -73,10 +111,6 @@ function resolveWindowsExecutable(command, { env, realpathImpl, includeSystemCmd
   }
 
   const candidates = [];
-  if (includeSystemCmd && /^cmd(?:\.exe)?$/i.test(value)) {
-    const systemRoot = windowsEnvValue(env, "SystemRoot") || windowsEnvValue(env, "WINDIR");
-    if (systemRoot) candidates.push(win32.join(systemRoot, "System32", "cmd.exe"));
-  }
   const pathValue = windowsEnvValue(env, "PATH");
   const extensions = win32.extname(value)
     ? [""]
@@ -207,12 +241,7 @@ export function runtimeProcessIdentityFiles(
   }
   if (!WINDOWS_NPM_SHIM.test(commandText)) return null;
 
-  const launcherCommand = windowsEnvValue(env, "COMSPEC") || "cmd.exe";
-  const launcher = resolveWindowsExecutable(launcherCommand, {
-    env,
-    realpathImpl,
-    includeSystemCmd: true,
-  });
+  const launcher = resolveWindowsCommandInterpreter({ env, realpathImpl });
   if (!launcher || !/\.exe$/i.test(launcher)) return null;
 
   let shim;
@@ -261,6 +290,46 @@ export function runtimeProcessIdentityFiles(
   ];
 }
 
+// The Windows half of the tree kill: taskkill's /t walks the whole process
+// tree rooted at `pid`, which is the closest POSIX-detached-group equivalent
+// Windows offers (there's no negative-pid group signal to send). Shared by
+// the ChildProcess-based path below and killProcessTreeByPid's pid-only path,
+// so both ever have exactly one place that knows how to reach a tree here.
+//
+// Bounded by timeoutMs (killProcessTreeByPid's own default, 2000ms): a
+// blocked or hung taskkill.exe must not leave the caller waiting on this
+// spawnSync forever. spawnSync's own timeout handling kills taskkill with
+// SIGKILL and reports that via `result.signal`, never `result.error` or a
+// normal exit status, so that has to be checked here too or a timed-out
+// taskkill would read as a silent success.
+function taskkillProcessTree(
+  pid,
+  { env = process.env, spawnSyncImpl = spawnSync, timeoutMs } = {}
+) {
+  const systemRoot = String(env.SystemRoot || env.SYSTEMROOT || env.WINDIR || "C:\\Windows");
+  const command = win32.join(systemRoot, "System32", "taskkill.exe");
+  const result = spawnSyncImpl(command, ["/pid", String(pid), "/t", "/f"], {
+    shell: false,
+    windowsHide: true,
+    stdio: "ignore",
+    ...(Number.isFinite(timeoutMs) ? { timeout: timeoutMs, killSignal: "SIGKILL" } : {}),
+  });
+  if (
+    result?.error ||
+    result?.signal ||
+    (Number.isInteger(result?.status) && result.status !== 0)
+  ) {
+    throw (
+      result?.error ||
+      new Error(
+        result?.signal
+          ? `taskkill timed out and was killed by ${result.signal}`
+          : `taskkill exited with status ${result.status}`
+      )
+    );
+  }
+}
+
 function terminateWindowsProcessTree(child, { env = process.env, spawnSyncImpl = spawnSync } = {}) {
   const pid = Number(child?.pid);
   if (!Number.isSafeInteger(pid) || pid <= 0) {
@@ -271,22 +340,67 @@ function terminateWindowsProcessTree(child, { env = process.env, spawnSyncImpl =
     }
     return;
   }
-  const systemRoot = String(env.SystemRoot || env.SYSTEMROOT || env.WINDIR || "C:\\Windows");
-  const command = win32.join(systemRoot, "System32", "taskkill.exe");
   try {
-    const result = spawnSyncImpl(command, ["/pid", String(pid), "/t", "/f"], {
-      shell: false,
-      windowsHide: true,
-      stdio: "ignore",
-    });
-    if (result?.error || (Number.isInteger(result?.status) && result.status !== 0)) {
-      throw result.error || new Error(`taskkill exited with status ${result.status}`);
-    }
+    taskkillProcessTree(pid, { env, spawnSyncImpl });
   } catch {
     try {
       child.kill?.("SIGKILL");
     } catch {
       // The process already exited between the tree-kill attempt and fallback.
+    }
+  }
+}
+
+// A synchronous, pid-only counterpart to scheduleRuntimeProcessKill for
+// callers that only ever have a spawnSync result (no ChildProcess object to
+// hang a `.kill()` fallback off of) — installedRuntimeExecutionIdentity's
+// own `--version` probe being the one caller today. Reuses the exact same
+// mechanism: process-group SIGKILL on POSIX (the probe is spawned with
+// `detached: true` so its pid doubles as its pgid), taskkill's tree walk on
+// Windows. Best-effort: the pid may already be gone by the time this runs,
+// and that's a success case too. Returns whether the kill attempt itself
+// reported success (taskkill exited 0 on Windows, either SIGKILL landed on
+// POSIX) so callers who need a fallback (runProbe's helper, when taskkill is
+// blocked or unavailable and descendants may have survived) know to run one
+// instead of the failure being swallowed silently.
+//
+// timeoutMs bounds the Windows taskkill spawnSync call itself — the POSIX
+// path below never spawns anything, so it has nothing to bound. A blocked or
+// hung taskkill.exe must not leave this call, and runProbe's cleanup
+// deadline waiting on it, hanging indefinitely; a timed-out kill counts as a
+// failed one, same as any other taskkill error.
+export function killProcessTreeByPid(
+  pid,
+  {
+    platform = process.platform,
+    env = process.env,
+    spawnSyncImpl = spawnSync,
+    timeoutMs = 2000,
+  } = {}
+) {
+  const numericPid = Number(pid);
+  if (!Number.isSafeInteger(numericPid) || numericPid <= 0) return false;
+  if (platform === "win32") {
+    try {
+      taskkillProcessTree(numericPid, { env, spawnSyncImpl, timeoutMs });
+      return true;
+    } catch {
+      // The process tree may have already exited on its own, or taskkill
+      // was blocked/unavailable — either way, the caller can't tell which
+      // from here, so it's reported as a failed attempt.
+      return false;
+    }
+  }
+  try {
+    process.kill(-numericPid, "SIGKILL");
+    return true;
+  } catch {
+    try {
+      process.kill(numericPid, "SIGKILL");
+      return true;
+    } catch {
+      // Already gone.
+      return false;
     }
   }
 }

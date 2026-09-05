@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { runtimeVerification as buildInstalledRuntimeVerification } from "../src/cli/installed-runtime-route.mjs";
 import {
   detectInstalledRuntimes,
   hasCompleteCareerRatCapabilities,
@@ -329,11 +330,21 @@ try {
     { env }
   );
   if (!identity) throw new Error(`${runtimeId} executable identity could not be verified.`);
-  const runtimeVerification = {
+  // Same canonical verification shape the installed-runtime route writes
+  // (installed-runtime-route.mjs's runtimeVerification), so this persisted
+  // selection carries versionBoundaryState and testedMinimumVersion too —
+  // without them the cache matcher (installedRuntimeBoundaryEvidenceCurrent)
+  // reads the boundary probe as untested, routing strips publicWeb, and the
+  // Claude search below rejects its own WebSearch/WebFetch profile.
+  const runtimeVerification = buildInstalledRuntimeVerification({
     ...identity,
     capabilities: probe.capabilities,
-    checkedAt: new Date().toISOString(),
-  };
+    versionBoundaryState: probe.versionBoundaryState,
+    minimumVersion: probe.minimumVersion,
+  });
+  if (!runtimeVerification) {
+    throw new Error(`${runtimeId} verification could not be built from the successful probe.`);
+  }
   writeInstalledRuntimeSelection({
     repoRoot,
     env,

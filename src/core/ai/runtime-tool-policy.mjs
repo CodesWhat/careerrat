@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { validatePublicHttpUrl } from "../deep-ingest/source-fetch.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
+import { isWithinRuntimePath } from "./runtime-path-policy.mjs";
 
 const FILE_TOOLS = new Set(["Read", "Glob", "Grep"]);
 // ".careerrat" is deliberately NOT here: it's the real data root on both the
@@ -26,11 +27,6 @@ function nearestCanonicalPath(path) {
   const canonicalBase = realpathSync(probe);
   const suffix = relative(probe, path);
   return resolve(canonicalBase, suffix);
-}
-
-function isWithin(root, target) {
-  const rel = relative(root, target);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 function requestedFilePath(toolName, input) {
@@ -95,7 +91,7 @@ function pathDecision({ repoRoot, env, skill, toolName, input }) {
   // internal dir is named "internal" (no dot), which the bare ".internal"
   // entry in BLOCKED_SEGMENTS never matched anyway. Denying by resolved
   // root containment catches both shapes the same way.
-  if (isWithin(internalRoot, target) || isWithin(dbRoot, target)) {
+  if (isWithinRuntimePath(internalRoot, target) || isWithinRuntimePath(dbRoot, target)) {
     return deny(
       `${toolName} cannot access credentials, internal state, or paths outside CareerRat`
     );
@@ -104,7 +100,8 @@ function pathDecision({ repoRoot, env, skill, toolName, input }) {
   if (
     target === privateFormDefaults ||
     (toolName === "Grep" &&
-      (isWithin(target, privateFormDefaults) || isWithin(privateFormDefaults, target)))
+      (isWithinRuntimePath(target, privateFormDefaults) ||
+        isWithinRuntimePath(privateFormDefaults, target)))
   ) {
     return deny(
       `${toolName} cannot access raw application defaults; use CareerRat's sanitized candidate context`
@@ -127,7 +124,7 @@ function pathDecision({ repoRoot, env, skill, toolName, input }) {
     join(canonicalRepo, "README.md"),
     join(canonicalRepo, "package.json"),
   ]);
-  const matchedRoot = allowedRoots.find((root) => isWithin(root, target));
+  const matchedRoot = allowedRoots.find((root) => isWithinRuntimePath(root, target));
   if (!allowedFiles.has(target) && !matchedRoot) {
     return deny(`${toolName} path is outside the approved CareerRat runtime roots`);
   }

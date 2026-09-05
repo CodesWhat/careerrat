@@ -91,11 +91,18 @@ function parseArgs(input) {
 }
 
 function readDoctorJson() {
-  const result = spawnSync(process.execPath, [join(root, "src/cli/doctor.mjs"), "--json"], {
-    cwd: root,
-    env: process.env,
-    encoding: "utf8",
-  });
+  // next only ever reads doctor.data.agentGuidance below, which never
+  // depends on installedRuntimes — --guidance-only skips runtime detection
+  // (and the binary hashing it can do) entirely rather than just hiding it.
+  const result = spawnSync(
+    process.execPath,
+    [join(root, "src/cli/doctor.mjs"), "--json", "--guidance-only"],
+    {
+      cwd: root,
+      env: process.env,
+      encoding: "utf8",
+    }
+  );
   if (result.error) return { ok: false, error: result.error.message };
   try {
     return { ok: true, data: JSON.parse(result.stdout) };
