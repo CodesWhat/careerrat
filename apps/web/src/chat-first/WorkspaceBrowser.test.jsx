@@ -1040,6 +1040,28 @@ describe("WorkspaceBrowser", () => {
     expect(schedule).toContain("Nothing stays in sync.");
   });
 
+  it("offers a plain-text export only for packet resume/cover-letter/answers files", async () => {
+    const { FilesPanel } = await loadBrowser();
+    const onExportFile = vi.fn();
+    const tree = FilesPanel({
+      files: [
+        { id: "f1", name: "Tyrell resume.pdf", kind: "Resume", packetKind: "resume" },
+        { id: "f2", name: "Interview dossier.pdf", kind: "Interview dossier" },
+      ],
+      onExportFile,
+    });
+
+    const html = renderToStaticMarkup(tree);
+    expect(html.match(/Plain text \(\.txt\)/g)?.length).toBe(1);
+
+    const plainTextButton = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node).includes("Plain text (.txt)")
+    );
+    plainTextButton.props.onClick();
+    expect(onExportFile).toHaveBeenCalledWith("f1", "text");
+  });
+
   it("disables calendar exports when nothing is scheduled", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(

@@ -43,11 +43,60 @@ function byId(db, id) {
   return parse(db.prepare("SELECT data FROM search_executions WHERE id = ?").get(id));
 }
 
+function normalizedIdList(value) {
+  return Array.isArray(value) ? value.slice(0, 50).map((id) => String(id)) : undefined;
+}
+
 function normalizedError(error) {
   if (!error) return null;
+  const failedIds = normalizedIdList(error.failedIds);
+  const failedOffers = Array.isArray(error.failedOffers)
+    ? error.failedOffers.slice(0, 50).map((offer) => ({
+        id: offer?.id != null ? String(offer.id) : null,
+        url: offer?.url ? String(offer.url).slice(0, 500) : null,
+      }))
+    : undefined;
+  // Bounded identity-conflict recovery detail (CR-29 round 9), the same
+  // treatment failedIds/failedOffers got in round 8: conflictOffers is
+  // already a sanitized company/title/url sample capped upstream (see
+  // ai-web-search.mjs/sourced.mjs's conflictOfferSample), so this only
+  // re-bounds it defensively the same way failedOffers is re-bounded here.
+  const conflicts = Number.isFinite(Number(error.conflicts)) ? Number(error.conflicts) : undefined;
+  const conflictOffers = Array.isArray(error.conflictOffers)
+    ? error.conflictOffers.slice(0, 50).map((offer) => ({
+        company: offer?.company ? String(offer.company).slice(0, 160) : null,
+        title: offer?.title ? String(offer.title).slice(0, 240) : null,
+        url: offer?.url ? String(offer.url).slice(0, 500) : null,
+      }))
+    : undefined;
+  // Plain-count/marker pass-through (CR-29 round 14): workspace-agent.mjs's
+  // compactSearchExecutionLaneError stopped duplicating failedIds/
+  // failedOffers/conflictOffers onto the error object (they now live on the
+  // lane's `summary` only, which this verb clones unfiltered) and instead
+  // hands this a bare `failed` count plus `truncated: true` whenever
+  // samples were dropped. Neither had an allowlisted home here before, so
+  // they'd otherwise vanish silently on this exact write this fix depends
+  // on.
+  const failed = Number.isFinite(Number(error.failed)) ? Number(error.failed) : undefined;
+  const truncated = error.truncated === true ? true : undefined;
   return {
     ...(error.code ? { code: String(error.code).slice(0, 120) } : {}),
     message: String(error.message || error).slice(0, 1000),
+    // Bounded failed-offer recovery detail (CR-29 round 8): kept through
+    // this normalization the same way sourcing-runs.mjs's own
+    // normalizeError already keeps `failedIds`/`failedOffers` on the child
+    // run, so a reload of the durable PARENT search execution can still
+    // name which postings never made it into the DB after a failed lane.
+    ...(failedIds ? { failedIds } : {}),
+    ...(failedOffers ? { failedOffers } : {}),
+    ...(failed != null ? { failed } : {}),
+    // Round 9: same reasoning, extended to identity conflicts — a
+    // conflict-only child result used to reload as a parent lane with no
+    // conflict count or sample at all, even though the child runId (still
+    // present elsewhere on the lane) let a caller chase it down indirectly.
+    ...(conflicts != null ? { conflicts } : {}),
+    ...(truncated ? { truncated: true } : {}),
+    ...(conflictOffers ? { conflictOffers } : {}),
   };
 }
 

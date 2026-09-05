@@ -15,6 +15,7 @@ import {
   isSupportedInstalledRuntime,
   probeCustomRuntimeCommand,
   probeInstalledRuntime,
+  runtimeExecutionChainDigests,
   startInstalledRuntimeGuidedSetup,
   startInstalledRuntimeSignIn,
 } from "../core/ai/installed-runtimes.mjs";
@@ -98,7 +99,13 @@ function withProbeReadiness(runtime, probe) {
   };
 }
 
-function runtimeVerification(runtime) {
+// Exported so callers outside this route (e.g. scripts/qa-live-runtime-search.mjs)
+// write the exact same cached-verification shape this route does, instead of
+// hand-assembling a subset that omits fields the cache matcher requires
+// (installedRuntimeCachedVerification and installedRuntimeBoundaryEvidenceCurrent
+// both read versionBoundaryState/testedMinimumVersion — a verification missing
+// them reads back as an untested boundary probe).
+export function runtimeVerification(runtime) {
   if (
     !runtime?.path ||
     !runtime.realPath ||
@@ -113,7 +120,22 @@ function runtimeVerification(runtime) {
     realPath: runtime.realPath,
     version: runtime.version,
     binaryFingerprint: String(runtime.binaryFingerprint).toLowerCase(),
+    // Best-effort, additive breakdown behind binaryFingerprint — see
+    // runtime-selection.mjs's sanitizeChainFiles. Never gates anything
+    // itself; it only lets a later mismatch name the specific launcher-chain
+    // role that changed (Doctor's installedRuntimeExecutionMismatchRole)
+    // instead of just reporting that the aggregate digest no longer
+    // matches. null (never persisted) when the chain can't be re-resolved
+    // right now, which the aggregate binaryFingerprint check above already
+    // covers on its own.
+    chainFiles: runtimeExecutionChainDigests(runtime.realPath) || null,
     capabilities: runtime.capabilities,
+    versionBoundaryState: runtime.versionBoundaryState || "indeterminate",
+    // The policy floor this boundary state was actually tested against, so a
+    // reader can tell a cached "at_or_above" apart from one tested before
+    // CareerRat raised the minimum. null for a runtime with no boundary
+    // policy (e.g. codex).
+    testedMinimumVersion: runtime.minimumVersion || null,
     checkedAt: new Date().toISOString(),
   };
 }
@@ -427,6 +449,7 @@ export function mountInstalledRuntimeRoutes({
         ok: false,
         code: "RUNTIME_AUTH_REQUIRED",
         action: "start_sign_in",
+        ...(runtime.probeMessage ? { error: runtime.probeMessage } : {}),
       });
       return;
     }

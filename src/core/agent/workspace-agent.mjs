@@ -2439,6 +2439,105 @@ function compactSearchSummary(summary) {
   return compact;
 }
 
+// Per-sample id/url length bound (CR-29 round 14): the LANE_RECEIPT_BYTE_BUDGET
+// shrink below reduces how many SAMPLES survive, but a single maximum-length
+// id or url could still make even one sample expensive. 256 chars is well
+// past any real posting id or URL this codebase generates, but bounded
+// nonetheless — see LANE_RECEIPT_BYTE_BUDGET's own comment for the failure
+// this closes.
+const LANE_SAMPLE_TEXT_MAX_LENGTH = 256;
+
+function boundedSampleText(value) {
+  return value != null ? String(value).slice(0, LANE_SAMPLE_TEXT_MAX_LENGTH) : null;
+}
+
+// One serialized-byte budget for an ENTIRE lane's persisted receipt — its
+// compacted `summary` AND `error` together, not each bounded independently
+// (CR-29 round 14, Codex review of PR #304). Before this, failure/conflict
+// SAMPLES were count-capped (50 each) and length-capped per field, but
+// duplicated into BOTH compactSearchExecutionReceipt's `summary` and the
+// raw `error` object persistLane/persistUnifiedOutcome stored alongside it
+// unmodified — so 40 failures plus 40 conflicts, each with a long id and
+// URL, could double their footprint and exceed the search_executions row's
+// hard 65,536-byte DB constraint (search-executions.mjs's write()), which
+// throws SEARCH_EXECUTION_TOO_LARGE and terminalizes the parent lane with a
+// null summary — losing the recovery detail entirely instead of merely
+// truncating it. 48 KiB leaves headroom under that hard limit for the
+// OTHER lane and the execution's own bookkeeping fields.
+const LANE_RECEIPT_BYTE_BUDGET = 48 * 1024;
+
+// The bounded recovery-sample keys shrinkLaneReceiptToBudget trims. Kept
+// ONLY on `summary` now (see compactLaneError below) — `error` never
+// duplicates them, so shrinking only ever needs to touch these three.
+const LANE_RECEIPT_SAMPLE_KEYS = ["failedIds", "failedOffers", "conflictOffers"];
+
+function laneReceiptByteLength(summary, error) {
+  return Buffer.byteLength(JSON.stringify({ summary: summary ?? null, error: error ?? null }));
+}
+
+// Shrinks `summary`'s bounded recovery-sample arrays — never its numeric
+// counts or any other field — until {summary, error} together fit within
+// LANE_RECEIPT_BYTE_BUDGET. Tries progressively smaller fixed sample counts
+// rather than measuring/bisecting per byte: deterministic, and cheap enough
+// to just re-measure at each step. Falls back to dropping the sample arrays
+// entirely (keeping every count intact) if even that doesn't fit — a lane
+// with an enormous `reasonCounts` or similar, not the recovery samples
+// this exists to bound.
+function shrinkLaneReceiptToBudget(summary, error) {
+  if (!summary || laneReceiptByteLength(summary, error) <= LANE_RECEIPT_BYTE_BUDGET) {
+    return summary;
+  }
+  for (const limit of [25, 10, 5, 2, 1, 0]) {
+    const candidate = { ...summary, samplesTruncated: true };
+    for (const key of LANE_RECEIPT_SAMPLE_KEYS) {
+      if (!Array.isArray(summary[key])) continue;
+      if (limit === 0) delete candidate[key];
+      else candidate[key] = summary[key].slice(0, limit);
+    }
+    if (laneReceiptByteLength(candidate, error) <= LANE_RECEIPT_BYTE_BUDGET) return candidate;
+  }
+  const stripped = { ...summary, samplesTruncated: true };
+  for (const key of LANE_RECEIPT_SAMPLE_KEYS) delete stripped[key];
+  return stripped;
+}
+
+// Compacts a lane's raw error into its persisted shape (CR-29 round 14).
+// Keeps message/code/action; keeps `failed`/`conflicts` as COUNTS (numbers,
+// derivable straight from the raw error's own arrays/fields); never
+// duplicates the recovery-sample arrays the summary already carries — those
+// live in `summary` ONLY now (see compactSearchExecutionReceipt above and
+// shrinkLaneReceiptToBudget) — and marks `truncated: true` whenever the raw
+// error DID carry sample arrays this compaction dropped, so a reader knows
+// to look at the summary for detail instead of assuming there was none.
+function compactSearchExecutionLaneError(error) {
+  if (!error || typeof error !== "object" || Array.isArray(error)) return null;
+  const hadFailedSamples = Array.isArray(error.failedIds) || Array.isArray(error.failedOffers);
+  const hadConflictSamples = Array.isArray(error.conflictOffers);
+  const compact = {
+    ...(error.code ? { code: String(error.code).slice(0, 120) } : {}),
+    ...(error.message ? { message: String(error.message).slice(0, 500) } : {}),
+    ...(error.action ? { action: String(error.action).slice(0, 120) } : {}),
+  };
+  const failedCount = Array.isArray(error.failedOffers)
+    ? error.failedOffers.length
+    : Array.isArray(error.failedIds)
+      ? error.failedIds.length
+      : undefined;
+  if (Number.isFinite(failedCount)) compact.failed = failedCount;
+  if (Number.isFinite(Number(error.conflicts))) compact.conflicts = Number(error.conflicts);
+  else if (hadConflictSamples) compact.conflicts = error.conflictOffers.length;
+  if (hadFailedSamples || hadConflictSamples) compact.truncated = true;
+  return compact;
+}
+
+// Builds the {summary, error} pair persistLane/persistUnifiedOutcome store
+// on a lane, applying the shared byte budget across both together.
+function buildLaneReceipt(rawSummary, rawError) {
+  const summary = compactSearchExecutionReceipt(rawSummary);
+  const error = compactSearchExecutionLaneError(rawError);
+  return { summary: shrinkLaneReceiptToBudget(summary, error), error };
+}
+
 function compactSearchExecutionReceipt(summary) {
   if (!summary || typeof summary !== "object" || Array.isArray(summary)) return null;
   const numericKeys = [
@@ -2463,11 +2562,48 @@ function compactSearchExecutionReceipt(summary) {
     "failedPromptCount",
     "warningCount",
     "captureFailureCount",
+    "failed",
+    "conflicts",
   ];
   const receipt = {};
   for (const key of numericKeys) {
     const value = Number(summary[key]);
     if (Number.isFinite(value)) receipt[key] = value;
+  }
+  // Bounded failed-offer recovery detail (CR-29 round 8): a durable parent
+  // search execution used to drop `failedIds`/`failedOffers` entirely when
+  // compacting the child's raw result into its own `summary`, even though
+  // the child's own sourcing-run record (sourcing-runs.mjs's normalizeError)
+  // already keeps them. Reloading the parent execution after a failed AI-web
+  // lane then had no way to name which postings never made it into the DB —
+  // only a count. Capped at 50, same bound sourced-persistence.mjs's own
+  // failedOffers uses. Each id/url is bounded to LANE_SAMPLE_TEXT_MAX_LENGTH
+  // (CR-29 round 14): `id` had no length cap at all before this, so 40+
+  // failures with maximum-length ids/urls could push a single lane's
+  // receipt past the execution's hard 65,536-byte limit on its own.
+  if (Array.isArray(summary.failedIds)) {
+    receipt.failedIds = summary.failedIds.slice(0, 50).map((id) => boundedSampleText(id));
+  }
+  if (Array.isArray(summary.failedOffers)) {
+    receipt.failedOffers = summary.failedOffers.slice(0, 50).map((offer) => ({
+      id: boundedSampleText(offer?.id),
+      url: boundedSampleText(offer?.url),
+    }));
+  }
+  // Bounded identity-conflict recovery detail (CR-29 round 9), the same
+  // treatment failedIds/failedOffers got in round 8: an AI-search child
+  // reports a conflict-only result (see ai-web-search.mjs's conflictOffers,
+  // already company/title/url and capped at 10) same as a write failure,
+  // but this compactor dropped both fields when folding the child result
+  // into the durable PARENT search execution's `summary` — reloading the
+  // parent then had no way to name which postings hit an identity conflict,
+  // only a bare count buried in `conflicts`.
+  if (Array.isArray(summary.conflictOffers)) {
+    receipt.conflictOffers = summary.conflictOffers.slice(0, 50).map((offer) => ({
+      company: offer?.company ? String(offer.company).slice(0, 160) : null,
+      title: offer?.title ? String(offer.title).slice(0, 240) : null,
+      url: boundedSampleText(offer?.url),
+    }));
   }
   const arrayCounts = {
     offers: "offerCount",
@@ -4710,7 +4846,7 @@ export async function executeWorkspaceIntent({
       const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const formats = Array.isArray(input.formats)
         ? [...new Set(input.formats.map((value) => String(value).toLowerCase()))].filter((value) =>
-            ["pdf", "docx"].includes(value)
+            ["pdf", "docx", "text"].includes(value)
           )
         : ["pdf"];
       const operation = await exportDocumentsImpl({
@@ -4721,7 +4857,7 @@ export async function executeWorkspaceIntent({
         exportArtifact: packetExportArtifact,
       });
       const artifacts = operation.artifacts || {};
-      const fileCount = Object.keys(artifacts).filter((key) => /(Pdf|Docx)$/.test(key)).length;
+      const fileCount = Object.keys(artifacts).filter((key) => /(Pdf|Docx|Text)$/.test(key)).length;
       const downloadsErrors = Array.isArray(operation.downloadsErrors)
         ? operation.downloadsErrors
         : [];
@@ -10915,10 +11051,18 @@ export function createWorkspaceAgentRuntime({
       return { ok: false, resumable: true, run: outcome?.run || null };
     }
     if (outcome?.run?.status === "failed") {
+      // Keep outcome.value on a failed run too (CR-29 round 10): persistLane
+      // compacts `result?.run?.summary ?? result?.value` into the durable
+      // parent lane summary, and a recovered child reconstructs its outcome
+      // as `{ run, value: run.summary }` (see reconcileOrphanedSourcingRuns
+      // below). Dropping value here discarded conflicts/failedOffers a
+      // failed AI-web run had already reported, even once the run itself
+      // carries them (see sourcingRunFail's summary argument).
       return {
         ok: false,
         run: outcome.run,
         error: outcome.run.error || { message: "The search failed before it finished." },
+        value: outcome?.value ?? null,
       };
     }
     return { ok: true, run: outcome?.run || null, value: outcome?.value ?? null };
@@ -10941,6 +11085,10 @@ export function createWorkspaceAgentRuntime({
   function persistLane(searchExecutionId, lane, result, fallbackRunId) {
     if (result?.resumable === true) return readSearchExecution(searchExecutionId);
     const status = laneStatus(result);
+    const { summary, error } = buildLaneReceipt(
+      result?.run?.summary ?? result?.value,
+      status === "failed" ? result?.error || result?.run?.error : null
+    );
     return searchExecutionSetLane({
       repoRoot,
       env,
@@ -10948,8 +11096,8 @@ export function createWorkspaceAgentRuntime({
       lane,
       status,
       runId: result?.run?.id || fallbackRunId,
-      summary: compactSearchExecutionReceipt(result?.run?.summary ?? result?.value),
-      error: status === "failed" ? result?.error || result?.run?.error : null,
+      summary,
+      error,
     }).execution;
   }
 
@@ -10968,6 +11116,10 @@ export function createWorkspaceAgentRuntime({
     ) {
       return current;
     }
+    const { summary, error } = buildLaneReceipt(
+      outcome?.result?.run?.summary ?? outcome?.result?.value,
+      outcome?.error || outcome?.result?.error || outcome?.result?.run?.error
+    );
     return searchExecutionSetLane({
       repoRoot,
       env,
@@ -10975,10 +11127,8 @@ export function createWorkspaceAgentRuntime({
       lane,
       status,
       runId: outcome?.result?.run?.id,
-      summary: compactSearchExecutionReceipt(
-        outcome?.result?.run?.summary ?? outcome?.result?.value
-      ),
-      error: outcome?.error || outcome?.result?.error || outcome?.result?.run?.error,
+      summary,
+      error,
       reason: outcome?.reason,
     }).execution;
   }

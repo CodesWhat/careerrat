@@ -92,8 +92,60 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: npm ci
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable npm
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts --no-bin-links
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning"). `--no-bin-links` stays on through this step too (Codex
+      # review /tmp/codex-305-r7.md, finding 1): without it, this reinstall
+      # would recreate every dependency's bin symlinks before its own
+      # approved script runs, so a scriptless, unreviewed package that ships
+      # a `bin.node` entry could sit ahead of the real interpreter on PATH
+      # for an approved postinstall that invokes bare `node`.
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts --no-bin-links
+      # Bin links only, no scripts: with the strict install above still
+      # `--no-bin-links`, nothing on PATH points at a dependency's own bin
+      # until this step runs. `npm rebuild` is npm's own documented tool for
+      # exactly this split (npm 12.0.2 docs/content/commands/npm-rebuild.md,
+      # Description: "Installing with --ignore-scripts and --no-bin-links,
+      # to explicitly choose which packages to build and/or link bins.").
+      # It operates on the tree already on disk rather than reinstalling, so
+      # it can't discard anything the approved postinstall above just
+      # wrote, and passing --ignore-scripts here is verified against
+      # @npmcli/arborist's rebuild builder (lib/arborist/rebuild.js#build):
+      # every lifecycle queue (preinstall/install/postinstall/prepare) is
+      # gated behind `if (!this.options.ignoreScripts)`, while bin linking
+      # runs unconditionally when bin-links is enabled, so this step cannot
+      # re-run a script, reviewed or not.
+      - name: Materialize dependency bin links (scripts already ran; this only links)
+        run: npm rebuild --ignore-scripts
       - name: Core test suite
         run: npm test
       - name: Web UI test suite
@@ -119,8 +171,60 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: npm ci
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable npm
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts --no-bin-links
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning"). `--no-bin-links` stays on through this step too (Codex
+      # review /tmp/codex-305-r7.md, finding 1): without it, this reinstall
+      # would recreate every dependency's bin symlinks before its own
+      # approved script runs, so a scriptless, unreviewed package that ships
+      # a `bin.node` entry could sit ahead of the real interpreter on PATH
+      # for an approved postinstall that invokes bare `node`.
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts --no-bin-links
+      # Bin links only, no scripts: with the strict install above still
+      # `--no-bin-links`, nothing on PATH points at a dependency's own bin
+      # until this step runs. `npm rebuild` is npm's own documented tool for
+      # exactly this split (npm 12.0.2 docs/content/commands/npm-rebuild.md,
+      # Description: "Installing with --ignore-scripts and --no-bin-links,
+      # to explicitly choose which packages to build and/or link bins.").
+      # It operates on the tree already on disk rather than reinstalling, so
+      # it can't discard anything the approved postinstall above just
+      # wrote, and passing --ignore-scripts here is verified against
+      # @npmcli/arborist's rebuild builder (lib/arborist/rebuild.js#build):
+      # every lifecycle queue (preinstall/install/postinstall/prepare) is
+      # gated behind `if (!this.options.ignoreScripts)`, while bin linking
+      # runs unconditionally when bin-links is enabled, so this step cannot
+      # re-run a script, reviewed or not.
+      - name: Materialize dependency bin links (scripts already ran; this only links)
+        run: npm rebuild --ignore-scripts
       - name: Build the web app shell (apps/web)
         run: npm run build --workspace apps/web
 
@@ -155,8 +259,60 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: npm ci
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable npm
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts --no-bin-links
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning"). `--no-bin-links` stays on through this step too (Codex
+      # review /tmp/codex-305-r7.md, finding 1): without it, this reinstall
+      # would recreate every dependency's bin symlinks before its own
+      # approved script runs, so a scriptless, unreviewed package that ships
+      # a `bin.node` entry could sit ahead of the real interpreter on PATH
+      # for an approved postinstall that invokes bare `node`.
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts --no-bin-links
+      # Bin links only, no scripts: with the strict install above still
+      # `--no-bin-links`, nothing on PATH points at a dependency's own bin
+      # until this step runs. `npm rebuild` is npm's own documented tool for
+      # exactly this split (npm 12.0.2 docs/content/commands/npm-rebuild.md,
+      # Description: "Installing with --ignore-scripts and --no-bin-links,
+      # to explicitly choose which packages to build and/or link bins.").
+      # It operates on the tree already on disk rather than reinstalling, so
+      # it can't discard anything the approved postinstall above just
+      # wrote, and passing --ignore-scripts here is verified against
+      # @npmcli/arborist's rebuild builder (lib/arborist/rebuild.js#build):
+      # every lifecycle queue (preinstall/install/postinstall/prepare) is
+      # gated behind `if (!this.options.ignoreScripts)`, while bin linking
+      # runs unconditionally when bin-links is enabled, so this step cannot
+      # re-run a script, reviewed or not.
+      - name: Materialize dependency bin links (scripts already ran; this only links)
+        run: npm rebuild --ignore-scripts
       - name: Build the marketing site and docs (apps/website, apps/docs)
         run: npm run build --workspace apps/website
 
@@ -179,8 +335,76 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Install dependencies
-        run: npm ci
+      - name: Activate the repository-pinned npm release
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable npm
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        shell: bash
+        run: npm ci --ignore-scripts --no-bin-links
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        shell: bash
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning"). `--no-bin-links` stays on through this step too (Codex
+      # review /tmp/codex-305-r7.md, finding 1): without it, this reinstall
+      # would recreate every dependency's bin symlinks before its own
+      # approved script runs, so a scriptless, unreviewed package that ships
+      # a `bin.node` entry could sit ahead of the real interpreter on PATH
+      # for an approved postinstall that invokes bare `node`.
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        shell: bash
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts --no-bin-links
+      # Bin links only, no scripts: with the strict install above still
+      # `--no-bin-links`, nothing on PATH points at a dependency's own bin
+      # until this step runs. `npm rebuild` is npm's own documented tool for
+      # exactly this split (npm 12.0.2 docs/content/commands/npm-rebuild.md,
+      # Description: "Installing with --ignore-scripts and --no-bin-links,
+      # to explicitly choose which packages to build and/or link bins.").
+      # It operates on the tree already on disk rather than reinstalling, so
+      # it can't discard anything the approved postinstall above just
+      # wrote, and passing --ignore-scripts here is verified against
+      # @npmcli/arborist's rebuild builder (lib/arborist/rebuild.js#build):
+      # every lifecycle queue (preinstall/install/postinstall/prepare) is
+      # gated behind `if (!this.options.ignoreScripts)`, while bin linking
+      # runs unconditionally when bin-links is enabled, so this step cannot
+      # re-run a script, reviewed or not.
+      - name: Materialize dependency bin links (scripts already ran; this only links)
+        shell: bash
+        run: npm rebuild --ignore-scripts
+      - name: Run win32-gated installed-runtime identity tests
+        shell: bash
+        # The only runner that exercises the real win32 branches these files
+        # gate on (cmd.exe interpreter resolution, the runtime-probe-helper
+        # spawn, ELECTRON_RUN_AS_NODE scoping around it). Both suites also
+        # carry POSIX-only fixtures (extensionless shim detection, /bin/bash
+        # subprocess cases) that only ever run on non-Windows CI, so this
+        # filters execution down to the cases named `[win32] ...` -- the
+        # ones actually gated to run only on native Windows -- instead of
+        # running either suite in full.
+        run: node --test --test-name-pattern "\[win32\]" tests/installed-runtime.test.mjs tests/doctor-installed-runtimes.test.mjs
       - name: Build the Windows x64 NSIS installer
         run: npm run dist:windows --workspace apps/desktop
       - name: Verify install, packaged smoke, and uninstall
@@ -214,8 +438,60 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Install dependencies
-        run: npm ci
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable npm
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts --no-bin-links
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning"). `--no-bin-links` stays on through this step too (Codex
+      # review /tmp/codex-305-r7.md, finding 1): without it, this reinstall
+      # would recreate every dependency's bin symlinks before its own
+      # approved script runs, so a scriptless, unreviewed package that ships
+      # a `bin.node` entry could sit ahead of the real interpreter on PATH
+      # for an approved postinstall that invokes bare `node`.
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts --no-bin-links
+      # Bin links only, no scripts: with the strict install above still
+      # `--no-bin-links`, nothing on PATH points at a dependency's own bin
+      # until this step runs. `npm rebuild` is npm's own documented tool for
+      # exactly this split (npm 12.0.2 docs/content/commands/npm-rebuild.md,
+      # Description: "Installing with --ignore-scripts and --no-bin-links,
+      # to explicitly choose which packages to build and/or link bins.").
+      # It operates on the tree already on disk rather than reinstalling, so
+      # it can't discard anything the approved postinstall above just
+      # wrote, and passing --ignore-scripts here is verified against
+      # @npmcli/arborist's rebuild builder (lib/arborist/rebuild.js#build):
+      # every lifecycle queue (preinstall/install/postinstall/prepare) is
+      # gated behind `if (!this.options.ignoreScripts)`, while bin linking
+      # runs unconditionally when bin-links is enabled, so this step cannot
+      # re-run a script, reviewed or not.
+      - name: Materialize dependency bin links (scripts already ran; this only links)
+        run: npm rebuild --ignore-scripts
       - name: Install the real Chromium test browser
         run: npx playwright install --with-deps chromium
       - name: Build the app used by the visual contract
@@ -330,7 +606,59 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Install dependencies
-        run: npm ci
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable npm
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts --no-bin-links
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning"). `--no-bin-links` stays on through this step too (Codex
+      # review /tmp/codex-305-r7.md, finding 1): without it, this reinstall
+      # would recreate every dependency's bin symlinks before its own
+      # approved script runs, so a scriptless, unreviewed package that ships
+      # a `bin.node` entry could sit ahead of the real interpreter on PATH
+      # for an approved postinstall that invokes bare `node`.
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts --no-bin-links
+      # Bin links only, no scripts: with the strict install above still
+      # `--no-bin-links`, nothing on PATH points at a dependency's own bin
+      # until this step runs. `npm rebuild` is npm's own documented tool for
+      # exactly this split (npm 12.0.2 docs/content/commands/npm-rebuild.md,
+      # Description: "Installing with --ignore-scripts and --no-bin-links,
+      # to explicitly choose which packages to build and/or link bins.").
+      # It operates on the tree already on disk rather than reinstalling, so
+      # it can't discard anything the approved postinstall above just
+      # wrote, and passing --ignore-scripts here is verified against
+      # @npmcli/arborist's rebuild builder (lib/arborist/rebuild.js#build):
+      # every lifecycle queue (preinstall/install/postinstall/prepare) is
+      # gated behind `if (!this.options.ignoreScripts)`, while bin linking
+      # runs unconditionally when bin-links is enabled, so this step cannot
+      # re-run a script, reviewed or not.
+      - name: Materialize dependency bin links (scripts already ran; this only links)
+        run: npm rebuild --ignore-scripts
       - name: Knip check
         run: npx knip --no-progress --max-issues=0

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-
+import { workdayDedupKey } from "../src/core/providers/career-ops/vendor/workday.mjs";
+import { postingIdentityKeys } from "../src/core/scoring/sourced-identity.mjs";
 import * as sourcedScanner from "../src/core/scoring/sourced-scanner.mjs";
 import {
   buildLocationFilter,
@@ -2069,15 +2070,18 @@ test("extracts canonical req ids from common ATS URLs", () => {
     null
   );
   for (const requisition of ["JR12269", "JR13123-1", "R100123149", "HB344468-3"]) {
-    const baseRequisition = requisition.replace(/-\d+$/, "");
+    const baseRequisition = requisition.replace(/-\d+$/, "").toLowerCase();
     assert.deepEqual(
       extractReqId(
         `https://shakeshack.wd5.myworkdayjobs.com/en-US/External/job/New-York-NY/Assistant-General-Manager_${requisition}`
       ),
       {
         provider: "workday",
+        // value stays the literal, unstripped tail (resolve.mjs matches it
+        // verbatim against Workday's own detail-response jobReqId); id is
+        // the canonicalized, hostname-scoped dedup key.
         value: requisition,
-        id: `workday:shakeshack:${baseRequisition.toLowerCase()}`,
+        id: `workday:shakeshack.wd5.myworkdayjobs.com:${baseRequisition}`,
       }
     );
   }
@@ -2088,15 +2092,21 @@ test("extracts canonical req ids from common ATS URLs", () => {
   assert.equal(extractReqId("https://careers.example.com/jobs/123456").id, null);
 });
 
-test("scopes Workday requisition identity to its tenant", () => {
+test("scopes Workday requisition identity to the full hostname, not just the tenant", () => {
   const shakeShack = extractReqId(
     "https://shakeshack.wd5.myworkdayjobs.com/External/job/Manager_JR12269"
   );
   const acme = extractReqId("https://acme.wd3.myworkdayjobs.com/Careers/job/Manager_JR12269");
+  // Same tenant, different wd instance. CR-29: tenant-only scoping used to
+  // collapse these into one id even though they're different Workday hosts.
+  const acmeOtherInstance = extractReqId(
+    "https://acme.wd1.myworkdayjobs.com/Careers/job/Manager_JR12269"
+  );
 
-  assert.equal(shakeShack.id, "workday:shakeshack:jr12269");
-  assert.equal(acme.id, "workday:acme:jr12269");
+  assert.equal(shakeShack.id, "workday:shakeshack.wd5.myworkdayjobs.com:jr12269");
+  assert.equal(acme.id, "workday:acme.wd3.myworkdayjobs.com:jr12269");
   assert.notEqual(shakeShack.id, acme.id);
+  assert.notEqual(acme.id, acmeOtherInstance.id);
 });
 
 test("dedupes Workday postings republished with a cross-site disambiguator suffix", () => {
@@ -2110,9 +2120,9 @@ test("dedupes Workday postings republished with a cross-site disambiguator suffi
     "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-3/"
   );
 
-  assert.equal(unsuffixed.id, "workday:acme:jr12345");
-  assert.equal(suffixedTwo.id, "workday:acme:jr12345");
-  assert.equal(suffixedThree.id, "workday:acme:jr12345");
+  assert.equal(unsuffixed.id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+  assert.equal(suffixedTwo.id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+  assert.equal(suffixedThree.id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
   assert.equal(suffixedTwo.value, "JR12345-2");
   assert.equal(suffixedThree.value, "JR12345-3");
 
@@ -2122,14 +2132,240 @@ test("dedupes Workday postings republished with a cross-site disambiguator suffi
   const sequenceTwo = extractReqId(
     "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Platform-Engineer_R1234-0002"
   );
-  assert.equal(sequenceOne.id, "workday:acme:r1234-0001");
-  assert.equal(sequenceTwo.id, "workday:acme:r1234-0002");
+  assert.equal(sequenceOne.id, "workday:acme.wd5.myworkdayjobs.com:r1234-0001");
+  assert.equal(sequenceTwo.id, "workday:acme.wd5.myworkdayjobs.com:r1234-0002");
   assert.notEqual(sequenceOne.id, sequenceTwo.id);
 
   const unrelatedHost = extractReqId(
     "https://careers.example.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2"
   );
   assert.equal(unrelatedHost.id, null);
+});
+
+test("dedupes cross-site disambiguators on requisition bases with internal hyphens or underscores", () => {
+  // CR-29 round 3: the suffix guard's shape-check regex forbade hyphens and
+  // underscores between the leading letters and the first digit, so it
+  // rejected its own documented base shapes ("R-2593225") the moment a
+  // cross-site "-N" disambiguator followed them, and never matched
+  // underscore-separated bases ("JR_2024_00123") at all: the disambiguator
+  // went unstripped in both cases and the direct/aggregator republish never
+  // collapsed to one key. Regression covers extractReqId directly (the
+  // sourced-identity.mjs entry point) and the underlying vendored
+  // workdayDedupKey, for both a hyphen-bearing and an underscore-bearing
+  // base.
+  const hyphenBase = extractReqId(
+    "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Bentonville-AR/Staff-Engineer_R-2593225"
+  );
+  const hyphenSuffixed = extractReqId(
+    "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Bentonville-AR/Staff-Engineer_R-2593225-2"
+  );
+  assert.equal(hyphenBase.id, "workday:walmart.wd5.myworkdayjobs.com:r-2593225");
+  assert.equal(hyphenSuffixed.id, hyphenBase.id);
+  assert.equal(
+    workdayDedupKey({
+      url: "https://walmart.wd5.myworkdayjobs.com/en-US/WalmartExternal/job/Bentonville-AR/Staff-Engineer_R-2593225-2",
+    }),
+    hyphenBase.id
+  );
+
+  const underscoreBase = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123"
+  );
+  const underscoreSuffixed = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123-2"
+  );
+  assert.equal(underscoreBase.id, "workday:acme.wd5.myworkdayjobs.com:jr_2024_00123");
+  assert.equal(underscoreSuffixed.id, underscoreBase.id);
+  assert.equal(
+    workdayDedupKey({
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123-2",
+    }),
+    underscoreBase.id
+  );
+
+  // Aggregator representation: HiringCafe stamps its own reqId ahead of the
+  // Workday URL, so postingIdentityKeys must still surface the URL-derived
+  // key for the disambiguated aggregator row to collide with the direct one.
+  const directKeys = postingIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123",
+  });
+  const aggregatorKeys = postingIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    hiringCafeUrl: "https://hiring.cafe/job/some-aggregator-id",
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR_2024_00123-2",
+    reqId: "hiringcafe:some-aggregator-id",
+  });
+  assert.ok(directKeys.some((key) => aggregatorKeys.includes(key)));
+});
+
+test("workdayDedupKey keeps a two-digit trailing sequence number as part of the requisition id (CR-29 round 12)", () => {
+  // Codex review of PR #304: the disambiguator match (`-\d{1,2}$`) treated
+  // ANY one- or two-digit trailing group as Workday's cross-site republish
+  // suffix once the base looked requisition-shaped. "R-2024-12" and
+  // "R-2024-13" are two DIFFERENT requisitions (year + sequence), but both
+  // stripped to the identical "workday:<host>:r-2024" base and collided —
+  // the second batch upsert silently overwrote the first. Every documented
+  // real disambiguator (PR #3446) is a single digit, so only a one-digit
+  // trailing group is still treated as one; two-or-more digits now always
+  // stay part of the requisition id.
+  const keyTwelve = workdayDedupKey({
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_R-2024-12",
+  });
+  const keyThirteen = workdayDedupKey({
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_R-2024-13",
+  });
+  assert.equal(keyTwelve, "workday:acme.wd5.myworkdayjobs.com:r-2024-12");
+  assert.equal(keyThirteen, "workday:acme.wd5.myworkdayjobs.com:r-2024-13");
+  assert.notEqual(keyTwelve, keyThirteen);
+
+  // Same-host batch dedupe (scan.mjs's canonicalizeAndDedupe/dedupKey
+  // consumer) must keep both postings distinct end to end, not just at the
+  // key-derivation level.
+  const jobs = [
+    {
+      title: "Senior Engineer (2024-12)",
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_R-2024-12",
+      company: "Acme",
+      location: "Boston, MA",
+    },
+    {
+      title: "Senior Engineer (2024-13)",
+      url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_R-2024-13",
+      company: "Acme",
+      location: "Boston, MA",
+    },
+  ];
+  const keys = new Set(jobs.map((job) => workdayDedupKey(job)));
+  assert.equal(keys.size, 2, "both requisitions must dedupe to distinct keys");
+
+  // A genuine single-digit cross-site disambiguator must still collapse —
+  // this fix narrows the digit count, it doesn't remove the mechanism.
+  const unsuffixed = workdayDedupKey({
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+  });
+  const suffixedTwo = workdayDedupKey({
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+  });
+  assert.equal(unsuffixed, suffixedTwo);
+});
+
+test("workdayDedupKey resolves a long failing requisition base in bounded time (CR-29 round 4)", () => {
+  // The round-3 broadened shape check was one regex,
+  // /^[a-z0-9_-]*\d[a-z0-9_-]*\d{2,}$/: two overlapping `[a-z0-9_-]*` groups
+  // that can both consume the same digits, separated by one mandatory `\d`.
+  // A base that's entirely digits except for a single trailing non-digit
+  // never satisfies the pattern's `\d{2,}$` requirement no matter how the
+  // two groups split the string, so the engine backtracks through every
+  // split point before giving up — a 2,000-char probe measured ~1.15s, a
+  // 3,000-char probe ~3.9s, synchronously blocking the event loop before
+  // any fetch timeout applies. The linear replacement (isRequisitionIdShaped
+  // in workday.mjs) must resolve the same shape in bounded time regardless
+  // of length.
+  const failingBase = `${"9".repeat(4999)}x`; // 5,000 chars: all digits but the last
+  const url = `https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_${failingBase}-12`;
+
+  const start = process.hrtime.bigint();
+  const key = workdayDedupKey({ url });
+  const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+
+  assert.ok(elapsedMs < 50, `expected under 50ms, took ${elapsedMs}ms`);
+  // The base isn't requisition-ID-shaped (it doesn't end in 2+ digits), so
+  // the "-12" is kept as part of the requisition id rather than stripped as
+  // a cross-site disambiguator.
+  assert.equal(key, `workday:acme.wd5.myworkdayjobs.com:${failingBase}-12`);
+});
+
+test("extractReqId does not derive a requisition identity from a Workday board/portal root URL", () => {
+  // CR-29 round 3: delegating every myworkdayjobs.com URL to workdayDedupKey
+  // accepted board paths whose final segment merely contains an underscore
+  // (no /job/<leaf> posting segment at all): "External_Career_Site" derived
+  // requisition "career_site", colliding with a sibling board named
+  // "Internal_Career_Site". Only a genuine /job/<leaf> posting path may
+  // derive a requisition identity now.
+  const boardRoot = extractReqId("https://acme.wd5.myworkdayjobs.com/External_Career_Site");
+  assert.equal(boardRoot.id, null);
+  assert.equal(boardRoot.provider, null);
+
+  const siblingBoard = extractReqId("https://acme.wd5.myworkdayjobs.com/Internal_Career_Site");
+  assert.equal(siblingBoard.id, null);
+
+  const localeBoardRoot = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/External_Career_Site"
+  );
+  assert.equal(localeBoardRoot.id, null);
+
+  // A real posting under that same board still resolves normally.
+  const posting = extractReqId(
+    "https://acme.wd5.myworkdayjobs.com/en-US/External_Career_Site/job/Boston/Senior-Engineer_JR12345"
+  );
+  assert.equal(posting.id, "workday:acme.wd5.myworkdayjobs.com:jr12345");
+});
+
+test("extractReqId and the vendored workdayDedupKey collide on exactly the same Workday URL pairs", () => {
+  // Fixture covers the divergent cases that used to make extractReqId and
+  // workdayDedupKey disagree: same tenant on a different wd host, different
+  // requisition-id prefixes sharing a "LETTERSdigits" tail, "-N" cross-site
+  // disambiguator suffixes, mixed case, trailing slashes, and query strings.
+  const urls = [
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-3/",
+    "https://ACME.WD5.MYWORKDAYJOBS.COM/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345?source=indeed",
+    "https://acme.wd1.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345",
+    "https://acme.wd3.myworkdayjobs.com/Careers/job/Manager_JR12269",
+    "https://shakeshack.wd5.myworkdayjobs.com/External/job/Manager_JR12269",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_REQ_US12345",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_OTHER_US12345",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Data-Engineer_R1234-0001",
+    "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Platform-Engineer_R1234-0002",
+    "https://careers.example.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+  ];
+
+  for (let i = 0; i < urls.length; i++) {
+    for (let j = 0; j < urls.length; j++) {
+      const extractSame = extractReqId(urls[i]).id === extractReqId(urls[j]).id;
+      const vendorSame = workdayDedupKey({ url: urls[i] }) === workdayDedupKey({ url: urls[j] });
+      assert.equal(
+        extractSame,
+        vendorSame,
+        `mismatch for pair (${urls[i]}, ${urls[j]}): extractReqId agree=${extractSame}, workdayDedupKey agree=${vendorSame}`
+      );
+    }
+  }
+});
+
+test("postingIdentityKeys emits both the aggregator reqId and the URL-derived Workday key when they diverge", () => {
+  const keys = postingIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    hiringCafeUrl: "https://hiring.cafe/job/swfwvwmaq6basefz",
+    url: "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+    reqId: "hiringcafe:swfwvwmaq6basefz",
+  });
+
+  assert.deepEqual(keys, [
+    "url:https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Senior-Engineer_JR12345-2",
+    "req:hiringcafe:swfwvwmaq6basefz",
+    "req:workday:acme.wd5.myworkdayjobs.com:jr12345",
+  ]);
+});
+
+test("postingIdentityKeys does not duplicate the req key when the explicit reqId already matches the URL-derived one", () => {
+  const keys = postingIdentityKeys({
+    company: "Acme",
+    title: "Senior Engineer",
+    url: "https://job-boards.greenhouse.io/acme/jobs/123456",
+    reqId: "greenhouse:123456",
+  });
+
+  assert.deepEqual(keys, [
+    "url:https://job-boards.greenhouse.io/acme/jobs/123456",
+    "req:greenhouse:123456",
+  ]);
 });
 
 // ---------------------------------------------------------------------------

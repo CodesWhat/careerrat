@@ -29,6 +29,7 @@ import { migration015 } from "./migrations/015-resume-extractions.mjs";
 import { migration016 } from "./migrations/016-app-operations.mjs";
 import { migration017 } from "./migrations/017-remove-retired-form-fields.mjs";
 import { migration018 } from "./migrations/018-search-executions.mjs";
+import { migration019 } from "./migrations/019-artifact-reservations.mjs";
 
 // Add new migrations here, in ascending id order, as the schema evolves.
 export const ALL_MIGRATIONS = [
@@ -50,6 +51,7 @@ export const ALL_MIGRATIONS = [
   migration016,
   migration017,
   migration018,
+  migration019,
 ];
 
 function readUserVersion(db) {

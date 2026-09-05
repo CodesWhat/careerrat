@@ -534,6 +534,9 @@ test("grouped confirmation reconciles every exact answer gap and preserves unrel
     ].join("\n"),
     "utf8"
   );
+  const resumePdfPath = "workspace/tailored/acme-grouped-resume.pdf";
+  mkdirSync(dirname(join(repoRoot, resumePdfPath)), { recursive: true });
+  writeFileSync(join(repoRoot, resumePdfPath), "%PDF-1.4\nfake resume\n%%EOF\n", "utf8");
   const gaps = [
     {
       kind: "answers",
@@ -562,7 +565,7 @@ test("grouped confirmation reconciles every exact answer gap and preserves unrel
       company: "Acme",
       role: "Accountant",
       status: "reviewed-hold",
-      artifacts: { answersSource: answerPath },
+      artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
       packetManifest: {
         applicationId: "app-acme-grouped",
         generatedAt: "2026-08-24T12:00:00.000Z",
@@ -570,7 +573,7 @@ test("grouped confirmation reconciles every exact answer gap and preserves unrel
         status: "reviewable",
         gapCount: gaps.length,
         gaps,
-        artifacts: { answersSource: answerPath },
+        artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
       },
     },
   });
@@ -625,6 +628,9 @@ test("confirming a tracked one-off answer reconciles only its packet gap through
   const full = join(repoRoot, answerPath);
   mkdirSync(dirname(full), { recursive: true });
   writeFileSync(full, "# Application answers\n", "utf8");
+  const resumePdfPath = "workspace/tailored/acme-confirm-resume.pdf";
+  mkdirSync(dirname(join(repoRoot, resumePdfPath)), { recursive: true });
+  writeFileSync(join(repoRoot, resumePdfPath), "%PDF-1.4\nfake resume\n%%EOF\n", "utf8");
   appUpsert({
     repoRoot,
     env: {},
@@ -633,7 +639,7 @@ test("confirming a tracked one-off answer reconciles only its packet gap through
       company: "Acme",
       role: "Accountant",
       status: "reviewed-hold",
-      artifacts: { answersSource: answerPath },
+      artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
       packetManifest: {
         applicationId: "app-acme-confirm",
         generatedAt: "2026-08-24T12:00:00.000Z",
@@ -654,7 +660,7 @@ test("confirming a tracked one-off answer reconciles only its packet gap through
             message: "Answer “Can you work from our New York office?”.",
           },
         ],
-        artifacts: { answersSource: answerPath },
+        artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
       },
     },
   });
@@ -775,6 +781,94 @@ test("confirming replaces the matching rendered NEEDS YOU answer without disturb
     /## Can you work from our New York office\?\*\n\nNEEDS YOU: confirm the required schedule\./
   );
   assert.equal((markdown.match(/My notice period is two weeks\./g) || []).length, 1);
+});
+
+test("a text-only export plus a pending answer gap stays not upload-ready after the answer is confirmed", async () => {
+  // Regression for the text-only readiness finding: exportPacketArtifacts
+  // only ever added RESUME_UPLOAD_ARTIFACT_MISSING to the gap list when the
+  // packet would OTHERWISE already be upload-ready -- so a text-only
+  // export sitting next to an unrelated pending answer gap never recorded
+  // the resume gap at all (the pending answer gap already meant
+  // "not ready"). Once confirmOneOffScreeningAnswer resolved that answer
+  // gap, uploadReady flipped to true from `remainingGaps.every(...)` alone,
+  // even though the application still has no PDF/DOCX resume to upload --
+  // just the text export. confirmOneOffScreeningAnswer must recompute the
+  // missing-resume gap fresh, independent of what gaps happen to already be
+  // tracked, so this case can never silently become upload-ready.
+  const { confirmOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/acme-text-only-answers.md";
+  const resumeTextPath = "workspace/tailored/acme-text-only-resume.txt";
+  const answerFull = join(repoRoot, answerPath);
+  mkdirSync(dirname(answerFull), { recursive: true });
+  writeFileSync(
+    answerFull,
+    ["# Application answers", "", "## What is your notice period?", "", "NEEDS YOU", ""].join("\n"),
+    "utf8"
+  );
+  mkdirSync(dirname(join(repoRoot, resumeTextPath)), { recursive: true });
+  writeFileSync(join(repoRoot, resumeTextPath), "Jordan Rivera\n\nResume body.\n", "utf8");
+
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-acme-text-only",
+      company: "Acme",
+      role: "Accountant",
+      status: "reviewed-hold",
+      // Only a text export is on record -- no resumePdf/resumeDocx/resume,
+      // exactly like a candidate who ran a text-only regeneration.
+      artifacts: { answersSource: answerPath, resumeText: resumeTextPath },
+      packetManifest: {
+        applicationId: "app-acme-text-only",
+        generatedAt: "2026-08-24T12:00:00.000Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            code: "ANSWER_CONFIRMATION_REQUIRED",
+            questionId: "q-notice",
+            message: "Answer “What is your notice period?”.",
+          },
+        ],
+        artifacts: { answersSource: answerPath, resumeText: resumeTextPath },
+      },
+    },
+  });
+
+  const result = await confirmOneOffScreeningAnswer({
+    repoRoot,
+    env: {},
+    applicationId: "app-acme-text-only",
+    questionId: "q-notice",
+    question: "What is your notice period?",
+    answer: "My notice period is two weeks.",
+  });
+
+  assert.equal(result.persisted, true);
+  assert.equal(
+    result.packetManifest.uploadReady,
+    false,
+    "a text-only export must never read as upload-ready, even once every answer gap is confirmed"
+  );
+  assert.ok(
+    result.packetManifest.gaps.some((gap) => gap?.code === "RESUME_UPLOAD_ARTIFACT_MISSING"),
+    "the missing-resume gap must surface even though it was never in the original gap list"
+  );
+
+  const stored = JSON.parse(
+    openDb({ repoRoot, env: {} })
+      .prepare("SELECT data FROM applications WHERE id = ?")
+      .get("app-acme-text-only").data
+  );
+  assert.equal(stored.packetManifest.uploadReady, false);
+  assert.ok(
+    stored.packetManifest.gaps.some((gap) => gap?.code === "RESUME_UPLOAD_ARTIFACT_MISSING"),
+    "the persisted packet manifest must also carry the missing-resume gap"
+  );
 });
 
 test("confirming an answer cannot clear a packet gap without a tracked answers artifact", async () => {

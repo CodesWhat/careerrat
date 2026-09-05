@@ -31,10 +31,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { runSourcedScan } from "../scripts/scan-sourced.mjs";
+import { printSummary, runSourcedScan } from "../scripts/scan-sourced.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   candidateConfigPatch,
@@ -2224,6 +2224,281 @@ test("runSourcedScan materializes generated query-only HiringCafe sources", asyn
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });
   }
+});
+
+test("a JD artifact-write failure during a DB-mode scan marks the run failed, keeps the offer's id in failedIds, and blocks source-watermark advancement", async () => {
+  // CR-29 round 5: sourcedUpsertBatch/captureAndPersistOffersIfDb already
+  // reported a JD write failure in `failed`/`failedIds`, but this
+  // production caller used to discard that data — the offer's disappearance
+  // from persistedOffers just shrank the duplicate count, so a lost posting
+  // looked exactly like ordinary dedupe, and the search source's watermark
+  // still advanced, making the lost posting unlikely to ever appear again.
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: [], negative: [] },
+        location_filter: null,
+        tracked_companies: [],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "HiringCafe",
+            source_type: "url-query",
+            label: "Blocked Artifact",
+            query: "Blocked Artifact",
+            enabled: true,
+            recency: { mode: "since-last-run", safetyMinutes: 30 },
+            searchState: { sortBy: "date" },
+          },
+        ],
+      },
+    });
+
+    // JD artifacts land at a content-addressed final path (sourced-
+    // persistence.mjs's contentAddressedJobCaptureRelPath: <company-slug>-
+    // <title-slug>-<content-digest>.md, CR-29 round 6), so the exact
+    // filename can't be predicted ahead of rendering. Block EVERY artifact
+    // write instead, regardless of filename: making "workspace/jobs" itself
+    // a plain FILE means mkdirSync(dirname(absPath), { recursive: true })
+    // throws for any offer, since an ancestor path component exists but
+    // isn't a directory — the write throws before any DB transaction opens.
+    const jobsDir = userPath({ repoRoot }, "workspace/jobs");
+    mkdirSync(dirname(jobsDir), { recursive: true });
+    writeFileSync(jobsDir, "");
+
+    const before = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(before.searches[0].recency.lastRunAt, undefined);
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => ({
+        offers: [
+          {
+            company: "Example Labs",
+            title: "Blocked Artifact Role",
+            url: "https://boards.greenhouse.io/examplelabs/jobs/1234567",
+            location: "Remote",
+            bodyText: "Body for the blocked-artifact regression.",
+            source: "hiringcafe-browser",
+            sourceProvider: "hiringcafe",
+          },
+        ],
+        errors: [],
+        needsLogin: null,
+      }),
+      hydrateOfferImpl: async (offer) => offer,
+    });
+
+    assert.equal(summary.ok, false);
+    assert.equal(summary.failed, 1);
+    assert.deepEqual(summary.failedIds, ["sourced-example-labs-greenhouse-1234567"]);
+    assert.equal(summary.new, 0);
+    assert.equal(summary.duplicates, 0, "a write failure must not be reported as a duplicate");
+
+    const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+    assert.equal(rows.length, 0, "a failed JD write must not leave a dangling DB row");
+
+    const after = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(
+      after.searches[0].recency.lastRunAt,
+      undefined,
+      "a run with an artifact-write failure must not advance the source watermark"
+    );
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a scan offer bridging two already-persisted rows that share one identity key settles the run as an identity conflict, not a duplicate, and blocks the source watermark (CR-29 round 8)", async () => {
+  // Two rows that predate a canonicalization fix can already share one
+  // identity key in the DB (see tests/db-verbs.test.mjs's storedPostingIndex
+  // regression) — here, a Greenhouse requisition id both rows picked up as
+  // an ALIAS from an earlier merge, not their own URL. That asymmetry
+  // matters for this end-to-end path: filterAndDedupeOffers's own same-run
+  // dedupe (seenReqIds) only ever sees a row's OWN url-derived id, never its
+  // aliasKeys, so a fresh capture of that same Greenhouse posting sails
+  // through scanning and only meets the ambiguity once it reaches
+  // captureAndPersistOffersIfDb's DB-transaction reconciliation. Before this
+  // fix, captureAndPersistOffersIfDb's own production callers (this file,
+  // scripts/scan-sourced.mjs) didn't even look at `conflicts` — the bridge
+  // offer got folded straight into the ordinary duplicate count, the run
+  // settled "ok", and the source watermark advanced with no durable signal
+  // that reconciliation actually refused to persist anything for it.
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourcedUpsertBatch({
+      repoRoot,
+      rows: [
+        {
+          id: "sourced-legacy-conflict-owner-a",
+          company: "Legacy Corp A",
+          role: "Legacy Role A",
+          link: "https://jobs.example.test/legacy-corp-a/role",
+          fitScore: 70,
+          aliasKeys: ["req:greenhouse:9999999"],
+        },
+        {
+          id: "sourced-legacy-conflict-owner-b",
+          company: "Legacy Corp B",
+          role: "Legacy Role B",
+          link: "https://jobs.example.test/legacy-corp-b/role",
+          fitScore: 70,
+          aliasKeys: ["req:greenhouse:9999999"],
+        },
+      ],
+    });
+
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: [], negative: [] },
+        location_filter: null,
+        tracked_companies: [],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "HiringCafe",
+            source_type: "url-query",
+            label: "Bridge Conflict",
+            query: "Bridge Conflict",
+            enabled: true,
+            recency: { mode: "since-last-run", safetyMinutes: 30 },
+            searchState: { sortBy: "date" },
+          },
+        ],
+      },
+    });
+
+    const before = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(before.searches[0].recency.lastRunAt, undefined);
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      captureBrowserSourceImpl: async () => ({
+        offers: [
+          {
+            company: "Bridge Co",
+            title: "Bridge Role",
+            url: "https://boards.greenhouse.io/bridgeco/jobs/9999999",
+            location: "Remote",
+            bodyText: "Body for the identity-conflict regression.",
+            source: "hiringcafe-browser",
+            sourceProvider: "hiringcafe",
+          },
+        ],
+        errors: [],
+        needsLogin: null,
+      }),
+      hydrateOfferImpl: async (offer) => offer,
+    });
+
+    assert.equal(summary.ok, false);
+    assert.equal(summary.new, 0, "the ambiguous bridge must not persist as a new row");
+    assert.equal(summary.duplicates, 0, "a conflict must not be reported as an ordinary duplicate");
+    assert.equal(summary.conflicts, 1);
+    assert.equal(summary.conflictOffers.length, 1);
+    assert.equal(summary.conflictOffers[0].company, "Bridge Co");
+    assert.equal(
+      summary.conflictOffers[0].url,
+      "https://boards.greenhouse.io/bridgeco/jobs/9999999"
+    );
+
+    const rows = openDb({ repoRoot }).prepare("SELECT id FROM sourced").all();
+    assert.equal(rows.length, 2, "only the two pre-seeded legacy rows may exist");
+
+    const after = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(
+      after.searches[0].recency.lastRunAt,
+      undefined,
+      "a run settling with an identity conflict must not advance the source watermark"
+    );
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CLI exit code + summary-mode failure sample (CR-29 round 7): the CLI used
+// to exit 0 and (in --summary mode) print nothing at all about a batch with
+// JD artifact-write failures, so scheduled automation had no process-level
+// signal that offers were silently lost. printSummary is exported
+// specifically so this can be exercised directly rather than only through a
+// spawned process — see that export's own comment.
+// ---------------------------------------------------------------------------
+
+function captureConsoleLog(run) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(" "));
+  try {
+    run();
+  } finally {
+    console.log = original;
+  }
+  return lines;
+}
+
+test("printSummary stays silent about failures when the batch is clean", () => {
+  const summary = {
+    coldFamilies: [],
+    scanned: 1,
+    new: 1,
+    filteredTitle: 0,
+    filteredLocation: 0,
+    duplicates: 0,
+    ok: true,
+    failed: 0,
+    failedIds: [],
+    errors: [],
+  };
+  const lines = captureConsoleLog(() => printSummary(summary, [], {}, 0));
+  assert.ok(
+    !lines.some((line) => line.startsWith("Failed to persist")),
+    "a clean batch must not print a failure line"
+  );
+});
+
+test("printSummary reports a bounded (max 10) failure-id sample when the batch is not ok", () => {
+  const failedIds = Array.from({ length: 14 }, (_, index) => `sourced-acme-${index}`);
+  const summary = {
+    coldFamilies: [],
+    scanned: 14,
+    new: 0,
+    filteredTitle: 0,
+    filteredLocation: 0,
+    duplicates: 0,
+    ok: false,
+    failed: 14,
+    failedIds,
+    errors: [],
+  };
+  const lines = captureConsoleLog(() => printSummary(summary, [], {}, 0));
+  const failureLine = lines.find((line) => line.startsWith("Failed to persist"));
+  assert.ok(failureLine, "a failed batch must print a failure summary line");
+  assert.match(failureLine, /^Failed to persist: 14 \(ids: /);
+  for (const id of failedIds.slice(0, 10)) assert.ok(failureLine.includes(id));
+  for (const id of failedIds.slice(10)) assert.ok(!failureLine.includes(id));
+  assert.match(failureLine, /…\)$/, "the sample must show it was truncated");
 });
 
 test("runSourcedScan preserves a login-backed session JD without public rehydration", async () => {

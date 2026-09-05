@@ -7,12 +7,15 @@ import { createHash } from "node:crypto";
 import {
   accessSync,
   chmodSync,
+  closeSync,
   constants,
   copyFileSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -38,11 +41,26 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
+import { isWithinRuntimePath } from "./runtime-path-policy.mjs";
+import { CLEANUP_DEADLINE_MS, KILL_TIMEOUT_MS } from "./runtime-probe-constants.mjs";
 import {
+  killProcessTreeByPid,
+  resolveWindowsCommandInterpreter,
   runtimeProcessIdentityFiles,
   runtimeProcessInvocation,
   scheduleRuntimeProcessKill,
 } from "./runtime-process.mjs";
+
+// Windows-only helper for installedRuntimeExecutionIdentity's synchronous
+// `--version` probe below. See runtime-probe-helper.mjs for why it exists:
+// a bare spawnSync of the runtime itself only ever reaps the direct child on
+// timeout, which leaves killProcessTreeByPid's taskkill /t nothing to walk.
+// Referenced by path (spawned as its own node process), not imported, so it
+// stays out of installed-runtimes.mjs's own module graph. knip's entry list
+// (knip.json) lists it explicitly for the same reason.
+const RUNTIME_PROBE_HELPER_PATH = fileURLToPath(
+  new URL("./runtime-probe-helper.mjs", import.meta.url)
+);
 
 const CLAUDE_BOUNDARY_MINIMUM_VERSION = "2.1.241";
 const UNVERIFIED_COMPLETION_REASON =
@@ -146,9 +164,13 @@ const INSTALLED_CHILD_ENV_KEYS = Object.freeze([
   "NODE_EXTRA_CA_CERTS",
 ]);
 
-export function buildInstalledRuntimeChildEnv({ env = process.env } = {}) {
+// The base allowlist carries no provider credential, so one CLI can never read
+// another's. A runtime that documents its own credential variables gets exactly
+// those added on top, and only when it is the runtime being launched.
+export function buildInstalledRuntimeChildEnv({ env = process.env, runtimeId = null } = {}) {
   const childEnv = {};
-  for (const key of INSTALLED_CHILD_ENV_KEYS) {
+  const runtimeKeys = runtimeId ? installedRuntimeDefinition(runtimeId)?.authEnvKeys || [] : [];
+  for (const key of [...INSTALLED_CHILD_ENV_KEYS, ...runtimeKeys]) {
     if (env[key] !== undefined) childEnv[key] = env[key];
   }
   return childEnv;
@@ -191,6 +213,16 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     acpArgs: Object.freeze(["--acp"]),
     binaries: ["gemini"],
     commandShape: "gemini --acp",
+    // Variables the Gemini CLI itself reads for its non-interactive auth
+    // methods: GEMINI_API_KEY for the Gemini Developer API, the rest for
+    // Vertex AI. Verified against gemini-cli 0.58.0.
+    authEnvKeys: Object.freeze([
+      "GEMINI_API_KEY",
+      "GOOGLE_API_KEY",
+      "GOOGLE_CLOUD_PROJECT",
+      "GOOGLE_CLOUD_LOCATION",
+      "GOOGLE_GENAI_USE_VERTEXAI",
+    ]),
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "Make sure you're signed in.",
     installUrl: "https://github.com/google-gemini/gemini-cli",
@@ -305,6 +337,14 @@ function installedRuntimeDefinition(runtimeId) {
   return INSTALLED_RUNTIME_DEFINITIONS_BY_ID.get(String(runtimeId || "").trim());
 }
 
+// The version-boundary policy floor a runtime is currently held to, so a
+// cached probe can be checked against the floor in force right now rather
+// than whatever floor happened to be current when the probe last ran. A
+// runtime with no boundary policy (e.g. codex) has no minimum at all.
+export function installedRuntimeBoundaryPolicyMinimum(runtimeId) {
+  return installedRuntimeDefinition(runtimeId)?.minimumBoundaryVersion || null;
+}
+
 function splitPaths(value, separator) {
   return String(value || "")
     .split(separator)
@@ -401,11 +441,37 @@ export function findInstalledExecutable(
   return null;
 }
 
+// `fingerprintId` restricts binary hashing to a single definition id, for a
+// caller that only ever needs the fingerprint of one already-known runtime
+// (Doctor validating a cached verification for the selected engine, say).
+// Passing the key at all — even as null, meaning "fingerprint none" — opts
+// into the restriction; omitting it keeps the default of fingerprinting
+// every detected executable, so existing callers (call-ai.mjs, the settings
+// route, every test that doesn't pass this option) are unaffected. Reading
+// and SHA-256 hashing a full binary is not cheap across hundreds of MB of
+// installed CLIs, so a caller that only cares about one runtime's cached
+// verification should never pay for the others.
+//
+// `deferSelectedFingerprint` additionally skips hashing the `fingerprintId`
+// match itself. Doctor's normal path needs that runtime's content verified
+// exactly once, immediately before the version spawn it's about to
+// authorize — not once here during inventory discovery and reused later,
+// which leaves a window between the two reads for a same-path replacement
+// to swap in unverified bytes. installedRuntimeExecutionIdentity's
+// `expectedFingerprint` option is where that single hash now happens.
 export function detectInstalledRuntimes(options = {}) {
+  const restrictFingerprint = Object.hasOwn(options, "fingerprintId");
+  const fingerprintId = options.fingerprintId ?? null;
+  const deferSelectedFingerprint = options.deferSelectedFingerprint === true;
+  const fingerprintImpl = options.runtimeBinaryFingerprintImpl ?? runtimeBinaryFingerprint;
   return INSTALLED_RUNTIME_DEFINITIONS.map((definition) => {
     const path = findInstalledExecutable(definition.binaries, options);
     const realPath = path ? existingCanonicalPath(path) : null;
-    const binaryFingerprint = realPath ? runtimeBinaryFingerprint(realPath, options) : null;
+    const isSelectedMatch = restrictFingerprint && definition.id === fingerprintId;
+    const shouldFingerprint =
+      (!restrictFingerprint || isSelectedMatch) && !(isSelectedMatch && deferSelectedFingerprint);
+    const binaryFingerprint =
+      realPath && shouldFingerprint ? fingerprintImpl(realPath, options) : null;
     const runtimeCapabilities = installedRuntimeCapabilities(definition.id, {
       available: Boolean(path),
     });
@@ -638,7 +704,59 @@ const COMPLETION_SMOKE_SCHEMA = Object.freeze({
   required: ["receipt"],
 });
 
-function runtimeBinaryFingerprint(
+// Discovery only checks the executable bit (X_OK), which an executable FIFO
+// or other special file passes just as a real binary does. Fingerprinting is
+// the first place that would actually read that path's content, so it's the
+// place a FIFO with no writer would block forever on a plain readFileSync.
+// O_NONBLOCK makes the open itself return immediately instead of waiting for
+// a writer to connect; fstat-ing the resulting descriptor then proves what
+// was actually opened before any bytes are read. Returns null (never
+// throws) for anything that isn't a regular file, so callers treat a FIFO,
+// directory, or device the same as an unreadable path: unknown identity, not
+// a hang and not a fabricated fingerprint.
+function readRegularFileBytes(path) {
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK || 0));
+  } catch {
+    return null;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return null;
+    return readFileSync(fd);
+  } catch {
+    return null;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      // fd already invalid; nothing left to release.
+    }
+  }
+}
+
+// Windows filesystems are case-insensitive, so two resolutions of the same
+// on-disk file can differ only in casing without being different files at
+// all; folding to lowercase there keeps both the read-cache and the digest
+// input stable against that. POSIX filesystems are case-sensitive, so a case
+// difference there IS a different path and must stay significant.
+function normalizeChainPathKey(filePath, platform) {
+  return platform === "win32" ? String(filePath).toLowerCase() : String(filePath);
+}
+
+// Per-file breakdown behind runtimeBinaryFingerprint's aggregate digest:
+// ordered `{ role, realPath, sha256 }` entries for every file
+// runtimeProcessIdentityFiles resolves for `path` (launcher, wrapper,
+// interpreter, payload — or the single "executable" role for a
+// non-delegating binary or self-contained script). Exported so a persisted
+// verification can carry the same breakdown (installed-runtime-route.mjs's
+// runtimeVerification) and so a later mismatch can be attributed to the
+// specific role that changed (installedRuntimeExecutionMismatchRole) rather
+// than only reporting that the aggregate digest no longer matches. Returns
+// null (fail closed) whenever any resolved file's role, path, or bytes can't
+// be established — a chain that can't be read in full is not a chain this
+// function will vouch for any part of.
+export function runtimeExecutionChainDigests(
   path,
   {
     env = process.env,
@@ -647,38 +765,130 @@ function runtimeBinaryFingerprint(
   } = {}
 ) {
   try {
-    if (platform === "win32" && /\.(?:bat|cmd)$/i.test(String(path || ""))) {
-      const resolvedBytes = new Map();
-      const readIdentityFile = (filePath) => {
-        const bytes = readFileSync(filePath);
-        resolvedBytes.set(String(filePath).toLowerCase(), bytes);
-        return bytes;
-      };
-      const files = runtimeIdentityFilesImpl(path, {
-        env,
-        platform,
-        readFileImpl: readIdentityFile,
-      });
-      if (!Array.isArray(files) || files.length < 3) return null;
-      const hash = createHash("sha256").update("careerrat-runtime-chain-v1\0");
-      const seenRoles = new Set();
-      for (const file of files) {
-        const role = String(file?.role || "").trim();
-        const filePath = String(file?.path || "").trim();
-        if (!role || !filePath || seenRoles.has(role)) return null;
-        seenRoles.add(role);
-        const bytes = resolvedBytes.get(filePath.toLowerCase()) || readIdentityFile(filePath);
-        hash.update(`${role}\0${filePath.toLowerCase()}\0${bytes.length}\0`).update(bytes);
-      }
-      if (!seenRoles.has("launcher") || !seenRoles.has("wrapper") || !seenRoles.has("payload")) {
-        return null;
-      }
-      return hash.digest("hex");
+    const resolvedBytes = new Map();
+    const readIdentityFile = (filePath) => {
+      const bytes = readFileSync(filePath);
+      resolvedBytes.set(normalizeChainPathKey(filePath, platform), bytes);
+      return bytes;
+    };
+    const files = runtimeIdentityFilesImpl(path, {
+      env,
+      platform,
+      readFileImpl: readIdentityFile,
+    });
+    if (!Array.isArray(files) || files.length === 0) return null;
+
+    // The common case: a compiled binary or a self-contained script (e.g.
+    // `#!/usr/bin/env node`) with no further indirection to resolve. This
+    // preserves the plain sha256-of-the-file's-own-bytes digest CareerRat
+    // has always used for this case, unchanged, so an existing cached
+    // fingerprint for a non-delegating executable keeps matching.
+    if (files.length === 1 && files[0]?.role === "executable") {
+      const filePath = String(files[0].path || "").trim();
+      if (!filePath) return null;
+      const bytes = readRegularFileBytes(filePath);
+      if (bytes === null) return null;
+      return [
+        {
+          role: "executable",
+          realPath: normalizeChainPathKey(filePath, platform),
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        },
+      ];
     }
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
+
+    const seenRoles = new Set();
+    const chain = [];
+    for (const file of files) {
+      const role = String(file?.role || "").trim();
+      const filePath = String(file?.path || "").trim();
+      if (!role || !filePath || seenRoles.has(role)) return null;
+      seenRoles.add(role);
+      const key = normalizeChainPathKey(filePath, platform);
+      const bytes = resolvedBytes.get(key) || readIdentityFile(filePath);
+      chain.push({ role, realPath: key, sha256: createHash("sha256").update(bytes).digest("hex") });
+    }
+    if (!seenRoles.has("launcher") || !seenRoles.has("wrapper") || !seenRoles.has("payload")) {
+      return null;
+    }
+    return chain;
   } catch {
     return null;
   }
+}
+
+// The stored fingerprint for a non-delegating executable stays the plain
+// sha256 of its own bytes (see runtimeExecutionChainDigests above); for a
+// resolved multi-role chain it becomes a digest OVER the ordered per-file
+// digests instead — by design a different value from any single file's own
+// bytes, so a selection cached under the old launcher-only digest (from
+// before this function covered the whole chain) simply fails to match and
+// re-verifies once. That's the correct, safe behavior for the transition,
+// not a bug to work around. The field name and 64-hex shape are unchanged
+// either way, so every existing caller and persisted selection keeps
+// working.
+function runtimeBinaryFingerprint(
+  path,
+  {
+    env = process.env,
+    platform = process.platform,
+    runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+  } = {}
+) {
+  const chain = runtimeExecutionChainDigests(path, { env, platform, runtimeIdentityFilesImpl });
+  if (!chain) return null;
+  if (chain.length === 1 && chain[0].role === "executable") return chain[0].sha256;
+  const hash = createHash("sha256").update("careerrat-runtime-chain-v1\0");
+  for (const file of chain) {
+    hash.update(`${file.role}\0${file.realPath}\0${file.sha256}\0`);
+  }
+  return hash.digest("hex");
+}
+
+// Read-only diagnostic, never used for authorization: attributes a
+// binaryFingerprint mismatch to the specific chain role that changed, so
+// Doctor can report *why* a cached verification no longer matches ("the
+// payload changed") instead of only that it doesn't. Compares each cached
+// per-file digest (persisted alongside binaryFingerprint — see
+// runtime-selection.mjs's chainFiles) against a fresh read of the same role
+// right now. Returns the first role that no longer resolves, no longer
+// resolves to the same real path, or no longer hashes the same, or null when
+// nothing here can explain the mismatch (no cached breakdown to compare
+// against, or the wrapper itself can't currently be resolved at all).
+export function installedRuntimeExecutionMismatchRole(
+  runtime,
+  cachedVerification,
+  {
+    env = process.env,
+    platform = process.platform,
+    runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+  } = {}
+) {
+  const chainFiles = Array.isArray(cachedVerification?.chainFiles)
+    ? cachedVerification.chainFiles
+    : null;
+  if (!chainFiles || chainFiles.length === 0) return null;
+  const path = String(runtime?.path || "").trim();
+  if (!path) return null;
+  const currentRealPath = existingCanonicalPath(path);
+  if (!currentRealPath) return "wrapper";
+  const files = runtimeIdentityFilesImpl(currentRealPath, { env, platform });
+  if (!Array.isArray(files)) return "wrapper";
+  const currentByRole = new Map(files.map((file) => [String(file?.role || ""), file]));
+  for (const expected of chainFiles) {
+    const role = String(expected?.role || "");
+    const current = currentByRole.get(role);
+    if (!current?.path) return role;
+    const currentRealFilePath = existingCanonicalPath(current.path);
+    if (!currentRealFilePath) return role;
+    const key = normalizeChainPathKey(currentRealFilePath, platform);
+    if (key !== String(expected.realPath || "")) return role;
+    const bytes = readRegularFileBytes(currentRealFilePath);
+    if (bytes === null) return role;
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (digest !== String(expected.sha256 || "").toLowerCase()) return role;
+  }
+  return null;
 }
 
 export function installedRuntimeExecutionIdentity(
@@ -687,8 +897,32 @@ export function installedRuntimeExecutionIdentity(
     env = process.env,
     platform = process.platform,
     spawnSyncImpl = spawnSync,
+    treeKillImpl = spawnSync,
     runtimeIdentityFilesImpl = runtimeProcessIdentityFiles,
+    runtimeBinaryFingerprintImpl = runtimeBinaryFingerprint,
+    realpathImpl = realpathSync,
     requireCurrentExecutable = false,
+    // A fingerprint the caller already trusts for this exact runtime
+    // (Doctor's cached verification, say). When supplied, it is never
+    // reused in place of hashing — the fresh hash below always runs first —
+    // it is only ever a comparison target: if the digest just read from
+    // disk right now doesn't match it (or path/realPath moved), this
+    // returns null (unverified identity) before ever reaching the
+    // `--version` spawn below. That closes the window a reused,
+    // already-stale digest would leave open: a same-path replacement
+    // between whenever expectedFingerprint was established and this call
+    // must be caught here, not authorized to run.
+    expectedFingerprint = null,
+    // Fired (never thrown) whenever the win32 `--version` probe below
+    // reports cleanupFailed: true — its tree kill failed and, even after the
+    // helper's own bounded retry, descendants couldn't be confirmed dead.
+    // That's an internal probe-hygiene signal, not a reason to fail this
+    // identity read (the version this call cares about may have come back
+    // fine regardless), so it's surfaced via callback rather than folded
+    // into the return value: Doctor is the only caller that currently wants
+    // it, and every other call site (the AI execution router, tests) stays
+    // unaffected by leaving this unset.
+    onProbeCleanupFailed,
   } = {}
 ) {
   const path = String(runtime?.path || "").trim();
@@ -697,8 +931,19 @@ export function installedRuntimeExecutionIdentity(
   const realPath =
     currentRealPath || (requireCurrentExecutable ? "" : String(runtime?.realPath || "").trim());
   const resolvedFingerprint = currentRealPath
-    ? runtimeBinaryFingerprint(currentRealPath, { env, platform, runtimeIdentityFilesImpl })
+    ? runtimeBinaryFingerprintImpl(currentRealPath, { env, platform, runtimeIdentityFilesImpl })
     : null;
+  if (expectedFingerprint) {
+    const expectedFingerprintMatches =
+      Boolean(currentRealPath) &&
+      String(expectedFingerprint.path || "").trim() === path &&
+      String(expectedFingerprint.realPath || "").trim() === currentRealPath &&
+      /^[a-f0-9]{64}$/.test(String(resolvedFingerprint || "")) &&
+      String(expectedFingerprint.binaryFingerprint || "")
+        .trim()
+        .toLowerCase() === resolvedFingerprint;
+    if (!expectedFingerprintMatches) return null;
+  }
   const requiresResolvedChain = platform === "win32" && /\.(?:bat|cmd)$/i.test(String(realPath));
   const binaryFingerprint =
     resolvedFingerprint ||
@@ -710,22 +955,157 @@ export function installedRuntimeExecutionIdentity(
   let version = String(runtime?.version || "").trim();
   if (!version) {
     const childEnv = buildInstalledRuntimeChildEnv({ env });
-    const invocation = runtimeProcessInvocation(path, ["--version"], {
-      env: childEnv,
-      platform,
-    });
     try {
-      const result = spawnSyncImpl(invocation.command, invocation.args, {
-        ...invocation.options,
-        env: childEnv,
-        encoding: "utf8",
-        maxBuffer: MAX_RUNTIME_PROBE_BYTES,
-        timeout: 5_000,
-        shell: false,
-        windowsHide: true,
-      });
-      if (!result?.error && result?.status === 0) {
-        version = parseVersion(`${result.stdout || ""}\n${result.stderr || ""}`)?.join(".") || "";
+      if (platform === "win32") {
+        // A direct spawnSync of the runtime here would only ever reap the
+        // cmd.exe/npm-shim root on timeout; killProcessTreeByPid's
+        // taskkill /t runs afterward and finds nothing left to walk (see
+        // runtime-probe-helper.mjs's own header comment for the full
+        // reasoning). installedRuntimeExecutionIdentity has to stay
+        // synchronous, so the fix isn't to make this call async, it's to
+        // push the runtime spawn into its own node process that CAN be
+        // async: that helper enforces probeTimeoutMs itself, tree-kills
+        // the runtime while its root pid is still addressable, and only
+        // reports back once the whole tree is confirmed gone. The
+        // interpreter resolution is done once, here, via
+        // resolveWindowsCommandInterpreter, and handed straight to the
+        // helper as argv, never re-derived inside it.
+        //
+        // Same accepted hash-to-spawn window as the POSIX branch's own
+        // comment below: there is no fexecve/execveat equivalent on Windows
+        // either, and a staged, already-hashed copy would break a resolved
+        // npm-shim .cmd the same way it would a POSIX one. This ordering
+        // defends a stale cached verification, not a writer racing this
+        // exact call.
+        const invocation = runtimeProcessInvocation(path, ["--version"], {
+          env: childEnv,
+          platform,
+          resolveInterpreter: () =>
+            resolveWindowsCommandInterpreter({ env: childEnv, realpathImpl }),
+        });
+        // Windows CI review: a real npm-shim `.cmd` probe is a multi-hop
+        // CreateProcess chain (this helper's own node.exe, then cmd.exe,
+        // then the shim's own node.exe), and Windows process creation is
+        // measurably slower than POSIX fork/exec even before a real-time
+        // antivirus scan of a freshly-launched executable is added on top.
+        // A 5-second budget was tight enough to occasionally mistake a
+        // legitimately healthy, if slow-to-start, runtime for a hung one —
+        // once probeTimeoutMs elapses, timedOut latches true for the rest of
+        // this probe's life (runtime-probe-helper.mjs never clears it), so
+        // no amount of tree-kill/cleanup correctness downstream can recover
+        // a version read lost to a timeout that fired too early.
+        const probeTimeoutMs = 10_000;
+        // The helper's own worst-case lifecycle runs well past probeTimeoutMs:
+        // once that fires, it tree-kills (bounded by KILL_TIMEOUT_MS), then
+        // waits up to CLEANUP_DEADLINE_MS for confirmed exit, then — only if
+        // that first tree kill failed — retries the tree kill once more
+        // (bounded by KILL_TIMEOUT_MS again) before it gives up and reports
+        // cleanupFailed. This parent-side backstop has to outlast all four of
+        // those stages plus a margin for the helper process's own startup and
+        // reporting, or it kills the helper mid-retry and silently loses
+        // cleanupFailed instead of surfacing it (round 19 review).
+        const HELPER_STARTUP_AND_REPORTING_MARGIN_MS = 3_000;
+        const helperDeadlineMs =
+          probeTimeoutMs +
+          KILL_TIMEOUT_MS +
+          CLEANUP_DEADLINE_MS +
+          KILL_TIMEOUT_MS +
+          HELPER_STARTUP_AND_REPORTING_MARGIN_MS;
+        const result = spawnSyncImpl(
+          process.execPath,
+          [
+            RUNTIME_PROBE_HELPER_PATH,
+            invocation.command,
+            ...invocation.args,
+            "--timeout-ms",
+            String(probeTimeoutMs),
+            // The helper's own spawn needs the same windowsVerbatimArguments
+            // guarantee runtimeProcessInvocation just computed: without it,
+            // Node re-quotes the already cmd-escaped `/c "..."` payload above
+            // a second time before cmd.exe ever sees it (see
+            // runtime-probe-helper.mjs's own header comment).
+            ...(invocation.options?.windowsVerbatimArguments
+              ? ["--windows-verbatim-arguments"]
+              : []),
+          ],
+          {
+            // In the packaged desktop, process.execPath (used as the
+            // command above) is CareerRat.exe, not a Node binary — without
+            // ELECTRON_RUN_AS_NODE, this launches another Electron GUI
+            // instead of running runtime-probe-helper.mjs as a script. Scoped
+            // to this one child, same pattern as buildChildEnv's
+            // electronGuard (skill-runtime.mjs) and update-core.mjs's
+            // installer relaunch. The helper strips this back out of the
+            // env it hands to the runtime it spawns (runtime-probe-helper.mjs),
+            // so the runtime itself never inherits it.
+            env: { ...childEnv, ELECTRON_RUN_AS_NODE: "1" },
+            encoding: "utf8",
+            maxBuffer: MAX_RUNTIME_PROBE_BYTES,
+            // Backstop only, derived above from the helper's full worst-case
+            // lifecycle: the helper is the one enforcing the real deadline
+            // against the runtime it spawns, and always reports back before
+            // this fires under normal operation. This exists only so a
+            // wedged helper process itself can't hang Doctor forever.
+            timeout: helperDeadlineMs,
+            killSignal: "SIGKILL",
+            shell: false,
+            windowsHide: true,
+          }
+        );
+        if (!result?.error && result?.status === 0 && typeof result.stdout === "string") {
+          const reported = JSON.parse(result.stdout);
+          if (reported?.cleanupFailed) onProbeCleanupFailed?.();
+          if (reported && !reported.timedOut && reported.status === 0) {
+            version =
+              parseVersion(`${reported.stdout || ""}\n${reported.stderr || ""}`)?.join(".") || "";
+          }
+        }
+      } else {
+        // The hash just computed above (resolvedFingerprint) and the spawn
+        // below are two separate syscalls, not one atomic operation, so
+        // there is necessarily a window between them a local writer with
+        // permission to replace this same path could exploit. That window
+        // is accepted per platform, not closed, because there is no
+        // portable way to bind a spawn to already-hashed bytes: fexecve (or
+        // execveat with AT_EMPTY_PATH), which spawns an already-open,
+        // already-verified file descriptor instead of re-resolving a path,
+        // exists on Linux but not on macOS; and staging a hashed copy to
+        // spawn instead of the original breaks any script launcher (the
+        // POSIX npm-shim shape runtimeProcessIdentityFiles recognizes
+        // included) that resolves its own payload or sibling files relative
+        // to its own real path, since a staged copy's path is no longer
+        // that path. What this hash-then-spawn ordering actually defends
+        // against — and does defend against — is a STALE cached
+        // verification: the whole point of expectedFingerprint above is
+        // that a same-path replacement made at any point before this call
+        // is caught here, before the spawn ever runs, rather than trusted
+        // on a moments-old cached digest. It is not, and cannot portably be,
+        // a defense against a writer racing this exact call.
+        const invocation = runtimeProcessInvocation(path, ["--version"], {
+          env: childEnv,
+          platform,
+        });
+        const result = spawnSyncImpl(invocation.command, invocation.args, {
+          ...invocation.options,
+          env: childEnv,
+          encoding: "utf8",
+          maxBuffer: MAX_RUNTIME_PROBE_BYTES,
+          timeout: 5_000,
+          killSignal: "SIGKILL",
+          shell: false,
+          windowsHide: true,
+          // A detached child becomes its own process-group leader (pgid ===
+          // pid), so the killProcessTreeByPid cleanup below actually
+          // reaches any descendant this probe forks. spawnSync's own
+          // timeout handling only ever signals this one pid, never the
+          // group, which is exactly what let a hung launcher's children
+          // outlive the probe.
+          detached: true,
+        });
+        killProcessTreeByPid(result?.pid, { platform, env: childEnv, spawnSyncImpl: treeKillImpl });
+        if (!result?.error && result?.status === 0) {
+          version = parseVersion(`${result.stdout || ""}\n${result.stderr || ""}`)?.join(".") || "";
+        }
       }
     } catch {
       version = "";
@@ -1288,7 +1668,7 @@ export async function probeInstalledRuntime(
   }
   const definition = installedRuntimeDefinition(runtime.id);
   if (!definition) return { status: "unsupported", ready: false, action: null };
-  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const childEnv = buildInstalledRuntimeChildEnv({ env, runtimeId: runtime.id });
   let runtimeVersion = null;
   let capabilityOverrides = {};
   let capabilityReason = null;
@@ -1350,7 +1730,7 @@ export async function probeInstalledRuntime(
   if (definition.protocol === "acp") {
     try {
       await probeAcpRuntimeImpl({
-        runtime: { ...runtime, acpArgs: definition.acpArgs },
+        runtime: { ...runtime, name: definition.name, acpArgs: definition.acpArgs },
         cwd,
         env: childEnv,
         timeoutMs,
@@ -1392,13 +1772,23 @@ export async function probeInstalledRuntime(
         ready: true,
         action: null,
         version: runtimeVersion,
+        versionBoundaryState,
+        minimumVersion: definition.minimumBoundaryVersion || null,
         capabilities: runtimeCapabilities,
         capabilityReason:
           capabilityReason || (runtimeCapabilities.taskTools ? null : UNVERIFIED_COMPLETION_REASON),
       };
     } catch (error) {
       if (error?.code === "RUNTIME_AUTH_REQUIRED") {
-        return { status: "authentication_required", ready: false, action: "start_sign_in" };
+        // The handshake knows which variable this agent wants, so carry that
+        // sentence through instead of leaving the user with a sign-in button
+        // that cannot help.
+        return {
+          status: "authentication_required",
+          ready: false,
+          action: "start_sign_in",
+          probeMessage: error.message || null,
+        };
       }
       return { status: "probe_failed", ready: false, action: "retry" };
     }
@@ -1463,6 +1853,8 @@ export async function probeInstalledRuntime(
       ready: true,
       action: null,
       version: runtimeVersion,
+      versionBoundaryState,
+      minimumVersion: definition.minimumBoundaryVersion || null,
       capabilities: runtimeCapabilities,
       capabilityReason:
         capabilityReason ||
@@ -1489,14 +1881,6 @@ function existingCanonicalPath(path) {
 }
 
 const RUNTIME_READ_BOUNDARY_INVALID = "RUNTIME_READ_BOUNDARY_INVALID";
-
-function isWithin(root, candidate) {
-  const remainder = relative(root, candidate);
-  return (
-    remainder === "" ||
-    (!remainder.startsWith(`..${sep}`) && remainder !== ".." && !isAbsolute(remainder))
-  );
-}
 
 function exactApprovedReadPaths({ repoRoot, env, skill, approvedReadPaths, runtimeId } = {}) {
   const rootSegments = EXACT_READ_ROOTS[skill];
@@ -1531,8 +1915,8 @@ function exactApprovedReadPaths({ repoRoot, env, skill, approvedReadPaths, runti
     if (
       !canonical ||
       !isFile ||
-      !isWithin(lexicalAllowedRoot, lexical) ||
-      !isWithin(canonicalAllowedRoot, canonical) ||
+      !isWithinRuntimePath(lexicalAllowedRoot, lexical) ||
+      !isWithinRuntimePath(canonicalAllowedRoot, canonical) ||
       canonical !== expectedCanonical
     ) {
       throw runtimeError(
@@ -2640,7 +3024,7 @@ export async function runInstalledRuntime({
     : [];
   const toolBearing = providerTools.length > 0;
   assertRuntimeCapabilities({ runtime, definition, skill, tools: providerTools, outputSchema });
-  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const childEnv = buildInstalledRuntimeChildEnv({ env, runtimeId: runtime.id });
   const assertExecutionIdentity = () =>
     assertInstalledRuntimeExecutionIdentity(runtime, {
       env: childEnv,
@@ -2715,7 +3099,7 @@ export async function runInstalledRuntime({
         stagedReadPath,
       });
       return await runAcpRuntimeImpl({
-        runtime: { ...runtime, acpArgs: definition.acpArgs },
+        runtime: { ...runtime, name: definition.name, acpArgs: definition.acpArgs },
         prompt: installedPrompt,
         cwd: skillCwd || taskCwd || cwd,
         tools: providerTools,
@@ -3051,7 +3435,7 @@ export async function runInstalledRuntimeStream({
     outputSchema,
     streaming: true,
   });
-  const childEnv = buildInstalledRuntimeChildEnv({ env });
+  const childEnv = buildInstalledRuntimeChildEnv({ env, runtimeId: runtime.id });
   const assertExecutionIdentity = () =>
     assertInstalledRuntimeExecutionIdentity(runtime, {
       env: childEnv,
@@ -3127,7 +3511,7 @@ export async function runInstalledRuntimeStream({
         stagedReadPath,
       });
       return await runAcpRuntimeImpl({
-        runtime: { ...runtime, acpArgs: definition.acpArgs },
+        runtime: { ...runtime, name: definition.name, acpArgs: definition.acpArgs },
         prompt: installedPrompt,
         cwd: skillCwd || taskCwd || cwd,
         tools: providerTools,

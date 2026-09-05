@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { userPath } from "../paths/workspace.mjs";
+import { postingIdentityKeys } from "./sourced-identity.mjs";
 import { extractReqId } from "./sourced-scanner.mjs";
 
 export function loadSnapshot(path) {
@@ -53,6 +54,13 @@ export function latestSnapshotPair({
   };
 }
 
+// A single stable label for one offer, kept for callers that just want ONE
+// display id (deltaId, logging). Explicit reqId wins, then a URL-derived
+// provider key, then a normalized-URL/company+title fallback: the FIRST
+// match, in that order. Diffing/dedupe use offerIdentityKeys below instead:
+// this single-label reduction is exactly what let a posting carried both
+// directly (URL-derived key) and through an aggregator (its own reqId)
+// report as two different postings (CR-29 round 3).
 export function offerIdentity(offer) {
   if (offer?.reqId) return String(offer.reqId).toLowerCase();
   const req = extractReqId(offer?.url || offer?.hiringCafeUrl || "");
@@ -64,29 +72,128 @@ export function offerIdentity(offer) {
   return company && title ? `role:${company}::${title}` : "";
 }
 
-export function buildOfferIdentitySet(offers = []) {
-  return new Set(offers.map(offerIdentity).filter(Boolean));
+// The full identity-key SET for one offer, used for every diff/dedupe
+// membership check below (previous-vs-current, and repo seenIds). Unlike
+// offerIdentity, this keeps every key a posting resolves to: an aggregator's
+// own reqId (e.g. hiringcafe:x) AND a URL-derived provider key (e.g.
+// Workday's tenant-scoped requisition id) when postingIdentityKeys says they
+// diverge, so two representations of the same posting match by
+// INTERSECTION instead of only agreeing when one happens to win the
+// single-label reduction above. Kept in the same raw (unprefixed) shape
+// offerIdentity has always produced, since seenIds (buildOfferIdentitySet's
+// callers, and callers that pass their own seenIds) is an external contract
+// built on that shape.
+export function offerIdentityKeys(offer) {
+  const keys = new Set();
+  // postingIdentityKeys only looks at row.url/row.link: snapshot offers
+  // (unlike DB rows) can carry ONLY hiringCafeUrl with no outbound url at
+  // all, so fall back to it for identity purposes exactly like offerIdentity
+  // above already does; offer.url still wins whenever it's present.
+  const withUrlFallback = offer?.url ? offer : { ...offer, url: offer?.hiringCafeUrl };
+  for (const key of postingIdentityKeys(withUrlFallback)) {
+    if (key.startsWith("req:")) keys.add(key.slice(4));
+  }
+  const url = normalizeUrl(offer?.url || offer?.hiringCafeUrl || "");
+  if (url) keys.add(`url:${url}`);
+  if (keys.size) return [...keys];
+  const company = normalizeText(offer?.company);
+  const title = normalizeText(offer?.title || offer?.role);
+  return company && title ? [`role:${company}::${title}`] : [];
 }
 
+export function buildOfferIdentitySet(offers = []) {
+  const set = new Set();
+  for (const offer of offers) for (const key of offerIdentityKeys(offer)) set.add(key);
+  return set;
+}
+
+// Diffs `current` against `previous` with a real one-to-one (key -> owner)
+// match instead of flattened key SETS (CR-29 round 13, Codex review of PR
+// #304). Flattened sets only asked "does ANY previous offer hold one of this
+// current offer's keys" — so a current row bridging previous posting A's
+// aggregator ID and previous posting B's Workday URL matched SOME key for
+// EACH, counted as one clean carry, and left BOTH A and B off the removed
+// list (zero removals) even though the bridge can't actually be a
+// continuation of both distinct postings at once.
+//
+// previousOwnerByKey below maps each identity key to the SPECIFIC previous
+// offer that holds it (an index, not a boolean), so a current offer's match
+// resolves to the actual SET of distinct previous owners it touches:
+//   - zero owners  -> new
+//   - one owner, not already claimed by an earlier current offer -> carried
+//     (that previous owner is matched: excluded from removedOffers)
+//   - more than one distinct owner, OR its one owner already claimed by an
+//     earlier current offer -> a conflict, never a clean carry. When a
+//     multi-owner bridge's owners aren't ALL already claimed, the first
+//     still-unclaimed one is marked matched (one of the previous postings
+//     really did keep publishing under a representation this row also
+//     carries — we just can't tell WHICH, so claiming one slot rather than
+//     both keeps removal counting honest about the others).
+// removedOffers is then every previous offer whose index never got matched.
 export function diffSnapshotOffers({ current = [], previous = [], seenIds = new Set() }) {
-  const previousIds = buildOfferIdentitySet(previous);
-  const currentIds = buildOfferIdentitySet(current);
+  const previousKeySets = previous.map(offerIdentityKeys);
+  const currentKeySets = current.map(offerIdentityKeys);
   const repoSeen = seenIds instanceof Set ? seenIds : new Set(seenIds || []);
+
+  const previousOwnerByKey = new Map();
+  previousKeySets.forEach((keys, index) => {
+    for (const key of keys) if (!previousOwnerByKey.has(key)) previousOwnerByKey.set(key, index);
+  });
 
   const newOffers = [];
   const carriedOffers = [];
-  for (const offer of current) {
-    const id = offerIdentity(offer);
-    const enriched = { ...offer, deltaId: id, repoDuplicate: id ? repoSeen.has(id) : false };
-    if (id && previousIds.has(id)) carriedOffers.push(enriched);
-    else newOffers.push(enriched);
-  }
+  const conflictOffers = [];
+  const matchedPreviousIndexes = new Set();
+  const claimedPreviousIndexes = new Set();
+
+  current.forEach((offer, index) => {
+    const keys = currentKeySets[index];
+    const enriched = {
+      ...offer,
+      deltaId: offerIdentity(offer),
+      repoDuplicate: keys.some((key) => repoSeen.has(key)),
+    };
+    const owners = new Set();
+    for (const key of keys) {
+      const ownerIndex = previousOwnerByKey.get(key);
+      if (ownerIndex !== undefined) owners.add(ownerIndex);
+    }
+    if (owners.size === 0) {
+      newOffers.push(enriched);
+      return;
+    }
+    if (owners.size === 1) {
+      const [ownerIndex] = owners;
+      if (!claimedPreviousIndexes.has(ownerIndex)) {
+        claimedPreviousIndexes.add(ownerIndex);
+        matchedPreviousIndexes.add(ownerIndex);
+        carriedOffers.push(enriched);
+        return;
+      }
+    } else {
+      for (const ownerIndex of owners) {
+        if (!claimedPreviousIndexes.has(ownerIndex)) {
+          claimedPreviousIndexes.add(ownerIndex);
+          matchedPreviousIndexes.add(ownerIndex);
+          break;
+        }
+      }
+    }
+    // Either a multi-owner bridge, or its single owner was already claimed
+    // by an earlier current offer — ambiguous either way.
+    conflictOffers.push(enriched);
+  });
 
   const removedOffers = previous
-    .map((offer) => ({ ...offer, deltaId: offerIdentity(offer) }))
-    .filter((offer) => offer.deltaId && !currentIds.has(offer.deltaId));
+    .map((offer, index) => ({
+      offer: { ...offer, deltaId: offerIdentity(offer) },
+      index,
+      keys: previousKeySets[index],
+    }))
+    .filter(({ index, keys }) => keys.length && !matchedPreviousIndexes.has(index))
+    .map(({ offer }) => offer);
 
-  return { current, previous, newOffers, carriedOffers, removedOffers };
+  return { current, previous, newOffers, carriedOffers, removedOffers, conflictOffers };
 }
 
 export function summarizeDelta(delta) {
@@ -97,6 +204,7 @@ export function summarizeDelta(delta) {
     newAfterRepoDedupe: delta.newOffers.filter((offer) => !offer.repoDuplicate).length,
     carried: delta.carriedOffers.length,
     removed: delta.removedOffers.length,
+    conflicts: (delta.conflictOffers || []).length,
   };
 }
 

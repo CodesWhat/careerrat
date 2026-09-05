@@ -348,6 +348,70 @@ describe("chat-first app controller", () => {
     expect(packetExportReceipt({ data: { userFacing: {} } })).toBeNull();
   });
 
+  it("names the Downloads file for a text export instead of showing the bare workspace path", () => {
+    expect(
+      packetExportReceipt({
+        data: {
+          formats: ["text"],
+          userFacing: {
+            resume: [
+              {
+                format: "text",
+                name: "Acme - Resume.txt",
+                path: "workspace/tailored/acme-resume.txt",
+                downloadsPath: "/Users/riley/Downloads/careerrat/Acme/Acme - Resume.txt",
+              },
+            ],
+            coverLetter: [],
+            answers: [],
+          },
+        },
+      })
+    ).toEqual({
+      title: "Export complete",
+      artifact: {
+        kind: "Export receipt",
+        text: [
+          "Saved to your Downloads folder as Acme - Resume.txt.",
+          "",
+          "workspace/tailored/acme-resume.txt",
+        ].join("\n"),
+      },
+    });
+  });
+
+  it("falls back to the general receipt for a text export whose Downloads copy failed", () => {
+    expect(
+      packetExportReceipt({
+        data: {
+          formats: ["text"],
+          userFacing: {
+            resume: [
+              {
+                format: "text",
+                name: "Acme - Resume.txt",
+                path: "workspace/tailored/acme-resume.txt",
+              },
+            ],
+            coverLetter: [],
+            answers: [],
+          },
+        },
+      })
+    ).toEqual({
+      title: "Export complete",
+      artifact: {
+        kind: "Export receipt",
+        text: [
+          "Saved 1 file locally.",
+          "",
+          "Acme - Resume.txt",
+          "workspace/tailored/acme-resume.txt",
+        ].join("\n"),
+      },
+    });
+  });
+
   it("only treats sourced search rows as durable Dismiss all decisions", () => {
     expect(
       selectedSourcedDismissal(

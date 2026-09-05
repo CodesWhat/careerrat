@@ -3447,18 +3447,18 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       }
     },
     openFile,
-    exportFile: async (id) => {
+    exportFile: async (id, format = "pdf") => {
       const file = view.browser.files.find((candidate) => String(candidate.id) === String(id));
       if (file?.applicationId && file?.packetKind) {
         const result = await run(() =>
-          api.exportPacketDocuments({ applicationId: file.applicationId, formats: ["pdf"] })
+          api.exportPacketDocuments({ applicationId: file.applicationId, formats: [format] })
         );
         const receipt = packetExportReceipt(result);
         if (receipt) setArtifactViewer(receipt);
         else if (result)
           setError(
             localFileError("missing-export-path", {
-              onRetry: () => actions.exportFile(id),
+              onRetry: () => actions.exportFile(id, format),
             })
           );
       } else if (

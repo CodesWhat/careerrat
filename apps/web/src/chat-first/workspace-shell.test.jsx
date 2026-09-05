@@ -180,6 +180,25 @@ describe("TopBar", () => {
     expect(html).not.toContain(">Windows release status</button>");
   });
 
+  it("omits the Dismiss control while an accepted install is in progress", () => {
+    const onDismiss = vi.fn();
+    const html = markup(
+      <TopBar
+        showActivity={false}
+        desktopUpdate={{
+          visible: true,
+          kind: "installing",
+          message: "Restarting to install…",
+          onDismiss,
+        }}
+      />
+    );
+
+    expect(html).toContain("Restarting to install");
+    expect(html).not.toContain(">Dismiss</button>");
+    expect(html).not.toContain(">Later</button>");
+  });
+
   it("styles the updater states the desktop bridge actually emits", () => {
     const css = readFileSync(fileURLToPath(new URL("./chat-first.css", import.meta.url)), "utf8");
 

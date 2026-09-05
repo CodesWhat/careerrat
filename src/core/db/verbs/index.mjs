@@ -9,6 +9,7 @@ export {
   appApplySyncedStatus,
   appApproveReview,
   appCaptureInterviewIntake,
+  appListArtifactRegistrations,
   appPersistEvaluation,
   appRecordOutcome,
   appRecordRoundOutcome,
@@ -33,6 +34,12 @@ export {
   appOperationRetryStart,
   appOperationStart,
 } from "./app-operations.mjs";
+export {
+  artifactReservationClaim,
+  artifactReservationOwner,
+  artifactReservationRelease,
+  artifactReservationReleaseAll,
+} from "./artifact-reservations.mjs";
 export { calendarBusyUpsert, calendarWriteAppend } from "./calendar.mjs";
 export {
   authorizationDeclared,
