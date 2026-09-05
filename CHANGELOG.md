@@ -31,6 +31,14 @@ All notable changes to CareerRat are documented here. This project follows
 - The Doctor check verifies the engine binary it is about to run, not a
   cached copy, and on Windows it cleans up the engine's whole process tree
   when a version probe hangs.
+- Doctor checks the whole launcher chain of a selected engine (launcher,
+  wrapper, interpreter and payload) before running it, and says which part
+  changed when a cached verification no longer matches.
+- Two Workday requisitions that differ only by underscore or hyphen, or by
+  a trailing sequence number, are stored as two jobs instead of one
+  overwriting the other.
+- Snapshot deltas report a posting that bridges two earlier ones as a
+  conflict instead of hiding a removal.
 
 ## [0.18.1] - 2026-09-03
 
