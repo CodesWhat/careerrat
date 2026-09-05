@@ -21,6 +21,31 @@ function sanitizeVersionBoundaryState(value) {
   return VERSION_BOUNDARY_STATES.has(value) ? value : "indeterminate";
 }
 
+// Optional, additive breakdown behind `binaryFingerprint` (installed-runtimes.mjs's
+// runtimeExecutionChainDigests): ordered `{ role, realPath, sha256 }` entries
+// for every file the launcher chain resolved to at verification time.
+// binaryFingerprint itself stays the single 64-hex aggregate digest it
+// always was — this is purely additional, so it's fine for it to be absent
+// on a verification written before it existed, or on any verification a
+// caller chooses not to populate; both sanitize to null, same as a
+// verification with no cached breakdown at all. Its only consumer is
+// installedRuntimeExecutionMismatchRole's diagnostic, never the aggregate
+// comparison that actually authorizes anything.
+function sanitizeChainFiles(value) {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const seenRoles = new Set();
+  const files = [];
+  for (const entry of value) {
+    const role = typeof entry?.role === "string" ? entry.role.trim() : "";
+    const realPath = typeof entry?.realPath === "string" ? entry.realPath.trim() : "";
+    const sha256 = typeof entry?.sha256 === "string" ? entry.sha256.trim().toLowerCase() : "";
+    if (!role || !realPath || !/^[a-f0-9]{64}$/.test(sha256) || seenRoles.has(role)) return null;
+    seenRoles.add(role);
+    files.push({ role, realPath, sha256 });
+  }
+  return files;
+}
+
 function sanitizeVerification(value, runtimeId) {
   if (!runtimeId || !value || typeof value !== "object") return null;
   const path = typeof value.path === "string" ? value.path.trim() : "";
@@ -55,6 +80,7 @@ function sanitizeVerification(value, runtimeId) {
     realPath,
     version,
     binaryFingerprint,
+    chainFiles: sanitizeChainFiles(value.chainFiles),
     capabilities,
     versionBoundaryState,
     testedMinimumVersion,

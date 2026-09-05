@@ -1,6 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
-import { win32 } from "node:path";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
+import { posix, win32 } from "node:path";
 
 const WINDOWS_BATCH_EXTENSION = /\.(?:bat|cmd)$/i;
 const WINDOWS_NPM_SHIM = /(?:^|[\\/])(?:node_modules[\\/]\.bin|npm)[\\/][^\\/]+\.(?:bat|cmd)$/i;
@@ -8,6 +16,43 @@ const WINDOWS_COMMAND_META = /([()\][%!^"`<>&|;, *?])/g;
 const WINDOWS_LINE_BREAK = /[\r\n]/;
 const WINDOWS_NODE_PAYLOAD = /((?:%~dp0|%dp0%)[\\/][^"'\r\n]*?\.(?:cjs|mjs|js))/gi;
 const MAX_WINDOWS_SHIM_BYTES = 64 * 1024;
+
+// POSIX counterpart to the Windows npm-shim recognition below: the classic
+// two-branch launcher npm/bin-links generates for a global or local install,
+// where the wrapper script's own bytes never change even when the payload it
+// `exec`s underneath does. Only a script whose shebang names an actual POSIX
+// shell is even a candidate — `#!/usr/bin/env node` (or any other non-shell
+// interpreter) means the file itself IS the payload, interpreted directly,
+// with no further indirection to resolve.
+const POSIX_SHELL_INTERPRETER_NAMES = new Set(["sh", "bash", "dash", "ksh", "zsh"]);
+const POSIX_SHEBANG_PATTERN = /^#!\s*(\/\S+)(?:\s+(\S+))?[ \t]*\r?\n?$/;
+const MAX_SHEBANG_LINE_BYTES = 256;
+const MAX_POSIX_SHIM_BYTES = 64 * 1024;
+// The classic npm/bin-links basedir line uses a doubled backslash inside the
+// sed pattern (`s,\\,/,g`, sed's own escape for "match one literal
+// backslash"), translating a Windows-ish `$0` to forward slashes — a no-op
+// on a real POSIX path, but required for the sed invocation itself to be
+// valid regardless of what `$0` looks like.
+const POSIX_SHIM_BASEDIR_LINE =
+  /^basedir=\$\(dirname "\$\(echo "\$0" \| sed -e 's,\\\\,\/,g'\)"\)$/;
+const POSIX_SHIM_CASE_LINE = /^case `uname` in$/;
+const POSIX_SHIM_CYGWIN_LINE =
+  /^\*CYGWIN\*\|\*MINGW\*\|\*MSYS\*\) basedir=`cygpath -w "\$basedir"`;;$/;
+const POSIX_SHIM_ESAC_LINE = /^esac$/;
+const POSIX_SHIM_IF_LINE = /^if \[ -x "\$basedir\/node" \]; then$/;
+const POSIX_SHIM_ELSE_LINE = /^else$/;
+const POSIX_SHIM_FI_LINE = /^fi$/;
+const POSIX_SHIM_IF_EXEC_LINE = /^exec "\$basedir\/node"\s+"(\$basedir\/[^"]+)"\s+"\$@"$/;
+const POSIX_SHIM_ELSE_EXEC_LINE = /^exec node\s+"(\$basedir\/[^"]+)"\s+"\$@"$/;
+const POSIX_SHIM_REQUIRED_LINES = [
+  POSIX_SHIM_BASEDIR_LINE,
+  POSIX_SHIM_CASE_LINE,
+  POSIX_SHIM_CYGWIN_LINE,
+  POSIX_SHIM_ESAC_LINE,
+  POSIX_SHIM_IF_LINE,
+  POSIX_SHIM_ELSE_LINE,
+  POSIX_SHIM_FI_LINE,
+];
 
 const RUNTIME_TERMINATION_GRACE_MS = 250;
 
@@ -224,6 +269,167 @@ function hasRecognizedNpmShimShape(shim, invocationLine, payloadReference) {
   );
 }
 
+// Bounded, non-blocking read of just the shebang line (if any). Confirms the
+// descriptor names a regular file before touching its content — the same
+// FIFO-safety pattern installed-runtimes.mjs's readRegularFileBytes uses —
+// because this sniff runs on every POSIX executable Doctor fingerprints, not
+// only ones already known to be regular files. Capped at 256 bytes: any real
+// shebang line is a fraction of that, so a longer or missing terminator
+// means "not a recognizable shebang" rather than "keep reading."
+function readPosixShebangLine(path) {
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK || 0));
+  } catch {
+    return null;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return null;
+    const buffer = Buffer.alloc(MAX_SHEBANG_LINE_BYTES);
+    const bytesRead = readSync(fd, buffer, 0, MAX_SHEBANG_LINE_BYTES, 0);
+    if (bytesRead < 2 || buffer[0] !== 0x23 || buffer[1] !== 0x21) return null;
+    const text = buffer.toString("utf8", 0, bytesRead);
+    const newlineIndex = text.indexOf("\n");
+    if (newlineIndex !== -1) return text.slice(0, newlineIndex + 1);
+    return bytesRead < MAX_SHEBANG_LINE_BYTES ? text : null;
+  } catch {
+    return null;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      // fd already invalid; nothing left to release.
+    }
+  }
+}
+
+// Recognizes exactly the classic npm/bin-links POSIX launcher shape (the
+// direct counterpart to hasRecognizedNpmShimShape above): a fixed basedir
+// derivation, a Cygwin/MSYS basedir rewrite that's a no-op on real POSIX, and
+// two `exec` branches — one preferring a node binary bundled next to the
+// wrapper, one falling back to `node` on PATH — that must reference the
+// identical payload. Anything else (a hand-written wrapper, a different
+// shim generator's shape, or just prose that happens to start with a shell
+// shebang) is deliberately NOT recognized here, so it falls back to being
+// treated as a self-contained executable rather than failing closed: most
+// installed POSIX binaries and single-file scripts are not delegating shims
+// at all, and there is no way to prove that a script doesn't `exec`
+// elsewhere without a positively recognized grammar to check it against.
+function hasRecognizedPosixNpmShimShape(lines) {
+  const ifLine = lines.find((line) => POSIX_SHIM_IF_EXEC_LINE.test(line));
+  const elseLine = lines.find((line) => POSIX_SHIM_ELSE_EXEC_LINE.test(line));
+  if (!ifLine || !elseLine) return null;
+  const ifMatch = POSIX_SHIM_IF_EXEC_LINE.exec(ifLine);
+  const elseMatch = POSIX_SHIM_ELSE_EXEC_LINE.exec(elseLine);
+  if (ifMatch[1] !== elseMatch[1]) return null;
+  if (POSIX_SHIM_REQUIRED_LINES.some((pattern) => !lines.some((line) => pattern.test(line)))) {
+    return null;
+  }
+  const allowed = [
+    ...POSIX_SHIM_REQUIRED_LINES,
+    POSIX_SHIM_IF_EXEC_LINE,
+    POSIX_SHIM_ELSE_EXEC_LINE,
+  ];
+  if (!lines.every((line) => allowed.some((pattern) => pattern.test(line)))) return null;
+  return { payloadReference: ifMatch[1] };
+}
+
+function resolvePosixExecutable(command, { env, realpathImpl }) {
+  const value = String(command || "").trim();
+  if (!value) return null;
+  if (value.includes("/")) return canonicalPath(value, realpathImpl);
+  const pathValue = String(env?.PATH || "");
+  for (const directory of pathValue
+    .split(":")
+    .map((entry) => entry.trim())
+    .filter(Boolean)) {
+    const resolved = canonicalPath(posix.join(directory, value), realpathImpl);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolvePosixShimInterpreter({ wrapperDirectory, env, realpathImpl }) {
+  const localNode = canonicalPath(posix.join(wrapperDirectory, "node"), realpathImpl);
+  if (localNode) return localNode;
+  return resolvePosixExecutable("node", { env, realpathImpl });
+}
+
+// POSIX global and local npm layouts both put the shim's own directory one
+// level below the tree the payload actually lives under — a global install's
+// bin dir sits next to `lib/node_modules`, and a local install's
+// `node_modules/.bin` sits directly inside `node_modules` — so allowing any
+// resolution that stays at or under the wrapper directory's PARENT covers
+// both without the Windows resolver's separate `.bin`-vs-not branch (whose
+// global layout differs: node_modules sits directly inside the shim's own
+// directory there, not one level up).
+function resolvePosixShimPayload(reference, wrapperDirectory, realpathImpl) {
+  const relativePayload = String(reference).replace(/^\$basedir\/?/, "");
+  if (!relativePayload || posix.isAbsolute(relativePayload)) return null;
+  const candidate = posix.resolve(wrapperDirectory, relativePayload);
+  const allowedRoot = posix.dirname(wrapperDirectory);
+  const remainder = posix.relative(allowedRoot, candidate);
+  if (remainder === ".." || remainder.startsWith(`..${posix.sep}`) || posix.isAbsolute(remainder)) {
+    return null;
+  }
+  return canonicalPath(candidate, realpathImpl);
+}
+
+function posixRuntimeIdentityFiles(wrapper, { env, readFileImpl, realpathImpl }) {
+  const fallback = [{ role: "executable", path: wrapper }];
+  const shebangLine = readPosixShebangLine(wrapper);
+  if (!shebangLine) return fallback;
+  const shebangMatch = POSIX_SHEBANG_PATTERN.exec(shebangLine);
+  if (!shebangMatch) return fallback;
+  const [, interpreterPath, envArg] = shebangMatch;
+  const interpreterName = posix.basename(interpreterPath).toLowerCase();
+  const shellName =
+    interpreterName === "env" && envArg ? String(envArg).toLowerCase() : interpreterName;
+  if (!POSIX_SHELL_INTERPRETER_NAMES.has(shellName)) return fallback;
+
+  let content;
+  try {
+    const bytes = readFileImpl(wrapper);
+    if (bytes.length > MAX_POSIX_SHIM_BYTES || String(bytes).includes("\0")) return fallback;
+    content = String(bytes);
+  } catch {
+    return fallback;
+  }
+
+  const lines = content
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const recognized = hasRecognizedPosixNpmShimShape(lines);
+  if (!recognized) return fallback;
+
+  // From here the wrapper is a confirmed, recognized delegator whose own
+  // bytes never change even when the payload underneath it does. Every
+  // remaining resolution failure fails closed (null) rather than falling
+  // back to the wrapper's own bytes: we now know self-hashing the wrapper
+  // alone would miss exactly the swap this shape exists to make possible.
+  const launcher =
+    interpreterName === "env"
+      ? resolvePosixExecutable(shellName, { env, realpathImpl })
+      : canonicalPath(interpreterPath, realpathImpl);
+  const wrapperDirectory = posix.dirname(wrapper);
+  const interpreter = resolvePosixShimInterpreter({ wrapperDirectory, env, realpathImpl });
+  const payload = resolvePosixShimPayload(
+    recognized.payloadReference,
+    wrapperDirectory,
+    realpathImpl
+  );
+  if (!launcher || !interpreter || !payload) return null;
+
+  return [
+    { role: "launcher", path: launcher },
+    { role: "wrapper", path: wrapper },
+    { role: "interpreter", path: interpreter },
+    { role: "payload", path: payload },
+  ];
+}
+
 export function runtimeProcessIdentityFiles(
   command,
   {
@@ -236,7 +442,10 @@ export function runtimeProcessIdentityFiles(
   const commandText = String(command || "").trim();
   const wrapper = canonicalPath(commandText, realpathImpl);
   if (!wrapper) return null;
-  if (platform !== "win32" || !WINDOWS_BATCH_EXTENSION.test(commandText)) {
+  if (platform !== "win32") {
+    return posixRuntimeIdentityFiles(wrapper, { env, readFileImpl, realpathImpl });
+  }
+  if (!WINDOWS_BATCH_EXTENSION.test(commandText)) {
     return [{ role: "executable", path: wrapper }];
   }
   if (!WINDOWS_NPM_SHIM.test(commandText)) return null;

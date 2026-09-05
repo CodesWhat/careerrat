@@ -23,6 +23,7 @@ import {
 import {
   detectInstalledRuntimes,
   installedRuntimeExecutionIdentity,
+  installedRuntimeExecutionMismatchRole,
 } from "../core/ai/installed-runtimes.mjs";
 import {
   installedRuntimeBoundaryEvidenceCurrent,
@@ -285,6 +286,24 @@ const selectedRuntimeCurrentIdentity = nonExecutingPathMatchesCache
     })
   : null;
 
+// Read-only diagnostic on top of the comparison above, never a second gate:
+// installedRuntimeExecutionIdentity already decided whether this cache is
+// still trustworthy (selectedRuntimeCurrentIdentity), before ever spawning
+// anything. This only runs when that came back empty against a cache that
+// otherwise looked current, purely to attribute the mismatch to a specific
+// launcher-chain role (e.g. "payload") for the message below instead of
+// just reporting the cache as unknown.
+const selectedRuntimeMismatchRole =
+  nonExecutingPathMatchesCache && !selectedRuntimeCurrentIdentity && cachedRuntimeVerification
+    ? installedRuntimeExecutionMismatchRole(
+        selectedRuntimeForVerification,
+        cachedRuntimeVerification,
+        {
+          env: process.env,
+        }
+      )
+    : null;
+
 // Bundled plugins (plugins/<name>/). Informational: a plugin needing a
 // consent capability is unaffected by this block, that's the automation
 // block above. An invalid bundled manifest IS a defect in the shipped
@@ -392,6 +411,15 @@ const result = {
       // against.
       ...(runtime.id === runtimeFingerprintId && selectedRuntimeProbeCleanupFailed
         ? { cleanupFailed: true }
+        : {}),
+      // Diagnostic only, never affects result.ok: names the specific
+      // launcher-chain role (launcher/wrapper/interpreter/payload) that no
+      // longer matches CareerRat's last verification of this CLI, when that
+      // can be determined. Only ever set for the selected runtime.
+      ...(runtime.id === runtimeFingerprintId && !verification && selectedRuntimeMismatchRole
+        ? {
+            unverifiedReason: `The ${selectedRuntimeMismatchRole} changed since CareerRat last verified this CLI.`,
+          }
         : {}),
     };
   }),
@@ -546,7 +574,8 @@ if (guidanceOnly) {
     runtimeSelection,
     selectedRuntimeCurrentIdentity,
     runtimeFingerprintId,
-    selectedRuntimeProbeCleanupFailed
+    selectedRuntimeProbeCleanupFailed,
+    selectedRuntimeMismatchRole
   );
 }
 console.log("");
@@ -843,7 +872,8 @@ function printInstalledRuntimes(
   selection,
   currentIdentity,
   fingerprintId,
-  probeCleanupFailed
+  probeCleanupFailed,
+  mismatchRole
 ) {
   for (const runtime of runtimes) {
     if (!runtime.available) {
@@ -872,6 +902,14 @@ function printInstalledRuntimes(
     if (runtime.id === fingerprintId && probeCleanupFailed) {
       console.log(
         `  warning: the verification probe for ${runtime.id} could not confirm its process tree was fully cleaned up.`
+      );
+    }
+    // Diagnostic only, never a failure of its own: names the specific
+    // launcher-chain role that no longer matches CareerRat's last
+    // verification of this CLI, when that can be determined.
+    if (runtime.id === fingerprintId && !verification && mismatchRole) {
+      console.log(
+        `  unverified: the ${mismatchRole} changed since CareerRat last verified this CLI.`
       );
     }
   }

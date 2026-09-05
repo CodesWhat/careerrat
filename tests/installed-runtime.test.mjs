@@ -1386,6 +1386,203 @@ test("Windows verified runtime identity changes when an unchanged shim payload o
   }
 });
 
+// POSIX counterpart to the Windows test above: CR42 gap 1 was that
+// installedRuntimeExecutionIdentity only ever fingerprinted the launcher
+// path itself, so a POSIX script launcher whose own bytes stayed identical
+// could silently delegate to a payload that changed underneath it without
+// the cached binaryFingerprint ever noticing. Injects a fixed
+// runtimeIdentityFilesImpl (same technique the Windows test uses) so this
+// exercises runtimeBinaryFingerprint's chain-digest math directly, without
+// depending on runtimeProcessIdentityFiles's own POSIX npm-shim recognition
+// (covered separately below).
+test("POSIX verified runtime identity changes when an unchanged shim payload or interpreter changes", () => {
+  const root = tempRoot();
+  const wrapper = join(root, "codex");
+  const launcher = join(root, "sh");
+  const interpreter = join(root, "node");
+  const payload = join(root, "codex.js");
+  writeFileSync(wrapper, "unchanged wrapper");
+  writeFileSync(launcher, "sh implementation");
+  writeFileSync(interpreter, "node implementation v1");
+  writeFileSync(payload, "codex implementation v1");
+  const runtimeIdentityFilesImpl = () => [
+    { role: "launcher", path: launcher },
+    { role: "wrapper", path: wrapper },
+    { role: "interpreter", path: interpreter },
+    { role: "payload", path: payload },
+  ];
+
+  try {
+    const runtime = { path: wrapper, version: "codex-cli 0.149.1" };
+    const original = installedRuntimeExecutionIdentity(runtime, {
+      platform: "linux",
+      runtimeIdentityFilesImpl,
+    });
+    assert.ok(original, "fixture must produce a genuine chain identity");
+
+    writeFileSync(payload, "codex implementation v2");
+    const changedPayload = installedRuntimeExecutionIdentity(runtime, {
+      platform: "linux",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedPayload.binaryFingerprint, original.binaryFingerprint);
+
+    // Doctor's real gate: a cache built from the ORIGINAL (pre-swap)
+    // identity must refuse to match once the payload has changed, and must
+    // do so without ever reaching the `--version` spawn (no `version` on
+    // the runtime handed in, so a spawn would be the only way to fill it).
+    let spawned = false;
+    const rejected = installedRuntimeExecutionIdentity(
+      { path: wrapper },
+      {
+        platform: "linux",
+        runtimeIdentityFilesImpl,
+        expectedFingerprint: {
+          path: original.path,
+          realPath: original.realPath,
+          binaryFingerprint: original.binaryFingerprint,
+        },
+        spawnSyncImpl() {
+          spawned = true;
+          return { error: null, status: 0, stdout: "0.0.0", stderr: "" };
+        },
+      }
+    );
+    assert.equal(rejected, null);
+    assert.equal(spawned, false, "a chain fingerprint mismatch must resolve to no spawn at all");
+
+    writeFileSync(payload, "codex implementation v1");
+    writeFileSync(interpreter, "node implementation v2");
+    const changedInterpreter = installedRuntimeExecutionIdentity(runtime, {
+      platform: "linux",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedInterpreter.binaryFingerprint, original.binaryFingerprint);
+
+    writeFileSync(interpreter, "node implementation v1");
+    writeFileSync(launcher, "sh implementation v2");
+    const changedLauncher = installedRuntimeExecutionIdentity(runtime, {
+      platform: "linux",
+      runtimeIdentityFilesImpl,
+    });
+    assert.notEqual(changedLauncher.binaryFingerprint, original.binaryFingerprint);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A recognized npm/bin-links-style POSIX launcher: the wrapper script's own
+// bytes never change, but it `exec`s a payload found by relative path at
+// run time. Mirrors npm's own classic bin-links two-branch shim shape
+// (prefer a node binary bundled next to the wrapper, else fall back to
+// `node` on PATH) closely enough that runtimeProcessIdentityFiles's
+// recognizer accepts it as written. Shared by the unit test right below and
+// the doctor.mjs end-to-end regression test.
+function writePosixNpmShimFixture(
+  root,
+  { payloadContent = "console.log('codex-fixture 1.0.0');\n" } = {}
+) {
+  const binDir = join(root, "bin");
+  const libDir = join(root, "lib", "node_modules", "codex-fixture", "bin");
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(libDir, { recursive: true });
+  const wrapper = join(binDir, "codex-fixture");
+  const payload = join(libDir, "codex-fixture.js");
+  const payloadReference = "../lib/node_modules/codex-fixture/bin/codex-fixture.js";
+  writeFileSync(
+    wrapper,
+    [
+      "#!/bin/sh",
+      'basedir=$(dirname "$(echo "$0" | sed -e \'s,\\\\,/,g\')")',
+      "",
+      "case `uname` in",
+      '    *CYGWIN*|*MINGW*|*MSYS*) basedir=`cygpath -w "$basedir"`;;',
+      "esac",
+      "",
+      'if [ -x "$basedir/node" ]; then',
+      `  exec "$basedir/node"  "$basedir/${payloadReference}" "$@"`,
+      "else",
+      `  exec node  "$basedir/${payloadReference}" "$@"`,
+      "fi",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+  chmodSync(wrapper, 0o755);
+  writeFileSync(payload, payloadContent, "utf8");
+  chmodSync(payload, 0o755);
+  return { wrapper, payload, binDir };
+}
+
+test("runtimeProcessIdentityFiles recognizes a real POSIX npm-shim launcher and resolves its full chain", (t) => {
+  if (process.platform === "win32") {
+    t.skip("exercises the POSIX shim grammar; only meaningful off win32");
+    return;
+  }
+  const root = tempRoot();
+  try {
+    const { wrapper, payload } = writePosixNpmShimFixture(root);
+    const files = runtimeProcessIdentityFiles(wrapper);
+    assert.ok(Array.isArray(files), "expected a resolved chain, not a fail-closed null");
+    const byRole = Object.fromEntries(files.map((file) => [file.role, file.path]));
+    assert.equal(byRole.wrapper, realpathSync(wrapper));
+    assert.equal(byRole.payload, realpathSync(payload));
+    assert.ok(byRole.launcher, "expected a resolved shell launcher");
+    assert.ok(byRole.interpreter, "expected a resolved node interpreter");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// CR42 regression: a marker-writing payload swapped in behind an otherwise
+// byte-identical POSIX shim launcher must never run. Verify once (seeding a
+// genuine chain fingerprint), swap the payload for something that would
+// prove it ran, and confirm installedRuntimeExecutionIdentity fails closed
+// without ever reaching the `--version` spawn.
+test("installedRuntimeExecutionIdentity fails closed, without spawning, when a real POSIX shim's payload is replaced", (t) => {
+  if (process.platform === "win32") {
+    t.skip("exercises the POSIX shim grammar; only meaningful off win32");
+    return;
+  }
+  const root = tempRoot();
+  const markerPath = join(root, "marker-ran");
+  try {
+    const { wrapper, payload } = writePosixNpmShimFixture(root);
+    const original = installedRuntimeExecutionIdentity(
+      { path: wrapper, version: "codex-fixture 1.0.0" },
+      {}
+    );
+    assert.ok(original, "fixture must produce a genuine verified identity to seed the cache");
+
+    // Replace the payload with a marker executable, byte-identical launcher
+    // untouched. If Doctor's re-verification ever spawned this instead of
+    // failing closed first, the marker file would exist afterward.
+    writeFileSync(payload, `#!/bin/sh\ntouch "${markerPath}"\n`, "utf8");
+    chmodSync(payload, 0o755);
+
+    let spawned = false;
+    const rejected = installedRuntimeExecutionIdentity(
+      { path: wrapper },
+      {
+        expectedFingerprint: {
+          path: original.path,
+          realPath: original.realPath,
+          binaryFingerprint: original.binaryFingerprint,
+        },
+        spawnSyncImpl() {
+          spawned = true;
+          return { error: null, status: 0, stdout: "0.0.0", stderr: "" };
+        },
+      }
+    );
+    assert.equal(rejected, null);
+    assert.equal(spawned, false, "a chain fingerprint mismatch must resolve to no spawn at all");
+    assert.equal(existsSync(markerPath), false, "the replaced payload must never have run");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Windows verified runtime identity fails closed for an unresolved batch implementation", () => {
   const root = tempRoot();
   const wrapper = join(root, "codex.cmd");
