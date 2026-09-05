@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, normalize, sep } from "node:path";
 
+import { hasUploadableResumeArtifact } from "../apply/apply-driver.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import {
@@ -418,7 +419,34 @@ export async function confirmOneOffScreeningAnswer({
     requireArtifact: true,
     replaceRendered: true,
   });
-  const remainingGaps = gaps.filter((_, index) => !targetIndexes.has(index));
+  const remainingGapsAfterConfirmation = gaps.filter((_, index) => !targetIndexes.has(index));
+  // Recomputed fresh here, independently of whatever the gap list already
+  // says: exportPacketArtifacts (packet/exports.mjs) always records this gap
+  // when the application has no uploadable resume, but that gap is not one
+  // of the ones this confirmation targets — it survives untouched in
+  // remainingGapsAfterConfirmation regardless. This recompute exists as its
+  // own defense: a manifest written before this check existed, or an
+  // artifact removed from disk since export, would otherwise let a resume
+  // gap silently go stale in either direction (missing when it should
+  // block, or lingering after a later export actually supplied one).
+  const hasUploadableResume = hasUploadableResumeArtifact({
+    repoRoot,
+    env,
+    artifacts: application.artifacts,
+  });
+  const remainingGaps = hasUploadableResume
+    ? remainingGapsAfterConfirmation.filter((gap) => gap?.code !== "RESUME_UPLOAD_ARTIFACT_MISSING")
+    : remainingGapsAfterConfirmation.some((gap) => gap?.code === "RESUME_UPLOAD_ARTIFACT_MISSING")
+      ? remainingGapsAfterConfirmation
+      : [
+          ...remainingGapsAfterConfirmation,
+          {
+            kind: "resume",
+            code: "RESUME_UPLOAD_ARTIFACT_MISSING",
+            message:
+              "No PDF or DOCX resume is available to upload; a text-only export cannot be submitted as-is.",
+          },
+        ];
   const uploadReady = remainingGaps.every(nonBlockingPacketGap);
   const confirmedAt = now().toISOString();
   const confirmedAnswerMap = new Map(
