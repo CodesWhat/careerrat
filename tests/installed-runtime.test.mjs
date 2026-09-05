@@ -47,6 +47,7 @@ import {
   stopInstalledRuntimeSignIns,
   supportsInstalledRuntimeStreaming,
 } from "../src/core/ai/installed-runtimes.mjs";
+import { CLEANUP_DEADLINE_MS, KILL_TIMEOUT_MS } from "../src/core/ai/runtime-probe-constants.mjs";
 import { runProbe } from "../src/core/ai/runtime-probe-helper.mjs";
 import {
   killProcessTreeByPid,
@@ -1630,6 +1631,100 @@ test("installedRuntimeExecutionIdentity fires onProbeCleanupFailed when the win3
   }
 });
 
+// Codex round 19 review: the old parent-side backstop was a flat
+// `probeTimeoutMs + 5_000`, well short of the helper's own worst case
+// (probeTimeoutMs + a first tree-kill bound + the cleanup closure wait + a
+// retry tree-kill bound + reporting margin) — see the runProbe-level
+// regression above for that math. Proves installedRuntimeExecutionIdentity's
+// win32 path now derives its spawnSyncImpl `timeout` from the same
+// KILL_TIMEOUT_MS/CLEANUP_DEADLINE_MS bounds the helper itself uses, instead
+// of the old undersized constant, so the parent can never kill the helper
+// mid-cleanup and swallow cleanupFailed again.
+test("installedRuntimeExecutionIdentity derives its win32 spawnSyncImpl backstop from the helper's full cleanup lifecycle", () => {
+  const root = tempRoot();
+  const wrapperDir = join(root, "npm");
+  mkdirSync(wrapperDir, { recursive: true });
+  const wrapper = join(wrapperDir, "codex.cmd");
+  const interpreter = join(wrapperDir, "node.exe");
+  const payload = join(wrapperDir, "codex.js");
+  const systemRoot = join(root, "Windows");
+  const system32 = join(systemRoot, "System32");
+  mkdirSync(system32, { recursive: true });
+  const realCmd = join(system32, "cmd.exe");
+
+  writeFileSync(interpreter, "node implementation");
+  writeFileSync(payload, "codex implementation");
+  writeFileSync(realCmd, "real cmd.exe");
+  writeFileSync(
+    wrapper,
+    [
+      "@ECHO off",
+      "GOTO start",
+      ":find_dp0",
+      "SET dp0=%~dp0",
+      "EXIT /b",
+      ":start",
+      "SETLOCAL",
+      "CALL :find_dp0",
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ") ELSE (",
+      '  SET "_prog=node"',
+      ")",
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%" "%dp0%\\codex.js" %*',
+    ].join("\r\n")
+  );
+
+  const env = { SystemRoot: systemRoot };
+  const fakeRealpathImpl = (path) => realpathSync(String(path).replace(/\\/g, "/"));
+  const runtimeIdentityFilesImpl = (command, opts) =>
+    runtimeProcessIdentityFiles(command, { ...opts, realpathImpl: fakeRealpathImpl });
+
+  const spawnSyncCalls = [];
+  try {
+    installedRuntimeExecutionIdentity(
+      { path: wrapper },
+      {
+        platform: "win32",
+        env,
+        realpathImpl: fakeRealpathImpl,
+        runtimeIdentityFilesImpl,
+        spawnSyncImpl(command, args, options) {
+          spawnSyncCalls.push({ command, args, options });
+          return {
+            error: null,
+            status: 0,
+            stdout: JSON.stringify({
+              stdout: "",
+              stderr: "",
+              status: null,
+              timedOut: true,
+              cleanupFailed: true,
+            }),
+            stderr: "",
+          };
+        },
+      }
+    );
+
+    assert.equal(spawnSyncCalls.length, 1);
+    const { options } = spawnSyncCalls[0];
+    // The probe's own reported timeout-ms argument is the 5-second
+    // probeTimeoutMs; the backstop must clear that plus both tree-kill
+    // bounds plus the cleanup wait plus a startup/reporting margin, not the
+    // old flat +5_000.
+    const minimumSafeDeadlineMs =
+      5_000 + KILL_TIMEOUT_MS + CLEANUP_DEADLINE_MS + KILL_TIMEOUT_MS + 3_000;
+    assert.ok(
+      options.timeout >= minimumSafeDeadlineMs,
+      `expected the spawnSyncImpl backstop (${options.timeout}ms) to cover the helper's full ` +
+        `worst-case cleanup lifecycle (>= ${minimumSafeDeadlineMs}ms)`
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("resolveWindowsCommandInterpreter fails closed with no PATH search when neither COMSPEC nor SystemRoot resolves", () => {
   assert.equal(resolveWindowsCommandInterpreter({ env: {} }), null);
   assert.equal(
@@ -1748,7 +1843,12 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
 // (killProcessTreeByPid, unstubbed) reaches both of them. Plain node
 // child/grandchild scripts run identically on POSIX and win32, so unlike the
 // trap/sleep shell-script test above this one is never platform-skipped.
-test("runtime-probe-helper.mjs's runProbe kills a real node child and its real node grandchild on timeout", async () => {
+// Codex round 19 review: tagged `[win32]` so ci-verify.yml's Windows job
+// (`--test-name-pattern "\[win32\]"`) selects it too — the tag is a name
+// match, not a platform gate, so it keeps running unconditionally on POSIX.
+// Without it, Windows CI proved only stubbed taskkill behavior, never that
+// native taskkill /T actually reaches a real grandchild.
+test("[win32] runtime-probe-helper.mjs's runProbe kills a real node child and its real node grandchild on timeout", async () => {
   const root = tempRoot();
   const childPidFile = join(root, "child.pid");
   const grandchildPidFile = join(root, "grandchild.pid");
@@ -1913,6 +2013,74 @@ test("runtime-probe-helper.mjs's runProbe keeps cleanupFailed sticky when the tr
     result.cleanupFailed,
     true,
     "a failed tree kill must stay sticky even when the direct child later confirms exit"
+  );
+});
+
+// Codex round 19 review: a 5-second probe used to receive only 5 additional
+// seconds before installedRuntimeExecutionIdentity's own spawnSync backstop
+// killed the helper — but the helper's own worst case is probeTimeoutMs plus
+// a first tree-kill bound (KILL_TIMEOUT_MS), plus the cleanup closure wait
+// (CLEANUP_DEADLINE_MS), plus a retry tree-kill bound (KILL_TIMEOUT_MS again),
+// which alone already exceeds the old 5-second margin. This drives both
+// killTreeImpl attempts to genuinely take their full bound (not resolve
+// instantly, as the other injected-killTreeImpl tests above do), so the
+// probe's real elapsed time lands in exactly the window the old parent
+// deadline would have cut off, and proves runProbe still settles with
+// cleanupFailed: true instead of the parent's own timeout tearing it down
+// first.
+test("runtime-probe-helper.mjs's runProbe reports cleanupFailed after slow failing first and retry tree kills", async () => {
+  const fakeChild = new EventEmitter();
+  fakeChild.stdout = new EventEmitter();
+  fakeChild.stderr = new EventEmitter();
+  fakeChild.kill = () => {
+    // Never emits "close" — the direct-child fallback doesn't land either,
+    // same as the sibling test above; this run has to be settled entirely by
+    // the cleanup deadline and the sticky failed-retry path.
+  };
+  const spawnImpl = () => fakeChild;
+
+  let killTreeCalls = 0;
+  // Simulates a taskkill call that runs its full bound before reporting
+  // failure, on both the first attempt and the retry — the slow-failing case
+  // Codex flagged, as opposed to the other tests' instantly-false stub.
+  const killTreeImpl = () => {
+    killTreeCalls += 1;
+    const busyUntil = Date.now() + KILL_TIMEOUT_MS;
+    while (Date.now() < busyUntil) {
+      // Deliberately synchronous: killTreeImpl is called synchronously by
+      // runProbe's own timer callbacks, so a real bounded taskkill spawnSync
+      // call blocks this same way.
+    }
+    return false;
+  };
+
+  const started = Date.now();
+  const result = await runProbe(
+    { exe: "stuck-runtime", args: ["--version"], timeoutMs: 10 },
+    { spawnImpl, killTreeImpl, cleanupDeadlineMs: CLEANUP_DEADLINE_MS }
+  );
+  const elapsedMs = Date.now() - started;
+
+  assert.equal(killTreeCalls, 2, "the first tree kill and its retry must both run");
+  assert.equal(result.timedOut, true);
+  assert.equal(
+    result.cleanupFailed,
+    true,
+    "the helper must still report cleanupFailed even when both tree-kill attempts run slow"
+  );
+  // The helper's own worst case here: KILL_TIMEOUT_MS (first, slow) +
+  // CLEANUP_DEADLINE_MS (wait) + KILL_TIMEOUT_MS (retry, slow). A parent
+  // backstop derived from the old `probeTimeoutMs + 5_000` formula would be
+  // shorter than a 5-second probe plus this elapsed time, which is exactly
+  // the gap that used to kill the helper mid-retry and swallow cleanupFailed.
+  const helperWorstCaseMs = KILL_TIMEOUT_MS + CLEANUP_DEADLINE_MS + KILL_TIMEOUT_MS;
+  assert.ok(
+    elapsedMs >= KILL_TIMEOUT_MS,
+    `expected the slow first+retry kills to take at least one KILL_TIMEOUT_MS bound (took ${elapsedMs}ms)`
+  );
+  assert.ok(
+    elapsedMs < helperWorstCaseMs + 2_000,
+    `the probe must still settle close to the modeled worst case, not hang past it (took ${elapsedMs}ms)`
   );
 });
 

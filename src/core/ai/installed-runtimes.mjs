@@ -42,6 +42,7 @@ import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-f
 import { userPath } from "../paths/workspace.mjs";
 import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
 import { isWithinRuntimePath } from "./runtime-path-policy.mjs";
+import { CLEANUP_DEADLINE_MS, KILL_TIMEOUT_MS } from "./runtime-probe-constants.mjs";
 import {
   killProcessTreeByPid,
   resolveWindowsCommandInterpreter,
@@ -851,6 +852,22 @@ export function installedRuntimeExecutionIdentity(
             resolveWindowsCommandInterpreter({ env: childEnv, realpathImpl }),
         });
         const probeTimeoutMs = 5_000;
+        // The helper's own worst-case lifecycle runs well past probeTimeoutMs:
+        // once that fires, it tree-kills (bounded by KILL_TIMEOUT_MS), then
+        // waits up to CLEANUP_DEADLINE_MS for confirmed exit, then — only if
+        // that first tree kill failed — retries the tree kill once more
+        // (bounded by KILL_TIMEOUT_MS again) before it gives up and reports
+        // cleanupFailed. This parent-side backstop has to outlast all four of
+        // those stages plus a margin for the helper process's own startup and
+        // reporting, or it kills the helper mid-retry and silently loses
+        // cleanupFailed instead of surfacing it (round 19 review).
+        const HELPER_STARTUP_AND_REPORTING_MARGIN_MS = 3_000;
+        const helperDeadlineMs =
+          probeTimeoutMs +
+          KILL_TIMEOUT_MS +
+          CLEANUP_DEADLINE_MS +
+          KILL_TIMEOUT_MS +
+          HELPER_STARTUP_AND_REPORTING_MARGIN_MS;
         const result = spawnSyncImpl(
           process.execPath,
           [
@@ -881,12 +898,12 @@ export function installedRuntimeExecutionIdentity(
             env: { ...childEnv, ELECTRON_RUN_AS_NODE: "1" },
             encoding: "utf8",
             maxBuffer: MAX_RUNTIME_PROBE_BYTES,
-            // Backstop only, well above probeTimeoutMs: the helper is the
-            // one enforcing the real deadline against the runtime it
-            // spawns, and always reports back before this fires under
-            // normal operation. This exists only so a wedged helper
-            // process itself can't hang Doctor forever.
-            timeout: probeTimeoutMs + 5_000,
+            // Backstop only, derived above from the helper's full worst-case
+            // lifecycle: the helper is the one enforcing the real deadline
+            // against the runtime it spawns, and always reports back before
+            // this fires under normal operation. This exists only so a
+            // wedged helper process itself can't hang Doctor forever.
+            timeout: helperDeadlineMs,
             killSignal: "SIGKILL",
             shell: false,
             windowsHide: true,

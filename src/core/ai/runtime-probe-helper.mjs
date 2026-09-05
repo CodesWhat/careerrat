@@ -36,19 +36,12 @@
 // just through SIGKILL on a process group instead of taskkill /T /F.
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { CLEANUP_DEADLINE_MS, KILL_TIMEOUT_MS } from "./runtime-probe-constants.mjs";
 import { killProcessTreeByPid } from "./runtime-process.mjs";
 
 const MAX_PROBE_BYTES = 64 * 1024;
 
 const WINDOWS_VERBATIM_FLAG = "--windows-verbatim-arguments";
-
-// How long runProbe waits, after a failed tree kill's direct-child fallback,
-// for confirmed exit before it gives up and settles anyway. taskkill can be
-// blocked or unavailable on a locked-down Windows host, in which case even
-// the direct-child SIGKILL/TerminateProcess may never land; this caps how
-// long the probe (and the caller's spawnSync waiting on it) hangs on that
-// instead of leaving both indefinitely stuck on a runtime that won't die.
-const CLEANUP_DEADLINE_MS = 2000;
 
 function parseArgv(argv) {
   let end = argv.length;
@@ -78,6 +71,7 @@ export function runProbe(
   {
     spawnImpl = spawn,
     killTreeImpl = killProcessTreeByPid,
+    killTimeoutMs = KILL_TIMEOUT_MS,
     cleanupDeadlineMs = CLEANUP_DEADLINE_MS,
   } = {}
 ) {
@@ -164,13 +158,13 @@ export function runProbe(
       () => {
         timedOut = true;
         // killTreeImpl reports whether the kill attempt itself succeeded
-        // (taskkill exited 0 on Windows, within its own bounded timeoutMs).
+        // (taskkill exited 0 on Windows, within its own bounded killTimeoutMs).
         // If it didn't — taskkill blocked, unavailable, or itself timed out
         // — fall back to killing the direct child so the root process at
         // least has a second chance to die, even though any descendants it
         // forked may now be orphaned. That failure is recorded in
         // treeKillFailed and never cleared by anything that happens next.
-        const killed = killTreeImpl(child.pid, { timeoutMs: cleanupDeadlineMs });
+        const killed = killTreeImpl(child.pid, { timeoutMs: killTimeoutMs });
         if (!killed) {
           treeKillFailed = true;
           try {
@@ -210,7 +204,7 @@ export function runProbe(
             // Object would give a real kill-on-close guarantee here instead
             // of a best-effort retry; this repo ships no native addon to
             // create one, so this is what's available.
-            killTreeImpl(child.pid, { timeoutMs: cleanupDeadlineMs });
+            killTreeImpl(child.pid, { timeoutMs: killTimeoutMs });
           }
           finish(null, { cleanupFailed: true });
         }, cleanupDeadlineMs);
