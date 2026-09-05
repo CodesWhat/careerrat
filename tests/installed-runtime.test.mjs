@@ -2342,7 +2342,14 @@ test("[win32] installedRuntimeExecutionIdentity verifies a real npm-shim .cmd en
   // recognizes a .cmd whose immediate parent directory is literally "npm"
   // (or node_modules/.bin); the space lives one level up, matching real
   // installs like "C:\Users\Taylor Smith\AppData\Roaming\npm\myshim.cmd".
-  const spacedRoot = join(root, "Taylor Smith & Co");
+  // No "&" in this path on purpose: the shim below is byte-for-byte what
+  // npm's cmd-shim writes, and its unquoted `SET dp0=%~dp0` makes cmd.exe
+  // split the value at an ampersand, so a real npm shim cannot run from
+  // such a directory regardless of anything on our side (CI diagnostic on
+  // 4eceba7d: "'Co\npm\' is not recognized as an internal or external
+  // command"). Our own quoting under a metacharacter path is covered by the
+  // helper-level test above.
+  const spacedRoot = join(root, "Taylor Smith");
   const npmDir = join(spacedRoot, "npm");
   const payloadDir = join(npmDir, "node_modules", "myshim", "bin");
   mkdirSync(payloadDir, { recursive: true });
@@ -2381,72 +2388,6 @@ test("[win32] installedRuntimeExecutionIdentity verifies a real npm-shim .cmd en
     // override -- the same production path Doctor and every runtime caller
     // resolve through.
     const identity = installedRuntimeExecutionIdentity({ path: wrapper }, { platform: "win32" });
-    if (!identity) {
-      // Temporary CI diagnostic: replay each stage of the production path
-      // and report which one diverges from the helper-level test above.
-      const diag = {};
-      try {
-        diag.identityFiles = runtimeProcessIdentityFiles(wrapper, {
-          platform: "win32",
-          env: process.env,
-        });
-      } catch (error) {
-        diag.identityFilesError = String(error?.stack || error);
-      }
-      const childEnv = buildInstalledRuntimeChildEnv({ env: process.env });
-      diag.childEnvKeys = Object.keys(childEnv);
-      try {
-        diag.interpreter = resolveWindowsCommandInterpreter({ env: childEnv });
-        const invocation = runtimeProcessInvocation(wrapper, ["--version"], {
-          env: childEnv,
-          platform: "win32",
-          resolveInterpreter: () => resolveWindowsCommandInterpreter({ env: childEnv }),
-        });
-        const helperPath = fileURLToPath(
-          new URL("../src/core/ai/runtime-probe-helper.mjs", import.meta.url)
-        );
-        const argv = [
-          helperPath,
-          invocation.command,
-          ...invocation.args,
-          "--timeout-ms",
-          "10000",
-          ...(invocation.options?.windowsVerbatimArguments ? ["--windows-verbatim-arguments"] : []),
-        ];
-        const variants = {
-          fullEnv: { encoding: "utf8", timeout: 30_000 },
-          childEnv: { env: childEnv, encoding: "utf8", timeout: 30_000 },
-          childEnvElectron: {
-            env: { ...childEnv, ELECTRON_RUN_AS_NODE: "1" },
-            encoding: "utf8",
-            timeout: 30_000,
-          },
-          childEnvHide: { env: childEnv, encoding: "utf8", timeout: 30_000, windowsHide: true },
-          production: {
-            env: { ...childEnv, ELECTRON_RUN_AS_NODE: "1" },
-            encoding: "utf8",
-            timeout: 30_000,
-            killSignal: "SIGKILL",
-            shell: false,
-            windowsHide: true,
-          },
-        };
-        diag.variants = {};
-        for (const [name, options] of Object.entries(variants)) {
-          const result = spawnSync(process.execPath, argv, options);
-          diag.variants[name] = {
-            error: result.error ? String(result.error) : null,
-            status: result.status,
-            signal: result.signal,
-            stdout: String(result.stdout || "").slice(0, 600),
-            stderr: String(result.stderr || "").slice(0, 600),
-          };
-        }
-      } catch (error) {
-        diag.invocationError = String(error?.stack || error);
-      }
-      console.error(`WIN32_IDENTITY_DIAG ${JSON.stringify(diag)}`);
-    }
     assert.ok(identity, "a genuine npm-shim .cmd must verify through the real production path");
     assert.equal(identity.path, wrapper);
     assert.match(identity.binaryFingerprint, /^[a-f0-9]{64}$/);
