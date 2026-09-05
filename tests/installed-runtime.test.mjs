@@ -49,6 +49,7 @@ import {
 } from "../src/core/ai/installed-runtimes.mjs";
 import { runProbe } from "../src/core/ai/runtime-probe-helper.mjs";
 import {
+  killProcessTreeByPid,
   resolveWindowsCommandInterpreter,
   runtimeProcessIdentityFiles,
   runtimeProcessInvocation,
@@ -1538,6 +1539,97 @@ test("Windows execution identity spawns the version probe through the same resol
   }
 });
 
+// PR #309 review (round 18): Doctor wants to surface a probe's cleanupFailed
+// (runtime-probe-helper.mjs's tree kill failed and, even after its own
+// retry, descendants couldn't be confirmed dead) as a warning, without that
+// signal riding on installedRuntimeExecutionIdentity's return value — a
+// timed-out probe already returns null (unverified) regardless, which would
+// otherwise discard exactly the case this exists to surface. Proves the
+// onProbeCleanupFailed callback fires whenever the win32 probe's own JSON
+// protocol reports cleanupFailed: true.
+test("installedRuntimeExecutionIdentity fires onProbeCleanupFailed when the win32 probe reports a failed tree kill", () => {
+  const root = tempRoot();
+  const wrapperDir = join(root, "npm");
+  mkdirSync(wrapperDir, { recursive: true });
+  const wrapper = join(wrapperDir, "codex.cmd");
+  const interpreter = join(wrapperDir, "node.exe");
+  const payload = join(wrapperDir, "codex.js");
+  const systemRoot = join(root, "Windows");
+  const system32 = join(systemRoot, "System32");
+  mkdirSync(system32, { recursive: true });
+  const realCmd = join(system32, "cmd.exe");
+
+  writeFileSync(interpreter, "node implementation");
+  writeFileSync(payload, "codex implementation");
+  writeFileSync(realCmd, "real cmd.exe");
+  writeFileSync(
+    wrapper,
+    [
+      "@ECHO off",
+      "GOTO start",
+      ":find_dp0",
+      "SET dp0=%~dp0",
+      "EXIT /b",
+      ":start",
+      "SETLOCAL",
+      "CALL :find_dp0",
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ") ELSE (",
+      '  SET "_prog=node"',
+      ")",
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%" "%dp0%\\codex.js" %*',
+    ].join("\r\n")
+  );
+
+  const env = { SystemRoot: systemRoot };
+  const fakeRealpathImpl = (path) => realpathSync(String(path).replace(/\\/g, "/"));
+  const runtimeIdentityFilesImpl = (command, opts) =>
+    runtimeProcessIdentityFiles(command, { ...opts, realpathImpl: fakeRealpathImpl });
+
+  let cleanupFailedCalls = 0;
+  try {
+    const identity = installedRuntimeExecutionIdentity(
+      { path: wrapper },
+      {
+        platform: "win32",
+        env,
+        realpathImpl: fakeRealpathImpl,
+        runtimeIdentityFilesImpl,
+        spawnSyncImpl() {
+          return {
+            error: null,
+            status: 0,
+            stdout: JSON.stringify({
+              stdout: "",
+              stderr: "",
+              status: null,
+              timedOut: true,
+              cleanupFailed: true,
+            }),
+            stderr: "",
+          };
+        },
+        onProbeCleanupFailed: () => {
+          cleanupFailedCalls += 1;
+        },
+      }
+    );
+
+    assert.equal(
+      cleanupFailedCalls,
+      1,
+      "the callback must fire when the probe's own JSON reports cleanupFailed"
+    );
+    // A timed-out probe never trusts the (empty) version it printed, so the
+    // identity as a whole correctly still comes back unverified — the
+    // callback is the only channel this signal travels through.
+    assert.equal(identity, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("resolveWindowsCommandInterpreter fails closed with no PATH search when neither COMSPEC nor SystemRoot resolves", () => {
   assert.equal(resolveWindowsCommandInterpreter({ env: {} }), null);
   assert.equal(
@@ -1647,6 +1739,98 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
   }
 });
 
+// Codex round 18 review: the injected-killTreeImpl tests above prove the
+// fallback/sticky-cleanupFailed logic in isolation, but a fake EventEmitter
+// child can't reveal a retained real handle or an actually-orphaned real
+// descendant. This spawns a genuine node process as the probed "runtime",
+// which itself spawns a genuine node grandchild — both write their own real
+// pid to a temp file and then hang — and proves runProbe's real tree kill
+// (killProcessTreeByPid, unstubbed) reaches both of them. Plain node
+// child/grandchild scripts run identically on POSIX and win32, so unlike the
+// trap/sleep shell-script test above this one is never platform-skipped.
+test("runtime-probe-helper.mjs's runProbe kills a real node child and its real node grandchild on timeout", async () => {
+  const root = tempRoot();
+  const childPidFile = join(root, "child.pid");
+  const grandchildPidFile = join(root, "grandchild.pid");
+  const grandchildScript = join(root, "grandchild.mjs");
+  const childScript = join(root, "child.mjs");
+
+  writeFileSync(
+    grandchildScript,
+    [
+      'import { writeFileSync } from "node:fs";',
+      `writeFileSync(${JSON.stringify(grandchildPidFile)}, String(process.pid));`,
+      "setInterval(() => {}, 1_000);",
+      "",
+    ].join("\n")
+  );
+  writeFileSync(
+    childScript,
+    [
+      'import { spawn } from "node:child_process";',
+      'import { writeFileSync } from "node:fs";',
+      `writeFileSync(${JSON.stringify(childPidFile)}, String(process.pid));`,
+      `spawn(process.execPath, [${JSON.stringify(grandchildScript)}], { stdio: "ignore" });`,
+      "setInterval(() => {}, 1_000);",
+      "",
+    ].join("\n")
+  );
+
+  const helperPath = fileURLToPath(
+    new URL("../src/core/ai/runtime-probe-helper.mjs", import.meta.url)
+  );
+
+  // Bounded poll for process.kill(pid, 0) to throw ESRCH — real process exit
+  // is asynchronous from the caller's point of view, so this can't just
+  // assert once immediately after the helper's own spawnSync returns.
+  async function waitUntilDead(pid, timeoutMs = 5_000, intervalMs = 20) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return true;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      // Longer than the trap/sleep test above: this has to give two stacked
+      // real node process starts (child, then its grandchild) time to run
+      // far enough to write their pid files before the probe's own timeout
+      // fires and kills the tree.
+      [helperPath, process.execPath, childScript, "--timeout-ms", "1000"],
+      { encoding: "utf8", timeout: 15_000 }
+    );
+    assert.equal(result.status, 0, result.stderr || "the helper must exit 0 after reporting");
+    const reported = JSON.parse(result.stdout);
+    assert.equal(reported.timedOut, true);
+
+    const childPid = Number(readFileSync(childPidFile, "utf8").trim());
+    const grandchildPid = Number(readFileSync(grandchildPidFile, "utf8").trim());
+    assert.ok(Number.isInteger(childPid) && childPid > 0, "the child must have recorded its pid");
+    assert.ok(
+      Number.isInteger(grandchildPid) && grandchildPid > 0,
+      "the grandchild must have recorded its pid"
+    );
+
+    assert.ok(
+      await waitUntilDead(childPid),
+      "the probed child must not survive the helper's timeout cleanup"
+    );
+    assert.ok(
+      await waitUntilDead(grandchildPid),
+      "the child's own grandchild must not survive the helper's tree kill"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // PR #309 review: the timeout path used to call killProcessTreeByPid and
 // trust it silently, even on Windows where a blocked or unavailable
 // taskkill leaves the root process (and any descendants) running forever
@@ -1655,8 +1839,8 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
 // direct child, then give that fallback a bounded deadline instead of
 // hanging on a confirmed exit that may never come. Stubs killTreeImpl to
 // return false (the taskkill-failure case) and a fake child that never
-// emits "close", so this proves the fallback fires and the probe still
-// settles instead of hanging.
+// emits "close", so this proves the fallback fires, the deadline retries the
+// tree kill once more, and the probe still settles instead of hanging.
 test("runtime-probe-helper.mjs's runProbe falls back to a direct child kill and settles on cleanup deadline when the tree kill fails", async () => {
   const fakeChild = new EventEmitter();
   fakeChild.stdout = new EventEmitter();
@@ -1683,7 +1867,11 @@ test("runtime-probe-helper.mjs's runProbe falls back to a direct child kill and 
   );
   const elapsedMs = Date.now() - started;
 
-  assert.equal(killTreeCalls.length, 1, "the tree kill must be attempted first");
+  assert.equal(
+    killTreeCalls.length,
+    2,
+    "the tree kill must be attempted first, then retried once more when the cleanup deadline fires"
+  );
   assert.deepEqual(
     killCalls,
     ["SIGKILL"],
@@ -1695,6 +1883,37 @@ test("runtime-probe-helper.mjs's runProbe falls back to a direct child kill and 
   );
   assert.equal(result.timedOut, true);
   assert.equal(result.cleanupFailed, true);
+});
+
+// PR #309 review (round 18): a failed tree kill must be sticky. If the
+// direct-child fallback SIGKILL happens to land and the child closes on its
+// own before the cleanup deadline elapses, that close must not be read as
+// proof the whole tree is gone — descendants were never confirmed dead
+// because the tree kill itself failed. Stubs killTreeImpl to fail and a fake
+// child that closes shortly after its fallback kill, with a cleanup deadline
+// long enough that the close event, not the deadline timer, is what settles
+// this probe.
+test("runtime-probe-helper.mjs's runProbe keeps cleanupFailed sticky when the tree kill fails but the child still closes", async () => {
+  const fakeChild = new EventEmitter();
+  fakeChild.stdout = new EventEmitter();
+  fakeChild.stderr = new EventEmitter();
+  fakeChild.kill = () => {
+    queueMicrotask(() => fakeChild.emit("close", null));
+  };
+  const spawnImpl = () => fakeChild;
+  const killTreeImpl = () => false;
+
+  const result = await runProbe(
+    { exe: "stuck-runtime", args: ["--version"], timeoutMs: 10 },
+    { spawnImpl, killTreeImpl, cleanupDeadlineMs: 5_000 }
+  );
+
+  assert.equal(result.timedOut, true);
+  assert.equal(
+    result.cleanupFailed,
+    true,
+    "a failed tree kill must stay sticky even when the direct child later confirms exit"
+  );
 });
 
 // Codex round 13 review: runtimeProcessInvocation returns
@@ -2052,6 +2271,52 @@ test("Windows forced cleanup uses fixed taskkill argv for the entire runtime pro
       options: { shell: false, windowsHide: true, stdio: "ignore" },
     },
   ]);
+});
+
+// PR #309 review (round 18): killProcessTreeByPid's own taskkill spawnSync
+// had no bound, so a blocked or hung taskkill.exe could leave both this call
+// and runProbe's cleanup deadline waiting on it hanging indefinitely.
+// Defaults to 2000ms and forwards it straight through as spawnSync's own
+// `timeout` option.
+test("killProcessTreeByPid bounds taskkill with a default 2000ms timeout", () => {
+  const calls = [];
+  const killed = killProcessTreeByPid(4242, {
+    platform: "win32",
+    env: { SystemRoot: "C:\\Windows" },
+    spawnSyncImpl(command, args, options) {
+      calls.push({ command, args, options });
+      return { status: 0 };
+    },
+  });
+
+  assert.equal(killed, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.timeout, 2000);
+  assert.equal(calls[0].options.killSignal, "SIGKILL");
+});
+
+// A caller-supplied timeoutMs must reach spawnSync too, and a timed-out
+// taskkill — reported via `result.signal`, never `result.error` or a normal
+// exit status — must be treated as a failed kill rather than a silent
+// success.
+test("killProcessTreeByPid treats a timed-out taskkill as a failed kill", () => {
+  const calls = [];
+  const killed = killProcessTreeByPid(4242, {
+    platform: "win32",
+    env: { SystemRoot: "C:\\Windows" },
+    timeoutMs: 250,
+    spawnSyncImpl(command, args, options) {
+      calls.push({ command, args, options });
+      // Mirrors what Node's own spawnSync reports when its `timeout` option
+      // elapses: the child is killed with killSignal and that shows up as
+      // `signal`, with `status` left null.
+      return { status: null, signal: "SIGKILL" };
+    },
+  });
+
+  assert.equal(killed, false, "a timed-out taskkill must be reported as a failed kill");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.timeout, 250);
 });
 
 test("Windows streaming execution launches a detected npm shim through fixed cmd argv", async () => {

@@ -295,16 +295,38 @@ export function runtimeProcessIdentityFiles(
 // Windows offers (there's no negative-pid group signal to send). Shared by
 // the ChildProcess-based path below and killProcessTreeByPid's pid-only path,
 // so both ever have exactly one place that knows how to reach a tree here.
-function taskkillProcessTree(pid, { env = process.env, spawnSyncImpl = spawnSync } = {}) {
+//
+// Bounded by timeoutMs (killProcessTreeByPid's own default, 2000ms): a
+// blocked or hung taskkill.exe must not leave the caller waiting on this
+// spawnSync forever. spawnSync's own timeout handling kills taskkill with
+// SIGKILL and reports that via `result.signal`, never `result.error` or a
+// normal exit status, so that has to be checked here too or a timed-out
+// taskkill would read as a silent success.
+function taskkillProcessTree(
+  pid,
+  { env = process.env, spawnSyncImpl = spawnSync, timeoutMs } = {}
+) {
   const systemRoot = String(env.SystemRoot || env.SYSTEMROOT || env.WINDIR || "C:\\Windows");
   const command = win32.join(systemRoot, "System32", "taskkill.exe");
   const result = spawnSyncImpl(command, ["/pid", String(pid), "/t", "/f"], {
     shell: false,
     windowsHide: true,
     stdio: "ignore",
+    ...(Number.isFinite(timeoutMs) ? { timeout: timeoutMs, killSignal: "SIGKILL" } : {}),
   });
-  if (result?.error || (Number.isInteger(result?.status) && result.status !== 0)) {
-    throw result.error || new Error(`taskkill exited with status ${result.status}`);
+  if (
+    result?.error ||
+    result?.signal ||
+    (Number.isInteger(result?.status) && result.status !== 0)
+  ) {
+    throw (
+      result?.error ||
+      new Error(
+        result?.signal
+          ? `taskkill timed out and was killed by ${result.signal}`
+          : `taskkill exited with status ${result.status}`
+      )
+    );
   }
 }
 
@@ -341,15 +363,26 @@ function terminateWindowsProcessTree(child, { env = process.env, spawnSyncImpl =
 // POSIX) so callers who need a fallback (runProbe's helper, when taskkill is
 // blocked or unavailable and descendants may have survived) know to run one
 // instead of the failure being swallowed silently.
+//
+// timeoutMs bounds the Windows taskkill spawnSync call itself — the POSIX
+// path below never spawns anything, so it has nothing to bound. A blocked or
+// hung taskkill.exe must not leave this call, and runProbe's cleanup
+// deadline waiting on it, hanging indefinitely; a timed-out kill counts as a
+// failed one, same as any other taskkill error.
 export function killProcessTreeByPid(
   pid,
-  { platform = process.platform, env = process.env, spawnSyncImpl = spawnSync } = {}
+  {
+    platform = process.platform,
+    env = process.env,
+    spawnSyncImpl = spawnSync,
+    timeoutMs = 2000,
+  } = {}
 ) {
   const numericPid = Number(pid);
   if (!Number.isSafeInteger(numericPid) || numericPid <= 0) return false;
   if (platform === "win32") {
     try {
-      taskkillProcessTree(numericPid, { env, spawnSyncImpl });
+      taskkillProcessTree(numericPid, { env, spawnSyncImpl, timeoutMs });
       return true;
     } catch {
       // The process tree may have already exited on its own, or taskkill

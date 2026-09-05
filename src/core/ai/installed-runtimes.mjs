@@ -787,6 +787,16 @@ export function installedRuntimeExecutionIdentity(
     // between whenever expectedFingerprint was established and this call
     // must be caught here, not authorized to run.
     expectedFingerprint = null,
+    // Fired (never thrown) whenever the win32 `--version` probe below
+    // reports cleanupFailed: true — its tree kill failed and, even after the
+    // helper's own bounded retry, descendants couldn't be confirmed dead.
+    // That's an internal probe-hygiene signal, not a reason to fail this
+    // identity read (the version this call cares about may have come back
+    // fine regardless), so it's surfaced via callback rather than folded
+    // into the return value: Doctor is the only caller that currently wants
+    // it, and every other call site (the AI execution router, tests) stays
+    // unaffected by leaving this unset.
+    onProbeCleanupFailed,
   } = {}
 ) {
   const path = String(runtime?.path || "").trim();
@@ -884,6 +894,7 @@ export function installedRuntimeExecutionIdentity(
         );
         if (!result?.error && result?.status === 0 && typeof result.stdout === "string") {
           const reported = JSON.parse(result.stdout);
+          if (reported?.cleanupFailed) onProbeCleanupFailed?.();
           if (reported && !reported.timedOut && reported.status === 0) {
             version =
               parseVersion(`${reported.stdout || ""}\n${reported.stderr || ""}`)?.join(".") || "";

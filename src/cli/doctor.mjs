@@ -263,6 +263,14 @@ const nonExecutingPathMatchesCache = Boolean(
     selectedRuntimeForVerification.path === cachedRuntimeVerification.path &&
     selectedRuntimeForVerification.realPath === cachedRuntimeVerification.realPath
 );
+// Set when the live `--version` probe above ran on win32 and its own tree
+// kill failed to confirm every descendant dead (runtime-probe-helper.mjs's
+// cleanupFailed). That's a hygiene warning about the probe itself, not a
+// reason to distrust the version/fingerprint result it otherwise reported —
+// installedRuntimeExecutionIdentity fires this callback independently of
+// whatever it returns, so it's never lost even when the read below still
+// succeeds.
+let selectedRuntimeProbeCleanupFailed = false;
 const selectedRuntimeCurrentIdentity = nonExecutingPathMatchesCache
   ? installedRuntimeExecutionIdentity(selectedRuntimeForVerification, {
       env: process.env,
@@ -270,6 +278,9 @@ const selectedRuntimeCurrentIdentity = nonExecutingPathMatchesCache
         path: cachedRuntimeVerification.path,
         realPath: cachedRuntimeVerification.realPath,
         binaryFingerprint: cachedRuntimeVerification.binaryFingerprint,
+      },
+      onProbeCleanupFailed: () => {
+        selectedRuntimeProbeCleanupFailed = true;
       },
     })
   : null;
@@ -376,6 +387,12 @@ const result = {
       version: verification?.version ?? null,
       boundaryProbePassed: installedRuntimeBoundaryPassed(runtime, verification),
       boundaryProbeCheckedAt: verification?.checkedAt ?? null,
+      // Warning, not a failure: never affects result.ok. Only ever set for
+      // the one runtime the live `--version` probe above actually ran
+      // against.
+      ...(runtime.id === runtimeFingerprintId && selectedRuntimeProbeCleanupFailed
+        ? { cleanupFailed: true }
+        : {}),
     };
   }),
   plugins: {
@@ -524,7 +541,13 @@ console.log("Installed AI runtimes:");
 if (guidanceOnly) {
   console.log("- skipped (--guidance-only).");
 } else {
-  printInstalledRuntimes(installedRuntimes, runtimeSelection, selectedRuntimeCurrentIdentity);
+  printInstalledRuntimes(
+    installedRuntimes,
+    runtimeSelection,
+    selectedRuntimeCurrentIdentity,
+    runtimeFingerprintId,
+    selectedRuntimeProbeCleanupFailed
+  );
 }
 console.log("");
 
@@ -815,7 +838,13 @@ function installedRuntimeBoundaryPassed(runtime, verification) {
   return installedRuntimeBoundaryEvidenceCurrent(runtime.id, verification);
 }
 
-function printInstalledRuntimes(runtimes, selection, currentIdentity) {
+function printInstalledRuntimes(
+  runtimes,
+  selection,
+  currentIdentity,
+  fingerprintId,
+  probeCleanupFailed
+) {
   for (const runtime of runtimes) {
     if (!runtime.available) {
       console.log(`- ${runtime.id} (${runtime.name}): not installed.`);
@@ -837,5 +866,13 @@ function printInstalledRuntimes(runtimes, selection, currentIdentity) {
     console.log(
       `- ${runtime.id} (${runtime.name}): supported engine, installed ${versionText}, ${boundaryText}.`
     );
+    // Warning, not a failure: the version/boundary read above can still be
+    // trustworthy even when the probe that produced it couldn't confirm its
+    // own child tree was fully cleaned up afterward.
+    if (runtime.id === fingerprintId && probeCleanupFailed) {
+      console.log(
+        `  warning: the verification probe for ${runtime.id} could not confirm its process tree was fully cleaned up.`
+      );
+    }
   }
 }

@@ -124,13 +124,20 @@ export function runProbe(
     let timedOut = false;
     let timer = null;
     let cleanupTimer = null;
+    // Sticky once a tree-kill attempt reports failure: descendants may still
+    // be alive and unconfirmed even if the direct child (child.on("close"))
+    // goes on to exit right afterward, whether from its own fallback SIGKILL
+    // landing or from anything else. Once true this never flips back to
+    // false — only a tree kill that actually reported success ever leaves it
+    // false in the first place.
+    let treeKillFailed = false;
 
     const finish = (status, { cleanupFailed = false } = {}) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(cleanupTimer);
-      resolve({ stdout, stderr, status, timedOut, cleanupFailed });
+      resolve({ stdout, stderr, status, timedOut, cleanupFailed: cleanupFailed || treeKillFailed });
     };
 
     child.stdout?.on("data", (chunk) => {
@@ -148,18 +155,24 @@ export function runProbe(
     // timedOut in the reported payload. Also what makes the cleanup deadline
     // below a no-op on the common path: finish() is idempotent, so if this
     // fires first the deadline timer's own finish() call later is dropped.
+    // The direct child closing is never proof descendants are gone too when
+    // the tree kill itself failed, which is exactly what treeKillFailed above
+    // guards against here.
     child.on("close", (status) => finish(status));
 
     timer = setTimeout(
       () => {
         timedOut = true;
         // killTreeImpl reports whether the kill attempt itself succeeded
-        // (taskkill exited 0 on Windows). If it didn't — taskkill blocked or
-        // unavailable — fall back to killing the direct child so the root
-        // process at least has a second chance to die, even though any
-        // descendants it forked may now be orphaned.
-        const killed = killTreeImpl(child.pid);
+        // (taskkill exited 0 on Windows, within its own bounded timeoutMs).
+        // If it didn't — taskkill blocked, unavailable, or itself timed out
+        // — fall back to killing the direct child so the root process at
+        // least has a second chance to die, even though any descendants it
+        // forked may now be orphaned. That failure is recorded in
+        // treeKillFailed and never cleared by anything that happens next.
+        const killed = killTreeImpl(child.pid, { timeoutMs: cleanupDeadlineMs });
         if (!killed) {
+          treeKillFailed = true;
           try {
             child.kill?.("SIGKILL");
           } catch {
@@ -173,6 +186,32 @@ export function runProbe(
         // confirmation before settling anyway, so a stuck cleanup can't hang
         // the probe (and the caller's spawnSync) indefinitely.
         cleanupTimer = setTimeout(() => {
+          // The deadline fired: nothing confirmed this process (or its
+          // descendants) actually exited. Don't let this helper linger on a
+          // wedged runtime waiting for streams that may never end — drop the
+          // piped stdio and unref the child so this helper process itself
+          // can still exit even if the runtime tree can't be confirmed gone.
+          try {
+            child.stdout?.destroy?.();
+          } catch {
+            // Best-effort; the stream may already be gone.
+          }
+          try {
+            child.stderr?.destroy?.();
+          } catch {
+            // Best-effort; the stream may already be gone.
+          }
+          child.unref?.();
+          if (treeKillFailed) {
+            // One last-ditch retry before giving up on confirming the tree
+            // is actually dead: the same platform-appropriate primitive
+            // (taskkill /T /F on win32, a process-group SIGKILL on POSIX)
+            // killTreeImpl already runs, bounded the same way. A Windows Job
+            // Object would give a real kill-on-close guarantee here instead
+            // of a best-effort retry; this repo ships no native addon to
+            // create one, so this is what's available.
+            killTreeImpl(child.pid, { timeoutMs: cleanupDeadlineMs });
+          }
           finish(null, { cleanupFailed: true });
         }, cleanupDeadlineMs);
         cleanupTimer.unref?.();
