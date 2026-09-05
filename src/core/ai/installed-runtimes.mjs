@@ -851,7 +851,18 @@ export function installedRuntimeExecutionIdentity(
           resolveInterpreter: () =>
             resolveWindowsCommandInterpreter({ env: childEnv, realpathImpl }),
         });
-        const probeTimeoutMs = 5_000;
+        // Windows CI review: a real npm-shim `.cmd` probe is a multi-hop
+        // CreateProcess chain (this helper's own node.exe, then cmd.exe,
+        // then the shim's own node.exe), and Windows process creation is
+        // measurably slower than POSIX fork/exec even before a real-time
+        // antivirus scan of a freshly-launched executable is added on top.
+        // A 5-second budget was tight enough to occasionally mistake a
+        // legitimately healthy, if slow-to-start, runtime for a hung one —
+        // once probeTimeoutMs elapses, timedOut latches true for the rest of
+        // this probe's life (runtime-probe-helper.mjs never clears it), so
+        // no amount of tree-kill/cleanup correctness downstream can recover
+        // a version read lost to a timeout that fired too early.
+        const probeTimeoutMs = 10_000;
         // The helper's own worst-case lifecycle runs well past probeTimeoutMs:
         // once that fires, it tree-kills (bounded by KILL_TIMEOUT_MS), then
         // waits up to CLEANUP_DEADLINE_MS for confirmed exit, then — only if

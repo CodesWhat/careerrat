@@ -1708,17 +1708,120 @@ test("installedRuntimeExecutionIdentity derives its win32 spawnSyncImpl backstop
     );
 
     assert.equal(spawnSyncCalls.length, 1);
-    const { options } = spawnSyncCalls[0];
-    // The probe's own reported timeout-ms argument is the 5-second
-    // probeTimeoutMs; the backstop must clear that plus both tree-kill
-    // bounds plus the cleanup wait plus a startup/reporting margin, not the
-    // old flat +5_000.
+    const { args, options } = spawnSyncCalls[0];
+    // Read the probe's own reported timeout-ms argument straight off the
+    // real argv, instead of hardcoding it here a second time — the backstop
+    // must clear that plus both tree-kill bounds plus the cleanup wait plus
+    // a startup/reporting margin, not the old flat +5_000, and this stays
+    // correct if probeTimeoutMs itself is ever retuned again.
+    const timeoutFlagIndex = args.indexOf("--timeout-ms");
+    assert.ok(timeoutFlagIndex >= 0, "expected a --timeout-ms argument in the helper's argv");
+    const probeTimeoutMs = Number(args[timeoutFlagIndex + 1]);
+    assert.ok(Number.isFinite(probeTimeoutMs) && probeTimeoutMs > 0);
     const minimumSafeDeadlineMs =
-      5_000 + KILL_TIMEOUT_MS + CLEANUP_DEADLINE_MS + KILL_TIMEOUT_MS + 3_000;
+      probeTimeoutMs + KILL_TIMEOUT_MS + CLEANUP_DEADLINE_MS + KILL_TIMEOUT_MS + 3_000;
     assert.ok(
       options.timeout >= minimumSafeDeadlineMs,
       `expected the spawnSyncImpl backstop (${options.timeout}ms) to cover the helper's full ` +
         `worst-case cleanup lifecycle (>= ${minimumSafeDeadlineMs}ms)`
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// windows-package-smoke CI review: "installedRuntimeExecutionIdentity
+// verifies a real npm-shim .cmd end to end" drives a genuine multi-hop
+// Windows CreateProcess chain (this helper's own node.exe, then cmd.exe,
+// then the shim's own freshly-copied node.exe) through the real, unstubbed
+// win32 probe path. Windows process creation is measurably slower than
+// POSIX fork/exec, and a real-time antivirus scan of that freshly-launched
+// executable adds more on top -- easily enough to blow a too-tight budget
+// even though the runtime itself is perfectly healthy. Once probeTimeoutMs
+// elapses, runtime-probe-helper.mjs's timedOut latches true for the rest of
+// that probe's life, discarding a version read that would otherwise have
+// come back clean no matter how correct the tree-kill/cleanup logic
+// downstream is -- so this has to be a real, generous number, not just
+// "some override the caller could theoretically supply." Proves the actual
+// value installedRuntimeExecutionIdentity hands the helper on win32 clears
+// a realistic multi-hop-spawn floor, read off the same argv the real
+// production caller builds (no injected timeout, no spawnImpl override of
+// the value itself).
+test("installedRuntimeExecutionIdentity gives its win32 probe enough of a budget for a real multi-hop Windows spawn chain", () => {
+  const root = tempRoot();
+  const wrapperDir = join(root, "npm");
+  mkdirSync(wrapperDir, { recursive: true });
+  const wrapper = join(wrapperDir, "codex.cmd");
+  const interpreter = join(wrapperDir, "node.exe");
+  const payload = join(wrapperDir, "codex.js");
+  const systemRoot = join(root, "Windows");
+  const system32 = join(systemRoot, "System32");
+  mkdirSync(system32, { recursive: true });
+  const realCmd = join(system32, "cmd.exe");
+
+  writeFileSync(interpreter, "node implementation");
+  writeFileSync(payload, "codex implementation");
+  writeFileSync(realCmd, "real cmd.exe");
+  writeFileSync(
+    wrapper,
+    [
+      "@ECHO off",
+      "GOTO start",
+      ":find_dp0",
+      "SET dp0=%~dp0",
+      "EXIT /b",
+      ":start",
+      "SETLOCAL",
+      "CALL :find_dp0",
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ") ELSE (",
+      '  SET "_prog=node"',
+      ")",
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & "%_prog%" "%dp0%\\codex.js" %*',
+    ].join("\r\n")
+  );
+
+  const env = { SystemRoot: systemRoot };
+  const fakeRealpathImpl = (path) => realpathSync(String(path).replace(/\\/g, "/"));
+  const runtimeIdentityFilesImpl = (command, opts) =>
+    runtimeProcessIdentityFiles(command, { ...opts, realpathImpl: fakeRealpathImpl });
+
+  const spawnSyncCalls = [];
+  try {
+    installedRuntimeExecutionIdentity(
+      { path: wrapper },
+      {
+        platform: "win32",
+        env,
+        realpathImpl: fakeRealpathImpl,
+        runtimeIdentityFilesImpl,
+        spawnSyncImpl(command, args, options) {
+          spawnSyncCalls.push({ command, args, options });
+          return {
+            error: null,
+            status: 0,
+            stdout: JSON.stringify({ stdout: "", stderr: "", status: null, timedOut: true }),
+            stderr: "",
+          };
+        },
+      }
+    );
+
+    assert.equal(spawnSyncCalls.length, 1);
+    const timeoutFlagIndex = spawnSyncCalls[0].args.indexOf("--timeout-ms");
+    assert.ok(timeoutFlagIndex >= 0, "expected a --timeout-ms argument in the helper's argv");
+    const probeTimeoutMs = Number(spawnSyncCalls[0].args[timeoutFlagIndex + 1]);
+    // A single real Windows CreateProcess call, on a loaded/AV-scanned
+    // runner, has been observed to cost multiple seconds on its own; this
+    // chain needs at least three (helper node.exe already running, then
+    // cmd.exe, then the shim's own node.exe). 8s is a floor well under the
+    // 10s this fix actually sets, so retuning probeTimeoutMs again later
+    // only fails this test if it regresses back toward the old, too-tight
+    // 5s budget.
+    assert.ok(
+      probeTimeoutMs >= 8_000,
+      `expected a probeTimeoutMs generous enough for a real multi-hop Windows spawn chain, got ${probeTimeoutMs}ms`
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
