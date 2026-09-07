@@ -4,6 +4,14 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- A short public roadmap is back at the repo root. The UI/UX research notes
+  and the retired port-parity audit left `docs/`; they were working notes, not
+  product documentation.
+
 ## [0.18.2] - 2026-09-05
 
 ### Added

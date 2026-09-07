@@ -45,7 +45,7 @@ v0.16.3 release-candidate rerun: 2026-08-26
   Each handed off to the workspace, stayed dismissed after reload, and the current browser console
   reported zero errors and warnings.
 
-This is the live execution ledger for the release gate in `docs/ROADMAP.md`. Status values are
+This is the live execution ledger for the release gate on the roadmap (`ROADMAP.md` at the repo root is the short public version; the working plan is local). Status values are
 `NOT RUN`, `PASS`, `FAIL`, `FIXED`, or `DEFERRED`. Every failure needs reproduction evidence,
 severity, root cause, fix/test references, and a live retest before it becomes `FIXED`.
 
