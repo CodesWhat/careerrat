@@ -1,5 +1,7 @@
+import { useRef } from "react";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
+import { useDialogFocus } from "../lib/use-dialog-focus.js";
 import { cleanAgentCopy } from "./agent-copy.js";
 import { UploadIcon } from "./chat-first-icons.jsx";
 import { artifactEmoji } from "./chat-first-model.js";
@@ -1688,6 +1690,9 @@ export function SubmitGateModal({
   onRequestChanges,
   onSubmit,
 }) {
+  const dialogRef = useRef(null);
+  useDialogFocus({ active: open, dialogRef, onClose });
+
   if (!open) return null;
 
   const packet = gate?.packet || EMPTY_LIST;
@@ -1698,10 +1703,12 @@ export function SubmitGateModal({
   return (
     <div className="chat-first-cover chat-first-cover--gate">
       <section
+        ref={dialogRef}
         className="chat-first-gate"
         role="dialog"
         aria-modal="true"
         aria-labelledby="chat-first-gate-title"
+        tabIndex={-1}
       >
         <header className="chat-first-gate__header">
           <div>
@@ -1801,15 +1808,22 @@ export function EngineDownCover({
   onShowTechnical,
   technicalDetails,
 }) {
+  const dialogRef = useRef(null);
+  // No onClose: EngineDownCover has no close control, so Escape stays a
+  // no-op here (useDialogFocus only wires Escape when it gets one).
+  useDialogFocus({ active: open, dialogRef });
+
   if (!open) return null;
   const displayDetails = safeDisplayDetail(technicalDetails);
   return (
     <div className="chat-first-cover chat-first-cover--engine">
       <section
+        ref={dialogRef}
         className="chat-first-engine-down"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="chat-first-engine-title"
+        tabIndex={-1}
       >
         <span className="chat-first-engine-down__avatar" aria-hidden="true">
           🐀
