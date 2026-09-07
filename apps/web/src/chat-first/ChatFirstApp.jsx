@@ -1102,18 +1102,27 @@ function offerPositionLine(source) {
 // through from compRangeView (src/core/tracker/dashboard-data.js) via the
 // drawer detail's floor/ask/market* fields. null when there's nothing to plot:
 // no posted or built market band, and no candidate floor/target either.
-function jobCompRange(source) {
+// source.floor/.ask/.market* are `number | null` (compRangeView) — check for
+// null explicitly before Number() coercion, since Number(null) is 0
+// (finite), not NaN, and would turn "unset" into a fabricated $0K.
+function compNumberOrNull(value) {
+  if (value == null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function jobCompRange(source) {
   if (!source) return null;
   const hasMarket = Boolean(source.compHasMarket);
-  const floorK = Number.isFinite(Number(source.floor)) ? Number(source.floor) : null;
-  const askK = Number.isFinite(Number(source.ask)) ? Number(source.ask) : null;
+  const floorK = compNumberOrNull(source.floor);
+  const askK = compNumberOrNull(source.ask);
   if (!hasMarket && floorK == null && askK == null) return null;
   return {
     state: source.compState || "needs-info",
     hasMarket,
-    marketLo: Number.isFinite(Number(source.marketLo)) ? Number(source.marketLo) : null,
-    marketP50: Number.isFinite(Number(source.marketP50)) ? Number(source.marketP50) : null,
-    marketHi: Number.isFinite(Number(source.marketHi)) ? Number(source.marketHi) : null,
+    marketLo: compNumberOrNull(source.marketLo),
+    marketP50: compNumberOrNull(source.marketP50),
+    marketHi: compNumberOrNull(source.marketHi),
     floorK,
     askK,
     currency: source.currency,

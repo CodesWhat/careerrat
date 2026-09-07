@@ -11,11 +11,14 @@ import "./chat-first.css";
 const EMPTY_LIST = [];
 
 // Plain-language caption for each comp-range state (compRangeView in
-// src/core/tracker/dashboard-data.js) — never the internal state name.
+// src/core/tracker/dashboard-data.js), never the internal state name.
 const COMP_RANGE_CAPTION = {
   posted: "Posted by the company",
   built: "Estimated",
-  "needs-info": "Needs your target",
+  // needs-info only ever renders alongside a floor/target line (see
+  // targetOnly below), so this must describe the missing market data, not
+  // imply the candidate hasn't given a number yet.
+  "needs-info": "No market data yet",
 };
 
 // Position (0-100) of `value` along the [lo, hi] track, clamped to the ends so a
@@ -27,7 +30,7 @@ function compRangePosition(value, lo, hi) {
   return Math.max(0, Math.min(100, Math.round(((value - lo) / (hi - lo)) * 100)));
 }
 
-// Comp range bar for the job context panel — reuses the fit-bar's track/fill
+// Comp range bar for the job context panel, reusing the fit-bar's track/fill
 // visual pattern (see WorkspaceBrowser's cf-job-row__fit) at panel scale. Renders
 // a bounded low-high bar with a mid pin and, when the view model carries one, the
 // candidate's own target as a second marker. With no market band (needs-info),
@@ -36,11 +39,20 @@ function compRangePosition(value, lo, hi) {
 function CompRangeFact({ compRange }) {
   const caption = COMP_RANGE_CAPTION[compRange.state] || "";
   const { marketLo, marketHi, marketP50, askK, floorK, currency } = compRange;
-  const hasBar = compRange.hasMarket && Number.isFinite(marketLo) && Number.isFinite(marketHi);
+  // A single comparable (or a posted single figure rather than a range) can
+  // legitimately produce marketLo === marketHi. A bar needs a real span, or
+  // the track renders full-width and empty between two duplicate labels;
+  // show it as one plain figure instead (see singlePoint below).
+  const hasBar =
+    compRange.hasMarket &&
+    Number.isFinite(marketLo) &&
+    Number.isFinite(marketHi) &&
+    marketHi > marketLo;
+  const singlePoint = compRange.hasMarket && !hasBar && Number.isFinite(marketLo);
   const midPosition = hasBar ? compRangePosition(marketP50, marketLo, marketHi) : null;
   const targetPosition =
     hasBar && Number.isFinite(askK) ? compRangePosition(askK, marketLo, marketHi) : null;
-  const targetOnly = !hasBar && (Number.isFinite(askK) || Number.isFinite(floorK));
+  const targetOnly = !compRange.hasMarket && (Number.isFinite(askK) || Number.isFinite(floorK));
 
   return (
     <span className="chat-first-context-card__fact chat-first-context-card__fact--comp">
@@ -70,8 +82,13 @@ function CompRangeFact({ compRange }) {
             {formatCurrencyThousands(marketHi, currency)}
           </span>
         </span>
+      ) : singlePoint ? (
+        <strong>{formatCurrencyThousands(marketLo, currency)}</strong>
       ) : targetOnly ? (
-        <strong>Your target {formatCurrencyThousands(askK ?? floorK, currency)}</strong>
+        <strong>
+          {Number.isFinite(askK) ? "Your target " : "Your floor "}
+          {formatCurrencyThousands(askK ?? floorK, currency)}
+        </strong>
       ) : null}
       {caption ? <span>{caption}</span> : null}
     </span>

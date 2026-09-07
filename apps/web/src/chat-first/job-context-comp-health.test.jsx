@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { jobCompRange } from "./ChatFirstApp.jsx";
 import { JobContextPanel } from "./conversation-surfaces.jsx";
 
 function markup(node) {
@@ -41,6 +42,27 @@ describe("JobContextPanel comp range bar", () => {
     expect(html).toContain("chat-first-comp-bar__track");
     expect(html).toContain("chat-first-comp-bar__mid");
     expect(html).toContain("chat-first-comp-bar__target");
+  });
+
+  it("shows a single figure, not an empty bar, when a posted band collapses to one number", () => {
+    const html = markup(
+      JobContextPanel({
+        job: baseJob({
+          compRange: {
+            state: "posted",
+            hasMarket: true,
+            marketLo: 150,
+            marketP50: 150,
+            marketHi: 150,
+            floorK: null,
+            askK: 150,
+            currency: "USD",
+          },
+        }),
+      })
+    );
+    expect(html).toContain("$150K");
+    expect(html).not.toContain("chat-first-comp-bar__track");
   });
 
   it("renders a bar for a built (estimated) band", () => {
@@ -86,9 +108,31 @@ describe("JobContextPanel comp range bar", () => {
         }),
       })
     );
-    expect(html).toContain("Needs your target");
+    expect(html).toContain("No market data yet");
     expect(html).toContain("Your target $130K");
     expect(html).not.toContain("chat-first-comp-bar__track");
+  });
+
+  it("shows a floor line, not a target line, when only the floor is set", () => {
+    const html = markup(
+      JobContextPanel({
+        job: baseJob({
+          compRange: {
+            state: "needs-info",
+            hasMarket: false,
+            marketLo: null,
+            marketP50: null,
+            marketHi: null,
+            floorK: 100,
+            askK: null,
+            currency: "USD",
+          },
+        }),
+      })
+    );
+    expect(html).toContain("No market data yet");
+    expect(html).toContain("Your floor $100K");
+    expect(html).not.toContain("Your target");
   });
 
   it("renders nothing when there is no comp data at all", () => {
@@ -153,5 +197,52 @@ describe("JobContextPanel company-health pill", () => {
   it("renders nothing when there is no rating", () => {
     const html = markup(JobContextPanel({ job: baseJob({ companyHealth: null }) }));
     expect(html).not.toContain("chat-first-context-card__health-pill");
+  });
+});
+
+describe("jobCompRange normalization", () => {
+  it("treats an unset floor/ask as null, not a fabricated $0K", () => {
+    const view = jobCompRange({
+      compHasMarket: false,
+      floor: null,
+      ask: null,
+      marketLo: null,
+      marketP50: null,
+      marketHi: null,
+      compState: "needs-info",
+      currency: "USD",
+    });
+    expect(view).toBeNull();
+  });
+
+  it("keeps a real floor of 0 distinct from an unset floor", () => {
+    const view = jobCompRange({
+      compHasMarket: false,
+      floor: 0,
+      ask: null,
+      marketLo: null,
+      marketP50: null,
+      marketHi: null,
+      compState: "needs-info",
+      currency: "USD",
+    });
+    expect(view).not.toBeNull();
+    expect(view.floorK).toBe(0);
+    expect(view.askK).toBeNull();
+  });
+
+  it("does not put a false target marker at 0% when only a market band is set", () => {
+    const view = jobCompRange({
+      compHasMarket: true,
+      floor: null,
+      ask: null,
+      marketLo: 100,
+      marketP50: 120,
+      marketHi: 140,
+      compState: "posted",
+      currency: "USD",
+    });
+    expect(view.askK).toBeNull();
+    expect(view.floorK).toBeNull();
   });
 });

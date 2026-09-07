@@ -2152,7 +2152,7 @@ form.chat-first-choice-actions > fieldset {
   grid-column: 1 / -1;
 }
 
-/* Comp range bar — same track/fill pattern as the fit bar (WorkspaceBrowser's
+/* Comp range bar, same track/fill pattern as the fit bar (WorkspaceBrowser's
    cf-job-row__fit), sized for the job context panel. The track spans the whole
    low-high range; the mid pin and candidate target marker sit at their
    percent position along it via --cf-comp-position. */
