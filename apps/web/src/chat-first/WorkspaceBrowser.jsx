@@ -919,22 +919,38 @@ export function SchedulePanel({ groups = [], onAction, onCalendarAction }) {
               {safeArray(group.items).map((item) => (
                 <article
                   key={item.id}
-                  className={`cf-schedule__row${item.kind === "interview" ? " cf-schedule__row--interview" : ""}`}
+                  className={`cf-schedule__row${item.kind === "interview" ? " cf-schedule__row--interview" : ""}${item.done ? " cf-schedule__row--done" : ""}`}
                 >
                   <strong className="cf-schedule__time">{item.time || ""}</strong>
                   <span className="cf-resource__identity">
                     <strong>{item.title || "Scheduled item"}</strong>
                     <span>{item.meta || ""}</span>
                   </span>
-                  {item.actionLabel ? (
-                    <button
-                      type="button"
-                      className="cf-button cf-button--ink"
-                      onClick={() => onAction?.(item.id)}
-                    >
-                      {item.actionLabel}
-                    </button>
-                  ) : null}
+                  <span className="cf-schedule__row-actions">
+                    {item.actionLabel ? (
+                      <button
+                        type="button"
+                        className="cf-button cf-button--ink"
+                        onClick={() => onAction?.(item.id)}
+                      >
+                        {item.actionLabel}
+                      </button>
+                    ) : null}
+                    {item.export ? (
+                      <span className="cf-schedule__calendar-actions">
+                        {["Google", "Outlook", "Download file"].map((label) => (
+                          <button
+                            key={label}
+                            type="button"
+                            className="cf-button cf-button--outline"
+                            onClick={() => onCalendarAction?.(label, item.id)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </span>
+                    ) : null}
+                  </span>
                 </article>
               ))}
             </section>
@@ -942,20 +958,6 @@ export function SchedulePanel({ groups = [], onAction, onCalendarAction }) {
         ) : (
           <EmptyPanel>Nothing is scheduled.</EmptyPanel>
         )}
-      </div>
-      <div className="cf-schedule__calendar-actions">
-        <span>Add to calendar:</span>
-        {["Google", "Outlook", "Download file"].map((label) => (
-          <button
-            key={label}
-            type="button"
-            className="cf-button cf-button--outline"
-            disabled={!canExportCalendar}
-            onClick={() => onCalendarAction?.(label)}
-          >
-            {label}
-          </button>
-        ))}
       </div>
       <p className="cf-browser__footnote">
         {canExportCalendar

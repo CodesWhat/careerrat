@@ -1407,22 +1407,12 @@ describe("chat-first app controller", () => {
   });
 
   it("opens safe calendar handoffs and downloads the generated calendar file", () => {
-    const groups = [
-      {
-        day: "THURSDAY",
-        items: [
-          {
-            id: "event-1",
-            export: {
-              googleUrl: "https://calendar.google.com/calendar/render?action=TEMPLATE",
-              outlookUrl: "https://outlook.live.com/calendar/0/deeplink/compose?subject=Interview",
-              filename: "interview.ics",
-              ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR",
-            },
-          },
-        ],
-      },
-    ];
+    const exportData = {
+      googleUrl: "https://calendar.google.com/calendar/render?action=TEMPLATE",
+      outlookUrl: "https://outlook.live.com/calendar/0/deeplink/compose?subject=Interview",
+      filename: "interview.ics",
+      ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR",
+    };
     const open = vi.fn();
     const link = { click: vi.fn(), remove: vi.fn() };
     const documentRef = {
@@ -1430,14 +1420,16 @@ describe("chat-first app controller", () => {
       createElement: vi.fn(() => link),
     };
 
-    expect(calendarAction("Google", groups, { openWindow: open, documentRef })).toBe(true);
+    expect(calendarAction("Google", exportData, { openWindow: open, documentRef })).toBe(true);
     expect(open).toHaveBeenCalledWith(
       "https://calendar.google.com/calendar/render?action=TEMPLATE",
       "_blank",
       "noopener,noreferrer"
     );
-    expect(calendarAction("Outlook", groups, { openWindow: open, documentRef })).toBe(true);
-    expect(calendarAction("Download file", groups, { openWindow: open, documentRef })).toBe(true);
+    expect(calendarAction("Outlook", exportData, { openWindow: open, documentRef })).toBe(true);
+    expect(calendarAction("Download file", exportData, { openWindow: open, documentRef })).toBe(
+      true
+    );
     expect(link.download).toBe("interview.ics");
     expect(link.href).toContain("data:text/calendar;charset=utf-8,");
     expect(link.click).toHaveBeenCalledOnce();
@@ -1446,24 +1438,15 @@ describe("chat-first app controller", () => {
 
   it("refuses unsafe or incomplete calendar exports", () => {
     const open = vi.fn();
-    const schedule = [
-      {
-        day: "UPCOMING",
-        items: [
-          {
-            export: {
-              googleUrl: "javascript:alert(1)",
-              filename: "../bad.ics",
-              ics: "not a calendar",
-            },
-          },
-        ],
-      },
-    ];
+    const badExport = {
+      googleUrl: "javascript:alert(1)",
+      filename: "../bad.ics",
+      ics: "not a calendar",
+    };
 
-    expect(calendarAction("Google", schedule, { openWindow: open })).toBe(false);
+    expect(calendarAction("Google", badExport, { openWindow: open })).toBe(false);
     expect(
-      calendarAction("Download file", schedule, {
+      calendarAction("Download file", badExport, {
         documentRef: { body: {}, createElement: vi.fn() },
       })
     ).toBe(false);

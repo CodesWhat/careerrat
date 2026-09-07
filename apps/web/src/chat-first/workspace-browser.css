@@ -814,19 +814,34 @@
 
 .cf-schedule__row {
   grid-template-columns: 72px minmax(180px, 1fr) auto;
+  align-items: center;
   margin-bottom: 6px;
+}
+
+.cf-schedule__row--done {
+  color: var(--slate);
 }
 
 .cf-schedule__time {
   font-size: 12.5px;
 }
 
+.cf-schedule__row--done .cf-schedule__time,
+.cf-schedule__row--done .cf-resource__identity > strong {
+  color: var(--slate);
+}
+
+.cf-schedule__row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+
 .cf-schedule__calendar-actions {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--slate);
-  font-size: 12px;
 }
 
 .cf-schedule__calendar-actions .cf-button {
