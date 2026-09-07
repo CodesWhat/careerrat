@@ -18,6 +18,35 @@ export function fitBarWidth(fit) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+// Mirrors core's fitLabel (dashboard-data.js): a triage guess reads "~72" until
+// evaluate-job resolves the real fit and clears fitBasis off "triage".
+export function fitDisplayLabel(job) {
+  const fit = Number(job?.fit) || 0;
+  const isTriage = String(job?.fitBasis || "").toLowerCase() === "triage";
+  return `${isTriage ? "~" : ""}${fit}`;
+}
+
+function sortTimeValue(value) {
+  const time = new Date(value || "").getTime();
+  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
+}
+
+const JOB_SORT_COMPARATORS = {
+  fit: (a, b) => (Number(b?.fit) || 0) - (Number(a?.fit) || 0),
+  posted: (a, b) =>
+    sortTimeValue(b?.postedAt || b?.datePosted) - sortTimeValue(a?.postedAt || a?.datePosted),
+  updated: (a, b) =>
+    sortTimeValue(b?.appliedAt || b?.sourcedAt || b?.postedAt) -
+    sortTimeValue(a?.appliedAt || a?.sourcedAt || a?.postedAt),
+};
+
+// "all" (or any unrecognized key) keeps the given order as-is — today's default.
+export function sortJobs(jobs, sortKey) {
+  const rows = asArray(jobs);
+  const comparator = JOB_SORT_COMPARATORS[sortKey];
+  return comparator ? [...rows].sort(comparator) : rows;
+}
+
 export function buildCartView(jobs) {
   const selected = asArray(jobs);
   const count = selected.length;

@@ -229,6 +229,7 @@ const DEFAULT_BROWSER_FILTERS = Object.freeze({
   stage: "all",
   source: "all",
   posted: "all",
+  sort: "all",
   files: "All",
   people: "all",
 });
@@ -240,6 +241,7 @@ const CLEARED_SEARCH_FILTERS = Object.freeze({
   stage: "all",
   source: "all",
   posted: "all",
+  sort: "all",
 });
 
 export function initialVisibleSearchState(api = {}) {
@@ -3375,7 +3377,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         setBrowserFilters((current) => ({ ...current, [filter]: !current[filter] }));
         return;
       }
-      if (["stage", "source", "posted"].includes(filter)) {
+      if (["stage", "source", "posted", "sort"].includes(filter)) {
         setBrowserFilters((current) => ({ ...current, [filter]: value || "all" }));
       }
     },

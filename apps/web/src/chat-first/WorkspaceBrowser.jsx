@@ -3,12 +3,21 @@ import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import {
   buildCartView,
   fitBarWidth,
+  fitDisplayLabel,
   pipelineRowsWithWidths,
   selectedJobs,
   selectionIds,
+  sortJobs,
 } from "./browser-model.js";
 import { RadarIcon, SearchIcon, SpinnerIcon } from "./chat-first-icons.jsx";
 import "./workspace-browser.css";
+
+const SORT_OPTIONS = [
+  { value: "all", label: "Sort" },
+  { value: "fit", label: "Sort · Best fit" },
+  { value: "posted", label: "Sort · Newest posted" },
+  { value: "updated", label: "Sort · Recently updated" },
+];
 
 const TAB_ORDER = ["search", "pipeline", "files", "people", "schedule"];
 const TAB_LABELS = {
@@ -311,12 +320,19 @@ function filterChoices(jobs, valueFor) {
   return [...choices].map(([value, label]) => ({ value, label }));
 }
 
-function FilterSelect({ label, value = "all", options, onChange }) {
+function FilterSelect({
+  label,
+  value = "all",
+  options,
+  onChange,
+  neutralValue = "all",
+  ariaLabel,
+}) {
   return (
     <select
-      className={`cf-filter cf-filter--select${value !== "all" ? " cf-filter--active" : ""}`}
+      className={`cf-filter cf-filter--select${value !== neutralValue ? " cf-filter--active" : ""}`}
       value={value}
-      aria-label={`Filter by ${label.toLowerCase()}`}
+      aria-label={ariaLabel || `Filter by ${label.toLowerCase()}`}
       onChange={(event) => onChange?.(event.target.value)}
     >
       {options.map((option) => (
@@ -325,6 +341,18 @@ function FilterSelect({ label, value = "all", options, onChange }) {
         </option>
       ))}
     </select>
+  );
+}
+
+function SortSelect({ value = "all", onChange }) {
+  return (
+    <FilterSelect
+      label="Sort"
+      value={value}
+      ariaLabel="Sort jobs"
+      options={SORT_OPTIONS}
+      onChange={onChange}
+    />
   );
 }
 
@@ -390,6 +418,7 @@ function FilterBar({ jobs = [], eyebrow, query = "", filters = {}, onQueryChange
         ]}
         onChange={(value) => onFilter?.("posted", value)}
       />
+      <SortSelect value={filters.sort} onChange={(value) => onFilter?.("sort", value)} />
     </div>
   );
 }
@@ -456,7 +485,7 @@ export function SearchJobRow({ job, selected, onToggleSelection }) {
         <span>{searchCompensationLabel(job)}</span>
       </div>
       <div className="cf-job-row__fit">
-        <strong>Fit {Number(job?.fit) || 0}</strong>
+        <strong>Fit {fitDisplayLabel(job)}</strong>
         <span className="cf-job-row__fit-track">
           <span className="cf-job-row__fit-fill" style={{ "--cf-fit-width": `${width}%` }} />
         </span>
@@ -482,7 +511,7 @@ export function SearchPanel({
   onClearFilters,
 }) {
   const selected = new Set(selectionIds(selection));
-  const rows = safeArray(jobs);
+  const rows = sortJobs(safeArray(jobs), filters.sort);
   const unfilteredRows = safeArray(filterJobs);
   const filtersHideJobs = rows.length === 0 && unfilteredRows.length > 0;
   const noConfiguredLane = searchHasNoConfiguredLane(sourceSweep);
@@ -691,38 +720,72 @@ function PipelineFunnel({ pipeline = {}, onStageSelect }) {
   );
 }
 
-function PipelineList({ jobs = [], onOpenJob }) {
-  const rows = safeArray(jobs);
-  if (rows.length === 0) return <EmptyPanel>No actioned jobs yet.</EmptyPanel>;
+function PipelineJobFlag({ job }) {
+  if (job?.ghosted) {
+    return (
+      <span className="cf-pipeline__job-flag" title="No response in over a month.">
+        Ghosted
+      </span>
+    );
+  }
+  if (job?.stale) {
+    return (
+      <span className="cf-pipeline__job-flag" title="No response in over two weeks.">
+        Stale
+      </span>
+    );
+  }
+  return null;
+}
+
+function PipelineList({ jobs = [], filters = {}, onOpenJob, onFilter }) {
+  const rows = sortJobs(safeArray(jobs), filters.sort);
   return (
     <div className="cf-pipeline__list">
-      {rows.map((job) => (
-        <button
-          key={job.id}
-          type="button"
-          className="cf-pipeline__job"
-          onClick={() => onOpenJob?.(job.id)}
-        >
-          <span className="cf-pipeline__job-name">
-            <strong>{job.company || "Unknown company"}</strong>
-            <span>{job.role || "Role not provided"}</span>
-          </span>
-          <span
-            className={`cf-stage cf-stage--${String(job.stage || "applied")
-              .toLowerCase()
-              .replaceAll(" ", "-")}`}
+      <div className="cf-pipeline__list-toolbar">
+        <SortSelect value={filters.sort} onChange={(value) => onFilter?.("sort", value)} />
+      </div>
+      {rows.length === 0 ? (
+        <EmptyPanel>No actioned jobs yet.</EmptyPanel>
+      ) : (
+        rows.map((job) => (
+          <button
+            key={job.id}
+            type="button"
+            className={`cf-pipeline__job${job.stale || job.ghosted ? " cf-pipeline__job--muted" : ""}`}
+            onClick={() => onOpenJob?.(job.id)}
           >
-            {job.stage || "Applied"}
-          </span>
-          <span className="cf-pipeline__job-note">{job.statusNote || ""}</span>
-          <strong>{Number(job.fit) || 0}</strong>
-        </button>
-      ))}
+            <span className="cf-pipeline__job-name">
+              <strong>
+                <PipelineJobFlag job={job} />
+                {job.company || "Unknown company"}
+              </strong>
+              <span>{job.role || "Role not provided"}</span>
+            </span>
+            <span
+              className={`cf-stage cf-stage--${String(job.stage || "applied")
+                .toLowerCase()
+                .replaceAll(" ", "-")}`}
+            >
+              {job.stage || "Applied"}
+            </span>
+            <span className="cf-pipeline__job-note">{job.statusNote || ""}</span>
+            <strong>{fitDisplayLabel(job)}</strong>
+          </button>
+        ))
+      )}
     </div>
   );
 }
 
-export function PipelinePanel({ pipeline = {}, view = "funnel", onStageSelect, onOpenJob }) {
+export function PipelinePanel({
+  pipeline = {},
+  view = "funnel",
+  filters = {},
+  onStageSelect,
+  onOpenJob,
+  onFilter,
+}) {
   return (
     <section
       id="workspace-panel-pipeline"
@@ -731,7 +794,12 @@ export function PipelinePanel({ pipeline = {}, view = "funnel", onStageSelect, o
       aria-labelledby="workspace-tab-pipeline"
     >
       {view === "list" ? (
-        <PipelineList jobs={pipeline?.jobs} onOpenJob={onOpenJob} />
+        <PipelineList
+          jobs={pipeline?.jobs}
+          filters={filters}
+          onOpenJob={onOpenJob}
+          onFilter={onFilter}
+        />
       ) : (
         <PipelineFunnel pipeline={pipeline} onStageSelect={onStageSelect} />
       )}
@@ -1102,8 +1170,10 @@ export function WorkspaceBrowser({
           <PipelinePanel
             pipeline={pipeline}
             view={pipelineView}
+            filters={filters}
             onStageSelect={onStageSelect}
             onOpenJob={onOpenJob}
+            onFilter={onFilter}
           />
         ) : activeTab === "files" ? (
           <FilesPanel
