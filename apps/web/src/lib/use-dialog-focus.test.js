@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   focusDialogOnOpen,
   handleDialogKeyDown,
+  isTopActiveDialogToken,
+  popActiveDialogToken,
+  pushActiveDialogToken,
   restoreDialogFocus,
   trapDialogTab,
 } from "./use-dialog-focus.js";
@@ -155,5 +158,38 @@ describe("handleDialogKeyDown", () => {
     handleDialogKeyDown({ event, dialog, activeElement: last });
 
     expect(first.focus).toHaveBeenCalledOnce();
+  });
+});
+
+describe("active dialog token stack", () => {
+  // useDialogFocus pushes a token when a dialog activates and checks
+  // isTopActiveDialogToken before handling a keydown, so an older dialog left
+  // mounted underneath a newer one (SubmitGateModal under ArtifactViewerModal)
+  // doesn't answer Escape/Tab ahead of the one actually on top.
+  it("treats the most recently pushed token as top", () => {
+    const gate = {};
+    const viewer = {};
+
+    pushActiveDialogToken(gate);
+    expect(isTopActiveDialogToken(gate)).toBe(true);
+
+    pushActiveDialogToken(viewer);
+    expect(isTopActiveDialogToken(gate)).toBe(false);
+    expect(isTopActiveDialogToken(viewer)).toBe(true);
+
+    popActiveDialogToken(viewer);
+    expect(isTopActiveDialogToken(gate)).toBe(true);
+
+    popActiveDialogToken(gate);
+  });
+
+  it("popping a token that isn't on the stack is a no-op", () => {
+    const gate = {};
+    pushActiveDialogToken(gate);
+
+    expect(() => popActiveDialogToken({})).not.toThrow();
+    expect(isTopActiveDialogToken(gate)).toBe(true);
+
+    popActiveDialogToken(gate);
   });
 });

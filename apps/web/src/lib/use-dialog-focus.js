@@ -58,6 +58,30 @@ export function handleDialogKeyDown({ event, onClose, dialog, activeElement }) {
   trapDialogTab({ dialog, event, activeElement });
 }
 
+// Dialogs wired through this hook can be open at the same time: SubmitGateModal
+// stays mounted under ArtifactViewerModal while the user views a packet item
+// from the gate, and EngineDownCover can appear over either. Each dialog
+// installs its own document-level capture listener when it activates, so
+// without this stack the *older* (first-installed) listener would see a
+// keydown before the newer, visually-topmost dialog's listener ever runs and
+// could swallow it with stopImmediatePropagation() first. Tracking activation
+// order here lets a listener check "am I the top?" and no-op if not, so only
+// the most recently opened dialog answers Escape/Tab.
+const activeDialogTokens = [];
+
+export function pushActiveDialogToken(token) {
+  activeDialogTokens.push(token);
+}
+
+export function popActiveDialogToken(token) {
+  const index = activeDialogTokens.indexOf(token);
+  if (index !== -1) activeDialogTokens.splice(index, 1);
+}
+
+export function isTopActiveDialogToken(token) {
+  return activeDialogTokens[activeDialogTokens.length - 1] === token;
+}
+
 // `active` gates the whole effect so a caller that keeps the component
 // mounted while closed (SubmitGateModal, EngineDownCover both toggle on an
 // `open` prop rather than unmounting) doesn't move focus or install a
@@ -68,7 +92,12 @@ export function useDialogFocus({ active, dialogRef, onClose }) {
     const dialog = dialogRef.current;
     const previouslyFocused = document.activeElement;
     focusDialogOnOpen({ dialog });
+    const token = {};
+    pushActiveDialogToken(token);
     function onKeyDown(event) {
+      // Not the topmost open dialog: leave the key alone for whichever
+      // dialog's listener actually owns it right now.
+      if (!isTopActiveDialogToken(token)) return;
       handleDialogKeyDown({
         event,
         onClose,
@@ -81,6 +110,7 @@ export function useDialogFocus({ active, dialogRef, onClose }) {
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
+      popActiveDialogToken(token);
       restoreDialogFocus({ previouslyFocused });
     };
   }, [active, onClose, dialogRef]);
