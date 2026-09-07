@@ -1102,7 +1102,7 @@ function offerPositionLine(source) {
 // through from compRangeView (src/core/tracker/dashboard-data.js) via the
 // drawer detail's floor/ask/market* fields. null when there's nothing to plot:
 // no posted or built market band, and no candidate floor/target either.
-// source.floor/.ask/.market* are `number | null` (compRangeView) — check for
+// source.floor/.ask/.market* are `number | null` (compRangeView), so check for
 // null explicitly before Number() coercion, since Number(null) is 0
 // (finite), not NaN, and would turn "unset" into a fabricated $0K.
 function compNumberOrNull(value) {
