@@ -272,7 +272,23 @@
   gap: 9px;
   align-items: baseline;
   padding: 5px 0;
+  width: 100%;
+  border: none;
+  background: none;
+  font-family: inherit;
   font-size: 12.5px;
+  color: inherit;
+  text-align: left;
+}
+
+.chat-first-activity__row--clickable {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.chat-first-activity__row--clickable:hover,
+.chat-first-activity__row--clickable:focus-visible {
+  background: var(--tint-cool-3);
 }
 
 .chat-first-activity__row time {

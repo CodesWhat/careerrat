@@ -228,14 +228,22 @@ describe("chat-first app controller", () => {
         },
       ])
     ).toEqual([
-      { id: "a1", time: "8:14", label: "Sweep complete", mark: "✓", tone: "done" },
-      { id: "a2", time: "2:15pm", label: "Packet ready", mark: "!", tone: "attention" },
+      { id: "a1", time: "8:14", label: "Sweep complete", mark: "✓", tone: "done", appId: "" },
+      {
+        id: "a2",
+        time: "2:15pm",
+        label: "Packet ready",
+        mark: "!",
+        tone: "attention",
+        appId: "",
+      },
       {
         id: "a3",
         time: "6:53pm",
         label: "Job targets updated",
         mark: "✓",
         tone: "done",
+        appId: "",
       },
     ]);
     expect(

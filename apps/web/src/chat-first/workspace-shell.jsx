@@ -96,6 +96,7 @@ export function TopBar({
   showActivity = true,
   onOpenProfile,
   onToggleActivity,
+  onOpenJob,
 }) {
   return (
     <header className="chat-first-topbar">
@@ -128,17 +129,37 @@ export function TopBar({
               >
                 <div className="chat-first-eyebrow">{activityHeading(agentName)}</div>
                 <div className="chat-first-activity__rows">
-                  {activityItems.map((item) => (
-                    <div className="chat-first-activity__row" key={item.id}>
-                      <time>{item.time}</time>
-                      <span
-                        className={`chat-first-activity__mark chat-first-activity__mark--${item.tone || "done"}`}
+                  {activityItems.map((item) =>
+                    item.appId ? (
+                      <button
+                        type="button"
+                        className="chat-first-activity__row chat-first-activity__row--clickable"
+                        key={item.id}
+                        onClick={() => {
+                          onOpenJob?.(item.appId);
+                          onToggleActivity?.();
+                        }}
                       >
-                        {item.mark}
-                      </span>
-                      <span>{item.label}</span>
-                    </div>
-                  ))}
+                        <time>{item.time}</time>
+                        <span
+                          className={`chat-first-activity__mark chat-first-activity__mark--${item.tone || "done"}`}
+                        >
+                          {item.mark}
+                        </span>
+                        <span>{item.label}</span>
+                      </button>
+                    ) : (
+                      <div className="chat-first-activity__row" key={item.id}>
+                        <time>{item.time}</time>
+                        <span
+                          className={`chat-first-activity__mark chat-first-activity__mark--${item.tone || "done"}`}
+                        >
+                          {item.mark}
+                        </span>
+                        <span>{item.label}</span>
+                      </div>
+                    )
+                  )}
                 </div>
                 <div className="chat-first-activity__footer">
                   Every step is logged. The full history lives in your local files.

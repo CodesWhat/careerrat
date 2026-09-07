@@ -1260,6 +1260,7 @@ export function ChatFirstAppView({
       missionLive={Boolean(activeMission?.status === "running")}
       onOpenProfile={actions.openSettings}
       onToggleActivity={actions.toggleActivity}
+      onOpenJob={actions.openJob}
     />
   );
   const overlays = (
@@ -1332,6 +1333,7 @@ export function ChatFirstAppView({
             pipeline={pipeline}
             files={filterFiles(view.browser.files, browserFilters.files)}
             people={filterPeople(view.browser.people, browserFilters.people)}
+            peopleTargets={view.browser.peopleTargets}
             schedule={view.browser.schedule}
             agentName={view.agentName}
             expiringCount={view.needsYou.filter((item) => item.tone === "attention").length}
