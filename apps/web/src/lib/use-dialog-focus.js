@@ -67,19 +67,19 @@ export function handleDialogKeyDown({ event, onClose, dialog, activeElement }) {
 // could swallow it with stopImmediatePropagation() first. Tracking activation
 // order here lets a listener check "am I the top?" and no-op if not, so only
 // the most recently opened dialog answers Escape/Tab.
-const activeDialogTokens = [];
+const activeDialogHandles = [];
 
-export function pushActiveDialogToken(token) {
-  activeDialogTokens.push(token);
+export function pushActiveDialogHandle(handle) {
+  activeDialogHandles.push(handle);
 }
 
-export function popActiveDialogToken(token) {
-  const index = activeDialogTokens.indexOf(token);
-  if (index !== -1) activeDialogTokens.splice(index, 1);
+export function popActiveDialogHandle(handle) {
+  const index = activeDialogHandles.indexOf(handle);
+  if (index !== -1) activeDialogHandles.splice(index, 1);
 }
 
-export function isTopActiveDialogToken(token) {
-  return activeDialogTokens[activeDialogTokens.length - 1] === token;
+export function isTopActiveDialogHandle(handle) {
+  return activeDialogHandles[activeDialogHandles.length - 1] === handle;
 }
 
 // `active` gates the whole effect so a caller that keeps the component
@@ -92,12 +92,12 @@ export function useDialogFocus({ active, dialogRef, onClose }) {
     const dialog = dialogRef.current;
     const previouslyFocused = document.activeElement;
     focusDialogOnOpen({ dialog });
-    const token = {};
-    pushActiveDialogToken(token);
+    const handle = {};
+    pushActiveDialogHandle(handle);
     function onKeyDown(event) {
       // Not the topmost open dialog: leave the key alone for whichever
       // dialog's listener actually owns it right now.
-      if (!isTopActiveDialogToken(token)) return;
+      if (!isTopActiveDialogHandle(handle)) return;
       handleDialogKeyDown({
         event,
         onClose,
@@ -110,7 +110,7 @@ export function useDialogFocus({ active, dialogRef, onClose }) {
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
-      popActiveDialogToken(token);
+      popActiveDialogHandle(handle);
       restoreDialogFocus({ previouslyFocused });
     };
   }, [active, onClose, dialogRef]);

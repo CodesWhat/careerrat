@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   focusDialogOnOpen,
   handleDialogKeyDown,
-  isTopActiveDialogToken,
-  popActiveDialogToken,
-  pushActiveDialogToken,
+  isTopActiveDialogHandle,
+  popActiveDialogHandle,
+  pushActiveDialogHandle,
   restoreDialogFocus,
   trapDialogTab,
 } from "./use-dialog-focus.js";
@@ -161,35 +161,35 @@ describe("handleDialogKeyDown", () => {
   });
 });
 
-describe("active dialog token stack", () => {
-  // useDialogFocus pushes a token when a dialog activates and checks
-  // isTopActiveDialogToken before handling a keydown, so an older dialog left
+describe("active dialog handle stack", () => {
+  // useDialogFocus pushes a handle when a dialog activates and checks
+  // isTopActiveDialogHandle before handling a keydown, so an older dialog left
   // mounted underneath a newer one (SubmitGateModal under ArtifactViewerModal)
   // doesn't answer Escape/Tab ahead of the one actually on top.
-  it("treats the most recently pushed token as top", () => {
+  it("treats the most recently pushed handle as top", () => {
     const gate = {};
     const viewer = {};
 
-    pushActiveDialogToken(gate);
-    expect(isTopActiveDialogToken(gate)).toBe(true);
+    pushActiveDialogHandle(gate);
+    expect(isTopActiveDialogHandle(gate)).toBe(true);
 
-    pushActiveDialogToken(viewer);
-    expect(isTopActiveDialogToken(gate)).toBe(false);
-    expect(isTopActiveDialogToken(viewer)).toBe(true);
+    pushActiveDialogHandle(viewer);
+    expect(isTopActiveDialogHandle(gate)).toBe(false);
+    expect(isTopActiveDialogHandle(viewer)).toBe(true);
 
-    popActiveDialogToken(viewer);
-    expect(isTopActiveDialogToken(gate)).toBe(true);
+    popActiveDialogHandle(viewer);
+    expect(isTopActiveDialogHandle(gate)).toBe(true);
 
-    popActiveDialogToken(gate);
+    popActiveDialogHandle(gate);
   });
 
-  it("popping a token that isn't on the stack is a no-op", () => {
+  it("popping a handle that isn't on the stack is a no-op", () => {
     const gate = {};
-    pushActiveDialogToken(gate);
+    pushActiveDialogHandle(gate);
 
-    expect(() => popActiveDialogToken({})).not.toThrow();
-    expect(isTopActiveDialogToken(gate)).toBe(true);
+    expect(() => popActiveDialogHandle({})).not.toThrow();
+    expect(isTopActiveDialogHandle(gate)).toBe(true);
 
-    popActiveDialogToken(gate);
+    popActiveDialogHandle(gate);
   });
 });
