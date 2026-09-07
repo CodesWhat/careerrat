@@ -1,7 +1,7 @@
 export const CAREER_OPS_UPSTREAM = Object.freeze({
   repository: "https://github.com/career-ops-hq/career-ops",
-  commit: "ffb49be1f394041840c31c23a5d3a3347854340e",
-  providerCount: 83,
+  commit: "8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40",
+  providerCount: 87,
 });
 
 export const CAREER_OPS_PROVIDER_IDS = Object.freeze([
@@ -17,7 +17,9 @@ export const CAREER_OPS_PROVIDER_IDS = Object.freeze([
   "bamboohr",
   "beesite",
   "breezy",
+  "builtin",
   "careerviet",
+  "collage",
   "comeet",
   "consider",
   "cryptocurrencyjobs",
@@ -28,6 +30,7 @@ export const CAREER_OPS_PROVIDER_IDS = Object.freeze([
   "eightfold",
   "feishu-jobs",
   "flowxtra",
+  "garena",
   "gem",
   "getonbrd",
   "getro",
@@ -128,7 +131,9 @@ export const CAREER_OPS_UPSTREAM_PROVIDER_IDS = Object.freeze([
   "bamboohr",
   "beesite",
   "breezy",
+  "builtin",
   "careerviet",
+  "collage",
   "comeet",
   "consider",
   "cryptocurrencyjobs",
@@ -139,6 +144,7 @@ export const CAREER_OPS_UPSTREAM_PROVIDER_IDS = Object.freeze([
   "eightfold",
   "feishu-jobs",
   "flowxtra",
+  "garena",
   "gem",
   "getonbrd",
   "getro",
@@ -187,6 +193,7 @@ export const CAREER_OPS_UPSTREAM_PROVIDER_IDS = Object.freeze([
   "solidjobs",
   "successfactors",
   "teamtailor",
+  "telegram-channel",
   "tencent",
   "thehub",
   "themuse",
@@ -202,12 +209,13 @@ export const CAREER_OPS_UPSTREAM_PROVIDER_IDS = Object.freeze([
 ]);
 
 // Upstream providers not yet adopted, pending Scott's decision. Not a
-// permanent exclusion; each can move into CAREER_OPS_PROVIDER_IDS later.
-// Currently empty — jobbankca, mycareersfuture, senjob, and yourator were the
-// last deferred batch and were adopted into CAREER_OPS_PROVIDER_IDS on
-// 2026-08-23. The constant stays in place (rather than being removed) as the
-// landing slot for whatever the next upstream roll defers.
-export const CAREER_OPS_DEFERRED_PROVIDER_IDS = Object.freeze({});
+// permanent exclusion; each can move into CAREER_OPS_PROVIDER_IDS later. The
+// prior deferred batch (jobbankca, mycareersfuture, senjob, yourator) was
+// adopted into CAREER_OPS_PROVIDER_IDS on 2026-08-23.
+export const CAREER_OPS_DEFERRED_PROVIDER_IDS = Object.freeze({
+  "telegram-channel":
+    "Scrapes Telegram channel web-preview pages with heuristic per-post employer attribution (upstream measured a 25% pass rate on its own RU/CIS test corpus, 0% on the EN one); too fragile and low-precision to adopt as a general source.",
+});
 
 // Upstream providers deliberately never adopted, with no plan to. Distinct
 // from "deferred": local-parser is already vendored (it is in
