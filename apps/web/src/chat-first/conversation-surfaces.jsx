@@ -1,3 +1,4 @@
+import { formatCurrencyThousands } from "../../../../src/core/currency-format.mjs";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
 import { cleanAgentCopy } from "./agent-copy.js";
@@ -8,6 +9,74 @@ import { SourceReviewSummaryCard } from "./source-review.jsx";
 import "./chat-first.css";
 
 const EMPTY_LIST = [];
+
+// Plain-language caption for each comp-range state (compRangeView in
+// src/core/tracker/dashboard-data.js) — never the internal state name.
+const COMP_RANGE_CAPTION = {
+  posted: "Posted by the company",
+  built: "Estimated",
+  "needs-info": "Needs your target",
+};
+
+// Position (0-100) of `value` along the [lo, hi] track, clamped to the ends so a
+// target outside the posted/built band still shows at an edge instead of vanishing.
+function compRangePosition(value, lo, hi) {
+  if (!Number.isFinite(value) || !Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, Math.round(((value - lo) / (hi - lo)) * 100)));
+}
+
+// Comp range bar for the job context panel — reuses the fit-bar's track/fill
+// visual pattern (see WorkspaceBrowser's cf-job-row__fit) at panel scale. Renders
+// a bounded low-high bar with a mid pin and, when the view model carries one, the
+// candidate's own target as a second marker. With no market band (needs-info),
+// falls back to a plain target line so the fact still reads as "here's your
+// number" rather than a bar with nothing to plot.
+function CompRangeFact({ compRange }) {
+  const caption = COMP_RANGE_CAPTION[compRange.state] || "";
+  const { marketLo, marketHi, marketP50, askK, floorK, currency } = compRange;
+  const hasBar = compRange.hasMarket && Number.isFinite(marketLo) && Number.isFinite(marketHi);
+  const midPosition = hasBar ? compRangePosition(marketP50, marketLo, marketHi) : null;
+  const targetPosition =
+    hasBar && Number.isFinite(askK) ? compRangePosition(askK, marketLo, marketHi) : null;
+  const targetOnly = !hasBar && (Number.isFinite(askK) || Number.isFinite(floorK));
+
+  return (
+    <span className="chat-first-context-card__fact chat-first-context-card__fact--comp">
+      <small>COMPENSATION</small>
+      {hasBar ? (
+        <span className="chat-first-comp-bar">
+          <span className="chat-first-comp-bar__label">
+            {formatCurrencyThousands(marketLo, currency)}
+          </span>
+          <span className="chat-first-comp-bar__track">
+            {midPosition != null ? (
+              <span
+                className="chat-first-comp-bar__mid"
+                style={{ "--cf-comp-position": `${midPosition}%` }}
+                title={`Midpoint ${formatCurrencyThousands(marketP50, currency)}`}
+              />
+            ) : null}
+            {targetPosition != null ? (
+              <span
+                className="chat-first-comp-bar__target"
+                style={{ "--cf-comp-position": `${targetPosition}%` }}
+                title={`Your target ${formatCurrencyThousands(askK, currency)}`}
+              />
+            ) : null}
+          </span>
+          <span className="chat-first-comp-bar__label">
+            {formatCurrencyThousands(marketHi, currency)}
+          </span>
+        </span>
+      ) : targetOnly ? (
+        <strong>Your target {formatCurrencyThousands(askK ?? floorK, currency)}</strong>
+      ) : null}
+      {caption ? <span>{caption}</span> : null}
+    </span>
+  );
+}
 function jobLocationCopy(job) {
   const location = String(job?.location || "").trim();
   const mode = String(job?.mode || "").trim();
@@ -1033,6 +1102,21 @@ export function JobContextPanel({
             </div>
             <span className="chat-first-context-card__stage">{job.stage}</span>
           </header>
+          {job.companyHealth ? (
+            <span
+              className={`chat-first-context-card__health-pill chat-first-context-card__health-pill--${job.companyHealth.rating}`}
+              title={
+                job.companyHealth.provenanceLabel
+                  ? `Company health: ${job.companyHealth.provenanceLabel}`
+                  : "Company health"
+              }
+            >
+              {job.companyHealth.ratingLabel || job.companyHealth.rating}
+              {job.companyHealth.provenanceLabel ? (
+                <small>{job.companyHealth.provenanceLabel}</small>
+              ) : null}
+            </span>
+          ) : null}
           <div className="chat-first-context-card__facts">
             <span className="chat-first-context-card__fact chat-first-context-card__fact--fit">
               <small>FIT</small>
@@ -1046,7 +1130,9 @@ export function JobContextPanel({
                 )}
               </span>
             ) : null}
-            {job.compensation ? (
+            {job.compRange ? (
+              <CompRangeFact compRange={job.compRange} />
+            ) : job.compensation ? (
               <span className="chat-first-context-card__fact chat-first-context-card__fact--comp">
                 <small>COMPENSATION</small>
                 <strong>{job.compensation}</strong>

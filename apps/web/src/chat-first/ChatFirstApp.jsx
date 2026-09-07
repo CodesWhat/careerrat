@@ -1098,6 +1098,28 @@ function offerPositionLine(source) {
   return parts.length ? parts.join(" · ") : null;
 }
 
+// Comp-range view model for the job context panel's bar, carried straight
+// through from compRangeView (src/core/tracker/dashboard-data.js) via the
+// drawer detail's floor/ask/market* fields. null when there's nothing to plot:
+// no posted or built market band, and no candidate floor/target either.
+function jobCompRange(source) {
+  if (!source) return null;
+  const hasMarket = Boolean(source.compHasMarket);
+  const floorK = Number.isFinite(Number(source.floor)) ? Number(source.floor) : null;
+  const askK = Number.isFinite(Number(source.ask)) ? Number(source.ask) : null;
+  if (!hasMarket && floorK == null && askK == null) return null;
+  return {
+    state: source.compState || "needs-info",
+    hasMarket,
+    marketLo: Number.isFinite(Number(source.marketLo)) ? Number(source.marketLo) : null,
+    marketP50: Number.isFinite(Number(source.marketP50)) ? Number(source.marketP50) : null,
+    marketHi: Number.isFinite(Number(source.marketHi)) ? Number(source.marketHi) : null,
+    floorK,
+    askK,
+    currency: source.currency,
+  };
+}
+
 function jobContext(view, thread, mockSession, actions) {
   if (!thread) return null;
   const detail = view.jobDetails?.[thread.applicationId] || {};
@@ -1157,6 +1179,8 @@ function jobContext(view, thread, mockSession, actions) {
         fit: Number.isFinite(Number(thread.fitScore)) ? Number(thread.fitScore) : "Fit pending",
         compensation,
         compensationNote: source?.compNote || source?.compStateLabel || null,
+        compRange: jobCompRange(source),
+        companyHealth: source?.companyHealth || null,
         location: thread.location || source?.location || null,
         mode: thread.modeLabel || thread.mode || source?.modeLabel || source?.mode || null,
         source: jobSourceLine(source) || null,
