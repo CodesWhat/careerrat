@@ -45,7 +45,7 @@ test("tracked paths and text use CareerRat branding only", () => {
 });
 
 test("the tracked repository root contains only entry-point documentation", () => {
-  const allowed = new Set(["AGENTS.md", "CHANGELOG.md", "CLAUDE.md", "README.md"]);
+  const allowed = new Set(["AGENTS.md", "CHANGELOG.md", "CLAUDE.md", "README.md", "ROADMAP.md"]);
   const rootMarkdown = execFileSync("git", ["ls-files", "*.md"], {
     cwd: root,
     encoding: "utf8",
