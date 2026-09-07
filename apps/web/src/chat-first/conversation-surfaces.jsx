@@ -881,6 +881,67 @@ export function ConversationPanel({ children, composer }) {
   );
 }
 
+// Turns the raw `strategy` view model (src/core/tracker/dashboard-data.js#buildStrategyInsights)
+// into a short list of plain-language lines, each carrying the number or evidence
+// that backs it. Placeholder metrics ("No source yet", "No lane yet") are dropped
+// rather than shown as empty claims.
+function strategyInsightLines(strategy) {
+  if (!strategy) return EMPTY_LIST;
+  const lines = [];
+  const topSource = strategy.metrics?.topSource;
+  if (topSource?.value && topSource.value !== "No source yet") {
+    const detail = (strategy.sources || EMPTY_LIST).find((row) => row?.label === topSource.label);
+    const total = detail?.total;
+    lines.push(
+      total
+        ? `${topSource.label} is your top source, with a ${topSource.rate} response rate across ${total} tracked role${total === 1 ? "" : "s"}.`
+        : `${topSource.label} is your top source, with a ${topSource.rate} response rate.`
+    );
+  }
+  const bestLane = strategy.metrics?.bestLane;
+  if (bestLane?.value && bestLane.value !== "No lane yet") {
+    const detail = (strategy.roles || EMPTY_LIST).find((row) => row?.label === bestLane.label);
+    const total = detail?.total;
+    lines.push(
+      total
+        ? `${bestLane.label} is your strongest role lane, with a ${bestLane.rate} response rate across ${total} tracked role${total === 1 ? "" : "s"}.`
+        : `${bestLane.label} is your strongest role lane, with a ${bestLane.rate} response rate.`
+    );
+  }
+  const staleCount = Number(strategy.metrics?.staleCount?.value);
+  if (Number.isFinite(staleCount) && staleCount > 0) {
+    lines.push(
+      `${staleCount} application${staleCount === 1 ? "" : "s"} ${
+        staleCount === 1 ? "has" : "have"
+      } gone quiet. Worth a look: nudge, downgrade, or close.`
+    );
+  }
+  return lines;
+}
+
+// The one Today-tab card surfacing src/core/tracker/dashboard-data.js's strategy
+// insights (Roadmap CR53). Absent entirely when there's no strategy signal yet,
+// so an empty tracker never shows a card with nothing in it.
+function StrategyInsightsCard({ strategy, agentName = "Paul" }) {
+  const insights = strategyInsightLines(strategy);
+  if (!insights.length) return null;
+  return (
+    <div className="chat-first-indented-card">
+      <article className="chat-first-strategy-card">
+        <div className="chat-first-strategy-card__header">
+          <span className="chat-first-eyebrow">STRATEGY</span>
+          <strong>{agentName}’s read on your search</strong>
+        </div>
+        <ul className="chat-first-strategy-card__list">
+          {insights.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      </article>
+    </div>
+  );
+}
+
 export function TodayConversation({
   agentName = "Paul",
   dateLabel = "TODAY",
@@ -889,6 +950,7 @@ export function TodayConversation({
   messages = EMPTY_LIST,
   artifacts = EMPTY_LIST,
   mission,
+  strategy = null,
   userMessages = EMPTY_LIST,
   onArtifactAction,
   onMessageAction,
@@ -902,6 +964,7 @@ export function TodayConversation({
       <div className="chat-first-conversation-eyebrow">{dateLabel}</div>
       {intro ? <AgentBubble agentName={agentName}>{intro}</AgentBubble> : null}
       <RunReceipt receipt={run} />
+      <StrategyInsightsCard strategy={strategy} agentName={agentName} />
       {messages.length ? (
         <MessageTranscript
           messages={messages}

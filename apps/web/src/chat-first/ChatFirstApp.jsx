@@ -1541,6 +1541,7 @@ export function ChatFirstAppView({
           onAnswer={actions.submitComposer}
           answerBusy={busy}
           mission={missionPresentation(activeMission)}
+          strategy={view.strategy}
         />
       </ConversationPanel>
     );

@@ -841,6 +841,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
       schedule: groupSchedule(dashboard.calendar),
     },
     jobDetails: dashboard.jobs?.details || {},
+    strategy: dashboard.strategy || null,
   };
 }
 
