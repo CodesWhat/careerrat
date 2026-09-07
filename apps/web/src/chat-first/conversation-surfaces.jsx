@@ -825,7 +825,9 @@ function strategyInsightLines(strategy) {
   const staleCount = Number(strategy.metrics?.staleCount?.value);
   if (Number.isFinite(staleCount) && staleCount > 0) {
     lines.push(
-      `${staleCount} application${staleCount === 1 ? "" : "s"} have gone quiet and could use a nudge.`
+      `${staleCount} application${staleCount === 1 ? "" : "s"} ${
+        staleCount === 1 ? "has" : "have"
+      } gone quiet. Worth a look: nudge, downgrade, or close.`
     );
   }
   return lines;
@@ -834,7 +836,7 @@ function strategyInsightLines(strategy) {
 // The one Today-tab card surfacing src/core/tracker/dashboard-data.js's strategy
 // insights (Roadmap CR53). Absent entirely when there's no strategy signal yet,
 // so an empty tracker never shows a card with nothing in it.
-function StrategyInsightsCard({ strategy }) {
+function StrategyInsightsCard({ strategy, agentName = "Paul" }) {
   const insights = strategyInsightLines(strategy);
   if (!insights.length) return null;
   return (
@@ -842,7 +844,7 @@ function StrategyInsightsCard({ strategy }) {
       <article className="chat-first-strategy-card">
         <div className="chat-first-strategy-card__header">
           <span className="chat-first-eyebrow">STRATEGY</span>
-          <strong>Paul’s read on your search</strong>
+          <strong>{agentName}’s read on your search</strong>
         </div>
         <ul className="chat-first-strategy-card__list">
           {insights.map((line) => (
@@ -876,7 +878,7 @@ export function TodayConversation({
       <div className="chat-first-conversation-eyebrow">{dateLabel}</div>
       {intro ? <AgentBubble agentName={agentName}>{intro}</AgentBubble> : null}
       <RunReceipt receipt={run} />
-      <StrategyInsightsCard strategy={strategy} />
+      <StrategyInsightsCard strategy={strategy} agentName={agentName} />
       {messages.length ? (
         <MessageTranscript
           messages={messages}

@@ -46,7 +46,9 @@ describe("TodayConversation strategy card", () => {
     expect(html).toContain(
       "Platform Engineering is your strongest role lane, with a 40% response rate across 5 tracked roles."
     );
-    expect(html).toContain("3 applications have gone quiet and could use a nudge.");
+    expect(html).toContain(
+      "3 applications have gone quiet. Worth a look: nudge, downgrade, or close."
+    );
   });
 
   it("renders no card when the insight list is empty", () => {
@@ -77,5 +79,27 @@ describe("TodayConversation strategy card", () => {
     const html = markup(<TodayConversation agentName="Paul" strategy={strategyFixture} />);
 
     expect(html).not.toContain("—");
+  });
+
+  it("attributes the card to the configured agent, not a hardcoded name", () => {
+    const html = markup(<TodayConversation agentName="Maya" strategy={strategyFixture} />);
+
+    expect(html).toContain("Maya’s read on your search");
+    expect(html).not.toContain("Paul’s read on your search");
+  });
+
+  it("uses singular grammar when exactly one application has gone quiet", () => {
+    const singleStale = {
+      ...strategyFixture,
+      metrics: {
+        ...strategyFixture.metrics,
+        staleCount: { label: "Quiet", value: 1, rate: "1 quiet" },
+      },
+    };
+    const html = markup(<TodayConversation agentName="Paul" strategy={singleStale} />);
+
+    expect(html).toContain(
+      "1 application has gone quiet. Worth a look: nudge, downgrade, or close."
+    );
   });
 });
