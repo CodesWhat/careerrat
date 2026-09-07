@@ -6,11 +6,22 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- Three new job sources: Built In (a board-wide search, so it only scans once
+  you configure a query or category), Collage HR, and Garena's careers site.
+
 ### Changed
 
 - A short public roadmap is back at the repo root. The UI/UX research notes
   and the retired port-parity audit left `docs/`; they were working notes, not
   product documentation.
+
+### Fixed
+
+- An iCIMS posting no longer loses its location when an earlier location entry
+  on the same posting is unavailable; it now checks every entry instead of
+  just the first.
 
 ## [0.18.2] - 2026-09-05
 

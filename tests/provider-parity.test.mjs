@@ -29,7 +29,9 @@ const EXPECTED_PROVIDER_IDS = [
   "bamboohr",
   "beesite",
   "breezy",
+  "builtin",
   "careerviet",
+  "collage",
   "comeet",
   "consider",
   "cryptocurrencyjobs",
@@ -40,6 +42,7 @@ const EXPECTED_PROVIDER_IDS = [
   "eightfold",
   "feishu-jobs",
   "flowxtra",
+  "garena",
   "gem",
   "getonbrd",
   "getro",
@@ -105,12 +108,12 @@ const EXPECTED_PROVIDER_IDS = [
 test("Career Ops provider parity is pinned to the audited upstream snapshot", () => {
   assert.deepEqual(CAREER_OPS_UPSTREAM, {
     repository: "https://github.com/career-ops-hq/career-ops",
-    commit: "ffb49be1f394041840c31c23a5d3a3347854340e",
-    providerCount: 83,
+    commit: "8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40",
+    providerCount: 87,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
-  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 83);
-  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 83);
+  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 86);
+  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 86);
 });
 
 test("every provider in the pinned upstream inventory has an explicit disposition", () => {
@@ -145,7 +148,7 @@ test("every provider in the pinned upstream inventory has an explicit dispositio
     [...upstream].sort(),
     "adopted + deferred must exactly equal the pinned upstream inventory"
   );
-  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 83);
+  assert.equal(CAREER_OPS_UPSTREAM_PROVIDER_IDS.length, 87);
 });
 
 test("every upstream provider has an explicit runtime disposition", () => {

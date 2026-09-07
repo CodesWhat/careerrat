@@ -31,17 +31,33 @@ export function parseRetryAfterMs(value) {
   return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : null;
 }
 
+/**
+ * Whether a failure is a redirect refused by the mandatory SSRF guard —
+ * `redirect:'error'` meeting a 3xx (#1440). It arrives as a bare TypeError
+ * with no `.status`, indistinguishable by shape from a timeout or a DNS
+ * failure, and only `err.cause.message` tells them apart.
+ *
+ * Exported because the verdict has two consumers, not one. isRetryableError()
+ * below needs it to stop retrying; discover-ats.mjs needs it to stop telling a
+ * human to re-run. Before it was shared, those two disagreed about the same
+ * error object: the retry layer called it deterministic while the CLI reported
+ * "board status unknown — re-run", and 48 of one user's 62 companies were
+ * BambooHR answering "no such tenant" with a 302 (#3788).
+ *
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isRefusedRedirectError(err) {
+  return err?.status === undefined
+    && err instanceof TypeError
+    && err?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE;
+}
+
 export function isRetryableError(error) {
   const status = error?.status;
   if (status === 429) return true;
   if (typeof status === "number" && status >= 500) return true;
-  if (
-    status === undefined &&
-    error instanceof TypeError &&
-    error?.cause?.message === REDIRECT_REFUSAL_CAUSE_MESSAGE
-  ) {
-    return false;
-  }
+  if (isRefusedRedirectError(error)) return false;
   return status === undefined;
 }
 
