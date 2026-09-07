@@ -108,6 +108,7 @@ export function parseChatFirstForeground(search = "") {
       stage: params.get("stage") || "all",
       source: params.get("source") || "all",
       posted: params.get("posted") || "all",
+      sort: params.get("sort") || "all",
       files: params.get("files") || "All",
       people: params.get("people") || "all",
     },
@@ -145,6 +146,7 @@ export function serializeChatFirstForeground(foreground = {}) {
   setParam(params, "stage", filters.stage, "all");
   setParam(params, "source", filters.source, "all");
   setParam(params, "posted", filters.posted, "all");
+  setParam(params, "sort", filters.sort, "all");
   if (String(filters.files || "").toLowerCase() !== "all") {
     setParam(params, "files", filters.files);
   }

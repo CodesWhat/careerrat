@@ -40,7 +40,7 @@ const JOB_SORT_COMPARATORS = {
     sortTimeValue(a?.appliedAt || a?.sourcedAt || a?.postedAt),
 };
 
-// "all" (or any unrecognized key) keeps the given order as-is — today's default.
+// "all" (or any unrecognized key) keeps the given order as-is, today's default.
 export function sortJobs(jobs, sortKey) {
   const rows = asArray(jobs);
   const comparator = JOB_SORT_COMPARATORS[sortKey];
