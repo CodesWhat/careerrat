@@ -4781,6 +4781,7 @@ test("document generation reports plural review gaps grammatically", async () =>
 
 test("document export executes behind workspace-main and preserves packaged file context", async () => {
   const repoRoot = tempRepo();
+  const controller = new AbortController();
   seedApplication(repoRoot, { evaluation: { gate: "keep" } });
   const exported = {
     appId: "app-temporal",
@@ -4810,6 +4811,7 @@ test("document export executes behind workspace-main and preserves packaged file
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
+    signal: controller.signal,
     intent: {
       type: "job.export-documents",
       entity: { type: "application", id: "app-temporal" },
@@ -4828,6 +4830,7 @@ test("document export executes behind workspace-main and preserves packaged file
       applicationId: "app-temporal",
       formats: ["pdf", "docx"],
       exportArtifact: undefined,
+      signal: controller.signal,
     },
   ]);
   assert.equal(result.operationResult, exported);
