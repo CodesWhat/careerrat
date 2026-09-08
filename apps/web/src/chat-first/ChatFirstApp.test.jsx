@@ -1141,6 +1141,7 @@ describe("ChatFirstAppView", () => {
       stage: "all",
       source: "all",
       posted: "all",
+      sort: "all",
       files: "Resumes",
       people: "touch-due",
     });
@@ -1213,6 +1214,7 @@ describe("ChatFirstAppView", () => {
       stage: "all",
       source: "all",
       posted: "all",
+      sort: "all",
       files: "Evidence",
       people: "touch-due",
     });
