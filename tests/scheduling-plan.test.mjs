@@ -382,6 +382,65 @@ for (const rejected of [
   });
 }
 
+for (const proposal of [
+  {
+    name: "all-past",
+    slots: [
+      {
+        startIso: "2030-08-09T19:00:00Z",
+        endIso: "2030-08-09T19:30:00Z",
+        label: "August 9 at 3 PM ET",
+      },
+    ],
+  },
+  {
+    name: "all-invalid",
+    slots: [{ startIso: "invalid", endIso: "invalid", label: "August 9 at 3 PM ET" }],
+  },
+  { name: "originally empty", slots: [] },
+]) {
+  test(`scheduling link handles ${proposal.name} proposed slots`, async () => {
+    const link = "https://calendar.example.test/sam";
+    const originalBody = proposal.slots.length
+      ? "August 9 at 3 PM ET works for me."
+      : `Please choose a time at ${link}.`;
+    const result = await planSchedulingReply({
+      communication,
+      application,
+      profile: { ...profile, availability: { ...profile.availability, scheduling_link: link } },
+      now: new Date("2030-08-10T12:00:00Z"),
+      runBoundedAI: async () => ({
+        body: {
+          ok: true,
+          data: {
+            state: "draft_ready",
+            timezone: "America/New_York",
+            timezoneAssumed: false,
+            timezoneNote: "",
+            subject: "Re: Interview availability",
+            body: originalBody,
+            round: "recruiter screen",
+            contactName: "Avery",
+            durationMinutes: 30,
+            selectedSlotIndex: null,
+            slots: proposal.slots,
+            missing: [],
+          },
+        },
+      }),
+    });
+    if (proposal.slots.length) {
+      assert.equal(result.status, "needs_user");
+      assert.deepEqual(result.missing, ["availability"]);
+      assert.equal(result.plan, undefined);
+    } else {
+      assert.equal(result.status, "ready");
+      assert.deepEqual(result.plan.slots, []);
+      assert.equal(result.plan.body, `${originalBody}\n\nAll times are in America/New_York.`);
+    }
+  });
+}
+
 test("scheduling plan requires confirmation before using an inferred timezone", async () => {
   const result = await planSchedulingReply({
     communication,

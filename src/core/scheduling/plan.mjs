@@ -298,7 +298,9 @@ function normalizePlan(data, { referenceMs, busyBlocks, profile }) {
             },
             profile
           )
-        : baseBody,
+        : rawSlots.length > availableSlots.length
+          ? ""
+          : baseBody,
     round: ROUND_VALUES.includes(data?.round) ? data.round : "interview",
     contactName: clean(data?.contactName, 120),
     durationMinutes: Number.isFinite(Number(data?.durationMinutes))
