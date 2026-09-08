@@ -483,6 +483,17 @@
   font-weight: 700;
 }
 
+.cf-pipeline__job-flag {
+  flex: 0 0 auto;
+  margin-right: 6px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  color: var(--ink-soft);
+  background: var(--tint-cool-3);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+}
+
 .cf-job-row__role,
 .cf-resource__identity > span,
 .cf-pipeline__job-name > span {
@@ -661,6 +672,12 @@
   overflow-y: auto;
 }
 
+.cf-pipeline__list-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 2px 4px;
+}
+
 .cf-pipeline__job {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) 110px minmax(120px, 0.8fr) 42px;
@@ -673,6 +690,10 @@
   background: var(--cream);
   text-align: left;
   cursor: pointer;
+}
+
+.cf-pipeline__job--muted {
+  opacity: 0.62;
 }
 
 .cf-pipeline__job-name {

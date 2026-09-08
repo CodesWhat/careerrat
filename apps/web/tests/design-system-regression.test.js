@@ -418,6 +418,7 @@ describe("CareerRat selection and focus states", () => {
 describe("CareerRat JSX styling boundary", () => {
   it("allows inline styles to set only reviewed dynamic measurements", () => {
     const allowedProperties = new Set([
+      "--cf-comp-position",
       "--cf-fit-width",
       "--cf-pipeline-width",
       "--cf-progress-width",
