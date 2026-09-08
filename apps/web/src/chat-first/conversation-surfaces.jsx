@@ -1,5 +1,8 @@
+import { useRef } from "react";
+import { formatCurrencyThousands } from "../../../../src/core/currency-format.mjs";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
+import { useDialogFocus } from "../lib/use-dialog-focus.js";
 import { cleanAgentCopy } from "./agent-copy.js";
 import { UploadIcon } from "./chat-first-icons.jsx";
 import { artifactEmoji } from "./chat-first-model.js";
@@ -8,6 +11,91 @@ import { SourceReviewSummaryCard } from "./source-review.jsx";
 import "./chat-first.css";
 
 const EMPTY_LIST = [];
+
+// Plain-language caption for each comp-range state (compRangeView in
+// src/core/tracker/dashboard-data.js), never the internal state name.
+const COMP_RANGE_CAPTION = {
+  posted: "Posted by the company",
+  built: "Estimated",
+  // needs-info only ever renders alongside a floor/target line (see
+  // targetOnly below), so this must describe the missing market data, not
+  // imply the candidate hasn't given a number yet.
+  "needs-info": "No market data yet",
+};
+
+// Position (0-100) of `value` along the [lo, hi] track, clamped to the ends so a
+// target outside the posted/built band still shows at an edge instead of vanishing.
+function compRangePosition(value, lo, hi) {
+  if (!Number.isFinite(value) || !Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, Math.round(((value - lo) / (hi - lo)) * 100)));
+}
+
+// Comp range bar for the job context panel, reusing the fit-bar's track/fill
+// visual pattern (see WorkspaceBrowser's cf-job-row__fit) at panel scale. Renders
+// a bounded low-high bar with a mid pin and, when the view model carries one, the
+// candidate's own target as a second marker. With no market band (needs-info),
+// falls back to a plain target line so the fact still reads as "here's your
+// number" rather than a bar with nothing to plot.
+function CompRangeFact({ compRange }) {
+  const caption = COMP_RANGE_CAPTION[compRange.state] || "";
+  const { marketLo, marketHi, marketP50, askK, floorK, currency } = compRange;
+  // A single comparable (or a posted single figure rather than a range) can
+  // legitimately produce marketLo === marketHi. A bar needs a real span, or
+  // the track renders full-width and empty between two duplicate labels;
+  // show it as one plain figure instead (see singlePoint below).
+  const hasBar =
+    compRange.hasMarket &&
+    Number.isFinite(marketLo) &&
+    Number.isFinite(marketHi) &&
+    marketHi > marketLo;
+  const singlePoint = compRange.hasMarket && !hasBar && Number.isFinite(marketLo);
+  const midPosition = hasBar ? compRangePosition(marketP50, marketLo, marketHi) : null;
+  const targetPosition =
+    hasBar && Number.isFinite(askK) ? compRangePosition(askK, marketLo, marketHi) : null;
+  const targetOnly = !compRange.hasMarket && (Number.isFinite(askK) || Number.isFinite(floorK));
+
+  return (
+    <span className="chat-first-context-card__fact chat-first-context-card__fact--comp">
+      <small>COMPENSATION</small>
+      {hasBar ? (
+        <span className="chat-first-comp-bar">
+          <span className="chat-first-comp-bar__label">
+            {formatCurrencyThousands(marketLo, currency)}
+          </span>
+          <span className="chat-first-comp-bar__track">
+            {midPosition != null ? (
+              <span
+                className="chat-first-comp-bar__mid"
+                style={{ "--cf-comp-position": `${midPosition}%` }}
+                title={`Midpoint ${formatCurrencyThousands(marketP50, currency)}`}
+              />
+            ) : null}
+            {targetPosition != null ? (
+              <span
+                className="chat-first-comp-bar__target"
+                style={{ "--cf-comp-position": `${targetPosition}%` }}
+                title={`Your target ${formatCurrencyThousands(askK, currency)}`}
+              />
+            ) : null}
+          </span>
+          <span className="chat-first-comp-bar__label">
+            {formatCurrencyThousands(marketHi, currency)}
+          </span>
+        </span>
+      ) : singlePoint ? (
+        <strong>{formatCurrencyThousands(marketLo, currency)}</strong>
+      ) : targetOnly ? (
+        <strong>
+          {Number.isFinite(askK) ? "Your target " : "Your floor "}
+          {formatCurrencyThousands(askK ?? floorK, currency)}
+        </strong>
+      ) : null}
+      {caption ? <span>{caption}</span> : null}
+    </span>
+  );
+}
 function jobLocationCopy(job) {
   const location = String(job?.location || "").trim();
   const mode = String(job?.mode || "").trim();
@@ -795,6 +883,67 @@ export function ConversationPanel({ children, composer }) {
   );
 }
 
+// Turns the raw `strategy` view model (src/core/tracker/dashboard-data.js#buildStrategyInsights)
+// into a short list of plain-language lines, each carrying the number or evidence
+// that backs it. Placeholder metrics ("No source yet", "No lane yet") are dropped
+// rather than shown as empty claims.
+function strategyInsightLines(strategy) {
+  if (!strategy) return EMPTY_LIST;
+  const lines = [];
+  const topSource = strategy.metrics?.topSource;
+  if (topSource?.value && topSource.value !== "No source yet") {
+    const detail = (strategy.sources || EMPTY_LIST).find((row) => row?.label === topSource.label);
+    const total = detail?.total;
+    lines.push(
+      total
+        ? `${topSource.label} is your top source, with a ${topSource.rate} response rate across ${total} tracked role${total === 1 ? "" : "s"}.`
+        : `${topSource.label} is your top source, with a ${topSource.rate} response rate.`
+    );
+  }
+  const bestLane = strategy.metrics?.bestLane;
+  if (bestLane?.value && bestLane.value !== "No lane yet") {
+    const detail = (strategy.roles || EMPTY_LIST).find((row) => row?.label === bestLane.label);
+    const total = detail?.total;
+    lines.push(
+      total
+        ? `${bestLane.label} is your strongest role lane, with a ${bestLane.rate} response rate across ${total} tracked role${total === 1 ? "" : "s"}.`
+        : `${bestLane.label} is your strongest role lane, with a ${bestLane.rate} response rate.`
+    );
+  }
+  const staleCount = Number(strategy.metrics?.staleCount?.value);
+  if (Number.isFinite(staleCount) && staleCount > 0) {
+    lines.push(
+      `${staleCount} application${staleCount === 1 ? "" : "s"} ${
+        staleCount === 1 ? "has" : "have"
+      } gone quiet. Worth a look: nudge, downgrade, or close.`
+    );
+  }
+  return lines;
+}
+
+// The one Today-tab card surfacing src/core/tracker/dashboard-data.js's strategy
+// insights (Roadmap CR53). Absent entirely when there's no strategy signal yet,
+// so an empty tracker never shows a card with nothing in it.
+function StrategyInsightsCard({ strategy, agentName = "Paul" }) {
+  const insights = strategyInsightLines(strategy);
+  if (!insights.length) return null;
+  return (
+    <div className="chat-first-indented-card">
+      <article className="chat-first-strategy-card">
+        <div className="chat-first-strategy-card__header">
+          <span className="chat-first-eyebrow">STRATEGY</span>
+          <strong>{agentName}’s read on your search</strong>
+        </div>
+        <ul className="chat-first-strategy-card__list">
+          {insights.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      </article>
+    </div>
+  );
+}
+
 export function TodayConversation({
   agentName = "Paul",
   dateLabel = "TODAY",
@@ -803,6 +952,7 @@ export function TodayConversation({
   messages = EMPTY_LIST,
   artifacts = EMPTY_LIST,
   mission,
+  strategy = null,
   userMessages = EMPTY_LIST,
   onArtifactAction,
   onMessageAction,
@@ -816,6 +966,7 @@ export function TodayConversation({
       <div className="chat-first-conversation-eyebrow">{dateLabel}</div>
       {intro ? <AgentBubble agentName={agentName}>{intro}</AgentBubble> : null}
       <RunReceipt receipt={run} />
+      <StrategyInsightsCard strategy={strategy} agentName={agentName} />
       {messages.length ? (
         <MessageTranscript
           messages={messages}
@@ -1033,6 +1184,21 @@ export function JobContextPanel({
             </div>
             <span className="chat-first-context-card__stage">{job.stage}</span>
           </header>
+          {job.companyHealth ? (
+            <span
+              className={`chat-first-context-card__health-pill chat-first-context-card__health-pill--${job.companyHealth.rating}`}
+              title={
+                job.companyHealth.provenanceLabel
+                  ? `Company health: ${job.companyHealth.provenanceLabel}`
+                  : "Company health"
+              }
+            >
+              {job.companyHealth.ratingLabel || job.companyHealth.rating}
+              {job.companyHealth.provenanceLabel ? (
+                <small>{job.companyHealth.provenanceLabel}</small>
+              ) : null}
+            </span>
+          ) : null}
           <div className="chat-first-context-card__facts">
             <span className="chat-first-context-card__fact chat-first-context-card__fact--fit">
               <small>FIT</small>
@@ -1046,7 +1212,9 @@ export function JobContextPanel({
                 )}
               </span>
             ) : null}
-            {job.compensation ? (
+            {job.compRange ? (
+              <CompRangeFact compRange={job.compRange} />
+            ) : job.compensation ? (
               <span className="chat-first-context-card__fact chat-first-context-card__fact--comp">
                 <small>COMPENSATION</small>
                 <strong>{job.compensation}</strong>
@@ -1688,6 +1856,9 @@ export function SubmitGateModal({
   onRequestChanges,
   onSubmit,
 }) {
+  const dialogRef = useRef(null);
+  useDialogFocus({ active: open, dialogRef, onClose });
+
   if (!open) return null;
 
   const packet = gate?.packet || EMPTY_LIST;
@@ -1698,10 +1869,12 @@ export function SubmitGateModal({
   return (
     <div className="chat-first-cover chat-first-cover--gate">
       <section
+        ref={dialogRef}
         className="chat-first-gate"
         role="dialog"
         aria-modal="true"
         aria-labelledby="chat-first-gate-title"
+        tabIndex={-1}
       >
         <header className="chat-first-gate__header">
           <div>
@@ -1801,15 +1974,22 @@ export function EngineDownCover({
   onShowTechnical,
   technicalDetails,
 }) {
+  const dialogRef = useRef(null);
+  // No onClose: EngineDownCover has no close control, so Escape stays a
+  // no-op here (useDialogFocus only wires Escape when it gets one).
+  useDialogFocus({ active: open, dialogRef });
+
   if (!open) return null;
   const displayDetails = safeDisplayDetail(technicalDetails);
   return (
     <div className="chat-first-cover chat-first-cover--engine">
       <section
+        ref={dialogRef}
         className="chat-first-engine-down"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="chat-first-engine-title"
+        tabIndex={-1}
       >
         <span className="chat-first-engine-down__avatar" aria-hidden="true">
           🐀

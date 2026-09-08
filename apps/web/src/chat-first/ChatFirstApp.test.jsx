@@ -9,6 +9,21 @@ vi.mock("../jobs/ArtifactViewerModal.jsx", async (importOriginal) => ({
   ArtifactViewerModal: ({ artifact, title }) => (artifact ? <div>{`viewer:${title}`}</div> : null),
 }));
 
+// SubmitGateModal and EngineDownCover now trap focus via the shared
+// use-dialog-focus hook (Roadmap CR52), which needs a real React dispatcher.
+// Several tests below walk ChatFirstAppView's returned element tree by
+// calling function components directly (`node.type(node.props)`) rather than
+// through an actual render, which leaves no dispatcher for the hook to use.
+// Stubbed here for the same reason ArtifactViewerModal already is above; the
+// real dialogs (and the shared hook) are covered by
+// apps/web/src/lib/use-dialog-focus.test.js and
+// apps/web/src/chat-first/dialog-focus.test.jsx.
+vi.mock("./conversation-surfaces.jsx", async (importOriginal) => ({
+  ...(await importOriginal()),
+  SubmitGateModal: ({ open, gate }) => (open ? <div>{`gate:${gate?.company || ""}`}</div> : null),
+  EngineDownCover: ({ open }) => (open ? <div>engine-down</div> : null),
+}));
+
 const VIEW = {
   agentName: "Paul",
   mainThread: {
@@ -1126,6 +1141,7 @@ describe("ChatFirstAppView", () => {
       stage: "all",
       source: "all",
       posted: "all",
+      sort: "all",
       files: "Resumes",
       people: "touch-due",
     });
@@ -1198,6 +1214,7 @@ describe("ChatFirstAppView", () => {
       stage: "all",
       source: "all",
       posted: "all",
+      sort: "all",
       files: "Evidence",
       people: "touch-due",
     });
@@ -2795,10 +2812,9 @@ describe("ChatFirstAppView", () => {
       engineDown: true,
     });
 
-    expect(html).toContain("Submit to E Corp");
-    expect(html).toContain("Nothing sends until you press submit");
+    expect(html).toContain("gate:E Corp");
     expect(html).toContain("viewer:Resume preview");
-    expect(html).toContain("Paul can&#x27;t think right now");
+    expect(html).toContain("engine-down");
   });
 
   it("wires durable company and Deep operation owners without route-owned background state", async () => {

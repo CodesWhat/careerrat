@@ -272,7 +272,23 @@
   gap: 9px;
   align-items: baseline;
   padding: 5px 0;
+  width: 100%;
+  border: none;
+  background: none;
+  font-family: inherit;
   font-size: 12.5px;
+  color: inherit;
+  text-align: left;
+}
+
+.chat-first-activity__row--clickable {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.chat-first-activity__row--clickable:hover,
+.chat-first-activity__row--clickable:focus-visible {
+  background: var(--tint-cool-3);
 }
 
 .chat-first-activity__row time {
@@ -926,6 +942,37 @@
 .chat-first-requirement-evidence {
   font-size: 10px;
   font-style: normal;
+}
+
+.chat-first-strategy-card {
+  box-sizing: content-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 340px;
+  padding: 12px 15px;
+  border-radius: 18px;
+  background: var(--cream);
+}
+
+.chat-first-strategy-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-first-strategy-card__header strong {
+  font-size: 13.5px;
+}
+
+.chat-first-strategy-card__list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--slate);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .company-proposal-review {
@@ -2056,6 +2103,30 @@ form.chat-first-choice-actions > fieldset {
   text-align: center;
 }
 
+.chat-first-context-card__health-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--cream);
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.chat-first-context-card__health-pill small {
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.chat-first-context-card__health-pill--watch,
+.chat-first-context-card__health-pill--risky {
+  color: var(--red);
+}
+
 .chat-first-context-card__facts {
   display: grid;
   margin-top: 11px;
@@ -2126,6 +2197,55 @@ form.chat-first-choice-actions > fieldset {
 
 .chat-first-context-card__fact--comp {
   grid-column: 1 / -1;
+}
+
+/* Comp range bar, same track/fill pattern as the fit bar (WorkspaceBrowser's
+   cf-job-row__fit), sized for the job context panel. The track spans the whole
+   low-high range; the mid pin and candidate target marker sit at their
+   percent position along it via --cf-comp-position. */
+.chat-first-comp-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.chat-first-comp-bar__label {
+  flex: none;
+  color: var(--ink-soft);
+  font-size: 10.5px;
+}
+
+.chat-first-comp-bar__track {
+  position: relative;
+  flex: 1;
+  height: 7px;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: var(--lime-bar);
+}
+
+.chat-first-comp-bar__mid {
+  position: absolute;
+  top: 50%;
+  left: var(--cf-comp-position, 50%);
+  width: 2px;
+  height: 11px;
+  background: var(--ink);
+  border-radius: 1px;
+  transform: translate(-50%, -50%);
+}
+
+.chat-first-comp-bar__target {
+  position: absolute;
+  top: 50%;
+  left: var(--cf-comp-position, 50%);
+  width: 8px;
+  height: 8px;
+  background: var(--white);
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
 }
 
 .chat-first-context-card__section {
