@@ -897,6 +897,9 @@ export function PeoplePanel({
           <EmptyPanel>No real conversations are tracked yet.</EmptyPanel>
         )}
       </div>
+      <p className="cf-browser__footnote">
+        people you've actually talked to. Application-portal noise is excluded.
+      </p>
       {targetRows.length > 0 ? (
         <div className="cf-resource__targets">
           <h3 className="cf-resource__targets-heading cf-eyebrow">Worth reaching out to</h3>
@@ -913,9 +916,6 @@ export function PeoplePanel({
           </div>
         </div>
       ) : null}
-      <p className="cf-browser__footnote">
-        people you've actually talked to. Application-portal noise is excluded.
-      </p>
     </section>
   );
 }

@@ -705,6 +705,7 @@ function collapseSubmitGates(items) {
 const PLATFORM_LABELS = {
   linkedin: "LinkedIn",
   wellfound: "Wellfound",
+  sms: "SMS",
 };
 
 function platformLabel(platform) {
