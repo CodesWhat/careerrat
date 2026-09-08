@@ -3554,8 +3554,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       );
       openThread("today");
     },
-    calendarAction: (label) => {
-      if (!calendarAction(label, view.browser.schedule)) {
+    calendarAction: (label, id) => {
+      const item = view.browser.schedule
+        .flatMap((group) => group.items)
+        .find((event) => event.id === id);
+      if (!calendarAction(label, item?.export)) {
         setError(localFileError("no-calendar-event"));
       }
     },
