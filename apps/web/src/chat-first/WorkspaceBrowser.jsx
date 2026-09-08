@@ -895,12 +895,14 @@ function initials(name) {
 
 export function PeoplePanel({
   people = [],
+  targets = [],
   activeFilter = "all",
   onOpenPerson,
   onDraftNudge,
   onFilter,
 }) {
   const rows = safeArray(people);
+  const targetRows = safeArray(targets);
   const dueCount = rows.filter((person) => person?.needsTouch).length;
   return (
     <section
@@ -940,6 +942,9 @@ export function PeoplePanel({
               <span className="cf-resource__identity">
                 <strong>{person.name || "Unknown person"}</strong>
                 <span>{person.role || ""}</span>
+                {person.platform ? (
+                  <span className="cf-person__platform">{person.platform}</span>
+                ) : null}
               </span>
               <span className="cf-person__dates">
                 <span>last: {person.last || "not recorded"}</span>
@@ -963,6 +968,22 @@ export function PeoplePanel({
       <p className="cf-browser__footnote">
         people you've actually talked to. Application-portal noise is excluded.
       </p>
+      {targetRows.length > 0 ? (
+        <div className="cf-resource__targets">
+          <h3 className="cf-resource__targets-heading cf-eyebrow">Worth reaching out to</h3>
+          <div className="cf-resource__targets-rows">
+            {targetRows.map((target) => (
+              <article key={target.id} className="cf-resource__target">
+                <span className="cf-resource__identity">
+                  <strong>{target.company || "Unknown company"}</strong>
+                  <span>{target.role || "Tracked role"}</span>
+                </span>
+                <strong className="cf-resource__target-fit">Fit {Number(target.fit) || 0}</strong>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1118,6 +1139,7 @@ export function WorkspaceBrowser({
   pipeline = {},
   files = [],
   people = [],
+  peopleTargets = [],
   schedule = [],
   agentName = "Paul",
   expiringCount = 1,
@@ -1187,6 +1209,7 @@ export function WorkspaceBrowser({
         ) : activeTab === "people" ? (
           <PeoplePanel
             people={people}
+            targets={peopleTargets}
             activeFilter={filters.people}
             onOpenPerson={onOpenPerson}
             onDraftNudge={onDraftNudge}

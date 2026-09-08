@@ -704,11 +704,29 @@ function collapseSubmitGates(items) {
   return remaining;
 }
 
+const PLATFORM_LABELS = {
+  linkedin: "LinkedIn",
+  wellfound: "Wellfound",
+  sms: "SMS",
+};
+
+function platformLabel(platform) {
+  const key = String(platform || "").trim();
+  if (!key) return "";
+  return (
+    PLATFORM_LABELS[key.toLowerCase()] ||
+    key
+      .split(/\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ")
+  );
+}
+
 function flattenPeople(network, agentName) {
-  const people = [];
+  const contacts = [];
   for (const company of list(network?.companies)) {
     for (const contact of list(company?.contacts)) {
-      people.push({
+      contacts.push({
         ...contact,
         id:
           contact.id ||
@@ -723,10 +741,18 @@ function flattenPeople(network, agentName) {
         actionLabel:
           contact.actionLabel ||
           (!company.applicationId && !company.nextTouch ? `Ask ${agentName}` : null),
+        platform: platformLabel(contact.platform),
       });
     }
   }
-  return people;
+  const targets = list(network?.sourcing?.targets).map((target) => ({
+    id: target.id || `${target.company}:${target.role}`,
+    company: target.company || "",
+    role: target.role || "Tracked role",
+    fit: Number(target.fit) || 0,
+    label: target.label || "Search contact path",
+  }));
+  return { contacts, targets };
 }
 
 export function buildChatFirstView(dashboardInput, runtimeInput) {
@@ -787,6 +813,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
     ...jobArtifactFiles(dashboard.jobs?.details),
   ]);
   const people = flattenPeople(dashboard.network, agentName);
+  const peopleTargets = people.targets;
   const missions = list(runtime.missions);
   const gates = submitGates(missions);
   const hasCanonicalNeeds = list(runtime.needsYou).length > 0;
@@ -831,7 +858,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
       search: search.length,
       pipeline: pipelineRows.length,
       files: files.length,
-      people: people.length,
+      people: people.contacts.length,
       touchDue: list(runtime.touchDue).length,
       archived: archivedThreads.length,
     },
@@ -839,7 +866,8 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
       search,
       pipeline: buildPipeline(pipelineRows),
       files,
-      people,
+      people: people.contacts,
+      peopleTargets,
       schedule: groupSchedule(dashboard.calendar),
     },
     jobDetails: dashboard.jobs?.details || {},

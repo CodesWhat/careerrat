@@ -279,6 +279,7 @@ export function mapActivityItems(items) {
       label: item?.title || item?.summary || item?.label || "Workspace updated",
       mark: attention ? "!" : item?.mark || "✓",
       tone: attention ? "attention" : item?.tone || "done",
+      appId: item?.appId || "",
     };
   });
 }
