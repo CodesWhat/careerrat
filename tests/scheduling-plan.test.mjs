@@ -260,6 +260,128 @@ test("scheduling plan keeps conflict-free slots when only part of a proposal ove
   assert.doesNotMatch(result.plan.body, /Tuesday at 3:00 PM|Tue Aug 13/);
 });
 
+for (const history of [true, false]) {
+  test(`scheduling plan checks conflicts after 200 ${history ? "historical" : "future"} blocks`, async () => {
+    const slot = {
+      startIso: "2030-08-13T19:00:00.000Z",
+      endIso: "2030-08-13T19:30:00.000Z",
+      label: "Tue Aug 13, 3:00 PM ET",
+    };
+    const start = Date.parse(history ? "2029-08-10T12:00:00Z" : "2030-08-11T12:00:00Z");
+    const blocks = Array.from({ length: 200 }, (_, index) => ({
+      startIso: new Date(start + index * 5 * 60_000).toISOString(),
+      endIso: new Date(start + (index * 5 + 1) * 60_000).toISOString(),
+      label: "Private meeting",
+    }));
+    let context;
+    const result = await planSchedulingReply({
+      communication,
+      application,
+      profile,
+      calendarBusy: [...blocks, { ...slot, label: "Private conflict" }],
+      now: new Date("2030-08-10T12:00:00.000Z"),
+      runBoundedAI: async (input) => {
+        context = JSON.parse(input.messages[0].content);
+        return {
+          body: {
+            ok: true,
+            data: {
+              state: "draft_ready",
+              timezone: "America/New_York",
+              timezoneAssumed: false,
+              timezoneNote: "",
+              subject: "Re: Interview availability",
+              body: "Tuesday at 3:00 PM ET works.",
+              round: "recruiter screen",
+              contactName: "Avery",
+              durationMinutes: 30,
+              selectedSlotIndex: null,
+              slots: [slot],
+              missing: [],
+            },
+          },
+        };
+      },
+    });
+
+    assert.equal(result.status, "needs_user");
+    assert.deepEqual(result.missing, ["conflict-free availability"]);
+    assert.equal(result.calendarChecked, true);
+    assert.equal(context.calendarBusy.length, history ? 1 : 200);
+    assert.ok(context.calendarBusy.every((block) => block.label === "Busy"));
+    assert.doesNotMatch(JSON.stringify(context), /Private meeting|Private conflict|2029/);
+  });
+}
+
+test("scheduling model context retains a recently ended block within the buffer", async () => {
+  let context;
+  await planSchedulingReply({
+    communication,
+    application,
+    profile,
+    calendarBusy: [
+      { startIso: "2030-08-10T11:00:00Z", endIso: "2030-08-10T11:45:00Z" },
+      { startIso: "2030-08-10T11:45:00Z", endIso: "2030-08-10T11:50:00Z" },
+    ],
+    now: new Date("2030-08-10T12:00:00Z"),
+    runBoundedAI: async (input) => {
+      context = JSON.parse(input.messages[0].content);
+      return { body: { ok: false } };
+    },
+  });
+  assert.equal(context.calendarBusy.length, 1);
+  assert.equal(context.calendarBusy[0].endIso, "2030-08-10T11:50:00Z");
+});
+
+for (const rejected of [
+  { name: "past", startIso: "2030-08-09T19:00:00Z", endIso: "2030-08-09T19:30:00Z" },
+  { name: "invalid", startIso: "invalid", endIso: "invalid" },
+]) {
+  test(`scheduling reply removes ${rejected.name} slots from its body`, async () => {
+    const result = await planSchedulingReply({
+      communication,
+      application,
+      profile,
+      now: new Date("2030-08-10T12:00:00Z"),
+      runBoundedAI: async () => ({
+        body: {
+          ok: true,
+          data: {
+            state: "draft_ready",
+            timezone: "America/New_York",
+            timezoneAssumed: false,
+            timezoneNote: "",
+            subject: "Re: Interview availability",
+            body: "August 9 at 3 PM ET or August 13 at 3 PM ET works.",
+            round: "recruiter screen",
+            contactName: "Avery",
+            durationMinutes: 30,
+            selectedSlotIndex: 1,
+            slots: [
+              {
+                startIso: rejected.startIso,
+                endIso: rejected.endIso,
+                label: "August 9 at 3 PM ET",
+              },
+              {
+                startIso: "2030-08-13T19:00:00Z",
+                endIso: "2030-08-13T19:30:00Z",
+                label: "August 13 at 3 PM ET",
+              },
+            ],
+            missing: [],
+          },
+        },
+      }),
+    });
+    assert.equal(result.status, "ready");
+    assert.equal(result.plan.slots.length, 1);
+    assert.equal(result.plan.selectedSlotIndex, 0);
+    assert.match(result.plan.body, /August 13 at 3 PM ET/);
+    assert.doesNotMatch(result.plan.body, /August 9/);
+  });
+}
+
 test("scheduling plan requires confirmation before using an inferred timezone", async () => {
   const result = await planSchedulingReply({
     communication,

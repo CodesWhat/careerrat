@@ -152,22 +152,20 @@ function safeProfile(profile = {}) {
 }
 
 function safeBusyBlocks(calendarBusy) {
-  return (Array.isArray(calendarBusy) ? calendarBusy : [])
-    .flatMap((block) => {
-      const startIso = clean(block?.startIso || block?.start, 40);
-      const endIso = clean(block?.endIso || block?.end, 40);
-      if (
-        !startIso ||
-        !endIso ||
-        Number.isNaN(Date.parse(startIso)) ||
-        Number.isNaN(Date.parse(endIso)) ||
-        Date.parse(endIso) <= Date.parse(startIso)
-      ) {
-        return [];
-      }
-      return [{ startIso, endIso, allDay: Boolean(block?.allDay), label: "Busy" }];
-    })
-    .slice(0, 200);
+  return (Array.isArray(calendarBusy) ? calendarBusy : []).flatMap((block) => {
+    const startIso = clean(block?.startIso || block?.start, 40);
+    const endIso = clean(block?.endIso || block?.end, 40);
+    if (
+      !startIso ||
+      !endIso ||
+      Number.isNaN(Date.parse(startIso)) ||
+      Number.isNaN(Date.parse(endIso)) ||
+      Date.parse(endIso) <= Date.parse(startIso)
+    ) {
+      return [];
+    }
+    return [{ startIso, endIso, allDay: Boolean(block?.allDay), label: "Busy" }];
+  });
 }
 
 function hasAvailabilitySource(profile, instruction, communication) {
@@ -291,7 +289,7 @@ function normalizePlan(data, { referenceMs, busyBlocks, profile }) {
     timezoneNote: clean(data?.timezoneNote, 200),
     subject: withoutEmDash(clean(data?.subject, 200)),
     body:
-      conflicting.length > 0 && availableSlots.length > 0
+      rawSlots.length > availableSlots.length && availableSlots.length > 0
         ? conflictFreeReply(
             {
               slots: availableSlots,
@@ -413,6 +411,13 @@ export async function planSchedulingReply({
   }
 
   const currentTime = nowDate(now);
+  const calendarContext = safeBusy
+    .filter(
+      (block) =>
+        Date.parse(block.endIso) + safeCandidate.availability.bufferMinutes * 60_000 >
+        currentTime.getTime()
+    )
+    .slice(0, 200);
   const result = await runBoundedAI({
     labels: {
       skill: "schedule-meeting",
@@ -442,8 +447,8 @@ export async function planSchedulingReply({
           communication: safeComm,
           application: safeApp,
           candidate: safeCandidate,
-          calendarBusy: safeBusy,
-          calendarChecked: safeBusy.length > 0,
+          calendarBusy: calendarContext,
+          calendarChecked: calendarContext.length > 0,
         }),
       },
     ],

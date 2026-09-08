@@ -70,6 +70,7 @@ import {
   writeResearch,
 } from "../src/core/research/research-store.mjs";
 import { createAppOperationManager } from "../src/core/runtime/app-operation-manager.mjs";
+import { planSchedulingReply } from "../src/core/scheduling/plan.mjs";
 
 const cleanupRoots = [];
 let missionFixtureSequence = 0;
@@ -6963,6 +6964,63 @@ test("natural scheduling requests prepare a timezone-explicit draft and tentativ
       },
     },
   ]);
+});
+
+test("scheduling persists only future offers from the real planner", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { status: "interview" });
+  seedCommunication(repoRoot);
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "scheduling.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Offer Tuesday at 3 PM ET.",
+      },
+    },
+    prepareSchedulingPlanImpl: (input) =>
+      planSchedulingReply({
+        ...input,
+        runBoundedAI: async () => ({
+          body: {
+            ok: true,
+            data: {
+              state: "draft_ready",
+              timezone: "America/New_York",
+              timezoneAssumed: false,
+              timezoneNote: "",
+              subject: "Re: Interview availability",
+              body: "August 9 at 3 PM ET or August 13 at 3 PM ET works.",
+              round: "recruiter screen",
+              contactName: "Avery",
+              durationMinutes: 30,
+              selectedSlotIndex: null,
+              slots: [
+                {
+                  startIso: "2030-08-09T19:00:00Z",
+                  endIso: "2030-08-09T19:30:00Z",
+                  label: "August 9 at 3 PM ET",
+                },
+                {
+                  startIso: "2030-08-13T19:00:00Z",
+                  endIso: "2030-08-13T19:30:00Z",
+                  label: "August 13 at 3 PM ET",
+                },
+              ],
+              missing: [],
+            },
+          },
+        }),
+      }),
+    now: () => new Date("2030-08-10T12:00:00Z"),
+  });
+  const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(comm.status, "drafted");
+  assert.match(comm.draft.body, /August 13 at 3 PM ET/);
+  assert.doesNotMatch(comm.draft.body, /August 9/);
 });
 
 test("scheduling needs-you results do not create a draft or invent a booked interview", async () => {
