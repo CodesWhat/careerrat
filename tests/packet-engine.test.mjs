@@ -4,8 +4,16 @@
 // fail now and become the implementation contract for later Phase 10 waves.
 
 import assert from "node:assert/strict";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import JSZip from "jszip";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { appUpsert, candidateSetupInitialize } from "../src/core/db/verbs.mjs";
 import { buildCoverLetterScaffold, buildShortAnswer } from "../src/core/documents/tailor.mjs";
+import { exportPacketArtifacts } from "../src/core/packet/exports.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 
 const PROFILE = {
   candidate: {
@@ -384,6 +392,78 @@ test("generatePacket threads one abort signal through every model-backed packet 
   });
 
   assert.deepEqual(seen, [controller.signal, controller.signal, controller.signal]);
+});
+
+test("generatePacket cancellation during export rejects without registering completed files", async (t) => {
+  const { generatePacket } = await loadGenerateModule();
+  const home = mkdtempSync(join(tmpdir(), "careerrat-generation-abort-"));
+  t.after(() => {
+    closeAll();
+    rmSync(home, { recursive: true, force: true });
+  });
+  const pathCtx = {
+    repoRoot: home,
+    env: { CAREERRAT_HOME: home, CAREERRAT_DOWNLOADS_DIR: join(home, "downloads") },
+  };
+  candidateSetupInitialize(pathCtx);
+  appUpsert({ ...pathCtx, row: PACKET_CONTEXT.application });
+  const db = openDb(pathCtx);
+  const before = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-packet").data;
+  const controller = new AbortController();
+  const stopped = new Error("Generation cancelled during document export");
+  let exportSignal;
+  let renderSignal;
+
+  await assert.rejects(
+    generatePacket({
+      ...pathCtx,
+      context: PACKET_CONTEXT,
+      questionCapture: CAPTURED_QUESTIONS,
+      formats: ["docx"],
+      signal: controller.signal,
+      draftResumeProposal: RESUME_DRAFT,
+      draftCoverLetterBlocks: async () => ({
+        blocks: [{ text: "Evidence-backed cover letter block.", evidenceIds: ["ev-ai-001"] }],
+      }),
+      draftPacketAnswers: async () => ({ answers: [], gaps: [] }),
+      exportPacketArtifacts: async (input) => {
+        exportSignal = input.signal;
+        return exportPacketArtifacts({
+          ...input,
+          exportArtifact: async ({ outBase, signal }) => {
+            renderSignal = signal;
+            const zip = new JSZip();
+            zip.file("[Content_Types].xml", "<Types />");
+            zip.file("word/document.xml", "<w:document />");
+            const docx = `${outBase}.docx`;
+            writeFileSync(docx, await zip.generateAsync({ type: "nodebuffer" }));
+            const pdf = `${outBase}.pdf`;
+            writeFileSync(pdf, "%PDF-1.4\nfake packet pdf\n%%EOF\n");
+            controller.abort(stopped);
+            return { docx, pdf };
+          },
+        });
+      },
+    }),
+    (error) => error === stopped
+  );
+
+  assert.equal(exportSignal, controller.signal);
+  assert.equal(renderSignal, controller.signal);
+  assert.equal(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-packet").data,
+    before
+  );
+  const workspace = userPath(pathCtx, "workspace");
+  assert.equal(
+    readdirSync(workspace).some((name) => name.startsWith(".export-staging-")),
+    false
+  );
+  assert.equal(
+    readdirSync(join(workspace, "tailored")).some((name) => /\.(pdf|docx)$/.test(name)),
+    false
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM artifact_reservations").get().n, 0);
 });
 
 test("standalone tailoring never enters application-answer drafting", async () => {
