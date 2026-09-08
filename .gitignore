@@ -77,7 +77,6 @@ tracker-*.png
 # under docs/ so they remain available in a fresh clone.
 /.planning/
 # Anchor root-only legacy names so matching files elsewhere keep their own policy.
-/ROADMAP.md
 /ROADMAP-ARCHIVE.md
 /CLI-PARITY-EXEC-SUMMARY.html
 /RUNTIME-PARITY-PLAN.md

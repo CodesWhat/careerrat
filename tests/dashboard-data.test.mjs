@@ -26,7 +26,7 @@ test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
   assert.equal(vm.stats.interviews, 3);
   assert.equal(vm.jobs.totalCount, tracker.applications.length + tracker.sourced.length);
   assert.equal(vm.jobs.visibleCount, 31);
-  assert.ok(vm.calendar.weeks[0].days.some((day) => day.events.length > 0));
+  assert.ok(vm.calendar.upcoming.events.length > 0);
   assert.ok(vm.latestRoles.some((role) => role.company === "Aperture Science"));
   assert.ok(vm.jobs.sankey.nodes.length > 0);
 });
@@ -335,7 +335,7 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
         role: "Senior Software Engineer (AI)",
         status: "needs-reply",
         nextAction: "Complete Aperture Science CodeSignal technical assessment",
-        nextActionDue: "2026-06-17",
+        nextActionDue: "2026-06-19",
         summary: "Assessment due within 48 hours.",
       },
       {
@@ -368,33 +368,18 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
   });
 
   // metrics.thisWeek is forward-looking (today+2..today+6, see buildCalendar in
-  // dashboard-data.js), not the Mon-Fri `currentWeek` grid below: 06-17 is
-  // yesterday (past) and both 06-18 items are today, so only the 06-22 followUp
-  // falls in the forward window. currentWeek.events (Jun 15-19) still holds all 3.
+  // dashboard-data.js): both 06-18 items are today and the 06-19 assessment
+  // falls short of the window, so only the 06-22 followUp lands in it.
   assert.equal(vm.calendar.metrics.thisWeek, 1);
-  assert.equal(vm.calendar.weeks[0].events.length, 3);
   assert.equal(vm.calendar.metrics.interviews, 1);
   assert.equal(vm.calendar.metrics.dueToday, 2);
-  assert.equal(vm.calendar.currentWeekIndex, 0);
-  assert.equal(vm.calendar.weeks[0].label, "Jun 15-19");
-  assert.match(vm.calendar.weeks[0].export.filename, /careerrat-calendar-jun-15-19\.ics/);
-  assert.match(vm.calendar.weeks[0].export.ics, /BEGIN:VCALENDAR/);
-  assert.match(vm.calendar.weeks[0].export.ics, /SUMMARY:Aperture interview/);
-  assert.match(
-    vm.calendar.weeks[0].export.ics,
-    /SUMMARY:Complete Aperture Science CodeSignal technical assessment/
-  );
-  assert.match(vm.calendar.weeks[0].export.ics, /DTSTART:20260618T150000Z/);
-  assert.deepEqual(
-    vm.calendar.weeks[0].days.map((day) => day.iso),
-    ["2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18", "2026-06-19"]
-  );
-  const apertureEvent = vm.calendar.weeks[0].days
-    .find((day) => day.iso === "2026-06-18")
-    .events.find((event) => event.detailId === "aperture");
+  const apertureEvent = vm.calendar.today.events.find((event) => event.detailId === "aperture");
+  assert.equal(apertureEvent.kind, "interview");
   assert.equal(apertureEvent.export.kind, "timed");
   assert.match(apertureEvent.export.filename, /aperture-interview-2026-06-18\.ics/);
   assert.match(apertureEvent.export.ics, /BEGIN:VEVENT/);
+  assert.match(apertureEvent.export.ics, /SUMMARY:Aperture interview/);
+  assert.match(apertureEvent.export.ics, /DTSTART:20260618T150000Z/);
   assert.match(
     apertureEvent.export.googleUrl,
     /^https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE/
@@ -404,29 +389,14 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
     apertureEvent.export.outlookUrl,
     /^https:\/\/outlook\.live\.com\/calendar\/0\/deeplink\/compose\?/
   );
-  const apertureScEvent = vm.calendar.weeks[0].days
-    .find((day) => day.iso === "2026-06-17")
-    .events.find((event) => event.detailId === "aperture-science");
+  const hooliEvent = vm.calendar.today.events.find((event) => event.detailId === "hooli");
+  assert.match(hooliEvent.title, /Reply to the recruiter/);
+  const apertureScEvent = vm.calendar.upcoming.events.find(
+    (event) => event.detailId === "aperture-science"
+  );
+  assert.equal(apertureScEvent.kind, "assessment");
   assert.equal(apertureScEvent.export.kind, "all-day");
-  assert.match(apertureScEvent.export.ics, /DTSTART;VALUE=DATE:20260617/);
-  assert.ok(
-    vm.calendar.weeks[0].days
-      .find((day) => day.iso === "2026-06-18")
-      .events.some((event) => event.detailId === "aperture" && event.kind === "interview")
-  );
-  assert.ok(
-    vm.calendar.weeks[0].days
-      .find((day) => day.iso === "2026-06-17")
-      .events.some((event) => event.detailId === "aperture-science" && event.kind === "assessment")
-  );
-  assert.equal(vm.calendar.weeks[0].nextUp.detailId, "hooli");
-  assert.match(vm.calendar.weeks[0].nextUp.title, /Reply to the recruiter/);
-  assert.ok(vm.calendar.weeks[0].loops.some((loop) => loop.detailId === "hooli"));
-  assert.equal(vm.calendar.month.title, "June 2026");
-  assert.ok(vm.calendar.month.days.some((day) => day.iso === "2026-06-18" && day.isToday));
-  assert.ok(
-    vm.calendar.month.days.some((day) => day.events.some((event) => event.detailId === "aperture"))
-  );
+  assert.match(apertureScEvent.export.ics, /DTSTART;VALUE=DATE:20260619/);
   assert.equal(vm.calendar.sync.capability, "calendar_sync");
   assert.deepEqual(
     vm.calendar.sync.providers.map((provider) => provider.key),
@@ -437,12 +407,11 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
   assert.equal(vm.calendar.sync.history[0].statusLabel, "Written");
 });
 
-// 2026-08-23 UX audit: on a Sunday, the Mon-Fri `currentWeek` grid is entirely
-// in the past, so a hero stat built from it undercounts (or reads zero) next
-// to the agenda's forward-looking "This week" section, which is a
-// self-contradiction a user reads on the same screen. metrics.thisWeek must
-// stay forward-looking (today+2..today+6) regardless of which weekday "today"
-// falls on.
+// 2026-08-23 UX audit: on a Sunday, a Mon-Fri ISO week is entirely in the
+// past, so a hero stat built from it undercounts (or reads zero) next to a
+// forward-looking "This week" section, which is a self-contradiction a user
+// reads on the same screen. metrics.thisWeek must stay forward-looking
+// (today+2..today+6) regardless of which weekday "today" falls on.
 test("Calendar's This Week hero stat stays forward-looking on a Sunday, not the past Mon-Fri week", () => {
   const tracker = {
     applications: [
@@ -477,18 +446,13 @@ test("Calendar's This Week hero stat stays forward-looking on a Sunday, not the 
   });
 
   assert.equal(vm.calendar.todayIso, "2026-06-21");
-  // The ISO Mon-Fri week (Jun 15-19) is entirely in the past on this Sunday.
-  assert.equal(vm.calendar.weeks[0].label, "Jun 15-19");
-  assert.equal(vm.calendar.weeks[0].events.length, 0);
   // The two forward-looking items (Jun 24 interview, Jun 26 follow-up) land in
-  // today+2..today+6, so the hero stat reads 2, matching what the agenda's
-  // forward "This week" bucket would show instead of the stale, contradicting 0.
+  // today+2..today+6, so the hero stat reads 2 rather than the stale,
+  // contradicting 0 a Mon-Fri ISO week (Jun 15-19, entirely past on this
+  // Sunday) would have shown.
   assert.equal(vm.calendar.metrics.thisWeek, 2);
-  // calendar.thisWeek.events is the canonical, uncapped collection
-  // CalendarPage's agenda pool also reads (collectCalendarEvents) so its
-  // rendered "This week" row count can never drift from this hero number —
-  // see CalendarPage.test.jsx for the full cap-overflow/weekend-event
-  // regression case.
+  // calendar.thisWeek.events is the canonical, uncapped collection behind the
+  // hero metric above, so its length can never drift from that number.
   assert.equal(vm.calendar.thisWeek.events.length, vm.calendar.metrics.thisWeek);
   assert.deepEqual(vm.calendar.thisWeek.events.map((event) => event.detailId).sort(), [
     "globodyne",
@@ -1695,6 +1659,101 @@ test("Dashboard adapter builds Strategy insights from outcomes by source role an
   assert.match(vm.strategy.stale[0].meta, /24d quiet/);
 });
 
+test("Strategy staleCount reflects every stale application, not just the capped display list", () => {
+  const applications = Array.from({ length: 6 }, (_, index) => ({
+    id: `stale-${index + 1}`,
+    company: `Quiet Co ${index + 1}`,
+    role: "Applied AI Engineer",
+    status: "applied",
+    channel: "board",
+    fitScore: 70,
+    appliedAt: "2026-05-01",
+  }));
+
+  const vm = buildDashboardViewModel(
+    { applications, sourced: [], sources: [], communications: [] },
+    { now: new Date("2026-06-01T12:00:00.000Z") }
+  );
+
+  assert.equal(vm.strategy.metrics.staleCount.value, 6);
+  assert.equal(vm.strategy.stale.length, 4);
+  assert.match(vm.strategy.recommendation.title, /Clean up quiet applications/);
+  assert.match(vm.strategy.recommendation.summary, /^6 active applications/);
+});
+
+test("Strategy response rate counts only employer engagement, not candidate-driven exits", () => {
+  const applications = [
+    {
+      id: "board-rejected-by-employer",
+      company: "Employer Reject Co",
+      role: "Applied AI Engineer",
+      status: "rejected",
+      channel: "board",
+      fitScore: 72,
+      appliedAt: "2026-05-01",
+    },
+    {
+      id: "board-withdrawn-by-candidate",
+      company: "Candidate Withdrew Co",
+      role: "Applied AI Engineer",
+      status: "cut",
+      channel: "board",
+      fitScore: 68,
+      appliedAt: "2026-05-01",
+    },
+  ];
+
+  const vm = buildDashboardViewModel(
+    { applications, sourced: [], sources: [], communications: [] },
+    { now: new Date("2026-06-01T12:00:00.000Z") }
+  );
+
+  const boardRow = vm.strategy.sources.find((row) => row.label === "Job board");
+  assert.ok(boardRow, "expected a Job board strategy row");
+  assert.equal(boardRow.total, 2);
+  assert.equal(boardRow.advanced, 0);
+  assert.equal(boardRow.rejected, 1);
+  assert.equal(boardRow.rate, "50%");
+});
+
+test("Strategy response rate still counts a withdrawal that came after the employer engaged", () => {
+  const applications = [
+    {
+      id: "board-withdrew-after-interview",
+      company: "Interviewed Then Withdrew Co",
+      role: "Applied AI Engineer",
+      status: "withdrawn",
+      channel: "board",
+      fitScore: 74,
+      appliedAt: "2026-05-01",
+      conversations: [{ kind: "technical interview", date: "2026-05-10" }],
+    },
+    {
+      id: "board-withdrew-before-response",
+      company: "No Response Withdraw Co",
+      role: "Applied AI Engineer",
+      status: "cut",
+      channel: "board",
+      fitScore: 68,
+      appliedAt: "2026-05-01",
+    },
+  ];
+
+  const vm = buildDashboardViewModel(
+    { applications, sourced: [], sources: [], communications: [] },
+    { now: new Date("2026-06-01T12:00:00.000Z") }
+  );
+
+  const boardRow = vm.strategy.sources.find((row) => row.label === "Job board");
+  assert.ok(boardRow, "expected a Job board strategy row");
+  assert.equal(boardRow.total, 2);
+  assert.equal(boardRow.advanced, 0);
+  // Only the app that reached a real interview round before withdrawing counts as
+  // an employer response; the pre-response withdrawal does not.
+  assert.equal(boardRow.rejected, 1);
+  assert.equal(boardRow.rate, "50%");
+});
+
 test("Dashboard adapter exposes the next agent task", () => {
   const tracker = {
     applications: [],
@@ -2501,4 +2560,92 @@ test("evaluate verdict requirements project end to end from tracker data through
   // An explicit empty array carries no rows either; either representation
   // (null or an empty array) must leave the UI with nothing to render.
   assert.equal(view.jobDetails["app-empty-requirements"].requirements?.length || 0, 0);
+});
+
+test("job rows carry lastTouchAt from the same signal that drives the decay state", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "touched-recently",
+        company: "Recent Touch Co",
+        role: "Software Engineer",
+        status: "awaiting",
+        channel: "portal",
+        fitScore: 80,
+        appliedAt: "2026-04-19",
+      },
+      {
+        id: "touched-only-at-apply",
+        company: "Quiet Since Apply Co",
+        role: "Software Engineer",
+        status: "awaiting",
+        channel: "portal",
+        fitScore: 78,
+        appliedAt: "2026-06-13",
+      },
+      {
+        id: "no-touch",
+        company: "No Signal Co",
+        role: "Software Engineer",
+        status: "reviewed-hold",
+        channel: "portal",
+        fitScore: 70,
+      },
+    ],
+    sourced: [
+      {
+        id: "sourced-with-touch",
+        company: "Sourced Touch Co",
+        role: "Solutions Engineer",
+        status: "sourced",
+        fitScore: 75,
+        sourcedAt: "2026-06-10",
+        updatedAt: "2026-06-17",
+      },
+      {
+        id: "sourced-no-touch",
+        company: "Sourced Silent Co",
+        role: "Solutions Engineer",
+        status: "sourced",
+        fitScore: 72,
+      },
+    ],
+    sources: [],
+    communications: [
+      {
+        id: "comm-touched-recently",
+        applicationId: "touched-recently",
+        company: "Recent Touch Co",
+        role: "Software Engineer",
+        status: "waiting",
+        summary: "Recruiter followed up.",
+        lastInboundAt: "2026-06-17",
+        messages: [{ direction: "inbound", at: "2026-06-17", summary: "Still moving forward." }],
+      },
+    ],
+  };
+
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-18T12:00:00.000Z"),
+  });
+  const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+
+  // Applied 60 days ago, but a communication landed yesterday: lastTouchAt tracks
+  // the communication, not the stale appliedAt.
+  assert.equal(
+    new Date(byId.get("touched-recently").lastTouchAt).toISOString(),
+    new Date("2026-06-17").toISOString()
+  );
+  // No communications and no updatedAt/statusUpdatedAt: lastTouchAt falls back to
+  // appliedAt, same as latestApplicationTouch would resolve.
+  assert.equal(
+    new Date(byId.get("touched-only-at-apply").lastTouchAt).toISOString(),
+    new Date("2026-06-13").toISOString()
+  );
+  assert.equal(byId.get("no-touch").lastTouchAt, null);
+  assert.equal(
+    new Date(byId.get("sourced-with-touch").lastTouchAt).toISOString(),
+    new Date("2026-06-17").toISOString()
+  );
+  assert.equal(byId.get("sourced-no-touch").lastTouchAt, null);
 });

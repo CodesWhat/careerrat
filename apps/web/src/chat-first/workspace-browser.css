@@ -483,6 +483,17 @@
   font-weight: 700;
 }
 
+.cf-pipeline__job-flag {
+  flex: 0 0 auto;
+  margin-right: 6px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  color: var(--ink-soft);
+  background: var(--tint-cool-3);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+}
+
 .cf-job-row__role,
 .cf-resource__identity > span,
 .cf-pipeline__job-name > span {
@@ -661,6 +672,12 @@
   overflow-y: auto;
 }
 
+.cf-pipeline__list-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 2px 4px;
+}
+
 .cf-pipeline__job {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) 110px minmax(120px, 0.8fr) 42px;
@@ -673,6 +690,10 @@
   background: var(--cream);
   text-align: left;
   cursor: pointer;
+}
+
+.cf-pipeline__job--muted {
+  opacity: 0.62;
 }
 
 .cf-pipeline__job-name {
@@ -790,6 +811,43 @@
   color: var(--ink);
 }
 
+.cf-person__platform {
+  color: var(--slate);
+  font-size: 10.5px;
+}
+
+.cf-resource__targets {
+  margin-top: 10px;
+  padding: 10px 4px 4px;
+}
+
+.cf-resource__targets-heading {
+  margin: 0 0 8px;
+  padding: 0 8px;
+}
+
+.cf-resource__targets-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cf-resource__target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 14px;
+  background: var(--tint-cool-2);
+}
+
+.cf-resource__target-fit {
+  flex: 0 0 auto;
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .cf-resource > .cf-browser__footnote {
   padding: 6px 4px 0;
 }
@@ -814,19 +872,34 @@
 
 .cf-schedule__row {
   grid-template-columns: 72px minmax(180px, 1fr) auto;
+  align-items: center;
   margin-bottom: 6px;
+}
+
+.cf-schedule__row--done {
+  color: var(--slate);
 }
 
 .cf-schedule__time {
   font-size: 12.5px;
 }
 
+.cf-schedule__row--done .cf-schedule__time,
+.cf-schedule__row--done .cf-resource__identity > strong {
+  color: var(--slate);
+}
+
+.cf-schedule__row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+
 .cf-schedule__calendar-actions {
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--slate);
-  font-size: 12px;
 }
 
 .cf-schedule__calendar-actions .cf-button {

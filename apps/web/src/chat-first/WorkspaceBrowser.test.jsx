@@ -1062,14 +1062,15 @@ describe("WorkspaceBrowser", () => {
     expect(onExportFile).toHaveBeenCalledWith("f1", "text");
   });
 
-  it("disables calendar exports when nothing is scheduled", async () => {
+  it("shows no calendar actions when nothing is scheduled", async () => {
     const { WorkspaceBrowser } = await loadBrowser();
     const html = renderToStaticMarkup(
       <WorkspaceBrowser {...baseProps({ activeTab: "schedule", schedule: [] })} />
     );
 
+    expect(html).toContain("Nothing is scheduled.");
     expect(html).toContain("Calendar exports appear when something is scheduled.");
-    expect(html.match(/disabled=""/g)).toHaveLength(3);
+    expect(html).not.toMatch(/cf-schedule__calendar-actions/);
   });
 
   it("keeps selected jobs in the cart when search filters hide their rows", async () => {

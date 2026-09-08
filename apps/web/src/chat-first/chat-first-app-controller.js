@@ -55,12 +55,6 @@ export function workspaceOperationFailure(operation, retry) {
   };
 }
 
-function firstCalendarExport(groups) {
-  return list(groups)
-    .flatMap((group) => list(group?.items))
-    .find((item) => item?.export)?.export;
-}
-
 export function engineUnavailable(state) {
   if (state?.providerFallback === true && state?.providerFallbackAllowed === true) return false;
   const selectedId = String(state?.selectedId || "").trim();
@@ -75,8 +69,7 @@ export function isEngineFailure(error) {
   return [402, 501, 502, 503, 504].includes(Number(error?.status));
 }
 
-export function calendarAction(label, groups, options = {}) {
-  const exportData = firstCalendarExport(groups);
+export function calendarAction(label, exportData, options = {}) {
   if (!exportData) return false;
 
   if (label === "Google" || label === "Outlook") {
@@ -279,6 +272,7 @@ export function mapActivityItems(items) {
       label: item?.title || item?.summary || item?.label || "Workspace updated",
       mark: attention ? "!" : item?.mark || "✓",
       tone: attention ? "attention" : item?.tone || "done",
+      appId: item?.appId || "",
     };
   });
 }

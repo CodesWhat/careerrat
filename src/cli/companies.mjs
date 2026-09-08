@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { dbExists } from "../core/db/connection.mjs";
 import { companyAtsRemove, companyAtsUpsert, sourceConfigGet } from "../core/db/verbs.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
-import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
+import { CAREER_OPS_PUBLIC_PROVIDER_IDS } from "../core/providers/provider-parity.mjs";
 import {
   inferProvider,
   isCompanyProviderSupported,
@@ -28,7 +28,7 @@ const pathCtx = { repoRoot: root };
 const CONFIG_REL = "config/sourced-scan.json";
 const CONFIG_PATH = userPath(pathCtx, CONFIG_REL);
 
-const PUBLIC_PROVIDER_COUNT = CAREER_OPS_UPSTREAM.providerCount - 1;
+const PUBLIC_PROVIDER_COUNT = CAREER_OPS_PUBLIC_PROVIDER_IDS.length;
 
 const json = args.includes("--json");
 const write = args.includes("--write");

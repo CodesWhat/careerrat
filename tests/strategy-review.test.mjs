@@ -196,6 +196,28 @@ test("buildStrategyReviewContext assembles funnel counts, targeting signals, and
   assert.ok(!serialized.includes("184500"), "context must never carry the private comp figure");
 });
 
+test("buildStrategyReviewContext's staleCount is the true count, not the 4-row display cap", () => {
+  const repoRoot = tempRepo();
+  for (let index = 1; index <= 6; index += 1) {
+    seedApplication(repoRoot, {
+      id: `stale-${index}`,
+      company: `Quiet Co ${index}`,
+      role: "Applied AI Engineer",
+      status: "applied",
+      channel: "board",
+      appliedAt: "2026-05-01",
+    });
+  }
+
+  const context = buildStrategyReviewContext({
+    repoRoot,
+    env: {},
+    now: new Date("2026-06-01T12:00:00.000Z"),
+  });
+
+  assert.equal(context.strategy.staleCount, 6);
+});
+
 // ---------------------------------------------------------------------------
 // 2. draftStrategyReview — freshness gate
 // ---------------------------------------------------------------------------

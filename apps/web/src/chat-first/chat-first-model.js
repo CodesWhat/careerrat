@@ -108,6 +108,7 @@ export function parseChatFirstForeground(search = "") {
       stage: params.get("stage") || "all",
       source: params.get("source") || "all",
       posted: params.get("posted") || "all",
+      sort: params.get("sort") || "all",
       files: params.get("files") || "All",
       people: params.get("people") || "all",
     },
@@ -145,6 +146,7 @@ export function serializeChatFirstForeground(foreground = {}) {
   setParam(params, "stage", filters.stage, "all");
   setParam(params, "source", filters.source, "all");
   setParam(params, "posted", filters.posted, "all");
+  setParam(params, "sort", filters.sort, "all");
   if (String(filters.files || "").toLowerCase() !== "all") {
     setParam(params, "files", filters.files);
   }
@@ -471,9 +473,16 @@ function groupSchedule(calendar) {
       id: event?.id || `${iso}:${event?.time || ""}:${event?.title || "event"}`,
       meta: event?.meta || event?.label || "",
       actionLabel: scheduleActionLabel(event),
+      done: event?.done === true,
     });
   }
-  return [...groups].map(([day, items]) => ({ day, items }));
+  // Done rounds render muted and sink below the not-done rows within their
+  // day, history, not next action. A stable sort keeps everything else in
+  // the order the calendar model already produced.
+  return [...groups].map(([day, items]) => ({
+    day,
+    items: [...items].sort((a, b) => Number(a.done) - Number(b.done)),
+  }));
 }
 
 function pipelineStageKey(row) {
@@ -702,11 +711,29 @@ function collapseSubmitGates(items) {
   return remaining;
 }
 
+const PLATFORM_LABELS = {
+  linkedin: "LinkedIn",
+  wellfound: "Wellfound",
+  sms: "SMS",
+};
+
+function platformLabel(platform) {
+  const key = String(platform || "").trim();
+  if (!key) return "";
+  return (
+    PLATFORM_LABELS[key.toLowerCase()] ||
+    key
+      .split(/\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ")
+  );
+}
+
 function flattenPeople(network, agentName) {
-  const people = [];
+  const contacts = [];
   for (const company of list(network?.companies)) {
     for (const contact of list(company?.contacts)) {
-      people.push({
+      contacts.push({
         ...contact,
         id:
           contact.id ||
@@ -721,10 +748,18 @@ function flattenPeople(network, agentName) {
         actionLabel:
           contact.actionLabel ||
           (!company.applicationId && !company.nextTouch ? `Ask ${agentName}` : null),
+        platform: platformLabel(contact.platform),
       });
     }
   }
-  return people;
+  const targets = list(network?.sourcing?.targets).map((target) => ({
+    id: target.id || `${target.company}:${target.role}`,
+    company: target.company || "",
+    role: target.role || "Tracked role",
+    fit: Number(target.fit) || 0,
+    label: target.label || "Search contact path",
+  }));
+  return { contacts, targets };
 }
 
 export function buildChatFirstView(dashboardInput, runtimeInput) {
@@ -785,6 +820,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
     ...jobArtifactFiles(dashboard.jobs?.details),
   ]);
   const people = flattenPeople(dashboard.network, agentName);
+  const peopleTargets = people.targets;
   const missions = list(runtime.missions);
   const gates = submitGates(missions);
   const hasCanonicalNeeds = list(runtime.needsYou).length > 0;
@@ -829,7 +865,7 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
       search: search.length,
       pipeline: pipelineRows.length,
       files: files.length,
-      people: people.length,
+      people: people.contacts.length,
       touchDue: list(runtime.touchDue).length,
       archived: archivedThreads.length,
     },
@@ -837,10 +873,12 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
       search,
       pipeline: buildPipeline(pipelineRows),
       files,
-      people,
+      people: people.contacts,
+      peopleTargets,
       schedule: groupSchedule(dashboard.calendar),
     },
     jobDetails: dashboard.jobs?.details || {},
+    strategy: dashboard.strategy || null,
   };
 }
 

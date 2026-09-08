@@ -188,7 +188,7 @@ export function buildStrategyReviewContext({ repoRoot, env = process.env, now = 
       sources: insights.sources,
       roles: insights.roles,
       fitBands: insights.fitBands,
-      staleCount: insights.stale.length,
+      staleCount: insights.staleTotal,
       cadence: insights.cadence.slice(0, 8),
       deterministicRecommendation: insights.recommendation,
     },

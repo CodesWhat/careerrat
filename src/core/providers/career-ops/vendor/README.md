@@ -2,9 +2,72 @@
 
 These provider modules are vendored from
 [`career-ops-hq/career-ops`](https://github.com/career-ops-hq/career-ops) at
-commit `ffb49be1f394041840c31c23a5d3a3347854340e` (September 2, 2026). Upstream
+commit `8a20e491fdde2c928a54ff17a7bfe07ca5d2ab40` (September 7, 2026). Upstream
 moved from `santifer/career-ops` to the `career-ops-hq` org on 2026-09-01, the
 repository name is unchanged, only the owner.
+
+Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
+(September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
+`pickLocation` now walks every `jobLocation` entry instead of trusting only the
+first one, so an all-`UNAVAILABLE` first entry no longer masks a usable later
+one (#3727/#3728). Four providers changed upstream only by having their
+message strings re-punctuated to CareerRat's no-em-dash house style once
+copied in verbatim, on top of real upstream feature work: `gem.mjs` (adds an
+optional `api.gem.com` REST endpoint alongside the existing GraphQL board),
+`radancy.mjs` (retry-wrapped transport, a `randomUUID()` cache-buster, and
+`ctx.maxPages` probe-budget support with cap-warning accuracy fixes), `wttj.mjs`
+(a server-side Algolia `filters` config that raises the per-request hits cap
+from 200 to 1000 and makes `queries` optional), and `_registry.mjs` (a
+JSDoc-only comment change).
+
+Three new providers were adopted: `builtin.mjs` (Built In's board-wide
+aggregator, two-payload joining of the server-side ItemList JSON with rendered
+job-card enrichment, market-host allowlisting, and a loud warning if card
+enrichment silently fails), `collage.mjs`, and `garena.mjs` (both small,
+single/multi-tenant public job-board APIs with SSRF host-pinning; `garena.mjs`
+also guards its office/id path segments against `.`/`..` traversal). A fourth
+new provider, `telegram-channel.mjs`, was evaluated and deferred rather than
+adopted: it scrapes public Telegram channel web-preview pages with heuristic
+per-post employer attribution, and upstream's own measurement shows only a 25%
+pass rate on its RU/CIS test corpus and 0% on its EN corpus, too fragile and
+low-precision for general adoption. See `CAREER_OPS_DEFERRED_PROVIDER_IDS` in
+`src/core/providers/provider-parity.mjs`.
+
+Four files changed upstream in this range and were hand-ported into
+CareerRat's own copies instead of being overwritten, because CareerRat has
+either replaced, extended, or added to them:
+
+- `greenhouse.mjs` picked up upstream's one change in this range: the
+  `/offices`-derived location suffix is now sorted before being joined, not
+  left in `/offices` traversal order, which Greenhouse never promised was
+  stable between responses (#3750-style dedup-key stability). CareerRat's
+  local extensions on this file (`htmlToTextCapture`/`decodeEntities` for a
+  byte-capped, entity-decoded description, and the `entry.name` company
+  fallback) are unaffected and carried forward unchanged.
+- `workday.mjs` picked up upstream's one real change in this range:
+  `chooseSplitFacet` is now location-hint aware (it prefers a location-shaped
+  facet when `ctx.locationHints` is set) and offset-clamp recovery now detects
+  a `splitIncomplete` coverage gap when no usable split facet exists or the
+  chosen split still undercounts the true total. It is not byte-identical to
+  upstream: it still carries every CareerRat-local addition from the prior
+  roll (`fetchDetail`, `resolvePostingEndpoint`, `workdayHeaders`,
+  `isRequisitionIdShaped`), which `src/core/intake/resolve.mjs`'s exact-URL
+  resolution path and `workdayDedupKey`'s cross-site disambiguation still
+  depend on. `tests/intake-resolve.test.mjs`'s Workday cases (71/71) confirm
+  the hand-port didn't disturb either. One upstream commit cited for this
+  range (CXS-form URL resolution) produced no actual diff against the prior
+  pin at this file, verified byte-for-byte; nothing was ported for it.
+- `_http.mjs` gained a new exported `isRefusedRedirectError` helper,
+  distinguishing a redirect refused by the mandatory SSRF guard
+  (`redirect:'error'` meeting a 3xx, #1440) from other `TypeError`s, and wired
+  it into `isRetryableError` so a refused redirect is never treated as
+  transient. CareerRat's local additions to this shim are unaffected.
+- `_types.js` (a CareerRat-local extension of the JSDoc `@typedef`s) gained
+  upstream's new optional `salary: {min?, max?, currency?}` Job property,
+  attached only when a source exposes real figures. `career-ops-registry.mjs`'s
+  existing `formatSalaryRange()` already consumes it generically; no registry
+  change was needed. CareerRat's local `descriptionPartial`/`fetchDetail`
+  additions on this file are unaffected.
 
 Rolled forward 2026-09-02 from `10a569b1e9178aa90ef8028ea287e411a831e1b6`
 (August 23, 2026). Only the providers upstream actually changed between those

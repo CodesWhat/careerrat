@@ -1833,7 +1833,6 @@ function buildFocusCard(trackerData, { now, nextSteps, latestRoles } = {}) {
   };
 }
 
-const CALENDAR_WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const CALENDAR_KIND_LABELS = {
   reply: "Reply",
   prep: "Prep",
@@ -1905,41 +1904,8 @@ function compareIsoDate(a, b) {
   return a.localeCompare(b);
 }
 
-function mondayForIso(iso) {
-  const date = utcDateFromIso(iso);
-  const day = date.getUTCDay();
-  const delta = day === 0 ? -6 : 1 - day;
-  date.setUTCDate(date.getUTCDate() + delta);
-  return date.toISOString().slice(0, 10);
-}
-
 function daysBetweenIso(a, b) {
   return Math.round((utcDateFromIso(b) - utcDateFromIso(a)) / 86_400_000);
-}
-
-function monthTitleFromIso(iso) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(utcDateFromIso(iso));
-}
-
-function monthShortFromIso(iso) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    timeZone: "UTC",
-  }).format(utcDateFromIso(iso));
-}
-
-function weekLabel(startIso, endIso) {
-  const startMonth = monthShortFromIso(startIso);
-  const endMonth = monthShortFromIso(endIso);
-  const startDay = utcDateFromIso(startIso).getUTCDate();
-  const endDay = utcDateFromIso(endIso).getUTCDate();
-  return startMonth === endMonth
-    ? `${startMonth} ${startDay}-${endDay}`
-    : `${startMonth} ${startDay}-${endMonth} ${endDay}`;
 }
 
 function calendarTimeLabel(value) {
@@ -2197,15 +2163,6 @@ function calendarEventExport(event) {
   };
 }
 
-function calendarBundleExport(events, label) {
-  const rows = objectList(events);
-  return {
-    count: rows.length,
-    filename: `careerrat-calendar-${calendarSlug(label)}.ics`,
-    ics: calendarIcsDocument(rows.map((event) => calendarEventVevent(event))),
-  };
-}
-
 function calendarSyncProviderLabel(provider) {
   return (
     CALENDAR_SYNC_PROVIDERS.find((item) => item.key === provider)?.label || titleCase(provider)
@@ -2424,55 +2381,6 @@ function conversationCalendarEvent(app, conversation, now) {
   };
 }
 
-function busyCalendarEvent(busy) {
-  const startIso = busy?.startIso || busy?.start || busy?.from || "";
-  const iso = isoDate(startIso);
-  if (!iso) return null;
-  const endIso = busy?.endIso || busy?.end || busy?.to || "";
-  const allDay = Boolean(busy?.allDay);
-  const startLabel = calendarTimeLabel(startIso);
-  const endLabel = calendarTimeLabel(endIso);
-  const meta = allDay
-    ? "All day"
-    : startLabel && endLabel
-      ? `${startLabel} – ${endLabel}`
-      : startLabel || "Busy";
-  return {
-    id: busy?.id || `busy-${busy?.provider || "cal"}-${startIso || iso}`,
-    iso,
-    rawDate: startIso,
-    sortTime: calendarDateSortTime(startIso),
-    title: compactUiText(busy?.label || "Busy", 40),
-    meta,
-    kind: "busy",
-    detailId: "",
-    company: "",
-    role: "",
-    source: "busy",
-    provider: busy?.provider || "",
-    allDay,
-    endIso,
-  };
-}
-
-// Opaque free/busy blocks ingested under calendar_read. Kept separate from the
-// actionable event set so they never inflate metrics, today, or upcoming — they
-// only render as muted context on the week grid and month dots.
-function buildCalendarBusy(trackerData) {
-  const blocks = arrayOrEmpty(trackerData?.calendarBusy);
-  const events = [];
-  const seen = new Set();
-  for (const block of blocks) {
-    const event = busyCalendarEvent(block);
-    if (!event) continue;
-    const key = `${event.provider}:${event.rawDate}:${event.endIso}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    events.push(event);
-  }
-  return events;
-}
-
 function buildCalendarEvents(trackerData, now) {
   const applications = trackerData?.applications || [];
   const communications = trackerData?.communications || [];
@@ -2518,110 +2426,6 @@ function eventsBetween(events, startIso, endIso) {
   );
 }
 
-function buildCalendarWeek(events, startIso, todayIso, busyEvents = []) {
-  const days = Array.from({ length: 5 }, (_, index) => {
-    const iso = addDaysToIso(startIso, index);
-    const date = utcDateFromIso(iso);
-    const dayEvents = events
-      .filter((event) => event.iso === iso)
-      .sort(sortCalendarEvents(todayIso));
-    // Busy blocks are context, not actions — append them after the actionable
-    // items so the day card leads with what the candidate must do.
-    const dayBusy = busyEvents
-      .filter((event) => event.iso === iso)
-      .sort((a, b) => Number(a.sortTime || 0) - Number(b.sortTime || 0));
-    return {
-      dow: CALENDAR_WEEKDAY_LABELS[date.getUTCDay()],
-      date: String(date.getUTCDate()),
-      iso,
-      state: compareIsoDate(iso, todayIso) < 0 ? "past" : iso === todayIso ? "today" : "",
-      events: [...dayEvents, ...dayBusy],
-    };
-  });
-  const endIso = addDaysToIso(startIso, 4);
-  const weekEvents = eventsBetween(events, startIso, endIso).sort(sortCalendarEvents(todayIso));
-  const actionable = weekEvents.filter(
-    (event) => event.source !== "conversation" && CALENDAR_ACTIONABLE_KINDS.has(event.kind)
-  );
-  const nextUp =
-    weekEvents.find((event) => event.source !== "conversation") || weekEvents[0] || null;
-  const stats = {
-    interviews: weekEvents.filter((event) => event.kind === "interview").length,
-    replies: weekEvents.filter((event) => event.kind === "reply").length,
-    deadlines: weekEvents.filter(
-      (event) => event.kind === "deadline" || event.kind === "assessment"
-    ).length,
-  };
-  return {
-    label: weekLabel(startIso, endIso),
-    startIso,
-    endIso,
-    export: calendarBundleExport(weekEvents, weekLabel(startIso, endIso)),
-    days,
-    events: weekEvents,
-    nextUp: nextUp
-      ? {
-          ...nextUp,
-          note:
-            nextUp.kind === "interview" || nextUp.kind === "assessment"
-              ? "Prep context, job notes, artifacts, and open questions are ready from the tracker."
-              : "This is the next dated item from the tracker. Handle it before adding more work.",
-        }
-      : {
-          label: "Clear",
-          title: "No dated action",
-          note: "No interviews, replies, assessments, or follow-ups are dated in this week.",
-          meta: "Calendar clear",
-          kind: "deadline",
-          detailId: "",
-          cta: "Review jobs",
-        },
-    loops: actionable.slice(0, 4),
-    stats,
-  };
-}
-
-function buildCalendarMonth(events, todayIso, busyEvents = []) {
-  const today = utcDateFromIso(todayIso);
-  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-  const monthIso = monthStart.toISOString().slice(0, 10);
-  const gridStart = mondayForIso(monthIso);
-  const cells = Array.from({ length: 42 }, (_, index) => {
-    const iso = addDaysToIso(gridStart, index);
-    const date = utcDateFromIso(iso);
-    // Full per-day event set (actionable leads, busy fills) — the week-expansion
-    // reads these; the dot row slices them down at render time.
-    const dayEvents = [
-      ...events.filter((event) => event.iso === iso),
-      ...busyEvents.filter((event) => event.iso === iso),
-    ];
-    const isMonthStart = date.getUTCDate() === 1;
-    return {
-      iso,
-      date: String(date.getUTCDate()),
-      // A short month tag on each 1st-of-month cell marks where the grid crosses
-      // into a new month (e.g. the July spillover below the current month).
-      monthLabel: isMonthStart ? monthShortFromIso(iso) : "",
-      muted: date.getUTCMonth() !== today.getUTCMonth(),
-      isToday: iso === todayIso,
-      state: compareIsoDate(iso, todayIso) < 0 ? "past" : iso === todayIso ? "today" : "",
-      events: dayEvents,
-    };
-  });
-  const monthEvents = events.filter((event) => {
-    const date = utcDateFromIso(event.iso);
-    return (
-      date.getUTCMonth() === today.getUTCMonth() && date.getUTCFullYear() === today.getUTCFullYear()
-    );
-  });
-  return {
-    title: monthTitleFromIso(todayIso),
-    count: monthEvents.length,
-    countLabel: `${monthEvents.length} tracked`,
-    days: cells,
-  };
-}
-
 function buildCalendarProtectedPrep(events, todayIso) {
   const prep = events
     .filter(
@@ -2651,11 +2455,6 @@ function buildCalendarProtectedPrep(events, todayIso) {
 function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus = null } = {}) {
   const todayIso = isoDate(now);
   const events = buildCalendarEvents(trackerData, now);
-  const busyEvents = buildCalendarBusy(trackerData);
-  const currentWeekStart = mondayForIso(todayIso);
-  const weeks = [0, 7, 14].map((offset) =>
-    buildCalendarWeek(events, addDaysToIso(currentWeekStart, offset), todayIso, busyEvents)
-  );
   const todayEvents = events.filter((event) => event.iso === todayIso);
   const rollingHorizonEnd = addDaysToIso(todayIso, CALENDAR_ROLLING_HORIZON_DAYS - 1);
   const rollingHorizonEvents = eventsBetween(events, todayIso, rollingHorizonEnd);
@@ -2666,12 +2465,14 @@ function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus =
     .filter((event) => compareIsoDate(event.iso, todayIso) >= 0)
     .sort((a, b) => compareIsoDate(a.iso, b.iso))
     .slice(0, 6);
-  // The hero "This Week" stat mirrors the agenda's forward-looking "This week"
-  // bucket (apps/web/src/calendar/CalendarPage.jsx's bucketForIso: the two
-  // days after tomorrow through six days out), not the Monday-Sunday ISO week
-  // `weeks[0]` uses. On a Sunday, that ISO window is almost entirely
-  // the past, which read as contradicting the agenda's forward count in the
-  // 2026-08-23 UX audit.
+  // The hero "This Week" stat is forward-looking (today+2..today+6), matching the
+  // chat-first Schedule tab's own forward-only view rather than a Monday-Sunday
+  // ISO week. On a Sunday, a Mon-Fri window would read almost entirely in the
+  // past, contradicting a forward count shown on the same screen
+  // (2026-08-23 UX audit). The Mon-Fri week grid and month dot-calendar this
+  // metric used to sit alongside were dropped (CR50, 2026-09-07): nothing
+  // outside this file read `weeks`/`currentWeekIndex`/`month`, and the
+  // chat-first Schedule tab only ever consumed `upcoming`/`thisWeek`.
   const thisWeekStartIso = addDaysToIso(todayIso, 2);
   const thisWeekEndIso = addDaysToIso(todayIso, 6);
   const thisWeekEvents = eventsBetween(events, thisWeekStartIso, thisWeekEndIso).filter(
@@ -2679,7 +2480,6 @@ function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus =
   );
   return {
     todayIso,
-    currentWeekIndex: 0,
     metrics: {
       thisWeek: thisWeekEvents.length,
       interviews: rollingHorizonEvents.filter(
@@ -2687,8 +2487,6 @@ function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus =
       ).length,
       dueToday: todayEvents.filter((event) => event.source !== "conversation").length,
     },
-    weeks,
-    month: buildCalendarMonth(events, todayIso, busyEvents),
     today: {
       label: formatDateShort(todayIso, "Today"),
       events: todayEvents,
@@ -2696,13 +2494,8 @@ function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus =
     upcoming: {
       events: upcomingEvents,
     },
-    // Canonical, uncapped source for the "This Week" hero metric above — also
-    // fed into CalendarPage's agenda pool (collectCalendarEvents) so the
-    // rendered "This week" row count always equals metrics.thisWeek. Without
-    // this, the agenda only sees today.events + the top-6 capped upcoming
-    // list + Mon-Fri-only week.days/week.events, so a >6-event week or a
-    // weekend event undercounts the agenda relative to the hero tile
-    // (2026-08-23 UX audit regression).
+    // Canonical, uncapped source for the "This Week" hero metric above, and what
+    // the chat-first Schedule tab falls back to when `upcoming` is empty.
     thisWeek: {
       events: thisWeekEvents,
     },
@@ -2720,6 +2513,18 @@ function latestIso(...values) {
     if (!latest || date > latest) latest = date;
   }
   return latest ? latest.toISOString() : "";
+}
+
+// A "touch" that is really a future-scheduled event (e.g. a booked interview
+// still weeks out) shouldn't be able to outrank rows that were genuinely
+// touched today in a "most recently updated" sort, and would otherwise keep
+// outranking them for as long as that future date remains ahead of now. Caps
+// the reported touch at `now` without changing what counts as a touch.
+function capFutureIso(iso, now = new Date()) {
+  if (!iso) return iso;
+  const date = new Date(iso);
+  if (Number.isNaN(date.valueOf())) return iso;
+  return date > now ? now.toISOString() : iso;
 }
 
 function earliestIso(...values) {
@@ -2845,6 +2650,7 @@ function addStrategyGroup(groups, key, label, app, extra = {}) {
       total: 0,
       advanced: 0,
       terminal: 0,
+      rejected: 0,
       fitTotal: 0,
       order: extra.order ?? 999,
     });
@@ -2855,13 +2661,27 @@ function addStrategyGroup(groups, key, label, app, extra = {}) {
   row.fitTotal += normalizeFit(app.fitScore);
   if (isAdvanced(app)) row.advanced += 1;
   if (TERMINAL_STAGES.has(stage)) row.terminal += 1;
+  // An explicit rejection is always an employer response. A withdrawal only counts
+  // as one if the candidate had already reached screen-or-deeper before pulling
+  // out (deepestRoundStage reads conversation history, so it's correct for
+  // terminal apps too). Otherwise it's a candidate exit before the employer ever
+  // engaged.
+  if (stage === "rejected" || (stage === "withdrawn" && deepestRoundStage(app))) {
+    row.rejected += 1;
+  }
 }
 
 function finalizeStrategyRows(groups, { fixedOrder = false } = {}) {
   const maxTotal = Math.max(1, ...[...groups.values()].map((row) => row.total));
   return [...groups.values()]
     .map((row) => {
-      const heardBack = row.advanced + row.terminal;
+      // A response means the employer engaged: an advanced stage, an explicit
+      // rejection, or a withdrawal that only happened after reaching screen-or-deeper
+      // (row.rejected covers both cases, see addStrategyGroup). The "withdrawn" stage
+      // also absorbs candidate-driven exits (cut/hold/skipped/app-limit and a
+      // candidate's own withdrawal) that never reached the employer, and those still
+      // don't count as a response.
+      const heardBack = row.advanced + row.rejected;
       const avgFit = row.total ? Math.round(row.fitTotal / row.total) : 0;
       const responseValue = row.total ? Math.round((heardBack / row.total) * 100) : 0;
       const advancedValue = row.total ? Math.round((row.advanced / row.total) * 100) : 0;
@@ -2904,6 +2724,10 @@ function latestApplicationTouch(app, communications = []) {
   );
 }
 
+// Returns every stale application, not capped. Callers that only need the
+// count (metrics.staleCount, the recommendation threshold, review.mjs's staleCount)
+// read `.length` off this full list; callers rendering the row list slice(0, 4)
+// themselves so the display stays capped without truncating the count.
 function buildStrategyStaleRows(applications, communications, now) {
   return applications
     .map((app, index) => {
@@ -2929,8 +2753,7 @@ function buildStrategyStaleRows(applications, communications, now) {
       };
     })
     .filter(Boolean)
-    .sort((a, b) => b.daysQuiet - a.daysQuiet || a.title.localeCompare(b.title))
-    .slice(0, 4);
+    .sort((a, b) => b.daysQuiet - a.daysQuiet || a.title.localeCompare(b.title));
 }
 
 function strategyStageStartedAt(app) {
@@ -3501,7 +3324,8 @@ export function buildStrategyInsights(trackerData, { now = new Date() } = {}) {
   const sources = finalizeStrategyRows(sourceGroups).slice(0, 4);
   const roles = finalizeStrategyRows(roleGroups).slice(0, 4);
   const fitBands = finalizeStrategyRows(fitGroups, { fixedOrder: true });
-  const stale = buildStrategyStaleRows(applications, communications, now);
+  const staleAll = buildStrategyStaleRows(applications, communications, now);
+  const stale = staleAll.slice(0, 4);
   const stageAges = buildStrategyStageRows(applications, now);
   const cadence = buildStrategyCadenceRows(applications, communications, now);
   const learning = buildStrategyLearning(
@@ -3537,21 +3361,22 @@ export function buildStrategyInsights(trackerData, { now = new Date() } = {}) {
       },
       staleCount: {
         label: "Quiet",
-        value: stale.length,
-        rate: stale.length ? `${stale.length} quiet` : "Clear",
+        value: staleAll.length,
+        rate: staleAll.length ? `${staleAll.length} quiet` : "Clear",
       },
     },
     sources,
     roles,
     fitBands,
     stale,
+    staleTotal: staleAll.length,
     stageAges,
     cadence,
     learning,
     recommendation: buildStrategyRecommendation({
       topSource,
       bestLane,
-      staleCount: stale.length,
+      staleCount: staleAll.length,
       cadence,
     }),
   };
@@ -4745,6 +4570,11 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     sourceIcon: source.icon,
     appliedAt: app.appliedAt || "",
     postedAt: app.postedAt || "",
+    // Same signal that drives the Stale/Ghosted decay state (rowDecayState below),
+    // so "Recently updated" sorting and the staleness label never disagree. Capped
+    // at `now` so a future-scheduled interview (a real conversations[] touch, but
+    // dated ahead) can't pin the row to the top of "Recently updated" indefinitely.
+    lastTouchAt: capFutureIso(latestApplicationTouch(app, communications), now) || null,
     appliedLabel: formatDateShort(app.appliedAt, "Tracked"),
     initials: initials(app.company),
     domain: app.domain || app.companyDomain || "",
@@ -4848,6 +4678,11 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     appliedAt: "",
     postedAt: role.postedAt || "",
     sourcedAt: role.sourcedAt || "",
+    // Not-yet-applied rows have no application touch history; the best signal is
+    // whichever of sourcedAt/updatedAt is most recent, so it sorts alongside
+    // applied rows' lastTouchAt uniformly. Capped at `now` for the same reason
+    // applicationJobRow caps its lastTouchAt above.
+    lastTouchAt: capFutureIso(latestIso(role.sourcedAt, role.updatedAt), now) || null,
     appliedLabel: "Sourced",
     initials: initials(role.company),
     domain: role.domain || role.companyDomain || "",
