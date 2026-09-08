@@ -4538,6 +4538,9 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     sourceIcon: source.icon,
     appliedAt: app.appliedAt || "",
     postedAt: app.postedAt || "",
+    // Same signal that drives the Stale/Ghosted decay state (rowDecayState below),
+    // so "Recently updated" sorting and the staleness label never disagree.
+    lastTouchAt: latestApplicationTouch(app, communications) || null,
     appliedLabel: formatDateShort(app.appliedAt, "Tracked"),
     initials: initials(app.company),
     domain: app.domain || app.companyDomain || "",
@@ -4641,6 +4644,10 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     appliedAt: "",
     postedAt: role.postedAt || "",
     sourcedAt: role.sourcedAt || "",
+    // Not-yet-applied rows have no application touch history; the best signal is
+    // whichever of sourcedAt/updatedAt is most recent, so it sorts alongside
+    // applied rows' lastTouchAt uniformly.
+    lastTouchAt: latestIso(role.sourcedAt, role.updatedAt) || null,
     appliedLabel: "Sourced",
     initials: initials(role.company),
     domain: role.domain || role.companyDomain || "",

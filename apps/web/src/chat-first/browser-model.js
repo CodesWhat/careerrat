@@ -36,8 +36,8 @@ const JOB_SORT_COMPARATORS = {
   posted: (a, b) =>
     sortTimeValue(b?.postedAt || b?.datePosted) - sortTimeValue(a?.postedAt || a?.datePosted),
   updated: (a, b) =>
-    sortTimeValue(b?.appliedAt || b?.sourcedAt || b?.postedAt) -
-    sortTimeValue(a?.appliedAt || a?.sourcedAt || a?.postedAt),
+    sortTimeValue(b?.lastTouchAt || b?.appliedAt || b?.sourcedAt || b?.postedAt) -
+    sortTimeValue(a?.lastTouchAt || a?.appliedAt || a?.sourcedAt || a?.postedAt),
 };
 
 // "all" (or any unrecognized key) keeps the given order as-is, today's default.
