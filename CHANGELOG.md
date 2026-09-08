@@ -10,18 +10,43 @@ All notable changes to CareerRat are documented here. This project follows
 
 - Three new job sources: Built In (a board-wide search, so it only scans once
   you configure a query or category), Collage HR, and Garena's careers site.
+- Sort the Search results and the Pipeline list by fit, posting date, or last
+  update.
+- The job panel draws the pay band as a range bar with your target marked, and
+  says whether the band was posted by the company or estimated.
+- Once a company-health check has run, the job panel shows its rating and
+  where it came from. It never starts a check on its own.
+- Paul's read on your search: a card in Today's conversation with the source
+  and role lane that are working best, and how many applications have gone
+  quiet.
+- Add each scheduled event to Google Calendar, Outlook, or a calendar file
+  from its own row.
+- People shows suggested outreach from your saved companies, with the role and
+  fit, kept apart from people you've actually talked to. Contacts now show
+  where they came from, such as LinkedIn.
+- Activity entries tied to a job open that job when clicked.
 
 ### Changed
 
 - A short public roadmap is back at the repo root. The UI/UX research notes
   and the retired port-parity audit left `docs/`; they were working notes, not
   product documentation.
+- Stale and ghosted applications are muted and labelled in the Pipeline list,
+  not only in the funnel.
+- A fit score that is still a first guess shows as `~72`; it drops the tilde
+  once the job has been evaluated.
+- Interview rounds you've already done sink to the bottom of their day and
+  render muted.
 
 ### Fixed
 
 - An iCIMS posting no longer loses its location when an earlier location entry
   on the same posting is unavailable; it now checks every entry instead of
   just the first.
+- The submit confirmation and the engine-down screen now take keyboard focus,
+  keep Tab inside the dialog, close on Escape where a close exists, and hand
+  focus back when they go away. Stacked dialogs no longer steal each other's
+  Escape.
 
 ## [0.18.2] - 2026-09-05
 
