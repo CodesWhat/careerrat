@@ -13,6 +13,7 @@ import {
   deleteRow,
   getRow,
   logActivityEvent,
+  nowIso,
   putRow,
   refreshAnalyticsInDb,
   requireRow,
@@ -472,7 +473,7 @@ export function sourcedSetStatus({ repoRoot, env, id, to, note } = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const role = requireRow(db, "sourced", id, "sourced role");
     const from = role.status || "sourced";
-    const updated = { ...role, status: to };
+    const updated = { ...role, status: to, updatedAt: nowIso() };
     if (note) updated.note = note;
 
     putRow(db, "sourced", id, updated);
