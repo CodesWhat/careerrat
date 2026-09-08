@@ -2638,6 +2638,7 @@ function addStrategyGroup(groups, key, label, app, extra = {}) {
       total: 0,
       advanced: 0,
       terminal: 0,
+      rejected: 0,
       fitTotal: 0,
       order: extra.order ?? 999,
     });
@@ -2648,13 +2649,27 @@ function addStrategyGroup(groups, key, label, app, extra = {}) {
   row.fitTotal += normalizeFit(app.fitScore);
   if (isAdvanced(app)) row.advanced += 1;
   if (TERMINAL_STAGES.has(stage)) row.terminal += 1;
+  // An explicit rejection is always an employer response. A withdrawal only counts
+  // as one if the candidate had already reached screen-or-deeper before pulling
+  // out (deepestRoundStage reads conversation history, so it's correct for
+  // terminal apps too). Otherwise it's a candidate exit before the employer ever
+  // engaged.
+  if (stage === "rejected" || (stage === "withdrawn" && deepestRoundStage(app))) {
+    row.rejected += 1;
+  }
 }
 
 function finalizeStrategyRows(groups, { fixedOrder = false } = {}) {
   const maxTotal = Math.max(1, ...[...groups.values()].map((row) => row.total));
   return [...groups.values()]
     .map((row) => {
-      const heardBack = row.advanced + row.terminal;
+      // A response means the employer engaged: an advanced stage, an explicit
+      // rejection, or a withdrawal that only happened after reaching screen-or-deeper
+      // (row.rejected covers both cases, see addStrategyGroup). The "withdrawn" stage
+      // also absorbs candidate-driven exits (cut/hold/skipped/app-limit and a
+      // candidate's own withdrawal) that never reached the employer, and those still
+      // don't count as a response.
+      const heardBack = row.advanced + row.rejected;
       const avgFit = row.total ? Math.round(row.fitTotal / row.total) : 0;
       const responseValue = row.total ? Math.round((heardBack / row.total) * 100) : 0;
       const advancedValue = row.total ? Math.round((row.advanced / row.total) * 100) : 0;
@@ -2697,6 +2712,10 @@ function latestApplicationTouch(app, communications = []) {
   );
 }
 
+// Returns every stale application, not capped. Callers that only need the
+// count (metrics.staleCount, the recommendation threshold, review.mjs's staleCount)
+// read `.length` off this full list; callers rendering the row list slice(0, 4)
+// themselves so the display stays capped without truncating the count.
 function buildStrategyStaleRows(applications, communications, now) {
   return applications
     .map((app, index) => {
@@ -2722,8 +2741,7 @@ function buildStrategyStaleRows(applications, communications, now) {
       };
     })
     .filter(Boolean)
-    .sort((a, b) => b.daysQuiet - a.daysQuiet || a.title.localeCompare(b.title))
-    .slice(0, 4);
+    .sort((a, b) => b.daysQuiet - a.daysQuiet || a.title.localeCompare(b.title));
 }
 
 function strategyStageStartedAt(app) {
@@ -3294,7 +3312,8 @@ export function buildStrategyInsights(trackerData, { now = new Date() } = {}) {
   const sources = finalizeStrategyRows(sourceGroups).slice(0, 4);
   const roles = finalizeStrategyRows(roleGroups).slice(0, 4);
   const fitBands = finalizeStrategyRows(fitGroups, { fixedOrder: true });
-  const stale = buildStrategyStaleRows(applications, communications, now);
+  const staleAll = buildStrategyStaleRows(applications, communications, now);
+  const stale = staleAll.slice(0, 4);
   const stageAges = buildStrategyStageRows(applications, now);
   const cadence = buildStrategyCadenceRows(applications, communications, now);
   const learning = buildStrategyLearning(
@@ -3330,21 +3349,22 @@ export function buildStrategyInsights(trackerData, { now = new Date() } = {}) {
       },
       staleCount: {
         label: "Quiet",
-        value: stale.length,
-        rate: stale.length ? `${stale.length} quiet` : "Clear",
+        value: staleAll.length,
+        rate: staleAll.length ? `${staleAll.length} quiet` : "Clear",
       },
     },
     sources,
     roles,
     fitBands,
     stale,
+    staleTotal: staleAll.length,
     stageAges,
     cadence,
     learning,
     recommendation: buildStrategyRecommendation({
       topSource,
       bestLane,
-      staleCount: stale.length,
+      staleCount: staleAll.length,
       cadence,
     }),
   };

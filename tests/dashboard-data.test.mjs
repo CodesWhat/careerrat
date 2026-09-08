@@ -1659,6 +1659,101 @@ test("Dashboard adapter builds Strategy insights from outcomes by source role an
   assert.match(vm.strategy.stale[0].meta, /24d quiet/);
 });
 
+test("Strategy staleCount reflects every stale application, not just the capped display list", () => {
+  const applications = Array.from({ length: 6 }, (_, index) => ({
+    id: `stale-${index + 1}`,
+    company: `Quiet Co ${index + 1}`,
+    role: "Applied AI Engineer",
+    status: "applied",
+    channel: "board",
+    fitScore: 70,
+    appliedAt: "2026-05-01",
+  }));
+
+  const vm = buildDashboardViewModel(
+    { applications, sourced: [], sources: [], communications: [] },
+    { now: new Date("2026-06-01T12:00:00.000Z") }
+  );
+
+  assert.equal(vm.strategy.metrics.staleCount.value, 6);
+  assert.equal(vm.strategy.stale.length, 4);
+  assert.match(vm.strategy.recommendation.title, /Clean up quiet applications/);
+  assert.match(vm.strategy.recommendation.summary, /^6 active applications/);
+});
+
+test("Strategy response rate counts only employer engagement, not candidate-driven exits", () => {
+  const applications = [
+    {
+      id: "board-rejected-by-employer",
+      company: "Employer Reject Co",
+      role: "Applied AI Engineer",
+      status: "rejected",
+      channel: "board",
+      fitScore: 72,
+      appliedAt: "2026-05-01",
+    },
+    {
+      id: "board-withdrawn-by-candidate",
+      company: "Candidate Withdrew Co",
+      role: "Applied AI Engineer",
+      status: "cut",
+      channel: "board",
+      fitScore: 68,
+      appliedAt: "2026-05-01",
+    },
+  ];
+
+  const vm = buildDashboardViewModel(
+    { applications, sourced: [], sources: [], communications: [] },
+    { now: new Date("2026-06-01T12:00:00.000Z") }
+  );
+
+  const boardRow = vm.strategy.sources.find((row) => row.label === "Job board");
+  assert.ok(boardRow, "expected a Job board strategy row");
+  assert.equal(boardRow.total, 2);
+  assert.equal(boardRow.advanced, 0);
+  assert.equal(boardRow.rejected, 1);
+  assert.equal(boardRow.rate, "50%");
+});
+
+test("Strategy response rate still counts a withdrawal that came after the employer engaged", () => {
+  const applications = [
+    {
+      id: "board-withdrew-after-interview",
+      company: "Interviewed Then Withdrew Co",
+      role: "Applied AI Engineer",
+      status: "withdrawn",
+      channel: "board",
+      fitScore: 74,
+      appliedAt: "2026-05-01",
+      conversations: [{ kind: "technical interview", date: "2026-05-10" }],
+    },
+    {
+      id: "board-withdrew-before-response",
+      company: "No Response Withdraw Co",
+      role: "Applied AI Engineer",
+      status: "cut",
+      channel: "board",
+      fitScore: 68,
+      appliedAt: "2026-05-01",
+    },
+  ];
+
+  const vm = buildDashboardViewModel(
+    { applications, sourced: [], sources: [], communications: [] },
+    { now: new Date("2026-06-01T12:00:00.000Z") }
+  );
+
+  const boardRow = vm.strategy.sources.find((row) => row.label === "Job board");
+  assert.ok(boardRow, "expected a Job board strategy row");
+  assert.equal(boardRow.total, 2);
+  assert.equal(boardRow.advanced, 0);
+  // Only the app that reached a real interview round before withdrawing counts as
+  // an employer response; the pre-response withdrawal does not.
+  assert.equal(boardRow.rejected, 1);
+  assert.equal(boardRow.rate, "50%");
+});
+
 test("Dashboard adapter exposes the next agent task", () => {
   const tracker = {
     applications: [],
