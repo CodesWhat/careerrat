@@ -2650,9 +2650,10 @@ function addStrategyGroup(groups, key, label, app, extra = {}) {
   if (isAdvanced(app)) row.advanced += 1;
   if (TERMINAL_STAGES.has(stage)) row.terminal += 1;
   // An explicit rejection is always an employer response. A withdrawal only counts
-  // as one if the candidate had already reached screen-or-deeper before pulling out
-  // — deepestRoundStage reads conversation history, so it's correct for terminal
-  // apps too — otherwise it's a candidate exit before the employer ever engaged.
+  // as one if the candidate had already reached screen-or-deeper before pulling
+  // out (deepestRoundStage reads conversation history, so it's correct for
+  // terminal apps too). Otherwise it's a candidate exit before the employer ever
+  // engaged.
   if (stage === "rejected" || (stage === "withdrawn" && deepestRoundStage(app))) {
     row.rejected += 1;
   }
