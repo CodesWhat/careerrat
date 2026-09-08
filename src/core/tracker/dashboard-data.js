@@ -2649,17 +2649,25 @@ function addStrategyGroup(groups, key, label, app, extra = {}) {
   row.fitTotal += normalizeFit(app.fitScore);
   if (isAdvanced(app)) row.advanced += 1;
   if (TERMINAL_STAGES.has(stage)) row.terminal += 1;
-  if (stage === "rejected") row.rejected += 1;
+  // An explicit rejection is always an employer response. A withdrawal only counts
+  // as one if the candidate had already reached screen-or-deeper before pulling out
+  // — deepestRoundStage reads conversation history, so it's correct for terminal
+  // apps too — otherwise it's a candidate exit before the employer ever engaged.
+  if (stage === "rejected" || (stage === "withdrawn" && deepestRoundStage(app))) {
+    row.rejected += 1;
+  }
 }
 
 function finalizeStrategyRows(groups, { fixedOrder = false } = {}) {
   const maxTotal = Math.max(1, ...[...groups.values()].map((row) => row.total));
   return [...groups.values()]
     .map((row) => {
-      // A response means the employer engaged: an advanced stage, or an explicit
-      // rejection. The "withdrawn" stage also absorbs candidate-driven exits
-      // (cut/hold/skipped/app-limit and a candidate's own withdrawal) that never
-      // reached the employer, so those don't count as a response either way.
+      // A response means the employer engaged: an advanced stage, an explicit
+      // rejection, or a withdrawal that only happened after reaching screen-or-deeper
+      // (row.rejected covers both cases, see addStrategyGroup). The "withdrawn" stage
+      // also absorbs candidate-driven exits (cut/hold/skipped/app-limit and a
+      // candidate's own withdrawal) that never reached the employer, and those still
+      // don't count as a response.
       const heardBack = row.advanced + row.rejected;
       const avgFit = row.total ? Math.round(row.fitTotal / row.total) : 0;
       const responseValue = row.total ? Math.round((heardBack / row.total) * 100) : 0;
