@@ -78,7 +78,7 @@ describe("SchedulePanel per-event calendar actions", () => {
     expect(downloadButtons).toHaveLength(2);
 
     // Clicking the SECOND row's Google button acts on the second event, not
-    // the first — the regression the old panel-level, first-exportable-item
+    // the first, the regression the old panel-level, first-exportable-item
     // lookup could not distinguish.
     googleButtons[1].props.onClick();
     expect(onCalendarAction).toHaveBeenCalledWith("Google", "event-2");

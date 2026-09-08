@@ -475,7 +475,7 @@ function groupSchedule(calendar) {
     });
   }
   // Done rounds render muted and sink below the not-done rows within their
-  // day — history, not next action. A stable sort keeps everything else in
+  // day, history, not next action. A stable sort keeps everything else in
   // the order the calendar model already produced.
   return [...groups].map(([day, items]) => ({
     day,
