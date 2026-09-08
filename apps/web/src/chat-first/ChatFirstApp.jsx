@@ -1098,6 +1098,37 @@ function offerPositionLine(source) {
   return parts.length ? parts.join(" · ") : null;
 }
 
+// Comp-range view model for the job context panel's bar, carried straight
+// through from compRangeView (src/core/tracker/dashboard-data.js) via the
+// drawer detail's floor/ask/market* fields. null when there's nothing to plot:
+// no posted or built market band, and no candidate floor/target either.
+// source.floor/.ask/.market* are `number | null` (compRangeView), so check for
+// null explicitly before Number() coercion, since Number(null) is 0
+// (finite), not NaN, and would turn "unset" into a fabricated $0K.
+function compNumberOrNull(value) {
+  if (value == null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function jobCompRange(source) {
+  if (!source) return null;
+  const hasMarket = Boolean(source.compHasMarket);
+  const floorK = compNumberOrNull(source.floor);
+  const askK = compNumberOrNull(source.ask);
+  if (!hasMarket && floorK == null && askK == null) return null;
+  return {
+    state: source.compState || "needs-info",
+    hasMarket,
+    marketLo: compNumberOrNull(source.marketLo),
+    marketP50: compNumberOrNull(source.marketP50),
+    marketHi: compNumberOrNull(source.marketHi),
+    floorK,
+    askK,
+    currency: source.currency,
+  };
+}
+
 function jobContext(view, thread, mockSession, actions) {
   if (!thread) return null;
   const detail = view.jobDetails?.[thread.applicationId] || {};
@@ -1157,6 +1188,8 @@ function jobContext(view, thread, mockSession, actions) {
         fit: Number.isFinite(Number(thread.fitScore)) ? Number(thread.fitScore) : "Fit pending",
         compensation,
         compensationNote: source?.compNote || source?.compStateLabel || null,
+        compRange: jobCompRange(source),
+        companyHealth: source?.companyHealth || null,
         location: thread.location || source?.location || null,
         mode: thread.modeLabel || thread.mode || source?.modeLabel || source?.mode || null,
         source: jobSourceLine(source) || null,
