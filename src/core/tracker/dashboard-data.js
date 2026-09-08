@@ -2515,6 +2515,18 @@ function latestIso(...values) {
   return latest ? latest.toISOString() : "";
 }
 
+// A "touch" that is really a future-scheduled event (e.g. a booked interview
+// still weeks out) shouldn't be able to outrank rows that were genuinely
+// touched today in a "most recently updated" sort, and would otherwise keep
+// outranking them for as long as that future date remains ahead of now. Caps
+// the reported touch at `now` without changing what counts as a touch.
+function capFutureIso(iso, now = new Date()) {
+  if (!iso) return iso;
+  const date = new Date(iso);
+  if (Number.isNaN(date.valueOf())) return iso;
+  return date > now ? now.toISOString() : iso;
+}
+
 function earliestIso(...values) {
   let earliest = null;
   for (const value of values.flat(Infinity)) {
@@ -4558,6 +4570,11 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     sourceIcon: source.icon,
     appliedAt: app.appliedAt || "",
     postedAt: app.postedAt || "",
+    // Same signal that drives the Stale/Ghosted decay state (rowDecayState below),
+    // so "Recently updated" sorting and the staleness label never disagree. Capped
+    // at `now` so a future-scheduled interview (a real conversations[] touch, but
+    // dated ahead) can't pin the row to the top of "Recently updated" indefinitely.
+    lastTouchAt: capFutureIso(latestApplicationTouch(app, communications), now) || null,
     appliedLabel: formatDateShort(app.appliedAt, "Tracked"),
     initials: initials(app.company),
     domain: app.domain || app.companyDomain || "",
@@ -4661,6 +4678,11 @@ function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
     appliedAt: "",
     postedAt: role.postedAt || "",
     sourcedAt: role.sourcedAt || "",
+    // Not-yet-applied rows have no application touch history; the best signal is
+    // whichever of sourcedAt/updatedAt is most recent, so it sorts alongside
+    // applied rows' lastTouchAt uniformly. Capped at `now` for the same reason
+    // applicationJobRow caps its lastTouchAt above.
+    lastTouchAt: capFutureIso(latestIso(role.sourcedAt, role.updatedAt), now) || null,
     appliedLabel: "Sourced",
     initials: initials(role.company),
     domain: role.domain || role.companyDomain || "",

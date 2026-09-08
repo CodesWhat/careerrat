@@ -2561,3 +2561,91 @@ test("evaluate verdict requirements project end to end from tracker data through
   // (null or an empty array) must leave the UI with nothing to render.
   assert.equal(view.jobDetails["app-empty-requirements"].requirements?.length || 0, 0);
 });
+
+test("job rows carry lastTouchAt from the same signal that drives the decay state", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "touched-recently",
+        company: "Recent Touch Co",
+        role: "Software Engineer",
+        status: "awaiting",
+        channel: "portal",
+        fitScore: 80,
+        appliedAt: "2026-04-19",
+      },
+      {
+        id: "touched-only-at-apply",
+        company: "Quiet Since Apply Co",
+        role: "Software Engineer",
+        status: "awaiting",
+        channel: "portal",
+        fitScore: 78,
+        appliedAt: "2026-06-13",
+      },
+      {
+        id: "no-touch",
+        company: "No Signal Co",
+        role: "Software Engineer",
+        status: "reviewed-hold",
+        channel: "portal",
+        fitScore: 70,
+      },
+    ],
+    sourced: [
+      {
+        id: "sourced-with-touch",
+        company: "Sourced Touch Co",
+        role: "Solutions Engineer",
+        status: "sourced",
+        fitScore: 75,
+        sourcedAt: "2026-06-10",
+        updatedAt: "2026-06-17",
+      },
+      {
+        id: "sourced-no-touch",
+        company: "Sourced Silent Co",
+        role: "Solutions Engineer",
+        status: "sourced",
+        fitScore: 72,
+      },
+    ],
+    sources: [],
+    communications: [
+      {
+        id: "comm-touched-recently",
+        applicationId: "touched-recently",
+        company: "Recent Touch Co",
+        role: "Software Engineer",
+        status: "waiting",
+        summary: "Recruiter followed up.",
+        lastInboundAt: "2026-06-17",
+        messages: [{ direction: "inbound", at: "2026-06-17", summary: "Still moving forward." }],
+      },
+    ],
+  };
+
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-18T12:00:00.000Z"),
+  });
+  const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+
+  // Applied 60 days ago, but a communication landed yesterday: lastTouchAt tracks
+  // the communication, not the stale appliedAt.
+  assert.equal(
+    new Date(byId.get("touched-recently").lastTouchAt).toISOString(),
+    new Date("2026-06-17").toISOString()
+  );
+  // No communications and no updatedAt/statusUpdatedAt: lastTouchAt falls back to
+  // appliedAt, same as latestApplicationTouch would resolve.
+  assert.equal(
+    new Date(byId.get("touched-only-at-apply").lastTouchAt).toISOString(),
+    new Date("2026-06-13").toISOString()
+  );
+  assert.equal(byId.get("no-touch").lastTouchAt, null);
+  assert.equal(
+    new Date(byId.get("sourced-with-touch").lastTouchAt).toISOString(),
+    new Date("2026-06-17").toISOString()
+  );
+  assert.equal(byId.get("sourced-no-touch").lastTouchAt, null);
+});

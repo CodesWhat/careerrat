@@ -60,6 +60,27 @@ describe("chat-first browser sort", () => {
     ]);
   });
 
+  it("sorts by lastTouchAt when present, ahead of the appliedAt/sourcedAt/postedAt fallback", async () => {
+    const { sortJobs } = await loadModel();
+    const jobs = [
+      // Applied 60 days ago, but touched (a communication) yesterday: the touch wins.
+      {
+        id: "applied-old-touched-recent",
+        appliedAt: "2026-07-01T00:00:00Z",
+        lastTouchAt: "2026-08-29T00:00:00Z",
+      },
+      // Applied 5 days ago, no later touch recorded.
+      { id: "applied-recent-no-touch", appliedAt: "2026-08-25T00:00:00Z" },
+      { id: "unknown" },
+    ];
+
+    expect(sortJobs(jobs, "updated").map((job) => job.id)).toEqual([
+      "applied-old-touched-recent",
+      "applied-recent-no-touch",
+      "unknown",
+    ]);
+  });
+
   it("does not mutate the input array", async () => {
     const { sortJobs } = await loadModel();
     const jobs = [
