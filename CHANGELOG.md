@@ -4,6 +4,27 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2026-09-08
+
+### Fixed
+
+- Evaluating a scanner-saved posting reads the full job description instead of
+  treating its body as empty and losing requirements and fit signals.
+- Inbound recruiter messages stay with their own application when two jobs share
+  a company and title. Creating a thread cannot overwrite another thread with
+  the same generated name.
+- Scheduling checks every saved busy block, so old calendar history and long
+  calendars no longer hide future conflicts.
+- Prepared scheduling replies remove past, invalid, and conflicting proposed
+  times from their text as well as their structured slots.
+- DOCX conversion keeps the app responsive, stops stalled or cancelled converter
+  processes, and preserves completed files when an export fails.
+
+### Changed
+
+- Refreshed the README highlights, application and scheduling guides, public
+  roadmap, and supported release information.
+
 ## [0.19.0] - 2026-09-08
 
 ### Added

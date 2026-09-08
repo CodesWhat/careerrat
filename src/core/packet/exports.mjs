@@ -354,6 +354,7 @@ export async function exportPacketArtifacts({
   request = {},
   formats,
   uploadRequirements = [],
+  signal,
   exportArtifact = documentExportArtifact,
   // Test-only fault-injection seam for the packet manifest's own write
   // (decision 6's rollback ordering): defaults to the real write. A real
@@ -363,6 +364,7 @@ export async function exportPacketArtifacts({
   writeManifestFile = (path, content) => writeFileSync(path, content, "utf8"),
   now = () => new Date(),
 } = {}) {
+  signal?.throwIfAborted();
   const id = cleanText(applicationId || appId);
   if (!id) {
     const err = new Error("exportPacketArtifacts: appId is required");
@@ -695,7 +697,9 @@ export async function exportPacketArtifacts({
         title: titleFor(app, kind),
         ats: true,
         root: stagingDir,
+        signal,
       });
+      signal?.throwIfAborted();
 
       artifacts[sourceKey] = storedPath;
       // BUG: the read path (GET /api/packet, isGatedIn) keys off the plain
@@ -801,6 +805,7 @@ export async function exportPacketArtifacts({
 
     let registered;
     try {
+      signal?.throwIfAborted();
       for (const { stagedPath, finalPath } of pendingPromotions) {
         if (existsSync(finalPath)) {
           const backupPath = `${finalPath}.bak-${randomToken()}`;

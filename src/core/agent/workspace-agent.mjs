@@ -4855,6 +4855,7 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         formats: formats.length ? formats : ["pdf"],
         exportArtifact: packetExportArtifact,
+        signal,
       });
       const artifacts = operation.artifacts || {};
       const fileCount = Object.keys(artifacts).filter((key) => /(Pdf|Docx|Text)$/.test(key)).length;

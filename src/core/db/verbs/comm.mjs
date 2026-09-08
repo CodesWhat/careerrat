@@ -46,7 +46,9 @@ function findInboundThread(db, { applicationId, company, role, channel }) {
     if (matched) return matched;
   }
   return db
-    .prepare("SELECT data FROM communications ORDER BY updated_at DESC")
+    .prepare(
+      "SELECT data FROM communications WHERE application_id IS NULL ORDER BY updated_at DESC"
+    )
     .all()
     .map((row) => JSON.parse(row.data))
     .find(
@@ -131,6 +133,12 @@ export function commCaptureInbound({
       });
     if (!existing && id === `comm-${cleanChannel}` && linkedApplicationId) {
       id = slugifyThreadId({ company: linkedApplicationId, channel: cleanChannel });
+    }
+    if (!existing) {
+      const baseId = id;
+      while (getRow(db, "communications", id)) {
+        id = `${baseId}-${randomUUID()}`;
+      }
     }
     const messageId = sourceId ? `intake:${clean(sourceId)}` : `inbound:${randomUUID()}`;
     const existingMessages = Array.isArray(existing?.messages) ? existing.messages.slice() : [];
