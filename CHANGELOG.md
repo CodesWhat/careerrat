@@ -4,7 +4,7 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.19.0] - 2026-09-08
 
 ### Added
 
@@ -47,6 +47,11 @@ All notable changes to CareerRat are documented here. This project follows
   keep Tab inside the dialog, close on Escape where a close exists, and hand
   focus back when they go away. Stacked dialogs no longer steal each other's
   Escape.
+- Paul's read on your search counts every quiet application, not just the
+  four it lists, and only counts employer replies as responses, so withdrawing
+  before anyone answered no longer inflates the rate.
+- "Recently updated" in Search and Pipeline follows the last real touch on an
+  application, such as a logged call, instead of the date you applied.
 
 ## [0.18.2] - 2026-09-05
 

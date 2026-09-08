@@ -5,7 +5,7 @@ record of what shipped when, is a local file that isn't published.
 
 ## Where things stand
 
-v0.18.2 is the current release (2026-09-05). The desktop app is the product;
+v0.19.0 is the current release (2026-09-08). The desktop app is the product;
 the CLI underneath it is an implementation detail and isn't promoted.
 
 The theme: agnostic to the job. It should work for anyone.
