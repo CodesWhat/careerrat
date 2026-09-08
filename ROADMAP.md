@@ -5,15 +5,16 @@ record of what shipped when, is a local file that isn't published.
 
 ## Where things stand
 
-v0.19.0 is the current release (2026-09-08). The desktop app is the product;
+v0.19.1 is the current release (2026-09-08). The desktop app is the product;
 the CLI underneath it is an implementation detail and isn't promoted.
 
 The theme: agnostic to the job. It should work for anyone.
 
 ## Next
 
-- Go through the 18 things the old dashboard did that the chat-first app
-  doesn't yet, and decide each one: build it into the chat surface, or drop it.
+The chat-first feature review and the latest reliability fixes are complete.
+There are no further committed roadmap items. New work appears here once its
+scope is decided.
 
 ## How to read this
 

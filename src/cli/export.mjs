@@ -101,7 +101,7 @@ const title = titleArg || inputBase.replace(/[-_]/g, " ");
 // --- If docx, report which tool will be used ---
 
 if (formats.includes("docx") && !wantJson) {
-  const cap = detectDocxCapability();
+  const cap = await detectDocxCapability();
   console.log(`DOCX tool: ${cap.label}`);
 }
 

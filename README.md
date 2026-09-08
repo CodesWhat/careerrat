@@ -145,19 +145,18 @@ resizable, maximizable, and supports full screen, with a minimum working size of
 <h2 align="center" id="recent-updates">Recent Updates</h2>
 
 <details open>
-<summary><strong>v0.17.0 highlights</strong></summary>
+<summary><strong>v0.19.1 highlights</strong></summary>
 
-- **Pay checks now understand hourly, tipped, and shift-based jobs, not just
-  salaried roles.** Candidate setup and Profile add an annual-cash worksheet
-  that keeps your original pay inputs while deriving a comparable annual floor
-  for search and evaluation.
-- **Search and company discovery now follow your own role, seniority, and
-  location rules**, instead of assuming a salaried software-engineering search.
-- **Compensation checks compare like with like** across annual salaries, hourly
-  and tipped wages, and explicitly labeled pay ranges.
-- **An ordinary search no longer opens a stack of visible browser windows.**
-  Public web searches run hidden; a source that needs your own login still opens
-  visibly so you can interact with it.
+- Saved job descriptions retain their full text when evaluated, including
+  requirements and fit signals in the body.
+- Different applications at the same company keep their own recruiter history
+  and reply recipients, even when the job titles match.
+- Scheduling checks all saved calendar conflicts and removes rejected times
+  from the reply it prepares for you.
+- DOCX conversion keeps the app responsive and stops if the converter hangs.
+
+This patch builds on v0.19.0's job sorting, pay-band display, company-health
+context, per-event calendar links, and clearer People and activity panels.
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
 

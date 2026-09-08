@@ -124,6 +124,76 @@ function readApp(repoRoot, id = "app-export") {
   return row ? JSON.parse(row.data) : null;
 }
 
+for (const cause of ["abort", "timeout"]) {
+  test(`packet export ${cause} leaves prior files and registrations intact and releases reservations`, async () => {
+    const { exportPacketArtifacts } = await importPacketExports();
+    const repoRoot = tempRepo();
+    const sources = seedPacketSources(repoRoot);
+    seedApp(repoRoot, sources);
+    const env = tempDownloadsEnv();
+    const before = readApp(repoRoot);
+    const beforeFiles = readdirSync(join(repoRoot, "workspace/tailored")).sort();
+    const controller = new AbortController();
+    const stopped = new Error(cause === "abort" ? "export cancelled" : "converter timed out");
+    let calls = 0;
+    let receivedSignal;
+    const exporter = async (input) => {
+      receivedSignal = input.signal;
+      const result = await fakeExporter([])(input);
+      calls += 1;
+      if (calls === 2) {
+        if (cause === "abort") controller.abort(stopped);
+        else throw stopped;
+      }
+      return result;
+    };
+    await assert.rejects(
+      exportPacketArtifacts({
+        repoRoot,
+        env,
+        appId: "app-export",
+        formats: ["docx"],
+        signal: controller.signal,
+        exportArtifact: exporter,
+      }),
+      (error) => error === stopped
+    );
+    assert.equal(receivedSignal, controller.signal);
+    assert.deepEqual(readApp(repoRoot), before);
+    assert.deepEqual(readdirSync(join(repoRoot, "workspace/tailored")).sort(), beforeFiles);
+    assert.equal(
+      readdirSync(join(repoRoot, "workspace")).some((name) => name.startsWith(".export-staging-")),
+      false
+    );
+    assert.equal(
+      openDb({ repoRoot, env }).prepare("SELECT COUNT(*) AS n FROM artifact_reservations").get().n,
+      0
+    );
+  });
+}
+
+test("export intent forwards its operation cancellation signal to packet export", async () => {
+  const repoRoot = tempRepo();
+  seedApp(repoRoot, seedPacketSources(repoRoot));
+  const controller = new AbortController();
+  let receivedSignal;
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    signal: controller.signal,
+    intent: {
+      type: "job.export-documents",
+      entity: { type: "application", id: "app-export" },
+      input: { formats: ["docx"] },
+    },
+    exportDocumentsImpl: async (input) => {
+      receivedSignal = input.signal;
+      return { artifacts: {}, formats: ["docx"] };
+    },
+  });
+  assert.equal(receivedSignal, controller.signal);
+});
+
 function workspaceRel(repoRoot, absPath) {
   return relative(repoRoot, absPath).replaceAll("\\", "/");
 }

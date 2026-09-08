@@ -4,16 +4,18 @@
 // via renderResumeText, built on the same block/run content model as DOCX.
 // Preview fragments are sanitized server-side.
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   closeSync,
   fstatSync,
   lstatSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readSync,
   realpathSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -22,6 +24,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import sanitizeHtml from "sanitize-html";
+import { scheduleRuntimeProcessKill } from "../ai/runtime-process.mjs";
 
 const repoRoot = join(fileURLToPath(new URL("../../..", import.meta.url)));
 
@@ -1144,31 +1147,137 @@ function desktopPdfRendererConfig(env) {
 // detectDocxCapability
 // ---------------------------------------------------------------------------
 
+const DOCX_PROBE_TIMEOUT_MS = 5_000;
+const DOCX_CONVERSION_TIMEOUT_MS = 60_000;
+const DOCX_OUTPUT_MAX_BYTES = 1024 * 1024;
+
+function runDocxCommand(command, args, { signal, timeoutMs, spawnImpl = spawn } = {}) {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl(command, args, {
+      shell: false,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout = [];
+    const stderr = [];
+    let outputBytes = 0;
+    let stopping = false;
+    let stopError;
+    let closed = false;
+    let terminationComplete = true;
+    let exitError;
+    let status;
+    let terminationTimer;
+    const finish = () => {
+      if (!closed || !terminationComplete) return;
+      clearTimeout(timer);
+      clearTimeout(terminationTimer);
+      signal?.removeEventListener("abort", abort);
+      if (stopping) reject(stopError);
+      else if (exitError) reject(exitError);
+      else {
+        const result = {
+          status,
+          stdout: Buffer.concat(stdout).toString("utf8"),
+          stderr: Buffer.concat(stderr).toString("utf8"),
+        };
+        if (status === 0) resolve(result);
+        else
+          reject(
+            new Error(`${command} failed (exit ${status}): ${result.stderr || result.stdout}`)
+          );
+      }
+    };
+    const stop = (error) => {
+      if (stopping) return;
+      stopping = true;
+      stopError = error;
+      clearTimeout(timer);
+      terminationComplete = false;
+      // Keep the escalation even if the parent exits first: a converter's
+      // descendants may still hold files or pipes open after SIGTERM.
+      terminationTimer = scheduleRuntimeProcessKill(child, () => {
+        terminationComplete = true;
+        finish();
+      });
+      terminationTimer.ref?.();
+    };
+    const abort = () => stop(signal.reason);
+    const deadline =
+      Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DOCX_CONVERSION_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      const error = new Error(`${command} timed out after ${deadline}ms`);
+      error.code = "DOCX_PROCESS_TIMEOUT";
+      stop(error);
+    }, deadline);
+    const collect = (chunks) => (chunk) => {
+      if (stopping) return;
+      outputBytes += chunk.length;
+      if (outputBytes > DOCX_OUTPUT_MAX_BYTES) {
+        const error = new Error(
+          `${command} output exceeded the ${DOCX_OUTPUT_MAX_BYTES}-byte limit`
+        );
+        error.code = "DOCX_OUTPUT_LIMIT";
+        stop(error);
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    };
+    child.stdout?.on("data", collect(stdout));
+    child.stderr?.on("data", collect(stderr));
+    child.on("error", (error) => {
+      exitError = error;
+    });
+    child.on("close", (code) => {
+      status = code;
+      closed = true;
+      finish();
+    });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
+
 /**
  * Probe for DOCX conversion tools in priority order: pandoc → soffice → ooxml (built-in).
- *
- * @returns {{ tool: 'pandoc'|'soffice'|'ooxml', label: string }}
+ * @returns {Promise<{ tool: 'pandoc'|'soffice'|'ooxml', label: string }>}
  */
-export function detectDocxCapability() {
+export async function detectDocxCapability({
+  signal,
+  probeTimeoutMs = DOCX_PROBE_TIMEOUT_MS,
+  spawnImpl,
+} = {}) {
   // Try pandoc
   try {
-    const res = spawnSync("pandoc", ["--version"], { encoding: "utf8" });
+    const res = await runDocxCommand("pandoc", ["--version"], {
+      signal,
+      timeoutMs: probeTimeoutMs,
+      spawnImpl,
+    });
     if (res.status === 0 && res.stdout) {
       const ver = (res.stdout.match(/pandoc\s+([\d.]+)/) || [])[1] || "";
       return { tool: "pandoc", label: `pandoc ${ver}`.trim() };
     }
   } catch {
+    signal?.throwIfAborted();
     // not on PATH
   }
 
   // Try soffice (LibreOffice)
   try {
-    const res = spawnSync("soffice", ["--version"], { encoding: "utf8" });
+    const res = await runDocxCommand("soffice", ["--version"], {
+      signal,
+      timeoutMs: probeTimeoutMs,
+      spawnImpl,
+    });
     if (res.status === 0 && res.stdout) {
       const ver = (res.stdout.match(/LibreOffice\s+([\d.]+)/) || [])[1] || "";
       return { tool: "soffice", label: `LibreOffice soffice ${ver}`.trim() };
     }
   } catch {
+    signal?.throwIfAborted();
     // not on PATH
   }
 
@@ -1188,14 +1297,26 @@ export function detectDocxCapability() {
  *   to any backend, for ATS submission copies.
  * @returns {Promise<{ outPath: string, tool: string, label: string }>}
  */
-async function renderDocx({ markdown, outPath, title = "Document", ats = false }) {
-  const cap = detectDocxCapability();
+async function renderDocx({
+  markdown,
+  outPath,
+  title = "Document",
+  ats = false,
+  signal,
+  docxOptions = {},
+}) {
+  const cap = await detectDocxCapability({ ...docxOptions, signal });
   const source = (ats ? normalizeAtsText : normalizeDocumentText)(markdown);
+  const processOptions = {
+    spawnImpl: docxOptions.spawnImpl,
+    timeoutMs: docxOptions.conversionTimeoutMs ?? DOCX_CONVERSION_TIMEOUT_MS,
+    signal,
+  };
 
   if (cap.tool === "pandoc") {
-    await renderDocxViaPandoc({ markdown: source, outPath, title });
+    await renderDocxViaPandoc({ markdown: source, outPath, title, processOptions });
   } else if (cap.tool === "soffice") {
-    await renderDocxViaSoffice({ markdown: source, outPath, title });
+    await renderDocxViaSoffice({ markdown: source, outPath, title, processOptions });
   } else {
     await renderDocxOoxml({ markdown: source, outPath, title });
   }
@@ -1299,87 +1420,55 @@ function makeReferenceDoc(dst) {
   writeFileSync(dst, buildZip(entries));
 }
 
-async function renderDocxViaPandoc({ markdown, outPath, title }) {
-  const tmp = join(tmpdir(), `careerrat-export-${Date.now()}.md`);
-  const refDoc = join(tmpdir(), `careerrat-ref-${Date.now()}.docx`);
-  writeFileSync(tmp, markdown, "utf8");
-  makeReferenceDoc(refDoc);
-
-  const res = spawnSync(
-    "pandoc",
-    [
-      tmp,
-      "-f",
-      "markdown",
-      "-o",
-      outPath,
-      "--reference-doc",
-      refDoc,
-      "--metadata",
-      `title=${title}`,
-    ],
-    { encoding: "utf8" }
-  );
-
-  // clean up temp files
+async function renderDocxViaPandoc({ markdown, outPath, title, processOptions }) {
+  const scratch = mkdtempSync(join(tmpdir(), "careerrat-docx-"));
   try {
-    import("node:fs").then(({ unlinkSync }) => {
-      try {
-        unlinkSync(tmp);
-      } catch {
-        /* ok */
-      }
-      try {
-        unlinkSync(refDoc);
-      } catch {
-        /* ok */
-      }
-    });
-  } catch {
-    /* ok */
-  }
-
-  if (res.status !== 0) {
-    throw new Error(`pandoc failed (exit ${res.status}): ${res.stderr || res.stdout || ""}`);
+    const input = join(scratch, "document.md");
+    const reference = join(scratch, "reference.docx");
+    writeFileSync(input, markdown, "utf8");
+    makeReferenceDoc(reference);
+    await runDocxCommand(
+      "pandoc",
+      [
+        input,
+        "-f",
+        "markdown",
+        "-o",
+        outPath,
+        "--reference-doc",
+        reference,
+        "--metadata",
+        `title=${title}`,
+      ],
+      processOptions
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 }
 
 // --- soffice path ---
 
-async function renderDocxViaSoffice({ markdown, outPath, title }) {
-  const tmp = join(tmpdir(), `careerrat-export-${Date.now()}.html`);
-  const tmpDocx = tmp.replace(".html", ".docx");
-
-  writeFileSync(tmp, documentHtml(markdown, { title }), "utf8");
-
-  const res = spawnSync(
-    "soffice",
-    ["--headless", "--convert-to", "docx", "--outdir", tmpdir(), tmp],
-    { encoding: "utf8" }
-  );
-
-  if (res.status !== 0) {
-    throw new Error(`soffice failed (exit ${res.status}): ${res.stderr || res.stdout || ""}`);
-  }
-
-  // soffice writes <basename>.docx in the outdir — move it to outPath
-  const { renameSync, unlinkSync } = await import("node:fs");
+async function renderDocxViaSoffice({ markdown, outPath, title, processOptions }) {
+  const scratch = mkdtempSync(join(tmpdir(), "careerrat-docx-"));
   try {
-    renameSync(tmpDocx, outPath);
-  } catch {
-    // soffice may have named it differently — fall back to OOXML
+    const input = join(scratch, "document.html");
+    const converted = join(scratch, "document.docx");
+    writeFileSync(input, documentHtml(markdown, { title }), "utf8");
+    await runDocxCommand(
+      "soffice",
+      ["--headless", "--convert-to", "docx", "--outdir", scratch, input],
+      processOptions
+    );
+    processOptions.signal?.throwIfAborted();
     try {
-      unlinkSync(tmp);
+      renameSync(converted, outPath);
     } catch {
-      /* ok */
+      // Preserve the fallback for a successful converter that chose another filename.
+      await renderDocxOoxml({ markdown, outPath, title });
     }
-    await renderDocxOoxml({ markdown, outPath, title });
-    return;
-  }
-  try {
-    unlinkSync(tmp);
-  } catch {
-    /* ok */
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 }
 
@@ -2546,7 +2635,7 @@ function confinedTempSiblingPath(finalDestPath) {
 // writeTextArtifactConfined already uses, so a renderer that follows
 // symlinks or partially writes on failure never touches the real
 // destination path directly.
-async function renderFormatConfined({ destPath, root, formatLabel, render }) {
+async function renderFormatConfined({ destPath, root, formatLabel, render, signal }) {
   if (!destPath || !isAbsolute(destPath)) {
     throw new Error(
       `exportArtifact: outBase must be a non-empty absolute path, got ${JSON.stringify(destPath)}`
@@ -2558,6 +2647,7 @@ async function renderFormatConfined({ destPath, root, formatLabel, render }) {
   let info;
   try {
     info = await render(tmpPath);
+    signal?.throwIfAborted();
   } catch (err) {
     try {
       unlinkSync(tmpPath);
@@ -2592,17 +2682,22 @@ export async function exportArtifact({
   title = "Document",
   ats = false,
   root,
+  signal,
+  docxOptions,
 }) {
+  signal?.throwIfAborted();
   assertMarkdownSourceSize(markdown);
   assertMarkdownLineCount(markdown);
   const result = {};
 
   for (const fmt of formats) {
+    signal?.throwIfAborted();
     if (fmt === "pdf") {
       const { finalDestPath } = await renderFormatConfined({
         destPath: `${outBase}.pdf`,
         root,
         formatLabel: "PDF",
+        signal,
         render: (tmpPath) => renderPdf({ markdown, outPath: tmpPath, title, ats }),
       });
       result.pdf = finalDestPath;
@@ -2612,8 +2707,9 @@ export async function exportArtifact({
         destPath: `${outBase}.docx`,
         root,
         formatLabel: "DOCX",
+        signal,
         render: async (tmpPath) => {
-          info = await renderDocx({ markdown, outPath: tmpPath, title, ats });
+          info = await renderDocx({ markdown, outPath: tmpPath, title, ats, signal, docxOptions });
         },
       });
       result.docx = finalDestPath;

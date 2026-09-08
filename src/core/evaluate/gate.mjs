@@ -29,10 +29,10 @@ import { assessLegitimacy } from "./legitimacy.mjs";
  *   <yaml frontmatter>
  *   ---
  *
- *   # Job Description
+ *   # Job Description (or ## Job Description in captured postings)
  *   <body text>
  *
- *   # Gate Notes
+ *   # Gate Notes (or ## Gate Notes)
  *   <gate notes text>
  */
 export function parseSavedJob(markdown) {
@@ -51,8 +51,10 @@ export function parseSavedJob(markdown) {
   }
 
   // --- split sections ---
-  const jdMatch = rest.match(/(?:^|\n)#\s*Job Description\s*\r?\n([\s\S]*?)(?=\n#\s|$)/);
-  const gnMatch = rest.match(/(?:^|\n)#\s*Gate Notes\s*\r?\n([\s\S]*?)(?=\n#\s|$)/);
+  const jdMatch = rest.match(
+    /(?:^|\n)#{1,2}[ \t]*Job Description[ \t]*\r?\n([\s\S]*?)(?=\n#\s|\n##[ \t]*Gate Notes[ \t]*(?:\r?\n|$)|$)/
+  );
+  const gnMatch = rest.match(/(?:^|\n)#{1,2}[ \t]*Gate Notes[ \t]*\r?\n([\s\S]*?)(?=\n#\s|$)/);
 
   const body = jdMatch ? jdMatch[1].trim() : "";
   const gateNotes = gnMatch ? gnMatch[1].trim() : "";

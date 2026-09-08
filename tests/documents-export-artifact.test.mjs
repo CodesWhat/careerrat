@@ -4,11 +4,14 @@
 // packet-directory guard plus a symlink-safe atomic write.
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -16,10 +19,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import JSZip from "jszip";
 import {
+  detectDocxCapability,
   exportArtifact,
   MARKDOWN_SOURCE_MAX_BYTES,
   MARKDOWN_SOURCE_MAX_LINES,
@@ -41,6 +45,171 @@ after(() => {
       // best-effort cleanup
     }
   }
+});
+
+async function docxConverterFixture(
+  t,
+  { tool = "pandoc", behavior = "success", probeHang = false } = {}
+) {
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", "<Types />");
+  zip.file("word/document.xml", "<document>Fixture conversion</document>");
+  const bytes = await zip.generateAsync({ type: "base64" });
+  const children = [];
+  const inputs = [];
+  let markStarted;
+  const started = new Promise((resolve) => {
+    markStarted = resolve;
+  });
+  t.after(async () => {
+    const pending = [];
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) {
+        pending.push(once(child, "close"));
+        child.kill("SIGKILL");
+      }
+    }
+    await Promise.all(pending);
+  });
+  const spawnImpl = (command, args, options) => {
+    const probe = args.includes("--version");
+    if (!probe) inputs.push(command === "pandoc" ? args[0] : args.at(-1));
+    const source = `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const config = JSON.parse(process.argv[1]);
+      const safety = setTimeout(() => process.exit(9), 10000);
+      if (config.probe) {
+        if (config.probeHang && config.command === 'pandoc') {
+          process.on('SIGTERM', () => {});
+        } else {
+          console.log(config.command === 'pandoc' ? 'pandoc 3.0' : 'LibreOffice 24.0');
+          process.exit(config.command === config.tool ? 0 : 1);
+        }
+      } else {
+        const output = config.command === 'pandoc' ? config.args[config.args.indexOf('-o') + 1]
+          : path.join(config.args[config.args.indexOf('--outdir') + 1], path.basename(config.args.at(-1), '.html') + '.docx');
+        fs.writeFileSync(output, 'partial');
+        console.log('ready');
+        if (config.behavior === 'hang') process.on('SIGTERM', () => {});
+        else if (config.behavior === 'fail') { console.error('fixture conversion failed'); process.exit(2); }
+        else if (config.behavior === 'noisy') process.stderr.write('x'.repeat(2 * 1024 * 1024));
+        else setTimeout(() => { fs.writeFileSync(output, Buffer.from(config.bytes, 'base64')); clearTimeout(safety); }, 150);
+      }
+    `;
+    const child = spawn(
+      process.execPath,
+      ["-e", source, JSON.stringify({ command, args, probe, tool, behavior, probeHang, bytes })],
+      options
+    );
+    children.push(child);
+    child.stdout?.on("data", (chunk) => {
+      if (String(chunk).includes("ready")) markStarted();
+    });
+    return child;
+  };
+  return {
+    children,
+    inputs,
+    started,
+    options: { spawnImpl },
+    assertClean() {
+      for (const child of children)
+        assert.ok(
+          child.exitCode !== null || child.signalCode !== null,
+          "converter must have exited"
+        );
+      for (const input of inputs)
+        assert.equal(existsSync(input), false, "converter input must be removed");
+    },
+  };
+}
+
+for (const tool of ["pandoc", "soffice"]) {
+  test(`DOCX ${tool} conversion keeps the event loop responsive and cleans temporary files`, async (t) => {
+    const fixture = await docxConverterFixture(t, { tool });
+    const output = tempDir("careerrat-docx-responsive-");
+    let ticked = false;
+    const timer = setTimeout(() => {
+      ticked = true;
+    }, 20);
+    t.after(() => clearTimeout(timer));
+    const result = await exportArtifact({
+      markdown: "# Resume",
+      outBase: join(output, "resume"),
+      formats: ["docx"],
+      docxOptions: fixture.options,
+    });
+    assert.equal(ticked, true, "conversion must allow timers to run before it completes");
+    assert.equal(result.docxTool, tool);
+    const zip = await JSZip.loadAsync(readFileSync(result.docx));
+    assert.match(await zip.file("word/document.xml").async("string"), /Fixture conversion/);
+    fixture.assertClean();
+    for (const input of fixture.inputs) assert.equal(existsSync(dirname(input)), false);
+  });
+
+  for (const cause of ["timeout", "abort", "fail", "noisy"]) {
+    test(`DOCX ${tool} ${cause} stops the converter and preserves the previous destination`, async (t) => {
+      const fixture = await docxConverterFixture(t, {
+        tool,
+        behavior: ["timeout", "abort"].includes(cause) ? "hang" : cause,
+      });
+      const output = tempDir("careerrat-docx-stopped-");
+      const outBase = join(output, "resume");
+      writeFileSync(`${outBase}.docx`, "previous document");
+      const controller = new AbortController();
+      const aborted = Object.assign(new Error("export cancelled"), { code: "ABORT_ERR" });
+      const run = exportArtifact({
+        markdown: "# Resume",
+        outBase,
+        formats: ["docx"],
+        signal: controller.signal,
+        docxOptions: { ...fixture.options, conversionTimeoutMs: cause === "timeout" ? 300 : 3000 },
+      });
+      const expected =
+        cause === "abort"
+          ? (error) => error === aborted
+          : cause === "timeout"
+            ? /timed out/i
+            : cause === "noisy"
+              ? /output.*limit/i
+              : /fixture conversion failed/;
+      const rejected = assert.rejects(run, expected);
+      if (cause === "abort") {
+        await fixture.started;
+        controller.abort(aborted);
+      }
+      await rejected;
+      assert.equal(readFileSync(`${outBase}.docx`, "utf8"), "previous document");
+      fixture.assertClean();
+      assert.deepEqual(readdirSync(output), ["resume.docx"]);
+    });
+  }
+}
+
+test("DOCX capability probe times out and falls through without blocking timers", async (t) => {
+  const fixture = await docxConverterFixture(t, { tool: "soffice", probeHang: true });
+  const cap = await detectDocxCapability({ ...fixture.options, probeTimeoutMs: 1000 });
+  assert.equal(cap.tool, "soffice");
+  fixture.assertClean();
+});
+
+test("concurrent DOCX conversions use different temporary directories", async (t) => {
+  const fixture = await docxConverterFixture(t);
+  const output = tempDir("careerrat-docx-concurrent-");
+  await Promise.all(
+    ["one", "two"].map((name) =>
+      exportArtifact({
+        markdown: name,
+        outBase: join(output, name),
+        formats: ["docx"],
+        docxOptions: fixture.options,
+      })
+    )
+  );
+  assert.equal(fixture.inputs.length, 2);
+  assert.equal(new Set(fixture.inputs.map(dirname)).size, 2);
+  fixture.assertClean();
 });
 
 test("exportArtifact rejects an empty outBase instead of writing under process.cwd()", async () => {

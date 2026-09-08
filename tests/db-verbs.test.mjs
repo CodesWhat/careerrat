@@ -9,6 +9,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { resolveRecipient } from "../src/core/comms/recipient.mjs";
+import { slugifyThreadId } from "../src/core/comms/threads.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import {
@@ -1024,6 +1026,128 @@ test("commSetDraft stores a reviewable draft and appends its durable message his
   assert.equal(comm.messages.at(-1).direction, "outbound-draft");
   assert.equal(comm.messages.at(-1).at, "2026-08-09T17:00:00.000Z");
   assert.equal(comm.messages.at(-1).subject, "Re: SRE next steps");
+});
+
+test("commCaptureInbound keeps same-title requisitions in separate recruiter threads", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  const captures = [
+    { applicationId: "req-one", email: "alice@example.test" },
+    { applicationId: "req-two", email: "bob@example.test" },
+  ].map(({ applicationId, email }) => {
+    appUpsert({
+      repoRoot,
+      row: { id: applicationId, company: "Acme", role: "Staff Engineer", status: "awaiting" },
+    });
+    return {
+      repoRoot,
+      applicationId,
+      company: "Acme",
+      role: "Staff Engineer",
+      participant: { email },
+      summary: "Please share your availability.",
+      sourceId: `${applicationId}-first`,
+    };
+  });
+  const results = captures.map((capture) => commCaptureInbound(capture));
+  assert.notEqual(results[0].id, results[1].id);
+  for (const [index, capture] of captures.entries()) {
+    const result = results[index];
+    assert.equal(result.created, true);
+    const next = commCaptureInbound({
+      ...capture,
+      sourceId: `${capture.applicationId}-next`,
+      summary: "Tuesday is confirmed.",
+    });
+    assert.equal(next.id, result.id);
+    assert.equal(next.created, false);
+    const beforeDuplicate = readMeta(db);
+    assert.equal(commCaptureInbound(capture).duplicate, true);
+    assert.deepEqual(readMeta(db), beforeDuplicate);
+    const stored = db
+      .prepare("SELECT application_id, data FROM communications WHERE id = ?")
+      .get(result.id);
+    const thread = JSON.parse(stored.data);
+    assert.equal(stored.application_id, capture.applicationId);
+    assert.equal(thread.applicationId, capture.applicationId);
+    assert.deepEqual(
+      thread.messages.map((message) => message.id),
+      [`intake:${capture.applicationId}-first`, `intake:${capture.applicationId}-next`]
+    );
+    assert.equal(resolveRecipient(thread).to, capture.participant.email);
+  }
+  const unlinked = commCaptureInbound({
+    ...captures[0],
+    applicationId: undefined,
+    sourceId: "unlinked-first",
+  });
+  assert.ok(results.every((result) => result.id !== unlinked.id));
+  assert.equal(
+    db.prepare("SELECT application_id FROM communications WHERE id = ?").get(unlinked.id)
+      .application_id,
+    null
+  );
+});
+
+test("commCaptureInbound adopts an unlinked matching thread without losing its history", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const capture = {
+    repoRoot,
+    company: "Initech",
+    role: "Analyst",
+    summary: "Can we arrange a call?",
+    sourceId: "unlinked-call",
+  };
+  const first = commCaptureInbound(capture);
+  const linked = commCaptureInbound({
+    ...capture,
+    applicationId: "app-non-interview",
+    sourceId: "linked-call",
+  });
+  assert.equal(linked.id, first.id);
+  assert.equal(linked.created, false);
+  const stored = openDb({ repoRoot })
+    .prepare("SELECT application_id, data FROM communications WHERE id = ?")
+    .get(first.id);
+  assert.equal(stored.application_id, "app-non-interview");
+  const thread = JSON.parse(stored.data);
+  assert.equal(thread.applicationId, "app-non-interview");
+  assert.equal(thread.messages.length, 2);
+});
+
+test("commCaptureInbound never overwrites an unrelated row occupying its generated slug", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const id = slugifyThreadId({ company: "Initech", role: "Analyst", channel: "email" });
+  const original = {
+    id,
+    company: "Other company",
+    role: "Different role",
+    channel: "email",
+    status: "waiting",
+    messages: [],
+  };
+  commUpsert({ repoRoot, row: original });
+  const result = commCaptureInbound({
+    repoRoot,
+    company: "Initech",
+    role: "Analyst",
+    summary: "Please send availability.",
+    sourceId: "new-inbound",
+  });
+  assert.notEqual(result.id, id);
+  const db = openDb({ repoRoot });
+  assert.deepEqual(
+    JSON.parse(db.prepare("SELECT data FROM communications WHERE id = ?").get(id).data),
+    original
+  );
+  assert.equal(
+    JSON.parse(db.prepare("SELECT data FROM communications WHERE id = ?").get(result.id).data)
+      .company,
+    "Initech"
+  );
 });
 
 test("ISSUE-038 commCaptureInbound opens or appends one actionable thread without losing provenance", () => {

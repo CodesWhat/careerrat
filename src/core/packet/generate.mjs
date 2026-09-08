@@ -1310,6 +1310,7 @@ export async function generatePacket({
       appId: id,
       packetSources: artifacts,
       formats,
+      signal,
     });
     artifacts = { ...artifacts, ...(exported?.artifacts || {}) };
     const registeredManifest = exported?.registered?.packetManifest;

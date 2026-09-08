@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -13,8 +14,9 @@ import {
   parseSavedJob,
   renderGateBlock,
 } from "../src/core/evaluate/gate.mjs";
-
+import { userPath } from "../src/core/paths/workspace.mjs";
 import { validate } from "../src/core/profile/schema-validator.mjs";
+import { offersWithCapturedJobs } from "../src/core/scoring/sourced-persistence.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const jobSchema = JSON.parse(readFileSync(join(__dirname, "../config/job.schema.json"), "utf8"));
@@ -125,6 +127,90 @@ describe("parseSavedJob", () => {
     const md = "---\ncompany: Foo\nrole: Bar\n---\n\n# Job Description\n\nBody text only.\n";
     const result = parseSavedJob(md);
     assert.equal(result.gateNotes, "");
+  });
+
+  for (const heading of ["#", "##"]) {
+    for (const newline of ["\n", "\r\n"]) {
+      it(`separates ${heading} wrappers and preserves description subsections with ${JSON.stringify(newline)}`, () => {
+        const body = [
+          "Build distributed systems.",
+          "",
+          "## Responsibilities",
+          "Mentor engineers.",
+          "",
+          "### Qualifications",
+          "Experience building developer platforms.",
+        ].join(newline);
+        const markdown = [
+          "---",
+          "company: Acme",
+          "role: Staff Engineer",
+          "---",
+          "",
+          `${heading} Job Description`,
+          "",
+          body,
+          "",
+          `${heading} Gate Notes`,
+          "",
+          "GATE: REVIEW",
+          "",
+          "# Other section",
+          "Not part of either section.",
+        ].join(newline);
+
+        const parsed = parseSavedJob(markdown);
+        assert.equal(parsed.body, body);
+        assert.equal(parsed.gateNotes, "GATE: REVIEW");
+        assert.equal(parsed.frontmatter.company, "Acme");
+      });
+    }
+  }
+
+  it("evaluates the full description written by the sourced capture producer", (t) => {
+    const home = mkdtempSync(join(tmpdir(), "careerrat-capture-gate-"));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    const pathCtx = { repoRoot: join(__dirname, ".."), env: { CAREERRAT_HOME: home } };
+    const body = [
+      "Build distributed systems.",
+      "",
+      "## Responsibilities",
+      "Mentor engineers.",
+      "",
+      "### Qualifications",
+      "Experience building developer platforms.",
+    ].join("\n");
+    const [offer] = offersWithCapturedJobs({
+      ...pathCtx,
+      offers: [
+        {
+          company: "Acme",
+          title: "Staff Engineer",
+          url: "https://example.test/jobs/42",
+          location: "Remote, US",
+          bodyText: body,
+          ratingReason: "Capture triage should not become description text.",
+        },
+      ],
+      savedAt: new Date("2030-08-10T12:00:00Z"),
+    });
+    const job = parseSavedJob(readFileSync(userPath(pathCtx, offer.artifacts.jd), "utf8"));
+    const result = evaluateGate({
+      job,
+      targeting: {
+        role_buckets: [{ name: "Engineering", priority: "primary", titles: ["Staff Engineer"] }],
+        keep_signals: ["distributed systems", "mentor engineers", "developer platforms"],
+        fit_bands: { fit_floor: 85 },
+      },
+      profile: PROFILE,
+      now: new Date("2030-08-10T12:00:00Z"),
+    });
+
+    assert.equal(job.body, body);
+    assert.doesNotMatch(job.body, /Capture triage/);
+    assert.equal(job.gateNotes, "");
+    assert.equal(result.fit.score, 85);
+    assert.equal(result.gate, "REVIEW");
   });
 });
 
