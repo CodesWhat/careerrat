@@ -29,6 +29,10 @@ A `GATE: CUT` stops the flow. A `GATE: REVIEW` surfaces for your judgment. Only
 likely ghost jobs, evergreen reqs, and staffing-farm reposts as `LEGITIMACY:
 suspect` — a flag for your judgment, never an automatic cut.
 
+Evaluation reads the complete locally captured description, including its
+requirements and subsections. Saved postings remain usable after the live page
+disappears; gate notes are kept separate from the posting body.
+
 ## Step 2 — Tailor artifacts (tailor-application)
 
 After a KEEP verdict, say "tailor this" or "write a resume and cover letter":
@@ -49,6 +53,10 @@ not invent facts.
 
 Artifacts land in `.careerrat/workspace/tailored/` and are also exported to
 `~/Downloads/careerrat/<Company>/` for easy access.
+
+You can export a submission copy as PDF, DOCX, or plain text. DOCX conversion runs
+while the app remains responsive. If a converter hangs or an export is cancelled,
+CareerRat stops the conversion and keeps any previous completed file intact.
 
 Exporting the submission copy with `careerrat export ... --ats` also prints an
 ATS parseability score (0-100): how likely an applicant tracking system is to

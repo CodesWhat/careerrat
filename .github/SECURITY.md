@@ -7,6 +7,11 @@ currently published to npm as `latest`). Older releases and prerelease
 `rc` builds do not receive backported fixes; upgrade to the latest release to
 get one.
 
+| Release line | Supported |
+| --- | --- |
+| 0.19.x (latest patch) | Yes |
+| 0.18.x and earlier | No |
+
 ## Reporting a vulnerability
 
 Do not open a public GitHub issue for a suspected security vulnerability.

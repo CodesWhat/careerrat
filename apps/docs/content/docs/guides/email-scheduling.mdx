@@ -23,6 +23,10 @@ The `email-comms` skill:
 **Draft-only by default.** Sending requires your explicit action — the skill
 never sends automatically.
 
+Messages linked to different applications keep separate recruiter histories and
+reply recipients, even when the company and job title match. Review the linked
+application when capturing an incoming message.
+
 ### What email-comms handles
 
 - Reply to a recruiter message
@@ -54,6 +58,11 @@ If you have the `calendar_read` capability enabled, the skill can read free/busy
 from your work calendar to avoid double-booking. Without it, it drafts from the
 availability block in your profile (timezone + preferred hours) and degrades
 gracefully to draft-only + a manual `.ics` hold.
+
+Conflict checks use all saved busy blocks, including meetings beyond the short
+calendar context shown to Paul. Past, invalid, or conflicting proposed times are
+removed from both the prepared slots and the reply text. You still review the
+reply before sending it.
 
 ### Calendar provider sync (calendar-sync)
 
