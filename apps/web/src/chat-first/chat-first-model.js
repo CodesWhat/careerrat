@@ -473,9 +473,16 @@ function groupSchedule(calendar) {
       id: event?.id || `${iso}:${event?.time || ""}:${event?.title || "event"}`,
       meta: event?.meta || event?.label || "",
       actionLabel: scheduleActionLabel(event),
+      done: event?.done === true,
     });
   }
-  return [...groups].map(([day, items]) => ({ day, items }));
+  // Done rounds render muted and sink below the not-done rows within their
+  // day, history, not next action. A stable sort keeps everything else in
+  // the order the calendar model already produced.
+  return [...groups].map(([day, items]) => ({
+    day,
+    items: [...items].sort((a, b) => Number(a.done) - Number(b.done)),
+  }));
 }
 
 function pipelineStageKey(row) {
