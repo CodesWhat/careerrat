@@ -78,7 +78,7 @@ jobs:
         with:
           # Pin the last mirror-verified release instead of racing a newly
           # published `latest` before its Astral mirror asset is available.
-          version: "0.12.5"
+          version: "0.12.7"
       - name: Scan workflows for Actions security anti-patterns
         run: uvx zizmor==1.29.0 .github/workflows/ --min-severity medium
 
