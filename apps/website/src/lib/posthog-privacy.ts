@@ -87,6 +87,19 @@ function getRawPath(properties: Record<string, unknown>): unknown {
   }
 }
 
+function sanitizeReferringDomain(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (value === "$direct") return value;
+  if (
+    value.length > 253 ||
+    value.trim() !== value ||
+    !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu.test(value)
+  ) {
+    return undefined;
+  }
+  return value.toLowerCase();
+}
+
 function createCommonProperties(properties: Record<string, unknown>) {
   const token = properties.token;
   // PostHog's cookieless server-hash ingestion step computes the anonymous
@@ -130,6 +143,8 @@ function createCommonProperties(properties: Record<string, unknown>) {
   if (properties.distinct_id === "$posthog_cookieless") {
     common.distinct_id = "$posthog_cookieless";
   }
+  const referringDomain = sanitizeReferringDomain(properties.$referring_domain);
+  if (referringDomain !== undefined) common.$referring_domain = referringDomain;
   return common;
 }
 
