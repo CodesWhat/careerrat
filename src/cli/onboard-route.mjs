@@ -93,6 +93,7 @@ import {
   runFirstSearchInBackground,
   startFirstSearchRun,
 } from "../core/onboarding/first-search-run.mjs";
+import { hasUsableResumeContent } from "../core/onboarding/resume-content.mjs";
 import {
   extractDocxResumeMarkdown as defaultExtractDocxResumeMarkdown,
   extractDocxResumeText as defaultExtractDocxResumeText,
@@ -344,21 +345,11 @@ export function assertSettingsBaseRevision({
 // ---------------------------------------------------------------------------
 
 function hasUsableResumeExtraction(extracted) {
-  if (!String(extracted?.full_text || "").trim()) return false;
-
-  // Targeting suggestions and `candidate.domain` can be inferred by the
-  // model, so they do not prove that the uploaded document was actually
-  // transcribed. Require at least one literal candidate field, claim, or
-  // detected source section before accepting and persisting the result.
-  const candidateFacts = Object.entries(extracted?.candidate || {}).some(
-    ([key, value]) => key !== "domain" && String(value ?? "").trim()
-  );
-  const claimFacts = (extracted?.claims || []).some((claim) => String(claim?.claim ?? "").trim());
-  const sectionFacts = Object.values(extracted?.sections || {}).some(
-    (count) => Number.isFinite(Number(count)) && Number(count) > 0
-  );
-
-  return candidateFacts || claimFacts || sectionFacts;
+  return hasUsableResumeContent({
+    fullText: extracted?.full_text,
+    claims: extracted?.claims,
+    sections: extracted?.sections,
+  });
 }
 
 // Detect resume text that is actually binary (a PDF/DOCX decoded as text).
