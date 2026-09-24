@@ -27,7 +27,7 @@ jobs:
       contents: read
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: block
           # raven-actions/actionlint installs actionlint via a Python/pip helper
@@ -56,7 +56,7 @@ jobs:
       contents: read
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: block
           # astral-sh/setup-uv fetches uv from its GitHub release
@@ -74,11 +74,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # Pin the last mirror-verified release instead of racing a newly
           # published `latest` before its Astral mirror asset is available.
-          version: "0.12.5"
+          version: "0.12.13"
       - name: Scan workflows for Actions security anti-patterns
         run: uvx zizmor==1.29.0 .github/workflows/ --min-severity medium
 
@@ -97,7 +97,7 @@ jobs:
       GITLEAKS_LINUX_X64_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: block
           # checkout plus the pinned-and-hash-verified gitleaks tarball download
@@ -129,7 +129,7 @@ jobs:
       contents: read
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: block
           # actions/dependency-review-action calls the GitHub dependency-graph
