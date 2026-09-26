@@ -2,7 +2,7 @@
   "name": "careerrat",
   "version": "0.19.1",
   "private": false,
-  "packageManager": "npm@12.0.2",
+  "packageManager": "npm@12.1.0",
   "publishConfig": {
     "access": "public"
   },
@@ -158,20 +158,20 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.251",
-    "@biomejs/biome": "2.5.11",
-    "@npmcli/arborist": "10.0.2",
-    "@npmcli/config": "11.0.1",
-    "fast-check": "4.9.0",
-    "knip": "6.33.0",
-    "lefthook": "2.1.12",
+    "@anthropic-ai/claude-agent-sdk": "0.3.280",
+    "@biomejs/biome": "2.5.14",
+    "@npmcli/arborist": "10.0.3",
+    "@npmcli/config": "11.1.0",
+    "fast-check": "4.10.2",
+    "knip": "6.38.0",
+    "lefthook": "2.1.14",
     "nopt": "10.0.1",
     "npm-package-arg": "14.0.0",
-    "playwright": "1.62.1",
+    "playwright": "1.63.0",
     "semver": "7.8.5",
     "sharp": "0.35.4",
-    "turbo": "2.10.12",
-    "yaml": "2.9.0"
+    "turbo": "2.11.3",
+    "yaml": "2.9.1"
   },
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
