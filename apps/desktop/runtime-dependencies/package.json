@@ -3,12 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@agentclientprotocol/sdk": "1.4.0",
+    "@agentclientprotocol/sdk": "1.5.0",
     "htmlparser2": "12.0.0",
-    "jszip": "3.10.1",
-    "mammoth": "1.12.2",
-    "playwright": "1.62.1",
+    "jszip": "3.10.2",
+    "mammoth": "1.12.3",
+    "playwright": "1.63.0",
     "sanitize-html": "2.17.7",
-    "undici": "8.10.1"
+    "undici": "8.11.0"
   }
 }
