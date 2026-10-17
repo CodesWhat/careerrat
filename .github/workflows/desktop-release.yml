@@ -52,7 +52,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: block
           # This job only calls `gh api repos/.../tags` (dispatch path) and
@@ -124,7 +124,7 @@ jobs:
       REPO: ${{ github.repository }}
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -208,7 +208,7 @@ jobs:
       TAG: ${{ needs.resolve-tag.outputs.tag }}
     steps:
       - name: Harden the runner (audit all outbound calls)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           # Stays on audit: this job's notarytool/stapler calls hit
           # Apple/Akamai/S3 hosts (appstoreconnect.apple.com,
@@ -366,7 +366,7 @@ jobs:
       REPO: ${{ github.repository }}
     steps:
       - name: Harden the runner (audit dependency, browser, and signing endpoints)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -498,7 +498,7 @@ jobs:
       WINDOWS_PUBLISHED: ${{ needs.build-windows-upload.outputs.published }}
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: block
           # Release lookup/publication plus workflow dispatch and child-run
