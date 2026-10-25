@@ -1,6 +1,6 @@
 {
   "name": "careerrat",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "private": false,
   "packageManager": "npm@12.0.2",
   "publishConfig": {
@@ -137,7 +137,7 @@
     "export": "node src/cli/export.mjs",
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
     "check:install-scripts": "node scripts/check-install-scripts.mjs",
-    "test": "node --test 'tests/**/*.test.mjs'",
+    "test": "node --test --test-concurrency=2 'tests/**/*.test.mjs'",
     "scan:sourced": "node scripts/scan-sourced.mjs",
     "delta:sourced": "node scripts/delta-sourced.mjs",
     "capture:board": "node scripts/capture-board-snapshot.mjs",
