@@ -4,6 +4,16 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.2] - 2026-10-25
+
+### Fixed
+
+- Bundled libraries with published security advisories are updated in both the
+  app and the desktop runtime: the HTML sanitizer, the HTTP client, the schema
+  validator, and the source-map helper. No change to how CareerRat behaves.
+- The website and documentation analytics record the page a visitor arrived
+  from, under the same privacy settings as before.
+
 ## [0.19.1] - 2026-09-08
 
 ### Fixed
