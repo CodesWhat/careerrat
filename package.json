@@ -137,7 +137,7 @@
     "export": "node src/cli/export.mjs",
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
     "check:install-scripts": "node scripts/check-install-scripts.mjs",
-    "test": "node --test 'tests/**/*.test.mjs'",
+    "test": "node --test --test-concurrency=2 'tests/**/*.test.mjs'",
     "scan:sourced": "node scripts/scan-sourced.mjs",
     "delta:sourced": "node scripts/delta-sourced.mjs",
     "capture:board": "node scripts/capture-board-snapshot.mjs",
