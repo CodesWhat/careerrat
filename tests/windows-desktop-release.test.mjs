@@ -44,10 +44,7 @@ test("desktop dependency staging is reproducible and excludes the source-only Ag
   assert.equal(runtimePackage.dependencies?.["@anthropic-ai/claude-agent-sdk"], undefined);
   assert.equal(runtimeLock.packages?.["node_modules/@anthropic-ai/claude-agent-sdk"], undefined);
 
-  const expectedDependencyNames = [
-    ...Object.keys(rootPackage.dependencies || {}),
-    "playwright",
-  ].sort();
+  const expectedDependencyNames = Object.keys(rootPackage.dependencies || {}).sort();
   assert.deepEqual(Object.keys(runtimePackage.dependencies || {}).sort(), expectedDependencyNames);
   for (const [name, version] of Object.entries(runtimePackage.dependencies || {})) {
     assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, `${name} must be exact`);
