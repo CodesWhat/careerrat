@@ -3,9 +3,8 @@
 #
 # Adoption is incremental: Biome enforces only on the files a commit actually
 # touches (so the pre-existing lint backlog doesn't block work), while the fast
-# structural guards run every commit because they catch the class of bug that
-# ships green through the test runner — a broken CSS/JS template literal that is
-# never parsed in a browser by the suite. The full gate suite runs on push,
+# structural guards run every commit to protect the current app foundation,
+# retired dashboard boundary, and shipped YAML configuration. The full gate suite runs on push,
 # mirroring CI (see .github/workflows/ci-verify.yml's `qlty` and `knip` jobs).
 
 commit-msg:
@@ -21,10 +20,9 @@ pre-commit:
       run: npx biome check --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     - name: structure-guards
-      # Cheap parse/structure checks the test suite would otherwise ship green:
-      # the embedded <style>/<script> template literals (never parsed in a
-      # browser) and every shipped YAML config. Sub-second; safe to run always.
-      run: node --test tests/styles.test.mjs tests/client-script.test.mjs tests/config-yaml-parses.test.mjs
+      # Fast source checks for the React app foundation, static dashboard
+      # retirement, and every shipped YAML config. No build or browser required.
+      run: node --test tests/chat-first-foundation-style.test.mjs tests/static-dashboard-retirement.test.mjs tests/config-yaml-parses.test.mjs
 
 # Piped (not parallel): fail fast in the order listed, cheapest checks first,
 # same order as CI's gate jobs.

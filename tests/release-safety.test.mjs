@@ -79,6 +79,25 @@ test("every explicit workflow test path exists", async () => {
   assert.deepEqual(missing, [], `Workflow test paths must exist:\n${missing.join("\n")}`);
 });
 
+test("pre-commit guards reference tracked tests that still exist", async () => {
+  const hooks = await readFile(join(root, "lefthook.yml"), "utf8");
+  const preCommit = hooks.split(/^pre-commit:\s*$/m)[1]?.split(/^pre-push:/m)[0] || "";
+  const paths =
+    preCommit.match(
+      /\b(?:tests|apps\/[A-Za-z0-9._/-]+)\/[A-Za-z0-9._/-]+\.test\.(?:mjs|cjs|js|jsx|ts|tsx)\b/g
+    ) || [];
+  const tracked = new Set(
+    execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).trim().split("\n")
+  );
+
+  assert.ok(paths.length > 0, "pre-commit must retain its structural guards");
+  assert.deepEqual(
+    paths.filter((path) => !tracked.has(path) || !existsSync(join(root, path))),
+    [],
+    "pre-commit must not keep paths removed by a product migration"
+  );
+});
+
 test("document export fonts stay packaged while the app bundles its own fonts", async () => {
   assert.equal(existsSync(join(root, "fonts")), false, "root fonts/ should not exist");
   for (const file of ["Geist-OFL.txt", "GeistMonoVF.woff2", "GeistVF.woff2"]) {
