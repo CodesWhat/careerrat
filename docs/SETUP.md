@@ -65,6 +65,18 @@ Flags: `--no-agent` (browser only), `--no-dashboard` (terminal only, detecting a
 supported agent when unnamed), `--no-open` (serve without opening a tab),
 `--agent <name>` (alias for the positional), `--port <n>`.
 
+## Exported Files
+
+Resumes, cover letters and other saved job documents go in
+`~/Documents/careerrat/<Company>/job-<application-id>/`. Each job has its own
+folder, including when you apply for two roles at one company. The workspace keeps
+the canonical originals; the job folder gives you copies to attach or open outside
+CareerRat.
+Rejected, withdrawn or closed jobs move to `_archive/<Company>/job-<application-id>/`
+under the same CareerRat folder. Reopening a job restores its active folder.
+Your job history and workspace originals remain available. Existing files in
+Downloads stay where they are until their job ownership is established.
+
 ## Update Later
 
 ```bash

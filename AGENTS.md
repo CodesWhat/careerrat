@@ -885,26 +885,29 @@ as fallback). Skills that produce outbound text route around `current_base` by f
 - Generated emails, replies, follow-ups, thank-yous, negotiation messages, and
   scheduling responses must be complete artifacts, not templates.
 - Run placeholder lint before marking artifacts build-ready or upload-ready.
-- **Every artifact lands in two places: on the record and in Downloads.** Bake it
+- **Every artifact lands in two places: on the record and in Documents.** Bake it
   onto its tracker record so the user can copy it from the dashboard —
   `comm.draft` / `app.followUp.draft` for emails and messages, the `tailored/` or
-  artifact path for documents — AND export a copy to Downloads (`.txt` for emails
+  artifact path for documents — AND export a copy to Documents (`.txt` for emails
   and messages, PDF for formatted documents). `workspace/` stays the source of
-  truth; Downloads is the convenience copy. Never hand the user an artifact that
+  truth; Documents is the convenience copy. Never hand the user an artifact that
   lives only in the chat.
-- **Downloads is organized by company, then by round.** Every export goes under a
-  per-company folder: `~/Downloads/careerrat/<Company Name>/`. The current/active
-  round's materials sit at that company root; when a round is superseded, move its
-  files into `~/Downloads/careerrat/<Company Name>/archive/`. Name files
-  `<Company> - <Round or Type>.<ext>` so they read at a glance, e.g.
-  `Aperture Science - Final Panel Prep.md`, `Aperture Science - Resume.pdf`,
-  `archive/Aperture Science - Leadership Round Prep.pdf`. Use the real company name
-  for the folder (never a bracket placeholder; truly unknown company → `unknown`).
-  Loose, non-company outputs go in `_resumes/` (reusable/template resumes),
-  `_recruiters/` (recruiter comms not tied to one company), `_linkedin/` (profile
-  optimization docs), or a dated `_archive-*/` pile. Before adding a new round's file, move the prior round's file to that
-  company's `archive/` so the root always shows only what's live. Move, never
-  delete.
+- **Documents is organized by company and job.** Job-bound exports go in
+  `~/Documents/careerrat/<Company>/job-<application-id>/`. Reuse the exact folder path
+  returned by document export. Before the first export, resolve it with
+  `jobDocumentPaths` in `src/core/documents/job-folders.mjs`, using the canonical
+  application and environment. Stable, encoded ids keep roles separate even on
+  case-insensitive filesystems. Current materials sit at the job root; preserve superseded rounds
+  under its `archive/`, with unique filenames so older versions survive.
+  Rejected, withdrawn, cut or closed applications move their whole job folder to
+  `~/Documents/careerrat/_archive/<Company>/job-<application-id>/`. Reopening the
+  application restores it. Canonical workspace paths, job conversations, evidence
+  and application records stay intact. Never archive a whole company while another
+  role is active. Leave unassigned older company-root files alone until ownership
+  is established. The canonical DB status writers organize these folders after
+  committing the outcome, and report a saved-outcome error if organizing fails.
+  Loose, non-job outputs go in `_resumes/` (reusable resumes), `_recruiters/`
+  (unlinked recruiter comms), or `_linkedin/` (profile optimization).
 - Use `candidate/evidence.yml` and `candidate/honesty.yml` as the source of
   truth. Never invent facts.
 - **Originate evidence the safe way.** New claims (e.g. from `ingest-profile`

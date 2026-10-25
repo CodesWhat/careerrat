@@ -465,15 +465,15 @@ Apply the write per mode:
   is missing or validation fails, **stop** — the application is not recorded. Fix the
   row write and re-run 9b before doing anything else. Do not proceed to 9c.
 
-### 9c — Downloads copy (only after 9b passes)
+### 9c — Documents copy (only after 9b passes)
 
-Copy every submitted artifact to the company's Downloads folder — PDF for formatted documents, `.txt` for plain-text answers — under the per-company folder (Artifact Contract: organized by company, then by round). Use the real company name (no brackets). Example filenames:
+Copy every submitted artifact to the job's Documents folder — PDF for formatted documents, `.txt` for plain-text answers — under the job folder (Artifact Contract: organized by company, job, then round). Use the real company name (no brackets). Example filenames:
 
-- `~/Downloads/careerrat/<Company>/<Company> - Resume.pdf`
-- `~/Downloads/careerrat/<Company>/<Company> - Cover Letter.pdf`
-- `~/Downloads/careerrat/<Company>/<Company> - Application Answers.txt` (if short-answer fields were submitted)
+- `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Resume.pdf`
+- `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Cover Letter.pdf`
+- `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Application Answers.txt` (if short-answer fields were submitted)
 
-If `tailor-application` already exported these files to the company folder this turn (it runs the same export), verify the files are present rather than re-copying. The contract is satisfied when the files exist — one copy is enough. `workspace/` remains the source of truth; `~/Downloads/careerrat/` is the convenience copy the candidate can find without opening the tracker. Unknown detail → generic slug; never a bracket placeholder.
+If `tailor-application` already exported these files to the job folder this turn (it runs the same export), verify the files are present rather than re-copying. The contract is satisfied when the files exist — one copy is enough. `workspace/` remains the source of truth; `~/Documents/careerrat/` is the convenience copy the candidate can find without opening the tracker. Unknown detail → generic slug; never a bracket placeholder.
 
 ### 9d — Log and commit (only after 9b passes)
 

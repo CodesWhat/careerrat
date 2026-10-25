@@ -115,6 +115,19 @@ routing:
   `expected_base` / `target_base` / `minimum_base` for any comp — **never write
   `current_base` into any tracker field or note under any circumstances.**
 
+### Keep the saved job folder current
+
+After saving a rejection, withdrawal, cut or closed application, its convenience
+folder belongs under `~/Documents/careerrat/_archive/<Company>/job-<application-id>/`.
+Reopening the application restores `~/Documents/careerrat/<Company>/job-<application-id>/`.
+Move the whole job folder, including previous rounds, rather than deleting files
+or moving a company folder that may contain another live role. Keep canonical
+workspace paths, tracker records, conversations and evidence where they are.
+The DB status verbs do this automatically after committing the outcome; read any
+reported folder error before saying cleanup succeeded. For a legacy JSON workspace,
+perform the same move after the tracker write is verified. Never overwrite an
+existing archive destination or guess ownership of older company-root exports.
+
 ## STEP 2b — Comm record write-back
 
 If a `communications[]` record exists for this job, it **must** be updated for

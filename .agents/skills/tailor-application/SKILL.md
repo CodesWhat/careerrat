@@ -377,20 +377,20 @@ built-in OOXML writer. Zero new dependencies in either case.
 Use `--out <path>` to override the output location, `--title "..."` to set the
 document title (defaults to the file's stem).
 
-**Export a convenience copy to the company's Downloads folder.** After every PDF
+**Export a convenience copy to the job's Documents folder.** After every PDF
 renders (resume and cover letter), copy it there unconditionally, under the
-per-company folder (Artifact Contract: organized by company, then by round):
+job folder (Artifact Contract: organized by company, job, then round):
 
 ```text
-~/Downloads/careerrat/<Company>/<Company> - Resume.pdf
-~/Downloads/careerrat/<Company>/<Company> - Cover Letter.pdf   # if produced
+~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Resume.pdf
+~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Cover Letter.pdf   # if produced
 ```
 
 Use the real company name for the folder and filename (no brackets — truly
 unknown company → `unknown`). If a prior round's file with the same name is at
-that company root, move it to `~/Downloads/careerrat/<Company>/archive/` first so
+that job root, move it to `~/Documents/careerrat/<Company>/job-<application-id>/archive/` first so
 the root only shows what's live. `workspace/tailored/` remains the source of
-truth; Downloads is a convenience copy for quick access. Plain-text artifacts
+truth; Documents is a convenience copy for quick access. Plain-text artifacts
 (short answers, outreach notes) export as `.txt` to the same company folder.
 
 ## STEP 12 — Hand off

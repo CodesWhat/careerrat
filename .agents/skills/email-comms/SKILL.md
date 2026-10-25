@@ -26,7 +26,7 @@ description: Draft, reply to, follow up on, summarize, and track job-search emai
 - complete, finished email or message artifact (subject + body, no placeholders)
 - updated `workspace/tracker.json` — communications[].messages[] append + status fields
 - optional `workspace/comms/<thread-id>.md` for long raw thread bodies
-- `~/Downloads/careerrat/email-<company-slug>-<yyyy-mm-dd>.txt` — convenience copy of the draft (`workspace/` stays source of truth)
+- `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Email.txt` — convenience copy of the draft (`workspace/` stays source of truth)
 - tracker snapshot checkpoint
 
 ---
@@ -458,7 +458,7 @@ When the user asks to work follow-ups (or `careerrat tracker --followups` surfac
    The dashboard notification bell reads these fields directly; a baked draft appears as "ready to send." A baked draft is only valid for the DRAFT/awaiting-send state; once the message is sent, it must be nulled per the sent-clears-draft invariant (STEP 6b) so the "Ready to send" panel clears.
    - **DB workspace:** comm-based kinds — there is no single-field patch verb for `communications[]`, so read the current row, set `draft`, and persist: `careerrat data comm upsert --data '<patched full comm row JSON>'`. Application-based kinds — `app.followUp` merges one level under `app set-fields`: `careerrat data app set-fields <id> --data '{"followUp":{"kind":"<kind>","dueAt":"<iso>","draft":{"subject":"<s>","body":"<b>"},"generatedAt":"<iso>"}}'`. Neither is outcome-changing.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly.
-   **Also write a convenience copy** to the company's Downloads folder — `~/Downloads/careerrat/<Company>/<Company> - <what> Email.txt` (e.g. `Aperture Science - Follow-up Email.txt`), per the Artifact Contract (organized by company, then by round). Use the real company name for the folder and file (never a bracket placeholder; if the company is somehow unknown, use `unknown`). File content: subject line on the first line, a blank line, then the body. `workspace/` stays the source of truth; Downloads is for the user's convenience. Body must NEVER contain `current_base` or any private comp field (per the Privacy Invariant). (This Downloads copy is a local file write outside `tracker.json` — unaffected by DB vs legacy mode.)
+   **Also write a convenience copy** to the job's Documents folder — `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - <what> Email.txt` (e.g. `Aperture Science - Follow-up Email.txt`), per the Artifact Contract (organized by company, job, then round). Use the real company name for the folder and file (never a bracket placeholder; if the company is somehow unknown, use `unknown`). File content: subject line on the first line, a blank line, then the body. `workspace/` stays the source of truth; Documents is for the user's convenience. Body must NEVER contain `current_base` or any private comp field (per the Privacy Invariant). (This Documents copy is a local file write outside `tracker.json` — unaffected by DB vs legacy mode.)
 6. Validate:
    - **DB workspace:** the calls above already persisted and auto-exported. Run `careerrat data verify` and `careerrat tracker --verify`.
    - **Legacy workspace (no DB):** `careerrat tracker --verify` (also: `npm run verify:tracker`). Confirm clean exit before proceeding.

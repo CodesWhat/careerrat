@@ -3,6 +3,7 @@
 // These tests intentionally fail until src/core/packet/exports.mjs exists.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -26,6 +27,7 @@ import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { appSetStatus, appUpsert } from "../src/core/db/verbs.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
@@ -344,6 +346,50 @@ after(() => {
   }
 });
 
+test("packet exports default to the user's Documents folder instead of Downloads", () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const home = join(repoRoot, "home");
+  mkdirSync(home);
+  const moduleUrl = new URL("../src/core/packet/exports.mjs", import.meta.url).href;
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `import { mkdirSync, writeFileSync } from "node:fs";
+       import { dirname } from "node:path";
+       import { exportPacketArtifacts } from ${JSON.stringify(moduleUrl)};
+       const fakeExporter = ${fakeExporter.toString()};
+       const result = await exportPacketArtifacts({
+         repoRoot: ${JSON.stringify(repoRoot)}, env: {}, appId: "app-export",
+         packetSources: ${JSON.stringify(sources)}, request: { formats: ["text"] },
+         exportArtifact: fakeExporter([])
+       });
+       console.log(JSON.stringify(result));`,
+    ],
+    {
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+      encoding: "utf8",
+      timeout: 10_000,
+    }
+  );
+  assert.equal(child.status, 0, child.stderr);
+  const result = JSON.parse(child.stdout);
+  const expected = join(
+    home,
+    "Documents",
+    "careerrat",
+    "Acme",
+    "job-app-export",
+    "Acme - Resume.txt"
+  );
+  assert.equal(result.userFacing.resume[0].downloadsPath, expected);
+  assert.equal(readFileSync(expected, "utf8"), "fake packet plain text\n");
+  assert.equal(existsSync(join(home, "Downloads")), false);
+});
+
 test("exportPacketArtifacts defaults to ATS-safe PDFs and keeps markdown sources internal", async () => {
   const repoRoot = tempRepo();
   const sources = seedPacketSources(repoRoot);
@@ -387,10 +433,16 @@ test("exportPacketArtifacts defaults to ATS-safe PDFs and keeps markdown sources
     false,
     "source markdown is tracked internally but not returned as the normal user-facing export"
   );
-  const resumeDownload = join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "Acme - Resume.pdf");
+  const resumeDownload = join(
+    downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
+    "Acme",
+    "job-app-export",
+    "Acme - Resume.pdf"
+  );
   const coverDownload = join(
     downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
     "Acme",
+    "job-app-export",
     "Acme - Cover Letter.pdf"
   );
   assert.equal(result.userFacing.resume[0].downloadsPath, resumeDownload);
@@ -403,7 +455,9 @@ test("exportPacketArtifacts defaults to ATS-safe PDFs and keeps markdown sources
     "answers PDFs are workspace artifacts only"
   );
   assert.equal(
-    existsSync(join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "Acme - Answers.pdf")),
+    existsSync(
+      join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "job-app-export", "Acme - Answers.pdf")
+    ),
     false
   );
 });
@@ -555,7 +609,12 @@ test("exportPacketArtifacts archives a prior same-named Downloads PDF on re-expo
     packetSources: { resumeSource: sources.resumeSource },
     exportArtifact: fakeExporter([]),
   });
-  const live = join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "Acme - Resume.pdf");
+  const live = join(
+    downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
+    "Acme",
+    "job-app-export",
+    "Acme - Resume.pdf"
+  );
   writeFileSync(live, "%PDF-1.4\nprior export marker\n", "utf8");
 
   await exportPacketArtifacts({
@@ -569,6 +628,7 @@ test("exportPacketArtifacts archives a prior same-named Downloads PDF on re-expo
   const archived = join(
     downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
     "Acme",
+    "job-app-export",
     "archive",
     "Acme - Resume.pdf"
   );
@@ -600,6 +660,88 @@ test("exportPacketArtifacts reports Downloads copy failures without failing work
   assert.deepEqual(
     { kind: result.downloadsErrors[0].kind, format: result.downloadsErrors[0].format },
     { kind: "resume", format: "pdf" }
+  );
+});
+
+test("exports for separate jobs at one company never replace each other's documents", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const env = tempDownloadsEnv();
+  const { exportPacketArtifacts } = await importPacketExports();
+  const first = await exportPacketArtifacts({
+    repoRoot,
+    env,
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    exportArtifact: fakeExporterDistinctBytes([]),
+  });
+  const firstPath = first.userFacing.resume[0].downloadsPath;
+  const firstBytes = readFileSync(firstPath);
+  const resumeSource = writeWorkspaceFile(repoRoot, "tailored/other-resume.md", "# Another role\n");
+  appUpsert({
+    repoRoot,
+    env,
+    row: {
+      id: "APP-EXPORT",
+      company: "Acme",
+      role: "Different Role",
+      status: "interview",
+      artifacts: { resumeSource },
+    },
+  });
+  const second = await exportPacketArtifacts({
+    repoRoot,
+    env,
+    appId: "APP-EXPORT",
+    packetSources: { resumeSource },
+    exportArtifact: fakeExporterDistinctBytes([]),
+  });
+  assert.notEqual(dirname(firstPath), dirname(second.userFacing.resume[0].downloadsPath));
+  assert.deepEqual(readFileSync(firstPath), firstBytes);
+  appSetStatus({ repoRoot, env, id: "app-export", to: "rejected" });
+  const archived = await exportPacketArtifacts({
+    repoRoot,
+    env,
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    exportArtifact: fakeExporterDistinctBytes([]),
+  });
+  assert.equal(
+    existsSync(dirname(firstPath)),
+    false,
+    "exporting a closed job must not recreate its active folder"
+  );
+  assert.match(archived.userFacing.resume[0].downloadsPath, /[/\\]_archive[/\\]/);
+  assert.equal(existsSync(second.userFacing.resume[0].downloadsPath), true);
+});
+
+test("three exports preserve both earlier rounds instead of overwriting archive history", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const env = tempDownloadsEnv();
+  const { exportPacketArtifacts } = await importPacketExports();
+  const run = () =>
+    exportPacketArtifacts({
+      repoRoot,
+      env,
+      appId: "app-export",
+      packetSources: { resumeSource: sources.resumeSource },
+      exportArtifact: fakeExporter([]),
+    });
+  const first = await run();
+  const path = first.userFacing.resume[0].downloadsPath;
+  writeFileSync(path, "first round");
+  await run();
+  writeFileSync(path, "second round");
+  await run();
+  const archive = join(dirname(path), "archive");
+  assert.deepEqual(
+    readdirSync(archive)
+      .map((name) => readFileSync(join(archive, name), "utf8"))
+      .sort(),
+    ["first round", "second round"]
   );
 });
 
@@ -795,9 +937,10 @@ test("exportPacketArtifacts generates plain text only when explicitly requested,
   // always had (the TXT retrieval fix) -- what this regression actually
   // guards is that a text-only request never ALSO fans out a PDF nobody
   // asked for, so the copy in Downloads is the .txt file and nothing else.
-  assert.deepEqual(readdirSync(join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme")), [
-    "Acme - Resume.txt",
-  ]);
+  assert.deepEqual(
+    readdirSync(join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "job-app-export")),
+    ["Acme - Resume.txt"]
+  );
 });
 
 test("exportPacketArtifacts picks a distinct output base instead of overwriting a .txt source with its own text export", async () => {
@@ -1239,6 +1382,7 @@ test("a renderer failure after the first successful render leaves prior files an
   const priorDownloadsPath = join(
     downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
     "Acme",
+    "job-app-export",
     "Acme - Resume.pdf"
   );
   mkdirSync(dirname(priorDownloadsPath), { recursive: true });
@@ -1369,6 +1513,7 @@ test("a registration failure restores the prior files and pointers", async () =>
   const priorDownloadsPath = join(
     downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
     "Acme",
+    "job-app-export",
     "Acme - Resume.pdf"
   );
   mkdirSync(dirname(priorDownloadsPath), { recursive: true });
@@ -2287,10 +2432,10 @@ test("POST /api/packet/export exports plain text through the local route with no
     // registered on the application (resume AND cover letter, per
     // seedApp/seedPacketSources) exports -- both get their own Downloads
     // copy, same as PDF always did.
-    assert.deepEqual(readdirSync(join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme")).sort(), [
-      "Acme - Cover Letter.txt",
-      "Acme - Resume.txt",
-    ]);
+    assert.deepEqual(
+      readdirSync(join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "job-app-export")).sort(),
+      ["Acme - Cover Letter.txt", "Acme - Resume.txt"]
+    );
   } finally {
     await closeServer(server);
   }
