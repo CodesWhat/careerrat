@@ -145,18 +145,17 @@ resizable, maximizable, and supports full screen, with a minimum working size of
 <h2 align="center" id="recent-updates">Recent Updates</h2>
 
 <details open>
-<summary><strong>v0.19.1 highlights</strong></summary>
+<summary><strong>v0.19.2 highlights</strong></summary>
 
-- Saved job descriptions retain their full text when evaluated, including
-  requirements and fit signals in the body.
-- Different applications at the same company keep their own recruiter history
-  and reply recipients, even when the job titles match.
-- Scheduling checks all saved calendar conflicts and removes rejected times
-  from the reply it prepares for you.
-- DOCX conversion keeps the app responsive and stops if the converter hangs.
+- Bundled libraries with published security advisories are updated in the app
+  and the desktop runtime. Nothing changes in how CareerRat behaves.
+- The website and docs analytics record the page a visitor arrived from.
 
-This patch builds on v0.19.0's job sorting, pay-band display, company-health
-context, per-event calendar links, and clearer People and activity panels.
+This patch builds on v0.19.1, which kept saved job descriptions whole when
+evaluated, kept recruiter history with its own application, checked every
+saved calendar conflict, and made DOCX conversion cancellable, and on v0.19.0's
+job sorting, pay-band display, company-health context, per-event calendar
+links, and clearer People and activity panels.
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
 
