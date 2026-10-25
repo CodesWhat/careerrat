@@ -1,9 +1,9 @@
 # Setup
 
-CareerRat is a local, skill-driven job-search workspace. A supported local AI
-CLI drives the workflow; the CareerRat CLI scaffolds, renders, and serves the
-local app. CareerRat owns the workflows and threads, so durable search state
-does not depend on one provider's session history.
+CareerRat is a local job-search workspace with browser chat. A supported local
+AI CLI runs the work behind the page; you can stay in the browser. CareerRat
+owns the workflows and per-job threads, so recruiter messages, interview notes,
+drafts and next steps do not depend on one terminal session's history.
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ same with Claude Code and OpenAI Codex and never switches providers.
 
 ```bash
 npm install -g careerrat
-careerrat start claude    # or: careerrat start codex
+careerrat start
 ```
 
 Developing from a source checkout is the same command shape; link the local
@@ -39,27 +39,30 @@ cd careerrat
 npm install
 npm run hooks:install
 npm link
-careerrat start claude    # or: careerrat start codex
+careerrat start
 ```
 
-That scaffolds your workspace, installs the skills, opens the local app at
-<http://localhost:7777>, and hands off to your agent. Then paste a job posting and say
-"evaluate this" — or try the bundled sample under `examples/sample-jobs/`.
+That scaffolds your workspace and opens the local app at
+<http://localhost:7777/app>. Choose your AI engine on the page, then continue
+chatting there. Paste a job posting and say "evaluate this", or try the bundled
+sample under `examples/sample-jobs/`. A terminal agent is optional.
 
 `start` does the whole arc in one shot:
 
 1. Scaffolds `.careerrat/candidate/` and `.careerrat/workspace/` directories (idempotent).
-2. Installs the canonical skills so the selected agent sees `/apply-job`,
-   `/evaluate-job`, etc.
-3. Seeds `.careerrat/workspace/tracker.json` from the demo template (if not yet present).
-4. Boots the live local app at <http://localhost:7777> with event-driven data updates.
-5. Launches your agent with the starter message that asks it to read
-   `AGENTS.md`, run `careerrat doctor`, and follow the next unfinished skill.
+2. Seeds `.careerrat/workspace/tracker.json` from the demo template if absent,
+   preserving existing work.
+3. Starts or reuses the local app with event-driven data updates.
+4. Opens the browser workspace. If the browser cannot open automatically, the
+   launcher prints the address.
 
-The first bare word picks the agent (`careerrat start claude` or `careerrat
-start codex`). Omit it to use the first supported launcher found.
+To work in a terminal agent too, name it explicitly: `careerrat start claude`
+or `careerrat start codex`. This also installs the skill shim and sends the
+doctor-driven starter message. Omitting the name keeps the conversation in the
+browser; the page still uses your selected local AI engine.
 
-Flags: `--no-agent` (scaffold + local app only), `--no-dashboard`,
+Flags: `--no-agent` (browser only), `--no-dashboard` (terminal only, detecting a
+supported agent when unnamed), `--no-open` (serve without opening a tab),
 `--agent <name>` (alias for the positional), `--port <n>`.
 
 ## Update Later

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // CareerRat launcher — the `npx careerrat <command>` entrypoint.
 //
-//   careerrat start [ai]  One command: scaffold + skills + local app + agent
+//   careerrat start [ai]  Open the local app; optionally launch a terminal agent
 //   careerrat init        Scaffold candidate/ + workspace dirs, print next steps
 //   careerrat doctor      Environment health check
 //   careerrat next        Show the next agent task
@@ -143,6 +143,11 @@ if (!command || command === "help" || command === "--help" || command === "-h") 
   process.exit(command ? 0 : 1);
 }
 
+if (command === "start" && (rest.includes("--help") || rest.includes("-h"))) {
+  printHelp();
+  process.exit(0);
+}
+
 if (command === "update") {
   process.exit(runUpdate(rest));
 }
@@ -201,11 +206,12 @@ function runInit(extra) {
 // (`careerrat start claude`); `--agent <name>` is an equivalent alias. Both
 // accept either supported launcher by name.
 function parseStartArgs(extra) {
-  const out = { agent: null, port: null, noAgent: false, noDashboard: false };
+  const out = { agent: null, port: null, noAgent: false, noDashboard: false, noOpen: false };
   for (let i = 0; i < extra.length; i++) {
     const a = extra[i];
     if (a === "--no-agent") out.noAgent = true;
     else if (a === "--no-dashboard") out.noDashboard = true;
+    else if (a === "--no-open") out.noOpen = true;
     else if (a === "--agent") out.agent = extra[++i] || out.agent;
     else if (a === "--port") out.port = extra[++i] || out.port;
     else if (a.startsWith("-")) {
@@ -216,14 +222,14 @@ function parseStartArgs(extra) {
 }
 
 // `careerrat start [agent]` — the one-command front door:
-//   scaffold workspace → install skills → boot the local app (:7777) →
-//   hand off to the named agent (or first found on PATH) with the starter prompt.
+//   scaffold workspace → boot the local app (:7777) → open the browser.
+//   An explicit agent name or --no-dashboard retains the terminal skill path.
 // Usage: careerrat start [claude|codex]
-//        [--agent <name>] [--no-agent] [--no-dashboard] [--port <n>]
+//        [--agent <name>] [--no-agent] [--no-dashboard] [--no-open] [--port <n>]
 async function runStart(extra) {
   const opts = parseStartArgs(extra);
   const wantDashboard = !opts.noDashboard;
-  const wantAgent = !opts.noAgent;
+  const wantAgent = !opts.noAgent && (Boolean(opts.agent) || opts.noDashboard);
   const forcedAgent = opts.agent;
 
   console.log(`• Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
@@ -236,10 +242,12 @@ async function runStart(extra) {
 
   // 2) Install skills so Claude Code sees /apply-job etc. Non-fatal: agents that
   //    read AGENTS.md natively (Codex) work without the shim.
-  console.log("• Installing skills…");
-  const skillCode = run(join(root, "scripts/install-skills.mjs"), ["--soft"]);
-  if (skillCode !== 0) {
-    console.log("  (skill shim reported an issue, AGENTS.md-native agents still work)");
+  if (wantAgent) {
+    console.log("• Installing skills…");
+    const skillCode = run(join(root, "scripts/install-skills.mjs"), ["--soft"]);
+    if (skillCode !== 0) {
+      console.log("  (skill shim reported an issue, AGENTS.md-native agents still work)");
+    }
   }
 
   // 3) Seed a tracker so the local app can boot. Never clobber real data.
@@ -260,6 +268,17 @@ async function runStart(extra) {
   let dash = null;
   if (wantDashboard && existsSync(trackerJson)) {
     dash = await startDashboard(opts.port);
+  }
+
+  if (dash) {
+    const appUrl = `${dash.url}/app`;
+    if (!wantAgent) console.log(`• Continue in your browser → ${appUrl}`);
+    if (!opts.noOpen && !(await openAppInBrowser(appUrl))) {
+      console.log(`Open this address in your browser: ${appUrl}`);
+    }
+  } else if (wantDashboard && !wantAgent) {
+    console.error("The browser workspace could not start. Check the local app log and try again.");
+    return 1;
   }
 
   // 5) Hand off to the agent.
@@ -292,11 +311,32 @@ async function runStart(extra) {
       }
       printManualAgentHandoff(dash);
     }
-  } else {
+  } else if (!wantDashboard) {
     console.log("");
     printManualAgentHandoff(dash);
   }
   return exitCode;
+}
+
+async function openAppInBrowser(url) {
+  const command =
+    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(command, [url], {
+        stdio: "ignore",
+        detached: true,
+        shell: process.platform === "win32",
+      });
+      child.once("error", () => resolve(false));
+      child.once("spawn", () => {
+        child.unref();
+        resolve(true);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 // The agent has to start where AGENTS.md and .agents/skills/ live, which is the
@@ -711,7 +751,7 @@ function printHelp() {
 Usage: careerrat <command> [options]
 
 Commands:
-  start [ai]  Scaffold + install skills + local app + launch your agent
+  start [ai]  Open the browser workspace; optionally launch a terminal agent
   init        Scaffold candidate/ + workspace dirs, print next steps
   install-skills  Create/repair the .claude/skills -> .agents/skills shim (--check to verify only)
   doctor      Environment health check
@@ -744,11 +784,12 @@ Commands:
   help        Show this list
 
 start [ai]:
-  the first bare word picks the agent to launch. Claude and Codex are detected
-  automatically; an explicitly named compatible command is also accepted.
+  With no agent name, continue chatting in the browser workspace.
+  Name Claude or Codex explicitly to launch a terminal skill session as well.
   --agent <name>      same as the positional, alternate spelling
   --no-agent          scaffold + local app only, don't launch an agent
-  --no-dashboard      skip the local app
+  --no-dashboard      terminal session only; detect a supported agent if unnamed
+  --no-open           serve the local app without opening a browser tab
   --port <n>          local app port (default 7777)
 
 Run any command with --help for its own options.`);

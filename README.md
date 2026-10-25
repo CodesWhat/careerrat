@@ -433,10 +433,13 @@ Needs Node.js 24.15 or newer.
 
 ```bash
 npm install -g careerrat
-careerrat start claude
-# or
-careerrat start codex
+careerrat start
 ```
+
+Continue chatting in the browser workspace. It uses your selected local AI
+engine, and keeps job conversations and artifacts in the same workspace.
+To launch a terminal skill session as well, use `careerrat start claude` or
+`careerrat start codex`. Use `--no-open` to serve without opening a tab.
 
 Useful terminal commands:
 

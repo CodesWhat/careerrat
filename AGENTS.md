@@ -85,8 +85,9 @@ When a user pulls the repo fresh and says something like "familiarize yourself a
 let's get started" (or anything that isn't a specific task):
 
 1. **Make sure the skills are installed first.** If the user entered via
-   `careerrat start`, skills are already installed — skip to step 2. If the agent
-   was opened directly (without `careerrat start`), run `careerrat install-skills --check`;
+   `careerrat start <agent>`, skills are already installed — skip to step 2.
+   Browser-only `careerrat start` does not launch a terminal agent or need its
+   skill shim. If the agent was opened directly, run `careerrat install-skills --check`;
    if it reports skills aren't discoverable, run `careerrat install-skills` — it shims
    `.claude/skills` → `.agents/skills` (a symlink, or a copied tree where symlinks
    aren't available) so `/apply-job`, `/search-jobs`, etc. become invokable.
