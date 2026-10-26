@@ -7,8 +7,21 @@ async function workflow(name) {
   return readFile(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
 }
 
-test("release workflows use one global lane so branch backfills cannot race their resolved tag", async () => {
-  for (const name of ["release.yml", "desktop-release.yml", "publish.yml", "sbom.yml"]) {
+test("release.yml queues each tag in its own lane so a later tag cannot drop an earlier one", async () => {
+  // GitHub keeps one pending run per concurrency group and a newer pending run
+  // replaces it. A shared group would let a third tag cancel the second tag's
+  // queued release. A same-tag backfill race fails closed on the existing-release check.
+  const source = await workflow("release.yml");
+  assert.match(
+    source,
+    /concurrency:\s*\n(?:\s*#[^\n]*\n)*\s+group:\s*\$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\s*\n/
+  );
+  assert.match(source, /cancel-in-progress:\s*false/);
+  assert.match(source, /already has a published release|already exists/i);
+});
+
+test("dispatched release workflows use one global lane so branch backfills cannot race their resolved tag", async () => {
+  for (const name of ["desktop-release.yml", "publish.yml", "sbom.yml"]) {
     const source = await workflow(name);
     assert.match(
       source,
@@ -168,7 +181,8 @@ test("desktop release publishes only after the complete macOS updater feed is at
     /"\$mac_zip_name" != \*-"\$version"-\*\.zip/,
     "the updater ZIP must carry this release's exact version as a filename segment"
   );
-  assert.match(publishJob, /for workflow in publish\.yml release-assets\.yml sbom\.yml/);
+  assert.match(publishJob, /for workflow in publish\.yml sbom\.yml; do/);
+  assert.doesNotMatch(publishJob, /release-assets/);
   assert.match(
     publishJob,
     /gh api -X POST -H "X-GitHub-Api-Version: 2026-03-10"[\s\S]*actions\/workflows\/\$workflow\/dispatches[\s\S]*-f ref="\$TAG"/

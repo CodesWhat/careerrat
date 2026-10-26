@@ -23,9 +23,9 @@ name: desktop-release
 # script body — that's the template-injection pattern zizmor flags.
 #
 # Events created with a workflow's GITHUB_TOKEN do not start other workflows.
-# `publish-release` therefore dispatches publish.yml, release-assets.yml, and
+# `publish-release` therefore dispatches publish.yml and
 # sbom.yml explicitly after the release is published with its DMG attached,
-# then waits for all three runs and propagates any failure. GitHub makes
+# then waits for both runs and propagates any failure. GitHub makes
 # workflow_dispatch the explicit exception to that suppression, so this stays
 # automatic without a PAT or GitHub App credential.
 
@@ -577,7 +577,7 @@ jobs:
         run: |
           set -euo pipefail
           downstream_run_ids=()
-          for workflow in publish.yml release-assets.yml sbom.yml; do
+          for workflow in publish.yml sbom.yml; do
             dispatch="$(gh api -X POST -H "X-GitHub-Api-Version: 2026-03-10" \
               "repos/$REPO/actions/workflows/$workflow/dispatches" -f ref="$TAG" \
               -F return_run_details=true)"
