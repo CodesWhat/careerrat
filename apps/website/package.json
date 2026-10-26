@@ -22,7 +22,7 @@
     "@types/node": "25.9.5",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "typescript": "7.0.2"
   }
 }
