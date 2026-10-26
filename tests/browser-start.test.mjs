@@ -135,3 +135,12 @@ test("start reports failure and never opens the browser when the local app does 
   });
   assert.equal(existsSync(f.openRecord), false);
 });
+
+test("start claude keeps the terminal session but never opens a browser when the local app does not come up", async (t) => {
+  const f = await fixture(t, { opener: true, appFails: true });
+  const result = await f.launch(["claude"]);
+  assert.match(result.stderr, /did not come up/);
+  assert.match(result.stderr, /Continuing with the terminal session/);
+  assert.equal(existsSync(f.openRecord), false);
+  assert.equal(existsSync(f.agentRecord), true);
+});

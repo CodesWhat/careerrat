@@ -278,7 +278,12 @@ async function runStart(extra) {
     return 1;
   }
 
-  if (dash) {
+  if (dash && dash.ready === false) {
+    const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
+    console.error(
+      `The browser workspace did not come up at ${dash.url}/app. See the local app log at ${relLog}. Continuing with the terminal session.`
+    );
+  } else if (dash) {
     const appUrl = `${dash.url}/app`;
     if (!wantAgent) console.log(`• Continue in your browser → ${appUrl}`);
     if (!opts.noOpen && !(await openAppInBrowser(appUrl))) {
