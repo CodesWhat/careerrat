@@ -190,7 +190,7 @@ wall-of-bullets. Match `writing-style.md`.
 
 Write the full set to a document the candidate can act on, in the loose `_linkedin/`
 bucket (per the Artifact Contract — a profile doc isn't a per-company round), e.g.
-`~/Downloads/careerrat/_linkedin/linkedin-optimize-<yyyy-mm-dd>.md`, formatted current → proposed per
+`~/Documents/careerrat/_linkedin/linkedin-optimize-<yyyy-mm-dd>.md`, formatted current → proposed per
 surface, with a one-line rationale and the backing evidence claim id for each change.
 Present the same diff inline to the user.
 
@@ -206,7 +206,7 @@ where `<json>` is `{ "surfaces": [{ "surfaceId", "surface", "current", "proposed
 "rationale", "evidenceRef" }] }`. The verb scans the entire batch payload, every surface
 field and property, not just proposed/rationale, and refuses the whole batch on any
 `current_base`/comp guard hit anywhere in it — fix the offending surface and re-record.
-This closes the Artifact Contract's two-places rule: the Downloads doc plus this
+This closes the Artifact Contract's two-places rule: the Documents doc plus this
 on-record batch.
 
 **If `profile_apply` is off, you are done here** — the document plus the recorded batch
@@ -264,7 +264,7 @@ no connection requests, no reactions.
 
 For every field written in STEP 5, reload and re-read it live to confirm the new text is
 present and correct (quote it back to the user). The before→after document from STEP 4
-stays in `~/Downloads/careerrat/` as the record of the pass — write it regardless of whether
+stays in `~/Documents/careerrat/` as the record of the pass — write it regardless of whether
 anything was applied.
 
 For each field verified live, flip its batch decision to applied so the in-app card stops
@@ -335,7 +335,7 @@ changes. The point is an honest profile that reads for the target roles, not a l
 
 - **Privacy invariant (hard).** `compensation.current_base` must never appear in any
   suggested or written profile copy, or in any artifact under `workspace/` /
-  `~/Downloads/careerrat/`. Outbound-safe comp fields are `expected_base`, `target_base`,
+  `~/Documents/careerrat/`. Outbound-safe comp fields are `expected_base`, `target_base`,
   and `minimum_base` only.
 
 - **Don't "fix" intentional styling.** A candidate's deliberate brand styling is a choice,
@@ -350,7 +350,7 @@ changes. The point is an honest profile that reads for the target roles, not a l
   tool.
 
 - **Local-only.** Scraped profile text, screenshots, and the before→after document stay
-  under `workspace/` or `~/Downloads/careerrat/`. Nothing goes outbound. No credentials are
+  under `workspace/` or `~/Documents/careerrat/`. Nothing goes outbound. No credentials are
   stored — the session browser holds the login.
 
 - **Read-only on everything but the candidate's own profile fields.** No messages, no

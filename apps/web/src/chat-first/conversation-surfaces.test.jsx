@@ -26,6 +26,53 @@ function markup(node) {
 }
 
 describe("TodayConversation", () => {
+  it("prompts for the next application in the conversation and runs its existing action", () => {
+    const need = { kind: "sourced-decision", title: "Apply to Tyrell?", primaryLabel: "Apply" };
+    const onApplicationAction = vi.fn();
+    const tree = TodayConversation({ applicationNeed: need, onApplicationAction });
+    const html = markup(tree);
+    expect(html).toContain("Apply to Tyrell?");
+    expect(html).toContain("fill what I can");
+    expect(html).toContain("review the answers and attachments");
+    const buttons = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      if (node.type === "button") buttons.push(node);
+      visit(node.props?.children);
+    }
+    visit(tree);
+    buttons.find((button) => button.props.children === "Apply").props.onClick();
+    expect(onApplicationAction).toHaveBeenCalledWith(need);
+    expect(markup(TodayConversation({ applicationNeed: need, intentBusy: true }))).toContain(
+      "disabled"
+    );
+  });
+
+  it("asks for outcomes once applications exist, including rejections without feedback", () => {
+    const html = markup(<TodayConversation hasApplications />);
+    expect(html).toContain("rejection, interview invite, offer, or recruiter feedback");
+    expect(html).toContain("company and role");
+    expect(html).toContain("Even a rejection without a reason");
+    expect(html).toContain("future search and application recommendations");
+    expect(markup(<TodayConversation />)).not.toContain("rejection");
+  });
+
+  it("asks users to check prepared forms and submit without offering to fill again", () => {
+    const html = markup(
+      <TodayConversation
+        applicationNeed={{
+          kind: "submit",
+          title: "Tyrell application ready",
+          primaryLabel: "Review & submit",
+        }}
+      />
+    );
+    expect(html).toContain("Open the application");
+    expect(html).toContain("press submit");
+    expect(html).not.toContain("fill what I can");
+  });
+
   it("renders current user turns on the shared quiet message surface", () => {
     const foundation = readFileSync(
       fileURLToPath(new URL("./app-foundation.css", import.meta.url)),

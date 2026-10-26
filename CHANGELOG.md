@@ -4,6 +4,36 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-10-26
+
+### Added
+
+- `careerrat start` opens the browser workspace on its own, without starting a
+  terminal agent. `careerrat start claude` and `careerrat start codex` still
+  open a terminal session, and `--no-open` serves the workspace without opening
+  a tab.
+- Saved exports go to `Documents/careerrat`, with one folder per job. A job you
+  reject, withdraw or close moves to an archive folder, and reopening it moves
+  it back. Earlier versions of a document are kept.
+- Today's conversation points at your next application: either the one ready
+  for you to check and submit, or a saved role you can start applying to. Once
+  you have applications, it asks you to paste rejections, interview invites,
+  offers or recruiter feedback so they shape later searches.
+
+### Changed
+
+- CareerRat now ships through npm only. The Mac app ended at v0.19.2: it keeps
+  working, but there are no more Mac builds or Homebrew cask updates. Install
+  or update with `npm install -g careerrat`.
+- When a supervised application is filled and waiting, its next step reads
+  "Open form to review & submit" and tells you to come back and choose
+  "I applied" once it's sent.
+
+### Fixed
+
+- PDF export works from an npm install, not just a source checkout. The browser
+  renderer is now a runtime dependency.
+
 ## [0.19.2] - 2026-10-25
 
 ### Fixed

@@ -32,7 +32,7 @@ scheduling, hand it back to `email-comms`. This skill draws on the same comms ma
 ## Outputs
 
 - a complete availability / confirmation reply (subject + body, no placeholders)
-- an optional calendar-ready hold (`.ics`) written to `~/Downloads/careerrat/`
+- an optional calendar-ready hold (`.ics`) written to `~/Documents/careerrat/`
 - updated `workspace/tracker.json` — `communications[].messages[]` + status, a
   `applications[].conversations[]` entry when a meeting is booked, and
   `interviewAt` / `nextInterviewAt` + `interviewNote` on the application row
@@ -233,8 +233,8 @@ When a slot is settled (or proposed for the candidate's own hold), prepare a cal
 hold so it lands cleanly:
 
 - **Always-available, dependency-free:** write a valid `.ics` (VEVENT) to the
-  company's Downloads folder — `~/Downloads/careerrat/<Company>/<Company> - <Round> Invite.ics`
-  (per the Artifact Contract: organized by company, then by round; real company
+  company's Documents folder — `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - <Round> Invite.ics`
+  (per the Artifact Contract: organized by company, job, then round; real company
   name, no brackets) — `UID`, `DTSTART`/`DTEND`
   with the correct timezone (or UTC `Z`), `SUMMARY` (e.g. "<Company> — <stage> with <who>"),
   `DESCRIPTION` (channel + dial-in/link if known), and a `VALARM` reminder. The user
@@ -245,7 +245,7 @@ hold so it lands cleanly:
   confirm-first action — show what you'll create and wait for an explicit yes. Never create,
   move, or delete a calendar event silently.
 
-Keep `.ics` content local (`~/Downloads/careerrat/` or `workspace/`). Never put
+Keep `.ics` content local (`~/Documents/careerrat/` or `workspace/`). Never put
 `current_base` or any private comp field in a hold.
 
 ---
@@ -442,7 +442,7 @@ draft awaiting send → log it as needing the user:
   scheduling state and the conversations[] entry, then hands the stage change + prep off — it
   does not own interview outcomes.
 - **Privacy + local-only.** No `current_base` or private comp in any reply, hold, or note.
-  `.ics` and raw thread bodies stay under `~/Downloads/careerrat/` / `workspace/`.
+  `.ics` and raw thread bodies stay under `~/Documents/careerrat/` / `workspace/`.
 - **No placeholder brackets.** Unknown detail → generic or omit; never a bracket token.
 - **Domain-neutral.** No hardcoded companies, names, or times. The candidate's
   `availability` block + the thread make it specific; absent config stays neutral (derive +

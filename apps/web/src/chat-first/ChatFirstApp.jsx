@@ -1546,6 +1546,16 @@ export function ChatFirstAppView({
           answerBusy={busy}
           mission={missionPresentation(activeMission)}
           strategy={view.strategy}
+          applicationNeed={
+            view.needsYou.find((item) =>
+              ["submit", "submit-gate", "submit-gate-group"].includes(item.kind)
+            ) ||
+            view.needsYou.find((item) =>
+              ["sourced-decision", "sourced-decision-group"].includes(item.kind)
+            )
+          }
+          hasApplications={view.counts.pipeline > 0}
+          onApplicationAction={(item) => actions.decideNeed?.(item, "primary")}
         />
       </ConversationPanel>
     );
