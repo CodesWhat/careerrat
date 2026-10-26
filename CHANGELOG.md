@@ -22,6 +22,9 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Changed
 
+- CareerRat now ships through npm only. The Mac app ended at v0.19.2: it keeps
+  working, but there are no more Mac builds or Homebrew cask updates. Install
+  or update with `npm install -g careerrat`.
 - When a supervised application is filled and waiting, its next step reads
   "Open form to review & submit" and tells you to come back and choose
   "I applied" once it's sent.
