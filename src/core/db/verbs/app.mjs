@@ -77,6 +77,7 @@ const APP_SETTABLE_FIELDS = new Set([
   "coachingPlan",
   "nextAction",
   "nextActionDue",
+  "submitAttemptedAt",
   "statusUrl",
   "statusPlatform",
   "followUp",
@@ -217,7 +218,7 @@ function activityStatusLabel(status) {
   );
 }
 
-function statusProvesApplicationWasSubmitted(status) {
+export function statusProvesApplicationWasSubmitted(status) {
   if (!isKnownStatusLabel(status)) return false;
   return new Set(["applied", "screen", "interview", "final", "offer", "accepted", "rejected"]).has(
     classifyStage(status).id

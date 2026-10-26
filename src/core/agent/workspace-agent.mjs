@@ -36,6 +36,7 @@ import {
   appScheduleInterview,
   appSetFields,
   appSetStatus,
+  statusProvesApplicationWasSubmitted,
 } from "../db/verbs/app.mjs";
 import {
   WRITE_PROVIDERS as CALENDAR_WRITE_PROVIDERS,
@@ -4125,7 +4126,7 @@ export async function executeWorkspaceIntent({
   try {
     normalized = resolveNaturalWorkspaceRequest({ repoRoot, env, intent: normalized });
     if (new Set(["job.prepare-submit", "job.apply"]).has(normalized.type)) {
-      applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      const submitTarget = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const executionPlan = corroborateApplicationMissionAttempt({
         repoRoot,
         env,
@@ -4135,15 +4136,22 @@ export async function executeWorkspaceIntent({
       // The workspace's `submit` setting decides whether the executor may press
       // the final Submit. A focus-only request only returns to the prepared tab,
       // so it never unlocks submit whatever the setting says.
+      // An application already auto-submitted without a confirmation (and not
+      // yet recorded as applied) is never auto-submitted again, across runs.
+      const submitAlreadyAttempted =
+        Boolean(submitTarget?.submitAttemptedAt) &&
+        !statusProvesApplicationWasSubmitted(submitTarget?.status);
       const submitAuto =
         loadSubmitMode({ root: repoRoot, env }) === "auto" &&
-        normalized.input?.focusSession !== true;
+        normalized.input?.focusSession !== true &&
+        !submitAlreadyAttempted;
       normalized = {
         ...normalized,
         input: {
           ...(normalized.input || {}),
           prepareOnly: !submitAuto,
           submitMode: submitAuto ? "auto" : "manual",
+          ...(submitAlreadyAttempted ? { submitAlreadyAttempted: true } : {}),
           executionPlan,
         },
       };
@@ -8652,6 +8660,10 @@ export async function executeWorkspaceIntent({
       });
     }
     const submitMode = input.submitMode === "auto" ? "auto" : "manual";
+    const alreadyAttemptedNote =
+      input.submitAlreadyAttempted === true
+        ? " CareerRat already pressed Submit once without a confirmation, so it will not press it again. Check the site and record the outcome."
+        : "";
     const prepareOnly = submitMode !== "auto";
     const executorInput = {
       ...input,
@@ -8821,6 +8833,7 @@ export async function executeWorkspaceIntent({
           ),
           nextAction:
             "Check the application on the site, then record it as Applied if it went through",
+          submitAttemptedAt: now().toISOString(),
         },
       });
       const sessionUrl = safeExternalHttpUrl(
@@ -8889,7 +8902,7 @@ export async function executeWorkspaceIntent({
         intentMessage,
         text: permission
           ? `${permission.request} Choose ${permission.allowLabel}, or type “${permission.typedCommand}”.`
-          : applicationSessionText(execution),
+          : `${applicationSessionText(execution)}${alreadyAttemptedNote}`,
         artifacts: [
           {
             kind: "application_handoff",
@@ -8985,7 +8998,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `${detail} CareerRat stopped before submission and did not mark this application Applied.`,
+        text: `${detail} CareerRat stopped before submission and did not mark this application Applied.${alreadyAttemptedNote}`,
         metadata: {
           state: "blocked",
           applicationId: normalized.entity.id,

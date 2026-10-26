@@ -27,6 +27,7 @@
           "role":          { "type": "string" },
           "status":        { "type": "string" },
           "appliedAt":     { "type": "string" },
+          "submitAttemptedAt": { "type": "string", "description": "ISO timestamp CareerRat auto-pressed Submit and saw no confirmation page. History once the status is applied; while pre-applied it stops further auto-submits." },
           "fitScore":      { "type": ["number", "null"] },
           "fitBucket":     { "type": ["string", "null"], "enum": ["high", "med", "stretch", null] },
           "submittedDate": { "type": ["string", "null"] },
