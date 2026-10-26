@@ -345,7 +345,7 @@ release publishes, so this is only needed to debug or redo that step by hand.
    lands. Do not push directly; the tap's `main` is protected.
 
 `depends_on macos:` must match the `LSMinimumSystemVersion` electron-builder
-bakes into the bundle (currently 12.0, so `:monterey`).
+bakes into the bundle (currently 13.0, so `:ventura`).
 
 ## Schema Versioning
 
