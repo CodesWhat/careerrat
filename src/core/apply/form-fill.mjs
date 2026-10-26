@@ -523,7 +523,14 @@ export function findAdvanceButtonRef(snapshot) {
 // Controls that must never be clicked as a final submit, even when the label
 // also contains a submit/send token ("Cancel submission", "Submit later").
 const SUBMIT_EXCLUDE_PATTERN =
-  /\b(withdraw|cancel|delete|remove|discard|later|draft|save|undo|edit|back)\b/;
+  /\b(withdraw|cancel|delete|remove|discard|later|draft|save|undo|edit|back|code|message|answer|question|verification|feedback|email|otp)\b/;
+
+// A final submit must read as submitting the application: exactly "Submit", or
+// a submit/send/complete/finish verb together with "application" or "apply".
+function isApplicationSubmitLabel(label) {
+  if (label === "submit") return true;
+  return /\b(submit|send|complete|finish)\b/.test(label) && /\b(application|apply)\b/.test(label);
+}
 
 /**
  * Find the final submit control for the auto-submit path ONLY. This is the one
@@ -542,7 +549,7 @@ export function findSubmitButtonRef(snapshot) {
     if (String(entry?.role || "").toLowerCase() !== "button") continue;
     const label = normalizeLabel(entry?.name);
     if (!label) continue;
-    if (!ADVANCE_DISQUALIFY_TOKENS.some((token) => label.includes(token))) continue;
+    if (!isApplicationSubmitLabel(label)) continue;
     if (SUBMIT_EXCLUDE_PATTERN.test(label)) continue;
     if (isSsoOrAccountLabel(entry?.name)) continue;
     matches.push(ref);

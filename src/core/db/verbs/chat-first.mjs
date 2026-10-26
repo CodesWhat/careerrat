@@ -1349,26 +1349,43 @@ export function completeSubmitGatesForApplicationInDb(
 ) {
   const id = cleanId(applicationId, "applicationId");
   const status = cleanText(applicationStatus, "applicationStatus", { max: 120 });
-  const rows = db
-    .prepare(
-      `SELECT data
-         FROM mission_steps
-        WHERE json_extract(data, '$.action') = 'submit-gate'
-          AND json_extract(data, '$.status') = 'blocked'
-          AND (
-            json_extract(data, '$.result.applicationId') = ?
-            OR json_extract(data, '$.jobRef.id') = ?
-          )
-        ORDER BY mission_id, sequence`
-    )
-    .all(id, id);
-  if (!rows.length) return { completedStepIds: [], completedMissionIds: [] };
+  const forApplication = (action, stepStatus) =>
+    db
+      .prepare(
+        `SELECT data
+           FROM mission_steps
+          WHERE json_extract(data, '$.action') = ?
+            AND json_extract(data, '$.status') = ?
+            AND (
+              json_extract(data, '$.result.applicationId') = ?
+              OR json_extract(data, '$.jobRef.id') = ?
+            )
+          ORDER BY mission_id, sequence`
+      )
+      .all(action, stepStatus, id, id)
+      .map(parseRow)
+      .filter(Boolean);
+
+  // A prepare-submit that auto-pressed Submit but saw no confirmation is left
+  // blocked with its pending submit-gate. Once the operator records the
+  // outcome, both close without re-running prepare.
+  const unverifiedPrepares = forApplication("prepare-submit", "blocked").filter(
+    (step) => step.result?.state === "submitted-unverified"
+  );
+  const unverifiedMissionIds = new Set(unverifiedPrepares.map((step) => step.missionId));
+  const gates = [
+    ...forApplication("submit-gate", "blocked"),
+    ...forApplication("submit-gate", "pending").filter((step) =>
+      unverifiedMissionIds.has(step.missionId)
+    ),
+  ];
+  if (!gates.length && !unverifiedPrepares.length) {
+    return { completedStepIds: [], completedMissionIds: [] };
+  }
 
   const completedStepIds = [];
   const touchedMissionIds = new Set();
-  for (const row of rows) {
-    const step = parseRow(row);
-    if (!step) continue;
+  for (const step of [...unverifiedPrepares, ...gates]) {
     const at = nextIso(step.updatedAt, now);
     const updatedStep = {
       ...step,

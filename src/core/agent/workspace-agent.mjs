@@ -32,6 +32,7 @@ import { activityAppend } from "../db/verbs/activity.mjs";
 import {
   appApproveReview,
   appCaptureInterviewIntake,
+  appMarkSubmitAttempt,
   appRecordOutcome,
   appScheduleInterview,
   appSetFields,
@@ -8665,6 +8666,21 @@ export async function executeWorkspaceIntent({
         ? " CareerRat already pressed Submit once without a confirmation, so it will not press it again. Check the site and record the outcome."
         : "";
     const prepareOnly = submitMode !== "auto";
+    // Written by the driver right before it presses Submit, so the marker is
+    // durable even if the run is aborted or the process stops after the click.
+    const submitAttemptHook =
+      submitMode === "auto"
+        ? {
+            onSubmitAttempt: async () => {
+              appMarkSubmitAttempt({
+                repoRoot,
+                env,
+                id: normalized.entity.id,
+                at: requestDate(now).toISOString(),
+              });
+            },
+          }
+        : {};
     const executorInput = {
       ...input,
       ...(prepareSubmit ? { resumeSession: true } : {}),
@@ -8681,6 +8697,7 @@ export async function executeWorkspaceIntent({
       input: executorInput,
       prepareOnly,
       submitMode,
+      ...submitAttemptHook,
       signal,
       ...(input.focusSession === true ? { focusSession: true } : {}),
     });
@@ -8770,6 +8787,7 @@ export async function executeWorkspaceIntent({
         },
         prepareOnly,
         submitMode,
+        ...submitAttemptHook,
         signal,
         ...(input.focusSession === true ? { focusSession: true } : {}),
       });
@@ -8833,8 +8851,14 @@ export async function executeWorkspaceIntent({
           ),
           nextAction:
             "Check the application on the site, then record it as Applied if it went through",
-          submitAttemptedAt: now().toISOString(),
         },
+      });
+      // Normally already set by the pre-click hook; set-once either way.
+      appMarkSubmitAttempt({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        at: requestDate(now).toISOString(),
       });
       const sessionUrl = safeExternalHttpUrl(
         execution.currentUrl || application.link || application.url || application.sourceUrl

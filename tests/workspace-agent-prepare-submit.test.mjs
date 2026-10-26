@@ -12,8 +12,10 @@ import {
 } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
+  appMarkSubmitAttempt,
   appPersistEvaluation,
   appRegisterPacketQuestionCapture,
+  appSetFields,
   appUpsert,
 } from "../src/core/db/verbs/app.mjs";
 import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
@@ -1097,4 +1099,132 @@ test("submit auto: a different application in the same workspace still auto-subm
   assert.equal(calls[0].prepareOnly, false);
   assert.equal(calls[0].submitMode, "auto");
   assert.equal(readApplication(repoRoot, "app-other").status, "applied");
+});
+
+test("submitAttemptedAt is not settable through the generic appSetFields path", () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, { submitAttemptedAt: "2026-10-26T19:00:00.000Z" });
+
+  assert.throws(
+    () =>
+      appSetFields({
+        repoRoot,
+        env: {},
+        id: "app-prepared",
+        patch: { submitAttemptedAt: null },
+      }),
+    { code: "APP_FIELDS_FORBIDDEN" }
+  );
+  assert.equal(readApplication(repoRoot).submitAttemptedAt, "2026-10-26T19:00:00.000Z");
+});
+
+test("appMarkSubmitAttempt sets the marker once and never overwrites it", () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+
+  const first = appMarkSubmitAttempt({
+    repoRoot,
+    env: {},
+    id: "app-prepared",
+    at: "2026-10-26T19:00:00.000Z",
+  });
+  const second = appMarkSubmitAttempt({
+    repoRoot,
+    env: {},
+    id: "app-prepared",
+    at: "2026-10-27T01:00:00.000Z",
+  });
+
+  assert.equal(first.marked, true);
+  assert.equal(second.marked, false);
+  assert.equal(second.at, "2026-10-26T19:00:00.000Z");
+  assert.equal(readApplication(repoRoot).submitAttemptedAt, "2026-10-26T19:00:00.000Z");
+});
+
+test("submit auto: the executor gets a hook that persists the marker before any click", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+  let markerAtHook = "unset";
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    now: new Date("2026-10-26T20:00:00.000Z"),
+    applyJobImpl: async (input) => {
+      assert.equal(typeof input.onSubmitAttempt, "function");
+      await input.onSubmitAttempt({ applicationId: input.applicationId });
+      markerAtHook = readApplication(repoRoot).submitAttemptedAt;
+      return { available: true, verified: true, state: "submitted", confirmation: "ok" };
+    },
+  });
+
+  assert.equal(markerAtHook, "2026-10-26T20:00:00.000Z");
+});
+
+test("submit manual: no submit-attempt hook is passed", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "manual");
+  const calls = [];
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        session: { provider: "test" },
+      };
+    },
+  });
+
+  assert.equal(calls[0].onSubmitAttempt, undefined);
+});
+
+test("submit auto: an abort right after the click still leaves the marker and a fresh run refuses", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+  const intent = prepareIntent(null, repoRoot);
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent,
+      now: () => new Date("2026-10-26T21:00:00.000Z"),
+      applyJobImpl: async (input) => {
+        await input.onSubmitAttempt({ applicationId: input.applicationId });
+        const abort = new Error("aborted after click");
+        abort.name = "AbortError";
+        throw abort;
+      },
+    })
+  );
+  assert.equal(readApplication(repoRoot).submitAttemptedAt, "2026-10-26T21:00:00.000Z");
+
+  const calls = [];
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent,
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        session: { provider: "test" },
+      };
+    },
+  });
+  assert.equal(calls[0].prepareOnly, true);
+  assert.equal(calls[0].submitMode, "manual");
+  assert.equal(calls[0].onSubmitAttempt, undefined);
 });

@@ -1284,12 +1284,47 @@ describe("findSubmitButtonRef (auto-submit only)", () => {
     assert.equal(findSubmitButtonRef({}), null);
   });
 
-  it("returns null when more than one distinct submit control is ambiguous", () => {
+  it("returns null when more than one qualifying submit control is ambiguous", () => {
     assert.equal(
       findSubmitButtonRef(
-        snap(["e1", "button", "Submit application"], ["e2", "button", "Send message to recruiter"])
+        snap(["e1", "button", "Submit application"], ["e2", "button", "Send application"])
       ),
       null
+    );
+  });
+
+  it("requires a positive application-submit label, not any submit or send button", () => {
+    for (const name of [
+      "Send code",
+      "Send verification code",
+      "Send message to recruiter",
+      "Submit answer",
+      "Submit feedback",
+      "Send email",
+      "Submit question",
+      "Send OTP",
+      "Review and submit",
+    ]) {
+      assert.equal(findSubmitButtonRef(snap(["e1", "button", name])), null, name);
+    }
+    for (const name of [
+      "Submit",
+      " submit ",
+      "SUBMIT APPLICATION",
+      "Send application",
+      "Complete application",
+      "Submit your application",
+    ]) {
+      assert.equal(findSubmitButtonRef(snap(["e1", "button", name])), "e1", name);
+    }
+  });
+
+  it("ignores a non-application send control beside the real submit", () => {
+    assert.equal(
+      findSubmitButtonRef(
+        snap(["e1", "button", "Send code"], ["e2", "button", "Submit application"])
+      ),
+      "e2"
     );
   });
 

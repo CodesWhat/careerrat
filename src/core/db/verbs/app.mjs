@@ -77,7 +77,6 @@ const APP_SETTABLE_FIELDS = new Set([
   "coachingPlan",
   "nextAction",
   "nextActionDue",
-  "submitAttemptedAt",
   "statusUrl",
   "statusPlatform",
   "followUp",
@@ -591,6 +590,25 @@ export function appSetFields({ repoRoot, env, id, patch } = {}) {
       tags: ["operation:application:details-update"],
     });
     return { id, meta, event };
+  });
+}
+
+// appMarkSubmitAttempt({id, at}) — the only writer of submitAttemptedAt, the
+// durable "auto-submit already pressed Submit once" marker. Set-once: a
+// later call never overwrites it, and no generic patch path can clear it.
+export function appMarkSubmitAttempt({ repoRoot, env, id, at } = {}) {
+  const stamp = String(at || "").trim();
+  if (!stamp || Number.isNaN(Date.parse(stamp))) {
+    const error = new Error("appMarkSubmitAttempt: at must be an ISO date or datetime");
+    error.code = "BAD_SUBMIT_ATTEMPT_AT";
+    throw error;
+  }
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    if (app.submitAttemptedAt) return { id, marked: false, at: app.submitAttemptedAt };
+    putRow(db, "applications", id, { ...app, submitAttemptedAt: stamp });
+    bumpMeta(db);
+    return { id, marked: true, at: stamp };
   });
 }
 
