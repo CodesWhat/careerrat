@@ -10,6 +10,7 @@ import {
   appSetStatus,
   appUpsert,
 } from "../src/core/db/verbs.mjs";
+import { jobDocumentPaths } from "../src/core/documents/job-folders.mjs";
 
 function fixture(t) {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-job-documents-"));
@@ -167,4 +168,25 @@ test("a committed outcome still archives files when only the tracker mirror fail
     existsSync(join(ctx.env.CAREERRAT_DOWNLOADS_DIR, "_archive/Acme/job-role-a/Resume.pdf")),
     true
   );
+});
+
+test("company folder names are safe Windows path segments", () => {
+  const env = { CAREERRAT_DOWNLOADS_DIR: join(tmpdir(), "careerrat-segment-docs") };
+  const name = (company) =>
+    jobDocumentPaths({ application: { id: "j1", company }, env }).companyName;
+  assert.equal(name("Acme: Inc"), "Acme- Inc");
+  assert.equal(name("A|B?C*"), "A-B-C-");
+  assert.equal(name("Trailing. "), "Trailing");
+  assert.equal(name("con"), "_con");
+  assert.equal(name("COM1"), "_COM1");
+  assert.equal(name("nul.txt"), "_nul.txt");
+  assert.equal(name("Bad\u0001Name"), "Bad-Name");
+  assert.equal(name(".."), "unknown");
+  assert.equal(name("Acme"), "Acme");
+});
+
+test("ordinary company names keep their existing folder path", () => {
+  const env = { CAREERRAT_DOWNLOADS_DIR: join(tmpdir(), "careerrat-segment-docs") };
+  const { active } = jobDocumentPaths({ application: { id: "role-a", company: "Acme Corp" }, env });
+  assert.equal(active, join(env.CAREERRAT_DOWNLOADS_DIR, "Acme Corp", "job-role-a"));
 });

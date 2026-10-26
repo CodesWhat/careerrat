@@ -270,6 +270,14 @@ async function runStart(extra) {
     dash = await startDashboard(opts.port);
   }
 
+  if (dash && dash.ready === false && wantDashboard && !wantAgent) {
+    const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
+    console.error(
+      `The browser workspace did not come up at ${dash.url}/app. See the local app log at ${relLog} and try again.`
+    );
+    return 1;
+  }
+
   if (dash) {
     const appUrl = `${dash.url}/app`;
     if (!wantAgent) console.log(`• Continue in your browser → ${appUrl}`);
@@ -439,17 +447,21 @@ async function startDashboard(port) {
     });
     closeSync(logFd);
     logFd = null;
+    let childExited = false;
+    child.once("exit", () => {
+      childExited = true;
+    });
     child.unref();
     writeFileSync(pidPath, `${child.pid}\n`);
 
-    const ready = await waitForUrl(url, installedVersion, 8000);
+    const ready = await waitForUrl(url, installedVersion, 8000, () => childExited);
     const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
     if (ready) {
       console.log(`• Local app live → ${url} (pid ${child.pid}, log ${relLog})`);
     } else {
       console.log(`• Local app starting → ${url} (pid ${child.pid}, log ${relLog})`);
     }
-    return { url, pid: child.pid, logPath };
+    return { url, pid: child.pid, logPath, ready };
   } catch {
     if (logFd != null) {
       try {
@@ -496,11 +508,12 @@ function recordedTrackerProcessCommand(pid) {
   return inspected.status === 0 ? inspected.stdout : "";
 }
 
-async function waitForUrl(url, installedVersion, timeoutMs) {
+async function waitForUrl(url, installedVersion, timeoutMs, hasExited = () => false) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const health = await readLocalAppHealth(url);
     if (health.careerrat && health.version === installedVersion) return true;
+    if (hasExited()) return false;
     await delay(150);
   }
   return false;

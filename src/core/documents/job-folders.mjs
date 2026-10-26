@@ -4,12 +4,22 @@ import { dirname, join } from "node:path";
 
 const ARCHIVED_STATUSES = new Set(["rejected", "withdrawn", "cut", "closed"]);
 
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+export function safeCompanySegment(value) {
+  const cleaned = String(value ?? "")
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are invalid in Windows path segments
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .trim()
+    .replace(/[. ]+$/, "");
+  if (!cleaned || cleaned === "." || cleaned === "..") return "unknown";
+  const stem = cleaned.split(".")[0].trimEnd();
+  return WINDOWS_RESERVED_NAME.test(stem) ? `_${cleaned}` : cleaned;
+}
+
 export function jobDocumentPaths({ application, env = process.env }) {
   if (!application?.id) throw new Error("A job id is required for its document folder");
-  const company = String(application.company || "unknown")
-    .replace(/[/\\\0]/g, "-")
-    .trim();
-  const companyName = !company || company === "." || company === ".." ? "unknown" : company;
+  const companyName = safeCompanySegment(application.company || "unknown");
   // Encode uppercase too so distinct ids cannot collide on APFS or NTFS.
   const jobId = Array.from(String(application.id), (character) =>
     /[A-Z.!'()*]/.test(character)

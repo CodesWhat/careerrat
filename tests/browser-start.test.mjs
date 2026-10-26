@@ -5,13 +5,14 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { readVersion } from "../src/core/version.mjs";
 
 const run = promisify(execFile);
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-async function fixture(t, { agentExit = 0, opener = false } = {}) {
+async function fixture(t, { agentExit = 0, opener = false, appFails = false } = {}) {
   const home = mkdtempSync(join(tmpdir(), "careerrat-browser-start-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const bin = join(home, "bin");
@@ -40,6 +41,7 @@ async function fixture(t, { agentExit = 0, opener = false } = {}) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const port = server.address().port;
+  if (appFails) await new Promise((resolve) => server.close(resolve));
   const launch = (args = []) =>
     run(process.execPath, ["bin/careerrat.mjs", "start", "--port", String(port), ...args], {
       cwd: ROOT,
@@ -49,6 +51,7 @@ async function fixture(t, { agentExit = 0, opener = false } = {}) {
         CAREERRAT_HOME: home,
         CAREERRAT_NO_UPDATE_CHECK: "1",
         PATH: bin,
+        ...(appFails ? { CAREERRAT_TRACKER_HOST: "0.0.0.0" } : {}),
       },
     });
   return { home, port, launch, agentRecord, openRecord };
@@ -119,4 +122,16 @@ test("start help exits before creating workspace data or launching anything", as
   assert.match(result.stdout, /--no-open/);
   assert.equal(existsSync(join(f.home, "workspace")), false);
   assert.equal(existsSync(f.agentRecord), false);
+});
+
+test("start reports failure and never opens the browser when the local app does not come up", async (t) => {
+  const f = await fixture(t, { opener: true, appFails: true });
+  await assert.rejects(f.launch(), (err) => {
+    assert.notEqual(err.code, 0);
+    assert.match(err.stderr, new RegExp(`http://localhost:${f.port}/app`));
+    assert.match(err.stderr, /did not come up/);
+    assert.match(err.stderr, /tracker-dev\.log/);
+    return true;
+  });
+  assert.equal(existsSync(f.openRecord), false);
 });

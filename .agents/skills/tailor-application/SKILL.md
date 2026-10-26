@@ -391,7 +391,7 @@ unknown company → `unknown`). If a prior round's file with the same name is at
 that job root, move it to `~/Documents/careerrat/<Company>/job-<application-id>/archive/` first so
 the root only shows what's live. `workspace/tailored/` remains the source of
 truth; Documents is a convenience copy for quick access. Plain-text artifacts
-(short answers, outreach notes) export as `.txt` to the same company folder.
+(short answers, outreach notes) export as `.txt` to the same job folder.
 
 ## STEP 12 — Hand off
 
