@@ -8672,12 +8672,18 @@ export async function executeWorkspaceIntent({
       submitMode === "auto"
         ? {
             onSubmitAttempt: async () => {
-              appMarkSubmitAttempt({
-                repoRoot,
-                env,
-                id: normalized.entity.id,
-                at: requestDate(now).toISOString(),
-              });
+              try {
+                appMarkSubmitAttempt({
+                  repoRoot,
+                  env,
+                  id: normalized.entity.id,
+                  at: requestDate(now).toISOString(),
+                });
+              } catch (error) {
+                // The marker is in the canonical database even when the tracker
+                // export after it fails; that is enough to block a second submit.
+                if (error?.committed !== true) throw error;
+              }
             },
           }
         : {};

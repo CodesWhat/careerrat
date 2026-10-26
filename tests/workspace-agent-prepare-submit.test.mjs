@@ -21,6 +21,7 @@ import {
 import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { missionCreate } from "../src/core/db/verbs/chat-first.mjs";
 import { capturePacketJobBody } from "../src/core/packet/context.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
 
@@ -1161,6 +1162,37 @@ test("submit auto: the executor gets a hook that persists the marker before any 
   });
 
   assert.equal(markerAtHook, "2026-10-26T20:00:00.000Z");
+});
+
+test("submit auto: a committed marker counts even when the tracker export after it fails", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+  let hookError = null;
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    now: new Date("2026-10-26T21:00:00.000Z"),
+    applyJobImpl: async (input) => {
+      // Force exportToTracker to fail after the marker commits: a directory at
+      // the tracker.json path makes the atomic write throw EISDIR.
+      const trackerPath = userPath({ repoRoot, env: {} }, "workspace/tracker.json");
+      rmSync(trackerPath, { force: true });
+      mkdirSync(trackerPath, { recursive: true });
+      try {
+        await input.onSubmitAttempt({ applicationId: input.applicationId });
+      } catch (error) {
+        hookError = error;
+      }
+      rmSync(trackerPath, { recursive: true, force: true });
+      return { available: true, verified: true, state: "submitted", confirmation: "ok" };
+    },
+  });
+
+  assert.equal(hookError, null, "a committed marker must not abort the submit");
+  assert.equal(readApplication(repoRoot).submitAttemptedAt, "2026-10-26T21:00:00.000Z");
 });
 
 test("submit manual: no submit-attempt hook is passed", async () => {
