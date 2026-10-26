@@ -61,18 +61,51 @@ manual-liveness checks strict. The source-checkout command fails when any receip
 is missing or stale. Do not weaken those checks to make a release pass.
 
 Every release still requires the protected unit, integration, browser, and build
-matrix. The tag pipeline separately verifies deterministic release metadata,
-builds the app, checks the signed tag, signs and notarizes macOS, exercises the
-native updater, and verifies the published artifacts.
+matrix. The tag pipeline separately checks the signed tag, confirms the tag's
+version matches `package.json`, publishes the GitHub release from the changelog,
+and then publishes npm and the SBOM.
 
-### Desktop Release Pipeline
+### Release pipeline
+
+Pushing a signed annotated tag `vX.Y.Z` on protected `main` runs
+`.github/workflows/release.yml`. There is no Mac or Windows build in the chain.
+
+1. **`resolve-tag`** resolves the tag once (from the push ref, or the newest tag
+   by semver order on a dispatch). It rejects lightweight or unsigned tags
+   through GitHub's tag API, requires the tagged commit to be reachable from
+   protected `main`, and requires the tag's version to equal `package.json`'s
+   `version` at that tag.
+2. **`publish-release`** fails closed if the tag already has a release. It
+   extracts the matching `## [x.y.z]` section from `CHANGELOG.md` at the tag
+   (failing if the section is missing or empty), creates the published
+   (non-draft) release titled with the tag, then explicitly dispatches
+   `publish.yml` (npm) and `sbom.yml`, both pinned to the tag. GitHub suppresses
+   workflows triggered by events created with `GITHUB_TOKEN` but permits
+   `workflow_dispatch`, so the job waits for both runs and fails if either
+   fails.
+
+`publish.yml` independently resolves the tag's release and refuses to publish
+unless it is published (not a draft) and its tag equals `package.json`'s
+version. npm trusted publishing is bound to the `publish.yml` file name, so
+don't rename it.
+
+`workflow_dispatch` on `release.yml` (no inputs) backfills the newest `vX.Y.Z`
+tag. It fails if that tag already has a release, so re-run `publish.yml` and
+`sbom.yml` directly to repair a release whose follow-up jobs failed.
+
+### Retired Mac build
+
+The Mac app ended at v0.19.2. `.github/workflows/desktop-release.yml` is
+`workflow_dispatch`-only, so no tag starts it, and it is pending removal. The
+rest of this document describes that retired build. The Homebrew cask is
+likewise Mac-only history.
 
 The public trust rules for both platforms are in the
 [Code signing policy](CODE_SIGNING_POLICY.md). Windows install, privacy, removal,
 and Store-readiness details are in [Windows installation and release status](WINDOWS.md).
 
-Pushing a tag `vX.Y.Z` runs the whole desktop release:
-`.github/workflows/desktop-release.yml` builds the app, signs and notarizes the
+The retired workflow ran the whole desktop release from a tag:
+`.github/workflows/desktop-release.yml` built the app, signs and notarizes the
 DMG, builds the exact-version updater ZIP and `latest-mac.yml`, uploads that
 atomic macOS release bundle to the tag's GitHub release, and flips the release
 from draft to published only after all three assets are present. The DMG remains
@@ -83,7 +116,7 @@ signing request waits for the required SignPath approval. The Windows lane build
 and fully smokes an
 NSIS package too, but attaches it only after a valid SignPath Foundation
 Authenticode signature. Until Windows signing is approved and configured, that
-unsigned installer remains an Actions-only QA artifact. Five jobs enforce the
+unsigned installer remains an Actions-only QA artifact. Five jobs enforced the
 order:
 
 1. **`resolve-tag`**, resolves and validates the `vX.Y.Z` tag once (from the
@@ -128,13 +161,8 @@ order:
 5. **`publish-release`**, waits for both platform jobs and confirms the DMG,
    exact-version updater ZIP, and single `latest-mac.yml` all landed before it
    may publish. It requires the `.exe` too when Windows signing reported success,
-   then publishes and explicitly dispatches `publish.yml` (npm publish),
-   `release-assets.yml` (the release-bundle verifier below), and `sbom.yml`. GitHub
-   suppresses workflows triggered by events created with `GITHUB_TOKEN`, but
-   explicitly permits `workflow_dispatch`, so each dispatch is pinned to the
-   validated release tag after the complete macOS release bundle is present. The job
-   waits for all three dispatched runs and fails if any one fails, so a green
-   desktop release means npm, the complete Mac feed check, and the SBOM all completed.
+   then publishes and explicitly dispatches `publish.yml` (npm publish) and
+   `sbom.yml`, each pinned to the validated release tag, and waits for them.
 
 The Homebrew cask is not updated from this repo. `CodesWhat/homebrew-tap`
 carries its own `update-careerrat-cask.yml` (cron plus manual dispatch) that
@@ -144,16 +172,15 @@ and commits the bump directly to the tap's `main` with its own
 `GITHUB_TOKEN`, the same way the goreleaser-managed casks already land
 there. No cross-repo credential lives in either repo's secrets.
 
-`workflow_dispatch` (no inputs, matching `release-assets.yml`) backfills the
-latest `vX.Y.Z` tag, re-running after a secrets fix for example, without
+`workflow_dispatch` (no inputs) backfills the latest `vX.Y.Z` tag, without
 needing a new tag push.
 
 The rest of this section, the release checklist, the manual publish order,
-and the manual cask steps, is the fallback path: what to run by hand if the
-pipeline needs debugging, a secret is temporarily unavailable, or you want to
-verify a step in isolation.
+and the manual cask steps, is the fallback path for that retired build.
 
 #### One-time CI signing setup
+
+This applies only to the retired Mac build.
 
 The pipeline needs six repository secrets, set once
 (`gh secret set <name> --repo CodesWhat/careerrat --body ...` or the
@@ -210,6 +237,8 @@ metadata-mismatched update as a fallback.
 
 #### Manual fallback: building and verifying locally
 
+This applies only to the retired Mac build.
+
 1. Build the desktop artifact with `npm run desktop:dist`. The command signs and notarizes the app
    and DMG container, staples the DMG ticket, and fails unless Gatekeeper verification and the
    exact signed app's packaged smoke both pass.
@@ -254,6 +283,8 @@ download, verification, or install-start failure.
 
 #### Manual fallback: publishing a desktop release
 
+This applies only to the retired Mac build.
+
 A GitHub release without the complete macOS bundle is a defect, not a
 formality. The DMG is the direct installer and Homebrew input; the exact-version
 updater ZIP plus `latest-mac.yml` make in-app updates work. Publishing the
@@ -280,25 +311,12 @@ tag="$(git describe --tags --exact-match)"
 4. Only then publish the release: `gh release edit "$tag" --draft=false`.
    This is the step that fires `publish.yml` and pushes to npm.
 
-`publish.yml` independently resolves that exact tag's GitHub Release and
-refuses to publish unless the release is public and already carries the
-version-matching DMG, exact-version updater ZIP, and `latest-mac.yml`. The same gate applies to a direct tag-pinned
-`workflow_dispatch`, so a manual retry cannot bypass signing and artifact
-publication order.
-
-The `release-assets` workflow checks every published release for the matching
-DMG, exact-version updater ZIP, and single `latest-mac.yml`, and fails loudly
-if any part is missing. It runs alongside
-`publish.yml`, not before it, so it is a detector, not a blocker: it cannot
-stop npm publish from firing. If it flags a release, run
-`npm run desktop:release` to upload the missing asset. A manual
-`workflow_dispatch` run takes no tag and always checks the **latest**
-published release, so re-running it only confirms the repair while the
-flagged release is still the latest one. If a newer release has landed since,
-verify the repaired one directly with
-`gh release view "$tag" --json assets` instead.
+`publish.yml` no longer checks for these assets. It only requires the tag's
+release to be published and to match `package.json`'s version.
 
 #### Manual fallback: updating the Homebrew cask
+
+This applies only to the retired Mac build.
 
 The cask lives at `Casks/careerrat.rb` in the separate repo
 `CodesWhat/homebrew-tap`, cloned locally at `~/code/codeswhat/homebrew-tap`.

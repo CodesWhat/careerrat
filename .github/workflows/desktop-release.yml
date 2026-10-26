@@ -1,7 +1,8 @@
 name: desktop-release
 
-# Fully automated desktop release pipeline. Pushing a tag `vX.Y.Z` builds the
-# macOS and Windows apps from the exact tag. The DMG is always signed and
+# RETIRED: the Mac app ended at v0.19.2 and tags now go through release.yml, so
+# this workflow is dispatch-only until it is removed. Desktop release pipeline:
+# it builds the macOS and Windows apps from the latest tag. The DMG is always signed and
 # notarized. Windows is attached only after SignPath returns a valid
 # Authenticode signature; until Foundation approval/configuration exists, the
 # unsigned installer remains a clearly labeled Actions-only QA artifact.
@@ -14,7 +15,7 @@ name: desktop-release
 #
 # workflow_dispatch backfills the LATEST vX.Y.Z tag (e.g. re-running after a
 # secrets fix) without requiring a new tag push. It takes no inputs, matching
-# release-assets.yml's dispatch and the checkov CKV_GHA_7 rule the qlty gate
+# the checkov CKV_GHA_7 rule the qlty gate
 # enforces; a dispatch always targets the newest tag by semver order.
 #
 # Every tag value is resolved once in `resolve-tag` and threaded through the
@@ -29,9 +30,6 @@ name: desktop-release
 # automatic without a PAT or GitHub App credential.
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch: {}
 
 concurrency:
@@ -45,7 +43,7 @@ jobs:
     name: resolve tag
     runs-on: ubuntu-latest
     # contents: read, not {}: the dispatch path reads the repo's tag list,
-    # same class of read release-assets.yml grants for its dispatch fallback.
+    # the same class of read any dispatch fallback needs.
     permissions:
       contents: read
     outputs:

@@ -1,0 +1,197 @@
+name: release
+
+# npm-only release pipeline. Pushing a signed annotated tag `vX.Y.Z` on protected
+# main publishes the GitHub release, then npm (publish.yml) and the SBOM
+# (sbom.yml). The Mac app ended at v0.19.2; desktop-release.yml is
+# dispatch-only until it is removed, so no tag starts a Mac or Windows build.
+#
+# workflow_dispatch backfills the LATEST vX.Y.Z tag without needing a new tag
+# push. It takes no inputs, matching the checkov CKV_GHA_7 rule the qlty gate
+# enforces; a dispatch always targets the newest tag by semver order.
+#
+# Every tag value is resolved once in `resolve-tag` and threaded through the
+# other jobs as a job output / env var, never spliced directly into a `run:`
+# script body (the template-injection pattern zizmor flags).
+#
+# Events created with a workflow's GITHUB_TOKEN do not start other workflows.
+# `publish-release` therefore dispatches publish.yml and sbom.yml explicitly
+# after the release is published, then waits for both runs and propagates any
+# failure. workflow_dispatch is the explicit exception to that suppression, so
+# this stays automatic without a PAT or GitHub App credential.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  resolve-tag:
+    name: resolve tag
+    runs-on: ubuntu-latest
+    # contents: read, not {}: the dispatch path reads the repo's tag list, and
+    # the version check reads package.json at the tag through the contents API.
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Harden the runner (block all outbound calls except the allowlist)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          # This job only calls the GitHub API through `gh` (tag list on the
+          # dispatch path, the tag-check API, and package.json at the tag).
+          # Same allowlist desktop-release.yml's resolve-tag job runs under
+          # (observed on runs 32487926861 and 32487059880).
+          allowed-endpoints: >
+            api.github.com:443
+      - name: Resolve the release tag
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$(gh api "repos/$REPO/tags" --paginate --jq '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          else
+            tag="$REF_NAME"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Resolved tag '$tag' does not match vX.Y.Z"
+            exit 1
+          fi
+          TAG="$tag"
+          tag_ref="$(gh api "repos/$REPO/git/ref/tags/$TAG")"
+          if [ "$(jq -r '.object.type' <<<"$tag_ref")" != "tag" ]; then
+            echo "::error::Release tag $TAG is lightweight; a signed annotated tag is required."
+            exit 1
+          fi
+          tag_object="$(jq -er '.object.sha' <<<"$tag_ref")"
+          tag_record="$(gh api "repos/$REPO/git/tags/$tag_object")"
+          recorded_tag="$(jq -r '.tag' <<<"$tag_record")"
+          if [ "$recorded_tag" != "$TAG" ]; then
+            echo "::error::Release ref $TAG points to an annotated tag named $recorded_tag."
+            exit 1
+          fi
+          target_type="$(jq -r '.object.type' <<<"$tag_record")"
+          if [ "$target_type" != "commit" ]; then
+            echo "::error::Release tag $TAG must point directly to one commit, not $target_type."
+            exit 1
+          fi
+          tag_commit="$(jq -er '.object.sha' <<<"$tag_record")"
+          verified="$(jq -r '.verification.verified' <<<"$tag_record")"
+          reason="$(jq -r '.verification.reason' <<<"$tag_record")"
+          if [ "$verified" != "true" ] || [ "$reason" != "valid" ]; then
+            echo "::error::Release tag $TAG has no valid cryptographic signature (reason: $reason)."
+            exit 1
+          fi
+          main_relation="$(gh api "repos/$REPO/compare/$tag_commit...main" --jq '.status')"
+          if [ "$main_relation" != "ahead" ] && [ "$main_relation" != "identical" ]; then
+            echo "::error::Release tag $TAG does not point to a commit reachable from protected main."
+            exit 1
+          fi
+          pkg_version="$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPO/contents/package.json?ref=$TAG" | jq -er '.version')"
+          if [ "v$pkg_version" != "$TAG" ]; then
+            echo "::error::Release tag $TAG does not match package.json version $pkg_version at that tag."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  publish-release:
+    name: publish release
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the published release for the tag
+      # Required only for the explicit workflow_dispatch calls below. GitHub
+      # suppresses release-event workflows when the publishing API call uses
+      # GITHUB_TOKEN, while workflow_dispatch is allowed to start them.
+      actions: write # dispatch the post-release workflows
+      # gh run watch reads each dispatched run's check suite before returning
+      # its final exit status to this job.
+      checks: read # propagate each dispatched workflow's final check status
+    env:
+      TAG: ${{ needs.resolve-tag.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Harden the runner (block all outbound calls except the allowlist)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          # Changelog lookup, release creation, workflow dispatch and child-run
+          # status checks all use GitHub's API through gh. Same allowlist
+          # desktop-release.yml's publish-release job runs under (observed on
+          # run 32487926861); nothing here is fetched from github.com.
+          allowed-endpoints: >
+            api.github.com:443
+      - name: Create the published release from the changelog
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          matches="$(gh api "repos/$REPO/releases" --paginate --slurp | jq -c --arg tag "$TAG" \
+            'add | [.[] | select(.tag_name==$tag)]')"
+          count="$(jq 'length' <<<"$matches")"
+          if [ "$count" -gt 0 ]; then
+            if jq -e 'any(.[]; .draft == false)' <<<"$matches" >/dev/null; then
+              echo "::error::Release $TAG is already published; refusing to replace it."
+            else
+              echo "::error::A draft release for $TAG already exists; refusing to guess what to publish."
+            fi
+            exit 1
+          fi
+          changelog="$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPO/contents/CHANGELOG.md?ref=$TAG")"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          awk -v heading="## [$version]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' <<<"$changelog" > "$notes_file"
+          if ! grep -q '[^[:space:]]' "$notes_file"; then
+            echo "::error::CHANGELOG.md at $TAG has no non-empty '## [$version]' section."
+            exit 1
+          fi
+          gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" \
+            --notes-file "$notes_file"
+          echo "Published $TAG."
+      - name: Dispatch post-release publishing and verification
+        # GITHUB_TOKEN-created release events do not trigger workflows, but
+        # workflow_dispatch does. Pin every dispatch to the already-validated
+        # release tag so the npm package and SBOM read the tree that was tagged.
+        run: |
+          set -euo pipefail
+          downstream_run_ids=()
+          for workflow in publish.yml sbom.yml; do
+            dispatch="$(gh api -X POST -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/$REPO/actions/workflows/$workflow/dispatches" -f ref="$TAG" \
+              -F return_run_details=true)"
+            if ! run_id="$(jq -er '.workflow_run_id | select(type == "number" and . > 0)' <<<"$dispatch")"; then
+              echo "::error::GitHub accepted $workflow but returned no usable run identity."
+              exit 1
+            fi
+            downstream_run_ids+=("$run_id")
+            echo "Dispatched $workflow at $TAG as run $run_id."
+          done
+
+          downstream_failures=0
+          for run_id in "${downstream_run_ids[@]}"; do
+            if ! gh run watch "$run_id" --repo "$REPO" --compact --exit-status; then
+              downstream_failures=$((downstream_failures + 1))
+            fi
+          done
+          if [ "$downstream_failures" -gt 0 ]; then
+            echo "::error::$downstream_failures post-release workflow(s) failed."
+            exit 1
+          fi

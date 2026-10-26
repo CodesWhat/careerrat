@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -7,7 +8,7 @@ async function workflow(name) {
 }
 
 test("release workflows use one global lane so branch backfills cannot race their resolved tag", async () => {
-  for (const name of ["desktop-release.yml", "publish.yml", "release-assets.yml", "sbom.yml"]) {
+  for (const name of ["release.yml", "desktop-release.yml", "publish.yml", "sbom.yml"]) {
     const source = await workflow(name);
     assert.match(
       source,
@@ -19,11 +20,11 @@ test("release workflows use one global lane so branch backfills cannot race thei
   }
 });
 
-test("desktop release rejects unsigned or lightweight release tags", async () => {
-  const source = await workflow("desktop-release.yml");
+test("release rejects unsigned or lightweight release tags", async () => {
+  const source = await workflow("release.yml");
   const resolve = source.slice(
     source.indexOf("  resolve-tag:"),
-    source.indexOf("  prepare-draft-release:")
+    source.indexOf("  publish-release:")
   );
 
   const tagRefAt = resolve.indexOf("git/ref/tags/$TAG");
@@ -31,13 +32,16 @@ test("desktop release rejects unsigned or lightweight release tags", async () =>
   const tagNameAt = resolve.indexOf("'.tag'");
   const targetTypeAt = resolve.indexOf("'.object.type'", tagRecordAt);
   const compareAt = resolve.indexOf("compare/$tag_commit...main");
+  const versionAt = resolve.indexOf("contents/package.json?ref=$TAG");
   const outputAt = resolve.indexOf('echo "tag=$tag"');
 
   assert.ok(tagRefAt >= 0 && tagRecordAt > tagRefAt);
   assert.ok(tagNameAt > tagRecordAt, "the signed tag object's own name must be checked");
   assert.ok(targetTypeAt > tagNameAt, "the signed tag must peel directly to a commit");
   assert.ok(compareAt > targetTypeAt, "the tagged commit must be compared with protected main");
-  assert.ok(outputAt > compareAt, "no tag output may escape before every trust check passes");
+  assert.ok(versionAt > compareAt, "the tag's package.json version must be read at the tag itself");
+  assert.ok(outputAt > versionAt, "no tag output may escape before every trust check passes");
+  assert.match(resolve, /\[ "v\$pkg_version" != "\$TAG" \]/);
   assert.match(resolve, /\[ "\$recorded_tag" != "\$TAG" \]/);
   assert.match(resolve, /\[ "\$target_type" != "commit" \]/);
   assert.match(resolve, /"\$main_relation" != "ahead"[\s\S]*"\$main_relation" != "identical"/);
@@ -218,46 +222,44 @@ test("release artifact selection rejects extra or renamed DMGs before upload", a
   );
 });
 
-test("desktop release waits for every dispatched workflow and propagates child failures", async () => {
-  const source = await workflow("desktop-release.yml");
-  const publishJob = source.slice(source.indexOf("  publish-release:"));
-  const dispatchAt = publishJob.indexOf("actions/workflows/$workflow/dispatches");
-  const waitAt = publishJob.indexOf('gh run watch "$run_id"');
+for (const name of ["release.yml", "desktop-release.yml"]) {
+  test(`${name} waits for every dispatched workflow and propagates child failures`, async () => {
+    const source = await workflow(name);
+    const publishJob = source.slice(source.indexOf("  publish-release:"));
+    const dispatchAt = publishJob.indexOf("actions/workflows/$workflow/dispatches");
+    const waitAt = publishJob.indexOf('gh run watch "$run_id"');
 
-  assert.match(
-    publishJob,
-    /run_id="\$\(jq -er '\.workflow_run_id \| select\(type == "number" and \. > 0\)' <<<"\$dispatch"\)"/,
-    "each dispatch must capture the exact run identity returned by the versioned API"
-  );
-  assert.match(
-    publishJob,
-    /permissions:[\s\S]*?actions: write[\s\S]*?checks: read/,
-    "gh run watch requires read access to child check runs"
-  );
-  assert.match(
-    publishJob,
-    /downstream_run_ids\+=\("\$run_id"\)/,
-    "all three child run ids must be retained before waiting"
-  );
-  assert.ok(waitAt > dispatchAt, "child runs must be watched after they are dispatched");
-  assert.match(
-    publishJob,
-    /for run_id in "\$\{downstream_run_ids\[@\]\}"; do[\s\S]*gh run watch "\$run_id" --repo "\$REPO"[^\n]*--exit-status/,
-    "the release job must wait for every child and ask gh to return its failure status"
-  );
-  assert.match(
-    publishJob,
-    /if \[ "\$downstream_failures" -gt 0 \]; then[\s\S]*exit 1/,
-    "any child failure must fail the originating desktop release"
-  );
-});
+    assert.match(
+      publishJob,
+      /run_id="\$\(jq -er '\.workflow_run_id \| select\(type == "number" and \. > 0\)' <<<"\$dispatch"\)"/,
+      "each dispatch must capture the exact run identity returned by the versioned API"
+    );
+    assert.match(
+      publishJob,
+      /permissions:[\s\S]*?actions: write[\s\S]*?checks: read/,
+      "gh run watch requires read access to child check runs"
+    );
+    assert.match(
+      publishJob,
+      /downstream_run_ids\+=\("\$run_id"\)/,
+      "every child run id must be retained before waiting"
+    );
+    assert.ok(waitAt > dispatchAt, "child runs must be watched after they are dispatched");
+    assert.match(
+      publishJob,
+      /for run_id in "\$\{downstream_run_ids\[@\]\}"; do[\s\S]*gh run watch "\$run_id" --repo "\$REPO"[^\n]*--exit-status/,
+      "the release job must wait for every child and ask gh to return its failure status"
+    );
+    assert.match(
+      publishJob,
+      /if \[ "\$downstream_failures" -gt 0 \]; then[\s\S]*exit 1/,
+      "any child failure must fail the originating release"
+    );
+  });
+}
 
 test("post-release workflow dispatches stay pinned to the release tag", async () => {
-  const [publish, releaseAssets, sbom] = await Promise.all([
-    workflow("publish.yml"),
-    workflow("release-assets.yml"),
-    workflow("sbom.yml"),
-  ]);
+  const [publish, sbom] = await Promise.all([workflow("publish.yml"), workflow("sbom.yml")]);
 
   assert.match(publish, /REF_TYPE:\s*\$\{\{ github\.ref_type \}\}/);
   assert.match(publish, /REF_NAME:\s*\$\{\{ github\.ref_name \}\}/);
@@ -265,46 +267,86 @@ test("post-release workflow dispatches stay pinned to the release tag", async ()
   assert.match(publish, /pkg_tag="v\$\(node -p .*package\.json.*version.*\)"/);
   assert.match(publish, /if \[ "\$pkg_tag" != "\$REF_NAME" \]/);
 
-  for (const source of [releaseAssets, sbom]) {
-    assert.match(source, /REF_TYPE:\s*\$\{\{ github\.ref_type \}\}/);
-    assert.match(source, /REF_NAME:\s*\$\{\{ github\.ref_name \}\}/);
-    assert.match(source, /\[ "\$REF_TYPE" = "tag" \]/);
-  }
+  assert.match(sbom, /REF_TYPE:\s*\$\{\{ github\.ref_type \}\}/);
+  assert.match(sbom, /REF_NAME:\s*\$\{\{ github\.ref_name \}\}/);
+  assert.match(sbom, /\[ "\$REF_TYPE" = "tag" \]/);
 });
 
-test("npm publish requires the exact published release and complete version-matching Mac feed", async () => {
+test("npm publish requires the exact published release whose tag matches the package version", async () => {
   const publish = await workflow("publish.yml");
-  const releaseGateAt = publish.indexOf("Verify the exact published release and Mac update feed");
+  const releaseGateAt = publish.indexOf("Verify the exact published release");
   const npmPublishAt = publish.indexOf("npm publish --provenance");
 
-  assert.ok(releaseGateAt >= 0, "publish must have a complete GitHub Release feed gate");
-  assert.ok(npmPublishAt > releaseGateAt, "the complete feed gate must run before npm publish");
+  assert.ok(releaseGateAt >= 0, "publish must have a published-release gate");
+  assert.ok(npmPublishAt > releaseGateAt, "the release gate must run before npm publish");
   assert.match(
     publish,
     /gh api "repos\/\$REPO\/releases" --paginate --slurp[\s\S]*--arg tag "\$REF_NAME"/,
     "publish must resolve the release by its validated tag, including workflow_dispatch runs"
   );
   assert.match(publish, /select\(\.tag_name==\$tag\)/);
+  assert.match(publish, /"\$count" -ne 1/);
   assert.match(publish, /\.draft == false/);
   assert.match(publish, /\.published_at != null/);
-  assert.match(publish, /matching_dmgs\+=\("\$asset"\)/);
-  assert.match(publish, /matching_zips\+=\("\$asset"\)/);
-  assert.match(publish, /manifest_count=\$\(\(manifest_count \+ 1\)\)/);
-  assert.match(publish, /"\$\{#matching_dmgs\[@\]\}" -ne 1/);
-  assert.match(publish, /"\$\{#matching_zips\[@\]\}" -ne 1/);
-  assert.match(publish, /"\$manifest_count" -ne 1/);
-  assert.match(publish, /exactly one \.dmg asset matching version \$version/i);
-  assert.match(publish, /exactly one updater \.zip asset matching version \$version/i);
-  assert.match(publish, /exactly one latest-mac\.yml asset/i);
+  assert.match(publish, /release_tag="\$\(jq -r '\.tag_name' <<<"\$release"\)"/);
+  assert.match(publish, /\[ "\$release_tag" != "v\$pkg_version" \]/);
+  assert.doesNotMatch(publish, /\.dmg|\.zip|latest-mac|matching_dmgs/);
 });
 
-test("published-release asset verification independently requires the complete Mac feed", async () => {
-  const releaseAssets = await workflow("release-assets.yml");
+test("release publishes a non-draft release from the changelog, then dispatches npm and the SBOM", async () => {
+  const source = await workflow("release.yml");
+  const publishJob = source.slice(source.indexOf("  publish-release:"));
+  const existingAt = publishJob.indexOf("refusing to replace it");
+  const changelogAt = publishJob.indexOf("contents/CHANGELOG.md?ref=$TAG");
+  const emptyAt = publishJob.indexOf("has no non-empty");
+  const createAt = publishJob.indexOf('gh release create "$TAG"');
+  const dispatchAt = publishJob.indexOf("actions/workflows/$workflow/dispatches");
 
-  assert.match(releaseAssets, /matching_dmgs\+=\("\$asset"\)/);
-  assert.match(releaseAssets, /matching_zips\+=\("\$asset"\)/);
-  assert.match(releaseAssets, /manifest_count=\$\(\(manifest_count \+ 1\)\)/);
-  assert.match(releaseAssets, /"\$\{#matching_dmgs\[@\]\}" -ne 1/);
-  assert.match(releaseAssets, /"\$\{#matching_zips\[@\]\}" -ne 1/);
-  assert.match(releaseAssets, /"\$manifest_count" -ne 1/);
+  assert.match(
+    source,
+    /on:\s*\n\s+push:\s*\n\s+tags:\s*\n\s+- "v\*\.\*\.\*"\s*\n\s+workflow_dispatch: \{\}/
+  );
+  assert.match(source, /needs: resolve-tag/);
+  assert.ok(
+    existingAt >= 0 && changelogAt > existingAt,
+    "an existing release must fail closed first"
+  );
+  assert.ok(emptyAt > changelogAt, "a missing changelog section must fail before release creation");
+  assert.ok(createAt > emptyAt, "the release is created only with real notes");
+  assert.ok(dispatchAt > createAt, "downstream workflows start only after publication");
+  assert.match(publishJob, /--notes-file "\$notes_file"/);
+  assert.match(publishJob, /--title "\$TAG"/);
+  assert.match(publishJob, /--verify-tag/);
+  assert.match(publishJob, /awk -v heading="## \[\$version\]"/);
+  assert.doesNotMatch(source, /--draft|draft=true/);
+  assert.match(publishJob, /for workflow in publish\.yml sbom\.yml; do/);
+  assert.match(
+    publishJob,
+    /permissions:[\s\S]*?contents: write[\s\S]*?actions: write[\s\S]*?checks: read/
+  );
+  assert.match(
+    publishJob,
+    /gh api -X POST -H "X-GitHub-Api-Version: 2026-03-10"[\s\S]*actions\/workflows\/\$workflow\/dispatches[\s\S]*-f ref="\$TAG"/
+  );
+  assert.match(publishJob, /-F return_run_details=true/);
+  assert.doesNotMatch(source, /release-assets|\.dmg|latest-mac|macos-/);
+});
+
+test("tags start release.yml only, and the retired Mac release workflow is dispatch-only", async () => {
+  const [release, desktop] = await Promise.all([
+    workflow("release.yml"),
+    workflow("desktop-release.yml"),
+  ]);
+  const desktopTriggers = desktop.slice(
+    desktop.indexOf("\non:"),
+    desktop.indexOf("\nconcurrency:")
+  );
+
+  assert.match(release, /tags:\s*\n\s+- "v\*\.\*\.\*"/);
+  assert.doesNotMatch(desktopTriggers, /push:|tags:/);
+  assert.match(desktopTriggers, /workflow_dispatch/);
+  assert.ok(
+    !existsSync(new URL("../.github/workflows/release-assets.yml", import.meta.url)),
+    "the Mac bundle verifier is gone with the Mac release"
+  );
 });
