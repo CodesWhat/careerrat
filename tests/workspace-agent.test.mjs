@@ -8686,10 +8686,12 @@ test("Apply on site keeps an active supervised browser session without treating 
   assert.equal(last.metadata.submissionVerified, false);
   assert.equal(last.artifacts[0].kind, "application_handoff");
   assert.equal(last.artifacts[0].session.filledCount, 5);
-  assert.equal(last.metadata.nextActions[0].label, "Return to supervised application");
+  assert.equal(last.metadata.nextActions[0].label, "Open form to review & submit");
   assert.equal(last.metadata.nextActions[0].intent.type, "job.prepare-submit");
   assert.match(last.text, /filled 5 fields/i);
   assert.match(last.text, /attached 2 files/i);
+  assert.match(last.text, /check the answers and attachments/i);
+  assert.match(last.text, /press submit.*I applied/i);
   assert.match(last.text, /not marked Applied/i);
 });
 

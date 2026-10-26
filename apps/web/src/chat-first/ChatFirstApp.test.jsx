@@ -1579,6 +1579,8 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("1 touch due");
     expect(html).toContain("next: Thu");
     expect(html).toContain("chat-first-browser-launcher--attention");
+    expect(html).toContain("Open the application");
+    expect(html).toContain("rejection, interview invite, offer, or recruiter feedback");
   });
 
   it("keeps first-run Search visibly actionable and labels its running state", async () => {

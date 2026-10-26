@@ -2162,7 +2162,11 @@ function applicationSessionText(execution) {
     ? `${unresolvedCount} field${unresolvedCount === 1 ? "" : "s"} still ${unresolvedCount === 1 ? "needs" : "need"} your review. `
     : "";
   const detail = String(execution?.reason || "Review the live application form.").trim();
-  return `${filled}${uploaded}${unresolved}${detail} This application was not marked Applied.`.trim();
+  const review =
+    execution?.state === "awaiting-submit"
+      ? ' Open the application, check the answers and attachments, finish any remaining fields, and press submit when everything looks right. Then return here and choose "I applied".'
+      : "";
+  return `${filled}${uploaded}${unresolved}${detail}${review} This application was not marked Applied.`.trim();
 }
 
 function packetGapsForApplication(gaps, application, applyIntent) {
@@ -8822,7 +8826,9 @@ export async function executeWorkspaceIntent({
             {
               label: permissionRequired
                 ? permission.allowLabel
-                : "Return to supervised application",
+                : execution.state === "awaiting-submit"
+                  ? "Open form to review & submit"
+                  : "Return to supervised application",
               intent: {
                 type: permissionRequired ? "settings.apply" : "job.prepare-submit",
                 entity: permissionRequired
