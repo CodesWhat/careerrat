@@ -6,7 +6,7 @@ const ARCHIVED_STATUSES = new Set(["rejected", "withdrawn", "cut", "closed"]);
 
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
-export function safeCompanySegment(value) {
+function safeCompanySegment(value) {
   const cleaned = String(value ?? "")
     // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are invalid in Windows path segments
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
