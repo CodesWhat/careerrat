@@ -3196,3 +3196,88 @@ test("chat-first reads fail closed and never create a database implicitly", asyn
     (error) => error?.code === "NO_DATABASE"
   );
 });
+
+function seedPrepareSubmitMission(api, repoRoot, appId, missionId) {
+  seedApplication(repoRoot, {
+    id: appId,
+    company: "Auto Submit Corp",
+    status: "reviewed-hold",
+    evaluation: { gate: "keep" },
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: missionId,
+    mode: "prepare-to-submit",
+    jobs: [{ type: "application", id: appId }],
+  });
+}
+
+function prepareSubmitState(state, extraMetadata = {}) {
+  return async ({ intent }) => ({
+    operationResult: { ok: true },
+    ...(intent.type === "job.prepare-submit"
+      ? { messages: [{ metadata: { state, ...extraMetadata } }] }
+      : {}),
+  });
+}
+
+test("auto submit mission: a verified applied prepare-submit completes the submit-gate and the mission", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-auto-applied", "mission-auto-applied");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-auto-applied",
+    executeIntent: prepareSubmitState("applied"),
+  });
+
+  assert.equal(run.ok, true);
+  assert.equal(run.mission.status, "completed");
+  const prepare = run.mission.steps.find((step) => step.action === "prepare-submit");
+  assert.equal(prepare.status, "completed");
+  assert.equal(prepare.result.state, "applied");
+  const gate = run.mission.steps.find((step) => step.action === "submit-gate");
+  assert.equal(gate.status, "completed");
+  assert.equal(gate.result.requiresUserSubmit, false);
+  assert.equal(gate.result.submissionRecorded, true);
+  assert.equal(gate.result.applicationId, "app-auto-applied");
+});
+
+test("auto submit mission: submitted-unverified blocks the step with its reason and does not throw", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-auto-unverified", "mission-auto-unverified");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-auto-unverified",
+    executeIntent: prepareSubmitState("submitted-unverified", {
+      reason: "Clicked Submit but no confirmation page appeared.",
+    }),
+  });
+
+  assert.equal(run.ok, true);
+  assert.equal(run.mission.status, "paused");
+  const prepare = run.mission.steps.find((step) => step.action === "prepare-submit");
+  assert.equal(prepare.status, "blocked");
+  assert.equal(prepare.result.state, "submitted-unverified");
+  assert.equal(prepare.result.reason, "Clicked Submit but no confirmation page appeared.");
+  assert.equal(run.mission.steps.find((step) => step.action === "submit-gate").status, "pending");
+});
+
+test("auto submit mission: any other unexpected prepare-submit state still fails the step", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-auto-weird", "mission-auto-weird");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-auto-weird",
+    executeIntent: prepareSubmitState("submitted"),
+  });
+
+  assert.equal(run.ok, false);
+  assert.equal(run.error.code, "MISSION_PREPARE_SUBMIT_FAILED");
+  assert.match(run.error.message, /unsafe state: submitted/);
+});

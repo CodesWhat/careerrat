@@ -520,6 +520,36 @@ export function findAdvanceButtonRef(snapshot) {
   return null;
 }
 
+// Controls that must never be clicked as a final submit, even when the label
+// also contains a submit/send token ("Cancel submission", "Submit later").
+const SUBMIT_EXCLUDE_PATTERN =
+  /\b(withdraw|cancel|delete|remove|discard|later|draft|save|undo|edit|back)\b/;
+
+/**
+ * Find the final submit control for the auto-submit path ONLY. This is the one
+ * place the submit/send disqualifier used by findAdvanceButtonRef is lifted.
+ * Returns the ref only when exactly one candidate button carries a submit/send
+ * label; zero or several (ambiguous) return null so the run falls back to the
+ * human handoff. Never matches withdraw/cancel/delete-style controls.
+ *
+ * @param {{ refs?: Record<string, { role?: string, name?: string }> }} snapshot
+ * @returns {string|null}
+ */
+export function findSubmitButtonRef(snapshot) {
+  const refs = snapshot?.refs && typeof snapshot.refs === "object" ? snapshot.refs : {};
+  const matches = [];
+  for (const [ref, entry] of Object.entries(refs)) {
+    if (String(entry?.role || "").toLowerCase() !== "button") continue;
+    const label = normalizeLabel(entry?.name);
+    if (!label) continue;
+    if (!ADVANCE_DISQUALIFY_TOKENS.some((token) => label.includes(token))) continue;
+    if (SUBMIT_EXCLUDE_PATTERN.test(label)) continue;
+    if (isSsoOrAccountLabel(entry?.name)) continue;
+    matches.push(ref);
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------

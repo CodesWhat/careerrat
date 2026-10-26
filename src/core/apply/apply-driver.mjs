@@ -15,6 +15,7 @@ import {
   confirmationCheck,
   EASY_APPLY_STEPS,
   findAdvanceButtonRef,
+  findSubmitButtonRef,
   hostnameToPortal,
   isEasyApply,
   isSsoOrAccountLabel,
@@ -915,9 +916,106 @@ export function createApplyDriver({
   mayRunImpl = mayRun,
   saveScreenshotImpl = screenshotPath,
   maxFormSteps = 10,
+  confirmationTimeoutMs = 20_000,
+  confirmationPollMs = 1_000,
+  sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
   const sessions = new Map();
   const inFlight = new Map();
+
+  // Auto-submit tail: click the final submit control exactly once, then poll
+  // for a confirmation page inside a bounded wait. There is no retry path: a
+  // click that produced no confirmation is reported as submitted-unverified
+  // and the retained session is marked so no later run clicks it again.
+  async function submitAndConfirm({
+    pageId,
+    submitRef,
+    submitLabel,
+    retainedSession,
+    applicationId,
+    snapshot,
+    stepSession,
+    counts,
+    signal,
+  }) {
+    retainedSession.submitAttempted = true;
+    let clickError = null;
+    try {
+      await browserOp(ops, "clickButton", { pageId, ref: submitRef }, signal);
+    } catch (error) {
+      throwIfAborted(signal);
+      // A throwing click may still have fired in the page. Never click again;
+      // fall through to the confirmation check and report what the page shows.
+      clickError = String(error?.message || "browser command failed").slice(0, 200);
+    }
+    const deadline = Date.now() + Math.max(0, confirmationTimeoutMs);
+    let latest = snapshot;
+    for (;;) {
+      throwIfAborted(signal);
+      try {
+        latest = await browserOp(ops, "snapshot", { pageId }, signal);
+        const confirmation = confirmationCheck({
+          pageText: latest.pageText,
+          currentUrl: latest.origin,
+        });
+        if (confirmation.submitted) {
+          return submittedResult({
+            ops,
+            pageId,
+            snapshot: latest,
+            applicationId,
+            repoRoot,
+            env,
+            saveScreenshotImpl,
+            providerLabel,
+            confirmation,
+            signal,
+          });
+        }
+      } catch {
+        throwIfAborted(signal);
+      }
+      if (Date.now() >= deadline) break;
+      await sleepImpl(confirmationPollMs);
+    }
+    const artifacts = [];
+    try {
+      const screenshot = await browserOp(ops, "screenshot", { pageId }, signal);
+      artifacts.push({
+        kind: "submission_attempt",
+        title: "Page after submit (no confirmation seen)",
+        path: saveScreenshotImpl({
+          repoRoot,
+          env,
+          applicationId,
+          data: screenshot.data,
+          format: screenshot.format,
+        }),
+      });
+    } catch {
+      throwIfAborted(signal);
+    }
+    return {
+      available: true,
+      verified: false,
+      state: "submitted-unverified",
+      reason: `CareerRat clicked "${submitLabel}" but no confirmation page appeared within ${Math.round(
+        confirmationTimeoutMs / 1000
+      )} seconds${clickError ? ` (the click reported: ${clickError})` : ""}. It did not click again; check the application on the site before trying it again.`,
+      currentUrl: latest?.origin || snapshot?.origin,
+      session: {
+        provider: providerLabel,
+        filledCount: counts.filledCount,
+        uploadedCount: counts.uploadedCount,
+        unresolved: counts.unresolved,
+        blockers: [],
+        submitMode: "auto",
+        submitClicked: true,
+        ...stepSession,
+      },
+      artifacts,
+    };
+  }
 
   async function executeOne({
     applicationId,
@@ -925,10 +1023,15 @@ export function createApplyDriver({
     postingUrl,
     questionCapture,
     prepareOnly = false,
+    submitMode,
     focusSession = false,
     signal,
   } = {}) {
     throwIfAborted(signal);
+    // The only way the driver ever presses the final Submit: the caller passes
+    // submitMode "auto" explicitly AND prepareOnly is false. Anything else keeps
+    // the human-presses-Submit handoff exactly as before.
+    const autoSubmit = submitMode === "auto" && prepareOnly === false;
     const url = safePostingUrl(postingUrl);
     if (!url) {
       return {
@@ -1114,6 +1217,19 @@ export function createApplyDriver({
         prepareOnly,
         signal,
       });
+    }
+
+    if (autoSubmit && retainedSession.submitAttempted === true) {
+      return {
+        available: true,
+        verified: false,
+        state: "submitted-unverified",
+        reason:
+          "CareerRat already pressed Submit for this application and saw no confirmation page. It will not press it again; check the application on the site.",
+        currentUrl: snapshot.origin || url,
+        session: { provider: providerLabel, blockers: [], submitMode: "auto", submitClicked: true },
+        artifacts: [],
+      };
     }
 
     const entry = applicationEntry(snapshot);
@@ -1479,6 +1595,30 @@ export function createApplyDriver({
               ...stepSessionFields(stepIndex, easyApply),
             },
           };
+        }
+        // submit: auto. Every gate above already held: no blockers, zero
+        // unresolved required fields (which includes any required attachment
+        // that is missing or failed to attach), trusted origin. The final
+        // submit control is the one thing findAdvanceButtonRef refuses, so it
+        // is found by findSubmitButtonRef here and nowhere else. A required
+        // field that only appeared since the fill pass keeps today's handoff.
+        const submitRef = autoSubmit ? findSubmitButtonRef(preAdvanceSnapshot) : null;
+        if (submitRef && !newlyRequiredFields(snapshot, preAdvanceSnapshot).length) {
+          return submitAndConfirm({
+            pageId,
+            submitRef,
+            submitLabel: String(preAdvanceSnapshot.refs?.[submitRef]?.name || "Submit").trim(),
+            retainedSession,
+            applicationId,
+            snapshot: preAdvanceSnapshot,
+            stepSession: stepSessionFields(stepIndex, easyApply),
+            counts: {
+              filledCount: totalFilledCount,
+              uploadedCount: totalUploadedCount,
+              unresolved,
+            },
+            signal,
+          });
         }
         return {
           available: true,

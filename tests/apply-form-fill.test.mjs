@@ -10,6 +10,8 @@ import {
   buildFillPlan,
   CANONICAL_FIELDS,
   confirmationCheck,
+  findAdvanceButtonRef,
+  findSubmitButtonRef,
   hostnameToPortal,
   mapFormDefaults,
   PORTAL_RECIPES,
@@ -1248,5 +1250,55 @@ describe("E2E: current_base privacy", () => {
     assert.equal(result.mode, "manual");
     const serialized = JSON.stringify(result);
     assert.ok(!serialized.includes("999999"));
+  });
+});
+
+describe("findSubmitButtonRef (auto-submit only)", () => {
+  const snap = (...entries) => ({
+    refs: Object.fromEntries(entries.map(([ref, role, name]) => [ref, { role, name }])),
+  });
+
+  it("finds the single final submit control that the advance finder disqualifies", () => {
+    const snapshot = snap(["e1", "button", "Submit application"]);
+    assert.equal(findAdvanceButtonRef(snapshot), null);
+    assert.equal(findSubmitButtonRef(snapshot), "e1");
+    assert.equal(findSubmitButtonRef(snap(["e2", "button", "Send application"])), "e2");
+  });
+
+  it("never returns withdraw, cancel, delete or save-for-later controls", () => {
+    for (const name of [
+      "Withdraw application",
+      "Cancel submit",
+      "Delete submitted application",
+      "Submit later",
+      "Save draft and submit later",
+      "Discard",
+    ]) {
+      assert.equal(findSubmitButtonRef(snap(["e1", "button", name])), null, name);
+    }
+  });
+
+  it("ignores non-buttons and social-login controls", () => {
+    assert.equal(findSubmitButtonRef(snap(["e1", "link", "Submit application"])), null);
+    assert.equal(findSubmitButtonRef(snap(["e1", "button", "Continue with Google"])), null);
+    assert.equal(findSubmitButtonRef({}), null);
+  });
+
+  it("returns null when more than one distinct submit control is ambiguous", () => {
+    assert.equal(
+      findSubmitButtonRef(
+        snap(["e1", "button", "Submit application"], ["e2", "button", "Send message to recruiter"])
+      ),
+      null
+    );
+  });
+
+  it("does not treat the buttons-with-withdraw case as a submit when a real submit exists", () => {
+    assert.equal(
+      findSubmitButtonRef(
+        snap(["e1", "button", "Withdraw application"], ["e2", "button", "Submit application"])
+      ),
+      "e2"
+    );
   });
 });

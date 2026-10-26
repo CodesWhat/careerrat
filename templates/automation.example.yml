@@ -35,6 +35,15 @@
 version: 1
 setup_mode: basic
 
+# ── Final submit ──────────────────────────────────────────────────────────────
+# auto   = once the form is complete (no unresolved required fields, every required
+#          attachment attached), the agent presses the final Submit once and checks
+#          for the confirmation page. No confirmation page means "submitted but
+#          unverified": it is never retried and never marked Applied.
+# manual = fill and stop before Submit; a person presses it.
+# Absent means auto. Any other value is an error.
+submit: auto
+
 # ── ToS consent — one-time, per platform ──────────────────────────────────────
 # Set a platform true ONLY after you've read its automation terms. Withdraw with
 # `careerrat automation revoke <platform> --write`.

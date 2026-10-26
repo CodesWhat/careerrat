@@ -8603,6 +8603,7 @@ test("Apply on site rebuilds the packet after the live browser discovers rendere
 test("Apply on site records Applied only after the supervised browser verifies confirmation", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
+  candidateConfigPatch({ repoRoot, env: {}, name: "automation", patch: { submit: "manual" } });
 
   const unverified = await executeWorkspaceIntent({
     repoRoot,

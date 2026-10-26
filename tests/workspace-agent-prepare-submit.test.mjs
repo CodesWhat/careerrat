@@ -16,6 +16,7 @@ import {
   appRegisterPacketQuestionCapture,
   appUpsert,
 } from "../src/core/db/verbs/app.mjs";
+import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { missionCreate } from "../src/core/db/verbs/chat-first.mjs";
 import { capturePacketJobBody } from "../src/core/packet/context.mjs";
 
@@ -268,6 +269,7 @@ test("browser-touching application intents reject forged and stale mission attem
 test("job.prepare-submit resumes a persisted KEEP packet in forced prepare-only mode", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "manual");
   const calls = [];
   const controller = new AbortController();
 
@@ -315,6 +317,7 @@ test("job.prepare-submit resumes a persisted KEEP packet in forced prepare-only 
 test("job.apply keeps the user-owned Submit boundary and records a verified submission", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "manual");
   const calls = [];
 
   const result = await executeWorkspaceIntent({
@@ -777,4 +780,192 @@ test("job.prepare-submit treats an intentionally skipped optional question as cu
   assert.equal(generateCalls, 0);
   assert.equal(applyCalls, 1);
   assert.equal(result.messages.at(-1).metadata.state, "awaiting-submit");
+});
+
+function setSubmitMode(repoRoot, mode) {
+  candidateConfigPatch({ repoRoot, env: {}, name: "automation", patch: { submit: mode } });
+}
+
+test("submit auto: job.prepare-submit calls the executor unlocked and records a verified Applied", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        available: true,
+        verified: true,
+        state: "submitted",
+        submittedAt: "2026-10-26T18:00:00.000Z",
+        confirmation: "thank you for applying",
+        artifacts: [
+          { kind: "submission_confirmation", title: "Verified", path: "workspace/captures/x.png" },
+        ],
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].prepareOnly, false);
+  assert.equal(calls[0].submitMode, "auto");
+  assert.equal(calls[0].input.prepareOnly, false);
+  assert.equal(calls[0].input.submitMode, "auto");
+  const application = readApplication(repoRoot);
+  assert.equal(application.status, "applied");
+  assert.equal(application.appliedAt, "2026-10-26T18:00:00.000Z");
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "applied");
+  assert.equal(last.metadata.submissionVerified, true);
+  assert.equal(last.artifacts[0].kind, "submission_confirmation");
+});
+
+test("submit auto: job.apply resumes with the same unlocked executor call", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+  const calls = [];
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: legacyApplyIntent({ resumeSession: true }, repoRoot),
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return { available: true, verified: true, state: "submitted", confirmation: "ok" };
+    },
+  });
+
+  assert.equal(calls[0].prepareOnly, false);
+  assert.equal(calls[0].submitMode, "auto");
+  assert.equal(readApplication(repoRoot).status, "applied");
+});
+
+test("submit auto: a focus-only request never unlocks submit", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+  const calls = [];
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent({ resumeSession: true, focusSession: true }, repoRoot),
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        session: { provider: "test" },
+      };
+    },
+  });
+
+  assert.equal(calls[0].prepareOnly, true);
+  assert.equal(calls[0].submitMode, "manual");
+});
+
+test("submit auto: submitted-unverified leaves the status alone and records a note, next action and thread message", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "submitted-unverified",
+      reason: 'CareerRat clicked "Submit application" but no confirmation page appeared.',
+      currentUrl: "https://jobs.example.test/platform-engineer/apply",
+      artifacts: [
+        {
+          kind: "submission_attempt",
+          title: "Page after submit (no confirmation seen)",
+          path: "workspace/captures/attempt.png",
+        },
+      ],
+    }),
+  });
+
+  const application = readApplication(repoRoot);
+  assert.equal(application.status, "reviewed-hold");
+  assert.equal(application.appliedAt, undefined);
+  assert.match(application.statusNote, /no confirmation page/i);
+  assert.match(application.nextAction, /confirm|check/i);
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "submitted-unverified");
+  assert.equal(last.metadata.submissionVerified, false);
+  assert.match(last.metadata.reason, /no confirmation page/);
+  assert.match(last.text, /submitted.*no confirmation/i);
+  assert.match(last.text, /not marked Applied/i);
+  assert.equal(
+    last.artifacts.some((item) => item.path === "workspace/captures/attempt.png"),
+    true
+  );
+  assert.equal(
+    last.metadata.nextActions.some(
+      (action) => action.intent.type === "application.record-external"
+    ),
+    true
+  );
+});
+
+test("submit manual: an explicit manual setting keeps the executor in prepare-only mode", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "manual");
+  const calls = [];
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        session: { provider: "test" },
+      };
+    },
+  });
+
+  assert.equal(calls[0].prepareOnly, true);
+  assert.equal(calls[0].submitMode, "manual");
+  assert.equal(calls[0].input.prepareOnly, true);
+});
+
+test("submit auto: a CUT gate still refuses before any browser call", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    evaluation: { gate: "cut", fitScore: 20, evaluatedAt: "2026-08-19T00:00:00.000Z" },
+  });
+  setSubmitMode(repoRoot, "auto");
+  let applyCalls = 0;
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: prepareIntent(null, repoRoot),
+      applyJobImpl: async () => {
+        applyCalls += 1;
+        return { available: true, verified: true, state: "submitted" };
+      },
+    }),
+    { code: "PACKET_GATE_REQUIRED" }
+  );
+
+  assert.equal(applyCalls, 0);
+  assert.equal(readApplication(repoRoot).status, "reviewed-hold");
 });

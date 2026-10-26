@@ -243,6 +243,34 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
 }
 
 // ---------------------------------------------------------------------------
+// Submit mode — the one resolver for whether the agent presses the final Submit.
+// `submit: auto | manual` is a top-level key in candidate/automation.yml. Absent
+// key (or absent file) means "auto"; "manual" keeps the human-presses-Submit
+// behavior and only applies when it is set explicitly. Anything else is an error.
+// ---------------------------------------------------------------------------
+
+const SUBMIT_MODES = ["auto", "manual"];
+
+export function resolveSubmitMode(config) {
+  if (!config || typeof config !== "object" || !Object.hasOwn(config, "submit")) return "auto";
+  const value = config.submit;
+  if (!SUBMIT_MODES.includes(value)) {
+    throw new Error(`candidate/automation.yml: submit must be "auto" or "manual"`);
+  }
+  return value;
+}
+
+export function loadSubmitMode({ root = DEFAULT_ROOT, env = process.env } = {}) {
+  const loaded = loadAutomation({ root, env });
+  // A corrupt file must not silently read as "auto" for someone who set "manual".
+  const parseError = loaded.errors.find((err) =>
+    String(err.message).startsWith("YAML parse error")
+  );
+  if (parseError) throw new Error(`candidate/automation.yml is unreadable: ${parseError.message}`);
+  return resolveSubmitMode(loaded.data);
+}
+
+// ---------------------------------------------------------------------------
 // mayRun — the hard predicate. allowed iff global ∧ platform ∧ consent.
 // Accepts a preloaded `data`, or loads from `root`. Returns { allowed, reasons,
 // checks } so callers can show the user exactly which switch is off.

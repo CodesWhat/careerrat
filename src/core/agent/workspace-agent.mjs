@@ -13,6 +13,7 @@ import {
   CAPABILITY_KEYS,
   isCapability,
   loadAutomation,
+  loadSubmitMode,
   mayRun,
   mergeAutomationDefaults,
   PLATFORMS,
@@ -4131,11 +4132,18 @@ export async function executeWorkspaceIntent({
         intent: normalized,
         now,
       });
+      // The workspace's `submit` setting decides whether the executor may press
+      // the final Submit. A focus-only request only returns to the prepared tab,
+      // so it never unlocks submit whatever the setting says.
+      const submitAuto =
+        loadSubmitMode({ root: repoRoot, env }) === "auto" &&
+        normalized.input?.focusSession !== true;
       normalized = {
         ...normalized,
         input: {
           ...(normalized.input || {}),
-          prepareOnly: true,
+          prepareOnly: !submitAuto,
+          submitMode: submitAuto ? "auto" : "manual",
           executionPlan,
         },
       };
@@ -8643,10 +8651,13 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
+    const submitMode = input.submitMode === "auto" ? "auto" : "manual";
+    const prepareOnly = submitMode !== "auto";
     const executorInput = {
       ...input,
       ...(prepareSubmit ? { resumeSession: true } : {}),
-      prepareOnly: true,
+      prepareOnly,
+      submitMode,
     };
     let execution = await applyJobImpl({
       repoRoot,
@@ -8656,7 +8667,8 @@ export async function executeWorkspaceIntent({
       postingUrl,
       questionCapture,
       input: executorInput,
-      prepareOnly: true,
+      prepareOnly,
+      submitMode,
       signal,
       ...(input.focusSession === true ? { focusSession: true } : {}),
     });
@@ -8741,9 +8753,11 @@ export async function executeWorkspaceIntent({
           ...executorInput,
           resumeSession: true,
           renderedQuestionsReady: true,
-          prepareOnly: true,
+          prepareOnly,
+          submitMode,
         },
-        prepareOnly: true,
+        prepareOnly,
+        submitMode,
         signal,
         ...(input.focusSession === true ? { focusSession: true } : {}),
       });
@@ -8785,6 +8799,76 @@ export async function executeWorkspaceIntent({
             },
           ],
         },
+        now,
+      });
+    }
+    if (execution?.verified !== true && execution?.state === "submitted-unverified") {
+      // submit: auto pressed Submit once but never saw a confirmation page. Not
+      // Applied, never retried: the status stays put and the person is told to
+      // check the site, with the screenshot of the page the click left behind.
+      const detail = String(
+        execution.reason || "CareerRat pressed Submit but saw no confirmation page."
+      ).trim();
+      const label = applicationLabel(application);
+      appSetFields({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        patch: {
+          statusNote: `Submitted automatically, but no confirmation page was seen. ${detail}`.slice(
+            0,
+            500
+          ),
+          nextAction:
+            "Check the application on the site, then record it as Applied if it went through",
+        },
+      });
+      const sessionUrl = safeExternalHttpUrl(
+        execution.currentUrl || application.link || application.url || application.sourceUrl
+      );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `CareerRat submitted ${label}, but no confirmation page appeared, so this application was not marked Applied. CareerRat will not submit it again. Check the application on the site.`,
+        artifacts: [
+          ...(Array.isArray(execution.artifacts) ? execution.artifacts : []),
+          ...(sessionUrl
+            ? [
+                {
+                  kind: "application_handoff",
+                  title: `${label}: Application site`,
+                  applicationId: normalized.entity.id,
+                  url: sessionUrl,
+                  submissionVerified: false,
+                  executorAvailable: true,
+                  session: execution.session || { provider: "session-browser" },
+                },
+              ]
+            : []),
+        ],
+        metadata: {
+          state: "submitted-unverified",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          reason: detail,
+          nextActions: [
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+            navigationAction("Review application", {
+              surface: "job",
+              entityType: "application",
+              entityId: normalized.entity.id,
+            }),
+          ],
+        },
+        operationResult: execution,
         now,
       });
     }
