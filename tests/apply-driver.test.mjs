@@ -88,6 +88,9 @@ function makeDriver({
   loadAnswerMapImpl,
   saveScreenshotImpl,
   mayRunImpl,
+  confirmationTimeoutMs,
+  confirmationPollMs,
+  sleepImpl,
   repoRoot = "/repo",
   env = {},
 } = {}) {
@@ -108,6 +111,9 @@ function makeDriver({
       })),
     saveScreenshotImpl: saveScreenshotImpl ?? (() => "workspace/captures/fake-confirmation.png"),
     maxFormSteps,
+    confirmationTimeoutMs,
+    confirmationPollMs,
+    sleepImpl,
   });
 }
 
@@ -3214,4 +3220,293 @@ test("a fresh snapshot with an unverifiable origin blocks before advancing", asy
     [],
     "an unverifiable origin never receives an advance click"
   );
+});
+
+// ---------------------------------------------------------------------------
+// submit: auto — the driver presses the final Submit under strict conditions.
+// ---------------------------------------------------------------------------
+
+const SUBMIT_FORM = {
+  origin: GREENHOUSE_URL,
+  pageText: "Application form",
+  refs: refsOf([
+    ["e1", "textbox", "First Name", true],
+    ["e2", "button", "Submit application", false],
+  ]),
+};
+const SUBMIT_CONFIRMATION = {
+  origin: `${GREENHOUSE_URL}/confirmation`,
+  pageText: "Thank you for applying",
+  refs: refsOf([]),
+};
+const AUTO_REQUEST = {
+  applicationId: "app-auto",
+  application: { id: "app-auto" },
+  postingUrl: GREENHOUSE_URL,
+  questionCapture: { state: "captured" },
+  submitMode: "auto",
+  prepareOnly: false,
+};
+const fastWaits = { confirmationTimeoutMs: 30, confirmationPollMs: 5, sleepImpl: async () => {} };
+const clicks = (log) => log.filter((entry) => entry.op === "clickButton");
+
+test("auto submit: a complete form clicks the final submit exactly once and returns verified with a screenshot", async () => {
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.verified, true);
+  assert.equal(result.state, "submitted");
+  assert.equal(result.confirmation, "/confirmation");
+  assert.equal(result.artifacts[0].kind, "submission_confirmation");
+  assert.deepEqual(clicks(log), [{ op: "clickButton", pageId: "page-1", ref: "e2" }]);
+  assert.equal(
+    log.some((entry) => entry.op === "screenshot"),
+    true
+  );
+});
+
+test("auto submit: a late confirmation inside the bounded wait still verifies", async () => {
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_FORM]);
+  let postClickSnapshots = 0;
+  const baseSnapshot = ops.snapshot;
+  ops.snapshot = async (args) => {
+    const snap = await baseSnapshot(args);
+    if (!clicks(log).length) return snap;
+    postClickSnapshots += 1;
+    return postClickSnapshots >= 3 ? SUBMIT_CONFIRMATION : snap;
+  };
+  const execute = makeDriver({ ops, ...fastWaits, confirmationTimeoutMs: 500 });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.state, "submitted");
+  assert.equal(clicks(log).length, 1);
+});
+
+test("auto submit: one unresolved required field never clicks submit", async () => {
+  const page = {
+    ...SUBMIT_FORM,
+    refs: refsOf([
+      ["e1", "textbox", "Favorite existential dread", true],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([page]);
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /Favorite existential dread/);
+  assert.equal(clicks(log).length, 0);
+});
+
+test("auto submit: a missing required attachment never clicks submit", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-auto-"));
+  try {
+    const page = {
+      origin: GREENHOUSE_URL,
+      pageText: 'Application form\n- button "Resume" [required, ref=e1]',
+      refs: refsOf([
+        ["e1", "button", "Resume", true],
+        ["e2", "button", "Submit application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([page, SUBMIT_CONFIRMATION]);
+    const execute = makeDriver({ ops, repoRoot, ...fastWaits });
+
+    const result = await execute({
+      ...AUTO_REQUEST,
+      application: { id: "app-auto", artifacts: {} },
+    });
+
+    assert.equal(result.state, "blocked");
+    assert.equal(
+      result.session.unresolved.some((item) => item.label === "Resume"),
+      true
+    );
+    assert.equal(clicks(log).length, 0);
+    assert.equal(
+      log.some((entry) => entry.op === "upload"),
+      false
+    );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("auto submit: no confirmation yields submitted-unverified with a screenshot, one click, and no retry", async () => {
+  const stillForm = { ...SUBMIT_FORM, pageText: "Application form (processing)" };
+  const { ops, log } = createFakeOps([SUBMIT_FORM, stillForm]);
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.state, "submitted-unverified");
+  assert.equal(result.verified, false);
+  assert.match(result.reason, /no confirmation/i);
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].kind, "submission_attempt");
+  assert.equal(result.artifacts[0].path, "workspace/captures/fake-confirmation.png");
+  assert.equal(result.session.submitMode, "auto");
+  assert.equal(clicks(log).length, 1);
+  assert.equal(
+    log.some((entry) => entry.op === "screenshot"),
+    true
+  );
+
+  const second = await execute(AUTO_REQUEST);
+  assert.equal(second.state, "submitted-unverified");
+  assert.equal(clicks(log).length, 1, "a later run never clicks submit a second time");
+});
+
+test("auto submit: manual mode, prepareOnly, or a missing submitMode never click the final submit", async () => {
+  for (const overrides of [
+    { submitMode: "manual" },
+    { submitMode: undefined },
+    { submitMode: "auto", prepareOnly: true },
+  ]) {
+    const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+    const execute = makeDriver({ ops, ...fastWaits });
+
+    const result = await execute({ ...AUTO_REQUEST, ...overrides });
+
+    assert.equal(result.state, "awaiting-submit", JSON.stringify(overrides));
+    assert.equal(clicks(log).length, 0, JSON.stringify(overrides));
+  }
+});
+
+test("auto submit: never clicks a withdraw or cancel control", async () => {
+  const page = {
+    ...SUBMIT_FORM,
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "button", "Withdraw application", false],
+      ["e3", "button", "Cancel submission", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([page, SUBMIT_CONFIRMATION]);
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(clicks(log).length, 0);
+});
+
+test("auto submit: advances a wizard with Next, then submits once on the last page", async () => {
+  const pageOne = {
+    origin: WORKDAY_URL,
+    pageText: "Contact information",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "button", "Next", false],
+    ]),
+  };
+  const review = {
+    origin: `${WORKDAY_URL}?step=review`,
+    pageText: "Review your application",
+    refs: refsOf([["e3", "button", "Submit", false]]),
+  };
+  const { ops, log } = createFakeOps([pageOne, review, SUBMIT_CONFIRMATION]);
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute({ ...AUTO_REQUEST, postingUrl: WORKDAY_URL });
+
+  assert.equal(result.state, "submitted");
+  assert.deepEqual(
+    clicks(log).map((entry) => entry.ref),
+    ["e2", "e3"]
+  );
+});
+
+test("auto submit: a required upload revealed after the fill pass never clicks submit", async () => {
+  const before = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const after = {
+    origin: GREENHOUSE_URL,
+    pageText: 'Application form\n- button "Cover Letter" [required, ref=e3]',
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e3", "button", "Cover Letter", true],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([before, SUBMIT_CONFIRMATION]);
+  const baseSnapshot = ops.snapshot;
+  ops.snapshot = async (args) =>
+    log.some((entry) => entry.op === "fillField") ? after : baseSnapshot(args);
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute({ ...AUTO_REQUEST, applicationId: "app-late-upload" });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(clicks(log).length, 0);
+  assert.equal(
+    result.session.unresolved.some((item) => item.label === "Cover Letter"),
+    true
+  );
+});
+
+test("auto submit: onSubmitAttempt runs before the click, once", async () => {
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+  const order = [];
+  const baseClick = ops.clickButton;
+  ops.clickButton = async (args) => {
+    order.push("click");
+    return baseClick(args);
+  };
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute({
+    ...AUTO_REQUEST,
+    applicationId: "app-hook",
+    onSubmitAttempt: async ({ applicationId }) => order.push(`hook:${applicationId}`),
+  });
+
+  assert.equal(result.state, "submitted");
+  assert.deepEqual(order, ["hook:app-hook", "click"]);
+  assert.equal(clicks(log).length, 1);
+});
+
+test("auto submit: a throwing onSubmitAttempt means no click and an awaiting-submit handoff", async () => {
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute({
+    ...AUTO_REQUEST,
+    applicationId: "app-hook-throws",
+    onSubmitAttempt: async () => {
+      throw new Error("disk full");
+    },
+  });
+
+  assert.equal(result.state, "awaiting-submit");
+  assert.match(result.reason, /disk full/);
+  assert.equal(clicks(log).length, 0);
+});
+
+test("auto submit: an abort between the hook and the click never clicks", async () => {
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+  const controller = new AbortController();
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  await assert.rejects(
+    execute({
+      ...AUTO_REQUEST,
+      applicationId: "app-hook-abort",
+      signal: controller.signal,
+      onSubmitAttempt: async () => controller.abort(),
+    })
+  );
+
+  assert.equal(clicks(log).length, 0);
 });

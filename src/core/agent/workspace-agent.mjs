@@ -13,6 +13,7 @@ import {
   CAPABILITY_KEYS,
   isCapability,
   loadAutomation,
+  loadSubmitMode,
   mayRun,
   mergeAutomationDefaults,
   PLATFORMS,
@@ -31,10 +32,12 @@ import { activityAppend } from "../db/verbs/activity.mjs";
 import {
   appApproveReview,
   appCaptureInterviewIntake,
+  appMarkSubmitAttempt,
   appRecordOutcome,
   appScheduleInterview,
   appSetFields,
   appSetStatus,
+  statusProvesApplicationWasSubmitted,
 } from "../db/verbs/app.mjs";
 import {
   WRITE_PROVIDERS as CALENDAR_WRITE_PROVIDERS,
@@ -4124,18 +4127,32 @@ export async function executeWorkspaceIntent({
   try {
     normalized = resolveNaturalWorkspaceRequest({ repoRoot, env, intent: normalized });
     if (new Set(["job.prepare-submit", "job.apply"]).has(normalized.type)) {
-      applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      const submitTarget = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const executionPlan = corroborateApplicationMissionAttempt({
         repoRoot,
         env,
         intent: normalized,
         now,
       });
+      // The workspace's `submit` setting decides whether the executor may press
+      // the final Submit. A focus-only request only returns to the prepared tab,
+      // so it never unlocks submit whatever the setting says.
+      // An application already auto-submitted without a confirmation (and not
+      // yet recorded as applied) is never auto-submitted again, across runs.
+      const submitAlreadyAttempted =
+        Boolean(submitTarget?.submitAttemptedAt) &&
+        !statusProvesApplicationWasSubmitted(submitTarget?.status);
+      const submitAuto =
+        loadSubmitMode({ root: repoRoot, env }) === "auto" &&
+        normalized.input?.focusSession !== true &&
+        !submitAlreadyAttempted;
       normalized = {
         ...normalized,
         input: {
           ...(normalized.input || {}),
-          prepareOnly: true,
+          prepareOnly: !submitAuto,
+          submitMode: submitAuto ? "auto" : "manual",
+          ...(submitAlreadyAttempted ? { submitAlreadyAttempted: true } : {}),
           executionPlan,
         },
       };
@@ -8643,10 +8660,38 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
+    const submitMode = input.submitMode === "auto" ? "auto" : "manual";
+    const alreadyAttemptedNote =
+      input.submitAlreadyAttempted === true
+        ? " CareerRat already pressed Submit once without a confirmation, so it will not press it again. Check the site and record the outcome."
+        : "";
+    const prepareOnly = submitMode !== "auto";
+    // Written by the driver right before it presses Submit, so the marker is
+    // durable even if the run is aborted or the process stops after the click.
+    const submitAttemptHook =
+      submitMode === "auto"
+        ? {
+            onSubmitAttempt: async () => {
+              try {
+                appMarkSubmitAttempt({
+                  repoRoot,
+                  env,
+                  id: normalized.entity.id,
+                  at: requestDate(now).toISOString(),
+                });
+              } catch (error) {
+                // The marker is in the canonical database even when the tracker
+                // export after it fails; that is enough to block a second submit.
+                if (error?.committed !== true) throw error;
+              }
+            },
+          }
+        : {};
     const executorInput = {
       ...input,
       ...(prepareSubmit ? { resumeSession: true } : {}),
-      prepareOnly: true,
+      prepareOnly,
+      submitMode,
     };
     let execution = await applyJobImpl({
       repoRoot,
@@ -8656,7 +8701,9 @@ export async function executeWorkspaceIntent({
       postingUrl,
       questionCapture,
       input: executorInput,
-      prepareOnly: true,
+      prepareOnly,
+      submitMode,
+      ...submitAttemptHook,
       signal,
       ...(input.focusSession === true ? { focusSession: true } : {}),
     });
@@ -8741,9 +8788,12 @@ export async function executeWorkspaceIntent({
           ...executorInput,
           resumeSession: true,
           renderedQuestionsReady: true,
-          prepareOnly: true,
+          prepareOnly,
+          submitMode,
         },
-        prepareOnly: true,
+        prepareOnly,
+        submitMode,
+        ...submitAttemptHook,
         signal,
         ...(input.focusSession === true ? { focusSession: true } : {}),
       });
@@ -8788,6 +8838,83 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
+    if (execution?.verified !== true && execution?.state === "submitted-unverified") {
+      // submit: auto pressed Submit once but never saw a confirmation page. Not
+      // Applied, never retried: the status stays put and the person is told to
+      // check the site, with the screenshot of the page the click left behind.
+      const detail = String(
+        execution.reason || "CareerRat pressed Submit but saw no confirmation page."
+      ).trim();
+      const label = applicationLabel(application);
+      appSetFields({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        patch: {
+          statusNote: `Submitted automatically, but no confirmation page was seen. ${detail}`.slice(
+            0,
+            500
+          ),
+          nextAction:
+            "Check the application on the site, then record it as Applied if it went through",
+        },
+      });
+      // Normally already set by the pre-click hook; set-once either way.
+      appMarkSubmitAttempt({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        at: requestDate(now).toISOString(),
+      });
+      const sessionUrl = safeExternalHttpUrl(
+        execution.currentUrl || application.link || application.url || application.sourceUrl
+      );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `CareerRat submitted ${label}, but no confirmation page appeared, so this application was not marked Applied. CareerRat will not submit it again. Check the application on the site.`,
+        artifacts: [
+          ...(Array.isArray(execution.artifacts) ? execution.artifacts : []),
+          ...(sessionUrl
+            ? [
+                {
+                  kind: "application_handoff",
+                  title: `${label}: Application site`,
+                  applicationId: normalized.entity.id,
+                  url: sessionUrl,
+                  submissionVerified: false,
+                  executorAvailable: true,
+                  session: execution.session || { provider: "session-browser" },
+                },
+              ]
+            : []),
+        ],
+        metadata: {
+          state: "submitted-unverified",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          reason: detail,
+          nextActions: [
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+            navigationAction("Review application", {
+              surface: "job",
+              entityType: "application",
+              entityId: normalized.entity.id,
+            }),
+          ],
+        },
+        operationResult: execution,
+        now,
+      });
+    }
     if (execution?.verified !== true && ACTIVE_APPLICATION_SESSION_STATES.has(execution?.state)) {
       const sessionUrl = safeExternalHttpUrl(
         execution.currentUrl || application.link || application.url || application.sourceUrl
@@ -8805,7 +8932,7 @@ export async function executeWorkspaceIntent({
         intentMessage,
         text: permission
           ? `${permission.request} Choose ${permission.allowLabel}, or type “${permission.typedCommand}”.`
-          : applicationSessionText(execution),
+          : `${applicationSessionText(execution)}${alreadyAttemptedNote}`,
         artifacts: [
           {
             kind: "application_handoff",
@@ -8901,7 +9028,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `${detail} CareerRat stopped before submission and did not mark this application Applied.`,
+        text: `${detail} CareerRat stopped before submission and did not mark this application Applied.${alreadyAttemptedNote}`,
         metadata: {
           state: "blocked",
           applicationId: normalized.entity.id,
