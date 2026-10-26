@@ -9,8 +9,8 @@ get one.
 
 | Release line | Supported |
 | --- | --- |
-| 0.19.x (latest patch) | Yes |
-| 0.18.x and earlier | No |
+| 0.20.x (latest patch) | Yes |
+| 0.19.x and earlier | No |
 
 ## Reporting a vulnerability
 

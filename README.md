@@ -42,11 +42,12 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of October 26, 2026:** v0.19.2 is the latest release and the last one with
-a Mac app. From here CareerRat installs from npm and runs in your browser, on
-your machine, with the AI CLI you already use. Terminal sessions stay optional.
+**As of October 26, 2026:** v0.20.0 is the latest release. CareerRat installs
+from npm and runs in your browser, on your machine, with the AI CLI you already
+use. Terminal sessions stay optional. v0.19.2 was the last release with a Mac
+app.
 
-On the development branch, not yet released:
+New in v0.20.0:
 
 - `careerrat start` opens the browser workspace without starting a terminal
   agent. Explicit Claude Code and Codex sessions still work.
@@ -57,8 +58,8 @@ On the development branch, not yet released:
 - Today's conversation points at your next application and asks for outcomes
   like rejections and interview invites.
 
-If you use the Mac app, it keeps working and updates to v0.19.2. There won't be
-a later Mac build.
+If you use the Mac app, it keeps working at v0.19.2. There won't be a later Mac
+build; switch with `npm install -g careerrat`.
 
 <hr>
 
@@ -168,17 +169,16 @@ resizable, maximizable, and supports full screen, with a minimum working size of
 <h2 align="center" id="recent-updates">Recent Updates</h2>
 
 <details open>
-<summary><strong>v0.19.2 highlights</strong></summary>
+<summary><strong>v0.20.0 highlights</strong></summary>
 
-- Bundled libraries with published security advisories are updated in the app
-  and the desktop runtime. Nothing changes in how CareerRat behaves.
-- The website and docs analytics record the page a visitor arrived from.
-
-This patch builds on v0.19.1, which kept saved job descriptions whole when
-evaluated, kept recruiter history with its own application, checked every
-saved calendar conflict, and made DOCX conversion cancellable, and on v0.19.0's
-job sorting, pay-band display, company-health context, per-event calendar
-links, and clearer People and activity panels.
+- `careerrat start` opens the browser workspace on its own. Terminal sessions
+  with Claude Code or Codex are still there when you ask for them.
+- Saved exports go to `Documents/careerrat`, one folder per job. Closed jobs
+  move to an archive and come back when reopened.
+- Today's conversation points at your next application and asks for outcomes
+  like rejections and interview invites.
+- PDF export works from an npm install.
+- CareerRat now ships through npm only. The Mac app ended at v0.19.2.
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
 
