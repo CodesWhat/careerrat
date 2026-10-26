@@ -953,6 +953,9 @@ export function TodayConversation({
   artifacts = EMPTY_LIST,
   mission,
   strategy = null,
+  applicationNeed = null,
+  hasApplications = false,
+  onApplicationAction,
   userMessages = EMPTY_LIST,
   onArtifactAction,
   onMessageAction,
@@ -965,6 +968,33 @@ export function TodayConversation({
     <div className="chat-first-conversation-flow">
       <div className="chat-first-conversation-eyebrow">{dateLabel}</div>
       {intro ? <AgentBubble agentName={agentName}>{intro}</AgentBubble> : null}
+      {applicationNeed ? (
+        <AgentBubble agentName={agentName}>
+          <strong>{applicationNeed.title}</strong>
+          <p>
+            {["submit", "submit-gate", "submit-gate-group"].includes(applicationNeed.kind)
+              ? 'Open the application, review the answers and attachments, then press submit when everything looks right. Come back and choose "I applied" once it is sent.'
+              : "Start an application and I’ll check the fit, prepare your materials, and fill what I can. Then you open the form, review the answers and attachments, and press submit."}
+          </p>
+          <div className="chat-first-inline-actions">
+            <button
+              className="chat-first-pill chat-first-pill--lime"
+              type="button"
+              disabled={intentBusy}
+              onClick={() => onApplicationAction?.(applicationNeed)}
+            >
+              {applicationNeed.primaryLabel}
+            </button>
+          </div>
+        </AgentBubble>
+      ) : null}
+      {hasApplications ? (
+        <AgentBubble agentName={agentName}>
+          Paste any rejection, interview invite, offer, or recruiter feedback here with the company
+          and role, or tell me what changed. Even a rejection without a reason helps track the
+          funnel. Those outcomes inform future search and application recommendations.
+        </AgentBubble>
+      ) : null}
       <RunReceipt receipt={run} />
       <StrategyInsightsCard strategy={strategy} agentName={agentName} />
       {messages.length ? (

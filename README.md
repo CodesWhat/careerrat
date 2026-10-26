@@ -26,6 +26,7 @@
 
 <h2 align="center">Contents</h2>
 
+- [Current Status](#current-status)
 - [Documentation](#documentation)
 - [Quick Start](#quick-start)
 - [Recent Updates](#recent-updates)
@@ -36,6 +37,28 @@
 - [Built With](#built-with)
 - [For Developers](#for-developers)
 - [Community & Support](#community-support)
+
+<hr>
+
+<h2 align="center" id="current-status">Current Status</h2>
+
+**As of October 26, 2026:** v0.19.2 is the latest release and the last one with
+a Mac app. From here CareerRat installs from npm and runs in your browser, on
+your machine, with the AI CLI you already use. Terminal sessions stay optional.
+
+On the development branch, not yet released:
+
+- `careerrat start` opens the browser workspace without starting a terminal
+  agent. Explicit Claude Code and Codex sessions still work.
+- PDF export works from an npm install.
+- Saved exports use `Documents/careerrat`, with a folder per job. Closed jobs
+  move to an archive and come back when reopened. Earlier versions are kept,
+  and existing Downloads files aren't moved.
+- Today's conversation points at your next application and asks for outcomes
+  like rejections and interview invites.
+
+If you use the Mac app, it keeps working and updates to v0.19.2. There won't be
+a later Mac build.
 
 <hr>
 
@@ -74,7 +97,7 @@ your machine and you pick it.
 ### Get the Mac app (Apple Silicon)
 
 The current macOS release is a signed and notarized Apple Silicon app for macOS
-12 or newer.
+13 (Ventura) or newer.
 
 1. [Download the latest `.dmg`](https://github.com/CodesWhat/careerrat/releases/latest),
    or install it with Homebrew:
@@ -433,10 +456,13 @@ Needs Node.js 24.15 or newer.
 
 ```bash
 npm install -g careerrat
-careerrat start claude
-# or
-careerrat start codex
+careerrat start
 ```
+
+Continue chatting in the browser workspace. It uses your selected local AI
+engine, and keeps job conversations and artifacts in the same workspace.
+To launch a terminal skill session as well, use `careerrat start claude` or
+`careerrat start codex`. Use `--no-open` to serve without opening a tab.
 
 Useful terminal commands:
 

@@ -14,6 +14,7 @@
 // appScheduleInterview/appRegisterArtifact are comms/scheduling/artifact-style
 // writes (like email-comms/schedule-meeting/tailor-application) and do not.
 
+import { syncJobDocumentFolder } from "../../documents/job-folders.mjs";
 import { packetManifestSchema } from "../../packet/schemas/packet-schemas.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { classifyStage, isKnownStatusLabel } from "../../tracker/dashboard.mjs";
@@ -33,6 +34,40 @@ import {
 
 function requireApp(db, id) {
   return requireRow(db, "applications", id, "application");
+}
+
+function reconcileDocumentFolder(pathCtx, id, result) {
+  try {
+    const application = requireApp(requireDb(pathCtx), id);
+    const documentFolder = syncJobDocumentFolder({ ...pathCtx, application });
+    return documentFolder ? { ...result, documentFolder } : result;
+  } catch (cause) {
+    const error = new Error(
+      `The job outcome was saved, but its document folder could not be organized: ${cause.message}`,
+      { cause }
+    );
+    error.code = "DOCUMENT_FOLDER_SYNC_FAILED";
+    error.committed = true;
+    error.result = result;
+    throw error;
+  }
+}
+
+function runApplicationOutcome(pathCtx, id, fn) {
+  let result;
+  try {
+    result = runVerb(pathCtx, fn);
+  } catch (error) {
+    if (error.committed) {
+      try {
+        error.result = reconcileDocumentFolder(pathCtx, id, error.result);
+      } catch (folderError) {
+        error.documentFolderError = folderError.message;
+      }
+    }
+    throw error;
+  }
+  return reconcileDocumentFolder(pathCtx, id, result);
 }
 
 const APP_SETTABLE_FIELDS = new Set([
@@ -132,7 +167,7 @@ function interviewLogisticsNote(at, who) {
 // new application row, or a wholesale replace of an existing one by id.
 export function appUpsert({ repoRoot, env, row } = {}) {
   if (!row?.id) throw new Error("appUpsert: row.id is required");
-  return runVerb({ repoRoot, env }, (db) => {
+  return runApplicationOutcome({ repoRoot, env }, row.id, (db) => {
     const existed = Boolean(getRow(db, "applications", row.id));
     putRow(db, "applications", row.id, row);
     const meta = bumpMeta(db);
@@ -245,7 +280,7 @@ export function appSetStatus({
     error.code = "BAD_APPLIED_AT";
     throw error;
   }
-  return runVerb({ repoRoot, env }, (db) => {
+  return runApplicationOutcome({ repoRoot, env }, id, (db) => {
     const app = requireApp(db, id);
     const { from, updated } = applyStatusUpdate(app, {
       to,
@@ -312,7 +347,7 @@ export function appRecordOutcome({ repoRoot, env, id, to, note, round, at } = {}
     throw error;
   }
 
-  return runVerb({ repoRoot, env }, (db) => {
+  return runApplicationOutcome({ repoRoot, env }, id, (db) => {
     const app = requireApp(db, id);
     const { from, updated } = applyStatusUpdate(app, {
       to,
@@ -405,7 +440,7 @@ export function appApplySyncedStatus({ repoRoot, env, id, to, rawStatus, round, 
   if (Number.isNaN(Date.parse(timestamp))) {
     throw new Error("appApplySyncedStatus: at must be an ISO datetime");
   }
-  return runVerb({ repoRoot, env }, (db) => {
+  return runApplicationOutcome({ repoRoot, env }, id, (db) => {
     const app = requireApp(db, id);
     const from = app.status;
     const note = String(rawStatus || `Portal status: ${to}`)
