@@ -365,6 +365,29 @@ release publishes, so this is only needed to debug or redo that step by hand.
 `depends_on macos:` must match the `LSMinimumSystemVersion` electron-builder
 bakes into the bundle (currently 13.0, so `:ventura`).
 
+## Website Preview Deploys
+
+The Vercel project (root `apps/website`) is on the Hobby plan, which caps
+deploys at 100 per day, so previews are limited in `apps/website/vercel.json`:
+
+- Production deploys from `main` are unchanged.
+- `git.deploymentEnabled` turns off deploys for every working-branch prefix
+  this repo uses: `feat/`, `fix/`, `docs/`, `ci/`, `chore/`, `test/`,
+  `refactor/`, `build/`, `perf/`, `style/`, `revert/`, `dev/`, `release/`,
+  `renovate/`, `dependabot/`, `codex/` and `claude/`. Vercel counts a build
+  canceled by the ignored-build step toward the daily cap, so this list is what
+  actually saves deploys.
+- To get a preview of a site change, push it on a `site/` branch. Any branch
+  outside that list gets a preview only when the build inputs changed:
+  `apps/website`, `apps/docs`, `scripts/build-docs-content.mjs`,
+  `scripts/harden-static-html.mjs`, `src/core/security/browser-policy.mjs`
+  (which that script imports), `package.json` or `package-lock.json`.
+  `apps/website/scripts/vercel-ignore-build.sh` diffs against the last
+  deployed commit (or the merge base with `main` on a branch's first push) and
+  builds when it can't tell.
+- If the site build starts reading a new path, add it to `SITE_PATHS` in the
+  script.
+
 ## Schema Versioning
 
 All JSON schemas live in `config/*.schema.json` and carry a `$id` URL of the
