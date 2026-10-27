@@ -149,19 +149,24 @@ After building, eyeball the output: page count reasonable, fonts render, no non-
 
 ## STEP 6: Submission
 
-Fill the form completely. What happens next depends on `submit` in `automation.yml`
-(`auto` or `manual`; absent means `auto`).
+Fill the form completely. What happens next depends on the submit mode (`auto` or
+`manual`; absent means `auto`). `careerrat automation status` shows it.
 
 - **`submit: auto` (default).** CareerRat presses the final Submit control itself,
   once, only when every required field is answered, every required upload is
   attached, exactly one positively labelled submit control exists, and the
   evaluate gate is KEEP or a user-approved REVIEW. It then waits for a
-  confirmation page. If the page is seen, record Applied. If not, record
-  `submitted-unverified`, never retry the click, and ask the person to check the
-  site. When auto declines to click, say why and hand the form over.
-- **`submit: manual`.** Stop at the final submit control. Show a summary of what
-  will be submitted and return or focus the retained supervised browser page. The
-  user presses Submit themselves, then reports back.
+  confirmation page. If the page is seen, record Applied. If not, the outcome is
+  `submitted-unverified`. That is recorded on the operation result, not as an
+  application status: keep the application's current status, set `statusNote` (that
+  it was submitted automatically with no confirmation page seen) and `nextAction`
+  (check the site, then record it as Applied if it went through), never retry the
+  click, and never pass `submitted-unverified` to `app set-status`. When auto
+  declines to click, say why and hand the form over.
+- **`submit: manual`** (set with `careerrat automation submit manual --write`). Stop
+  at the final submit control. Show a summary of what will be submitted and return or
+  focus the retained supervised browser page. The user presses Submit themselves,
+  then reports back.
 
 Either way, never treat an executor's claim of submission as permission to mark
 the application Applied. Only a seen confirmation page or the user's report does that.

@@ -74,13 +74,13 @@ Run the CLI confirm-first. The default is a **dry run** — it shows the exact l
 | Disable a capability | `careerrat automation disable <capability> [platform] --write` | write-and-report |
 | Session browser provider | `careerrat automation session <extension\|playwright> --write` | write-and-report |
 
-**Capabilities:** `status_polling`, `messaging`, `one_click_apply`, `profile_optimize`, `profile_apply`, `mail_access`.
+**Capabilities:** `status_polling`, `messaging`, `authenticated_apply_preparation`, `profile_optimize`, `profile_apply`, `mail_access`.
 
 **Platforms per capability:**
 
 - `status_polling`: greenhouse, workday, ashby, lever
 - `messaging`: linkedin, wellfound
-- `one_click_apply`: linkedin
+- `authenticated_apply_preparation`: linkedin
 - `profile_optimize`: linkedin
 - `profile_apply`: linkedin
 - `mail_access`: gmail, outlook, webmail (`webmail` is provider-agnostic verification-code access; Gmail/Outlook also support webmail ingest)

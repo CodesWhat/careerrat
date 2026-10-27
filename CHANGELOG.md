@@ -13,8 +13,9 @@ All notable changes to CareerRat are documented here. This project follows
   clearly labelled submit control is on the page, and the fit gate is KEEP or a
   REVIEW you approved. It presses Submit once, then looks for a confirmation
   page. This is the default.
-- `submit: manual` in `automation.yml` turns that off. CareerRat fills the form
-  and stops for you to press Submit.
+- `careerrat automation submit manual --write` turns that off. CareerRat fills
+  the form and stops for you to press Submit. `careerrat automation status` shows
+  the current setting.
 - When CareerRat doesn't press Submit, it says why and hands you the form.
 - The job thread shows "What was sent" after an automatic submit.
 
@@ -24,7 +25,7 @@ All notable changes to CareerRat are documented here. This project follows
   submitted-unverified. CareerRat never retries the click and asks you to check
   the site.
 - The README, agent instructions, skills, docs and disclaimer now describe
-  automatic submit and `submit: manual` instead of saying you always press
+  automatic submit and the manual setting instead of saying you always press
   Submit. The permission prompt for form preparation says the same. The honesty
   and evidence rules are unchanged.
 

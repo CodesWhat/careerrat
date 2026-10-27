@@ -129,6 +129,6 @@ captured during onboarding.
 
 CareerRat submits an application when it is complete and verified: every required
 field answered, required uploads attached, exactly one clearly labelled submit
-control, and an `evaluate-job` gate of KEEP or user-approved REVIEW. With
-`submit: manual` in `automation.yml`, prepare the form and stop for the candidate
-to press the final submit control.
+control, and an `evaluate-job` gate of KEEP or user-approved REVIEW. When
+the submit mode is manual (`careerrat automation submit manual --write`), prepare the
+form and stop for the candidate to press the final submit control.

@@ -32,8 +32,7 @@ describe("TodayConversation", () => {
     const tree = TodayConversation({ applicationNeed: need, onApplicationAction });
     const html = markup(tree);
     expect(html).toContain("Apply to Tyrell?");
-    expect(html).toContain("submit it once everything is answered");
-    expect(html).not.toContain("press submit");
+    expect(html).toContain("Your submit setting decides whether I press submit or you do");
     const buttons = [];
     function visit(node) {
       if (!node || typeof node !== "object") return;
@@ -1774,6 +1773,24 @@ describe("JobConversation and JobContextPanel", () => {
     expect(enable).toBeTruthy();
     enable.props.onClick();
     expect(onEnableApplicationPreparation).toHaveBeenCalledOnce();
+  });
+
+  it("tells a manual-submit person they press submit in the form permission prompt", () => {
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview: {
+        status: "upload-ready",
+        uploadReady: true,
+        gapCount: 0,
+        canResume: true,
+        gaps: [],
+      },
+      applicationPreparation: { status: "blocked", ready: false, submitMode: "manual" },
+      onEnableApplicationPreparation: vi.fn(),
+    });
+    const html = markup(tree);
+    expect(html).toContain("check the answers and attachments, and press submit");
+    expect(html).not.toContain("CareerRat submits once everything is filled and checked");
   });
 
   it("offers supervised form preparation without rendering packet diagnostics as questions", () => {

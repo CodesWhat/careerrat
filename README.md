@@ -194,8 +194,8 @@ CareerRat reads the full job posting against your location and compensation floo
 fit, and dealbreakers before it recommends anything. It builds resumes, cover
 letters, and screening answers from your real experience, then fills supported
 application forms. When the application is complete and verified, CareerRat
-submits it. Set `submit: manual` in `automation.yml` and it stops for you to press
-Submit instead.
+submits it. Run `careerrat automation submit manual --write` (or ask the agent to)
+and it stops for you to press Submit instead.
 
 Pay rules work for salaried, hourly, tipped, and commissioned jobs. You can set a
 guaranteed base floor, a minimum for annual cash earnings that includes wages,
@@ -260,8 +260,8 @@ application work begins.
   labelled submit control exists, and the fit gate is KEEP or a REVIEW you
   approved. It then waits for a confirmation page. If it doesn't see one, the
   application is marked submitted-unverified, never retried, and you're asked to
-  check the site. Set `submit: manual` and CareerRat fills the form and stops for
-  you to press Submit. The Mac app checks for signed updates, downloads them in place, and waits for an
+  check the site. Run `careerrat automation submit manual --write` and CareerRat
+  fills the form and stops for you to press Submit. The Mac app checks for signed updates, downloads them in place, and waits for an
   explicit **Restart and install**.
 
 ### One workspace for the whole search

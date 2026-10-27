@@ -133,7 +133,8 @@ two-factor authentication. At the final Submit it follows `submit` in
 `automation.yml`. With `submit: auto` (the default) it presses Submit once, only
 when every required field is answered, required uploads are attached, exactly one
 clearly labelled submit control exists, and the fit gate allows it, then waits for
-a confirmation page. With `submit: manual` it stops for you to press Submit.
+a confirmation page. Run `careerrat automation submit manual --write` and it stops for you to press Submit.
+(Legacy YAML workspaces can also set `submit: manual` in `automation.yml`.)
 
 `mail_access` has stricter mailbox-specific limits: for a verification-code flow,
 read only the one recent matching message needed for the current application or

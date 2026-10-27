@@ -92,15 +92,37 @@ test("docs never say the person always presses Submit outside a manual-mode sent
   }
 });
 
-test("the entry docs and apply-job skill explain submit: manual", () => {
+test("the entry docs and apply-job skill explain how to get manual submit", () => {
   for (const relativePath of [
     "AGENTS.md",
     "README.md",
     "docs/BROWSER.md",
     ".agents/skills/apply-job/SKILL.md",
   ]) {
-    assert.match(read(relativePath), /submit: manual/, relativePath);
+    assert.match(read(relativePath), /submit: manual|automation submit manual/, relativePath);
   }
+});
+
+test("prose points people at the submit command, not at hand-editing automation.yml", () => {
+  for (const relativePath of [
+    "README.md",
+    "AGENTS.md",
+    "templates/AGENTS.md",
+    "apps/website/public/AGENTS.md",
+    "docs/DISCLAIMER.md",
+    "apps/docs/content/docs/guides/applying.mdx",
+    "apps/docs/content/docs/reference/disclaimer.mdx",
+    "src/core/agent/workspace-agent.mjs",
+    "apps/web/src/chat-first/conversation-surfaces.jsx",
+  ]) {
+    assert.doesNotMatch(
+      read(relativePath),
+      /[Ss]et `?submit: manual`? in `?automation\.yml/,
+      relativePath
+    );
+  }
+  assert.match(read("README.md"), /careerrat automation submit manual --write/);
+  assert.match(read("src/cli/automation.mjs"), /submit <auto\|manual> \[--write\]/);
 });
 
 test("onboarding does not ask about submit mode or persist a submission setting", () => {

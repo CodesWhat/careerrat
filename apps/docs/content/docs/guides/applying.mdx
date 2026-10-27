@@ -92,7 +92,7 @@ The `apply-job` skill:
    **Profile > Application defaults** editor has two policy choices: leave them blank, or choose
    the form's decline option when available. Existing exact answers stay hidden and local.
    The policy never goes through Paul, and CareerRat never infers an answer.
-8. **Submits when the application is complete and verified.** It presses submit once and waits for a confirmation page. With `submit: manual` in `automation.yml`, it halts so you can review the form and press submit yourself.
+8. **Submits when the application is complete and verified.** It presses submit once and waits for a confirmation page. After `careerrat automation submit manual --write` (or asking the agent to), it halts so you can review the form and press submit yourself.
 9. Halts on CAPTCHAs, two-factor authentication, and unsupported auth prompts.
 10. Records the application through the canonical data layer only after submission is
    verified or you explicitly report that you applied. If no confirmation page shows up, the

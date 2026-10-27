@@ -19,7 +19,7 @@ liability for its accuracy, completeness, or consequences.
 **Submission.** By default CareerRat presses the final submit control itself,
 once, only when every required field is answered, required uploads are attached,
 and the application passes its checks. If it can't confirm the submission, it
-tells you to check the site. Set `submit: manual` in `automation.yml` and it fills
+tells you to check the site. Run `careerrat automation submit manual --write` (or ask the agent to) and it fills
 the form and halts so you press the submit control yourself.
 
 ## Terms of Service Compliance

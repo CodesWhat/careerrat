@@ -3759,7 +3759,7 @@ const CONTEXTUAL_PERMISSIONS = Object.freeze({
     allowLabel: "Allow form preparation",
     typedCommand: "Allow form preparation",
     request:
-      "CareerRat needs permission to open and fill application forms on Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and other job sites. CareerRat submits once everything is filled and checked. Set submit: manual in automation.yml to press Submit yourself.",
+      "CareerRat needs permission to open and fill application forms on Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and other job sites. CareerRat submits once everything is filled and checked. Run careerrat automation submit manual --write (or ask me) to press Submit yourself.",
   },
   "relationship-sourcing": {
     capability: "relationship_sourcing",

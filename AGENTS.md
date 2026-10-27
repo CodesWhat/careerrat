@@ -742,7 +742,7 @@ a KEEP verdict.
 `apply-job` owns the end-to-end apply flow. Its step zero is to run or verify
 `evaluate-job`. It must not tailor, fill, or submit unless the gate resolves to
 KEEP or explicit user-approved REVIEW. After the gate, CareerRat submits when the
-application is complete and verified; `submit: manual` makes it stop for you to
+application is complete and verified; `careerrat automation submit manual --write` makes it stop for you to
 press Submit.
 
 The gate also screens **posting legitimacy** (ghost / evergreen / staffing-farm /
@@ -1564,6 +1564,6 @@ credential going out with no truthful correction.
 
 CareerRat submits an application when it is complete and verified: every required
 field answered, required uploads attached, exactly one clearly labelled submit
-control, and an `evaluate-job` gate of KEEP or user-approved REVIEW. With
-`submit: manual` in `automation.yml`, prepare the form and stop for the candidate
-to press the final submit control.
+control, and an `evaluate-job` gate of KEEP or user-approved REVIEW. When
+the submit mode is manual (`careerrat automation submit manual --write`), prepare the
+form and stop for the candidate to press the final submit control.

@@ -103,8 +103,8 @@ careerrat automation session extension --write            # set provider
   remain hidden and may be used only when the candidate explicitly saved them.
 - **Submit only complete, verified applications.** With `submit: auto` (the
   default) CareerRat presses the final submit control once, then waits for a
-  confirmation page. With `submit: manual` it prepares the form and you press
-  submit. Other outward-facing actions, such as sending a message, require
+  confirmation page. Run `careerrat automation submit manual --write` and it prepares
+  the form and you press submit. Other outward-facing actions, such as sending a message, require
   explicit confirmation.
 - **Capture artifacts are scratch.** Screenshots go to `.careerrat/workspace/captures/`
   (gitignored), never the repo root.

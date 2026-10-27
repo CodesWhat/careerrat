@@ -27,7 +27,7 @@ never implies write-back. Both halt on captcha / 2FA / login-wall.
 the full read-only before→after set first — everything it would flag and change, nothing
 touched — so the candidate sees the whole picture before a single field is written.
 Applying is a deliberate opt-in second step, per field. This is the same dry-run-by-default
-posture as `apply-job`'s `one_click_apply`: preview the diff, then write. It also means the
+posture as `apply-job`'s `authenticated_apply_preparation`: preview the diff, then write. It also means the
 skill runs as a pure read-only audit even when `profile_apply` is off.
 
 ## STEP 0 — CONSENT GATE (hard stop)
