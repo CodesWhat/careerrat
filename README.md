@@ -42,21 +42,23 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of October 26, 2026:** v0.20.0 is the latest release. CareerRat installs
+**As of October 27, 2026:** v0.21.0 is the latest release. CareerRat installs
 from npm and runs in your browser, on your machine, with the AI CLI you already
 use. Terminal sessions stay optional. v0.19.2 was the last release with a Mac
 app.
 
-New in v0.20.0:
+New in v0.21.0:
 
-- `careerrat start` opens the browser workspace without starting a terminal
-  agent. Explicit Claude Code and Codex sessions still work.
-- PDF export works from an npm install.
-- Saved exports use `Documents/careerrat`, with a folder per job. Closed jobs
-  move to an archive and come back when reopened. Earlier versions are kept,
-  and existing Downloads files aren't moved.
-- Today's conversation points at your next application and asks for outcomes
-  like rejections and interview invites.
+- CareerRat submits an application itself once it's complete and checked: every
+  required field answered, required uploads attached, one clear submit button,
+  and a fit gate of KEEP or a REVIEW you approved. It presses Submit once and
+  looks for a confirmation page.
+- `careerrat automation submit manual --write` turns that off, so CareerRat
+  fills the form and you press Submit.
+- If no confirmation page shows up, the application isn't marked Applied and
+  CareerRat never clicks again. Today asks you to check the site.
+- When CareerRat stops before Submit, it says why. The job thread shows what
+  was sent.
 
 If you use the Mac app, it keeps working at v0.19.2. There won't be a later Mac
 build; switch with `npm install -g careerrat`.
