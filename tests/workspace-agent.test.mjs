@@ -8603,6 +8603,7 @@ test("Apply on site rebuilds the packet after the live browser discovers rendere
 test("Apply on site records Applied only after the supervised browser verifies confirmation", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
+  candidateConfigPatch({ repoRoot, env: {}, name: "automation", patch: { submit: "manual" } });
 
   const unverified = await executeWorkspaceIntent({
     repoRoot,
@@ -8745,7 +8746,7 @@ test("permission-blocked preparation offers a fresh retry instead of a missing s
     op: "contextual-permission",
     permission: "application-preparation",
   });
-  assert.match(last.text, /You still press Submit/i);
+  assert.match(last.text, /CareerRat submits once everything is filled and checked/i);
   assert.match(last.text, /type “Allow form preparation”/i);
   assert.doesNotMatch(last.text, /settings/i);
   assert.doesNotMatch(last.text, /prepared browser session/i);

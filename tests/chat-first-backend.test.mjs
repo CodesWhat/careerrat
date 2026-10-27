@@ -3196,3 +3196,188 @@ test("chat-first reads fail closed and never create a database implicitly", asyn
     (error) => error?.code === "NO_DATABASE"
   );
 });
+
+function seedPrepareSubmitMission(api, repoRoot, appId, missionId) {
+  seedApplication(repoRoot, {
+    id: appId,
+    company: "Auto Submit Corp",
+    status: "reviewed-hold",
+    evaluation: { gate: "keep" },
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: missionId,
+    mode: "prepare-to-submit",
+    jobs: [{ type: "application", id: appId }],
+  });
+}
+
+function prepareSubmitState(state, extraMetadata = {}) {
+  return async ({ intent }) => ({
+    operationResult: { ok: true },
+    ...(intent.type === "job.prepare-submit"
+      ? { messages: [{ metadata: { state, ...extraMetadata } }] }
+      : {}),
+  });
+}
+
+test("auto submit mission: a verified applied prepare-submit completes the submit-gate and the mission", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-auto-applied", "mission-auto-applied");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-auto-applied",
+    executeIntent: prepareSubmitState("applied"),
+  });
+
+  assert.equal(run.ok, true);
+  assert.equal(run.mission.status, "completed");
+  const prepare = run.mission.steps.find((step) => step.action === "prepare-submit");
+  assert.equal(prepare.status, "completed");
+  assert.equal(prepare.result.state, "applied");
+  const gate = run.mission.steps.find((step) => step.action === "submit-gate");
+  assert.equal(gate.status, "completed");
+  assert.equal(gate.result.requiresUserSubmit, false);
+  assert.equal(gate.result.submissionRecorded, true);
+  assert.equal(gate.result.applicationId, "app-auto-applied");
+});
+
+test("auto submit mission: submitted-unverified blocks the step with its reason and does not throw", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-auto-unverified", "mission-auto-unverified");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-auto-unverified",
+    executeIntent: prepareSubmitState("submitted-unverified", {
+      reason: "Clicked Submit but no confirmation page appeared.",
+    }),
+  });
+
+  assert.equal(run.ok, true);
+  assert.equal(run.mission.status, "paused");
+  const prepare = run.mission.steps.find((step) => step.action === "prepare-submit");
+  assert.equal(prepare.status, "blocked");
+  assert.equal(prepare.result.state, "submitted-unverified");
+  assert.equal(prepare.result.reason, "Clicked Submit but no confirmation page appeared.");
+  assert.equal(run.mission.steps.find((step) => step.action === "submit-gate").status, "pending");
+});
+
+test("auto submit mission: an auto-declined awaiting-submit carries the reason onto the submit-gate", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-auto-stopped", "mission-auto-stopped");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-auto-stopped",
+    executeIntent: prepareSubmitState("awaiting-submit", {
+      autoSubmitStopped: { reason: "A required upload isn't attached" },
+    }),
+  });
+
+  const gate = run.mission.steps.find((step) => step.action === "submit-gate");
+  assert.equal(gate.status, "blocked");
+  assert.equal(gate.result.requiresUserSubmit, true);
+  assert.deepEqual(gate.result.autoSubmitStopped, { reason: "A required upload isn't attached" });
+});
+
+test("manual submit mission: an awaiting-submit gate carries no auto-stop reason", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-manual-gate", "mission-manual-gate");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-manual-gate",
+    executeIntent: prepareSubmitState("awaiting-submit"),
+  });
+
+  const gate = run.mission.steps.find((step) => step.action === "submit-gate");
+  assert.equal(gate.status, "blocked");
+  assert.equal(gate.result.requiresUserSubmit, true);
+  assert.equal(gate.result.autoSubmitStopped, undefined);
+});
+
+test("auto submit mission: any other unexpected prepare-submit state still fails the step", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-auto-weird", "mission-auto-weird");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-auto-weird",
+    executeIntent: prepareSubmitState("submitted"),
+  });
+
+  assert.equal(run.ok, false);
+  assert.equal(run.error.code, "MISSION_PREPARE_SUBMIT_FAILED");
+  assert.match(run.error.message, /unsafe state: submitted/);
+});
+
+async function unverifiedMission(api, repoRoot, appId, missionId) {
+  seedPrepareSubmitMission(api, repoRoot, appId, missionId);
+  const run = await api.missionRun({
+    repoRoot,
+    id: missionId,
+    executeIntent: prepareSubmitState("submitted-unverified", { reason: "No confirmation." }),
+  });
+  assert.equal(run.mission.status, "paused");
+  return run.mission;
+}
+
+test("auto submit mission: recording Applied after an unverified attempt completes the blocked prepare step and the gate", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  await unverifiedMission(api, repoRoot, "app-unv-applied", "mission-unv-applied");
+
+  const outcome = api.appRecordOutcome({ repoRoot, id: "app-unv-applied", to: "applied" });
+
+  assert.equal(outcome.submitGates.completedMissionIds.includes("mission-unv-applied"), true);
+  const mission = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((row) => row.id === "mission-unv-applied");
+  assert.equal(mission.status, "completed");
+  const prepare = mission.steps.find((step) => step.action === "prepare-submit");
+  assert.equal(prepare.status, "completed");
+  assert.equal(prepare.result.state, "submitted-unverified");
+  assert.equal(prepare.result.submissionRecorded, true);
+  assert.equal(prepare.result.requiresUserSubmit, false);
+  const gate = mission.steps.find((step) => step.action === "submit-gate");
+  assert.equal(gate.status, "completed");
+  assert.equal(gate.result.submissionRecorded, true);
+  assert.equal(gate.result.requiresUserSubmit, false);
+});
+
+test("auto submit mission: a withdrawn outcome after an unverified attempt leaves the steps as they are", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  await unverifiedMission(api, repoRoot, "app-unv-withdrawn", "mission-unv-withdrawn");
+
+  api.appRecordOutcome({ repoRoot, id: "app-unv-withdrawn", to: "withdrawn" });
+
+  const mission = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((row) => row.id === "mission-unv-withdrawn");
+  assert.equal(mission.status, "paused");
+  assert.equal(mission.steps.find((step) => step.action === "prepare-submit").status, "blocked");
+  assert.equal(mission.steps.find((step) => step.action === "submit-gate").status, "pending");
+});
+
+test("auto submit mission: a rejected outcome after an unverified attempt closes them like Applied", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  await unverifiedMission(api, repoRoot, "app-unv-rejected", "mission-unv-rejected");
+
+  api.appRecordOutcome({ repoRoot, id: "app-unv-rejected", to: "rejected" });
+
+  const mission = api
+    .chatFirstStateGet({ repoRoot })
+    .missions.find((row) => row.id === "mission-unv-rejected");
+  assert.equal(mission.status, "completed");
+  assert.equal(mission.steps.find((step) => step.action === "prepare-submit").status, "completed");
+  assert.equal(mission.steps.find((step) => step.action === "submit-gate").status, "completed");
+});

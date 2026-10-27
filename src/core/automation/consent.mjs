@@ -54,7 +54,7 @@ export const CAPABILITIES = {
   authenticated_apply_preparation: {
     phase: 4,
     label: "Authenticated apply preparation",
-    summary: "fill the modal and stop at the user-submit gate",
+    summary: "fill the modal, then submit or stop per the submit setting",
     platforms: [
       "greenhouse",
       "lever",
@@ -243,6 +243,34 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
 }
 
 // ---------------------------------------------------------------------------
+// Submit mode — the one resolver for whether the agent presses the final Submit.
+// `submit: auto | manual` is a top-level key in candidate/automation.yml. Absent
+// key (or absent file) means "auto"; "manual" keeps the human-presses-Submit
+// behavior and only applies when it is set explicitly. Anything else is an error.
+// ---------------------------------------------------------------------------
+
+const SUBMIT_MODES = ["auto", "manual"];
+
+export function resolveSubmitMode(config) {
+  if (!config || typeof config !== "object" || !Object.hasOwn(config, "submit")) return "auto";
+  const value = config.submit;
+  if (!SUBMIT_MODES.includes(value)) {
+    throw new Error(`candidate/automation.yml: submit must be "auto" or "manual"`);
+  }
+  return value;
+}
+
+export function loadSubmitMode({ root = DEFAULT_ROOT, env = process.env } = {}) {
+  const loaded = loadAutomation({ root, env });
+  // A corrupt file must not silently read as "auto" for someone who set "manual".
+  const parseError = loaded.errors.find((err) =>
+    String(err.message).startsWith("YAML parse error")
+  );
+  if (parseError) throw new Error(`candidate/automation.yml is unreadable: ${parseError.message}`);
+  return resolveSubmitMode(loaded.data);
+}
+
+// ---------------------------------------------------------------------------
 // mayRun — the hard predicate. allowed iff global ∧ platform ∧ consent.
 // Accepts a preloaded `data`, or loads from `root`. Returns { allowed, reasons,
 // checks } so callers can show the user exactly which switch is off.
@@ -356,11 +384,19 @@ export function automationStatus({
     })),
   };
 
+  let submit = "auto";
+  try {
+    submit = resolveSubmitMode(cfg);
+  } catch {
+    // An invalid value is already reported through loaded.errors.
+  }
+
   return {
     exists: loaded.exists,
     valid: loaded.valid,
     errors: loaded.errors,
     mode: effectiveAutomationMode(cfg),
+    submit,
     liveCount,
     capabilities,
     consent: Object.fromEntries(
@@ -386,7 +422,7 @@ export function ensureAutomationFile({ root = DEFAULT_ROOT, env = process.env } 
 
 // ---------------------------------------------------------------------------
 // resolveEditPath — map an edit intent to the dotted YAML path + human label.
-// kind: "consent" | "capability" | "platform" | "session" | "mode".
+// kind: "consent" | "capability" | "platform" | "session" | "mode" | "submit".
 // ---------------------------------------------------------------------------
 
 export function resolveEditPath({ kind, capability, platform }) {
@@ -400,6 +436,9 @@ export function resolveEditPath({ kind, capability, platform }) {
   }
   if (kind === "mode") {
     return { parts: ["setup_mode"], label: "automation setup mode" };
+  }
+  if (kind === "submit") {
+    return { parts: ["submit"], label: "final submit mode" };
   }
   if (!isCapability(capability))
     throw new Error(`unknown capability "${capability}". Known: ${CAPABILITY_KEYS.join(", ")}`);
@@ -626,6 +665,35 @@ export function planModeEdit({ mode, currentText, schema = null }) {
     path: parts.join("."),
     label,
     value: mode,
+    previous: patch.previous,
+    changed: patch.changed,
+    valid: validation.valid,
+    errors: validation.errors,
+    nextText: patch.text,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// planSubmitEdit: pure (no fs), comment-preserving next text for the final
+// submit mode (`auto` | `manual`). Absent key reads as auto, so a missing key
+// scaffolds as auto before the edit.
+// ---------------------------------------------------------------------------
+
+export function planSubmitEdit({ submit, currentText, schema = null }) {
+  if (!SUBMIT_MODES.includes(submit)) {
+    return { ok: false, error: 'submit mode must be "auto" or "manual"' };
+  }
+  const { parts, label } = resolveEditPath({ kind: "submit" });
+  const scaffoldedText = ensureTopLevelScalar(currentText, "submit", "auto");
+  const patch = setScalar(scaffoldedText, parts, submit);
+  if (!patch.ok) return { ok: false, error: patch.error };
+
+  const validation = patch.changed ? validateText(patch.text, schema) : { valid: true, errors: [] };
+  return {
+    ok: true,
+    path: parts.join("."),
+    label,
+    value: submit,
     previous: patch.previous,
     changed: patch.changed,
     valid: validation.valid,

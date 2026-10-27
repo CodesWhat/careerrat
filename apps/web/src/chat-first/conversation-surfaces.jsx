@@ -353,6 +353,55 @@ function artifactView(artifact, message, onArtifactAction) {
   };
 }
 
+const PACKET_VALUE_PREVIEW = 80;
+
+// What an auto submit actually sent: the answered fields and attached files,
+// collapsed by default; a long value shows a preview and expands on click.
+function SubmissionPacket({ artifact }) {
+  const answers = Array.isArray(artifact?.answers) ? artifact.answers : EMPTY_LIST;
+  const attachments = Array.isArray(artifact?.attachments) ? artifact.attachments : EMPTY_LIST;
+  if (!answers.length && !attachments.length) return null;
+  const parts = [
+    answers.length ? `${answers.length} answer${answers.length === 1 ? "" : "s"}` : null,
+    attachments.length ? `${attachments.length} file${attachments.length === 1 ? "" : "s"}` : null,
+  ].filter(Boolean);
+  // The packet is a fixed record of one submission, so a row's position is a
+  // stable identity; labels alone can repeat across wizard steps.
+  const answerRows = answers.map((row, position) => ({ row, id: `answer:${position}` }));
+  const fileRows = attachments.map((file, position) => ({ file, id: `file:${position}` }));
+  return (
+    <details className="chat-first-submission-packet">
+      <summary>What was sent ({parts.join(", ")})</summary>
+      <ul>
+        {answerRows.map(({ row, id }) => {
+          const value = String(row?.value ?? "");
+          const long = value.length > PACKET_VALUE_PREVIEW;
+          return (
+            <li key={id}>
+              <strong>{row?.label}</strong>
+              {long ? (
+                <details className="chat-first-submission-packet__value">
+                  <summary>{`${value.slice(0, PACKET_VALUE_PREVIEW).trimEnd()}…`}</summary>
+                  <p>{value}</p>
+                  {row?.truncated ? <small>(shortened in this record)</small> : null}
+                </details>
+              ) : (
+                <span>{value}</span>
+              )}
+            </li>
+          );
+        })}
+        {fileRows.map(({ file, id }) => (
+          <li key={id}>
+            <strong>{file?.label || "Attachment"}</strong>
+            <span>{file?.name}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function AttachedArtifacts({ message, onArtifactAction }) {
   const artifacts = Array.isArray(message?.artifacts) ? message.artifacts : EMPTY_LIST;
   if (!artifacts.length) return null;
@@ -368,6 +417,13 @@ function AttachedArtifacts({ message, onArtifactAction }) {
               else onArtifactAction?.(artifact, message);
             }}
           />
+        </div>
+      );
+    }
+    if (artifact?.kind === "submission_packet") {
+      return (
+        <div className="chat-first-indented-card" key={key}>
+          <SubmissionPacket artifact={artifact} />
         </div>
       );
     }
@@ -974,7 +1030,7 @@ export function TodayConversation({
           <p>
             {["submit", "submit-gate", "submit-gate-group"].includes(applicationNeed.kind)
               ? 'Open the application, review the answers and attachments, then press submit when everything looks right. Come back and choose "I applied" once it is sent.'
-              : "Start an application and I’ll check the fit, prepare your materials, and fill what I can. Then you open the form, review the answers and attachments, and press submit."}
+              : "Start an application and I’ll check the fit, prepare your materials, and fill the form. Your submit setting decides whether I press submit or you do. If anything is missing, I’ll stop and show you what."}
           </p>
           <div className="chat-first-inline-actions">
             <button
@@ -1351,8 +1407,11 @@ export function JobContextPanel({
             <div className="chat-first-packet-review__permission">
               <strong>Allow CareerRat to prepare the form</strong>
               <small>
-                CareerRat needs permission to open and fill application forms. You still press
-                Submit. Choose the button, or type “Allow form preparation”.
+                CareerRat needs permission to open and fill application forms.{" "}
+                {applicationPreparation?.submitMode === "manual"
+                  ? "Then you open it, check the answers and attachments, and press submit."
+                  : "CareerRat submits once everything is filled and checked."}{" "}
+                Choose the button, or type “Allow form preparation”.
               </small>
               <button
                 className="chat-first-context-action"

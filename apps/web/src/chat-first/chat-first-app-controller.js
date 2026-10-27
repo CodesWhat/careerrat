@@ -504,7 +504,11 @@ export function applicationPreparationPermission(automation) {
     capability?.enabled === true &&
     platforms.length > 0 &&
     platforms.every((platform) => platform?.allowed === true);
-  return { status: ready ? "ready" : "blocked", ready };
+  return {
+    status: ready ? "ready" : "blocked",
+    ready,
+    submitMode: value.submit === "manual" ? "manual" : "auto",
+  };
 }
 
 export async function enableApplicationPreparation({ api }) {
@@ -638,6 +642,13 @@ export function resolveNeedDecision(item, decision = "primary") {
   const kind = String(item?.kind || "");
   if (kind === "submit" || kind === "submit-gate") {
     return decision === "primary" ? { kind: "open-gate", gateId: item?.id || null } : null;
+  }
+  if (kind === "submit-unverified") {
+    const applicationId = item?.applicationId || null;
+    if (!applicationId) return null;
+    return decision === "primary"
+      ? { kind: "record-external", applicationId }
+      : { kind: "open-application", applicationId };
   }
   if (kind === "submit-gate-group") {
     const gateId = list(item?.gateIds).find(Boolean) || null;

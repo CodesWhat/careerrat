@@ -693,7 +693,8 @@ function missionPresentation(mission) {
       (step) =>
         `${marks[step?.status] || "○"} ${step?.label || titleCase(step?.action, "Mission step")}`
     ),
-    footnote: "Packets are built from the full posting. Every submit gates back here.",
+    footnote:
+      "Packets are built from the full posting. Each one is checked against the full posting before it goes out.",
     choicePrompt: hasRemainingWork ? mission.choicePrompt || null : null,
   };
 }
@@ -3119,6 +3120,17 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     }
     if (resolved.kind === "open-application") {
       await openJob(resolved.applicationId);
+      return;
+    }
+    if (resolved.kind === "record-external") {
+      await run(() =>
+        api.runWorkspaceIntent(
+          "application.record-external",
+          { type: "application", id: resolved.applicationId },
+          {},
+          { requestId: createWorkspaceRequestId() }
+        )
+      );
       return;
     }
     if (resolved.kind === "dismiss-touch") {

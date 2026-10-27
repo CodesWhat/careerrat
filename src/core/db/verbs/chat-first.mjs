@@ -1349,26 +1349,43 @@ export function completeSubmitGatesForApplicationInDb(
 ) {
   const id = cleanId(applicationId, "applicationId");
   const status = cleanText(applicationStatus, "applicationStatus", { max: 120 });
-  const rows = db
-    .prepare(
-      `SELECT data
-         FROM mission_steps
-        WHERE json_extract(data, '$.action') = 'submit-gate'
-          AND json_extract(data, '$.status') = 'blocked'
-          AND (
-            json_extract(data, '$.result.applicationId') = ?
-            OR json_extract(data, '$.jobRef.id') = ?
-          )
-        ORDER BY mission_id, sequence`
-    )
-    .all(id, id);
-  if (!rows.length) return { completedStepIds: [], completedMissionIds: [] };
+  const forApplication = (action, stepStatus) =>
+    db
+      .prepare(
+        `SELECT data
+           FROM mission_steps
+          WHERE json_extract(data, '$.action') = ?
+            AND json_extract(data, '$.status') = ?
+            AND (
+              json_extract(data, '$.result.applicationId') = ?
+              OR json_extract(data, '$.jobRef.id') = ?
+            )
+          ORDER BY mission_id, sequence`
+      )
+      .all(action, stepStatus, id, id)
+      .map(parseRow)
+      .filter(Boolean);
+
+  // A prepare-submit that auto-pressed Submit but saw no confirmation is left
+  // blocked with its pending submit-gate. Once the operator records the
+  // outcome, both close without re-running prepare.
+  const unverifiedPrepares = forApplication("prepare-submit", "blocked").filter(
+    (step) => step.result?.state === "submitted-unverified"
+  );
+  const unverifiedMissionIds = new Set(unverifiedPrepares.map((step) => step.missionId));
+  const gates = [
+    ...forApplication("submit-gate", "blocked"),
+    ...forApplication("submit-gate", "pending").filter((step) =>
+      unverifiedMissionIds.has(step.missionId)
+    ),
+  ];
+  if (!gates.length && !unverifiedPrepares.length) {
+    return { completedStepIds: [], completedMissionIds: [] };
+  }
 
   const completedStepIds = [];
   const touchedMissionIds = new Set();
-  for (const row of rows) {
-    const step = parseRow(row);
-    if (!step) continue;
+  for (const step of [...unverifiedPrepares, ...gates]) {
     const at = nextIso(step.updatedAt, now);
     const updatedStep = {
       ...step,
@@ -2060,6 +2077,12 @@ function operationSummary(result) {
     ...(operation?.applicationId ? { applicationId: String(operation.applicationId) } : {}),
     ...(operation?.status ? { status: String(operation.status) } : {}),
     ...(last?.metadata?.state ? { state: String(last.metadata.state) } : {}),
+    ...(last?.metadata?.state === "submitted-unverified" && last.metadata.reason
+      ? { reason: promptText(last.metadata.reason, 500) }
+      : {}),
+    ...(last?.metadata?.autoSubmitStopped?.reason
+      ? { autoSubmitStopped: { reason: promptText(last.metadata.autoSubmitStopped.reason, 300) } }
+      : {}),
     ...(handoff
       ? {
           handoff: jsonClone(
@@ -2227,6 +2250,24 @@ export async function missionRun({
     if (step.action === "submit-gate") {
       const applicationId = applicationIds.get(step.jobRef.id);
       const application = applicationId ? getRow(db, "applications", applicationId) : null;
+      // submit: auto. A verified "applied" prepare-submit already pressed and
+      // confirmed Submit, so the gate resolves through the same reconcile path
+      // a manually recorded Applied outcome takes.
+      const submittedByAgent = missionSteps(db, missionId).some(
+        (candidate) =>
+          candidate.action === "prepare-submit" &&
+          candidate.status === "completed" &&
+          candidate.result?.state === "applied" &&
+          sameMissionJob(candidate, step)
+      );
+      // submit: auto stopped before pressing Submit: carry why onto the gate.
+      const autoStopReason = missionSteps(db, missionId).find(
+        (candidate) =>
+          candidate.action === "prepare-submit" &&
+          candidate.result?.state === "awaiting-submit" &&
+          candidate.result?.autoSubmitStopped?.reason &&
+          sameMissionJob(candidate, step)
+      )?.result?.autoSubmitStopped?.reason;
       committedWrite(() =>
         missionStepSetStatus({
           repoRoot,
@@ -2237,6 +2278,7 @@ export async function missionRun({
           result: {
             applicationId,
             requiresUserSubmit: true,
+            ...(autoStopReason ? { autoSubmitStopped: { reason: autoStopReason } } : {}),
             ...(step.jobRef.deadline ? { deadline: step.jobRef.deadline } : {}),
             ...(step.jobRef.expiryLabel ? { expiryLabel: step.jobRef.expiryLabel } : {}),
             ...applicationGateState(application),
@@ -2244,6 +2286,16 @@ export async function missionRun({
           now,
         })
       );
+      if (submittedByAgent) {
+        committedWrite(() =>
+          completeSubmitGatesForApplicationInDb(db, {
+            applicationId,
+            applicationStatus: "applied",
+            appliedAt: application?.appliedAt || null,
+            now,
+          })
+        );
+      }
       continue;
     }
     const applicationId = applicationIds.get(step.jobRef.id);
@@ -2354,9 +2406,21 @@ export async function missionRun({
           );
         applicationIds.set(step.jobRef.id, promotedId);
       }
-      if (step.action === "prepare-submit" && result.state !== "awaiting-submit") {
+      // "applied" (verified) and "submitted-unverified" only occur when the
+      // workspace has submit: auto; every other state keeps today's handling.
+      if (
+        step.action === "prepare-submit" &&
+        result.state !== "awaiting-submit" &&
+        result.state !== "applied"
+      ) {
         if (
-          new Set(["blocked", "manual-handoff", "needs-input", "unavailable"]).has(result.state)
+          new Set([
+            "blocked",
+            "manual-handoff",
+            "needs-input",
+            "unavailable",
+            "submitted-unverified",
+          ]).has(result.state)
         ) {
           committedWrite(() =>
             missionStepSetStatus({

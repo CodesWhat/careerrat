@@ -32,8 +32,7 @@ describe("TodayConversation", () => {
     const tree = TodayConversation({ applicationNeed: need, onApplicationAction });
     const html = markup(tree);
     expect(html).toContain("Apply to Tyrell?");
-    expect(html).toContain("fill what I can");
-    expect(html).toContain("review the answers and attachments");
+    expect(html).toContain("Your submit setting decides whether I press submit or you do");
     const buttons = [];
     function visit(node) {
       if (!node || typeof node !== "object") return;
@@ -1766,7 +1765,7 @@ describe("JobConversation and JobContextPanel", () => {
     visit(tree);
     const html = markup(tree);
     expect(html).toContain("CareerRat needs permission to open and fill application forms");
-    expect(html).toContain("You still press Submit");
+    expect(html).toContain("CareerRat submits once everything is filled and checked");
     expect(html).toContain("or type “Allow form preparation”");
     expect(html).not.toContain("Open Settings");
     expect(html).not.toContain("Resume preparation");
@@ -1774,6 +1773,24 @@ describe("JobConversation and JobContextPanel", () => {
     expect(enable).toBeTruthy();
     enable.props.onClick();
     expect(onEnableApplicationPreparation).toHaveBeenCalledOnce();
+  });
+
+  it("tells a manual-submit person they press submit in the form permission prompt", () => {
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview: {
+        status: "upload-ready",
+        uploadReady: true,
+        gapCount: 0,
+        canResume: true,
+        gaps: [],
+      },
+      applicationPreparation: { status: "blocked", ready: false, submitMode: "manual" },
+      onEnableApplicationPreparation: vi.fn(),
+    });
+    const html = markup(tree);
+    expect(html).toContain("check the answers and attachments, and press submit");
+    expect(html).not.toContain("CareerRat submits once everything is filled and checked");
   });
 
   it("offers supervised form preparation without rendering packet diagnostics as questions", () => {
@@ -2389,6 +2406,63 @@ describe("ConversationPanel", () => {
     expect(html).toContain('class="chat-first-conversation-panel__scroll"');
     expect(html).toContain('class="chat-first-conversation-panel__composer"');
     expect(html).toContain('data-composer="true"');
+  });
+});
+
+describe("submission packet in the thread", () => {
+  const packetMessage = (answers, attachments) => ({
+    id: "applied",
+    role: "assistant",
+    kind: "action_result",
+    text: "Verified the submission confirmation and recorded it as Applied.",
+    artifacts: [{ kind: "submission_packet", title: "What was sent", answers, attachments }],
+  });
+
+  it("lists the answered fields and attached file names", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          packetMessage(
+            [{ label: "Full name", value: "Jordan Rivera" }],
+            [{ label: "Resume/CV", name: "resume.pdf" }]
+          ),
+        ]}
+      />
+    );
+    expect(html).toContain("What was sent (1 answer, 1 file)");
+    expect(html).toContain("Full name");
+    expect(html).toContain("Jordan Rivera");
+    expect(html).toContain("Resume/CV");
+    expect(html).toContain("resume.pdf");
+  });
+
+  it("truncates a long value behind an expander that holds the full text", () => {
+    const long = `${"word ".repeat(40)}end`;
+    const html = markup(
+      <MessageTranscript messages={[packetMessage([{ label: "Why us", value: long }], [])]} />
+    );
+    expect(html).toContain("chat-first-submission-packet__value");
+    expect(html).toContain(`${long.slice(0, 80).trimEnd()}…`);
+    expect(html).toContain(long);
+  });
+
+  it("notes when a long answer was shortened in the record", () => {
+    const long = `${"word ".repeat(40)}end`;
+    const html = markup(
+      <MessageTranscript
+        messages={[packetMessage([{ label: "Why us", value: long, truncated: true }], [])]}
+      />
+    );
+    expect(html).toContain("(shortened in this record)");
+    const whole = markup(
+      <MessageTranscript messages={[packetMessage([{ label: "Why us", value: long }], [])]} />
+    );
+    expect(whole).not.toContain("shortened in this record");
+  });
+
+  it("renders nothing for an empty packet", () => {
+    const html = markup(<MessageTranscript messages={[packetMessage([], [])]} />);
+    expect(html).not.toContain("What was sent");
   });
 });
 

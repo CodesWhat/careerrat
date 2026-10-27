@@ -868,6 +868,13 @@ describe("chat-first app controller", () => {
     expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-current-prepare");
   });
 
+  it("reports the submit mode alongside form preparation, defaulting to auto", () => {
+    expect(applicationPreparationPermission({ capabilities: [] }).submitMode).toBe("auto");
+    expect(
+      applicationPreparationPermission({ capabilities: [], submit: "manual" }).submitMode
+    ).toBe("manual");
+  });
+
   it("treats form preparation as ready only when its supported application sites are allowed", () => {
     expect(applicationPreparationPermission({ capabilities: [] })).toMatchObject({
       status: "blocked",
@@ -1116,6 +1123,19 @@ describe("chat-first app controller", () => {
         "primary"
       )
     ).toEqual({ kind: "open-gate", gateId: "mission-a:gate" });
+  });
+
+  it("routes an unverified submit to Applied or the application, never to the submit gate", () => {
+    const need = { kind: "submit-unverified", id: "mission:prepare", applicationId: "app-9" };
+    expect(resolveNeedDecision(need, "primary")).toEqual({
+      kind: "record-external",
+      applicationId: "app-9",
+    });
+    expect(resolveNeedDecision(need, "secondary")).toEqual({
+      kind: "open-application",
+      applicationId: "app-9",
+    });
+    expect(resolveNeedDecision({ ...need, applicationId: null }, "primary")).toBeNull();
   });
 
   it("maps durable search-run snapshots without claiming a running sweep completed", () => {

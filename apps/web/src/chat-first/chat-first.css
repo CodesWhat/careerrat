@@ -865,6 +865,42 @@
   font-weight: 650;
 }
 
+.chat-first-submission-packet {
+  color: var(--slate);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.chat-first-submission-packet > summary {
+  width: fit-content;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-first-submission-packet ul {
+  display: grid;
+  gap: 4px;
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.chat-first-submission-packet li strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.chat-first-submission-packet__value summary {
+  cursor: pointer;
+}
+
+.chat-first-submission-packet__value p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .chat-first-artifact-card__requirements {
   flex-basis: 100%;
   margin-left: 31px;
