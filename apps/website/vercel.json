@@ -3,6 +3,27 @@
   "framework": null,
   "buildCommand": "npm run build",
   "outputDirectory": "out",
+  "ignoreCommand": "sh scripts/vercel-ignore-build.sh",
+  "git": {
+    "deploymentEnabled": {
+      "feat/**": false,
+      "fix/**": false,
+      "docs/**": false,
+      "ci/**": false,
+      "chore/**": false,
+      "test/**": false,
+      "refactor/**": false,
+      "build/**": false,
+      "perf/**": false,
+      "style/**": false,
+      "revert/**": false,
+      "dev/**": false,
+      "release/**": false,
+      "renovate/**": false,
+      "dependabot/**": false,
+      "codex/**": false,
+      "claude/**": false
+    }  },
   "headers": [
     {
       "source": "/(.*)",
