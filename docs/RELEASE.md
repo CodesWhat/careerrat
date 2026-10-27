@@ -380,7 +380,8 @@ deploys at 100 per day, so previews are limited in `apps/website/vercel.json`:
 - To get a preview of a site change, push it on a `site/` branch. Any branch
   outside that list gets a preview only when the build inputs changed:
   `apps/website`, `apps/docs`, `scripts/build-docs-content.mjs`,
-  `scripts/harden-static-html.mjs`, `package.json` or `package-lock.json`.
+  `scripts/harden-static-html.mjs`, `src/core/security/browser-policy.mjs`
+  (which that script imports), `package.json` or `package-lock.json`.
   `apps/website/scripts/vercel-ignore-build.sh` diffs against the last
   deployed commit (or the merge base with `main` on a branch's first push) and
   builds when it can't tell.

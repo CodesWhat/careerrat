@@ -8,7 +8,7 @@
 # branch's first deploy).
 
 # Everything the site build reads, relative to the repo root.
-SITE_PATHS="apps/website apps/docs scripts/build-docs-content.mjs scripts/harden-static-html.mjs package.json package-lock.json"
+SITE_PATHS="apps/website apps/docs scripts/build-docs-content.mjs scripts/harden-static-html.mjs src/core/security/browser-policy.mjs package.json package-lock.json"
 
 if [ "$VERCEL_ENV" = "production" ] || [ "$VERCEL_GIT_COMMIT_REF" = "main" ]; then
 	echo "vercel-ignore-build: building, production deploy"
