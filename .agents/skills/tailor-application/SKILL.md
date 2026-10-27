@@ -38,8 +38,7 @@ Read in this order:
 2. `candidate/evidence.yml` — note `claims[]`, `allowed_wording[]`,
    `forbidden_wording[]`
 3. `candidate/targeting.yml` — note `role_buckets`, `degree_policy`, `fit_bands`
-4. `candidate/form-defaults.yml` — note `expected_base`, `work_authorization`,
-   `auto_submit`
+4. `candidate/form-defaults.yml`: note `expected_base`, `work_authorization`
 5. `candidate/profile.yml` — note `candidate.toolchain`, `candidate.domain`,
    `compensation.expected_base` (outbound-safe); **do not read or echo
    `compensation.current_base`** — it is private and must not appear in any artifact
@@ -403,10 +402,11 @@ workspace/tailored/<Company> — <Role>.docx   (if built)
 workspace/tailored/<Company> — <Role>.pdf    (if built)
 ```
 
-- If the user intends to submit: hand off to `apply-job`. `apply-job` will re-verify
-  the gate, fill the form, and handle submission per `form-defaults.yml#auto_submit`.
+- If the user intends to apply: hand off to `apply-job`. `apply-job` will re-verify
+  the gate, fill the form, and handle submission per `automation.yml#submit`
+  (`auto` by default, `manual` to stop for the user).
 - If the user only wanted the artifacts: confirm files are ready and list their paths.
-- Do not auto-submit from within this skill. Submission is owned by `apply-job`.
+- Do not submit from within this skill. Submission is owned by `apply-job`.
 - **Learnings write-back is owned by `track-outcomes`, not this skill.** Read it
   via `careerrat learnings read "<role>"` (STEP 2); appends are `track-outcomes`'
   job. After an outcome is known (rejection, advance, offer), run `track-outcomes`

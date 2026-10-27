@@ -89,7 +89,7 @@ webmail access — are gated. They are
 The authenticated capabilities are live behind the switchboard: `status_polling`
 (**`sync-status`** skill), `messaging` (**`ingest-messages`** skill), and
 `authenticated_apply_preparation` (**supervised LinkedIn Easy Apply preparation**,
-which always stops at the user-submit gate),
+which follows the `submit` setting at the final Submit),
 `profile_optimize` / `profile_apply` (**`optimize-linkedin`**), and `mail_access`
 (generic `webmail` for one recent verification-code message; Gmail/Outlook for
 verification-code reads and opted-in `ingest-mail` webmail reads).
@@ -129,7 +129,11 @@ default. The local-only **Profile > Application defaults** editor can keep them
 blank or choose the form's decline option when available. Existing exact answers
 stay hidden and may be used only when explicitly saved; CareerRat never infers
 one. CareerRat halts on CAPTCHA or
-two-factor authentication and never presses the final submit control.
+two-factor authentication. At the final Submit it follows `submit` in
+`automation.yml`. With `submit: auto` (the default) it presses Submit once, only
+when every required field is answered, required uploads are attached, exactly one
+clearly labelled submit control exists, and the fit gate allows it, then waits for
+a confirmation page. With `submit: manual` it stops for you to press Submit.
 
 `mail_access` has stricter mailbox-specific limits: for a verification-code flow,
 read only the one recent matching message needed for the current application or

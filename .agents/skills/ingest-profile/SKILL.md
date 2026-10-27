@@ -397,7 +397,7 @@ Save each item below through `careerrat data candidate patch form-defaults --dat
 3. Current employer and current title (as typically entered in ATS forms). Save this group once settled.
 4. LinkedIn, GitHub, portfolio URLs (confirm these match candidate profile config). Profile link fields are strings; use an empty string when the candidate has no link, never `null`. In conversational chat, emit one profile confirmation block for LinkedIn, GitHub, and portfolio, not a second form-defaults proposal; the web surface mirrors those confirmed links into form-defaults from the same click. In a one-shot CLI context, write both documents. Save this group once settled.
 5. Do not handle voluntary self-identification here. After Paul finishes setup, the local Application defaults UI asks whether forms should leave those questions blank or choose a decline option. That policy and any exact answers stay outside agent context and are never proposed in chat.
-6. Final submission is not a preference to collect or persist. CareerRat always stops before the final submit control, and only the user can submit. Never write a submission setting into form-defaults.
+6. Submission is not an onboarding question and never goes into form-defaults. CareerRat submits when the application is complete and verified; `submit: manual` in `automation.yml` is point-of-need config for anyone who wants to press Submit themselves. Don't ask about it during setup.
 7. Confirm every supported item above is written before moving to STEP 12 — nothing here should still be sitting in chat only.
 
 ---
@@ -462,7 +462,7 @@ off. Never hand-edit `candidate/automation.yml`.
 |---|---|---|---|---|
 | `status_polling` | Portal status polling | Reads application status from ATS dashboards (read-only) | greenhouse, workday, ashby, lever | Session browser + ToS consent per platform |
 | `messaging` | In-platform messaging | Reads in-platform DMs into `communications[]` (read-only; replies go through `email-comms`) | linkedin, wellfound | Session browser + ToS consent per platform |
-| `one_click_apply` | Authenticated application fill | Modal-driven application filling under the `apply-job` submit gate; always halts before final submit so only the user can submit | linkedin | Session browser + ToS consent |
+| `one_click_apply` | Authenticated application fill | Modal-driven application filling under the `apply-job` submit gate; submits when complete and verified, or halts before final submit when `submit: manual` | linkedin | Session browser + ToS consent |
 | `profile_optimize` | LinkedIn profile optimize (read + suggest) | Reads your profile and proposes honest, evidence-backed rewrites of headline / About / experience / Featured (read-only; dry-run preview, also runs as a no-browser fix-doc) | linkedin | Session browser + ToS consent |
 | `profile_apply` | LinkedIn profile apply (write back) | Writes the approved profile rewrites back through the session browser, **confirm-first per field**; separate switch from `profile_optimize` (suggestions on never implies write-back) | linkedin | Session browser + ToS consent + `profile_optimize` |
 | `mail_access` | Session webmail access | Reads one specific recent verification-code email during apply/sign-in flows from any provider via `webmail`, or opted-in Gmail/Outlook recruiting messages for `ingest-mail`; never sends/deletes/replies or browses the broader inbox | gmail, outlook, webmail | Session browser + ToS consent per mail provider |

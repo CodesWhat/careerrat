@@ -113,7 +113,7 @@ field), `current_employer` (string), `current_title` (string), `eeo_default`
 (string), `screening_answers` (map of recurring custom questions to pre-reviewed
 answers), optional `confirm_current_role` / `confirm_current_disclosure` booleans,
 and the applicant URLs (`linkedin`, `github`, `portfolio`). Final submission is
-always user-controlled and has no configurable override.
+controlled by `submit` in `automation.yml`, not by form defaults.
 
 ---
 

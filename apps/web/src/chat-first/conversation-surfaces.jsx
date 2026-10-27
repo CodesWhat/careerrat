@@ -1030,7 +1030,7 @@ export function TodayConversation({
           <p>
             {["submit", "submit-gate", "submit-gate-group"].includes(applicationNeed.kind)
               ? 'Open the application, review the answers and attachments, then press submit when everything looks right. Come back and choose "I applied" once it is sent.'
-              : "Start an application and I’ll check the fit, prepare your materials, and fill what I can. Then you open the form, review the answers and attachments, and press submit."}
+              : "Start an application and I’ll check the fit, prepare your materials, fill the form, and submit it once everything is answered. If anything is missing, I’ll stop and show you what."}
           </p>
           <div className="chat-first-inline-actions">
             <button
@@ -1407,8 +1407,9 @@ export function JobContextPanel({
             <div className="chat-first-packet-review__permission">
               <strong>Allow CareerRat to prepare the form</strong>
               <small>
-                CareerRat needs permission to open and fill application forms. You still press
-                Submit. Choose the button, or type “Allow form preparation”.
+                CareerRat needs permission to open and fill application forms. CareerRat submits
+                once everything is filled and checked. Choose the button, or type “Allow form
+                preparation”.
               </small>
               <button
                 className="chat-first-context-action"

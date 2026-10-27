@@ -80,8 +80,7 @@ These files are safe for CareerRat updates and public distribution.
 - Generated text must map back to user-layer evidence.
 - The system must not invent degrees, tools, employers, metrics, credentials, or
   authorization status.
-- Public default is manual confirmation before final submit.
-- Browser automation that submits applications must be opt-in.
+- Public default is `submit: auto`: CareerRat submits only when the application is complete and verified. `submit: manual` stops before final submit.
 - Verification-code and inbox workflows must be explicit opt-in. Generic
   `webmail` supports one-code-message verification flows; Gmail/Outlook support
   that plus webmail ingest. All are separate from in-platform messaging.

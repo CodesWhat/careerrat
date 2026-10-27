@@ -32,8 +32,8 @@ describe("TodayConversation", () => {
     const tree = TodayConversation({ applicationNeed: need, onApplicationAction });
     const html = markup(tree);
     expect(html).toContain("Apply to Tyrell?");
-    expect(html).toContain("fill what I can");
-    expect(html).toContain("review the answers and attachments");
+    expect(html).toContain("submit it once everything is answered");
+    expect(html).not.toContain("press submit");
     const buttons = [];
     function visit(node) {
       if (!node || typeof node !== "object") return;
@@ -1766,7 +1766,7 @@ describe("JobConversation and JobContextPanel", () => {
     visit(tree);
     const html = markup(tree);
     expect(html).toContain("CareerRat needs permission to open and fill application forms");
-    expect(html).toContain("You still press Submit");
+    expect(html).toContain("CareerRat submits once everything is filled and checked");
     expect(html).toContain("or type “Allow form preparation”");
     expect(html).not.toContain("Open Settings");
     expect(html).not.toContain("Resume preparation");

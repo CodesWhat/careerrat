@@ -11,14 +11,16 @@ or other liability arising from use of the software.
 ## User Responsibility
 
 You are **solely responsible** for every job application you submit. CareerRat
-generates drafts and fills forms on your behalf; you must review and approve
-each submission. The tool is not a party to any application and accepts no
+generates drafts and fills forms on your behalf, and it submits them for you
+when they're complete and verified. Review your profile and answers, because
+CareerRat submits what they say on your behalf. The tool is not a party to any application and accepts no
 liability for its accuracy, completeness, or consequences.
 
-**User-controlled submission.** CareerRat may prepare application materials and
-fill supported form fields, but it halts before final submission. You review the
-prepared form and press its submit control yourself. There is no setting that
-allows CareerRat to press the final submit control.
+**Submission.** By default CareerRat presses the final submit control itself,
+once, only when every required field is answered, required uploads are attached,
+and the application passes its checks. If it can't confirm the submission, it
+tells you to check the site. Set `submit: manual` in `automation.yml` and it fills
+the form and halts so you press the submit control yourself.
 
 ## Terms of Service Compliance
 

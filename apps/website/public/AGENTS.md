@@ -65,8 +65,10 @@ This file only gets you to the front door — don't improvise procedures it cove
 
 ## Rules — read before acting for the user
 
-- **NEVER press a job application's final submit control.** Prepare the form and
-  leave submission to the user. This is the one hard safety gate.
+- **Submit only a complete, verified application.** Run `evaluate-job` first, and
+  press the final submit control only when every required field is answered and
+  the gate is KEEP or user-approved REVIEW. With `submit: manual` in
+  `automation.yml`, stop and leave submission to the user.
 - **ASK before** sending any outbound message (email, LinkedIn) on the user's behalf.
 - **ALWAYS run the owning skill** instead of improvising — skills are the how-to, AGENTS.md
   is the contract.

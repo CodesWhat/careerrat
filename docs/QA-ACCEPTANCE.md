@@ -100,8 +100,8 @@ Test homes:
 - [x] `J-07` Apply on site cannot mark Applied without verified or user-reported completion.
 - [x] `J-08` Status, follow-up, note, communication, and interview actions clear satisfied CTAs.
 - [x] `J-09` Jobs writes update Home, Calendar, Network, Library inputs, activity, and Ask context.
-- [x] `J-10` Supervised Apply captures the live form, fills only confirmed values, stops before
-  Submit, and requires confirmation-page screenshot evidence before writing Applied.
+- [x] `J-10` Supervised Apply captures the live form, fills only confirmed values, follows the
+  `submit` setting (stops before Submit in manual mode), and requires confirmation-page screenshot evidence before writing Applied.
 
 ## Calendar
 

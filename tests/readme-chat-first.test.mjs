@@ -11,7 +11,7 @@ test("README leads with the shipped chat-first Mac app", async () => {
   );
   assert.match(readme, /Download the latest `\.dmg`/);
   assert.match(readme, /signed and notarized Apple Silicon app/);
-  assert.match(readme, /It never presses the final Submit button\./);
+  assert.match(readme, /complete and verified, CareerRat\s+submits it\./);
   assert.match(readme, /SQLite/);
   assert.match(readme, /Deep ingest/);
   assert.match(readme, /mock interviews/);
