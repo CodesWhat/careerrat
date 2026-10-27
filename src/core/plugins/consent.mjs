@@ -25,13 +25,29 @@ export function pluginAllowed({ manifest, cfg, root, env } = {}) {
   // greenhouse/workday/ashby/lever). mayRun() is platform-scoped, so a
   // plugin is allowed while the capability is on for any one of the platforms
   // it covers.
+  const verdicts = [];
   for (const platform of platforms) {
     const verdict = mayRun({ capability, platform, data, root, env });
     if (verdict.allowed) return { allowed: true, reason: null };
+    verdicts.push(verdict);
   }
 
+  // Unreadable settings deny everything, so the first reason says so.
+  const unreadable = verdicts.find((v) => v.checks?.readable === false);
+  if (unreadable) return { allowed: false, reason: unreadable.reasons[0] };
+
+  // Capability switch off: one command turns the whole capability back on.
+  if (verdicts.some((v) => v.checks?.global === false)) {
+    return {
+      allowed: false,
+      reason: `capability "${capability}" is turned off (turn on: \`careerrat automation enable ${capability} --write\`)`,
+    };
+  }
+
+  // Only platform switches are off: name an applicable platform in the command.
+  const platform = platforms[0];
   return {
     allowed: false,
-    reason: `capability "${capability}" is turned off (turn on: \`careerrat automation enable ${capability} --write\`)`,
+    reason: `every platform is turned off for "${capability}" (turn one on: \`careerrat automation enable ${capability} ${platform} --write\`; platforms: ${platforms.join(", ")})`,
   };
 }

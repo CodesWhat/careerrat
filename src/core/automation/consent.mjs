@@ -185,12 +185,34 @@ export function automationModePatch() {
 // loadAutomation: read + validate. Absent file => all-ON default, exists:false.
 // ---------------------------------------------------------------------------
 
+// An existing config that can't be read must not read as the all-on default: that
+// would silently re-enable something the operator turned off. The returned data
+// carries `readError`, which mayRun treats as a denial of every capability.
+function unreadableAutomation({ display, source, message }) {
+  const readError = `${display}: ${message}`;
+  return {
+    exists: true,
+    valid: false,
+    errors: [{ path: "", message }],
+    readError,
+    data: { ...defaultAutomation(), readError },
+    path: display,
+    source,
+  };
+}
+
 export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) {
   const path = userPath({ repoRoot: root, env }, AUTOMATION_FILE);
   const display = displayPath({ repoRoot: root, env }, AUTOMATION_FILE);
   const source = candidateConfigSource({ repoRoot: root, env });
   if (source === "db") {
-    const data = loadCandidateDoc("automation", { repoRoot: root, env }) || {};
+    let stored;
+    try {
+      stored = loadCandidateDoc("automation", { repoRoot: root, env });
+    } catch (err) {
+      return unreadableAutomation({ display, source, message: err.message });
+    }
+    const data = stored || {};
     const schemaPath = join(root, AUTOMATION_SCHEMA);
     const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
     const { valid, errors } = schema ? validate(data, schema) : { valid: true, errors: [] };
@@ -198,6 +220,7 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
       exists: true,
       valid,
       errors,
+      readError: null,
       data: normalizeAutomationConfig(data),
       path: display,
       source,
@@ -208,6 +231,7 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
       exists: false,
       valid: true,
       errors: [],
+      readError: null,
       data: defaultAutomation(),
       path: display,
       source,
@@ -217,14 +241,11 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
   try {
     data = parseYaml(readFileSync(path, "utf8"));
   } catch (err) {
-    return {
-      exists: true,
-      valid: false,
-      errors: [{ path: "", message: `YAML parse error: ${err.message}` }],
-      data: defaultAutomation(),
-      path: display,
+    return unreadableAutomation({
+      display,
       source,
-    };
+      message: `YAML parse error: ${err.message}`,
+    });
   }
   const schemaPath = join(root, AUTOMATION_SCHEMA);
   const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
@@ -233,6 +254,7 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
     exists: true,
     valid,
     errors,
+    readError: null,
     data: normalizeAutomationConfig(data),
     path: display,
     source,
@@ -297,6 +319,15 @@ export function mayRun({
   }
 
   const cfg = data || loadAutomation({ root, env }).data;
+  if (cfg?.readError) {
+    return {
+      allowed: false,
+      reasons: [
+        `automation settings can't be read (${cfg.readError}); fix the file or run \`careerrat automation status\``,
+      ],
+      checks: { global: false, platform: false, readable: false },
+    };
+  }
   const cap = cfg?.capabilities?.[capability] || {};
   const globalOn = cap.enabled !== false;
   const platformOn = cap.platforms?.[platform] !== false;
@@ -381,6 +412,7 @@ export function automationStatus({
     exists: loaded.exists,
     valid: loaded.valid,
     errors: loaded.errors,
+    readError: loaded.readError || null,
     submit,
     liveCount,
     capabilities,
@@ -590,7 +622,9 @@ export function migrateLegacyAutomationText(currentText, templateText) {
   } catch {
     return currentText;
   }
-  if (!doc || typeof doc !== "object" || doc.capabilities_default === "on") return currentText;
+  // An empty or comments-only file parses to null: an empty legacy document.
+  if (doc == null) doc = {};
+  if (typeof doc !== "object" || doc.capabilities_default === "on") return currentText;
   let next = templateText;
   const carry = [];
   if (doc.submit === "auto" || doc.submit === "manual") carry.push([["submit"], doc.submit]);

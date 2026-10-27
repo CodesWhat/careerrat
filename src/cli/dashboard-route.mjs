@@ -98,8 +98,8 @@ function readSetup({ repoRoot, env, candidateConfigGetForRoute }) {
 // Reduces automationStatus()'s full capability matrix down to calendar_sync's
 // per-platform {enabled, allowed}, keyed by platform, the shape
 // buildCalendarSync (dashboard-data.js) expects as its providerStatus arg.
-// Degrades to null (its "On" fallback) rather than
-// failing the whole dashboard route if automation.yml is missing/invalid.
+// Degrades to null (the dashboard labels providers "Unknown") rather than
+// failing the whole dashboard route if the automation status can't be read.
 function readCalendarProviderStatus({ repoRoot, env, automationStatusForRoute }) {
   try {
     const status = automationStatusForRoute({ root: repoRoot, env });

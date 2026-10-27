@@ -530,6 +530,14 @@ test("buildCalendarSync maps each providerStatus shape to its status label", () 
   for (const provider of noProviderStatus.calendar.sync.providers) {
     assert.equal(provider.status, "On", "an absent providerStatus map reads On");
   }
+
+  const unavailable = buildDashboardViewModel(tracker, {
+    now: new Date("2026-08-15T12:00:00.000Z"),
+    calendarProviderStatus: null,
+  });
+  for (const provider of unavailable.calendar.sync.providers) {
+    assert.equal(provider.status, "Unknown", "a null providerStatus map reads Unknown");
+  }
 });
 
 test("normalizeCalendarWrite passes through an explicit manual provenance and defaults every other value to automated", () => {

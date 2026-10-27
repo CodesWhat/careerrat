@@ -203,7 +203,9 @@ export function calendarWriteAppend({ repoRoot, env, record } = {}) {
     });
     if (!verdict.allowed) {
       const error = new Error(
-        `Automated calendar sync is turned off for that provider, so an automated write can't be recorded. Turn it on with \`careerrat automation enable calendar_sync ${record.provider || record.platform} --write\`.`
+        verdict.checks?.readable === false
+          ? `Automated calendar sync is denied, so an automated write can't be recorded: ${verdict.reasons[0]}.`
+          : `Automated calendar sync is turned off for that provider, so an automated write can't be recorded. Turn it on with \`careerrat automation enable calendar_sync ${record.provider || record.platform} --write\`.`
       );
       error.code = "CALENDAR_WRITE_NOT_ALLOWED";
       throw error;

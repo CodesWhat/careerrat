@@ -274,3 +274,65 @@ session:
     rmSync(legacyRoot, { recursive: true, force: true });
   }
 });
+
+function makeLegacyRoot(prefix) {
+  const legacyRoot = mkdtempSync(join(tmpdir(), prefix));
+  mkdirSync(join(legacyRoot, "candidate"), { recursive: true });
+  mkdirSync(join(legacyRoot, "templates"), { recursive: true });
+  mkdirSync(join(legacyRoot, "config"), { recursive: true });
+  cpSync(
+    join(repoRoot, "templates/automation.example.yml"),
+    join(legacyRoot, "templates/automation.example.yml")
+  );
+  cpSync(
+    join(repoRoot, "config/automation.schema.json"),
+    join(legacyRoot, "config/automation.schema.json")
+  );
+  return legacyRoot;
+}
+
+for (const [label, text] of [
+  ["empty", ""],
+  ["comments-only", "# my notes\n# nothing set yet\n"],
+]) {
+  test(`automation CLI: disable, submit and session write to an ${label} automation.yml`, () => {
+    const env = { ...process.env };
+    delete env.CAREERRAT_HOME;
+    const legacyRoot = makeLegacyRoot("careerrat-automation-blank-");
+    const file = join(legacyRoot, "candidate", "automation.yml");
+    try {
+      writeFileSync(file, text);
+      const disabled = runAutomation(
+        ["disable", "mail_access", "--write", "--json"],
+        env,
+        legacyRoot
+      );
+      assert.equal(disabled.status, 0, disabled.stderr || disabled.stdout);
+      assert.equal(parseYaml(readFileSync(file, "utf8")).capabilities_default, "on");
+      assert.equal(
+        mayRun({ capability: "mail_access", platform: "gmail", root: legacyRoot, env }).allowed,
+        false
+      );
+      assert.equal(
+        mayRun({ capability: "messaging", platform: "linkedin", root: legacyRoot, env }).allowed,
+        true
+      );
+
+      writeFileSync(file, text);
+      const submit = runAutomation(["submit", "manual", "--write", "--json"], env, legacyRoot);
+      assert.equal(submit.status, 0, submit.stderr || submit.stdout);
+      assert.equal(loadSubmitMode({ root: legacyRoot, env }), "manual");
+
+      writeFileSync(file, text);
+      const session = runAutomation(
+        ["session", "playwright", "--write", "--json"],
+        env,
+        legacyRoot
+      );
+      assert.equal(session.status, 0, session.stderr || session.stdout);
+      assert.equal(parseYaml(readFileSync(file, "utf8")).session.provider, "playwright");
+    } finally {
+      rmSync(legacyRoot, { recursive: true, force: true });
+    }
+  });
+}

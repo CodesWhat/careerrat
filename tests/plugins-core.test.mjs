@@ -203,7 +203,12 @@ test("pluginAllowed resolves a declared capability through mayRun (stub capabili
   for (const platform of Object.keys(onePlatformOff.capabilities.status_polling.platforms)) {
     onePlatformOff.capabilities.status_polling.platforms[platform] = false;
   }
-  assert.equal(pluginAllowed({ manifest, cfg: onePlatformOff }).allowed, false);
+  const platformDenied = pluginAllowed({ manifest, cfg: onePlatformOff });
+  assert.equal(platformDenied.allowed, false);
+  assert.match(
+    platformDenied.reason,
+    /careerrat automation enable status_polling (greenhouse|workday|ashby|lever) --write/
+  );
   onePlatformOff.capabilities.status_polling.platforms.greenhouse = true;
   assert.equal(pluginAllowed({ manifest, cfg: onePlatformOff }).allowed, true);
 });

@@ -751,7 +751,13 @@ function printStatus(asJson) {
   console.log("careerrat automation");
   console.log("====================");
   console.log("");
-  if (!status.exists) {
+  if (status.readError) {
+    console.log(`ERROR: automation settings can't be read (${status.readError}).`);
+    console.log(
+      "Every capability is DENIED until this is fixed. Repair the file (or restore it), then run `careerrat automation status` again."
+    );
+    console.log("");
+  } else if (!status.exists) {
     console.log("Every capability is on unless you turn it off.");
     console.log(`No ${loaded.path} yet; the first \`--write\` creates it from the template.`);
     console.log("");

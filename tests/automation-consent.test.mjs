@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,7 @@ import {
   automationStatus,
   CAPABILITIES,
   defaultAutomation,
+  loadAutomation,
   mayRun,
   migrateLegacyAutomationText,
   normalizeAutomationConfig,
@@ -623,4 +624,42 @@ test("automation status: every capability and platform reads on for a fresh work
     status.liveCount,
     Object.values(CAPABILITIES).reduce((n, def) => n + def.platforms.length, 0)
   );
+});
+
+test("an unreadable existing automation.yml fails closed for every capability; an absent one is all on", () => {
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-automation-readerr-"));
+  const env = {};
+  assert.equal(loadAutomation({ root: dir, env }).readError, null);
+  assert.equal(
+    mayRun({ capability: "mail_access", platform: "gmail", root: dir, env }).allowed,
+    true
+  );
+
+  mkdirSync(join(dir, "candidate"), { recursive: true });
+  writeFileSync(
+    join(dir, "candidate", "automation.yml"),
+    `version: 1
+capabilities_default: on
+capabilities:
+  mail_access:
+    enabled: false
+  note: "unterminated
+`
+  );
+  const loaded = loadAutomation({ root: dir, env });
+  assert.equal(loaded.valid, false);
+  assert.match(loaded.readError, /YAML parse error/);
+  for (const [capability, platform] of [
+    ["mail_access", "gmail"],
+    ["messaging", "linkedin"],
+    ["status_polling", "greenhouse"],
+  ]) {
+    const verdict = mayRun({ capability, platform, root: dir, env });
+    assert.equal(verdict.allowed, false, capability);
+    assert.match(verdict.reasons[0], /automation settings can't be read/);
+    assert.match(verdict.reasons[0], /careerrat automation status/);
+  }
+  const status = automationStatus({ root: dir, env });
+  assert.match(status.readError, /YAML parse error/);
+  assert.equal(status.liveCount, 0);
 });
