@@ -3697,3 +3697,34 @@ test("auto submit packet: an optional choice that does not persist is absent fro
   const packet = result.artifacts.find((artifact) => artifact.kind === "submission_packet");
   assert.deepEqual(packet.answers, [{ label: "First Name", value: "Sam" }]);
 });
+
+test("auto submit packet: a choice whose final state cannot be read keeps the chosen answer", async () => {
+  const form = () => ({
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: {
+      e1: { role: "textbox", name: "First Name", required: true },
+      e2: {
+        role: "combobox",
+        name: "Country",
+        required: false,
+        stateKnown: false,
+      },
+      e3: { role: "button", name: "Submit application", required: false },
+    },
+  });
+  const execute = makeDriver({
+    ops: packetOps({ form, after: SUBMIT_CONFIRMATION, onSelect: () => undefined }),
+    loadAnswerMapImpl: async () => new Map([["country", "Canada"]]),
+    ...fastWaits,
+  });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.state, "submitted");
+  const packet = result.artifacts.find((artifact) => artifact.kind === "submission_packet");
+  assert.deepEqual(packet.answers, [
+    { label: "First Name", value: "Sam" },
+    { label: "Country", value: "Canada" },
+  ]);
+});

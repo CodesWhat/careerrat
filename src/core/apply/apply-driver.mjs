@@ -764,9 +764,12 @@ async function fillStep({
       const finalField = finalFields.find(
         (field) => field.id === step.id && field.type === step.type && field.label === step.label
       );
-      const liveValue =
-        finalField?.stateKnown === true ? String(finalField.value || "").trim() : "";
-      answerValue = liveValue || selectedValue;
+      // A known final state is the truth, blank included. An unknown one (some
+      // drivers can't read radio groups back) keeps what was chosen.
+      answerValue =
+        finalField?.stateKnown === true
+          ? String(finalField.value || "").trim() || selectedValue
+          : selectedValue || String(step.value ?? "").trim();
     } else {
       answerValue = String(step.value ?? "").trim();
     }
