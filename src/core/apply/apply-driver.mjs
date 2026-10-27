@@ -551,6 +551,8 @@ function fieldOpFor(step, snapshot, ops) {
   return null;
 }
 
+const MAX_PACKET_ANSWER_CHARS = 20000;
+
 function filledChoiceMatches(step, field) {
   const actual = normalizeLabel(field?.value);
   const expected = normalizeLabel(step?.value);
@@ -621,7 +623,7 @@ async function fillStep({
 
   const unresolved = [];
   const selectedChoiceValues = new Map();
-  const filledAnswers = [];
+  const filledSteps = [];
   let filledCount = 0;
   for (const step of plan) {
     throwIfAborted(signal);
@@ -665,13 +667,7 @@ async function fillStep({
         selectedChoiceValues.set(step.id, selectedValue);
       }
       filledCount += 1;
-      const answerValue = selectedValue || String(step.value ?? "").trim();
-      if (answerValue && step.label) {
-        filledAnswers.push({
-          label: String(step.label).slice(0, 200),
-          value: answerValue.slice(0, 2000),
-        });
-      }
+      filledSteps.push({ step, selectedValue });
     } catch (error) {
       throwIfAborted(signal);
       unresolved.push({
@@ -759,6 +755,28 @@ async function fillStep({
         reason: "The selected value did not remain in the live form.",
       });
     }
+  }
+  const filledAnswers = [];
+  for (const { step, selectedValue } of filledSteps) {
+    if (!step.label || unresolved.some((item) => item.label === step.label)) continue;
+    let answerValue;
+    if (["select", "radio"].includes(step.type)) {
+      const finalField = finalFields.find(
+        (field) => field.id === step.id && field.type === step.type && field.label === step.label
+      );
+      const liveValue =
+        finalField?.stateKnown === true ? String(finalField.value || "").trim() : "";
+      answerValue = liveValue || selectedValue;
+    } else {
+      answerValue = String(step.value ?? "").trim();
+    }
+    if (!answerValue) continue;
+    const truncated = answerValue.length > MAX_PACKET_ANSWER_CHARS;
+    filledAnswers.push({
+      label: String(step.label).slice(0, 200),
+      value: answerValue.slice(0, MAX_PACKET_ANSWER_CHARS),
+      ...(truncated ? { truncated: true } : {}),
+    });
   }
   for (const field of finalFields) {
     if (!field.required || field.stateKnown !== true || String(field.value || "").trim()) continue;
@@ -1858,6 +1876,10 @@ export function createApplyDriver({
           saveScreenshotImpl,
           providerLabel,
           confirmation: postAdvanceConfirmation,
+          packet: {
+            answers: submittedAnswers.slice(0, 100),
+            attachments: submittedFiles.slice(0, 20),
+          },
           prepareOnly,
           signal,
         });

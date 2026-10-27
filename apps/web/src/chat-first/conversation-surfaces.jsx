@@ -383,6 +383,7 @@ function SubmissionPacket({ artifact }) {
                 <details className="chat-first-submission-packet__value">
                   <summary>{`${value.slice(0, PACKET_VALUE_PREVIEW).trimEnd()}…`}</summary>
                   <p>{value}</p>
+                  {row?.truncated ? <small>(shortened in this record)</small> : null}
                 </details>
               ) : (
                 <span>{value}</span>

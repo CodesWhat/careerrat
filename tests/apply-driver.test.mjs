@@ -3551,3 +3551,149 @@ test("auto submit: an abort between the hook and the click never clicks", async 
 
   assert.equal(clicks(log).length, 0);
 });
+
+// Phase-driven ops for packet tests: the form snapshot is built by `form()`
+// until the submit/next click lands, then `after` is returned.
+function packetOps({ form, after, onSelect }) {
+  let clicked = false;
+  return {
+    async openTab() {
+      return { pageId: "page-packet" };
+    },
+    async snapshot() {
+      return clicked ? after : form();
+    },
+    async fillField() {},
+    async selectOption(args) {
+      return onSelect?.(args);
+    },
+    async clickButton() {
+      clicked = true;
+    },
+    async screenshot() {
+      return { data: "", format: "png" };
+    },
+  };
+}
+
+test("auto submit packet: an answer over the cap is flagged truncated, a shorter one is whole", async () => {
+  const huge = "a".repeat(20_050);
+  const exact = "b".repeat(20_000);
+  const form = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: refsOf([
+      ["e1", "textbox", "Essay", false],
+      ["e2", "textbox", "Short essay", false],
+      ["e3", "button", "Submit application", false],
+    ]),
+  };
+  const execute = makeDriver({
+    ops: packetOps({ form: () => form, after: SUBMIT_CONFIRMATION }),
+    loadAnswerMapImpl: async () =>
+      new Map([
+        ["essay", huge],
+        ["short essay", exact],
+      ]),
+    ...fastWaits,
+  });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.state, "submitted");
+  const packet = result.artifacts.find((artifact) => artifact.kind === "submission_packet");
+  const essay = packet.answers.find((answer) => answer.label === "Essay");
+  const short = packet.answers.find((answer) => answer.label === "Short essay");
+  assert.equal(essay.value.length, 20_000);
+  assert.equal(essay.truncated, true);
+  assert.equal(short.value, exact);
+  assert.equal("truncated" in short, false);
+});
+
+test("auto submit packet: a Next click that lands on a confirmation page still carries the packet", async () => {
+  const pageOne = {
+    origin: WORKDAY_URL,
+    pageText: "Contact information",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true],
+      ["e2", "button", "Next", false],
+    ]),
+  };
+  const execute = makeDriver({
+    ops: packetOps({ form: () => pageOne, after: SUBMIT_CONFIRMATION }),
+    ...fastWaits,
+  });
+
+  const result = await execute({ ...AUTO_REQUEST, postingUrl: WORKDAY_URL });
+
+  assert.equal(result.state, "submitted");
+  assert.equal(result.verified, true);
+  const packet = result.artifacts.find((artifact) => artifact.kind === "submission_packet");
+  assert.ok(packet);
+  assert.deepEqual(packet.answers, [{ label: "First Name", value: "Sam" }]);
+});
+
+test("auto submit packet: an alias-matched select records the option actually selected", async () => {
+  let shown = "";
+  const form = () => ({
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: {
+      e1: {
+        role: "combobox",
+        name: "Country",
+        required: false,
+        stateKnown: true,
+        value: shown,
+      },
+      e2: { role: "button", name: "Submit application", required: false },
+    },
+  });
+  const execute = makeDriver({
+    ops: packetOps({
+      form,
+      after: SUBMIT_CONFIRMATION,
+      onSelect: () => {
+        shown = "United States of America";
+        return { selectedValue: "United States of America" };
+      },
+    }),
+    loadAnswerMapImpl: async () => new Map([["country", "USA"]]),
+    ...fastWaits,
+  });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.state, "submitted");
+  const packet = result.artifacts.find((artifact) => artifact.kind === "submission_packet");
+  assert.deepEqual(packet.answers, [{ label: "Country", value: "United States of America" }]);
+});
+
+test("auto submit packet: an optional choice that does not persist is absent from the packet", async () => {
+  const form = () => ({
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: {
+      e1: { role: "textbox", name: "First Name", required: true },
+      e2: {
+        role: "combobox",
+        name: "Country",
+        required: false,
+        stateKnown: true,
+        value: "",
+      },
+      e3: { role: "button", name: "Submit application", required: false },
+    },
+  });
+  const execute = makeDriver({
+    ops: packetOps({ form, after: SUBMIT_CONFIRMATION, onSelect: () => undefined }),
+    loadAnswerMapImpl: async () => new Map([["country", "Canada"]]),
+    ...fastWaits,
+  });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.equal(result.state, "submitted");
+  const packet = result.artifacts.find((artifact) => artifact.kind === "submission_packet");
+  assert.deepEqual(packet.answers, [{ label: "First Name", value: "Sam" }]);
+});

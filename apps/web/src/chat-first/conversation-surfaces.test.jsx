@@ -2429,6 +2429,20 @@ describe("submission packet in the thread", () => {
     expect(html).toContain(long);
   });
 
+  it("notes when a long answer was shortened in the record", () => {
+    const long = `${"word ".repeat(40)}end`;
+    const html = markup(
+      <MessageTranscript
+        messages={[packetMessage([{ label: "Why us", value: long, truncated: true }], [])]}
+      />
+    );
+    expect(html).toContain("(shortened in this record)");
+    const whole = markup(
+      <MessageTranscript messages={[packetMessage([{ label: "Why us", value: long }], [])]} />
+    );
+    expect(whole).not.toContain("shortened in this record");
+  });
+
   it("renders nothing for an empty packet", () => {
     const html = markup(<MessageTranscript messages={[packetMessage([], [])]} />);
     expect(html).not.toContain("What was sent");
