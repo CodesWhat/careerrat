@@ -19,7 +19,7 @@ confirmation. An older install that already has top-level `candidate/` and
 | `.careerrat/candidate/honesty.yml` | Hard boundaries: tools, credentials, education, claims, and exclusions. |
 | `.careerrat/candidate/form-defaults.yml` | Reusable application form answers. |
 | `.careerrat/candidate/modes.yml` | Optional mode switches. `usage_mode` controls discretionary compute/scope; `application_mode` controls pursuit posture after discovery. If absent, defaults are `standard` and `balanced`. |
-| `.careerrat/candidate/automation.yml` | Optional browser-automation switchboard. Stores per-capability/per-platform opt-ins and ToS consent, including `mail_access` for Gmail/Outlook and generic `webmail`. If absent, every authenticated capability is off. |
+| `.careerrat/candidate/automation.yml` | Optional browser-automation switchboard. Stores per-capability/per-platform opt-ins and ToS consent, including `mail_access` for Gmail/Outlook and generic `webmail`, plus the final `submit` mode (`auto` by default, or `manual`). Workspaces with a database keep these values in SQLite and ignore this file; set `submit` with `careerrat automation submit <auto\|manual> --write`. If absent, every authenticated capability is off. |
 | `.careerrat/candidate/writing-style.md` | Candidate writing voice profile. |
 | `.careerrat/candidate/learnings/` | Durable per-role-family lesson files (one file per role family). Appended by `interview-prep`, `track-outcomes`, and `reevaluate-strategy` after debriefs and strategy reviews; read by `tailor-application`, `evaluate-job`, and `search-jobs` to sharpen fit signals and artifact quality over time. |
 | `.careerrat/candidate/application-limits.yml` | Per-company application caps and cooldown periods. Checked as a step-zero gate by `apply-job` (blocks re-application within the cooldown window) and used as a deprioritization signal by `search-jobs`. |
@@ -80,8 +80,7 @@ These files are safe for CareerRat updates and public distribution.
 - Generated text must map back to user-layer evidence.
 - The system must not invent degrees, tools, employers, metrics, credentials, or
   authorization status.
-- Public default is manual confirmation before final submit.
-- Browser automation that submits applications must be opt-in.
+- Public default is `submit: auto`: CareerRat submits only when the application is complete and verified. `submit: manual` stops before final submit. Set it with `careerrat automation submit manual --write`; legacy YAML workspaces can also edit `automation.yml` directly.
 - Verification-code and inbox workflows must be explicit opt-in. Generic
   `webmail` supports one-code-message verification flows; Gmail/Outlook support
   that plus webmail ingest. All are separate from in-platform messaging.

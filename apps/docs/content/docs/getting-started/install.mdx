@@ -58,7 +58,7 @@ Evaluate reads the posting.
 
 Application questions stay with the exact job thread. CareerRat can fill reviewed
 fields and advance safe form steps, but CAPTCHA, sensitive attestations,
-uncertainty, and the final Submit control always stay with you. The signed Mac app
+and uncertainty stop it and hand the form to you. It presses Submit itself only when the application is complete and verified, unless you run `careerrat automation submit manual --write`. The signed Mac app
 checks for updates, downloads them in CareerRat, and waits for you to choose
 **Restart and install**.
 

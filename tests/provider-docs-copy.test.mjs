@@ -105,7 +105,7 @@ test("v0.16.6 docs describe candidate behavior without rewriting v0.16.5 history
       /(?:keeps?\s+AI\s+leads|AI\s+leads\s+(?:clearly )?(?:stay|remain))\s+(?:clearly )?unverified/i
     );
     assert.match(publicCopy, /Evaluate reads the posting|full\s+postings/i);
-    assert.match(publicCopy, /final Submit control always stay/i);
+    assert.match(publicCopy, /uncertainty (?:always )?stop it and hand the form to you/i);
     assert.match(publicCopy, /Restart and install/i);
     assert.match(publicCopy, /Scott's (?:disclosed )?referral/i);
     assert.match(publicCopy, /Install inside CareerRat/i);

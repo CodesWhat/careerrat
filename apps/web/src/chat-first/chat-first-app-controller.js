@@ -504,7 +504,11 @@ export function applicationPreparationPermission(automation) {
     capability?.enabled === true &&
     platforms.length > 0 &&
     platforms.every((platform) => platform?.allowed === true);
-  return { status: ready ? "ready" : "blocked", ready };
+  return {
+    status: ready ? "ready" : "blocked",
+    ready,
+    submitMode: value.submit === "manual" ? "manual" : "auto",
+  };
 }
 
 export async function enableApplicationPreparation({ api }) {

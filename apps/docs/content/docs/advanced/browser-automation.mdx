@@ -62,7 +62,7 @@ none of them run.
 |------------|-------|-------------|
 | `status_polling` | `sync-status` | Read application status from ATS dashboards |
 | `messaging` | `ingest-messages` | Read LinkedIn / Wellfound DMs |
-| `authenticated_apply_preparation` | `apply-job` | Prepare supported ATS forms, including LinkedIn Easy Apply, and stop before final submit |
+| `authenticated_apply_preparation` | `apply-job` | Prepare supported ATS forms, including LinkedIn Easy Apply, and follow the `submit` setting at final submit |
 | `profile_optimize` | `optimize-linkedin` | Read LinkedIn profile for analysis |
 | `profile_apply` | `optimize-linkedin` | Write approved edits back to the profile |
 | `mail_access` | `ingest-mail`, `apply-job` | Webmail verification codes + Gmail/Outlook ingest |
@@ -101,9 +101,11 @@ careerrat automation session extension --write            # set provider
   default. The local-only **Profile > Application defaults** editor can keep them
   blank or choose the form's decline option when available. Existing exact answers
   remain hidden and may be used only when the candidate explicitly saved them.
-- **Never submit an application.** CareerRat prepares the form and the candidate
-  presses the final submit control. Other outward-facing actions, such as sending
-  a message, require explicit confirmation.
+- **Submit only complete, verified applications.** With `submit: auto` (the
+  default) CareerRat presses the final submit control once, then waits for a
+  confirmation page. Run `careerrat automation submit manual --write` and it prepares
+  the form and you press submit. Other outward-facing actions, such as sending a message, require
+  explicit confirmation.
 - **Capture artifacts are scratch.** Screenshots go to `.careerrat/workspace/captures/`
   (gitignored), never the repo root.
 - **No credential storage.** The session browser holds your logins. CareerRat does
