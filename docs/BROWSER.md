@@ -39,7 +39,7 @@ persistent-profile variant of this model.)
 ### Layer 3 — Interactive, agent-driven automation (the "session browser")
 
 For anything the agent drives step-by-step, such as rendering a JS page to read it
-or filling an application up to the user-submit handoff. The agent **drives the live DOM**: it reads
+or filling an application through the final submit control. The agent **drives the live DOM**: it reads
 the page (snapshot / read DOM) **before each action**, never relies on hardcoded
 selectors, and stays confirm-first per the Public Default in `AGENTS.md`.
 
@@ -74,7 +74,7 @@ Capabilities the agent uses at this layer (each maps to whichever provider is ac
 | Read a JS-rendered / SPA JD body | 3 | evaluate `document.body.innerText` in the session browser (or the Lever JSON API, below) |
 | Bulk-scrape a board into the workspace | 2 | `npm run capture:search-sources` / `capture:board` |
 | Export a résumé / packet to PDF | 2 | `careerrat export` (bundled Playwright) |
-| Fill an application form up to submit | 3 | session browser, modal-first uploads, user-controlled submit |
+| Fill an application form through submit | 3 | session browser, modal-first uploads, final Submit per the `submit` setting |
 | Drive a portal that needs the user's login | 3 | automatically selected session browser, with a supervised handoff when no provider is ready |
 | Read one emailed verification code or opted-in webmail recruiting messages | 3 | session browser gated by `mail_access`; generic `webmail` for one-code reads, Gmail/Outlook for one-code reads and webmail ingest |
 
@@ -129,8 +129,8 @@ default. The local-only **Profile > Application defaults** editor can keep them
 blank or choose the form's decline option when available. Existing exact answers
 stay hidden and may be used only when explicitly saved; CareerRat never infers
 one. CareerRat halts on CAPTCHA or
-two-factor authentication. At the final Submit it follows `submit` in
-`automation.yml`. With `submit: auto` (the default) it presses Submit once, only
+two-factor authentication. At the final Submit it follows the workspace's
+`submit` setting (`careerrat automation status` shows it). With `submit: auto` (the default) it presses Submit once, only
 when every required field is answered, required uploads are attached, exactly one
 clearly labelled submit control exists, and the fit gate allows it, then waits for
 a confirmation page. Run `careerrat automation submit manual --write` and it stops for you to press Submit.

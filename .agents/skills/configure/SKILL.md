@@ -73,6 +73,7 @@ Run the CLI confirm-first. The default is a **dry run** — it shows the exact l
 | Enable a capability (globally or per-platform) | `careerrat automation enable <capability> [platform] --write` | write-and-report |
 | Disable a capability | `careerrat automation disable <capability> [platform] --write` | write-and-report |
 | Session browser provider | `careerrat automation session <extension\|playwright> --write` | write-and-report |
+| Final submit mode (auto presses Submit, manual stops for you) | `careerrat automation submit <auto\|manual> --write` | write-and-report |
 
 **Capabilities:** `status_polling`, `messaging`, `authenticated_apply_preparation`, `profile_optimize`, `profile_apply`, `mail_access`.
 
@@ -102,7 +103,7 @@ Do NOT hand-edit these files. Route the user to the skill that owns the write pa
 | Search sources / job boards | `setup-searches` skill |
 | Identity / contact info (`profile.yml` name/email/phone/location) | `ingest-profile` — re-run the identity step |
 | Writing style (`writing-style.md` and `workspace/writing-samples/`) | `ingest-profile` — re-run the writing samples step (STEP 14) |
-| Form defaults (`form-defaults.yml` applicant facts, `auto_submit`) | `ingest-profile` — re-run the form defaults step (STEP 11) |
+| Form defaults (`form-defaults.yml` applicant facts) | `ingest-profile`: re-run the form defaults step (STEP 11) |
 
 For `ingest-profile`-owned settings: tell the user which step to target. `ingest-profile` supports resuming from a specific step — it will not restart the whole interview.
 
