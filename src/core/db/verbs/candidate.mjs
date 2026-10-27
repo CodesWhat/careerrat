@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeAutomationConfig } from "../../automation/consent.mjs";
 import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
@@ -99,7 +100,7 @@ const CANDIDATE_ACTIVITY = {
   automation: {
     title: "Automation permissions updated",
     operation: "candidate:automation-update",
-    summary: "Saved consent settings for optional automation capabilities.",
+    summary: "Saved on/off switches for browser automation capabilities.",
   },
   "application-limits": {
     title: "Application limits updated",
@@ -795,7 +796,9 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
       const merged =
         name === "profile"
           ? normalizeCandidateProfile(deepMerge(current, normalizeCandidateProfilePatch(patch)))
-          : deepMerge(current, patch);
+          : name === "automation"
+            ? deepMerge(normalizeAutomationConfig(current), patch)
+            : deepMerge(current, patch);
       assertValid(name, merged);
       putSingleton(db, table, merged);
       return completeCandidateConfigWrite(

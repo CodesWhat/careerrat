@@ -2196,15 +2196,13 @@ function normalizeCalendarWrite(record) {
 }
 
 // providerStatus is the route-merged per-provider automation status map
-// ({ [providerKey]: { allowed, enabled, consent } }, from automationStatus()'s
-// calendar_sync platforms — see dashboard-route.mjs). allowed means the
-// switches (capability/platform/consent) are all on; enabled/consent on their
-// own with allowed false means partial setup; neither on means untouched.
+// ({ [providerKey]: { allowed, enabled } }, from automationStatus()'s
+// calendar_sync platforms: see dashboard-route.mjs). Capabilities are on by
+// default, so a missing entry reads On, an allowed provider reads Ready, and
+// only an explicit off reads Off.
 function calendarProviderStatusLabel(entry) {
-  if (!entry) return "Consent gated";
-  if (entry.allowed) return "Ready";
-  if (entry.enabled || entry.consent) return "Needs setup";
-  return "Off";
+  if (!entry) return "On";
+  return entry.allowed ? "Ready" : "Off";
 }
 
 function buildCalendarSync(trackerData, providerStatus) {

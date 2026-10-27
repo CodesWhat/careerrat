@@ -74,7 +74,7 @@ test("plugins list (text) includes the bundled example-echo plugin with its cons
     assert.equal(result.status, 0);
     assert.match(result.stdout, /example-echo/);
     assert.match(result.stdout, /capability: none/);
-    assert.match(result.stdout, /consent: allowed/);
+    assert.match(result.stdout, /status: allowed/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

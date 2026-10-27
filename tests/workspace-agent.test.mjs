@@ -30,7 +30,12 @@ import {
   workspaceThreadOpen,
   workspaceThreadRead,
 } from "../src/core/agent/workspace-thread.mjs";
-import { CAPABILITY_KEYS, mayRun } from "../src/core/automation/consent.mjs";
+import {
+  CAPABILITIES,
+  CAPABILITY_KEYS,
+  mayRun,
+  normalizeAutomationConfig,
+} from "../src/core/automation/consent.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import {
@@ -76,10 +81,35 @@ const cleanupRoots = [];
 let missionFixtureSequence = 0;
 let workspaceRequestSequence = 0;
 
+// Capabilities are on by default. The permission-prompt tests here (72b-2 owns
+// reworking them) need the prompt path to fire, so this fixture starts every
+// capability and platform explicitly off. Tests that grant one then work as before.
+const ALL_OFF_CAPABILITIES = Object.fromEntries(
+  Object.entries(CAPABILITIES).map(([cap, def]) => [
+    cap,
+    {
+      enabled: false,
+      platforms: Object.fromEntries(def.platforms.map((platform) => [platform, false])),
+    },
+  ])
+);
+// What the stored automation doc reads as right after the fixture patch, for the
+// "nothing was granted" assertions that used to compare against {}.
+const ALL_OFF_AUTOMATION = normalizeAutomationConfig({
+  capabilities_default: "on",
+  capabilities: ALL_OFF_CAPABILITIES,
+});
+
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-"));
   cleanupRoots.push(repoRoot);
   openDb({ repoRoot, env: {} });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: { capabilities: structuredClone(ALL_OFF_CAPABILITIES) },
+  });
   return repoRoot;
 }
 
@@ -2689,7 +2719,7 @@ test("Yes enables the resolved login source and opens its exact saved URL withou
   assert.equal(opened[0].platform, "linkedin");
   assert.equal(opened[0].url, sourceUrl);
   assert.equal(opened[0].source.label, "LinkedIn search");
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
   assert.equal(result.messages.at(-1).text, "LinkedIn is open for sign-in.");
   assert.equal(result.messages.at(-1).metadata.state, "needs-user");
 });
@@ -2730,7 +2760,7 @@ test("Yes opens any configured login source without a hardcoded job-site allowli
   assert.equal(opened.length, 1);
   assert.equal(opened[0].platform, "jobs.example.com");
   assert.equal(opened[0].url, sourceUrl);
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
   assert.equal(
     result.messages.at(-1).text,
     "Example Jobs is open and ready. I’m continuing the search now."
@@ -2901,7 +2931,7 @@ test("Yes fails closed when the browser-session handoff is unavailable", async (
   );
 
   assert.deepEqual(enabled, [true, false]);
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
 test("No keeps the authenticated source disabled and continues the rest of the search", async () => {
@@ -2963,7 +2993,7 @@ test("No keeps the authenticated source disabled and continues the rest of the s
     "Skipped Indeed. I’m continuing with your other sources."
   );
   assert.equal(result.messages.at(-1).metadata.state, "running");
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
 test("No settles honestly when the login source was the only source available", async () => {
@@ -9713,7 +9743,7 @@ test("settings.apply cannot grant a source login as a global automation capabili
       return true;
     }
   );
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
 test("settings.apply automation: capability disable is allowed even for a high-tier capability", async () => {
@@ -9805,19 +9835,8 @@ test("settings.apply automation: contextual application permission writes the re
 });
 
 test("a narrow contextual calendar grant cannot activate a dormant relationship capability", async () => {
+  // tempRepo() already leaves relationship_sourcing explicitly off.
   const repoRoot = tempRepo();
-  candidateConfigPatch({
-    repoRoot,
-    env: {},
-    name: "automation",
-    patch: {
-      setup_mode: "basic",
-      consent: { linkedin: true },
-      capabilities: {
-        relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
-      },
-    },
-  });
 
   await executeWorkspaceIntent({
     repoRoot,
@@ -9836,9 +9855,8 @@ test("a narrow contextual calendar grant cannot activate a dormant relationship 
   });
 
   const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
-  assert.equal(automation.setup_mode, "basic");
-  assert.equal(automation.capabilities.relationship_sourcing.enabled, true);
-  assert.equal(automation.capabilities.relationship_sourcing.platforms.linkedin, true);
+  assert.equal(automation.capabilities.relationship_sourcing.enabled, false);
+  assert.equal(automation.capabilities.relationship_sourcing.platforms.linkedin, false);
   assert.equal(
     mayRun({
       capability: "relationship_sourcing",

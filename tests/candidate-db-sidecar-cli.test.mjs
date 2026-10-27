@@ -149,16 +149,7 @@ test("careerrat automation writes DB candidate automation in DB mode and does no
     "--root",
     repoRoot,
     "--json",
-    "enable",
-    "mail_access",
-    "--write",
-  ]);
-  jsonCli([
-    "src/cli/automation.mjs",
-    "--root",
-    repoRoot,
-    "--json",
-    "enable",
+    "disable",
     "mail_access",
     "gmail",
     "--write",
@@ -166,9 +157,11 @@ test("careerrat automation writes DB candidate automation in DB mode and does no
   jsonCli(["src/cli/automation.mjs", "--root", repoRoot, "--json", "consent", "gmail", "--write"]);
 
   const config = candidateConfigGet({ repoRoot });
+  assert.equal(config.automation.capabilities_default, "on");
   assert.equal(config.automation.capabilities.mail_access.enabled, true);
-  assert.equal(config.automation.capabilities.mail_access.platforms.gmail, true);
-  assert.equal(config.automation.consent.gmail, true);
+  assert.equal(config.automation.capabilities.mail_access.platforms.gmail, false);
+  assert.equal(config.automation.capabilities.mail_access.platforms.outlook, true);
+  assert.equal(Object.hasOwn(config.automation, "consent"), false);
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/automation.yml")), false);
 });
 
