@@ -1,6 +1,6 @@
 ---
 name: apply-job
-description: End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including supervised LinkedIn Easy Apply preparation), hands final submission to the user, verifies the result, and updates the tracker.
+description: End-to-end job application workflow. Gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including supervised LinkedIn Easy Apply preparation), submits when the application is complete and verified (or stops for the user in manual mode), verifies the result, and updates the tracker.
 ---
 
 # apply-job
@@ -147,13 +147,29 @@ After building, eyeball the output: page count reasonable, fonts render, no non-
 
 ---
 
-## STEP 6 — Manual submission gate
+## STEP 6: Submission
 
-Fill the form completely, then stop at the final submit control. Show a summary of
-what will be submitted and return or focus the retained supervised browser page.
-The user must click the final Submit control themselves. The agent never clicks it,
-even after an explicit confirmation in chat, and never treats an executor's claim
-of submission as permission to mark the application Applied.
+Fill the form completely. What happens next depends on the submit mode (`auto` or
+`manual`; absent means `auto`). `careerrat automation status` shows it.
+
+- **`submit: auto` (default).** CareerRat presses the final Submit control itself,
+  once, only when every required field is answered, every required upload is
+  attached, exactly one positively labelled submit control exists, and the
+  evaluate gate is KEEP or a user-approved REVIEW. It then waits for a
+  confirmation page. If the page is seen, record Applied. If not, the outcome is
+  `submitted-unverified`. That is recorded on the operation result, not as an
+  application status: keep the application's current status, set `statusNote` (that
+  it was submitted automatically with no confirmation page seen) and `nextAction`
+  (check the site, then record it as Applied if it went through), never retry the
+  click, and never pass `submitted-unverified` to `app set-status`. When auto
+  declines to click, say why and hand the form over.
+- **`submit: manual`** (set with `careerrat automation submit manual --write`). Stop
+  at the final submit control. Show a summary of what will be submitted and return or
+  focus the retained supervised browser page. The user presses Submit themselves,
+  then reports back.
+
+Either way, never treat an executor's claim of submission as permission to mark
+the application Applied. Only a seen confirmation page or the user's report does that.
 
 **Immediately halt** if the page shows a captcha or Cloudflare human-check, an
 application-limit blocker, a required manual exercise (assessment, coding exercise,
@@ -288,11 +304,12 @@ If you encounter a login wall, captcha, platform 2FA / two-step-verification pro
 
 3. **Submit-safety gate — honor STEP 6 exactly.**
 
-   After filling the entire modal through the Review page, stop at the final
-   submit button (visible text like "Submit application" or "Submit"). Show a
-   summary, return focus to the retained page, and leave the click to the user.
-   Never click the final control from the skill, browser executor, or a later
-   agent turn.
+   After filling the entire modal through the Review page, follow STEP 6. In
+   `submit: auto`, CareerRat presses the final submit button (visible text like
+   "Submit application" or "Submit") once, only when STEP 6's conditions hold. In
+   `submit: manual`, stop at it, show a summary, return focus to the retained page,
+   and leave the click to the user. Never click it from a later agent turn or retry
+   it.
 
    **Immediately halt** on captcha, platform 2FA / two-step-verification prompt,
    an application-limit blocker, or a required exercise that cannot be completed
@@ -312,7 +329,7 @@ If you encounter a login wall, captcha, platform 2FA / two-step-verification pro
 
 ### Verify
 
-After the user clicks Submit, continue into **STEP 8**. The LinkedIn Easy Apply
+After Submit (CareerRat's click in auto mode, the user's in manual mode), continue into **STEP 8**. The LinkedIn Easy Apply
 success signal is the "Your application was sent" / "Application sent"
 confirmation modal. Screenshot it. Never trust its absence. If the confirmation
 modal does not appear, do not mark the application as submitted. Report what the
@@ -326,7 +343,7 @@ After STEP 8 confirms submission, continue into **STEP 9** with `channel: "Linke
 
 ## STEP 8 — Verify
 
-After the user reports clicking Submit, read the retained supervised browser page
+After Submit (CareerRat's click in auto mode, or the user's report in manual mode), read the retained supervised browser page
 and confirm the application advanced past the submit step. Never open the posting
 in a new profile for this verification, and never click Submit as part of checking:
 
@@ -347,7 +364,7 @@ in a new profile for this verification, and never click Submit as part of checki
    (gitignored scratch) — never the repo root or `workspace/` root — and don't commit
    it. See the **Browser Automation Contract** (Local-only + safety) in AGENTS.md.
 4. Never trust HTTP 200 alone — read the page content.
-5. If no confirmation is found: do not mark as submitted. Report what the page shows and ask the user.
+5. If no confirmation is found: do not mark as Applied and never retry the submit. In auto mode record `submitted-unverified`. Report what the page shows and ask the user to check the site.
 
 ---
 

@@ -308,7 +308,7 @@ Combine `GATE` + `COMP` + `FIT` + app-limits + company-history result into a sin
 | --- | --- |
 | fit score below `targeting.fit_bands.fit_floor` | `cut` — auto-drop; no manual triage (config-driven; absent = no auto-drop) |
 | GATE=KEEP, COMP=clear, FIT=high or med | `apply-now` |
-| GATE=KEEP or REVIEW, COMP=review or unlisted | `manual` (verify comp before submitting) |
+| GATE=KEEP or REVIEW, COMP=review or unlisted | `manual` (verify comp before applying) |
 | COMP=below-floor on a **relocation** floor (`comp.relo`) | `cut` — hard gate; relocating for under-floor comp is a no-go (do not promote to apply-now) |
 | COMP=estimated-below-floor (no posted band, estimate under floor) | `hold` — advisory only; confirm real band before deciding |
 | GATE=KEEP, COMP=below-floor (remote/home metro, not relo) | `hold` (negotiable; unless user overrides) |

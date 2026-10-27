@@ -868,6 +868,13 @@ describe("chat-first app controller", () => {
     expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-current-prepare");
   });
 
+  it("reports the submit mode alongside form preparation, defaulting to auto", () => {
+    expect(applicationPreparationPermission({ capabilities: [] }).submitMode).toBe("auto");
+    expect(
+      applicationPreparationPermission({ capabilities: [], submit: "manual" }).submitMode
+    ).toBe("manual");
+  });
+
   it("treats form preparation as ready only when its supported application sites are allowed", () => {
     expect(applicationPreparationPermission({ capabilities: [] })).toMatchObject({
       status: "blocked",

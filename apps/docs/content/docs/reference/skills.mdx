@@ -18,7 +18,7 @@ private config, not hardcoded preferences.
 | `evaluate-job` | Body-read gate for a single job posting — fetch, save, check limits/comp/fit, emit GATE/FIT/COMP/ACTION, and write calibrated fit back to the tracker. Run before any tailoring or submission. |
 | `answer-question` | Draft evidence-grounded answers to one-off application or screening questions, reuse saved disclosure answers, and return `NEEDS YOU` instead of guessing when the evidence is insufficient. |
 | `tailor-application` | Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. |
-| `apply-job` | End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, prepares supported ATS forms (including LinkedIn Easy Apply), stops for user submission, verifies the reported outcome, and updates the tracker. |
+| `apply-job` | End-to-end job application workflow: gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, prepares supported ATS forms (including LinkedIn Easy Apply), submits when complete and verified (or stops for you after `careerrat automation submit manual --write`), verifies the outcome, and updates the tracker. |
 | `coach-gaps` | Turn each named REVIEW fit gap into an evidence-grounded claim draft or an explicit no-close path, then offer re-evaluation only after the evidence firewall confirms the change. |
 
 ## Intake extraction

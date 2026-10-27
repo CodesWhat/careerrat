@@ -42,21 +42,23 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of October 26, 2026:** v0.20.0 is the latest release. CareerRat installs
+**As of October 27, 2026:** v0.21.0 is the latest release. CareerRat installs
 from npm and runs in your browser, on your machine, with the AI CLI you already
 use. Terminal sessions stay optional. v0.19.2 was the last release with a Mac
 app.
 
-New in v0.20.0:
+New in v0.21.0:
 
-- `careerrat start` opens the browser workspace without starting a terminal
-  agent. Explicit Claude Code and Codex sessions still work.
-- PDF export works from an npm install.
-- Saved exports use `Documents/careerrat`, with a folder per job. Closed jobs
-  move to an archive and come back when reopened. Earlier versions are kept,
-  and existing Downloads files aren't moved.
-- Today's conversation points at your next application and asks for outcomes
-  like rejections and interview invites.
+- CareerRat submits an application itself once it's complete and checked: every
+  required field answered, required uploads attached, one clear submit button,
+  and a fit gate of KEEP or a REVIEW you approved. It presses Submit once and
+  looks for a confirmation page.
+- `careerrat automation submit manual --write` turns that off, so CareerRat
+  fills the form and you press Submit.
+- If no confirmation page shows up, the application isn't marked Applied and
+  CareerRat never clicks again. Today asks you to check the site.
+- When CareerRat stops before Submit, it says why. The job thread shows what
+  was sent.
 
 If you use the Mac app, it keeps working at v0.19.2. There won't be a later Mac
 build; switch with `npm install -g careerrat`.
@@ -193,7 +195,9 @@ Full history in [CHANGELOG.md](CHANGELOG.md).
 CareerRat reads the full job posting against your location and compensation floor,
 fit, and dealbreakers before it recommends anything. It builds resumes, cover
 letters, and screening answers from your real experience, then fills supported
-application forms for your review. It never presses the final Submit button.
+application forms. When the application is complete and verified, CareerRat
+submits it. Run `careerrat automation submit manual --write` (or ask the agent to)
+and it stops for you to press Submit instead.
 
 Pay rules work for salaried, hourly, tipped, and commissioned jobs. You can set a
 guaranteed base floor, a minimum for annual cash earnings that includes wages,
@@ -238,7 +242,7 @@ the full posting through the public or supervised browser path, and applies your
 real location, compensation, eligibility, and fit rules before any tailoring or
 application work begins.
 
-### It never submits without you
+### It only submits when the application is complete
 
 - Every job is read in full before tailoring or application work begins.
 - Generated claims must trace back to your own evidence. Missing facts are asked
@@ -251,9 +255,15 @@ application work begins.
   **Profile > Application defaults**, you can leave them blank or choose the
   form's decline option when one is available. CareerRat never infers an answer.
 - Application questions stay with the exact job thread. CareerRat can prepare a
-  reviewed form through the final safe step, but CAPTCHA, sensitive attestations,
-  uncertainty, and the final Submit control always stay with the candidate. The
-  Mac app checks for signed updates, downloads them in place, and waits for an
+  form through the final safe step. CAPTCHA, sensitive attestations, and
+  uncertainty always stop it and hand the form to you. By default (`submit: auto`
+  in `automation.yml`) CareerRat presses Submit itself, once, only when every
+  required field is answered, required uploads are attached, exactly one clearly
+  labelled submit control exists, and the fit gate is KEEP or a REVIEW you
+  approved. It then waits for a confirmation page. If it doesn't see one, the
+  application is marked submitted-unverified, never retried, and you're asked to
+  check the site. Run `careerrat automation submit manual --write` and CareerRat
+  fills the form and stops for you to press Submit. The Mac app checks for signed updates, downloads them in place, and waits for an
   explicit **Restart and install**.
 
 ### One workspace for the whole search

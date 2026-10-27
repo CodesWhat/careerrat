@@ -4,6 +4,31 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-10-27
+
+### Added
+
+- CareerRat now submits an application itself when it's complete and verified.
+  Every required field has an answer, required uploads are attached, exactly one
+  clearly labelled submit control is on the page, and the fit gate is KEEP or a
+  REVIEW you approved. It presses Submit once, then looks for a confirmation
+  page. This is the default.
+- `careerrat automation submit manual --write` turns that off. CareerRat fills
+  the form and stops for you to press Submit. `careerrat automation status` shows
+  the current setting.
+- When CareerRat doesn't press Submit, it says why and hands you the form.
+- The job thread shows "What was sent" after an automatic submit.
+
+### Changed
+
+- If no confirmation page shows up after Submit, the application is marked
+  submitted-unverified. CareerRat never retries the click and asks you to check
+  the site.
+- The README, agent instructions, skills, docs and disclaimer now describe
+  automatic submit and the manual setting instead of saying you always press
+  Submit. The permission prompt for form preparation says the same. The honesty
+  and evidence rules are unchanged.
+
 ## [0.20.0] - 2026-10-26
 
 ### Added

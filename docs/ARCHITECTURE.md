@@ -42,7 +42,7 @@ Routes are grouped below by cluster.
 - "Apply", "submit", or a JD URL with apply intent → `apply-job`
   (`apply-job` must run or verify `evaluate-job` as step zero; LinkedIn Easy Apply
   postings can use opt-in authenticated form preparation gated by the
-  `authenticated_apply_preparation` capability; final submission stays manual)
+  `authenticated_apply_preparation` capability; final submission follows `submit` in `automation.yml`: auto by default, manual to stop for the user)
 - "Gate", "should I apply", or a JD URL without apply intent → `evaluate-job`
 - "Find jobs", "source", "search", "refresh queue" → `search-jobs`
 - "Set up searches", "build search config" → `setup-searches`

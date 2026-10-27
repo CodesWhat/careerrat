@@ -92,10 +92,11 @@ The `apply-job` skill:
    **Profile > Application defaults** editor has two policy choices: leave them blank, or choose
    the form's decline option when available. Existing exact answers stay hidden and local.
    The policy never goes through Paul, and CareerRat never infers an answer.
-8. **Halts before final submission** so you can review the form and press submit.
+8. **Submits when the application is complete and verified.** It presses submit once and waits for a confirmation page. After `careerrat automation submit manual --write` (or asking the agent to), it halts so you can review the form and press submit yourself.
 9. Halts on CAPTCHAs, two-factor authentication, and unsupported auth prompts.
 10. Records the application through the canonical data layer only after submission is
-   verified or you explicitly report that you applied. The app and Activity Pulse update
+   verified or you explicitly report that you applied. If no confirmation page shows up, the
+   application is marked submitted-unverified, never retried, and you're asked to check the site. The app and Activity Pulse update
    in the same transaction.
 
 ### LinkedIn Easy Apply
@@ -104,8 +105,8 @@ For LinkedIn postings, `apply-job` supports opt-in supervised form preparation v
 the session browser. In the desktop app, the job's application review offers
 **Allow form preparation** when the permission is off. Terminal users can inspect
 the same `authenticated_apply_preparation` capability with `careerrat automation
-status`. CareerRat fills and advances the modal but never presses the final submit
-control.
+status`. CareerRat fills and advances the modal and follows the `submit` setting at the
+final submit control.
 
 ## Application limits
 
