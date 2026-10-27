@@ -1118,6 +1118,19 @@ describe("chat-first app controller", () => {
     ).toEqual({ kind: "open-gate", gateId: "mission-a:gate" });
   });
 
+  it("routes an unverified submit to Applied or the application, never to the submit gate", () => {
+    const need = { kind: "submit-unverified", id: "mission:prepare", applicationId: "app-9" };
+    expect(resolveNeedDecision(need, "primary")).toEqual({
+      kind: "record-external",
+      applicationId: "app-9",
+    });
+    expect(resolveNeedDecision(need, "secondary")).toEqual({
+      kind: "open-application",
+      applicationId: "app-9",
+    });
+    expect(resolveNeedDecision({ ...need, applicationId: null }, "primary")).toBeNull();
+  });
+
   it("maps durable search-run snapshots without claiming a running sweep completed", () => {
     expect(
       sourceSweepPresentation({

@@ -1095,7 +1095,7 @@ export function createPlaywrightOps({
                 timeout: SELECT_OPTION_TIMEOUT_MS,
               })
             );
-            if (selected.length > 0) return;
+            if (selected.length > 0) return { selectedValue: candidateValue };
           } catch {
             throwIfAborted(signal);
             // Not a native <select> (or this particular match form didn't
@@ -1132,7 +1132,7 @@ export function createPlaywrightOps({
             settleDelayMs: 0,
             signal,
           });
-          if (confirmed) return;
+          if (confirmed) return { selectedValue: candidateValue };
         }
       } catch {
         throwIfAborted(signal);
@@ -1197,7 +1197,7 @@ export function createPlaywrightOps({
               requireDisplayChange: true,
               signal,
             });
-            if (confirmed) return;
+            if (confirmed) return { selectedValue: candidateValue };
           }
         }
       } catch {

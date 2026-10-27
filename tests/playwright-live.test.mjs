@@ -232,6 +232,90 @@ test("real Chromium prepare-only driver advances structured steps and never clic
   }
 });
 
+test("real Chromium auto-submit driver finishes the 3-step fixture verified with one submit click", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
+}, async () => {
+  const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-auto-profile-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-live-auto-root-"));
+  const resumePath = join(repoRoot, "workspace", "tailored", "resume.pdf");
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(resumePath, "%PDF-1.4\nfake resume content for the live auto-submit test\n%%EOF\n");
+  const { url: baseUrl, close: closeServer } = await startFixtureServer(FIXTURE_DIR);
+  const ops = createPlaywrightOps({
+    profileDir,
+    headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
+  });
+  const clicked = [];
+  const driverOps = {
+    ...ops,
+    async clickButton(args) {
+      const before = await ops.snapshot({ pageId: args.pageId });
+      clicked.push(before.refs[args.ref]?.name || args.ref);
+      return ops.clickButton(args);
+    },
+  };
+  const execute = createApplyDriver({
+    ops: driverOps,
+    providerLabel: "playwright",
+    repoRoot,
+    candidateConfigGetImpl: () => ({
+      profile: {
+        candidate: {
+          full_name: "Jordan Rivera",
+          email: "jordan.rivera@example.test",
+          phone: "555-0100",
+        },
+      },
+      honesty: {},
+      "form-defaults": { work_authorization: "Yes, authorized to work" },
+    }),
+    mayRunImpl: () => ({ allowed: true }),
+    loadAnswerMapImpl: async () => new Map([["i agree to the terms", "Yes"]]),
+    confirmationTimeoutMs: 5_000,
+    confirmationPollMs: 100,
+  });
+
+  try {
+    const result = await execute({
+      applicationId: "live-auto-wizard",
+      application: {
+        id: "live-auto-wizard",
+        link: `${baseUrl}/step1.html`,
+        artifacts: { resumePdf: "workspace/tailored/resume.pdf" },
+      },
+      postingUrl: `${baseUrl}/step1.html`,
+      questionCapture: { state: "captured" },
+      submitMode: "auto",
+      prepareOnly: false,
+    });
+    assert.equal(result.state, "submitted");
+    assert.equal(result.verified, true);
+    assert.match(result.currentUrl, /confirmation\.html/);
+    assert.equal(
+      result.artifacts.some((artifact) => artifact.kind === "submission_confirmation"),
+      true
+    );
+    const packet = result.artifacts.find((artifact) => artifact.kind === "submission_packet");
+    assert.ok(packet, "the verified result carries what was sent");
+    assert.equal(
+      packet.answers.some((row) => row.label === "Full name" && row.value === "Jordan Rivera"),
+      true
+    );
+    assert.equal(
+      packet.attachments.some((file) => file.name === "resume.pdf"),
+      true
+    );
+    assert.deepEqual(clicked, ["Next", "Next", "Submit application"]);
+    assert.equal(clicked.filter((name) => name === "Submit application").length, 1);
+  } finally {
+    await ops.close();
+    await closeServer();
+    rmSync(profileDir, { recursive: true, force: true });
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("real Chromium snapshots and selects a native required radio fieldset without touching Submit", {
   skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
 }, async () => {

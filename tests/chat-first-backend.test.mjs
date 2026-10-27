@@ -3266,6 +3266,42 @@ test("auto submit mission: submitted-unverified blocks the step with its reason 
   assert.equal(run.mission.steps.find((step) => step.action === "submit-gate").status, "pending");
 });
 
+test("auto submit mission: an auto-declined awaiting-submit carries the reason onto the submit-gate", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-auto-stopped", "mission-auto-stopped");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-auto-stopped",
+    executeIntent: prepareSubmitState("awaiting-submit", {
+      autoSubmitStopped: { reason: "A required upload isn't attached" },
+    }),
+  });
+
+  const gate = run.mission.steps.find((step) => step.action === "submit-gate");
+  assert.equal(gate.status, "blocked");
+  assert.equal(gate.result.requiresUserSubmit, true);
+  assert.deepEqual(gate.result.autoSubmitStopped, { reason: "A required upload isn't attached" });
+});
+
+test("manual submit mission: an awaiting-submit gate carries no auto-stop reason", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedPrepareSubmitMission(api, repoRoot, "app-manual-gate", "mission-manual-gate");
+
+  const run = await api.missionRun({
+    repoRoot,
+    id: "mission-manual-gate",
+    executeIntent: prepareSubmitState("awaiting-submit"),
+  });
+
+  const gate = run.mission.steps.find((step) => step.action === "submit-gate");
+  assert.equal(gate.status, "blocked");
+  assert.equal(gate.result.requiresUserSubmit, true);
+  assert.equal(gate.result.autoSubmitStopped, undefined);
+});
+
 test("auto submit mission: any other unexpected prepare-submit state still fails the step", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();

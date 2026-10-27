@@ -639,6 +639,13 @@ export function resolveNeedDecision(item, decision = "primary") {
   if (kind === "submit" || kind === "submit-gate") {
     return decision === "primary" ? { kind: "open-gate", gateId: item?.id || null } : null;
   }
+  if (kind === "submit-unverified") {
+    const applicationId = item?.applicationId || null;
+    if (!applicationId) return null;
+    return decision === "primary"
+      ? { kind: "record-external", applicationId }
+      : { kind: "open-application", applicationId };
+  }
   if (kind === "submit-gate-group") {
     const gateId = list(item?.gateIds).find(Boolean) || null;
     return decision === "primary" && gateId ? { kind: "open-gate", gateId } : null;

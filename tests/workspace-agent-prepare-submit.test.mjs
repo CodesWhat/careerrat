@@ -935,6 +935,102 @@ test("submit auto: submitted-unverified leaves the status alone and records a no
   );
 });
 
+test("submit auto: a declined click puts Paul's reason in the thread text and metadata", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "awaiting-submit",
+      reason: "Review the live form and submit it in the supervised browser.",
+      session: {
+        provider: "test",
+        submitMode: "auto",
+        autoSubmitStopped: { reason: "1 required field still needs an answer" },
+      },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "awaiting-submit");
+  assert.deepEqual(last.metadata.autoSubmitStopped, {
+    reason: "1 required field still needs an answer",
+  });
+  assert.match(
+    last.text,
+    /^CareerRat filled the form but stopped before submitting: 1 required field still needs an answer\./
+  );
+  assert.match(last.text, /not marked Applied/i);
+});
+
+test("submit manual: an awaiting-submit thread message keeps the original press-submit copy", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "manual");
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "awaiting-submit",
+      reason: "Review the live form and submit it in the supervised browser.",
+      session: { provider: "test", submitMode: "manual", filledCount: 2 },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.autoSubmitStopped, undefined);
+  assert.equal(
+    last.text,
+    'CareerRat filled 2 fields. Review the live form and submit it in the supervised browser. Open the application, check the answers and attachments, finish any remaining fields, and press submit when everything looks right. Then return here and choose "I applied". This application was not marked Applied.'
+  );
+});
+
+test("submit auto: a verified thread message keeps the submission packet next to the receipt", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: true,
+      state: "submitted",
+      confirmation: "thank you for applying",
+      artifacts: [
+        { kind: "submission_confirmation", title: "Verified", path: "workspace/captures/x.png" },
+        {
+          kind: "submission_packet",
+          title: "What was sent",
+          answers: [{ label: "Full name", value: "Jordan Rivera" }],
+          attachments: [{ label: "Resume/CV", name: "resume.pdf" }],
+        },
+      ],
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  const kinds = last.artifacts.map((artifact) => artifact.kind);
+  assert.deepEqual(kinds, [
+    "submission_confirmation",
+    "submission_packet",
+    "application_status_receipt",
+  ]);
+  assert.deepEqual(last.artifacts[1].answers, [{ label: "Full name", value: "Jordan Rivera" }]);
+});
+
 test("submit manual: an explicit manual setting keeps the executor in prepare-only mode", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);

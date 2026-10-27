@@ -2392,6 +2392,63 @@ describe("ConversationPanel", () => {
   });
 });
 
+describe("submission packet in the thread", () => {
+  const packetMessage = (answers, attachments) => ({
+    id: "applied",
+    role: "assistant",
+    kind: "action_result",
+    text: "Verified the submission confirmation and recorded it as Applied.",
+    artifacts: [{ kind: "submission_packet", title: "What was sent", answers, attachments }],
+  });
+
+  it("lists the answered fields and attached file names", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          packetMessage(
+            [{ label: "Full name", value: "Jordan Rivera" }],
+            [{ label: "Resume/CV", name: "resume.pdf" }]
+          ),
+        ]}
+      />
+    );
+    expect(html).toContain("What was sent (1 answer, 1 file)");
+    expect(html).toContain("Full name");
+    expect(html).toContain("Jordan Rivera");
+    expect(html).toContain("Resume/CV");
+    expect(html).toContain("resume.pdf");
+  });
+
+  it("truncates a long value behind an expander that holds the full text", () => {
+    const long = `${"word ".repeat(40)}end`;
+    const html = markup(
+      <MessageTranscript messages={[packetMessage([{ label: "Why us", value: long }], [])]} />
+    );
+    expect(html).toContain("chat-first-submission-packet__value");
+    expect(html).toContain(`${long.slice(0, 80).trimEnd()}…`);
+    expect(html).toContain(long);
+  });
+
+  it("notes when a long answer was shortened in the record", () => {
+    const long = `${"word ".repeat(40)}end`;
+    const html = markup(
+      <MessageTranscript
+        messages={[packetMessage([{ label: "Why us", value: long, truncated: true }], [])]}
+      />
+    );
+    expect(html).toContain("(shortened in this record)");
+    const whole = markup(
+      <MessageTranscript messages={[packetMessage([{ label: "Why us", value: long }], [])]} />
+    );
+    expect(whole).not.toContain("shortened in this record");
+  });
+
+  it("renders nothing for an empty packet", () => {
+    const html = markup(<MessageTranscript messages={[packetMessage([], [])]} />);
+    expect(html).not.toContain("What was sent");
+  });
+});
+
 describe("SubmitGateModal", () => {
   it("makes final submit explicit and describes the local voluntary-question boundary", () => {
     const html = markup(

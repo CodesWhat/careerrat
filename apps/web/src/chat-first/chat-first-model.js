@@ -588,7 +588,7 @@ export function filterPipelineJobs(jobs, stageId) {
   });
 }
 
-function submitGates(missions) {
+function submitGates(missions, agentName) {
   const gates = [];
   const seenApplications = new Set();
   for (const mission of list(missions)) {
@@ -616,7 +616,11 @@ function submitGates(missions) {
         company: step?.jobRef?.company || "Application",
         role: step?.jobRef?.role || "Role",
         title: `${step?.jobRef?.company || "Application"} application ready`,
-        detail: "The form is filled. You press submit.",
+        detail: step?.result?.autoSubmitStopped?.reason
+          ? `${agentName} filled the form but stopped before submitting: ${String(
+              step.result.autoSubmitStopped.reason
+            ).replace(/[.\s]+$/, "")}.`
+          : "The form is filled. You press submit.",
         tone: step?.result?.expiryLabel || step?.result?.deadline ? "attention" : "plain",
         primaryLabel: "Review & submit",
         expiryLabel: step?.result?.expiryLabel || null,
@@ -628,6 +632,46 @@ function submitGates(missions) {
     }
   }
   return gates;
+}
+
+// submit: auto pressed Submit once and saw no confirmation. Not a submit gate:
+// the person checks the site, then records Applied. Never offers to submit again.
+function unverifiedSubmits(missions) {
+  const needs = [];
+  const seenApplications = new Set();
+  for (const mission of list(missions)) {
+    for (const step of list(mission?.steps)) {
+      if (
+        step?.action !== "prepare-submit" ||
+        step?.status !== "blocked" ||
+        step?.result?.state !== "submitted-unverified"
+      ) {
+        continue;
+      }
+      const applicationId = step?.result?.applicationId || step?.jobRef?.id || null;
+      const identity = applicationId
+        ? `application:${applicationId}`
+        : `unverified:${mission.id}:${step.id}`;
+      if (seenApplications.has(identity)) continue;
+      seenApplications.add(identity);
+      const company = step?.jobRef?.company || "the company";
+      needs.push({
+        id: `${mission.id}:${step.id}`,
+        kind: "submit-unverified",
+        missionId: mission.id,
+        stepId: step.id,
+        applicationId,
+        company: step?.jobRef?.company || "Application",
+        role: step?.jobRef?.role || "Role",
+        title: `Check that ${company} received your application`,
+        detail: step?.result?.reason || "Submit was pressed but no confirmation page appeared.",
+        tone: "attention",
+        primaryLabel: "I applied",
+        secondaryLabel: "Open application",
+      });
+    }
+  }
+  return needs;
 }
 
 function normalizeNextStep(item, index) {
@@ -822,7 +866,8 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
   const people = flattenPeople(dashboard.network, agentName);
   const peopleTargets = people.targets;
   const missions = list(runtime.missions);
-  const gates = submitGates(missions);
+  const gates = submitGates(missions, agentName);
+  const unverified = unverifiedSubmits(missions);
   const hasCanonicalNeeds = list(runtime.needsYou).length > 0;
   const canonicalNeeds = hasCanonicalNeeds
     ? list(runtime.needsYou)
@@ -831,9 +876,12 @@ export function buildChatFirstView(dashboardInput, runtimeInput) {
     collapseSourcedDecisions(
       [
         ...gates,
+        ...unverified,
         ...canonicalNeeds.filter(
           (item) =>
-            !gates.some((gate) => gate.applicationId && gate.applicationId === item.applicationId)
+            ![...gates, ...unverified].some(
+              (gate) => gate.applicationId && gate.applicationId === item.applicationId
+            )
         ),
         ...(hasCanonicalNeeds ? [] : touchNeeds(runtime.touchDue)),
       ],

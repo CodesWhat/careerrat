@@ -2080,6 +2080,9 @@ function operationSummary(result) {
     ...(last?.metadata?.state === "submitted-unverified" && last.metadata.reason
       ? { reason: promptText(last.metadata.reason, 500) }
       : {}),
+    ...(last?.metadata?.autoSubmitStopped?.reason
+      ? { autoSubmitStopped: { reason: promptText(last.metadata.autoSubmitStopped.reason, 300) } }
+      : {}),
     ...(handoff
       ? {
           handoff: jsonClone(
@@ -2257,6 +2260,14 @@ export async function missionRun({
           candidate.result?.state === "applied" &&
           sameMissionJob(candidate, step)
       );
+      // submit: auto stopped before pressing Submit: carry why onto the gate.
+      const autoStopReason = missionSteps(db, missionId).find(
+        (candidate) =>
+          candidate.action === "prepare-submit" &&
+          candidate.result?.state === "awaiting-submit" &&
+          candidate.result?.autoSubmitStopped?.reason &&
+          sameMissionJob(candidate, step)
+      )?.result?.autoSubmitStopped?.reason;
       committedWrite(() =>
         missionStepSetStatus({
           repoRoot,
@@ -2267,6 +2278,7 @@ export async function missionRun({
           result: {
             applicationId,
             requiresUserSubmit: true,
+            ...(autoStopReason ? { autoSubmitStopped: { reason: autoStopReason } } : {}),
             ...(step.jobRef.deadline ? { deadline: step.jobRef.deadline } : {}),
             ...(step.jobRef.expiryLabel ? { expiryLabel: step.jobRef.expiryLabel } : {}),
             ...applicationGateState(application),
