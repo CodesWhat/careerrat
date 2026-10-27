@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, normalize, relative, sep } from "node:path";
+import { basename, isAbsolute, join, normalize, relative, sep } from "node:path";
 
 import { mayRun } from "../automation/consent.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
@@ -621,6 +621,7 @@ async function fillStep({
 
   const unresolved = [];
   const selectedChoiceValues = new Map();
+  const filledAnswers = [];
   let filledCount = 0;
   for (const step of plan) {
     throwIfAborted(signal);
@@ -664,6 +665,13 @@ async function fillStep({
         selectedChoiceValues.set(step.id, selectedValue);
       }
       filledCount += 1;
+      const answerValue = selectedValue || String(step.value ?? "").trim();
+      if (answerValue && step.label) {
+        filledAnswers.push({
+          label: String(step.label).slice(0, 200),
+          value: answerValue.slice(0, 2000),
+        });
+      }
     } catch (error) {
       throwIfAborted(signal);
       unresolved.push({
@@ -677,6 +685,7 @@ async function fillStep({
   const uploads = uploadArtifacts({ repoRoot, env, application, postingUrl: url });
   let uploadedCount = 0;
   const uploadedKinds = [];
+  const uploadedFiles = [];
   for (const target of uploadTargetsFromSnapshot(snapshot)) {
     throwIfAborted(signal);
     const file = uploads[target.kind];
@@ -706,6 +715,7 @@ async function fillStep({
       await browserOp(ops, "upload", { pageId, ref: freshTarget.ref, files: file }, signal);
       uploadedCount += 1;
       uploadedKinds.push(target.kind);
+      uploadedFiles.push({ label: String(target.label || target.kind), name: basename(file) });
     } catch (error) {
       throwIfAborted(signal);
       unresolved.push({
@@ -769,6 +779,8 @@ async function fillStep({
     filledCount,
     uploadedCount,
     uploadedKinds,
+    filledAnswers,
+    uploadedFiles,
     unresolved,
     finalSnapshot,
   };
@@ -876,6 +888,32 @@ function stepSessionFields(stepIndex, easyApply) {
 // Shared by the entry-point confirmation check and the Easy Apply loop's
 // post-advance confirmation check (an advance click can land on a
 // confirmation page directly) — same screenshot + verified response either way.
+// Why auto mode declined to press the final Submit. Plain sentence, no
+// trailing period; callers add their own punctuation.
+function autoSubmitStopReason({
+  autoSubmit,
+  handoffUnresolved = [],
+  lateUploads = [],
+  submitRef,
+  freshRequired = [],
+}) {
+  if (!autoSubmit) return null;
+  if (lateUploads.length) return "A required upload isn't attached";
+  const required = handoffUnresolved.filter((item) => item?.required);
+  if (required.length) {
+    return required.length === 1
+      ? "1 required field still needs an answer"
+      : `${required.length} required fields still need an answer`;
+  }
+  if (freshRequired.length) {
+    return freshRequired.length === 1
+      ? "1 required field appeared after the form was filled"
+      : `${freshRequired.length} required fields appeared after the form was filled`;
+  }
+  if (!submitRef) return "Couldn't find a single Submit application button";
+  return "The form wasn't ready to submit";
+}
+
 async function submittedResult({
   ops,
   pageId,
@@ -886,6 +924,7 @@ async function submittedResult({
   saveScreenshotImpl,
   providerLabel,
   confirmation,
+  packet,
   signal,
 }) {
   throwIfAborted(signal);
@@ -911,6 +950,16 @@ async function submittedResult({
         title: "Verified submission confirmation",
         path,
       },
+      ...(packet && (packet.answers.length || packet.attachments.length)
+        ? [
+            {
+              kind: "submission_packet",
+              title: "What was sent",
+              answers: packet.answers,
+              attachments: packet.attachments,
+            },
+          ]
+        : []),
     ],
   };
 }
@@ -947,6 +996,7 @@ export function createApplyDriver({
     snapshot,
     stepSession,
     counts,
+    packet,
     signal,
   }) {
     // The caller records a durable "Submit is about to be pressed" marker first.
@@ -973,6 +1023,9 @@ export function createApplyDriver({
             unresolved: counts.unresolved,
             blockers: [],
             submitMode: "auto",
+            autoSubmitStopped: {
+              reason: "Paul couldn't record the attempt first, so it didn't press Submit",
+            },
             ...stepSession,
           },
         };
@@ -1010,6 +1063,7 @@ export function createApplyDriver({
             saveScreenshotImpl,
             providerLabel,
             confirmation,
+            packet,
             signal,
           });
         }
@@ -1426,6 +1480,8 @@ export function createApplyDriver({
     let totalFilledCount = 0;
     let totalUploadedCount = 0;
     const attachedKinds = new Set();
+    const submittedAnswers = [];
+    const submittedFiles = [];
     for (;;) {
       stepIndex += 1;
       if (stepIndex > maxFormSteps) {
@@ -1512,6 +1568,20 @@ export function createApplyDriver({
       totalFilledCount += result.filledCount;
       totalUploadedCount += result.uploadedCount;
       for (const kind of result.uploadedKinds || []) attachedKinds.add(kind);
+      for (const answer of result.filledAnswers || []) {
+        if (
+          !submittedAnswers.some(
+            (seen) => seen.label === answer.label && seen.value === answer.value
+          )
+        ) {
+          submittedAnswers.push(answer);
+        }
+      }
+      for (const file of result.uploadedFiles || []) {
+        if (!submittedFiles.some((seen) => seen.name === file.name && seen.label === file.label)) {
+          submittedFiles.push(file);
+        }
+      }
       if (result.blocked) {
         return {
           available: true,
@@ -1683,9 +1753,20 @@ export function createApplyDriver({
               uploadedCount: totalUploadedCount,
               unresolved,
             },
+            packet: {
+              answers: submittedAnswers.slice(0, 100),
+              attachments: submittedFiles.slice(0, 20),
+            },
             signal,
           });
         }
+        const autoStopReason = autoSubmitStopReason({
+          autoSubmit,
+          handoffUnresolved,
+          lateUploads,
+          submitRef,
+          freshRequired: newlyRequiredFields(snapshot, preAdvanceSnapshot),
+        });
         return {
           available: true,
           verified: false,
@@ -1699,7 +1780,8 @@ export function createApplyDriver({
             uploadedCount: totalUploadedCount,
             unresolved: handoffUnresolved,
             blockers: guard.blockers,
-            submitMode: guard.mode,
+            submitMode: autoStopReason ? "auto" : guard.mode,
+            ...(autoStopReason ? { autoSubmitStopped: { reason: autoStopReason } } : {}),
             ...(prepareOnly === true ? { prepareOnly: true } : {}),
             ...stepSessionFields(stepIndex, easyApply),
           },

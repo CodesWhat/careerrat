@@ -2149,7 +2149,27 @@ const ACTIVE_APPLICATION_SESSION_STATES = new Set([
   "blocked",
 ]);
 
+function autoSubmitStopReason(execution) {
+  if (execution?.state !== "awaiting-submit" || execution?.session?.submitMode !== "auto") {
+    return "";
+  }
+  return String(execution?.session?.autoSubmitStopped?.reason || "")
+    .trim()
+    .replace(/[.\s]+$/, "")
+    .slice(0, 300);
+}
+
 function applicationSessionText(execution) {
+  const autoReason = autoSubmitStopReason(execution);
+  if (autoReason) {
+    const unresolvedCount = Array.isArray(execution?.session?.unresolved)
+      ? execution.session.unresolved.length
+      : 0;
+    const unresolved = unresolvedCount
+      ? ` ${unresolvedCount} field${unresolvedCount === 1 ? "" : "s"} still ${unresolvedCount === 1 ? "needs" : "need"} your review.`
+      : "";
+    return `CareerRat filled the form but stopped before submitting: ${autoReason}.${unresolved} Open the application, check the answers and attachments, finish anything that's missing, and press submit yourself. Then return here and choose "I applied". This application was not marked Applied.`;
+  }
   const filledCount = Number(execution?.session?.filledCount) || 0;
   const uploadedCount = Number(execution?.session?.uploadedCount) || 0;
   const unresolvedCount = Array.isArray(execution?.session?.unresolved)
@@ -8949,6 +8969,9 @@ export async function executeWorkspaceIntent({
           state: sessionState,
           applicationId: normalized.entity.id,
           submissionVerified: false,
+          ...(autoSubmitStopReason(execution)
+            ? { autoSubmitStopped: { reason: autoSubmitStopReason(execution) } }
+            : {}),
           nextActions: [
             {
               label: permissionRequired
