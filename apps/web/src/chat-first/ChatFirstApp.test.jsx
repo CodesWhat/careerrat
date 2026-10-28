@@ -2327,7 +2327,7 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain('placeholder="Answer LinkedIn Profile…"');
   });
 
-  it("keeps packet resume behind a clear application-preparation permission action", async () => {
+  it("offers resume with no permission step while form preparation is on", async () => {
     const html = await renderView({
       view: {
         ...VIEW,
@@ -2346,12 +2346,39 @@ describe("ChatFirstAppView", () => {
       },
       ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
       actions: {
-        applicationPreparation: { status: "blocked", ready: false },
+        applicationPreparation: { status: "ready", ready: true },
       },
     });
 
-    expect(html).toContain("Allow form preparation");
-    expect(html).not.toContain("Resume preparation");
+    expect(html).toContain("Resume preparation");
+    expect(html).not.toMatch(/Allow form preparation|Turn it on/);
+  });
+
+  it("says so and offers Turn it on when form preparation is turned off", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        threads: [
+          {
+            ...VIEW.threads[0],
+            packetReview: {
+              status: "upload-ready",
+              uploadReady: true,
+              gapCount: 0,
+              canResume: true,
+              gaps: [],
+            },
+          },
+        ],
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+      actions: {
+        applicationPreparation: { status: "off", ready: false },
+      },
+    });
+
+    expect(html).toContain("Preparing application forms is turned off.");
+    expect(html).toContain("Turn it on");
   });
 
   it("labels each canonical job date by what happened", async () => {

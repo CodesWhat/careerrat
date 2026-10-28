@@ -86,8 +86,8 @@ The `apply-job` skill:
 6. Uses the session browser to fill safe, confirmed fields and attach generated documents when
    that executor is available. Most public forms do not require a login.
    Otherwise, it gives you a concrete supervised handoff instead of claiming automation ran.
-   If permission is off, the application review explains the boundary and offers **Allow form
-   preparation** in place before it resumes the matching paused mission.
+   If you turned form preparation off, the application review says so and offers **Turn it
+   on** in place before it resumes the matching paused mission.
 7. Keeps voluntary demographic and self-identification questions blank by default. The local-only
    **Profile > Application defaults** editor has two policy choices: leave them blank, or choose
    the form's decline option when available. Existing exact answers stay hidden and local.
@@ -101,9 +101,9 @@ The `apply-job` skill:
 
 ### LinkedIn Easy Apply
 
-For LinkedIn postings, `apply-job` supports opt-in supervised form preparation via
+For LinkedIn postings, `apply-job` supports supervised form preparation via
 the session browser. In the desktop app, the job's application review offers
-**Allow form preparation** when the permission is off. Terminal users can inspect
+**Turn it on** if you switched form preparation off. Terminal users can inspect
 the same `authenticated_apply_preparation` capability with `careerrat automation
 status`. CareerRat fills and advances the modal and follows the `submit` setting at the
 final submit control.

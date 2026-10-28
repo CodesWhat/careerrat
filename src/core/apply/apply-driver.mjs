@@ -11,6 +11,7 @@ import {
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { runAbortable, throwIfAborted, withAbortSignal } from "./cancellation.mjs";
 import {
+  applicationPlatformForUrl,
   buildFillPlan,
   confirmationCheck,
   EASY_APPLY_STEPS,
@@ -339,10 +340,6 @@ function applicationCapabilityOffReason(platform, permission) {
   return `Application preparation is turned off for ${label}. Turn it on with ${commands
     .map((command) => `\`${command}\``)
     .join(" and ")}, or ask me to turn it on.`;
-}
-
-function applicationPlatformForUrl(url) {
-  return isEasyApply(url) ? "linkedin" : hostnameToPortal(url) || "external_ats";
 }
 
 function fillPlan({ fields, config, application, answers }) {

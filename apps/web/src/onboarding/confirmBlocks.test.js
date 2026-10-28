@@ -59,37 +59,19 @@ describe("parseConfirmBlocks — authorization", () => {
   });
 });
 
-describe("parseConfirmBlocks — consent_mode", () => {
-  it("accepts payload 'basic' or 'advanced' only", () => {
+describe("parseConfirmBlocks, retired consent kinds", () => {
+  it("drops consent_mode and consent_capability blocks", () => {
+    expect(parseConfirmBlocks(fence({ kind: "consent_mode", payload: "advanced" })).blocks).toEqual(
+      []
+    );
     expect(
-      parseConfirmBlocks(fence({ kind: "consent_mode", payload: "advanced" })).blocks
-    ).toHaveLength(1);
-    expect(
-      parseConfirmBlocks(fence({ kind: "consent_mode", payload: "basic" })).blocks
-    ).toHaveLength(1);
-    expect(parseConfirmBlocks(fence({ kind: "consent_mode", payload: "yolo" })).blocks).toEqual([]);
-  });
-});
-
-describe("parseConfirmBlocks — consent_capability", () => {
-  it("requires non-empty string capability and platform", () => {
-    const good = fence({
-      kind: "consent_capability",
-      payload: { capability: "messaging", platform: "linkedin" },
-    });
-    expect(parseConfirmBlocks(good).blocks).toHaveLength(1);
-
-    const missingPlatform = fence({
-      kind: "consent_capability",
-      payload: { capability: "messaging" },
-    });
-    expect(parseConfirmBlocks(missingPlatform).blocks).toEqual([]);
-
-    const blankCapability = fence({
-      kind: "consent_capability",
-      payload: { capability: "  ", platform: "linkedin" },
-    });
-    expect(parseConfirmBlocks(blankCapability).blocks).toEqual([]);
+      parseConfirmBlocks(
+        fence({
+          kind: "consent_capability",
+          payload: { capability: "messaging", platform: "linkedin" },
+        })
+      ).blocks
+    ).toEqual([]);
   });
 });
 
@@ -318,9 +300,9 @@ describe("CONFIRM_KINDS / SINGLE_CLICK_KINDS", () => {
     );
   });
 
-  it("consent_mode and consent_capability are recognized kinds but NOT single-click", () => {
-    expect(CONFIRM_KINDS).toContain("consent_mode");
-    expect(CONFIRM_KINDS).toContain("consent_capability");
+  it("does not recognize the retired consent kinds", () => {
+    expect(CONFIRM_KINDS).not.toContain("consent_mode");
+    expect(CONFIRM_KINDS).not.toContain("consent_capability");
     expect(SINGLE_CLICK_KINDS.has("consent_mode")).toBe(false);
     expect(SINGLE_CLICK_KINDS.has("consent_capability")).toBe(false);
   });

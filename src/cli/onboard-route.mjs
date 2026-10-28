@@ -534,19 +534,32 @@ export function normalizeOnboardingDraft(raw = {}) {
 
 const ONBOARDING_TRANSCRIPT_ROLES = new Set(["user", "assistant", "receipt", "system-pill"]);
 const ONBOARDING_BLOCK_STATUSES = new Set(["pending", "saving", "resolved", "error"]);
-// consent_mode and consent_capability are retired (capabilities are on by
-// default and the interview no longer offers them). They stay in this list only
-// so transcripts saved by older versions still validate; the web side drops in
-// 72b-3.
 const ONBOARDING_BLOCK_KINDS = new Set([
   "authorization",
-  "consent_mode",
-  "consent_capability",
   "companies_suggest",
   "company_add",
   "candidate_patch",
   "evidence_claim",
 ]);
+
+const RETIRED_CONSENT_BLOCK_KINDS = new Set(["consent_mode", "consent_capability"]);
+const RETIRED_CONSENT_NOTE =
+  "Capabilities are on by default now; you can turn any off in Settings.";
+
+// A consent question that was still open when it was saved. Capabilities are
+// on by default now, so there is nothing left for the person to answer.
+function asksRetiredConsent(message) {
+  return (
+    message.role === "assistant" &&
+    Array.isArray(message.blocks) &&
+    message.blocks.some(
+      (block) =>
+        isPlainObject(block) &&
+        RETIRED_CONSENT_BLOCK_KINDS.has(block.kind) &&
+        block.status !== "resolved"
+    )
+  );
+}
 
 function cloneJsonValue(value, fallback = null) {
   try {
@@ -587,13 +600,17 @@ function normalizeOnboardingTranscript(value) {
         normalized.eventId = cursor.eventId;
       }
     }
+    const retiredConsent = asksRetiredConsent(message);
+    if (retiredConsent) normalized.text = RETIRED_CONSENT_NOTE;
     const binaryChoice =
+      !retiredConsent &&
       message?.metadata?.choicePrompt?.mode === "binary" &&
       message.metadata.choicePrompt.state === "pending";
     if (
-      message?.answerMode === "yes-no" ||
-      message?.metadata?.answerMode === "yes-no" ||
-      binaryChoice
+      !retiredConsent &&
+      (message?.answerMode === "yes-no" ||
+        message?.metadata?.answerMode === "yes-no" ||
+        binaryChoice)
     ) {
       normalized.answerMode = "yes-no";
       normalized.metadata = binaryChoice
@@ -622,6 +639,7 @@ function normalizeOnboardingTranscript(value) {
         ];
       });
     }
+    if (retiredConsent && !normalized.blocks?.length) return [];
     return [normalized];
   });
 }
@@ -949,12 +967,10 @@ function dbSourceResumePresent(pathCtx) {
 // ingest-profile may not write candidate/automation.yml at all, so a CLI-onboarded
 // candidate could never flip this item
 // and sat at 8 of 9 forever, permanently redirected to /onboarding. The
-// underlying automation-consent feature is untouched and still works —
-// Settings' automation controls and src/core/automation/consent.mjs still
-// read/write candidate/automation.yml; the on/off switches are the only
-// automation state left (consent and setup mode were retired, and the
-// interview no longer emits consent_mode/consent_capability pills). It's
-// not part of the SETUP CHECKLIST or setupProgress.complete.
+// automation on/off switches live in Settings and
+// src/core/automation/consent.mjs reads/writes candidate/automation.yml; they
+// are the only automation state left (consent and setup mode were retired).
+// They're not part of the SETUP CHECKLIST or setupProgress.complete.
 export { computeSetupProgress } from "../core/onboarding/setup-progress.mjs";
 
 // Same provenance-aware reconciliation as search-route.mjs's

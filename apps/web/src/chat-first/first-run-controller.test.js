@@ -421,7 +421,6 @@ describe("chat-first onboarding controller", () => {
   });
 
   it.each([
-    ["consent_mode", "basic", "Use this setup", "Keep current"],
     ["company_add", { name: "Acme" }, "Add company", "Not now"],
     ["companies_suggest", {}, "Show suggestions", "Not now"],
   ])(

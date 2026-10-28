@@ -10,6 +10,7 @@ import { workspaceMessagesForDisplay } from "../../agent/workspace-thread.mjs";
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../../ai/agent-voice.mjs";
 import { runBoundedAI } from "../../ai/bounded-ai.mjs";
 import { assertAIExecutionPlanForRuntime } from "../../ai/operation-policy.mjs";
+import { applicationPlatformForUrl } from "../../apply/form-fill.mjs";
 import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
@@ -4144,6 +4145,11 @@ function packetQuestionOptions(manifest, questionId) {
   return options;
 }
 
+function applicationPlatformFromApplication(application) {
+  const url = String(application?.link || application?.url || application?.sourceUrl || "").trim();
+  return url ? applicationPlatformForUrl(url) : null;
+}
+
 function packetReviewFromApplication(application) {
   const manifest = application?.packetManifest;
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return null;
@@ -4224,6 +4230,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
         mode: applicationMode(application),
         comp: applicationCompensation(application),
         ...(packetReview ? { packetReview } : {}),
+        applicationPlatform: applicationPlatformFromApplication(application),
         archived: archiveEligible || manuallyArchived,
         archiveEligible,
         archiveReason: archiveEligible ? "job-closed" : manuallyArchived ? "user" : null,

@@ -79,8 +79,9 @@ Evaluate verifies liveness and captures the full description.
 
 The in-app private-account browser workflows read permitted Apple Mail, Gmail,
 Outlook, LinkedIn, Wellfound, Greenhouse, Workday, Ashby, and Lever surfaces
-without delegating the product action to the selected agent CLI. Their contextual
-permissions remain off by default and are checked per capability and platform.
+without delegating the product action to the selected agent CLI. Their capabilities
+are on by default and are checked per capability and platform, so a switch you
+turn off is respected.
 Saved job-source login is separate: when a source is added or first used and login
 is needed, CareerRat asks one site-specific Yes/No question instead of using the
 permission matrix. Login walls, captchas, 2FA, and other challenges return visible
@@ -88,8 +89,8 @@ retry state without advancing the workflow watermark.
 
 Mail and message reads capture relevant communications locally. Relationship
 sourcing writes review-only leads. LinkedIn optimization writes proposal batches;
-approvals remain local until a separate `profile_apply` permission and per-field
-confirmation authorize a live edit. Status sync applies only `autoApplicable`
+approvals remain local until you approve each field and the `profile_apply`
+capability is on for a live edit. Status sync applies only `autoApplicable`
 results atomically, including stale portal-CTA cleanup, activity, and analytics.
 Regressions and low-confidence labels remain review-only. `track-outcomes` still
 owns candidate-reported outcome follow-up, coaching, learning capture, and
