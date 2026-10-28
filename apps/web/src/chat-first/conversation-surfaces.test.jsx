@@ -1824,6 +1824,67 @@ describe("JobConversation and JobContextPanel", () => {
     expect(html).not.toContain("Turn it on");
   });
 
+  it("hides Prepare and Resume while form preparation is off or unreadable", () => {
+    for (const applicationPreparation of [
+      { status: "off", ready: false },
+      { status: "unreadable", ready: false },
+    ]) {
+      for (const packetReview of [
+        { status: "upload-ready", uploadReady: true, gapCount: 0, canResume: true, gaps: [] },
+        {
+          status: "reviewable",
+          uploadReady: false,
+          gapCount: 0,
+          canResume: false,
+          canPrepare: true,
+          gaps: [],
+        },
+      ]) {
+        const html = markup(
+          JobContextPanel({
+            job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+            packetReview,
+            applicationPreparation,
+          })
+        );
+        expect(html).not.toContain("Resume preparation");
+        expect(html).not.toContain("Prepare form");
+      }
+    }
+    for (const applicationPreparation of [null, { status: "ready", ready: true }]) {
+      const html = markup(
+        JobContextPanel({
+          job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+          packetReview: {
+            status: "reviewable",
+            uploadReady: false,
+            gapCount: 0,
+            canResume: false,
+            canPrepare: true,
+            gaps: [],
+          },
+          applicationPreparation,
+        })
+      );
+      expect(html).toContain("Prepare form");
+    }
+  });
+
+  it("shows the failed-check notice when settings couldn't be checked", () => {
+    const html = markup(
+      JobContextPanel({
+        job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+        packetReview: { status: "upload-ready", uploadReady: true, gapCount: 0, gaps: [] },
+        applicationPreparation: {
+          status: "unreadable",
+          ready: false,
+          notice: "CareerRat couldn't check whether form preparation is on.",
+        },
+      })
+    );
+    expect(html).toContain("CareerRat couldn&#x27;t check whether form preparation is on.");
+  });
+
   it("offers supervised form preparation without rendering packet diagnostics as questions", () => {
     const onResumePacket = vi.fn();
     const packetReview = {

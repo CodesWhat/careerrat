@@ -497,19 +497,27 @@ export async function resumePacketPreparation({ api, missions, applicationId }) 
 // Application preparation is on by default. This only reports the explicit
 // "turned off" case (or unreadable settings, which fail closed) so the review
 // panel can say so and offer one "Turn it on" action.
-export function applicationPreparationPermission(automation) {
+// Shown when the settings request itself failed, so we can't tell either way.
+export const APPLICATION_PREPARATION_UNCHECKED = {
+  status: "unreadable",
+  ready: false,
+  offPlatforms: [],
+  notice: "CareerRat couldn't check whether form preparation is on.",
+};
+
+export function applicationPreparationPermission(automation, platform = null) {
   const value = automation?.automation || automation?.data || automation || {};
   if (value.readError) return { status: "unreadable", ready: false, offPlatforms: [] };
   const capability = list(value.capabilities).find(
     (row) => row?.capability === "authenticated_apply_preparation"
   );
   const platforms = list(capability?.platforms);
-  const off =
-    capability?.enabled === false ||
-    (platforms.length > 0 && platforms.every((platform) => platform?.enabled === false));
-  const offPlatforms = platforms
-    .filter((platform) => platform?.enabled === false && platform?.platform)
-    .map((platform) => platform.platform);
+  const target = String(platform || "").trim();
+  // The job's own platform decides. With no known platform, only the
+  // capability switch itself counts as off.
+  const targetRow = target ? platforms.find((row) => row?.platform === target) : null;
+  const off = capability?.enabled === false || targetRow?.enabled === false;
+  const offPlatforms = targetRow?.enabled === false ? [target] : [];
   return { status: off ? "off" : "ready", ready: !off, offPlatforms };
 }
 
@@ -522,7 +530,7 @@ export function isApplicationPreparationEnable(change) {
   return change?.op === "contextual-permission" && change.permission === "application-preparation";
 }
 
-export async function enableApplicationPreparation({ api, offPlatforms = [] }) {
+export async function enableApplicationPreparation({ api, offPlatforms = [], platform = null }) {
   if (
     typeof api?.runWorkspaceIntent !== "function" ||
     typeof api?.getAutomationSettings !== "function"
@@ -542,7 +550,7 @@ export async function enableApplicationPreparation({ api, offPlatforms = [] }) {
       },
     }
   );
-  return applicationPreparationPermission(await api.getAutomationSettings());
+  return applicationPreparationPermission(await api.getAutomationSettings(), platform);
 }
 
 export function isMockInterviewStartRequest(text) {

@@ -1414,10 +1414,15 @@ export function JobContextPanel({
           ) : null}
           {applicationPreparation?.status === "unreadable" ? (
             <div className="chat-first-packet-review__permission">
-              <small>CareerRat can't read your settings, so form preparation is paused.</small>
+              <small>
+                {applicationPreparation.notice ||
+                  "CareerRat can't read your settings, so form preparation is paused."}
+              </small>
             </div>
           ) : null}
-          {packetReview.canResume || packetReview.canPrepare ? (
+          {(packetReview.canResume || packetReview.canPrepare) &&
+          applicationPreparation?.status !== "off" &&
+          applicationPreparation?.status !== "unreadable" ? (
             <button
               className="chat-first-context-action"
               type="button"

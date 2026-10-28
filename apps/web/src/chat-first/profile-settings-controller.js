@@ -539,6 +539,7 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         description: copy.description,
         enabled: capabilityEnabled(automation, id),
         mutable: !automation?.readError,
+        ...(automation?.readError ? { statusLabel: "Unavailable" } : {}),
       })),
     ],
     sources: {

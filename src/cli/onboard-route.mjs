@@ -542,6 +542,25 @@ const ONBOARDING_BLOCK_KINDS = new Set([
   "evidence_claim",
 ]);
 
+const RETIRED_CONSENT_BLOCK_KINDS = new Set(["consent_mode", "consent_capability"]);
+const RETIRED_CONSENT_NOTE =
+  "Capabilities are on by default now; you can turn any off in Settings.";
+
+// A consent question that was still open when it was saved. Capabilities are
+// on by default now, so there is nothing left for the person to answer.
+function asksRetiredConsent(message) {
+  return (
+    message.role === "assistant" &&
+    Array.isArray(message.blocks) &&
+    message.blocks.some(
+      (block) =>
+        isPlainObject(block) &&
+        RETIRED_CONSENT_BLOCK_KINDS.has(block.kind) &&
+        block.status !== "resolved"
+    )
+  );
+}
+
 function cloneJsonValue(value, fallback = null) {
   try {
     return JSON.parse(JSON.stringify(value));
@@ -581,13 +600,17 @@ function normalizeOnboardingTranscript(value) {
         normalized.eventId = cursor.eventId;
       }
     }
+    const retiredConsent = asksRetiredConsent(message);
+    if (retiredConsent) normalized.text = RETIRED_CONSENT_NOTE;
     const binaryChoice =
+      !retiredConsent &&
       message?.metadata?.choicePrompt?.mode === "binary" &&
       message.metadata.choicePrompt.state === "pending";
     if (
-      message?.answerMode === "yes-no" ||
-      message?.metadata?.answerMode === "yes-no" ||
-      binaryChoice
+      !retiredConsent &&
+      (message?.answerMode === "yes-no" ||
+        message?.metadata?.answerMode === "yes-no" ||
+        binaryChoice)
     ) {
       normalized.answerMode = "yes-no";
       normalized.metadata = binaryChoice
@@ -616,6 +639,7 @@ function normalizeOnboardingTranscript(value) {
         ];
       });
     }
+    if (retiredConsent && !normalized.blocks?.length) return [];
     return [normalized];
   });
 }

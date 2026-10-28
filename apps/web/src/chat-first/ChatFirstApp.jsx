@@ -14,6 +14,7 @@ import { useEventSource } from "../lib/sse.js";
 import { chatFirstApi } from "./api.js";
 import { filterFiles, filterPeople, filterSearchJobs } from "./browser-model.js";
 import {
+  APPLICATION_PREPARATION_UNCHECKED,
   applicationPreparationPermission,
   calendarAction,
   commitComposerTurn,
@@ -1745,6 +1746,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }, [baseView, newSearchIds]);
   const activeJob = threadForUi(view, ui);
   const packetApplicationId = activeJob?.packetReview ? activeJob.applicationId : null;
+  const packetPlatform = activeJob?.applicationPlatform || null;
   const persistedSkillChat = list(view.skillChats).find((thread) => thread.id === ui.activeThread);
   const activeSkillChat = persistedSkillChat
     ? skillChatState?.id === persistedSkillChat.id
@@ -2104,16 +2106,16 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       .getAutomationSettings()
       .then((automation) => {
         if (!cancelled) {
-          setApplicationPreparation(applicationPreparationPermission(automation));
+          setApplicationPreparation(applicationPreparationPermission(automation, packetPlatform));
         }
       })
       .catch(() => {
-        if (!cancelled) setApplicationPreparation(null);
+        if (!cancelled) setApplicationPreparation(APPLICATION_PREPARATION_UNCHECKED);
       });
     return () => {
       cancelled = true;
     };
-  }, [api, packetApplicationId]);
+  }, [api, packetApplicationId, packetPlatform]);
 
   useEffect(() => {
     if (dashboard.loading || ui.searchSelectionSeeded || !baseView.browser.search.length) return;
@@ -2780,7 +2782,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     ) {
       const automation = await run(() => api.getAutomationSettings());
       if (automation) {
-        setApplicationPreparation(applicationPreparationPermission(automation));
+        setApplicationPreparation(applicationPreparationPermission(automation, packetPlatform));
       }
     }
     const launchedSkillChat = skillChatFromWorkspaceResult(result);
@@ -3247,7 +3249,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             typeof api.getAutomationSettings === "function"
           ) {
             const automation = await api.getAutomationSettings();
-            setApplicationPreparation(applicationPreparationPermission(automation));
+            setApplicationPreparation(applicationPreparationPermission(automation, packetPlatform));
           }
           if (
             activeJob?.applicationId &&
@@ -3400,7 +3402,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     },
     enableApplicationPreparation: async () => {
       const updated = await run(() =>
-        enableApplicationPreparation({ api, offPlatforms: applicationPreparation?.offPlatforms })
+        enableApplicationPreparation({
+          api,
+          offPlatforms: applicationPreparation?.offPlatforms,
+          platform: packetPlatform,
+        })
       );
       if (updated) setApplicationPreparation(updated);
       return updated;

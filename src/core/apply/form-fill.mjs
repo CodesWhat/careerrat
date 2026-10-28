@@ -332,6 +332,17 @@ export function isEasyApply(url) {
   );
 }
 
+/**
+ * The automation platform a posting URL runs under: LinkedIn Easy Apply,
+ * a known ATS portal, or the generic external_ats bucket.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function applicationPlatformForUrl(url) {
+  return isEasyApply(url) ? "linkedin" : hostnameToPortal(url) || "external_ats";
+}
+
 // ---------------------------------------------------------------------------
 // EASY_APPLY_ADVANCE_LABELS
 // ---------------------------------------------------------------------------

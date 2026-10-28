@@ -76,9 +76,11 @@ A capability runs on a platform unless you switch it off. Two switches matter:
 the capability's own switch, and that platform's switch under it. Turn either
 one off and the capability skips that platform.
 
-In the desktop app, the on/off switches are in Settings. If something you ask
-for is turned off, CareerRat says so in plain words and offers a **Turn it on**
-button. Terminal users can use the commands below.
+Settings has one switch per capability. Switches for a single platform are not
+in Settings: use the `careerrat automation disable|enable <capability> <platform> --write`
+commands below, or ask Paul to change one. If something you ask for is turned
+off, CareerRat says so in plain words and offers a **Turn it on** button that
+turns on only the platform that job needs.
 
 ```bash
 careerrat automation status                               # what is on and off

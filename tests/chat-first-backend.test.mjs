@@ -700,6 +700,25 @@ test("jobThreadMessageAppend refuses to reuse one message id for different trans
   );
 });
 
+test("job threads name the automation platform their posting runs under", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  const rows = [
+    ["app-platform-linkedin", "https://www.linkedin.com/jobs/view/123", "linkedin"],
+    ["app-platform-greenhouse", "https://boards.greenhouse.io/acme/jobs/1", "greenhouse"],
+    ["app-platform-other", "https://careers.example.com/role", "external_ats"],
+    ["app-platform-none", undefined, null],
+  ];
+  for (const [id, link] of rows) {
+    seedApplication(repoRoot, { id, company: "Acme", status: "reviewed-hold", link });
+    api.jobThreadSetPinned({ repoRoot, applicationId: id });
+  }
+  const threads = api.chatFirstStateGet({ repoRoot }).jobThreads;
+  for (const [id, , platform] of rows) {
+    assert.equal(threads.find((row) => row.applicationId === id).applicationPlatform, platform);
+  }
+});
+
 test("job threads expose live packet gaps without leaking the packet manifest", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();

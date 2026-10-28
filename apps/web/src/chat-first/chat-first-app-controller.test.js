@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as controller from "./chat-first-app-controller.js";
 import {
+  APPLICATION_PREPARATION_UNCHECKED,
   applicationPreparationPermission,
   calendarAction,
   commitComposerTurn,
@@ -877,24 +878,28 @@ describe("chat-first app controller", () => {
     });
     expect(applicationPreparationPermission(undefined)).toMatchObject({ ready: true });
     expect(
-      applicationPreparationPermission({
-        capabilities: [
-          {
-            capability: "authenticated_apply_preparation",
-            enabled: true,
-            platforms: [
-              { platform: "greenhouse", enabled: true, allowed: true },
-              { platform: "external_ats", enabled: false, allowed: false },
-            ],
-          },
-        ],
-      })
-    ).toMatchObject({ status: "ready", ready: true, offPlatforms: ["external_ats"] });
+      applicationPreparationPermission(
+        {
+          capabilities: [
+            {
+              capability: "authenticated_apply_preparation",
+              enabled: true,
+              platforms: [
+                { platform: "greenhouse", enabled: true, allowed: true },
+                { platform: "external_ats", enabled: false, allowed: false },
+              ],
+            },
+          ],
+        },
+        "external_ats"
+      )
+    ).toMatchObject({ status: "off", ready: false, offPlatforms: ["external_ats"] });
     expect(
       applicationPreparationPermission({
         capabilities: [{ capability: "authenticated_apply_preparation", enabled: false }],
       })
     ).toMatchObject({ status: "off", ready: false });
+    // With no known platform, only the capability switch itself counts.
     expect(
       applicationPreparationPermission({
         capabilities: [
@@ -908,7 +913,47 @@ describe("chat-first app controller", () => {
           },
         ],
       })
-    ).toMatchObject({ status: "off", ready: false, offPlatforms: ["greenhouse", "lever"] });
+    ).toMatchObject({ status: "ready", ready: true, offPlatforms: [] });
+  });
+
+  it("judges form preparation by the job's own platform", () => {
+    const automation = {
+      capabilities: [
+        {
+          capability: "authenticated_apply_preparation",
+          enabled: true,
+          platforms: [
+            { platform: "linkedin", enabled: false },
+            { platform: "greenhouse", enabled: true },
+            { platform: "lever", enabled: false },
+          ],
+        },
+      ],
+    };
+    expect(applicationPreparationPermission(automation, "linkedin")).toMatchObject({
+      status: "off",
+      ready: false,
+      offPlatforms: ["linkedin"],
+    });
+    expect(applicationPreparationPermission(automation, "greenhouse")).toMatchObject({
+      status: "ready",
+      ready: true,
+      offPlatforms: [],
+    });
+    expect(
+      applicationPreparationPermission(
+        { capabilities: [{ capability: "authenticated_apply_preparation", enabled: false }] },
+        "greenhouse"
+      )
+    ).toMatchObject({ status: "off", ready: false, offPlatforms: [] });
+  });
+
+  it("reports a failed settings request as unreadable with its own notice", () => {
+    expect(APPLICATION_PREPARATION_UNCHECKED).toMatchObject({
+      status: "unreadable",
+      ready: false,
+      notice: "CareerRat couldn't check whether form preparation is on.",
+    });
   });
 
   it("fails closed when the automation settings can't be read", () => {

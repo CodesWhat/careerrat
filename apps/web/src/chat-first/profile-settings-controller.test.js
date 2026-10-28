@@ -510,6 +510,7 @@ describe("profile settings controller mapping", () => {
     const rows = model.permissions.filter((row) => row.id !== "draft_documents");
     expect(rows.length).toBeGreaterThan(2);
     expect(rows.every((row) => row.enabled === false && row.mutable === false)).toBe(true);
+    expect(rows.every((row) => row.statusLabel === "Unavailable")).toBe(true);
   });
 
   it("marks draft documents as an honest fixed capability instead of a switch", () => {

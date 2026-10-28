@@ -32,6 +32,32 @@ test("onboarding draft drops the retired consent block kinds", () => {
     normalized.transcript[0].blocks.map((block) => block.kind),
     ["company_add"]
   );
+  assert.equal(
+    normalized.transcript[0].text,
+    "Capabilities are on by default now; you can turn any off in Settings."
+  );
+});
+
+test("onboarding draft drops an open consent question and keeps resolved history", () => {
+  const normalized = normalizeOnboardingDraft({
+    transcript: [
+      {
+        role: "assistant",
+        text: "Should I turn on browser automation?",
+        answerMode: "yes-no",
+        blocks: [{ kind: "consent_mode", payload: "advanced", status: "pending" }],
+      },
+      {
+        role: "assistant",
+        text: "You said yes to browser automation.",
+        blocks: [{ kind: "consent_mode", payload: "advanced", status: "resolved" }],
+      },
+    ],
+  });
+  assert.deepEqual(
+    normalized.transcript.map((message) => message.text),
+    ["You said yes to browser automation."]
+  );
 });
 
 test("onboarding draft preserves the chat cursor and stable assistant event identity", () => {

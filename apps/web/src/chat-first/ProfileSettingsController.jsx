@@ -514,7 +514,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
             runtimes:
               runtimesResult.status === "fulfilled" ? runtimesResult.value : current.runtimes,
             automation:
-              automationResult.status === "fulfilled" ? automationResult.value : current.automation,
+              automationResult.status === "fulfilled"
+                ? automationResult.value
+                : (current.automation ?? {
+                    readError: "CareerRat couldn't load automation settings.",
+                  }),
             sources: sourcesResult.status === "fulfilled" ? sourcesResult.value : current.sources,
             aiPreferences:
               aiPreferencesResult.status === "fulfilled"

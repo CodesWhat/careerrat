@@ -1457,6 +1457,22 @@ describe("ProfileSettingsController AI preferences", () => {
     });
   });
 
+  it("shows capability rows as unavailable when the first automation request fails", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAutomationSettings.mockRejectedValue(new Error("automation settings unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+
+    const props = settingsProps(renderController(module, api));
+    expect(props.permissionsReadError).toBeTruthy();
+    const rows = props.permissions.filter((row) => row.id !== "draft_documents");
+    expect(rows.every((row) => row.mutable === false && row.statusLabel === "Unavailable")).toBe(
+      true
+    );
+  });
+
   it("keeps the AI preference controls disabled, with an error, when their own mount fetch fails even though the rest of hydration completes", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();

@@ -265,7 +265,7 @@ function SettingsView({
         <div className="cf-settings__eyebrow">WHAT {agentName.toUpperCase()} CAN DO</div>
         {permissionsReadError ? (
           <p className="cf-settings__note" role="alert">
-            CareerRat can't read your automation settings, so these are shown as off until that's
+            CareerRat can't read your automation settings, so these are unavailable until that's
             fixed.
           </p>
         ) : null}
@@ -277,7 +277,7 @@ function SettingsView({
             </div>
             {permission.mutable === false ? (
               <span className="cf-settings__fixed-capability">
-                {permission.statusLabel || "Always on"}
+                {permission.statusLabel || "Unavailable"}
               </span>
             ) : (
               <button

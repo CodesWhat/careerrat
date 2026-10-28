@@ -464,6 +464,38 @@ describe("ProfileSettings", () => {
     expect(html).toContain("can&#x27;t read your automation settings");
   });
 
+  it("never says Always on for capability rows when settings are unreadable", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const html = renderToStaticMarkup(
+      <ProfileSettings
+        agentName="Paul"
+        activeTab="settings"
+        permissions={[
+          PERMISSIONS[0],
+          {
+            id: "email",
+            name: "Read job-search email",
+            description: "reads replies",
+            enabled: false,
+            mutable: false,
+            statusLabel: "Unavailable",
+          },
+          {
+            id: "other",
+            name: "Other capability",
+            description: "no label",
+            enabled: false,
+            mutable: false,
+          },
+        ]}
+        permissionsReadError="bad yaml"
+      />
+    );
+
+    expect(html.match(/Always on/g)).toHaveLength(1);
+    expect(html.match(/Unavailable/g)).toHaveLength(2);
+  });
+
   it("renders settings in plain language as on/off switches", async () => {
     const { ProfileSettings } = await loadProfile();
     const html = renderToStaticMarkup(
