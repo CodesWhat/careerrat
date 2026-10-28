@@ -69,12 +69,6 @@ const KIND_VALIDATORS = {
     typeof block.patch === "object" &&
     typeof block.patch.work_authorized === "boolean" &&
     typeof block.patch.requires_sponsorship === "boolean",
-  consent_mode: (block) => block?.payload === "basic" || block?.payload === "advanced",
-  consent_capability: (block) =>
-    block?.payload &&
-    typeof block.payload === "object" &&
-    isNonEmptyString(block.payload.capability) &&
-    isNonEmptyString(block.payload.platform),
   companies_suggest: () => true,
   company_add: (block) =>
     block?.payload && typeof block.payload === "object" && isNonEmptyString(block.payload.name),
@@ -107,9 +101,7 @@ const KIND_VALIDATORS = {
 export const CONFIRM_KINDS = Object.keys(KIND_VALIDATORS);
 
 // Kinds that are actionable with a single click (the model's own summary MAY
-// render alongside a code-owned kind label). consent_mode/consent_capability
-// are deliberately excluded — R4 requires a distinct second confirmation
-// dialog with code-owned copy for those two.
+// render alongside a code-owned kind label).
 export const SINGLE_CLICK_KINDS = new Set([
   "authorization",
   "company_add",

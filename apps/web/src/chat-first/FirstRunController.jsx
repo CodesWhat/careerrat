@@ -201,8 +201,6 @@ function confirmationOptions(blocks) {
     const labels = {
       company_add: ["Add company", "Not now"],
       companies_suggest: ["Show suggestions", "Not now"],
-      consent_capability: ["Allow", "Not now"],
-      consent_mode: ["Use this setup", "Keep current"],
     }[block?.kind] || ["Continue", "Not now"];
     return [
       { id: `confirm:${blockIndex}`, label: labels[0] },

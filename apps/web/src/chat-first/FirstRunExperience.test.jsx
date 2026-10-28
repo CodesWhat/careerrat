@@ -1052,12 +1052,12 @@ describe("FirstRunExperience", () => {
       agentName: "Paul",
       messages: [
         {
-          id: "consent-1",
+          id: "confirm-1",
           role: "assistant",
-          text: "Browser access needs your approval.",
-          blocks: [{ kind: "consent_capability" }],
+          text: "Add Acme to your list?",
+          blocks: [{ kind: "company_add" }],
           options: [
-            { id: "confirm:0", label: "Allow" },
+            { id: "confirm:0", label: "Add company" },
             { id: "decline:0", label: "Not now" },
           ],
         },
@@ -1066,11 +1066,14 @@ describe("FirstRunExperience", () => {
       progress: { completed: 0, total: 8 },
       onChooseOption,
     });
-    const option = findElement(tree, (node) => node.type === "button" && textOf(node) === "Allow");
+    const option = findElement(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Add company"
+    );
 
-    expect(renderToStaticMarkup(tree)).toContain("Browser access needs your approval.");
+    expect(renderToStaticMarkup(tree)).toContain("Add Acme to your list?");
     option.props.onClick();
-    expect(onChooseOption).toHaveBeenCalledWith("consent-1", "confirm:0");
+    expect(onChooseOption).toHaveBeenCalledWith("confirm-1", "confirm:0");
   });
 
   it("renders an accessible whole-section editor and delegates cancel and submit", async () => {

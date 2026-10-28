@@ -10,23 +10,25 @@ points, and Featured section.
 
 ## Setup
 
-LinkedIn profile work is opt-in and requires a browser capability:
+LinkedIn profile work uses browser capabilities that are on by default, so
+there is nothing to set up. Check or change them any time:
 
 ```bash
-careerrat automation status                         # see what is enabled
-careerrat automation consent linkedin --write       # record ToS consent
-careerrat automation enable profile_optimize linkedin --write   # enable reading
+careerrat automation status                         # see what is on and off
+careerrat automation disable profile_optimize --write   # turn reading off
+careerrat automation enable profile_optimize --write    # turn it back on
 ```
 
-A separate gate covers writing edits back:
+Writing approved edits back is its own capability, `profile_apply`. Turn it off
+if you want CareerRat to only suggest rewrites:
 
 ```bash
-careerrat automation enable profile_apply linkedin --write
+careerrat automation disable profile_apply --write
 ```
 
 ## Running a profile pass
 
-With the capability enabled, say:
+With the capability on, say:
 
 > optimize my LinkedIn / review my LinkedIn profile
 

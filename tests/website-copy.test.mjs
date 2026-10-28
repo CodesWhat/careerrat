@@ -434,6 +434,11 @@ test("search docs reserve capability gates for separate private-account workflow
   assert.match(setup, /saved job-site\s+search/i);
   assert.doesNotMatch(setup, /External browser,[\s\S]{0,80}permissions stay off/i);
   assert.match(browser, /private-account uses\s+below/i);
+  assert.match(browser, /on by default/i);
+  assert.match(browser, /careerrat automation disable/);
+  assert.match(browser, /careerrat automation status/);
+  assert.doesNotMatch(browser, /opt-in|consent|setup mode|Allow form preparation/i);
+  assert.doesNotMatch(setup, /consent|Allow form preparation/i);
   assert.doesNotMatch(browser, /Logged-in Layer-3 uses are\s+opt-in/i);
   assert.doesNotMatch(
     decomposition,

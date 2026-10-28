@@ -494,29 +494,40 @@ export async function resumePacketPreparation({ api, missions, applicationId }) 
   return api.runChatFirstMission(createdMission.id);
 }
 
+// Application preparation is on by default. This only reports the explicit
+// "turned off" case (or unreadable settings, which fail closed) so the review
+// panel can say so and offer one "Turn it on" action.
 export function applicationPreparationPermission(automation) {
   const value = automation?.automation || automation?.data || automation || {};
+  if (value.readError) return { status: "unreadable", ready: false, offPlatforms: [] };
   const capability = list(value.capabilities).find(
     (row) => row?.capability === "authenticated_apply_preparation"
   );
   const platforms = list(capability?.platforms);
-  const ready =
-    capability?.enabled === true &&
-    platforms.length > 0 &&
-    platforms.every((platform) => platform?.allowed === true);
-  return {
-    status: ready ? "ready" : "blocked",
-    ready,
-    submitMode: value.submit === "manual" ? "manual" : "auto",
-  };
+  const off =
+    capability?.enabled === false ||
+    (platforms.length > 0 && platforms.every((platform) => platform?.enabled === false));
+  const offPlatforms = platforms
+    .filter((platform) => platform?.enabled === false && platform?.platform)
+    .map((platform) => platform.platform);
+  return { status: off ? "off" : "ready", ready: !off, offPlatforms };
 }
 
-export async function enableApplicationPreparation({ api }) {
+// True for the settings.apply change that turns application preparation on.
+// Buttons saved in older threads still carry the retired contextual-permission op.
+export function isApplicationPreparationEnable(change) {
+  if (change?.op === "capability") {
+    return change.capability === "authenticated_apply_preparation" && change.enabled === true;
+  }
+  return change?.op === "contextual-permission" && change.permission === "application-preparation";
+}
+
+export async function enableApplicationPreparation({ api, offPlatforms = [] }) {
   if (
     typeof api?.runWorkspaceIntent !== "function" ||
     typeof api?.getAutomationSettings !== "function"
   ) {
-    throw new Error("Application form permission is unavailable");
+    throw new Error("Application form preparation can't be turned on from here");
   }
   await api.runWorkspaceIntent(
     "settings.apply",
@@ -524,8 +535,10 @@ export async function enableApplicationPreparation({ api }) {
     {
       change: {
         kind: "automation",
-        op: "contextual-permission",
-        permission: "application-preparation",
+        op: "capability",
+        capability: "authenticated_apply_preparation",
+        enabled: true,
+        ...(offPlatforms.length ? { platforms: offPlatforms } : {}),
       },
     }
   );

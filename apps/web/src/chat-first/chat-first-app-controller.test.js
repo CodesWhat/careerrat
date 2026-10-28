@@ -14,6 +14,7 @@ import {
   engineUnavailable,
   findGate,
   focusApplicationHandoff,
+  isApplicationPreparationEnable,
   isEngineFailure,
   mapActivityItems,
   mapComposerChips,
@@ -281,15 +282,16 @@ describe("chat-first app controller", () => {
     expect(result.kind).toBe("message");
   });
 
-  it("returns the exact committed permission intent so the open job can refresh in place", async () => {
+  it("returns the exact committed turn-on intent so the open job can refresh in place", async () => {
     const intent = {
       type: "settings.apply",
       entity: { type: "workspace", id: "workspace-main" },
       input: {
         change: {
           kind: "automation",
-          op: "contextual-permission",
-          permission: "application-preparation",
+          op: "capability",
+          capability: "authenticated_apply_preparation",
+          enabled: true,
         },
       },
     };
@@ -298,8 +300,8 @@ describe("chat-first app controller", () => {
 
     const result = await commitComposerTurn({
       api,
-      text: "Allow form preparation",
-      preview: { action: { label: "Allow form preparation", intent } },
+      text: "Turn it on",
+      preview: { action: { label: "Turn it on", intent } },
       requestId,
     });
 
@@ -868,18 +870,12 @@ describe("chat-first app controller", () => {
     expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-current-prepare");
   });
 
-  it("reports the submit mode alongside form preparation, defaulting to auto", () => {
-    expect(applicationPreparationPermission({ capabilities: [] }).submitMode).toBe("auto");
-    expect(
-      applicationPreparationPermission({ capabilities: [], submit: "manual" }).submitMode
-    ).toBe("manual");
-  });
-
-  it("treats form preparation as ready only when its supported application sites are allowed", () => {
+  it("treats form preparation as ready by default and only off when explicitly turned off", () => {
     expect(applicationPreparationPermission({ capabilities: [] })).toMatchObject({
-      status: "blocked",
-      ready: false,
+      status: "ready",
+      ready: true,
     });
+    expect(applicationPreparationPermission(undefined)).toMatchObject({ ready: true });
     expect(
       applicationPreparationPermission({
         capabilities: [
@@ -887,13 +883,18 @@ describe("chat-first app controller", () => {
             capability: "authenticated_apply_preparation",
             enabled: true,
             platforms: [
-              { platform: "greenhouse", allowed: true },
-              { platform: "external_ats", allowed: false },
+              { platform: "greenhouse", enabled: true, allowed: true },
+              { platform: "external_ats", enabled: false, allowed: false },
             ],
           },
         ],
       })
-    ).toMatchObject({ status: "blocked", ready: false });
+    ).toMatchObject({ status: "ready", ready: true, offPlatforms: ["external_ats"] });
+    expect(
+      applicationPreparationPermission({
+        capabilities: [{ capability: "authenticated_apply_preparation", enabled: false }],
+      })
+    ).toMatchObject({ status: "off", ready: false });
     expect(
       applicationPreparationPermission({
         capabilities: [
@@ -901,22 +902,54 @@ describe("chat-first app controller", () => {
             capability: "authenticated_apply_preparation",
             enabled: true,
             platforms: [
-              { platform: "greenhouse", allowed: true },
-              { platform: "external_ats", allowed: true },
+              { platform: "greenhouse", enabled: false },
+              { platform: "lever", enabled: false },
             ],
           },
         ],
       })
-    ).toMatchObject({ status: "ready", ready: true });
+    ).toMatchObject({ status: "off", ready: false, offPlatforms: ["greenhouse", "lever"] });
   });
 
-  it("enables supervised form preparation in place and re-reads the effective permission", async () => {
+  it("fails closed when the automation settings can't be read", () => {
+    expect(
+      applicationPreparationPermission({ readError: "bad yaml", capabilities: [] })
+    ).toMatchObject({ status: "unreadable", ready: false });
+  });
+
+  it("recognizes the turn-on intent, including buttons saved before consent was retired", () => {
+    expect(
+      isApplicationPreparationEnable({
+        op: "capability",
+        capability: "authenticated_apply_preparation",
+        enabled: true,
+      })
+    ).toBe(true);
+    expect(
+      isApplicationPreparationEnable({
+        op: "capability",
+        capability: "authenticated_apply_preparation",
+        enabled: false,
+      })
+    ).toBe(false);
+    expect(isApplicationPreparationEnable({ op: "capability", capability: "mail_access" })).toBe(
+      false
+    );
+    expect(
+      isApplicationPreparationEnable({
+        op: "contextual-permission",
+        permission: "application-preparation",
+      })
+    ).toBe(true);
+  });
+
+  it("turns form preparation on in place and re-reads the effective setting", async () => {
     const automation = {
       capabilities: [
         {
           capability: "authenticated_apply_preparation",
           enabled: true,
-          platforms: [{ platform: "greenhouse", allowed: true }],
+          platforms: [{ platform: "greenhouse", enabled: true, allowed: true }],
         },
       ],
     };
@@ -925,25 +958,26 @@ describe("chat-first app controller", () => {
       getAutomationSettings: vi.fn().mockResolvedValue(automation),
     };
 
-    await expect(enableApplicationPreparation({ api })).resolves.toMatchObject({
-      status: "ready",
-      ready: true,
-    });
+    await expect(
+      enableApplicationPreparation({ api, offPlatforms: ["greenhouse"] })
+    ).resolves.toMatchObject({ status: "ready", ready: true });
     expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
       "settings.apply",
       { type: "workspace", id: "workspace-main" },
       {
         change: {
           kind: "automation",
-          op: "contextual-permission",
-          permission: "application-preparation",
+          op: "capability",
+          capability: "authenticated_apply_preparation",
+          enabled: true,
+          platforms: ["greenhouse"],
         },
       }
     );
     expect(api.getAutomationSettings).toHaveBeenCalledOnce();
   });
 
-  it("does not claim form permission when the server-owned write fails", async () => {
+  it("does not claim form preparation is on when the server-owned write fails", async () => {
     const api = {
       runWorkspaceIntent: vi.fn().mockRejectedValue(new Error("write failed")),
       getAutomationSettings: vi.fn(),

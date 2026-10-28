@@ -27,6 +27,7 @@ import {
   engineUnavailable,
   findGate,
   focusApplicationHandoff,
+  isApplicationPreparationEnable,
   isEngineFailure,
   isMockInterviewStartRequest,
   loadChatFirstArtifact,
@@ -2094,11 +2095,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return;
     }
     if (typeof api.getAutomationSettings !== "function") {
-      setApplicationPreparation({ status: "blocked", ready: false });
+      setApplicationPreparation(null);
       return;
     }
     let cancelled = false;
-    setApplicationPreparation({ status: "checking", ready: false });
+    setApplicationPreparation(null);
     void api
       .getAutomationSettings()
       .then((automation) => {
@@ -2107,7 +2108,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         }
       })
       .catch(() => {
-        if (!cancelled) setApplicationPreparation({ status: "blocked", ready: false });
+        if (!cancelled) setApplicationPreparation(null);
       });
     return () => {
       cancelled = true;
@@ -2774,8 +2775,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (workspaceOperation) replaceWorkspaceOperation(workspaceOperation.id);
     if (result) setComposerValue("");
     if (
-      result?.intent?.input?.change?.op === "contextual-permission" &&
-      result.intent.input.change.permission === "application-preparation" &&
+      isApplicationPreparationEnable(result?.intent?.input?.change) &&
       typeof api.getAutomationSettings === "function"
     ) {
       const automation = await run(() => api.getAutomationSettings());
@@ -3217,10 +3217,6 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           activeJob?.applicationId &&
           typedIntent.entity?.id === activeJob.applicationId
         ) {
-          if (applicationPreparation?.ready !== true) {
-            setError("Allow form preparation in the application review on the right first.");
-            return false;
-          }
           return run(async () => {
             const resumed = await resumePacketPreparation({
               api,
@@ -3247,8 +3243,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             return response;
           }
           if (
-            typedIntent.input?.change?.op === "contextual-permission" &&
-            typedIntent.input.change.permission === "application-preparation" &&
+            isApplicationPreparationEnable(typedIntent.input?.change) &&
             typeof api.getAutomationSettings === "function"
           ) {
             const automation = await api.getAutomationSettings();
@@ -3387,9 +3382,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     runMessageIntent,
     packetAnswerGap,
     packetBusy: busy,
-    applicationPreparation: packetApplicationId
-      ? applicationPreparation || { status: "checking", ready: false }
-      : null,
+    applicationPreparation: packetApplicationId ? applicationPreparation : null,
     startPacketAnswer: (gap, answer) => {
       if (String(answer || "").trim()) {
         void persistPacketGapAnswer(gap, answer);
@@ -3399,10 +3392,6 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       navigateForeground({ packetGapId: gap?.id || null });
     },
     resumePacketPreparation: async (applicationId) => {
-      if (applicationPreparation?.ready !== true) {
-        setError("Allow form preparation in the application review on the right first.");
-        return false;
-      }
       const resumed = await run(() =>
         resumePacketPreparation({ api, missions: view.missions, applicationId })
       );
@@ -3410,7 +3399,9 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return resumed;
     },
     enableApplicationPreparation: async () => {
-      const updated = await run(() => enableApplicationPreparation({ api }));
+      const updated = await run(() =>
+        enableApplicationPreparation({ api, offPlatforms: applicationPreparation?.offPlatforms })
+      );
       if (updated) setApplicationPreparation(updated);
       return updated;
     },

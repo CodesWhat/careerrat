@@ -14,8 +14,6 @@ const FIRST_ROLE_SUGGESTION = {
 
 const EXTRACTED_FACT_KINDS = new Set(["authorization", "candidate_patch", "evidence_claim"]);
 const EXPLICIT_ACTION_LABELS = {
-  consent_capability: ["Allow", "Not now"],
-  consent_mode: ["Use this setup", "Keep current"],
   company_add: ["Add company", "Not now"],
   companies_suggest: ["Show suggestions", "Not now"],
 };
@@ -452,21 +450,6 @@ export async function applyFirstRunConfirmation(block, { api, state, onCompanyOp
       company_preferences: { ...preferences, confirmed: true, examples },
     });
     return `${block.payload.name} saved`;
-  }
-  if (block?.kind === "consent_mode") {
-    await api.saveCandidateFile("automation", { setup_mode: block.payload });
-    return block.payload === "advanced" ? "Advanced permissions ready" : "Basic permissions kept";
-  }
-  if (block?.kind === "consent_capability") {
-    const { capability, platform } = block.payload;
-    await api.saveCandidateFile("automation", {
-      setup_mode: "advanced",
-      capabilities: {
-        [capability]: { enabled: true, platforms: { [platform]: true } },
-      },
-      consent: { [platform]: true },
-    });
-    return "Permission granted";
   }
   throw new Error(`Unsupported first-run confirmation: ${block?.kind || "unknown"}`);
 }

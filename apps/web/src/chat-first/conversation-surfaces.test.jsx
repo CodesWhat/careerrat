@@ -567,14 +567,28 @@ describe("TodayConversation", () => {
       <MessageTranscript
         messages={[
           {
-            id: "browser-consent",
+            id: "browser-off",
             role: "assistant",
             kind: "action_result",
-            text: "raw consent backend output",
+            text: "raw off backend output",
             artifacts: [
               {
                 kind: "browser_workflow_result",
                 skill: "optimize-linkedin",
+                state: "needs-user",
+                blockers: [{ code: "CAPABILITY_OFF" }],
+              },
+            ],
+          },
+          {
+            id: "browser-old-consent",
+            role: "assistant",
+            kind: "action_result",
+            text: "raw old backend output",
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                skill: "ingest-mail",
                 state: "needs-user",
                 blockers: [{ code: "CONSENT_REQUIRED" }],
               },
@@ -612,11 +626,16 @@ describe("TodayConversation", () => {
       />
     );
 
-    expect(html).toContain("CareerRat needs permission to review your LinkedIn profile");
+    expect(html).toContain(
+      "LinkedIn profile review is turned off. Turn it on in Settings or ask Paul to turn it on."
+    );
+    expect(html).toContain(
+      "Email check is turned off. Turn it on in Settings or ask Paul to turn it on."
+    );
     expect(html).toContain("signed-in application dashboard link");
     expect(html).toContain("Sign in or finish the verification step in the CareerRat browser");
     expect(html).not.toContain("Open Settings");
-    expect(html).not.toMatch(/raw (?:consent|status|auth) backend output/i);
+    expect(html).not.toMatch(/raw (?:off|old|status|auth) backend output/i);
   });
 
   it("keeps a malformed persisted artifact field from crashing the transcript", () => {
@@ -1055,7 +1074,7 @@ describe("TodayConversation", () => {
     );
   });
 
-  it("restores a persisted contextual permission action and sends its server-owned intent", () => {
+  it("restores a persisted turn-on action and sends its server-owned intent", () => {
     const onIntentAction = vi.fn();
     const intent = {
       type: "settings.apply",
@@ -1063,8 +1082,9 @@ describe("TodayConversation", () => {
       input: {
         change: {
           kind: "automation",
-          op: "contextual-permission",
-          permission: "status-checks",
+          op: "capability",
+          capability: "status_polling",
+          enabled: true,
         },
       },
     };
@@ -1072,13 +1092,13 @@ describe("TodayConversation", () => {
       onIntentAction,
       messages: [
         {
-          id: "permission-after-reload",
+          id: "turned-off-after-reload",
           role: "assistant",
           kind: "action_result",
-          text: "CareerRat needs permission to read Greenhouse, Workday, Ashby, and Lever application statuses. Choose Allow status checks, or type “Allow status checks”.",
+          text: "Portal status polling is turned off. Turn it on with `careerrat enable status_polling`, or ask me to turn it on.",
           metadata: {
-            state: "permission-needed",
-            nextActions: [{ label: "Allow status checks", intent }],
+            state: "capability-off",
+            nextActions: [{ label: "Turn it on", intent }],
           },
         },
       ],
@@ -1093,13 +1113,13 @@ describe("TodayConversation", () => {
     }
     visit(tree);
 
-    const allow = buttons.find((button) => button.props.children === "Allow status checks");
+    const allow = buttons.find((button) => button.props.children === "Turn it on");
     expect(allow).toBeTruthy();
     allow.props.onClick();
     expect(onIntentAction).toHaveBeenCalledWith(
       intent,
-      expect.objectContaining({ id: "permission-after-reload" }),
-      expect.objectContaining({ label: "Allow status checks" })
+      expect.objectContaining({ id: "turned-off-after-reload" }),
+      expect.objectContaining({ label: "Turn it on" })
     );
   });
 
@@ -1741,7 +1761,26 @@ describe("JobConversation and JobContextPanel", () => {
     expect(onResumePacket).toHaveBeenCalledOnce();
   });
 
-  it("explains and enables form preparation before offering resume", () => {
+  it("shows no permission UI by default and offers resume", () => {
+    const onResumePacket = vi.fn();
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview: {
+        status: "upload-ready",
+        uploadReady: true,
+        gapCount: 0,
+        canResume: true,
+        gaps: [],
+      },
+      applicationPreparation: null,
+      onResumePacket,
+    });
+    const html = markup(tree);
+    expect(html).not.toMatch(/permission|Allow|turned off|Turn it on/i);
+    expect(html).toContain("Resume preparation");
+  });
+
+  it("says form preparation is turned off and offers one Turn it on button", () => {
     const onEnableApplicationPreparation = vi.fn();
     const tree = JobContextPanel({
       job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
@@ -1752,7 +1791,7 @@ describe("JobConversation and JobContextPanel", () => {
         canResume: true,
         gaps: [],
       },
-      applicationPreparation: { status: "blocked", ready: false },
+      applicationPreparation: { status: "off", ready: false },
       onEnableApplicationPreparation,
     });
     const buttons = [];
@@ -1764,33 +1803,25 @@ describe("JobConversation and JobContextPanel", () => {
     }
     visit(tree);
     const html = markup(tree);
-    expect(html).toContain("CareerRat needs permission to open and fill application forms");
-    expect(html).toContain("CareerRat submits once everything is filled and checked");
-    expect(html).toContain("or type “Allow form preparation”");
-    expect(html).not.toContain("Open Settings");
-    expect(html).not.toContain("Resume preparation");
-    const enable = buttons.find((button) => button.props.children === "Allow form preparation");
+    expect(html).toContain("Preparing application forms is turned off.");
+    expect(html).not.toMatch(/Allow form preparation|consent/i);
+    const enable = buttons.find((button) => button.props.children === "Turn it on");
     expect(enable).toBeTruthy();
     enable.props.onClick();
     expect(onEnableApplicationPreparation).toHaveBeenCalledOnce();
   });
 
-  it("tells a manual-submit person they press submit in the form permission prompt", () => {
+  it("says form preparation is paused when settings can't be read", () => {
     const tree = JobContextPanel({
       job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
-      packetReview: {
-        status: "upload-ready",
-        uploadReady: true,
-        gapCount: 0,
-        canResume: true,
-        gaps: [],
-      },
-      applicationPreparation: { status: "blocked", ready: false, submitMode: "manual" },
-      onEnableApplicationPreparation: vi.fn(),
+      packetReview: { status: "upload-ready", uploadReady: true, gapCount: 0, gaps: [] },
+      applicationPreparation: { status: "unreadable", ready: false },
     });
     const html = markup(tree);
-    expect(html).toContain("check the answers and attachments, and press submit");
-    expect(html).not.toContain("CareerRat submits once everything is filled and checked");
+    expect(html).toContain(
+      "CareerRat can&#x27;t read your settings, so form preparation is paused."
+    );
+    expect(html).not.toContain("Turn it on");
   });
 
   it("offers supervised form preparation without rendering packet diagnostics as questions", () => {

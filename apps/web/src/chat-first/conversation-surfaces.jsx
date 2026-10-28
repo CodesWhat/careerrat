@@ -239,6 +239,7 @@ function browserWorkflowBlockerCode(artifact) {
   const blockers = Array.isArray(artifact?.blockers) ? artifact.blockers : EMPTY_LIST;
   const codes = new Set(blockers.map((blocker) => String(blocker?.code || "").toUpperCase()));
   return [
+    "CAPABILITY_OFF",
     "CONSENT_REQUIRED",
     "STATUS_URL_REQUIRED",
     "AUTH_REQUIRED",
@@ -251,9 +252,9 @@ function browserWorkflowBlockerCode(artifact) {
 
 function browserWorkflowRecovery(artifact) {
   const blockerCode = browserWorkflowBlockerCode(artifact);
-  if (blockerCode === "CONSENT_REQUIRED") {
-    const task = browserWorkflowTitle(artifact);
-    return `CareerRat needs permission to ${task === "LinkedIn profile review" ? "review your LinkedIn profile" : `run ${task.toLowerCase()}`}. Ask Paul to run this task again and the permission control will appear here.`;
+  // CONSENT_REQUIRED is only in results saved before consent was retired.
+  if (blockerCode === "CAPABILITY_OFF" || blockerCode === "CONSENT_REQUIRED") {
+    return `${browserWorkflowTitle(artifact)} is turned off. Turn it on in Settings or ask Paul to turn it on.`;
   }
   if (blockerCode === "STATUS_URL_REQUIRED") {
     return "CareerRat needs the signed-in application dashboard link. Open the job, save that link, then retry.";
@@ -1256,7 +1257,6 @@ export function JobContextPanel({
   onEnableApplicationPreparation,
 }) {
   const location = jobLocationCopy(job);
-  const preparationReady = applicationPreparation == null || applicationPreparation.ready === true;
 
   return (
     <aside className="chat-first-context-stack" aria-label="This job">
@@ -1399,31 +1399,25 @@ export function JobContextPanel({
               ) : null}
             </div>
           ))}
-          {applicationPreparation?.status === "checking" ? (
-            <small>Checking form permission…</small>
-          ) : null}
-          {applicationPreparation?.ready === false &&
-          applicationPreparation?.status !== "checking" ? (
+          {applicationPreparation?.status === "off" ? (
             <div className="chat-first-packet-review__permission">
-              <strong>Allow CareerRat to prepare the form</strong>
-              <small>
-                CareerRat needs permission to open and fill application forms.{" "}
-                {applicationPreparation?.submitMode === "manual"
-                  ? "Then you open it, check the answers and attachments, and press submit."
-                  : "CareerRat submits once everything is filled and checked."}{" "}
-                Choose the button, or type “Allow form preparation”.
-              </small>
+              <small>Preparing application forms is turned off.</small>
               <button
                 className="chat-first-context-action"
                 type="button"
                 disabled={packetBusy}
                 onClick={onEnableApplicationPreparation}
               >
-                Allow form preparation
+                Turn it on
               </button>
             </div>
           ) : null}
-          {(packetReview.canResume || packetReview.canPrepare) && preparationReady ? (
+          {applicationPreparation?.status === "unreadable" ? (
+            <div className="chat-first-packet-review__permission">
+              <small>CareerRat can't read your settings, so form preparation is paused.</small>
+            </div>
+          ) : null}
+          {packetReview.canResume || packetReview.canPrepare ? (
             <button
               className="chat-first-context-action"
               type="button"

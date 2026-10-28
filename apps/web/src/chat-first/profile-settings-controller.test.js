@@ -285,28 +285,27 @@ describe("profile settings controller mapping", () => {
       selectedId: "codex",
     });
     expect(model.agentName).toBe("Scout");
-    expect(
-      model.permissions.find((row) => row.id === "authenticated_apply_preparation")?.description
-    ).toBe("Scout fills authenticated forms, you press every submit");
-    expect(model.permissions.filter((row) => row.mutable)).toMatchObject([
+    expect(model.permissions.filter((row) => row.mutable).slice(0, 2)).toMatchObject([
       {
         id: "authenticated_apply_preparation",
-        providerScope:
-          "Turning this on records consent for Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and external ATS sites.",
+        name: "Prepare application forms",
+        description: "opens and fills application forms in your signed-in browser",
       },
       {
         id: "mail_access",
         name: "Read job-search email",
         description: "reads recruiting updates and verification codes from connected mail",
-        providerScope: "Turning this on records consent for Gmail, Outlook, and webmail.",
       },
     ]);
+    expect(JSON.stringify(model.permissions)).not.toMatch(/consent|press every submit/i);
     expect(model.engine.choices.map((choice) => choice.id)).toEqual(["codex", "custom"]);
-    expect(model.permissions.map((row) => [row.id, row.enabled])).toEqual([
+    expect(model.permissions.map((row) => [row.id, row.enabled]).slice(0, 3)).toEqual([
       ["draft_documents", true],
       ["authenticated_apply_preparation", false],
       ["mail_access", false],
     ]);
+    // Capabilities not reported as off stay on (the default).
+    expect(model.permissions.find((row) => row.id === "status_polling")?.enabled).toBe(true);
     expect(model.browser).toEqual({
       providerId: "auto",
       provider: "Automatic browser connection",
@@ -483,32 +482,12 @@ describe("profile settings controller mapping", () => {
     });
   });
 
-  it("builds the existing automation config patch and keeps draft documents always on", () => {
+  it("writes only capabilities.<cap>.enabled and keeps draft documents always on", () => {
     expect(permissionPatch("authenticated_apply_preparation", true)).toEqual({
-      setup_mode: "advanced",
-      consent: {
-        greenhouse: true,
-        lever: true,
-        ashby: true,
-        workable: true,
-        smartrecruiters: true,
-        linkedin: true,
-        external_ats: true,
-      },
-      capabilities: {
-        authenticated_apply_preparation: {
-          enabled: true,
-          platforms: {
-            greenhouse: true,
-            lever: true,
-            ashby: true,
-            workable: true,
-            smartrecruiters: true,
-            linkedin: true,
-            external_ats: true,
-          },
-        },
-      },
+      capabilities: { authenticated_apply_preparation: { enabled: true } },
+    });
+    expect(permissionPatch("mail_access", false)).toEqual({
+      capabilities: { mail_access: { enabled: false } },
     });
     expect(permissionPatch("draft_documents", false)).toBeNull();
   });
@@ -520,44 +499,17 @@ describe("profile settings controller mapping", () => {
       },
     });
     expect(model.permissions.some((permission) => permission.id === "source_login")).toBe(false);
-    expect(model.permissionState.some((permission) => permission.id === "source_login")).toBe(
-      false
-    );
-    expect(permissionPatch("source_login", true, model.permissions)).toBeNull();
+    expect(permissionPatch("source_login", true)).toBeNull();
   });
 
-  it("does not preserve consent for a removed hidden job-source permission", () => {
-    const permissions = [
-      { id: "source_login", enabled: true },
-      { id: "authenticated_apply_preparation", enabled: true },
-      { id: "mail_access", enabled: false },
-    ];
-
-    expect(permissionPatch("authenticated_apply_preparation", false, permissions)).toMatchObject({
-      consent: {
-        greenhouse: false,
-        lever: false,
-        ashby: false,
-        workable: false,
-        smartrecruiters: false,
-        linkedin: false,
-        external_ats: false,
-      },
-      capabilities: {
-        authenticated_apply_preparation: {
-          enabled: false,
-          platforms: {
-            greenhouse: false,
-            lever: false,
-            ashby: false,
-            workable: false,
-            smartrecruiters: false,
-            linkedin: false,
-            external_ats: false,
-          },
-        },
-      },
+  it("lists every capability and shows them as off, locked, when settings can't be read", () => {
+    const model = buildProfileSettingsModel({
+      automation: { readError: "bad yaml", capabilities: [] },
     });
+    expect(model.permissionsReadError).toBe("bad yaml");
+    const rows = model.permissions.filter((row) => row.id !== "draft_documents");
+    expect(rows.length).toBeGreaterThan(2);
+    expect(rows.every((row) => row.enabled === false && row.mutable === false)).toBe(true);
   });
 
   it("marks draft documents as an honest fixed capability instead of a switch", () => {

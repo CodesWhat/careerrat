@@ -65,7 +65,6 @@ const PERMISSIONS = [
     id: "email",
     name: "Read job-search email",
     description: "reads recruiting updates and verification codes from connected mail",
-    providerScope: "Turning this on records consent for Gmail, Outlook, and webmail.",
     enabled: false,
     mutable: true,
   },
@@ -451,7 +450,21 @@ describe("ProfileSettings", () => {
     expect(html).toContain('tabindex="-1"');
   });
 
-  it("renders settings in plain language and keeps every submit gated", async () => {
+  it("says when automation settings can't be read", async () => {
+    const { ProfileSettings } = await loadProfile();
+    const html = renderToStaticMarkup(
+      <ProfileSettings
+        agentName="Paul"
+        activeTab="settings"
+        permissions={PERMISSIONS}
+        permissionsReadError="bad yaml"
+      />
+    );
+
+    expect(html).toContain("can&#x27;t read your automation settings");
+  });
+
+  it("renders settings in plain language as on/off switches", async () => {
     const { ProfileSettings } = await loadProfile();
     const html = renderToStaticMarkup(
       <ProfileSettings
@@ -476,8 +489,9 @@ describe("ProfileSettings", () => {
 
     expect(html).toContain("AI ENGINE");
     expect(html).toContain("Connected");
-    expect(html).toContain("WHAT PAUL MAY DO ON HIS OWN");
-    expect(html).toContain("Submitting an application always gates back to you");
+    expect(html).toContain("WHAT PAUL CAN DO");
+    expect(html).toContain("Everything here is on unless you turn it off.");
+    expect(html).not.toMatch(/records consent|gates back to you|press every submit/i);
     expect(html).toContain("Saved sources run when you search");
     expect(html).not.toContain("blocked by a bot wall");
     expect(html).not.toContain("permission to use LinkedIn");
@@ -485,7 +499,6 @@ describe("ProfileSettings", () => {
     expect(html).toContain('aria-checked="false"');
     expect(html).toContain("Always on");
     expect(html).toContain("Read job-search email");
-    expect(html).toContain("Turning this on records consent for Gmail, Outlook, and webmail.");
     expect(html).toContain("Share public company and board metadata");
     expect(html).toContain(
       "company domains, career pages, ATS board links, providers, and scan confidence"

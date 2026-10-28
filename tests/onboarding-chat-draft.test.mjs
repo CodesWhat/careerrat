@@ -11,6 +11,29 @@ import {
   onboardingHasUnansweredTurn,
 } from "../src/core/onboarding/transcript-cleanup.mjs";
 
+test("onboarding draft drops the retired consent block kinds", () => {
+  const normalized = normalizeOnboardingDraft({
+    transcript: [
+      {
+        role: "assistant",
+        text: "Pick one.",
+        blocks: [
+          { kind: "consent_mode", payload: "advanced" },
+          {
+            kind: "consent_capability",
+            payload: { capability: "messaging", platform: "linkedin" },
+          },
+          { kind: "company_add", payload: { name: "Acme" } },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(
+    normalized.transcript[0].blocks.map((block) => block.kind),
+    ["company_add"]
+  );
+});
+
 test("onboarding draft preserves the chat cursor and stable assistant event identity", () => {
   const normalized = normalizeOnboardingDraft({
     chatCursor: { chatId: "chat-1", eventId: 8 },
