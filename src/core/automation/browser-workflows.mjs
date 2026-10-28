@@ -75,14 +75,21 @@ function workflowResult(skill, state, details = {}) {
     state,
     title: details.title || skill,
     ...details,
-    summary: turnedOff.length
-      ? `${summary} Turned off, so skipped: ${turnedOff.join(", ")}.`
-      : summary,
+    summary: [
+      summary,
+      turnedOff.length ? `Turned off, so skipped: ${turnedOff.join(", ")}.` : "",
+      details.settingsError ? `Skipped, settings unreadable: ${details.settingsError}.` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
   };
 }
 
-function turnedOffDetails(turnedOff) {
-  return turnedOff.length ? { turnedOff } : {};
+function turnedOffDetails(turnedOff, settingsError = null) {
+  return {
+    ...(turnedOff.length ? { turnedOff } : {}),
+    ...(settingsError ? { settingsError } : {}),
+  };
 }
 
 function blockerSummary(prefix, results) {
@@ -173,8 +180,15 @@ async function readWithOwnedSession({ createSessionImpl, base, platform, read })
   }
 }
 
+// A denial because the settings file can't be read is not "turned off": callers
+// report it separately via `readError`.
 function allowed(capability, platform, repoRoot, env) {
-  return mayRun({ capability, platform, root: repoRoot, env }).allowed;
+  const verdict = mayRun({ capability, platform, root: repoRoot, env });
+  return {
+    allowed: verdict.allowed,
+    readError: verdict.checks?.readable === false,
+    reasons: verdict.reasons,
+  };
 }
 
 function sourceLastRun(sources, id) {
@@ -198,10 +212,13 @@ export async function ingestWebmailInApp({
   const completedAt = now().toISOString();
   const results = [];
   const turnedOff = [];
+  let settingsError = null;
   let captured = 0;
   for (const platform of ["gmail", "outlook"]) {
-    if (!allowed("mail_access", platform, repoRoot, env)) {
-      turnedOff.push(platform);
+    const verdict = allowed("mail_access", platform, repoRoot, env);
+    if (!verdict.allowed) {
+      if (verdict.readError) settingsError = verdict.reasons[0];
+      else turnedOff.push(platform);
       continue;
     }
     const sourceId = `${platform}-webmail`;
@@ -279,7 +296,7 @@ export async function ingestWebmailInApp({
       platform: result.platform,
       ...result.blocker,
     })),
-    ...turnedOffDetails(turnedOff),
+    ...turnedOffDetails(turnedOff, settingsError),
     at: completedAt,
   });
 }
@@ -299,10 +316,13 @@ export async function ingestPlatformMessagesInApp({
   const completedAt = now().toISOString();
   const results = [];
   const turnedOff = [];
+  let settingsError = null;
   let captured = 0;
   for (const platform of ["linkedin", "wellfound"]) {
-    if (!allowed("messaging", platform, repoRoot, env)) {
-      turnedOff.push(platform);
+    const verdict = allowed("messaging", platform, repoRoot, env);
+    if (!verdict.allowed) {
+      if (verdict.readError) settingsError = verdict.reasons[0];
+      else turnedOff.push(platform);
       continue;
     }
     const sourceId = `${platform}-messages`;
@@ -379,7 +399,7 @@ export async function ingestPlatformMessagesInApp({
       platform: result.platform,
       ...result.blocker,
     })),
-    ...turnedOffDetails(turnedOff),
+    ...turnedOffDetails(turnedOff, settingsError),
     at: completedAt,
   });
 }
@@ -400,10 +420,13 @@ export async function sourceRelationshipsInApp({
   const foundAt = now().toISOString();
   const results = [];
   const turnedOff = [];
+  let settingsError = null;
   const leads = [];
   for (const platform of ["linkedin", "wellfound"]) {
-    if (!allowed("relationship_sourcing", platform, repoRoot, env)) {
-      turnedOff.push(platform);
+    const verdict = allowed("relationship_sourcing", platform, repoRoot, env);
+    if (!verdict.allowed) {
+      if (verdict.readError) settingsError = verdict.reasons[0];
+      else turnedOff.push(platform);
       continue;
     }
     const read = await readWithOwnedSession({
@@ -457,7 +480,7 @@ export async function sourceRelationshipsInApp({
       platform: result.platform,
       ...result.blocker,
     })),
-    ...turnedOffDetails(turnedOff),
+    ...turnedOffDetails(turnedOff, settingsError),
     at: foundAt,
   });
 }
@@ -535,7 +558,7 @@ export async function optimizeLinkedinInApp({
     const message =
       verdict.checks?.readable === false
         ? `LinkedIn profile review is blocked: ${verdict.reasons[0]}.`
-        : "LinkedIn profile review is turned off. Turn it on with `careerrat automation enable profile_optimize --write`, or ask me to turn it on.";
+        : `LinkedIn profile review is turned off: ${verdict.reasons.join("; ")}. You can also ask me to turn it on.`;
     return workflowResult("optimize-linkedin", "needs-user", {
       title: "LinkedIn profile review",
       summary: message,
@@ -625,7 +648,8 @@ export async function syncStatusesInApp({
 } = {}) {
   const at = now().toISOString();
   const results = [];
-  const turnedOff = [];
+  const turnedOff = new Set();
+  let settingsError = null;
   for (const application of applications) {
     const platform = statusPlatform(application);
     const url =
@@ -645,8 +669,10 @@ export async function syncStatusesInApp({
       });
       continue;
     }
-    if (!allowed("status_polling", platform, repoRoot, env)) {
-      turnedOff.push(platform);
+    const verdict = allowed("status_polling", platform, repoRoot, env);
+    if (!verdict.allowed) {
+      if (verdict.readError) settingsError = verdict.reasons[0];
+      else turnedOff.add(platform);
       continue;
     }
     const read = await readWithOwnedSession({
@@ -732,7 +758,7 @@ export async function syncStatusesInApp({
         applicationId: result.applicationId,
         ...result.blocker,
       })),
-      ...turnedOffDetails(turnedOff),
+      ...turnedOffDetails([...turnedOff], settingsError),
       at,
     }
   );

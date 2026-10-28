@@ -9632,8 +9632,13 @@ function settingsExplainFromText(text) {
   const value = String(text || "").trim();
   if (/^(?:please\s+)?what(?:\s+are)?\s+my\s+settings\s*[.?!]*$/i.test(value)) return {};
   if (/^(?:please\s+)?show\s+my\s+settings\s*[.?!]*$/i.test(value)) return {};
-  if (/^(?:please\s+)?show\s+my\s+automation\s+permissions\s*[.?!]*$/i.test(value))
+  if (
+    /^(?:please\s+)?(?:show\s+(?:me\s+)?(?:my\s+)?automation\s+(?:permissions|settings)|(?:what(?:'s|\s+is|\s+are)\s+)?(?:my\s+)?automation\s+settings)\s*[.?!]*$/i.test(
+      value
+    )
+  )
     return { domain: "automation" };
+  if (/^what(?:'s|\s+is)\s+turned\s+on\s*[.?!]*$/i.test(value)) return { domain: "automation" };
   if (/^what\s+automation\s+is\s+enabled\s*[.?!]*$/i.test(value)) return { domain: "automation" };
   if (/^what\s+mode\s+am\s+i\s+in\s*[.?!]*$/i.test(value)) return { domain: "modes" };
   return null;
