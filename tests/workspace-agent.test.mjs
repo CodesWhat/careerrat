@@ -11120,6 +11120,20 @@ test("workspace intake route sends paste and link captures through the same seri
   assert.equal(response.body.data.intake.id, "intake-link-1");
 });
 
+test("workspace route maps an invalid knowledge undo to 400", async () => {
+  const repoRoot = tempRepo();
+  const invalid = new Error("CareerRat couldn't find that change to undo.");
+  invalid.code = "KNOWLEDGE_REVERT_INVALID";
+  const routes = mountDirect(repoRoot, undefined, undefined, async () => {
+    throw invalid;
+  });
+  const response = await callDirect(routes, "POST", "/api/workspace/intake", {
+    text: "Temporal Labs is hiring an Applied AI Engineer.",
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.body.code, "KNOWLEDGE_REVERT_INVALID");
+});
+
 test("workspace intake route returns 400 for an invalid requested action", async () => {
   const repoRoot = tempRepo();
   const invalidAction = new Error('requestedAction must be "evaluate", "prepare", or "tailor"');
@@ -12883,6 +12897,114 @@ test("knowledge.revert puts a replaced evidence claim back through the firewall"
     (item) => item.id === "swap-001"
   );
   assert.equal(restored.claim, "Led the platform team.");
+});
+
+test("knowledge.revert refuses an evidence undo when another claim took the text", async () => {
+  const repoRoot = tempRepo();
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "dup-x", claim: "Led the platform team.", evidence: "Resume" }],
+  });
+  const prior = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "dup-x"
+  );
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "dup-x", claim: "Led the platform and data teams.", evidence: "Resume" }],
+  });
+  const current = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "dup-x"
+  );
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "dup-y", claim: "Led the platform team.", evidence: "Resume" }],
+  });
+  const message = storeEntry(
+    repoRoot,
+    buildKnowledgeWriteEntry({
+      target: "evidence",
+      op: "replace",
+      id: "dup-x",
+      before: prior,
+      after: current,
+      source: { kind: "test" },
+      writer: "test",
+    })
+  );
+  const note = await revertEntry(repoRoot, message);
+  assert.equal(note.text, "Another claim already has that text, so CareerRat couldn't restore it.");
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
+  assert.equal(
+    claims.find((item) => item.id === "dup-x").claim,
+    "Led the platform and data teams."
+  );
+  // Nothing was recorded as undone, so Undo is still available.
+  const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
+  assert.equal(
+    messages.some((item) =>
+      (item.artifacts || []).some((artifact) => artifact?.revertOf?.messageId === message.id)
+    ),
+    false
+  );
+});
+
+test("settings.apply logs a legacy automation capability turned off from its effective on state", async () => {
+  const repoRoot = tempRepo();
+  const capability = CAPABILITY_KEYS[0];
+  // A legacy doc: no capabilities_default marker, so the stored false is ignored
+  // and the capability is effectively on.
+  openDb({ repoRoot, env: {} })
+    .prepare("UPDATE candidate_automation SET data = ? WHERE id = 1")
+    .run(JSON.stringify({ capabilities: { [capability]: { enabled: false } } }));
+  assert.equal(
+    normalizeAutomationConfig(candidateConfigGet({ repoRoot, env: {} }).automation).capabilities[
+      capability
+    ].enabled,
+    true
+  );
+  const message = await applySetting(repoRoot, {
+    kind: "automation",
+    op: "capability",
+    capability,
+    enabled: false,
+  });
+  const entries = message.artifacts.filter((artifact) => artifact.kind === "knowledge_write");
+  const entry = entries.find((item) => item.path === `capabilities.${capability}.enabled`);
+  assert.ok(entry, "expected one entry for the capability switch");
+  assert.equal(entry.before, true);
+  assert.equal(entry.after, false);
+  assert.equal(entry.revertible, true);
+  await revertEntry(repoRoot, message, message.artifacts.indexOf(entry));
+  const restored = normalizeAutomationConfig(candidateConfigGet({ repoRoot, env: {} }).automation);
+  assert.equal(restored.capabilities[capability].enabled, true);
+});
+
+test("knowledge.revert restores mode_preferences_confirmed with a location mode", async () => {
+  const repoRoot = tempRepo();
+  const flagBefore = candidateConfigGet({ repoRoot, env: {} }).profile?.location
+    ?.mode_preferences_confirmed;
+  assert.notEqual(flagBefore, true);
+  const current = candidateConfigGet({ repoRoot, env: {} }).profile?.location?.remote === true;
+  const message = await applySetting(repoRoot, {
+    kind: "profile",
+    section: "location-mode",
+    field: "remote",
+    value: !current,
+  });
+  const entries = message.artifacts.filter((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(entries.length, 1);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).profile.location.mode_preferences_confirmed,
+    true
+  );
+  await revertEntry(repoRoot, message, message.artifacts.indexOf(entries[0]));
+  const location = candidateConfigGet({ repoRoot, env: {} }).profile.location || {};
+  assert.equal(location.remote === true, current);
+  assert.notEqual(location.mode_preferences_confirmed, true);
+  assert.equal(location.mode_preferences_confirmed, flagBefore);
 });
 
 test("knowledge.revert undoes a deep-ingest lane row add and replace", async () => {

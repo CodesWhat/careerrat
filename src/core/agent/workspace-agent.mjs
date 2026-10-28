@@ -6519,7 +6519,12 @@ export async function executeWorkspaceIntent({
               location: { [field]: change.value, mode_preferences_confirmed: true },
             },
           });
-          logWrites.push({ name: "profile", path: `location.${field}`, label: `${field} roles` });
+          logWrites.push({
+            name: "profile",
+            path: `location.${field}`,
+            label: `${field} roles`,
+            companions: ["location.mode_preferences_confirmed"],
+          });
           result = {
             label: `${field} roles`,
             field: `location.${field}`,

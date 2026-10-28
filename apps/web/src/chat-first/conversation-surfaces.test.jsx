@@ -2678,6 +2678,30 @@ describe("knowledge writes in the thread", () => {
     expect(html).not.toContain("\u2014");
   });
 
+  it("shows role buckets by name and titles, not as [object Object]", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          resultMessage([
+            entry({
+              path: "role_buckets",
+              label: "Target roles",
+              before: [{ name: "Primary", priority: 1, titles: ["Staff Engineer"] }],
+              after: [
+                { name: "Primary", priority: 1, titles: ["Staff Engineer"] },
+                { name: "Secondary", priority: 2, titles: ["Engineering Manager", "Tech Lead"] },
+              ],
+            }),
+          ]),
+        ]}
+        onIntentAction={vi.fn()}
+      />
+    );
+    expect(html).not.toContain("[object Object]");
+    expect(html).toContain("Primary (Staff Engineer)");
+    expect(html).toContain("Secondary (Engineering Manager, Tech Lead)");
+  });
+
   it("shows the note instead of Undo when a write is not revertible", () => {
     const html = markup(
       <MessageTranscript

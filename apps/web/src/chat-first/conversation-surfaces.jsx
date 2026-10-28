@@ -403,12 +403,34 @@ function SubmissionPacket({ artifact }) {
   );
 }
 
+const KNOWLEDGE_VALUE_MAX = 120;
+
+function truncateKnowledgeCopy(text) {
+  return text.length > KNOWLEDGE_VALUE_MAX ? `${text.slice(0, KNOWLEDGE_VALUE_MAX - 3)}...` : text;
+}
+
+function knowledgeItemCopy(item) {
+  if (item === null || item === undefined) return "";
+  if (typeof item !== "object") return String(item);
+  if (Array.isArray(item.titles) && item.titles.length) {
+    const name = item.name || item.label || item.title;
+    const titles = item.titles.map(String).join(", ");
+    return name ? `${name} (${titles})` : titles;
+  }
+  const name = item.title || item.name || item.label;
+  return name ? String(name) : JSON.stringify(item);
+}
+
 function knowledgeValueCopy(value, absent) {
   if (absent || value === undefined || value === null) return "nothing";
   if (value === true) return "on";
   if (value === false) return "off";
-  if (Array.isArray(value)) return value.length ? value.map(String).join(", ") : "nothing";
-  if (typeof value === "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return value.length
+      ? truncateKnowledgeCopy(value.map(knowledgeItemCopy).join(", "))
+      : "nothing";
+  }
+  if (typeof value === "object") return truncateKnowledgeCopy(knowledgeItemCopy(value));
   return String(value);
 }
 
