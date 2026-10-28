@@ -187,18 +187,30 @@ test("pluginAllowed allows a plugin with no declared capability", () => {
 test("pluginAllowed resolves a declared capability through mayRun (stub capability)", () => {
   // status_polling is an existing capability/platform pair in
   // ../automation/consent.mjs — used here purely as a stub to exercise the
-  // point-of-need consent path without introducing a new capability name.
+  // on/off path without introducing a new capability name.
   const manifest = { capability: "status_polling" };
 
-  const off = defaultAutomation();
-  assert.equal(pluginAllowed({ manifest, cfg: off }).allowed, false);
-
   const on = defaultAutomation();
-  on.setup_mode = "advanced";
-  on.capabilities.status_polling.enabled = true;
-  on.capabilities.status_polling.platforms.greenhouse = true;
-  on.consent.greenhouse = true;
   assert.equal(pluginAllowed({ manifest, cfg: on }).allowed, true);
+
+  const off = defaultAutomation();
+  off.capabilities.status_polling.enabled = false;
+  const verdict = pluginAllowed({ manifest, cfg: off });
+  assert.equal(verdict.allowed, false);
+  assert.match(verdict.reason, /careerrat automation enable status_polling --write/);
+
+  const onePlatformOff = defaultAutomation();
+  for (const platform of Object.keys(onePlatformOff.capabilities.status_polling.platforms)) {
+    onePlatformOff.capabilities.status_polling.platforms[platform] = false;
+  }
+  const platformDenied = pluginAllowed({ manifest, cfg: onePlatformOff });
+  assert.equal(platformDenied.allowed, false);
+  assert.match(
+    platformDenied.reason,
+    /careerrat automation enable status_polling (greenhouse|workday|ashby|lever) --write/
+  );
+  onePlatformOff.capabilities.status_polling.platforms.greenhouse = true;
+  assert.equal(pluginAllowed({ manifest, cfg: onePlatformOff }).allowed, true);
 });
 
 test("pluginAllowed refuses an unknown capability with a plain reason", () => {
@@ -408,22 +420,24 @@ test("runPlugin times out a hanging plugin instead of hanging the caller", async
   }
 });
 
-test("runPlugin refuses a plugin whose capability consent is not granted", async () => {
+test("runPlugin refuses a plugin whose capability is turned off", async () => {
   const root = tempRoot();
   try {
     writePlugin(root, "gated-plugin", {
       manifest: goodManifest({ name: "gated-plugin", capability: "status_polling" }),
       entrySource: `export default function run() { throw new Error("should never run"); }\n`,
     });
-    const outcome = await runPlugin("gated-plugin", { root, cfg: defaultAutomation() });
+    const cfg = defaultAutomation();
+    cfg.capabilities.status_polling.enabled = false;
+    const outcome = await runPlugin("gated-plugin", { root, cfg });
     assert.equal(outcome.ok, false);
-    assert.ok(outcome.error.message.toLowerCase().includes("not allowed"));
+    assert.ok(outcome.error.message.toLowerCase().includes("turned off"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("runPlugin runs a gated plugin once consent is granted", async () => {
+test("runPlugin runs a gated plugin when its capability is on", async () => {
   const root = tempRoot();
   try {
     writePlugin(root, "gated-plugin-2", {
@@ -431,10 +445,6 @@ test("runPlugin runs a gated plugin once consent is granted", async () => {
       entrySource: `export default function run() { return { ran: true }; }\n`,
     });
     const cfg = defaultAutomation();
-    cfg.setup_mode = "advanced";
-    cfg.capabilities.status_polling.enabled = true;
-    cfg.capabilities.status_polling.platforms.greenhouse = true;
-    cfg.consent.greenhouse = true;
 
     const outcome = await runPlugin("gated-plugin-2", { root, cfg });
     assert.equal(outcome.ok, true);

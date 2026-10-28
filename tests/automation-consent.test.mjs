@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,10 +9,12 @@ import {
   automationStatus,
   CAPABILITIES,
   defaultAutomation,
+  loadAutomation,
   mayRun,
+  migrateLegacyAutomationText,
+  normalizeAutomationConfig,
   PLATFORMS,
   planAutomationEdit,
-  planModeEdit,
   resolveEditPath,
 } from "../src/core/automation/consent.mjs";
 import { validate } from "../src/core/profile/schema-validator.mjs";
@@ -36,18 +38,28 @@ function loadJson(rel) {
   return JSON.parse(readFileSync(join(root, rel), "utf8"));
 }
 
-const automationTextWithoutSetupMode = `version: 1
+// A file written before capabilities defaulted to on: no marker, retired
+// consent/setup_mode keys, and capability values that were the old off default.
+const legacyAutomationText = `version: 1
+setup_mode: basic
 consent:
-  linkedin: true
+  linkedin: false
 capabilities:
   authenticated_apply_preparation:
-    enabled: true
+    enabled: false
     platforms:
-      linkedin: true
+      linkedin: false
 session:
   provider: extension
   profile_root: null
 `;
+
+const allOnCapabilities = (cfg) =>
+  Object.entries(CAPABILITIES).every(
+    ([cap, def]) =>
+      cfg.capabilities[cap].enabled === true &&
+      def.platforms.every((p) => cfg.capabilities[cap].platforms[p] === true)
+  );
 
 test("automation consent: mail_access supports Gmail, Outlook, and generic webmail", () => {
   assert.deepEqual(CAPABILITIES.mail_access.platforms, ["gmail", "outlook", "webmail"]);
@@ -97,10 +109,6 @@ test("automation consent: supervised apply preparation replaces the removed one-
   assert.equal(Object.hasOwn(CAPABILITIES, "one_click_apply"), false);
 
   const cfg = defaultAutomation();
-  cfg.setup_mode = "advanced";
-  cfg.capabilities.authenticated_apply_preparation.enabled = true;
-  cfg.capabilities.authenticated_apply_preparation.platforms.linkedin = true;
-  cfg.consent.linkedin = true;
   assert.equal(
     mayRun({
       capability: "authenticated_apply_preparation",
@@ -109,8 +117,6 @@ test("automation consent: supervised apply preparation replaces the removed one-
     }).allowed,
     true
   );
-  cfg.capabilities.authenticated_apply_preparation.platforms.greenhouse = true;
-  cfg.consent.greenhouse = true;
   assert.equal(
     mayRun({
       capability: "authenticated_apply_preparation",
@@ -152,119 +158,148 @@ test("automation consent: calendar_sync supports calendar providers and automati
   assert.ok(PLATFORMS.includes("automation_tools"));
 });
 
-test("automation consent: mail_access defaults fully off", () => {
+test("automation consent: the default is every capability and platform on", () => {
   const cfg = defaultAutomation();
-  assert.equal(cfg.setup_mode, "basic");
+  assert.equal(cfg.capabilities_default, "on");
   assert.equal(cfg.session.provider, "auto");
-  assert.equal(cfg.consent.gmail, false);
-  assert.equal(cfg.consent.outlook, false);
-  assert.equal(cfg.consent.webmail, false);
-  assert.equal(cfg.capabilities.mail_access.enabled, false);
-  assert.deepEqual(cfg.capabilities.mail_access.platforms, {
-    gmail: false,
-    outlook: false,
-    webmail: false,
-  });
+  assert.equal(Object.hasOwn(cfg, "setup_mode"), false);
+  assert.equal(Object.hasOwn(cfg, "consent"), false);
+  assert.equal(Object.hasOwn(cfg, "submit"), false);
+  assert.ok(allOnCapabilities(cfg));
+  for (const [cap, def] of Object.entries(CAPABILITIES)) {
+    for (const platform of def.platforms) {
+      const verdict = mayRun({ capability: cap, platform, data: cfg });
+      assert.equal(verdict.allowed, true, `${cap} on ${platform}`);
+      assert.deepEqual(verdict.reasons, []);
+      assert.deepEqual(verdict.checks, { global: true, platform: true });
+    }
+  }
 });
 
-test("automation consent: relationship_sourcing defaults fully off and uses the same predicate", () => {
-  const cfg = defaultAutomation();
-  assert.equal(cfg.capabilities.relationship_sourcing.enabled, false);
-  assert.deepEqual(cfg.capabilities.relationship_sourcing.platforms, {
-    linkedin: false,
-    wellfound: false,
-  });
-
-  let verdict = mayRun({ capability: "relationship_sourcing", platform: "linkedin", data: cfg });
-  assert.equal(verdict.allowed, false);
-  assert.deepEqual(verdict.checks, { global: false, platform: false, consent: false });
-
-  cfg.capabilities.relationship_sourcing.enabled = true;
-  cfg.capabilities.relationship_sourcing.platforms.linkedin = true;
-  cfg.consent.linkedin = true;
-  cfg.setup_mode = "advanced";
-
-  verdict = mayRun({ capability: "relationship_sourcing", platform: "linkedin", data: cfg });
-  assert.equal(verdict.allowed, true);
-  assert.deepEqual(verdict.reasons, []);
-});
-
-test("automation consent: calendar_sync defaults fully off and uses the same predicate", () => {
-  const cfg = defaultAutomation();
-  assert.equal(cfg.capabilities.calendar_sync.enabled, false);
-  assert.deepEqual(cfg.capabilities.calendar_sync.platforms, {
-    apple_calendar: false,
-    google_calendar: false,
-    outlook_calendar: false,
-    automation_tools: false,
-  });
-
-  let verdict = mayRun({ capability: "calendar_sync", platform: "google_calendar", data: cfg });
-  assert.equal(verdict.allowed, false);
-  assert.deepEqual(verdict.checks, { global: false, platform: false, consent: false });
-
-  cfg.capabilities.calendar_sync.enabled = true;
-  cfg.capabilities.calendar_sync.platforms.google_calendar = true;
-  cfg.consent.google_calendar = true;
-  cfg.setup_mode = "advanced";
-
-  verdict = mayRun({ capability: "calendar_sync", platform: "google_calendar", data: cfg });
-  assert.equal(verdict.allowed, true);
-  assert.deepEqual(verdict.reasons, []);
-});
-
-test("automation consent: mail_access uses the same three-switch predicate", () => {
-  const cfg = defaultAutomation();
-
-  let verdict = mayRun({ capability: "mail_access", platform: "gmail", data: cfg });
-  assert.equal(verdict.allowed, false);
-  assert.deepEqual(verdict.checks, { global: false, platform: false, consent: false });
-
-  cfg.capabilities.mail_access.enabled = true;
-  cfg.capabilities.mail_access.platforms.gmail = true;
-  cfg.consent.gmail = true;
-  cfg.setup_mode = "advanced";
-
-  verdict = mayRun({ capability: "mail_access", platform: "gmail", data: cfg });
-  assert.equal(verdict.allowed, true);
-  assert.deepEqual(verdict.reasons, []);
-});
-
-test("Basic mode is a hard off switch and its patch revokes every capability, platform, and consent", () => {
-  const configured = defaultAutomation();
-  configured.setup_mode = "advanced";
-  configured.capabilities.messaging.enabled = true;
-  configured.capabilities.messaging.platforms.linkedin = true;
-  configured.consent.linkedin = true;
+test("mayRun: an empty or partial doc means on, since missing keys mean on", () => {
+  assert.equal(mayRun({ capability: "mail_access", platform: "gmail", data: {} }).allowed, true);
   assert.equal(
-    mayRun({ capability: "messaging", platform: "linkedin", data: configured }).allowed,
+    mayRun({
+      capability: "mail_access",
+      platform: "gmail",
+      data: { capabilities: { mail_access: { platforms: { outlook: false } } } },
+    }).allowed,
     true
   );
-
-  const patch = automationModePatch("basic");
-  assert.equal(patch.setup_mode, "basic");
-  assert.equal(patch.capabilities.messaging.enabled, false);
-  assert.equal(patch.capabilities.messaging.platforms.linkedin, false);
-  assert.equal(patch.consent.linkedin, false);
-  assert.equal(
-    mayRun({ capability: "messaging", platform: "linkedin", data: patch }).allowed,
-    false
-  );
-  assert.deepEqual(automationModePatch("advanced"), { setup_mode: "advanced" });
 });
 
-test("Basic mode blocks a malformed stale live matrix even before it is cleared", () => {
+test("mayRun: consent, setup_mode and scoped_grants are ignored", () => {
   const cfg = defaultAutomation();
-  cfg.capabilities.authenticated_apply_preparation.enabled = true;
-  cfg.capabilities.authenticated_apply_preparation.platforms.linkedin = true;
-  cfg.consent.linkedin = true;
-  const verdict = mayRun({
-    capability: "authenticated_apply_preparation",
-    platform: "linkedin",
-    data: cfg,
-  });
+  cfg.setup_mode = "basic";
+  cfg.consent = { linkedin: false };
+  cfg.capabilities.messaging.scoped_grants = { linkedin: false };
+  assert.equal(mayRun({ capability: "messaging", platform: "linkedin", data: cfg }).allowed, true);
+});
+
+test("mayRun: a global switch set to false denies and names the enable command", () => {
+  const cfg = defaultAutomation();
+  cfg.capabilities.mail_access.enabled = false;
+  const verdict = mayRun({ capability: "mail_access", platform: "gmail", data: cfg });
   assert.equal(verdict.allowed, false);
-  assert.match(verdict.reasons.join(" "), /Basic mode/);
+  assert.deepEqual(verdict.checks, { global: false, platform: true });
+  assert.match(verdict.reasons.join(" "), /careerrat automation enable mail_access --write/);
+  // Other capabilities stay on.
+  assert.equal(
+    mayRun({ capability: "calendar_sync", platform: "google_calendar", data: cfg }).allowed,
+    true
+  );
+});
+
+test("mayRun: a platform switch set to false denies only that platform and names the command", () => {
+  const cfg = defaultAutomation();
+  cfg.capabilities.relationship_sourcing.platforms.linkedin = false;
+  const verdict = mayRun({ capability: "relationship_sourcing", platform: "linkedin", data: cfg });
+  assert.equal(verdict.allowed, false);
+  assert.deepEqual(verdict.checks, { global: true, platform: false });
+  assert.match(
+    verdict.reasons.join(" "),
+    /careerrat automation enable relationship_sourcing linkedin --write/
+  );
+  assert.equal(
+    mayRun({ capability: "relationship_sourcing", platform: "wellfound", data: cfg }).allowed,
+    true
+  );
+});
+
+test("mayRun: platform applicability and unknown capabilities still deny", () => {
+  const cfg = defaultAutomation();
+  const wrongPlatform = mayRun({ capability: "mail_access", platform: "linkedin", data: cfg });
+  assert.equal(wrongPlatform.allowed, false);
+  assert.match(wrongPlatform.reasons.join(" "), /does not apply to platform "linkedin"/);
+  const unknown = mayRun({ capability: "nope", platform: "linkedin", data: cfg });
+  assert.equal(unknown.allowed, false);
+  assert.match(unknown.reasons.join(" "), /unknown capability/);
+});
+
+test("automationModePatch is a no-op now that setup modes are retired", () => {
+  assert.deepEqual(automationModePatch("basic"), {});
+  assert.deepEqual(automationModePatch("advanced"), {});
+});
+
+test("normalizeAutomationConfig: a legacy all-off doc with no marker reads as every capability on", () => {
+  const legacy = {
+    version: 1,
+    setup_mode: "basic",
+    consent: { linkedin: false },
+    capabilities: {
+      messaging: { enabled: false, platforms: { linkedin: false, wellfound: false } },
+    },
+    submit: "manual",
+    session: { provider: "playwright", profile_root: "/tmp/profiles" },
+  };
+  const snapshot = structuredClone(legacy);
+  const out = normalizeAutomationConfig(legacy);
+  assert.ok(allOnCapabilities(out));
+  assert.equal(out.capabilities_default, "on");
+  assert.equal(out.submit, "manual");
+  assert.deepEqual(out.session, { provider: "playwright", profile_root: "/tmp/profiles" });
+  assert.equal(Object.hasOwn(out, "setup_mode"), false);
+  assert.equal(Object.hasOwn(out, "consent"), false);
+  assert.deepEqual(legacy, snapshot, "normalizing must not mutate its input");
+  assert.equal(mayRun({ capability: "messaging", platform: "linkedin", data: out }).allowed, true);
+});
+
+test("normalizeAutomationConfig: with the marker, explicit false values are respected", () => {
+  const out = normalizeAutomationConfig({
+    capabilities_default: "on",
+    capabilities: { messaging: { enabled: false, platforms: { linkedin: false } } },
+  });
+  assert.equal(out.capabilities.messaging.enabled, false);
+  assert.equal(out.capabilities.messaging.platforms.linkedin, false);
+  assert.equal(out.capabilities.messaging.platforms.wellfound, true);
+  assert.equal(out.capabilities.mail_access.enabled, true);
+  assert.equal(mayRun({ capability: "messaging", platform: "linkedin", data: out }).allowed, false);
+});
+
+test("normalizeAutomationConfig: null, empty and non-object docs read as the default", () => {
+  for (const input of [null, undefined, {}, "x", []]) {
+    assert.deepEqual(normalizeAutomationConfig(input), defaultAutomation());
+  }
+});
+
+test("migrateLegacyAutomationText: marker-less text restarts from the template and keeps submit and session", () => {
+  const template = readFileSync(join(root, "templates/automation.example.yml"), "utf8");
+  const text = `${legacyAutomationText}submit: manual\n`;
+  const migrated = migrateLegacyAutomationText(text, template);
+  const parsed = parseYaml(migrated);
+  assert.equal(parsed.capabilities_default, "on");
+  assert.equal(parsed.submit, "manual");
+  assert.equal(parsed.session.provider, "extension");
+  assert.equal(parsed.session.profile_root, null);
+  assert.ok(allOnCapabilities(parsed));
+  assert.equal(Object.hasOwn(parsed, "setup_mode"), false);
+  assert.equal(Object.hasOwn(parsed, "consent"), false);
+});
+
+test("migrateLegacyAutomationText: marked text is returned untouched", () => {
+  const template = readFileSync(join(root, "templates/automation.example.yml"), "utf8");
+  const marked = "capabilities_default: on\ncapabilities:\n  messaging:\n    enabled: false\n";
+  assert.equal(migrateLegacyAutomationText(marked, template), marked);
 });
 
 test("automation consent: status output includes mail_access platforms", () => {
@@ -414,16 +449,13 @@ test("automation consent: status output includes calendar_sync platforms", () =>
   );
 });
 
-test("automation consent: CLI edit paths support mail_access and webmail consent", () => {
+test("automation consent: CLI edit paths support mail_access and webmail", () => {
   const platformEdit = resolveEditPath({
     kind: "platform",
     capability: "mail_access",
     platform: "gmail",
   });
   assert.deepEqual(platformEdit.parts, ["capabilities", "mail_access", "platforms", "gmail"]);
-
-  const consentEdit = resolveEditPath({ kind: "consent", platform: "outlook" });
-  assert.deepEqual(consentEdit.parts, ["consent", "outlook"]);
 
   const webmailEdit = resolveEditPath({
     kind: "platform",
@@ -433,7 +465,7 @@ test("automation consent: CLI edit paths support mail_access and webmail consent
   assert.deepEqual(webmailEdit.parts, ["capabilities", "mail_access", "platforms", "webmail"]);
 });
 
-test("automation consent: CLI edit paths support calendar_sync and provider consent", () => {
+test("automation consent: CLI edit paths support calendar_sync", () => {
   const platformEdit = resolveEditPath({
     kind: "platform",
     capability: "calendar_sync",
@@ -446,283 +478,188 @@ test("automation consent: CLI edit paths support calendar_sync and provider cons
     "apple_calendar",
   ]);
 
-  const consentEdit = resolveEditPath({ kind: "consent", platform: "automation_tools" });
-  assert.deepEqual(consentEdit.parts, ["consent", "automation_tools"]);
+  assert.throws(() => resolveEditPath({ kind: "consent", platform: "automation_tools" }));
+  assert.throws(() => resolveEditPath({ kind: "mode" }));
 });
 
-test("automation template: mail_access ships OFF and validates against schema", () => {
+test("automation template: ships on, carries the marker, and validates against schema", () => {
   const template = parseYaml(readFileSync(join(root, "templates/automation.example.yml"), "utf8"));
-  assert.equal(template.consent.gmail, false);
-  assert.equal(template.consent.outlook, false);
-  assert.equal(template.consent.webmail, false);
-  assert.equal(template.capabilities.mail_access.enabled, false);
-  assert.deepEqual(template.capabilities.mail_access.platforms, {
-    gmail: false,
-    outlook: false,
-    webmail: false,
-  });
-
+  assert.equal(template.capabilities_default, "on");
+  assert.equal(Object.hasOwn(template, "consent"), false);
+  assert.equal(Object.hasOwn(template, "setup_mode"), false);
+  assert.ok(allOnCapabilities(template));
+  for (const cap of Object.keys(CAPABILITIES)) {
+    assert.deepEqual(
+      Object.keys(template.capabilities[cap].platforms).sort(),
+      [...CAPABILITIES[cap].platforms].sort(),
+      `${cap} platforms`
+    );
+  }
   const result = validate(template, loadJson("config/automation.schema.json"));
   assert.equal(result.valid, true, JSON.stringify(result.errors));
 });
 
-test("automation template: relationship_sourcing ships OFF and validates against schema", () => {
-  const template = parseYaml(readFileSync(join(root, "templates/automation.example.yml"), "utf8"));
-  assert.equal(template.capabilities.relationship_sourcing.enabled, false);
-  assert.deepEqual(template.capabilities.relationship_sourcing.platforms, {
-    linkedin: false,
-    wellfound: false,
-  });
-
-  const result = validate(template, loadJson("config/automation.schema.json"));
+test("automation schema still accepts the deprecated consent and setup_mode keys", () => {
+  const result = validate(
+    { setup_mode: "basic", consent: { linkedin: false }, capabilities_default: "on" },
+    loadJson("config/automation.schema.json")
+  );
   assert.equal(result.valid, true, JSON.stringify(result.errors));
+  const bad = validate({ capabilities_default: "off" }, loadJson("config/automation.schema.json"));
+  assert.equal(bad.valid, false);
 });
 
-test("automation template: calendar_sync ships OFF and validates against schema", () => {
-  const template = parseYaml(readFileSync(join(root, "templates/automation.example.yml"), "utf8"));
-  assert.equal(template.consent.apple_calendar, false);
-  assert.equal(template.consent.google_calendar, false);
-  assert.equal(template.consent.outlook_calendar, false);
-  assert.equal(template.consent.automation_tools, false);
-  assert.equal(template.capabilities.calendar_sync.enabled, false);
-  assert.deepEqual(template.capabilities.calendar_sync.platforms, {
-    apple_calendar: false,
-    google_calendar: false,
-    outlook_calendar: false,
-    automation_tools: false,
-  });
-
-  const result = validate(template, loadJson("config/automation.schema.json"));
-  assert.equal(result.valid, true, JSON.stringify(result.errors));
-});
-
-test("automation writer: can add mail_access paths to legacy automation files", () => {
+test("automation writer: scaffolds missing capability blocks as on, then applies the edit", () => {
   const schema = loadJson("config/automation.schema.json");
+  const text = `capabilities_default: on\nversion: 1\ncapabilities:\n`;
 
-  const platformPlan = planAutomationEdit({
+  const mail = planAutomationEdit({
     kind: "platform",
     capability: "mail_access",
     platform: "gmail",
-    value: true,
-    currentText: automationTextWithoutSetupMode,
+    value: false,
+    currentText: text,
     schema,
   });
-  assert.equal(platformPlan.ok, true);
-  assert.equal(platformPlan.valid, true, JSON.stringify(platformPlan.errors));
-  assert.ok(platformPlan.nextText.includes("mail_access:"));
-  assert.ok(platformPlan.nextText.includes("gmail: true"));
-  assert.ok(platformPlan.nextText.includes("outlook: false"));
-  assert.ok(platformPlan.nextText.includes("webmail: false"));
-
-  const consentPlan = planAutomationEdit({
-    kind: "consent",
-    platform: "gmail",
-    value: true,
-    currentText: automationTextWithoutSetupMode,
-    schema,
+  assert.equal(mail.ok, true);
+  assert.equal(mail.valid, true, JSON.stringify(mail.errors));
+  assert.equal(mail.changed, true);
+  assert.equal(mail.previous, "true");
+  const parsed = parseYaml(mail.nextText);
+  assert.equal(parsed.capabilities.mail_access.enabled, true);
+  assert.deepEqual(parsed.capabilities.mail_access.platforms, {
+    gmail: false,
+    outlook: true,
+    webmail: true,
   });
-  assert.equal(consentPlan.ok, true);
-  assert.equal(consentPlan.valid, true, JSON.stringify(consentPlan.errors));
-  assert.ok(consentPlan.nextText.includes("gmail: true"));
-});
 
-test("automation writer: can add relationship_sourcing paths to legacy automation files", () => {
-  const schema = loadJson("config/automation.schema.json");
-
-  const platformPlan = planAutomationEdit({
-    kind: "platform",
-    capability: "relationship_sourcing",
-    platform: "linkedin",
-    value: true,
-    currentText: automationTextWithoutSetupMode,
-    schema,
-  });
-  assert.equal(platformPlan.ok, true);
-  assert.equal(platformPlan.valid, true, JSON.stringify(platformPlan.errors));
-  assert.ok(platformPlan.nextText.includes("relationship_sourcing:"));
-  assert.ok(platformPlan.nextText.includes("linkedin: true"));
-  assert.ok(platformPlan.nextText.includes("wellfound: false"));
-});
-
-test("automation writer: can add calendar_sync paths to legacy automation files", () => {
-  const schema = loadJson("config/automation.schema.json");
-
-  const platformPlan = planAutomationEdit({
-    kind: "platform",
+  const calendar = planAutomationEdit({
+    kind: "capability",
     capability: "calendar_sync",
-    platform: "google_calendar",
-    value: true,
-    currentText: automationTextWithoutSetupMode,
+    value: false,
+    currentText: mail.nextText,
     schema,
   });
-  assert.equal(platformPlan.ok, true);
-  assert.equal(platformPlan.valid, true, JSON.stringify(platformPlan.errors));
-  assert.ok(platformPlan.nextText.includes("calendar_sync:"));
-  assert.ok(platformPlan.nextText.includes("apple_calendar: false"));
-  assert.ok(platformPlan.nextText.includes("google_calendar: true"));
-  assert.ok(platformPlan.nextText.includes("outlook_calendar: false"));
-  assert.ok(platformPlan.nextText.includes("automation_tools: false"));
-
-  const consentPlan = planAutomationEdit({
-    kind: "consent",
-    platform: "google_calendar",
-    value: true,
-    currentText: automationTextWithoutSetupMode,
-    schema,
-  });
-  assert.equal(consentPlan.ok, true);
-  assert.equal(consentPlan.valid, true, JSON.stringify(consentPlan.errors));
-  assert.ok(consentPlan.nextText.includes("google_calendar: true"));
+  assert.equal(calendar.ok, true);
+  assert.equal(calendar.valid, true, JSON.stringify(calendar.errors));
+  const next = parseYaml(calendar.nextText);
+  assert.equal(next.capabilities.calendar_sync.enabled, false);
+  assert.equal(next.capabilities.calendar_sync.platforms.google_calendar, true);
+  assert.equal(
+    mayRun({ capability: "calendar_sync", platform: "google_calendar", data: next }).allowed,
+    false
+  );
+  assert.equal(
+    mayRun({ capability: "mail_access", platform: "outlook", data: next }).allowed,
+    true
+  );
 });
 
-// ── planModeEdit / the setup_mode CLI gap ───────────────────────────────────
-//
-// mayRun() is a hard AND of setup_mode==="advanced" plus the three granular
-// switches (global, platform, consent). Before this fix, the CLI
-// (src/cli/automation.mjs) had `consent`/`enable`/`disable`/`revoke` verbs but
-// no verb that could ever move setup_mode off its "basic" default, so the
-// AGENTS.md-documented recipe (consent, enable, enable) could never reach
-// allowed:true. planModeEdit is the pure edit-computation behind the new
-// `mode <basic|advanced>` CLI verb.
-
-test("resolveEditPath supports kind:mode", () => {
-  assert.deepEqual(resolveEditPath({ kind: "mode" }), {
-    parts: ["setup_mode"],
-    label: "automation setup mode",
-  });
-});
-
-test("planModeEdit rejects a value that isn't basic or advanced", () => {
-  const plan = planModeEdit({ mode: "yolo", currentText: automationTextWithoutSetupMode });
-  assert.equal(plan.ok, false);
-  assert.match(plan.error, /basic.*advanced|advanced.*basic/);
-});
-
-test("planModeEdit scaffolds setup_mode on a legacy file that predates the field", () => {
-  // This input has no `setup_mode:` key at all — an install from
-  // before this field existed. The edit must still succeed.
-  assert.doesNotMatch(automationTextWithoutSetupMode, /setup_mode/);
+test("automation writer: disabling is idempotent on an on-by-default template", () => {
   const schema = loadJson("config/automation.schema.json");
-  const plan = planModeEdit({
-    mode: "advanced",
-    currentText: automationTextWithoutSetupMode,
+  const template = readFileSync(join(root, "templates/automation.example.yml"), "utf8");
+  const first = planAutomationEdit({
+    kind: "capability",
+    capability: "messaging",
+    value: false,
+    currentText: template,
+    schema,
+  });
+  assert.equal(first.changed, true);
+  const second = planAutomationEdit({
+    kind: "capability",
+    capability: "messaging",
+    value: false,
+    currentText: first.nextText,
+    schema,
+  });
+  assert.equal(second.changed, false);
+  assert.equal(
+    mayRun({ capability: "messaging", platform: "linkedin", data: parseYaml(first.nextText) })
+      .allowed,
+    false
+  );
+});
+
+test("a legacy file migrated then disabled keeps one capability off and the rest on", () => {
+  const schema = loadJson("config/automation.schema.json");
+  const template = readFileSync(join(root, "templates/automation.example.yml"), "utf8");
+  const base = migrateLegacyAutomationText(legacyAutomationText, template);
+  const plan = planAutomationEdit({
+    kind: "capability",
+    capability: "mail_access",
+    value: false,
+    currentText: base,
     schema,
   });
   assert.equal(plan.ok, true);
   assert.equal(plan.valid, true, JSON.stringify(plan.errors));
-  assert.equal(plan.changed, true);
-  assert.match(plan.nextText, /^setup_mode: advanced$/m);
-
-  const parsed = parseYaml(plan.nextText);
-  assert.equal(parsed.setup_mode, "advanced");
-  // Nothing else in the file moved.
-  assert.equal(parsed.consent.linkedin, true);
+  const cfg = parseYaml(plan.nextText);
+  assert.equal(cfg.capabilities_default, "on");
+  const denied = mayRun({ capability: "mail_access", platform: "gmail", data: cfg });
+  assert.equal(denied.allowed, false);
+  assert.match(denied.reasons.join(" "), /careerrat automation enable mail_access --write/);
+  assert.equal(
+    mayRun({ capability: "authenticated_apply_preparation", platform: "linkedin", data: cfg })
+      .allowed,
+    true
+  );
+  assert.equal(cfg.session.provider, "extension");
 });
 
-test("planModeEdit is idempotent once already at the target mode", () => {
-  const schema = loadJson("config/automation.schema.json");
-  const first = planModeEdit({
-    mode: "advanced",
-    currentText: automationTextWithoutSetupMode,
-    schema,
-  });
-  const second = planModeEdit({ mode: "advanced", currentText: first.nextText, schema });
-  assert.equal(second.changed, false);
-  assert.equal(second.nextText, first.nextText);
+test("automation status: every capability and platform reads on for a fresh workspace, with no consent or mode fields", () => {
+  const status = automationStatus({ root: emptyRoot, env: {} });
+  assert.equal(Object.hasOwn(status, "consent"), false);
+  assert.equal(Object.hasOwn(status, "mode"), false);
+  assert.equal(status.submit, "auto");
+  for (const cap of status.capabilities) {
+    assert.equal(cap.enabled, true, cap.capability);
+    for (const platform of cap.platforms) {
+      assert.deepEqual(Object.keys(platform).sort(), ["allowed", "enabled", "platform"]);
+      assert.equal(platform.enabled, true);
+      assert.equal(platform.allowed, true);
+    }
+  }
+  assert.equal(
+    status.liveCount,
+    Object.values(CAPABILITIES).reduce((n, def) => n + def.platforms.length, 0)
+  );
 });
 
-test("planModeEdit can move an advanced file back to basic", () => {
-  const schema = loadJson("config/automation.schema.json");
-  const advanced = planModeEdit({
-    mode: "advanced",
-    currentText: automationTextWithoutSetupMode,
-    schema,
-  });
-  const backToBasic = planModeEdit({ mode: "basic", currentText: advanced.nextText, schema });
-  assert.equal(backToBasic.ok, true);
-  assert.equal(backToBasic.changed, true);
-  assert.equal(parseYaml(backToBasic.nextText).setup_mode, "basic");
-});
+test("an unreadable existing automation.yml fails closed for every capability; an absent one is all on", () => {
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-automation-readerr-"));
+  const env = {};
+  assert.equal(loadAutomation({ root: dir, env }).readError, null);
+  assert.equal(
+    mayRun({ capability: "mail_access", platform: "gmail", root: dir, env }).allowed,
+    true
+  );
 
-test("the AGENTS.md-documented CLI recipe (mode, consent, enable, enable) ends in mayRun() allowed:true", () => {
-  const schema = loadJson("config/automation.schema.json");
-  const template = readFileSync(join(root, "templates/automation.example.yml"), "utf8");
-
-  // Before this fix, running consent + enable + enable alone (skipping a
-  // setup_mode step no CLI verb could perform) left the capability
-  // permanently unreachable. Confirm that failure mode still holds without
-  // the new `mode` step, so the fix is demonstrably necessary...
-  let text = template;
-  let step = planAutomationEdit({
-    kind: "consent",
-    platform: "linkedin",
-    value: true,
-    currentText: text,
-    schema,
-  });
-  assert.equal(step.ok, true);
-  text = step.nextText;
-  step = planAutomationEdit({
-    kind: "capability",
-    capability: "messaging",
-    value: true,
-    currentText: text,
-    schema,
-  });
-  text = step.nextText;
-  step = planAutomationEdit({
-    kind: "platform",
-    capability: "messaging",
-    platform: "linkedin",
-    value: true,
-    currentText: text,
-    schema,
-  });
-  text = step.nextText;
-  const withoutMode = mayRun({
-    capability: "messaging",
-    platform: "linkedin",
-    data: parseYaml(text),
-  });
-  assert.equal(withoutMode.allowed, false);
-  assert.match(withoutMode.reasons.join(" "), /Basic mode/);
-
-  // ...then confirm prepending the new `mode advanced --write` step (now
-  // possible thanks to planModeEdit) is sufficient to reach allowed:true,
-  // with no other change to the recipe.
-  const modePlan = planModeEdit({ mode: "advanced", currentText: template, schema });
-  assert.equal(modePlan.ok, true);
-  let fullText = modePlan.nextText;
-  step = planAutomationEdit({
-    kind: "consent",
-    platform: "linkedin",
-    value: true,
-    currentText: fullText,
-    schema,
-  });
-  fullText = step.nextText;
-  step = planAutomationEdit({
-    kind: "capability",
-    capability: "messaging",
-    value: true,
-    currentText: fullText,
-    schema,
-  });
-  fullText = step.nextText;
-  step = planAutomationEdit({
-    kind: "platform",
-    capability: "messaging",
-    platform: "linkedin",
-    value: true,
-    currentText: fullText,
-    schema,
-  });
-  fullText = step.nextText;
-
-  const parsed = parseYaml(fullText);
-  const validation = validate(parsed, schema);
-  assert.equal(validation.valid, true, JSON.stringify(validation.errors));
-
-  const verdict = mayRun({ capability: "messaging", platform: "linkedin", data: parsed });
-  assert.equal(verdict.allowed, true, JSON.stringify(verdict.reasons));
+  mkdirSync(join(dir, "candidate"), { recursive: true });
+  writeFileSync(
+    join(dir, "candidate", "automation.yml"),
+    `version: 1
+capabilities_default: on
+capabilities:
+  mail_access:
+    enabled: false
+  note: "unterminated
+`
+  );
+  const loaded = loadAutomation({ root: dir, env });
+  assert.equal(loaded.valid, false);
+  assert.match(loaded.readError, /YAML parse error/);
+  for (const [capability, platform] of [
+    ["mail_access", "gmail"],
+    ["messaging", "linkedin"],
+    ["status_polling", "greenhouse"],
+  ]) {
+    const verdict = mayRun({ capability, platform, root: dir, env });
+    assert.equal(verdict.allowed, false, capability);
+    assert.match(verdict.reasons[0], /automation settings can't be read/);
+    assert.match(verdict.reasons[0], /careerrat automation status/);
+  }
+  const status = automationStatus({ root: dir, env });
+  assert.match(status.readError, /YAML parse error/);
+  assert.equal(status.liveCount, 0);
 });

@@ -5,7 +5,7 @@ each is the right tool at a different layer. Skills and scripts should name the
 layer they use and link here, so the agent always knows which capability to
 reach for.
 
-> This is the lightweight **substrate map**. The opt-in, consent-gated,
+> This is the lightweight **substrate map**. The on-by-default
 > authenticated automation model (status polling, in-platform
 > messaging, supervised apply preparation, profile optimization, webmail access) is specified by the
 > **Browser Automation Contract** in
@@ -83,8 +83,9 @@ Capabilities the agent uses at this layer (each maps to whichever provider is ac
 Reading public posting bodies (above) needs no permission. But **logged-in** Layer-3
 uses — polling your ATS dashboards for application status, reading in-platform DMs,
 supervised apply preparation, profile optimization, and
-webmail access — are gated. They are
-**opt-in and default OFF**: with no `.careerrat/candidate/automation.yml`, none of them run.
+webmail access, can be switched off. They are
+**on by default**: with no `.careerrat/candidate/automation.yml`, all of them can run, and
+`careerrat automation disable <capability> [platform] --write` turns one off.
 
 The authenticated capabilities are live behind the switchboard: `status_polling`
 (**`sync-status`** skill), `messaging` (**`ingest-messages`** skill), and
@@ -96,10 +97,8 @@ verification-code reads and opted-in `ingest-mail` webmail reads).
 
 The switchboard is `.careerrat/candidate/automation.yml` (gitignored; schema
 `config/automation.schema.json`, template `templates/automation.example.yml`). A
-capability runs on a platform **only if the three switches are all on**: the
-capability's global switch, that platform's per-capability switch, and that
-platform's one-time ToS consent. **And** either the setup mode is "advanced"
-or the capability has a contextual scoped grant for that platform. Query it
+capability runs on a platform unless its global switch or that platform's per-capability
+switch is explicitly `false`. ToS consent and setup mode are retired and ignored. Query it
 with `mayRun()` in `src/core/automation/consent.mjs`; never hardcode the
 policy in skill prose.
 
@@ -113,8 +112,8 @@ comment-preserving and schema-validated):
 
 ```
 careerrat automation status                          # the live matrix
-careerrat automation consent <platform> --write      # record ToS consent
 careerrat automation enable <capability> [platform] --write
+careerrat automation disable <capability> [platform] --write
 ```
 
 No credentials are ever stored — the session browser (Orca, extension, or a Playwright

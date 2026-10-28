@@ -16,6 +16,7 @@ import {
   sourceRelationshipsInApp,
   syncStatusesInApp,
 } from "../src/core/automation/browser-workflows.mjs";
+import { CAPABILITIES } from "../src/core/automation/consent.mjs";
 import { openDb, requireDb } from "../src/core/db/connection.mjs";
 import { assembleTrackerObject } from "../src/core/db/export-to-tracker.mjs";
 import { appUpsert } from "../src/core/db/verbs/app.mjs";
@@ -117,22 +118,32 @@ after(async () => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-function workspace(capabilities, consent) {
+// Capabilities are on by default, so a fixture names the ones it wants and every
+// other capability or platform is turned off explicitly.
+function workspace(capabilities) {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-browser-workflow-"));
   roots.push(repoRoot);
   openDb({ repoRoot, env: {} });
+  const matrix = {};
+  for (const [cap, def] of Object.entries(CAPABILITIES)) {
+    const wanted = capabilities[cap];
+    matrix[cap] = {
+      enabled: Boolean(wanted?.enabled),
+      platforms: Object.fromEntries(
+        def.platforms.map((platform) => [platform, wanted?.platforms?.[platform] === true])
+      ),
+    };
+  }
   candidateConfigPatch({
     repoRoot,
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       session: {
         provider: "playwright",
         profile_root: join(repoRoot, "profiles"),
       },
-      capabilities,
-      consent,
+      capabilities: matrix,
     },
   });
   return repoRoot;
@@ -156,12 +167,9 @@ function tracker(repoRoot) {
 }
 
 test("Playwright fixtures: Gmail and Outlook ingest write canonical inbound mail", async () => {
-  const repoRoot = workspace(
-    {
-      mail_access: { enabled: true, platforms: { gmail: true, outlook: true } },
-    },
-    { gmail: true, outlook: true }
-  );
+  const repoRoot = workspace({
+    mail_access: { enabled: true, platforms: { gmail: true, outlook: true } },
+  });
   appUpsert({
     repoRoot,
     env: {},
@@ -206,15 +214,12 @@ test("Playwright fixtures: Gmail and Outlook ingest write canonical inbound mail
 });
 
 test("Playwright fixtures: LinkedIn and Wellfound message ingest write separate channels", async () => {
-  const repoRoot = workspace(
-    {
-      messaging: {
-        enabled: true,
-        platforms: { linkedin: true, wellfound: true },
-      },
+  const repoRoot = workspace({
+    messaging: {
+      enabled: true,
+      platforms: { linkedin: true, wellfound: true },
     },
-    { linkedin: true, wellfound: true }
-  );
+  });
   appUpsert({
     repoRoot,
     env: {},
@@ -257,10 +262,9 @@ test("Playwright fixtures: LinkedIn and Wellfound message ingest write separate 
 });
 
 test("Playwright fixture: relationship sourcing captures review-only LinkedIn leads", async () => {
-  const repoRoot = workspace(
-    { relationship_sourcing: { enabled: true, platforms: { linkedin: true } } },
-    { linkedin: true }
-  );
+  const repoRoot = workspace({
+    relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
+  });
   const result = await sourceRelationshipsInApp({
     repoRoot,
     env: {},
@@ -279,10 +283,9 @@ test("Playwright fixture: relationship sourcing captures review-only LinkedIn le
 });
 
 test("Playwright fixture: LinkedIn profile read creates proposals without editing the profile", async () => {
-  const repoRoot = workspace(
-    { profile_optimize: { enabled: true, platforms: { linkedin: true } } },
-    { linkedin: true }
-  );
+  const repoRoot = workspace({
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
   const result = await optimizeLinkedinInApp({
     repoRoot,
     env: {},
@@ -305,10 +308,9 @@ test("Playwright fixture: LinkedIn profile read creates proposals without editin
 });
 
 test("LinkedIn proposal schema retry keeps the frozen provider plan after provider settings change", async () => {
-  const repoRoot = workspace(
-    { profile_optimize: { enabled: true, platforms: { linkedin: true } } },
-    { linkedin: true }
-  );
+  const repoRoot = workspace({
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
   const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
   const executionPlan = {
     policyVersion: 1,
@@ -381,10 +383,9 @@ test("LinkedIn proposal schema retry keeps the frozen provider plan after provid
 });
 
 test("Playwright fixture: ATS sync reads status and atomically clears portal CTAs", async () => {
-  const repoRoot = workspace(
-    { status_polling: { enabled: true, platforms: { greenhouse: true } } },
-    { greenhouse: true }
-  );
+  const repoRoot = workspace({
+    status_polling: { enabled: true, platforms: { greenhouse: true } },
+  });
   const application = {
     id: "app-acme",
     company: "Acme",
@@ -427,10 +428,9 @@ test("Playwright fixture: ATS sync reads status and atomically clears portal CTA
 });
 
 test("Playwright fixture: ambiguous ATS status stays visible for review and writes nothing", async () => {
-  const repoRoot = workspace(
-    { status_polling: { enabled: true, platforms: { greenhouse: true } } },
-    { greenhouse: true }
-  );
+  const repoRoot = workspace({
+    status_polling: { enabled: true, platforms: { greenhouse: true } },
+  });
   const application = {
     id: "app-acme-review",
     company: "Acme",
@@ -454,10 +454,7 @@ test("Playwright fixture: ambiguous ATS status stays visible for review and writ
 });
 
 test("Playwright fixture: authentication walls return visible retry state and write nothing", async () => {
-  const repoRoot = workspace(
-    { mail_access: { enabled: true, platforms: { gmail: true } } },
-    { gmail: true }
-  );
+  const repoRoot = workspace({ mail_access: { enabled: true, platforms: { gmail: true } } });
   const manager = createBrowserSessionManager({
     createSessionImpl: headlessSession,
   });

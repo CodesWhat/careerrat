@@ -5,9 +5,9 @@
 //
 // Plugins here are code we ship, never user-added, never remote — there is no
 // enable/disable registry and nothing to install. Whether a plugin may run is
-// a per-capability point-of-need consent decision `careerrat automation` and
+// a per-capability on/off switch `careerrat automation` and
 // src/core/plugins/consent.mjs already own. So this CLI does exactly two
-// things and nothing else: list what's bundled (with its current consent
+// things and nothing else: list what's bundled (with its current on/off
 // state), and verify every bundled manifest is well-formed. It never
 // enables, disables, or runs a plugin.
 //
@@ -100,7 +100,7 @@ function cmdList() {
     console.log(`- ${row.name}: ${row.description}`);
     console.log(`  capability: ${row.capability ?? "none"}`);
     console.log(`  fetch hosts: ${row.fetchHosts.length ? row.fetchHosts.join(", ") : "none"}`);
-    console.log(`  consent: ${row.allowed ? "allowed" : `blocked: ${row.reason}`}`);
+    console.log(`  status: ${row.allowed ? "allowed" : `turned off: ${row.reason}`}`);
   }
   process.exit(0);
 }
@@ -158,8 +158,8 @@ Usage:
 
 Commands:
   list      Default. One line per bundled plugin: name, description, declared
-            capability, fetch hosts, and its current consent state against
-            this workspace (allowed / blocked: reason).
+            capability, fetch hosts, and its current on/off state against
+            this workspace (allowed / turned off: reason).
   verify    Validate every bundled plugin's manifest.json and confirm its
             entry file exists inside plugins/. Exit 0 when all pass, exit 1
             otherwise, naming each failure.
@@ -171,5 +171,5 @@ Options:
 
 There is no enable/disable registry here — bundled plugins ship with the repo
 and are never user-added. Whether a plugin that declares a capability may run
-is a point-of-need consent decision; see \`careerrat automation\`.`);
+is an on/off switch; see \`careerrat automation\`.`);
 }

@@ -22,9 +22,9 @@
 // The middle four are config-file-derived (candidate/*.yml, workspace/setup-
 // state.json) and completely independent of the db/tracker.json — reusing the
 // same loaders tracker.mjs calls is not an assumption, it's the same code path.
-// calendarProviderStatus is calendar_sync's per-platform {enabled, consent,
+// calendarProviderStatus is calendar_sync's per-platform {enabled,
 // allowed} from candidate/automation.yml, keyed by platform — degrades to
-// null (buildCalendarSync's existing "Consent gated" fallback) if that file
+// null (buildCalendarSync's "On" fallback) if that file
 // is missing or automationStatus throws.
 // Every buildXStatus() reader inside buildDashboardViewModel defaults its own
 // input to `{}`/`null` (buildModeStatus, buildSettingsStatus, buildLibraryStatus,
@@ -96,20 +96,17 @@ function readSetup({ repoRoot, env, candidateConfigGetForRoute }) {
 }
 
 // Reduces automationStatus()'s full capability matrix down to calendar_sync's
-// per-platform {enabled, consent, allowed}, keyed by platform — the shape
+// per-platform {enabled, allowed}, keyed by platform, the shape
 // buildCalendarSync (dashboard-data.js) expects as its providerStatus arg.
-// Degrades to null (its existing "Consent gated" fallback) rather than
-// failing the whole dashboard route if automation.yml is missing/invalid.
+// Degrades to null (the dashboard labels providers "Unknown") rather than
+// failing the whole dashboard route if the automation status can't be read.
 function readCalendarProviderStatus({ repoRoot, env, automationStatusForRoute }) {
   try {
     const status = automationStatusForRoute({ root: repoRoot, env });
     const calendarSync = status.capabilities.find((c) => c.capability === "calendar_sync");
     if (!calendarSync) return null;
     return Object.fromEntries(
-      calendarSync.platforms.map((p) => [
-        p.platform,
-        { enabled: p.enabled, consent: p.consent, allowed: p.allowed },
-      ])
+      calendarSync.platforms.map((p) => [p.platform, { enabled: p.enabled, allowed: p.allowed }])
     );
   } catch {
     return null;

@@ -510,9 +510,9 @@ test("buildCalendarSync maps each providerStatus shape to its status label", () 
   const withMap = buildDashboardViewModel(tracker, {
     now: new Date("2026-08-15T12:00:00.000Z"),
     calendarProviderStatus: {
-      google_calendar: { allowed: true, enabled: true, consent: true },
-      outlook_calendar: { allowed: false, enabled: true, consent: false },
-      apple_calendar: { allowed: false, enabled: false, consent: true },
+      google_calendar: { allowed: true, enabled: true },
+      outlook_calendar: { allowed: false, enabled: true },
+      apple_calendar: { allowed: false, enabled: false },
       // automation_tools intentionally absent from the map.
     },
   });
@@ -520,40 +520,23 @@ test("buildCalendarSync maps each providerStatus shape to its status label", () 
     withMap.calendar.sync.providers.map((provider) => [provider.key, provider.status])
   );
   assert.equal(statusByKey.google_calendar, "Ready", "allowed:true reads Ready");
-  assert.equal(
-    statusByKey.outlook_calendar,
-    "Needs setup",
-    "allowed:false with enabled:true reads Needs setup"
-  );
-  assert.equal(
-    statusByKey.apple_calendar,
-    "Needs setup",
-    "allowed:false with consent:true reads Needs setup"
-  );
-  assert.equal(
-    statusByKey.automation_tools,
-    "Consent gated",
-    "a provider missing from the map reads Consent gated"
-  );
-
-  const allOff = buildDashboardViewModel(tracker, {
-    now: new Date("2026-08-15T12:00:00.000Z"),
-    calendarProviderStatus: {
-      apple_calendar: { allowed: false, enabled: false, consent: false },
-    },
-  });
-  const appleOff = allOff.calendar.sync.providers.find((p) => p.key === "apple_calendar");
-  assert.equal(appleOff.status, "Off", "neither enabled nor consent reads Off");
+  assert.equal(statusByKey.outlook_calendar, "Off", "allowed:false reads Off");
+  assert.equal(statusByKey.apple_calendar, "Off", "allowed:false and enabled:false reads Off");
+  assert.equal(statusByKey.automation_tools, "On", "a provider missing from the map reads On");
 
   const noProviderStatus = buildDashboardViewModel(tracker, {
     now: new Date("2026-08-15T12:00:00.000Z"),
   });
   for (const provider of noProviderStatus.calendar.sync.providers) {
-    assert.equal(
-      provider.status,
-      "Consent gated",
-      "an absent providerStatus map reads Consent gated"
-    );
+    assert.equal(provider.status, "On", "an absent providerStatus map reads On");
+  }
+
+  const unavailable = buildDashboardViewModel(tracker, {
+    now: new Date("2026-08-15T12:00:00.000Z"),
+    calendarProviderStatus: null,
+  });
+  for (const provider of unavailable.calendar.sync.providers) {
+    assert.equal(provider.status, "Unknown", "a null providerStatus map reads Unknown");
   }
 });
 
