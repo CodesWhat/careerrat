@@ -318,9 +318,27 @@ function hasPublicApplicationFormEvidence(snapshot) {
   });
 }
 
-function applicationPermissionReason(platform) {
+function applicationCapabilityOffReason(platform, permission) {
   const label = PLATFORM_LABELS[platform] || "this application site";
-  return `Application preparation for ${label} is off. Turn it on in Settings before CareerRat opens the form.`;
+  if (permission?.checks?.readable === false) {
+    return `Application preparation for ${label} is blocked: ${permission.reasons[0]}.`;
+  }
+  const commands = [];
+  if (permission?.checks?.global !== false && permission?.checks?.platform !== false) {
+    // Denied without a per-switch breakdown: name the capability switch.
+    commands.push("careerrat automation enable authenticated_apply_preparation --write");
+  }
+  if (permission?.checks?.global === false) {
+    commands.push("careerrat automation enable authenticated_apply_preparation --write");
+  }
+  if (permission?.checks?.platform === false) {
+    commands.push(
+      `careerrat automation enable authenticated_apply_preparation ${platform} --write`
+    );
+  }
+  return `Application preparation is turned off for ${label}. Turn it on with ${commands
+    .map((command) => `\`${command}\``)
+    .join(" and ")}, or ask me to turn it on.`;
 }
 
 function applicationPlatformForUrl(url) {
@@ -1238,12 +1256,13 @@ export function createApplyDriver({
       root: repoRoot,
     });
     if (!permission.allowed) {
-      const reason = applicationPermissionReason(applicationPlatform);
+      const reason = applicationCapabilityOffReason(applicationPlatform, permission);
       return {
         available: true,
         verified: false,
         state: "blocked",
-        code: "APPLICATION_PREPARATION_PERMISSION_REQUIRED",
+        code: "CAPABILITY_OFF",
+        platform: applicationPlatform,
         reason,
         currentUrl: url,
         session: { provider: providerLabel, blockers: [reason] },
@@ -1361,12 +1380,13 @@ export function createApplyDriver({
           root: repoRoot,
         });
         if (!targetPermission.allowed) {
-          const reason = applicationPermissionReason(targetPlatform);
+          const reason = applicationCapabilityOffReason(targetPlatform, targetPermission);
           return {
             available: true,
             verified: false,
             state: "blocked",
-            code: "APPLICATION_PREPARATION_PERMISSION_REQUIRED",
+            code: "CAPABILITY_OFF",
+            platform: targetPlatform,
             reason,
             currentUrl: detailSnapshot.origin || url,
             session: { provider: providerLabel, blockers: [reason] },

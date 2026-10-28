@@ -551,14 +551,18 @@ test("a listing with no application-form entry never reports awaiting submit", a
   assert.equal(result.session.filledCount, 0);
 });
 
-test("LinkedIn form preparation uses the supervised-preparation consent capability", async () => {
+test("LinkedIn form preparation uses the authenticated_apply_preparation capability", async () => {
   const seen = [];
   const { ops } = createFakeOps([]);
   const execute = makeDriver({
     ops,
     mayRunImpl: (request) => {
       seen.push(request);
-      return { allowed: false, reasons: ["permission off"] };
+      return {
+        allowed: false,
+        reasons: ["capability off"],
+        checks: { global: true, platform: false },
+      };
     },
   });
 
@@ -569,13 +573,18 @@ test("LinkedIn form preparation uses the supervised-preparation consent capabili
   });
 
   assert.equal(result.state, "blocked");
-  assert.equal(result.code, "APPLICATION_PREPARATION_PERMISSION_REQUIRED");
+  assert.equal(result.code, "CAPABILITY_OFF");
+  assert.equal(result.platform, "linkedin");
+  assert.equal(
+    result.reason,
+    "Application preparation is turned off for LinkedIn. Turn it on with `careerrat automation enable authenticated_apply_preparation linkedin --write`, or ask me to turn it on."
+  );
   assert.equal(seen.length, 1);
   assert.equal(seen[0].capability, "authenticated_apply_preparation");
   assert.equal(seen[0].platform, "linkedin");
 });
 
-test("external ATS preparation checks consent before opening the application", async () => {
+test("external ATS preparation checks the capability switch before opening the application", async () => {
   const seen = [];
   const { ops, log } = createFakeOps([]);
   const execute = makeDriver({
@@ -585,9 +594,10 @@ test("external ATS preparation checks consent before opening the application", a
       return {
         allowed: false,
         reasons: [
-          'capability "authenticated_apply_preparation" is disabled (enable: `careerrat automation enable authenticated_apply_preparation --write`)',
-          'platform "greenhouse" is off for authenticated_apply_preparation',
+          'capability "authenticated_apply_preparation" is turned off (turn on: `careerrat automation enable authenticated_apply_preparation --write`)',
+          'platform "greenhouse" is turned off for authenticated_apply_preparation (turn on: `careerrat automation enable authenticated_apply_preparation greenhouse --write`)',
         ],
+        checks: { global: false, platform: false },
       };
     },
   });
@@ -599,12 +609,11 @@ test("external ATS preparation checks consent before opening the application", a
   });
 
   assert.equal(result.state, "blocked");
-  assert.equal(result.code, "APPLICATION_PREPARATION_PERMISSION_REQUIRED");
+  assert.equal(result.code, "CAPABILITY_OFF");
   assert.equal(
     result.reason,
-    "Application preparation for Greenhouse is off. Turn it on in Settings before CareerRat opens the form."
+    "Application preparation is turned off for Greenhouse. Turn it on with `careerrat automation enable authenticated_apply_preparation --write` and `careerrat automation enable authenticated_apply_preparation greenhouse --write`, or ask me to turn it on."
   );
-  assert.doesNotMatch(result.reason, /authenticated_apply_preparation|careerrat automation|`/i);
   assert.deepEqual(result.session.blockers, [result.reason]);
   assert.equal(seen.length, 1);
   assert.equal(seen[0].capability, "authenticated_apply_preparation");

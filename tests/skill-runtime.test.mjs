@@ -1479,7 +1479,7 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   const prompt = buildPrompt({ skill: "ingest-profile", input: "hi", mode: "conversational" });
   assert.match(prompt, /```careerrat:confirm/);
   assert.match(prompt, /"kind":"authorization"/);
-  assert.match(prompt, /consent_capability/);
+  assert.doesNotMatch(prompt, /consent_capability/);
   assert.match(prompt, /companies_suggest/);
   assert.match(prompt, /company_add/);
   assert.doesNotMatch(prompt, /consent_mode/);
@@ -1487,8 +1487,8 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   assert.match(prompt, /role_buckets.*name.*priority.*titles/i);
   assert.match(prompt, /seniority_ladder.*at least two/i);
   assert.match(prompt, /titles array.*non-empty strings/i);
-  assert.match(prompt, /capability.*only when.*needed/i);
-  assert.match(prompt, /never.*saved job-source search/i);
+  assert.match(prompt, /on by default.*never ask the user for permission/i);
+  assert.match(prompt, /saved job-source search uses the site's plain/i);
   assert.match(prompt, /site-specific Yes\/No login question/i);
   assert.match(prompt, /voluntary self-identification.*local Application defaults/i);
   assert.match(prompt, /never include it in a candidate_patch/i);

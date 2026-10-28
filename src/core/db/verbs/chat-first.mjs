@@ -2080,6 +2080,11 @@ function operationSummary(result) {
     ...(last?.metadata?.state === "submitted-unverified" && last.metadata.reason
       ? { reason: promptText(last.metadata.reason, 500) }
       : {}),
+    // A turned-off capability pauses the mission on purpose (the operator chose
+    // that); the stored result keeps the plain reason instead of a bare "blocked".
+    ...(last?.metadata?.capabilityOff?.reason
+      ? { capabilityOff: { reason: promptText(last.metadata.capabilityOff.reason, 500) } }
+      : {}),
     ...(last?.metadata?.autoSubmitStopped?.reason
       ? { autoSubmitStopped: { reason: promptText(last.metadata.autoSubmitStopped.reason, 300) } }
       : {}),

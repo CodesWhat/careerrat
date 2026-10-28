@@ -34,14 +34,14 @@ Routes are grouped below by cluster.
 
 - New workspace or incomplete profile → `ingest-profile`
 - "Scan my projects folder / repo" → `ingest-profile` (projects-scan mode)
-- "Sync / import email, pull recruiter replies" (Apple Mail or opted-in Gmail/Outlook webmail) → `ingest-mail`
-- "Sync / check LinkedIn or Wellfound messages/DMs" (opt-in browser) → `ingest-messages`
+- "Sync / import email, pull recruiter replies" (Apple Mail or Gmail/Outlook webmail) → `ingest-mail`
+- "Sync / check LinkedIn or Wellfound messages/DMs" (browser, on by default) → `ingest-messages`
 
 ### Apply Cycle
 
 - "Apply", "submit", or a JD URL with apply intent → `apply-job`
   (`apply-job` must run or verify `evaluate-job` as step zero; LinkedIn Easy Apply
-  postings can use opt-in authenticated form preparation gated by the
+  postings can use authenticated form preparation, switchable with the
   `authenticated_apply_preparation` capability; final submission follows `submit` in `automation.yml`: auto by default, manual to stop for the user)
 - "Gate", "should I apply", or a JD URL without apply intent → `evaluate-job`
 - "Find jobs", "source", "search", "refresh queue" → `search-jobs`
@@ -56,7 +56,7 @@ Routes are grouped below by cluster.
   `gate: review` with named `fitRisks`; explicit-click only, never auto-fires)
 - "Optimize / review my LinkedIn profile", make it read for targeted roles →
   `optimize-linkedin` (read-only before→after diff by default; write-back is a
-  separate opt-in, confirm-first per field)
+  separate switch, confirm-first per field)
 
 ### Research Loop
 
@@ -81,9 +81,9 @@ Routes are grouped below by cluster.
   double-booking avoidance, and calendar-ready holds; non-scheduling threads
   hand back to `email-comms`)
 - Write a tracked interview, assessment, follow-up, or deadline to a real
-  calendar → `calendar-sync` (opt-in, confirm-first)
+  calendar → `calendar-sync` (confirm-first)
 - Find likely recruiters, hiring-team members, or warm contacts for tracked
-  companies → `relationship-sourcing` (opt-in, session browser;
+  companies → `relationship-sourcing` (session browser;
   candidate-reviewed leads are captured into Network)
 
 ### Interview & Story Bank
@@ -95,7 +95,7 @@ Routes are grouped below by cluster.
 
 - Rejection, offer, status change, outcome update → `track-outcomes`
 - "Check my statuses", "sync my pipeline", poll ATS dashboards → `sync-status`
-  (opt-in browser automation; applies verified advances atomically and leaves
+  (browser automation; applies verified advances atomically and leaves
   regressions or low-confidence labels for review)
 - "Why am I getting filtered", strategy review, re-rank, or when outcome
   thresholds trip → `reevaluate-strategy`

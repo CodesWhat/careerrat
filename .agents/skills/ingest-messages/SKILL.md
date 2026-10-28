@@ -1,9 +1,9 @@
 ---
 name: ingest-messages
-description: Read in-platform DMs from LinkedIn and Wellfound via the session browser and fold them into tracker communications[] — the browser analog of ingest-mail. Opt-in, user-initiated, local-only. Capability = messaging; platforms = linkedin, wellfound.
+description: Read in-platform DMs from LinkedIn and Wellfound via the session browser and fold them into tracker communications[] (the browser analog of ingest-mail). User-initiated, local-only. Capability = messaging; platforms = linkedin, wellfound.
 metadata:
   tier_1_inputs:
-    - consent verdict
+    - capability status
     - watermark window
     - tracker thread match keys
   tier_2_inputs:
@@ -14,12 +14,7 @@ metadata:
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
-## STEP 0 — CONSENT GATE (hard stop)
-
-This is the highest ToS-exposure capability in the automation stack. Messaging
-automation most directly risks a platform's terms of service — the consent gate
-here is the most explicit in the system. Never open a browser or touch any platform
-until consent is confirmed.
+## STEP 0: Capability check
 
 Run:
 
@@ -28,29 +23,18 @@ careerrat automation status --json
 ```
 
 Inspect the `capabilities.messaging` entry. The applicable platforms are `linkedin`
-and `wellfound`. For each platform, `allowed: true` means three switches are
-simultaneously on: the `messaging` capability global switch, that platform's
-per-capability switch, and the platform's one-time ToS consent. And either
-automation is in the "advanced" setup mode or the capability has a contextual
-scoped grant for that platform. This is the predicate from `mayRun()` in
-`src/core/automation/consent.mjs`; never re-derive it in prose.
+and `wellfound`. For each platform, `allowed: true` means neither the `messaging`
+capability switch nor that platform's switch is turned off. This is the verdict from
+`mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose.
+Messaging is on by default.
 
-If **no platform** shows `allowed: true`, explain exactly how to opt in, then
-stop — do not open a browser:
+If **no platform** shows `allowed: true`, tell the operator messaging is turned off,
+give the command that turns it on, and stop (do not open a browser). If `readError`
+is set, say the automation settings file can't be read and name it. Skip any single
+platform that is off and note it.
 
-1. `careerrat automation mode advanced --write`
-2. Read the platform's terms of service yourself to confirm automated messaging reads
-   are permitted.
-3. Record consent: `careerrat automation consent <platform> --write`
-4. Enable the capability global switch: `careerrat automation enable messaging --write`
-5. Enable for the specific platform: `careerrat automation enable messaging <platform> --write`
-6. Verify: `careerrat automation status --json`
-
-State clearly: this capability is OFF by default; enabling it is a deliberate choice.
-The user must read the platform ToS themselves before recording consent — CareerRat
-records the decision but does not make it. A contextual scoped grant given in the app
-is an alternative to step 1: it authorizes this capability for that platform without
-switching to advanced mode.
+- Capability: `careerrat automation enable messaging --write`
+- One platform: `careerrat automation enable messaging <platform> --write`
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
 
@@ -162,7 +146,7 @@ skipped.
 run **one at a time** per the one-browser rule — delegation here buys per-thread context
 isolation, not parallelism. Each subagent reads its matched thread and returns the
 chronological messages; the orchestrator captures them to `communications[]` (sole tracker
-writer). The STEP 0 consent gate already ran on the orchestrator. See the **Delegation
+writer). The STEP 0 capability check already ran on the orchestrator. See the **Delegation
 Contract** in AGENTS.md.
 
 For each confirmed match from STEP 4, navigate to that thread in the session browser
@@ -416,20 +400,20 @@ Ingest complete:
 
 ## RULES
 
-- **Opt-in, OFF by default.** Only poll platforms where `careerrat automation status --json`
-  shows `messaging` `allowed: true` for that platform. The `allowed` field encodes the
-  predicate (global switch · platform switch · ToS consent, all on, and either advanced
-  setup mode or a contextual scoped grant for that platform) from `mayRun()` in
-  `src/core/automation/consent.mjs`; never re-derive the predicate in prose.
+- **On by default, with an off-switch.** Only poll platforms where
+  `careerrat automation status --json` shows `messaging` `allowed: true` for that
+  platform. The `allowed` field is the `mayRun()` verdict from
+  `src/core/automation/consent.mjs` (neither the capability switch nor the platform
+  switch is turned off); never re-derive it in prose. A turned-off platform is
+  skipped and reported, not asked about.
 
-- **Highest ToS exposure — strongest consent gate.** In-platform messaging reads most
-  directly risk a platform's terms of service. Consent must be deliberate: the user
-  reads the platform ToS themselves and records it explicitly via the CLI. Surface this
-  clearly; never downplay it.
+- **Read-only.** This skill only reads threads. It never sends or replies;
+  reply drafts go to `email-comms` and stay confirm-first.
 
 - **Honor the Browser Automation Contract.** Follow AGENTS.md `## Browser Automation
-  Contract` in full. The `mayRun()` predicate is the hard gate; if `allowed` is false,
-  surface the reasons and stop — do not drive the browser.
+  Contract` in full. The `mayRun()` verdict is the check; if `allowed` is false,
+  say the capability is turned off, give the enable command, and skip it, do not
+  drive the browser.
 
 - **Never run on a schedule or unattended.** Always user-initiated with the agent in
   the loop. Never invoke this skill automatically in response to a paste, a timer, or
@@ -470,25 +454,25 @@ Ingest complete:
 ## In-app and terminal paths
 
 CareerRat's in-app path reads LinkedIn and Wellfound recruiting messages through
-its owned browser workflow after the platform-specific `messaging` permission
-passes. It writes relevant threads into `communications[]`, stores long bodies
+its owned browser workflow unless the operator turned `messaging` off for that
+platform. It writes relevant threads into `communications[]`, stores long bodies
 under `workspace/comms/`, and advances each platform watermark. A terminal or
 external-agent run still follows the steps above exactly as written.
 
 - **Requesting a message check** (`messages.sync-request`). "Check my LinkedIn
   messages" or "any new DMs?" offers a "Check for new messages" chip. The
-  handler reports each platform's real `mayRun` consent
+  handler reports each platform's `mayRun` on/off
   state for the `messaging` capability, the last sweep time from that
   platform's `sources[]` watermark ("Never checked" before a first run), and
   how many LinkedIn threads are currently waiting on a reply. The count is
   LinkedIn-scoped on purpose: Wellfound threads record under the shared
   `portal` channel, so counting that channel would overclaim what a message
-  sync covers. With every platform off, the request refuses toward Settings;
-  there is no ungated fallback source here, unlike mail's local Apple Mail
+  sync covers. With every platform off, the request says it is turned off and
+  offers a "Turn it on" action; there is no fallback source here, unlike mail's local Apple Mail
   path. Otherwise, choosing the action runs every allowed platform and returns
   the captured count or a retry blocker in the same Ask thread.
 - **Execution and recovery.** The app performs the allowed read when the chip is
-  chosen. Login, captcha, 2FA, and permission blockers return a visible retry
+  chosen. Login, captcha, 2FA, and turned-off blockers return a visible retry
   state without advancing the watermark. The terminal path keeps the detailed
   relevance/escalation review and track-outcomes handoff. Reply drafting stays
   with email-comms.

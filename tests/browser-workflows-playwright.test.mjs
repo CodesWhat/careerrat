@@ -485,3 +485,34 @@ test("Playwright fixture: authentication walls return visible retry state and wr
     await manager.shutdown();
   }
 });
+
+test("a turned-off capability returns a CAPABILITY_OFF blocker with the enable command, no browser opened", async () => {
+  const repoRoot = workspace({});
+  let opened = 0;
+  const result = await optimizeLinkedinInApp({
+    repoRoot,
+    env: {},
+    createSessionImpl: () => {
+      opened += 1;
+      throw new Error("no browser should open");
+    },
+  });
+  assert.equal(opened, 0);
+  assert.equal(result.state, "needs-user");
+  assert.equal(result.blockers[0].code, "CAPABILITY_OFF");
+  assert.match(result.blockers[0].message, /careerrat automation enable profile_optimize --write/);
+});
+
+test("platforms skipped because they are turned off are reported as turned off", async () => {
+  const repoRoot = workspace({});
+  const result = await ingestWebmailInApp({
+    repoRoot,
+    env: {},
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+    now: () => new Date("2026-08-24T16:00:00.000Z"),
+  });
+  assert.deepEqual(result.turnedOff, ["gmail", "outlook"]);
+  assert.match(result.summary, /Turned off, so skipped: gmail, outlook\./);
+});

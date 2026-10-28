@@ -534,6 +534,10 @@ export function normalizeOnboardingDraft(raw = {}) {
 
 const ONBOARDING_TRANSCRIPT_ROLES = new Set(["user", "assistant", "receipt", "system-pill"]);
 const ONBOARDING_BLOCK_STATUSES = new Set(["pending", "saving", "resolved", "error"]);
+// consent_mode and consent_capability are retired (capabilities are on by
+// default and the interview no longer offers them). They stay in this list only
+// so transcripts saved by older versions still validate; the web side drops in
+// 72b-3.
 const ONBOARDING_BLOCK_KINDS = new Set([
   "authorization",
   "consent_mode",
@@ -946,10 +950,11 @@ function dbSourceResumePresent(pathCtx) {
 // candidate could never flip this item
 // and sat at 8 of 9 forever, permanently redirected to /onboarding. The
 // underlying automation-consent feature is untouched and still works —
-// Settings' automation controls, src/core/automation/consent.mjs, and the
-// interview's own consent_mode/consent_capability confirm pills all still
-// read/write candidate/automation.yml exactly as before. It's just no
-// longer part of the SETUP CHECKLIST or setupProgress.complete.
+// Settings' automation controls and src/core/automation/consent.mjs still
+// read/write candidate/automation.yml; the on/off switches are the only
+// automation state left (consent and setup mode were retired, and the
+// interview no longer emits consent_mode/consent_capability pills). It's
+// not part of the SETUP CHECKLIST or setupProgress.complete.
 export { computeSetupProgress } from "../core/onboarding/setup-progress.mjs";
 
 // Same provenance-aware reconciliation as search-route.mjs's

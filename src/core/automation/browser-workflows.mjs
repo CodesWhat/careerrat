@@ -64,15 +64,25 @@ function digest(value) {
   return createHash("sha256").update(String(value)).digest("hex").slice(0, 18);
 }
 
+// `details.turnedOff` lists platforms skipped because the operator turned the
+// capability or that platform off; the summary says so, so a skip is never silent.
 function workflowResult(skill, state, details = {}) {
+  const summary = details.summary || "Workflow updated.";
+  const turnedOff = Array.isArray(details.turnedOff) ? details.turnedOff : [];
   return {
     kind: "browser_workflow_result",
     skill,
     state,
     title: details.title || skill,
-    summary: details.summary || "Workflow updated.",
     ...details,
+    summary: turnedOff.length
+      ? `${summary} Turned off, so skipped: ${turnedOff.join(", ")}.`
+      : summary,
   };
+}
+
+function turnedOffDetails(turnedOff) {
+  return turnedOff.length ? { turnedOff } : {};
 }
 
 function blockerSummary(prefix, results) {
@@ -187,9 +197,13 @@ export async function ingestWebmailInApp({
 } = {}) {
   const completedAt = now().toISOString();
   const results = [];
+  const turnedOff = [];
   let captured = 0;
   for (const platform of ["gmail", "outlook"]) {
-    if (!allowed("mail_access", platform, repoRoot, env)) continue;
+    if (!allowed("mail_access", platform, repoRoot, env)) {
+      turnedOff.push(platform);
+      continue;
+    }
     const sourceId = `${platform}-webmail`;
     const read = await readWithOwnedSession({
       createSessionImpl,
@@ -265,6 +279,7 @@ export async function ingestWebmailInApp({
       platform: result.platform,
       ...result.blocker,
     })),
+    ...turnedOffDetails(turnedOff),
     at: completedAt,
   });
 }
@@ -283,9 +298,13 @@ export async function ingestPlatformMessagesInApp({
 } = {}) {
   const completedAt = now().toISOString();
   const results = [];
+  const turnedOff = [];
   let captured = 0;
   for (const platform of ["linkedin", "wellfound"]) {
-    if (!allowed("messaging", platform, repoRoot, env)) continue;
+    if (!allowed("messaging", platform, repoRoot, env)) {
+      turnedOff.push(platform);
+      continue;
+    }
     const sourceId = `${platform}-messages`;
     const read = await readWithOwnedSession({
       createSessionImpl,
@@ -360,6 +379,7 @@ export async function ingestPlatformMessagesInApp({
       platform: result.platform,
       ...result.blocker,
     })),
+    ...turnedOffDetails(turnedOff),
     at: completedAt,
   });
 }
@@ -379,9 +399,13 @@ export async function sourceRelationshipsInApp({
 } = {}) {
   const foundAt = now().toISOString();
   const results = [];
+  const turnedOff = [];
   const leads = [];
   for (const platform of ["linkedin", "wellfound"]) {
-    if (!allowed("relationship_sourcing", platform, repoRoot, env)) continue;
+    if (!allowed("relationship_sourcing", platform, repoRoot, env)) {
+      turnedOff.push(platform);
+      continue;
+    }
     const read = await readWithOwnedSession({
       createSessionImpl,
       base: { repoRoot, env },
@@ -433,6 +457,7 @@ export async function sourceRelationshipsInApp({
       platform: result.platform,
       ...result.blocker,
     })),
+    ...turnedOffDetails(turnedOff),
     at: foundAt,
   });
 }
@@ -500,17 +525,21 @@ export async function optimizeLinkedinInApp({
   saveBatch = linkedinProposalBatchPut,
 } = {}) {
   const at = now().toISOString();
-  if (!allowed("profile_optimize", "linkedin", repoRoot, env)) {
+  const verdict = mayRun({
+    capability: "profile_optimize",
+    platform: "linkedin",
+    root: repoRoot,
+    env,
+  });
+  if (!verdict.allowed) {
+    const message =
+      verdict.checks?.readable === false
+        ? `LinkedIn profile review is blocked: ${verdict.reasons[0]}.`
+        : "LinkedIn profile review is turned off. Turn it on with `careerrat automation enable profile_optimize --write`, or ask me to turn it on.";
     return workflowResult("optimize-linkedin", "needs-user", {
       title: "LinkedIn profile review",
-      summary: "LinkedIn profile review consent is required.",
-      blockers: [
-        {
-          code: "CONSENT_REQUIRED",
-          message:
-            "Return to CareerRat and run LinkedIn profile review again. The permission control will appear there.",
-        },
-      ],
+      summary: message,
+      blockers: [{ code: "CAPABILITY_OFF", message }],
       at,
     });
   }
@@ -596,6 +625,7 @@ export async function syncStatusesInApp({
 } = {}) {
   const at = now().toISOString();
   const results = [];
+  const turnedOff = [];
   for (const application of applications) {
     const platform = statusPlatform(application);
     const url =
@@ -615,7 +645,10 @@ export async function syncStatusesInApp({
       });
       continue;
     }
-    if (!allowed("status_polling", platform, repoRoot, env)) continue;
+    if (!allowed("status_polling", platform, repoRoot, env)) {
+      turnedOff.push(platform);
+      continue;
+    }
     const read = await readWithOwnedSession({
       createSessionImpl,
       base: { repoRoot, env },
@@ -699,6 +732,7 @@ export async function syncStatusesInApp({
         applicationId: result.applicationId,
         ...result.blocker,
       })),
+      ...turnedOffDetails(turnedOff),
       at,
     }
   );

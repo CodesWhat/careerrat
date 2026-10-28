@@ -3752,94 +3752,72 @@ function workflowActionMetadata(normalized, execution, retryLabel, extra = {}) {
   };
 }
 
-const CONTEXTUAL_PERMISSIONS = Object.freeze({
+// Capabilities are on unless the operator turned one off, so nothing asks for
+// permission any more. These keys stay so thread buttons persisted by older
+// versions ({op: "contextual-permission", permission}) and the old typed commands
+// ("Allow form preparation") still resolve: both now just turn the capability on.
+const LEGACY_CONTEXTUAL_PERMISSIONS = Object.freeze({
   "application-preparation": {
     capability: "authenticated_apply_preparation",
     label: "Application form preparation",
-    allowLabel: "Allow form preparation",
     typedCommand: "Allow form preparation",
-    request:
-      "CareerRat needs permission to open and fill application forms on Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and other job sites. CareerRat submits once everything is filled and checked. Run careerrat automation submit manual --write (or ask me) to press Submit yourself.",
   },
   "relationship-sourcing": {
     capability: "relationship_sourcing",
     label: "Relationship sourcing",
-    allowLabel: "Allow relationship sourcing",
     typedCommand: "Allow relationship sourcing",
-    request:
-      "CareerRat needs permission to use LinkedIn and Wellfound to find recruiters and hiring-team contacts for your review.",
   },
   "status-checks": {
     capability: "status_polling",
     label: "Application status checks",
-    allowLabel: "Allow status checks",
     typedCommand: "Allow status checks",
-    request:
-      "CareerRat needs permission to read your saved application status pages on Greenhouse, Workday, Ashby, and Lever.",
   },
   "mail-checks": {
     capability: "mail_access",
     platforms: ["gmail", "outlook"],
     label: "Recruiting email checks",
-    allowLabel: "Allow email checks",
     typedCommand: "Allow email checks",
-    request:
-      "CareerRat needs permission to check Gmail and Outlook for recruiting email and bring the results back here.",
   },
   "message-checks": {
     capability: "messaging",
     label: "Recruiting message checks",
-    allowLabel: "Allow message checks",
     typedCommand: "Allow message checks",
-    request:
-      "CareerRat needs permission to check LinkedIn and Wellfound for recruiting messages and bring the results back here.",
   },
   "linkedin-profile-review": {
     capability: "profile_optimize",
     label: "LinkedIn profile review",
-    allowLabel: "Allow LinkedIn review",
     typedCommand: "Allow LinkedIn review",
-    request:
-      "CareerRat needs permission to read your LinkedIn profile and draft evidence-backed suggestions. It will not edit your profile.",
   },
   "apple-calendar-write": {
     capability: "calendar_sync",
     platforms: ["apple_calendar"],
     label: "Apple Calendar access",
-    allowLabel: "Allow Apple Calendar",
     typedCommand: "Allow Apple Calendar",
-    request: "CareerRat needs permission to add this event to Apple Calendar.",
   },
   "google-calendar-write": {
     capability: "calendar_sync",
     platforms: ["google_calendar"],
     label: "Google Calendar access",
-    allowLabel: "Allow Google Calendar",
     typedCommand: "Allow Google Calendar",
-    request: "CareerRat needs permission to add this event to Google Calendar.",
   },
   "outlook-calendar-write": {
     capability: "calendar_sync",
     platforms: ["outlook_calendar"],
     label: "Outlook Calendar access",
-    allowLabel: "Allow Outlook Calendar",
     typedCommand: "Allow Outlook Calendar",
-    request: "CareerRat needs permission to add this event to Outlook Calendar.",
   },
   "automation-tools-calendar-write": {
     capability: "calendar_sync",
     platforms: ["automation_tools"],
     label: "Calendar automation access",
-    allowLabel: "Allow calendar automation",
     typedCommand: "Allow calendar automation",
-    request: "CareerRat needs permission to add this event through your calendar automation.",
   },
 });
 
 function contextualPermissionDefinition(permission) {
   const key = String(permission || "").trim();
-  return Object.hasOwn(CONTEXTUAL_PERMISSIONS, key)
-    ? { key, ...CONTEXTUAL_PERMISSIONS[key] }
+  return Object.hasOwn(LEGACY_CONTEXTUAL_PERMISSIONS, key)
+    ? { key, ...LEGACY_CONTEXTUAL_PERMISSIONS[key] }
     : null;
 }
 
@@ -3851,39 +3829,90 @@ function contextualPermissionChange(permission) {
   };
 }
 
-function appendContextualPermissionRequest({
+const CAPABILITY_OFF_STATE = "capability-off";
+const APPLICATION_CAPABILITY_OFF_CODES = new Set([
+  "CAPABILITY_OFF",
+  "APPLICATION_PREPARATION_PERMISSION_REQUIRED",
+]);
+
+// The plain "it's turned off" note a request shows when mayRun denies it: what is
+// off, the command that turns it on, and one "Turn it on" action. A settings file
+// that can't be read is reported as that, with no action, because flipping a switch
+// can't fix it. `platforms` limits the check to the platforms the request needs.
+function capabilityOffNote({ repoRoot, env, capability, platforms }) {
+  const definition = {
+    ...CAPABILITIES[capability],
+    label: CAPABILITIES[capability].label.replace(/\s*\(.*\)$/, ""),
+  };
+  const checked = platforms?.length ? platforms : definition.platforms;
+  const verdicts = checked.map((platform) => ({
+    platform,
+    verdict: mayRun({ capability, platform, root: repoRoot, env }),
+  }));
+  if (verdicts.some(({ verdict }) => verdict.checks?.readable === false)) {
+    const path = loadAutomation({ root: repoRoot, env }).path;
+    return {
+      text: `${definition.label} is off because the automation settings file can't be read (${path}). Fix that file, then ask me again.`,
+      nextActions: [],
+    };
+  }
+  const denied = verdicts.filter(({ verdict }) => !verdict.allowed);
+  const offPlatforms = (denied.length ? denied : verdicts).map(({ platform }) => platform);
+  const capabilityOff = denied.some(({ verdict }) => verdict.checks?.global === false);
+  const commands = [];
+  if (capabilityOff || !denied.length) {
+    commands.push(`careerrat automation enable ${capability} --write`);
+  }
+  for (const { platform, verdict } of denied) {
+    if (verdict.checks?.platform === false) {
+      commands.push(`careerrat automation enable ${capability} ${platform} --write`);
+    }
+  }
+  const where = offPlatforms.map((platform) => platform.replaceAll("_", " ")).join(", ");
+  return {
+    text: `${definition.label} is turned off for ${where}. Turn it on with ${commands
+      .map((command) => `\`${command}\``)
+      .join(" and ")}, or ask me to turn it on.`,
+    nextActions: [
+      {
+        label: "Turn it on",
+        intent: {
+          type: "settings.apply",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: {
+            change: {
+              kind: "automation",
+              op: "capability",
+              capability,
+              enabled: true,
+              platforms: offPlatforms,
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
+function appendCapabilityOffNote({
   repoRoot,
   env,
   normalized,
   intentMessage,
-  permission,
+  capability,
+  platforms,
   artifacts,
   now,
 }) {
-  const definition = contextualPermissionDefinition(permission);
-  if (!definition) {
-    throw actionError("That permission request is unavailable.", "SETTINGS_CHANGE_INVALID");
-  }
+  const note = capabilityOffNote({ repoRoot, env, capability, platforms });
   return appendActionResult({
     repoRoot,
     env,
     normalized,
     intentMessage,
-    text: `${definition.request} Choose ${definition.allowLabel}, or type “${definition.typedCommand}”.`,
+    text: note.text,
     artifacts,
-    metadata: {
-      state: "permission-needed",
-      nextActions: [
-        {
-          label: definition.allowLabel,
-          intent: {
-            type: "settings.apply",
-            entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-            input: { change: contextualPermissionChange(definition.key) },
-          },
-        },
-      ],
-    },
+    metadata: { state: CAPABILITY_OFF_STATE, nextActions: note.nextActions },
     now,
   });
 }
@@ -6054,8 +6083,8 @@ export async function executeWorkspaceIntent({
       if (domain === "all" || domain === "automation") {
         const status = automationStatus({ root: repoRoot });
         automation = {
-          setup_mode: status.mode,
           session_provider: status.session?.provider || null,
+          read_error: status.readError || null,
           capabilities: status.capabilities.map((cap) => ({
             key: cap.capability,
             label: cap.label,
@@ -6063,7 +6092,6 @@ export async function executeWorkspaceIntent({
             platforms: cap.platforms.map((platform) => ({
               key: platform.platform,
               enabled: platform.enabled,
-              consent: platform.consent,
             })),
           })),
         };
@@ -6183,42 +6211,24 @@ export async function executeWorkspaceIntent({
         result = { label, field, from, to: value, summary: `${label} set to ${value}.` };
       } else if (change.kind === "automation") {
         const op = String(change.op || "");
-        if (op === "consent") {
-          const error = actionError(
-            "Consent changes happen in Settings where the terms are shown.",
-            "SETTINGS_CHANGE_UNSUPPORTED"
-          );
-          error.details = { reason: "consent" };
-          throw error;
-        }
-        // One normalized boolean for both the tier gate and the writers below
-        // — REST callers have sent the flag as either `enabled` or `value`,
-        // and gating on one while persisting the other would let "turn this
-        // on" record it off.
+        // One normalized boolean for the writers below: REST callers have sent
+        // the flag as either `enabled` or `value`, and persisting a different one
+        // than the caller meant would let "turn this on" record it off.
         const requested = change.enabled === true || change.value === true;
-        if ((op === "capability" || op === "platform") && requested) {
-          const capability = change.capability;
-          if (!isCapability(capability)) {
-            const error = actionError(
-              `Unknown capability "${capability}".`,
-              "SETTINGS_CHANGE_INVALID"
-            );
-            error.details = { options: CAPABILITY_KEYS };
-            throw error;
-          }
-          if (capability !== "status_polling") {
-            const error = actionError(
-              `Turning on ${CAPABILITIES[capability].label} happens in Settings, where the permissions are explained.`,
-              "SETTINGS_CHANGE_UNSUPPORTED"
-            );
-            error.details = { reason: "capability-tier", capability };
-            throw error;
-          }
-        }
 
         const automationDoc = mergeAutomationDefaults(loadAutomation({ root: repoRoot, env }).data);
         let patch;
-        if (op === "contextual-permission") {
+        if (op === "consent" || op === "setup_mode") {
+          // Retired: capabilities are on unless turned off. Older buttons and the
+          // current web still send these, so they succeed without writing.
+          patch = null;
+          result = {
+            label: op === "consent" ? "Automation consent" : "Automation setup mode",
+            field: op,
+            changed: false,
+            summary: "Consent and setup mode were retired; capabilities are on unless turned off.",
+          };
+        } else if (op === "contextual-permission") {
           const definition = contextualPermissionDefinition(change.permission);
           if (!definition) {
             const error = actionError(
@@ -6238,12 +6248,10 @@ export async function executeWorkspaceIntent({
               }).allowed
           );
           patch = {
-            consent: Object.fromEntries(platforms.map((platform) => [platform, true])),
             capabilities: {
               [definition.capability]: {
                 enabled: true,
                 platforms: Object.fromEntries(platforms.map((platform) => [platform, true])),
-                scoped_grants: Object.fromEntries(platforms.map((platform) => [platform, true])),
               },
             },
           };
@@ -6254,25 +6262,8 @@ export async function executeWorkspaceIntent({
             to: true,
             changed: !alreadyAllowed,
             summary: alreadyAllowed
-              ? `${definition.label} is already allowed.`
-              : `${definition.label} is allowed now.`,
-          };
-        } else if (op === "setup_mode") {
-          const value = String(change.value || "");
-          if (value !== "basic" && value !== "advanced") {
-            throw actionError(
-              'Setup mode must be "basic" or "advanced".',
-              "SETTINGS_CHANGE_INVALID"
-            );
-          }
-          const from = automationDoc.setup_mode || "basic";
-          patch = { setup_mode: value };
-          result = {
-            label: "Automation setup mode",
-            field: "setup_mode",
-            from,
-            to: value,
-            summary: `Setup mode set to ${value}.`,
+              ? `${definition.label} is already on.`
+              : `${definition.label} is on now.`,
           };
         } else if (op === "capability") {
           const capability = change.capability;
@@ -6285,8 +6276,34 @@ export async function executeWorkspaceIntent({
             throw error;
           }
           const value = requested;
-          const from = automationDoc.capabilities?.[capability]?.enabled === true;
-          patch = { capabilities: { [capability]: { enabled: value } } };
+          const from = automationDoc.capabilities?.[capability]?.enabled !== false;
+          // "Turn it on" notes name the denied platforms too, so turning the
+          // capability on also clears any of those platform switches.
+          const platformList = Array.isArray(change.platforms) ? change.platforms : [];
+          for (const platform of platformList) {
+            if (!CAPABILITIES[capability].platforms.includes(platform)) {
+              const error = actionError(
+                `Unknown platform "${platform}" for ${capability}.`,
+                "SETTINGS_CHANGE_INVALID"
+              );
+              error.details = { options: CAPABILITIES[capability].platforms };
+              throw error;
+            }
+          }
+          patch = {
+            capabilities: {
+              [capability]: {
+                enabled: value,
+                ...(value && platformList.length
+                  ? {
+                      platforms: Object.fromEntries(
+                        platformList.map((platform) => [platform, true])
+                      ),
+                    }
+                  : {}),
+              },
+            },
+          };
           const label = `${CAPABILITIES[capability].label} (global switch)`;
           result = {
             label,
@@ -6315,7 +6332,7 @@ export async function executeWorkspaceIntent({
             throw error;
           }
           const value = requested;
-          const from = automationDoc.capabilities?.[capability]?.platforms?.[platform] === true;
+          const from = automationDoc.capabilities?.[capability]?.platforms?.[platform] !== false;
           patch = { capabilities: { [capability]: { platforms: { [platform]: value } } } };
           result = {
             label: `${capability} on ${platform}`,
@@ -6351,7 +6368,7 @@ export async function executeWorkspaceIntent({
             "SETTINGS_CHANGE_UNSUPPORTED"
           );
         }
-        candidateConfigPatch({ repoRoot, env, name: "automation", patch });
+        if (patch) candidateConfigPatch({ repoRoot, env, name: "automation", patch });
       } else if (change.kind === "profile") {
         const section = String(change.section || "");
         const config = candidateConfigGet({ repoRoot, env });
@@ -6566,8 +6583,8 @@ export async function executeWorkspaceIntent({
         from: result.from,
         to: result.to,
         summary: result.summary,
-        // Only the gate branch reports a no-op (applyGateWrite's changed:
-        // false); mode/automation writes always persist. Absent means changed.
+        // The gate branch and the retired consent/setup_mode ops report a no-op
+        // (changed: false); other writes always persist. Absent means changed.
         ...(result.changed === false ? { changed: false } : {}),
       };
       return appendActionResult({
@@ -6997,9 +7014,9 @@ export async function executeWorkspaceIntent({
         );
       }
       // Manual provenance (a self-report of something the candidate already did
-      // in their own calendar app) is NOT consent-gated — CareerRat isn't writing
-      // anything. Automated provenance IS gated: it asserts the app itself wrote
-      // the event, so it must be backed by an actual calendar_sync consent grant.
+      // in their own calendar app) is never gated: CareerRat isn't writing
+      // anything. Automated provenance asserts the app itself wrote the event, so
+      // it needs calendar_sync to be on (it is, unless the operator turned it off).
       const provenance = input.provenance === "automated" ? "automated" : "manual";
       if (provenance === "automated") {
         const verdict = mayRun({
@@ -7009,19 +7026,13 @@ export async function executeWorkspaceIntent({
           env,
         });
         if (!verdict.allowed) {
-          const providerPermission =
-            {
-              apple_calendar: "apple-calendar-write",
-              google_calendar: "google-calendar-write",
-              outlook_calendar: "outlook-calendar-write",
-              automation_tools: "automation-tools-calendar-write",
-            }[provider] || null;
-          return appendContextualPermissionRequest({
+          return appendCapabilityOffNote({
             repoRoot,
             env,
             normalized,
             intentMessage,
-            permission: providerPermission,
+            capability: "calendar_sync",
+            platforms: [provider],
             now,
           });
         }
@@ -7224,12 +7235,13 @@ export async function executeWorkspaceIntent({
           .allowed,
       }));
       if (platforms.every((entry) => !entry.allowed)) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "relationship-sourcing",
+          capability: "relationship_sourcing",
+          platforms: platforms.map((entry) => entry.platform),
           now,
         });
       }
@@ -7307,12 +7319,13 @@ export async function executeWorkspaceIntent({
         allowed: mayRun({ capability: "status_polling", platform, root: repoRoot, env }).allowed,
       }));
       if (platforms.every((entry) => !entry.allowed)) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "status-checks",
+          capability: "status_polling",
+          platforms: platforms.map((entry) => entry.platform),
           now,
         });
       }
@@ -7369,12 +7382,13 @@ export async function executeWorkspaceIntent({
         tracker,
       });
       if (sources.every((source) => !source.allowed)) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "mail-checks",
+          capability: MAIL_ACCESS_CAPABILITY,
+          platforms: sources.filter((source) => source.platform).map((source) => source.platform),
           now,
         });
       }
@@ -7452,12 +7466,13 @@ export async function executeWorkspaceIntent({
       const tracker = assembleTrackerObject(requireDb({ repoRoot, env }));
       const sources = messagesSyncSources({ repoRoot, env, tracker });
       if (sources.every((source) => !source.allowed)) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "message-checks",
+          capability: "messaging",
+          platforms: sources.map((source) => source.platform),
           now,
         });
       }
@@ -7498,10 +7513,9 @@ export async function executeWorkspaceIntent({
     }
 
     if (normalized.type === "linkedin.optimize-request") {
-      // Never refuses: the handoff card always renders so the candidate can
-      // see current consent state and turn capabilities on from there. The
-      // gate that actually blocks a browser write lives in the skill, not
-      // here.
+      // The handoff card always renders so the candidate can see which
+      // capabilities are on. profile_optimize off gets the plain "turned off"
+      // note; the per-field confirm before a browser write lives in the skill.
       const capabilities = [
         {
           key: "profile_optimize",
@@ -7526,12 +7540,13 @@ export async function executeWorkspaceIntent({
       ];
       const batch = linkedinProposalBatchLatest({ repoRoot, env });
       if (!capabilities[0].allowed) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "linkedin-profile-review",
+          capability: "profile_optimize",
+          platforms: ["linkedin"],
           artifacts: [linkedinOptimizeHandoffArtifact({ capabilities, batch, now })],
           now,
         });
@@ -8939,9 +8954,16 @@ export async function executeWorkspaceIntent({
       const sessionUrl = safeExternalHttpUrl(
         execution.currentUrl || application.link || application.url || application.sourceUrl
       );
-      const permissionRequired = execution?.code === "APPLICATION_PREPARATION_PERMISSION_REQUIRED";
-      const permission = permissionRequired
-        ? contextualPermissionDefinition("application-preparation")
+      // APPLICATION_PREPARATION_PERMISSION_REQUIRED is the code older persisted
+      // results carry; the driver now emits CAPABILITY_OFF.
+      const capabilityOff = APPLICATION_CAPABILITY_OFF_CODES.has(execution?.code);
+      const offNote = capabilityOff
+        ? capabilityOffNote({
+            repoRoot,
+            env,
+            capability: "authenticated_apply_preparation",
+            platforms: execution.platform ? [execution.platform] : undefined,
+          })
         : null;
       const sessionState =
         prepareSubmit && execution.state === "questions-captured" ? "blocked" : execution.state;
@@ -8950,8 +8972,8 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: permission
-          ? `${permission.request} Choose ${permission.allowLabel}, or type “${permission.typedCommand}”.`
+        text: offNote
+          ? offNote.text
           : `${applicationSessionText(execution)}${alreadyAttemptedNote}`,
         artifacts: [
           {
@@ -8969,30 +8991,30 @@ export async function executeWorkspaceIntent({
           state: sessionState,
           applicationId: normalized.entity.id,
           submissionVerified: false,
+          ...(offNote ? { capabilityOff: { reason: offNote.text } } : {}),
           ...(autoSubmitStopReason(execution)
             ? { autoSubmitStopped: { reason: autoSubmitStopReason(execution) } }
             : {}),
           nextActions: [
-            {
-              label: permissionRequired
-                ? permission.allowLabel
-                : execution.state === "awaiting-submit"
-                  ? "Open form to review & submit"
-                  : "Return to supervised application",
-              intent: {
-                type: permissionRequired ? "settings.apply" : "job.prepare-submit",
-                entity: permissionRequired
-                  ? { type: "workspace", id: WORKSPACE_THREAD_ID }
-                  : { type: "application", id: normalized.entity.id },
-                input: permissionRequired
-                  ? { change: contextualPermissionChange("application-preparation") }
-                  : {
-                      resumeSession: true,
-                      focusSession: true,
-                      ...carriedReviewApproval(input),
+            ...(offNote
+              ? offNote.nextActions
+              : [
+                  {
+                    label:
+                      execution.state === "awaiting-submit"
+                        ? "Open form to review & submit"
+                        : "Return to supervised application",
+                    intent: {
+                      type: "job.prepare-submit",
+                      entity: { type: "application", id: normalized.entity.id },
+                      input: {
+                        resumeSession: true,
+                        focusSession: true,
+                        ...carriedReviewApproval(input),
+                      },
                     },
-              },
-            },
+                  },
+                ]),
             {
               label: "I applied",
               intent: {
@@ -9804,12 +9826,10 @@ function matchAutomationPlatformPhrase(text) {
   return PLATFORMS.find((platform) => lower === platform || lower === platform.replace(/_/g, " "));
 }
 
-// "turn off <capability> [on <platform>]" (any capability — disabling is
-// always allowed), "turn on status polling [on <platform>]" (the ONLY
-// capability allowed to enable from Ask — see the
-// settings.apply handler's own capability-tier restriction, enforced there
-// too since REST can call the intent directly), "set setup mode to
-// advanced/basic", "use <provider> for browser sessions".
+// "turn off <capability> [on <platform>]" and "turn on <capability> [on
+// <platform>]" (any capability, either direction), "use <provider> for browser
+// sessions". The old "set setup mode to advanced/basic" phrase still parses and
+// lands on the settings.apply no-op note.
 function settingsAutomationFromText(text) {
   const value = String(text || "").trim();
 
@@ -9832,7 +9852,7 @@ function settingsAutomationFromText(text) {
   match = value.match(/^(?:please\s+)?turn\s+on\s+(.+?)(?:\s+on\s+(.+?))?\s*[.?!]*$/i);
   if (match) {
     const capability = matchAutomationCapabilityPhrase(match[1]);
-    if (!capability || capability !== "status_polling") return null;
+    if (!capability) return null;
     return automationToggleChange(capability, match[2], true);
   }
 
@@ -9847,7 +9867,7 @@ function settingsContextualPermissionFromText(text) {
     .replace(/[.!]+$/g, "")
     .trim()
     .toLowerCase();
-  const match = Object.entries(CONTEXTUAL_PERMISSIONS).find(
+  const match = Object.entries(LEGACY_CONTEXTUAL_PERMISSIONS).find(
     ([, definition]) => definition.typedCommand.toLowerCase() === value
   );
   return match ? contextualPermissionChange(match[0]) : null;
@@ -9927,11 +9947,10 @@ function settingsApplyPreviewLabel(change) {
   }
   if (change.kind === "automation") {
     if (change.op === "contextual-permission") {
-      return (
-        contextualPermissionDefinition(change.permission)?.allowLabel || "Allow this permission"
-      );
+      const label = contextualPermissionDefinition(change.permission)?.label;
+      return label ? `Turn on ${label}` : "Turn on this capability";
     }
-    if (change.op === "setup_mode") return `Set automation setup mode to ${change.value}`;
+    if (change.op === "setup_mode") return "Setup mode was retired";
     if (change.op === "session") return `Use ${change.value} for browser sessions`;
     const capabilityLabel = CAPABILITIES[change.capability]?.label || change.capability;
     const verb = change.enabled ? "Turn on" : "Turn off";

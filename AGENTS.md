@@ -111,9 +111,9 @@ let's get started" (or anything that isn't a specific task):
    - **Keep implementation modes internal.** Setup defaults to the full conversational
      interview with focused questions. Do not ask candidates to choose an automation,
      depth, or question-style mode before they know the product. When a concrete task
-     later needs browser, mail, calendar, or messaging access, explain that one
-     capability and ask for that permission only. See the **Browser Automation
-     Contract** for the permission model.
+     later needs browser, mail, calendar, or messaging access, just use it: those
+     capabilities are on by default. If the operator turned one off, say so and give the
+     enable command. See the **Browser Automation Contract**.
    - **Save progress continuously.** Partial progress saves to
      `workspace/setup-state.json` after each step. The user can stop and resume by
      re-running `ingest-profile` (or `careerrat ingest`), which picks up where it left
@@ -583,7 +583,7 @@ Rules for intake:
 
 - If the user says "apply", "apply to this", "submit", "fill this application",
   or gives a JD URL with application intent: use `apply-job`. LinkedIn Easy Apply
-  postings can use opt-in authenticated form preparation in `apply-job` (STEP 7b);
+  postings can use authenticated form preparation in `apply-job` (STEP 7b);
   this requires `careerrat automation status` to show
   `authenticated_apply_preparation` allowed for `linkedin`.
 - If the user says "find jobs", "search", "source", "scan", "refresh",
@@ -655,19 +655,19 @@ Rules for intake:
   `mail_access` allowed for that provider.
 - If the user asks to sync/check their LinkedIn or Wellfound messages/DMs, pull
   in-platform recruiter messages, or ingest portal-inbox updates: use
-  `ingest-messages` (opt-in browser automation; reads DMs into `communications[]`,
+  `ingest-messages` (browser automation; reads DMs into `communications[]`,
   reply drafts go to `email-comms`). Requires `careerrat automation status` to show
   `messaging` allowed for that platform.
 - If the user asks to find a recruiter, hiring manager, employee contact, warm path,
   referral path, or relationship contact for a tracked company or job: use
-  `relationship-sourcing` (opt-in browser automation; writes only review leads into
+  `relationship-sourcing` (browser automation; writes only review leads into
   `relationshipLeads[]` for Network). Requires `careerrat automation status` to show
   `relationship_sourcing` allowed for LinkedIn or Wellfound. Do not treat a found
   person as an action path until the candidate approves the lead; outreach drafts
   route to `email-comms` and never send automatically.
 - If the user says "optimize my LinkedIn", "review/improve my profile", "make my
   profile read for <roles>", "fix my headline/About", or wants a LinkedIn profile
-  pass: use `optimize-linkedin` (opt-in browser automation; reads the profile and
+  pass: use `optimize-linkedin` (browser automation; reads the profile and
   proposes honest, evidence-backed rewrites — dry-run preview first, then optional
   per-field write-back). Reading + suggesting requires `careerrat automation status`
   to show `profile_optimize` allowed for `linkedin`; writing the edits back is a
@@ -699,7 +699,7 @@ Rules for intake:
   past due date because the agent wasn't the one who performed it.
 - If the user says "check my statuses", "sync my pipeline", "any updates on my
   applications", "poll the portals", or wants to read application status straight
-  from their ATS dashboards: use `sync-status` (opt-in browser automation; it reads
+  from their ATS dashboards: use `sync-status` (browser automation; it reads
   the portals and hands transitions to `track-outcomes`). Requires
   `careerrat automation status` to show `status_polling` allowed for a platform.
 - If the user asks why they're getting filtered, to review strategy, to re-rank,
@@ -1269,57 +1269,48 @@ asking the user to re-provide conversation history.
 Authenticated, logged-in browser automation (status polling, in-platform messaging,
 supervised application preparation, LinkedIn profile optimize/apply, session webmail
 access, relationship sourcing, and calendar provider sync) is
-**opt-in and defaults OFF**. No
-`candidate/automation.yml` means **none of those private-account actions run**.
-Saved job-source login follows the separate point-of-use flow below. The
+**on by default per workspace**. There is no consent step, setup mode, or permission
+prompt: a capability runs on a platform unless the operator turned it off. Saved
+job-source login follows the separate point-of-use flow below. The
 three-layer substrate (static `WebFetch` → headless capture →
 the live "session browser") is mapped in `docs/BROWSER.md`; this contract governs
 the authenticated, agent-driven uses of Layer 3.
 
-**The permission predicate (hard).** A capability may run on a platform **only if the
-three switches are all on**: the capability's global switch, that platform's
-per-capability switch, and that platform's one-time ToS consent. **And** either the
-setup mode is "advanced" or the capability has a contextual scoped grant for that
-platform. Never hardcode this in skill prose. Ask the config:
+**The off-switch check (hard).** A capability may run on a platform unless its global
+switch or that platform's per-capability switch is explicitly off. If the automation
+settings exist but can't be read, everything is treated as off. Never hardcode this in
+skill prose. Ask the config:
 
 ```
 import { mayRun } from "src/core/automation/consent.mjs";
 const { allowed, reasons } = mayRun({ capability, platform, root });
-// allowed === (setup_mode === "advanced" || scoped_grants[platform]) ∧ capabilities[cap].enabled ∧ capabilities[cap].platforms[platform] ∧ consent[platform]
+// allowed === capabilities[cap].enabled !== false ∧ capabilities[cap].platforms[platform] !== false (and the file is readable)
 ```
 
-Setup mode is the coarse "has the user opted into automation at all" gate — `basic`
-(the default) keeps every capability hard-off no matter what the granular switches
-say, unless a contextual scoped grant covers that capability and platform; `advanced`
-lets the granular switches govern individually with no scoped grant needed. Flip it
-with `careerrat automation mode advanced --write`; run this **before** `consent`/`enable`
-if you're not relying on a scoped grant, or the granular switches below have nothing
-to attach to.
+Skills run `careerrat automation status --json` (or `mayRun`) as a short **capability
+check** before the first browser action.
 
-If `allowed` is false, surface `reasons` (each names the exact switch that's off and
-the command to flip it) and **stop** — do not drive the browser.
+If `allowed` is false, tell the operator the capability is turned off, give the
+command that turns it on (`reasons` names the exact switch and the command), and
+**skip it**: do not drive the browser for that capability, and do not ask for
+permission or consent to turn it on. The operator turns it on themselves or asks you
+to (`careerrat automation enable <capability> [platform] --write`).
 
-**Config + CLI (the only writer of `automation.yml`).** The capability/platform/consent
+**Config + CLI (the only writer of `automation.yml`).** The capability/platform on/off
 matrix lives in `candidate/automation.yml` (gitignored, schema `config/automation.schema.json`,
 template `templates/automation.example.yml`). Toggle it through the CLI — never
 hand-edit — so writes stay schema-validated, comment-preserving, and atomic:
 
 - `careerrat automation status [--json]` — show the matrix + what's actually live.
-- `careerrat automation mode <basic|advanced> --write` — flip the coarse setup-mode
-  gate. Must be `advanced` before any capability can go live, unless a contextual
-  scoped grant already covers that capability and platform; run this first otherwise.
-- `careerrat automation consent <platform> --write` — record ToS consent (after the
-  user reads that platform's terms). `revoke <platform> --write` withdraws it.
-- `careerrat automation enable <capability> [platform] --write` — flip the global
-  switch (no platform) or one platform. `disable` is the inverse.
+- `careerrat automation enable <capability> [platform] --write`: turn the global
+  switch (no platform) or one platform back on. `disable` is the inverse.
 
 Dry-run is the default (prints the change + the resulting live-verdict, writes
 nothing); `--write` commits. The first write scaffolds the file from the template.
 
-**ToS is the user's call, flagged.** Automating a logged-in platform may violate its
-terms. Before recording consent, surface the ToS note and get an explicit yes; record
-it once via the CLI. **Never auto-run and never run on a schedule** — every automated
-session is user-initiated with the agent in the loop.
+**Never auto-run and never run on a schedule.** Every automated session is
+user-initiated with the agent in the loop: it starts from a request, never from a
+timer or a background job. There is no terms-of-service consent step to record.
 
 **No stored credentials.** CareerRat stores no passwords. The browser session holds the
 logins. The default `auto` provider uses Orca's supervised browser inside an Orca
@@ -1339,7 +1330,7 @@ subagents (see the **Delegation Contract**), **only one** session-browser subage
 run at a time — never two driving an authenticated session in parallel. Status polling,
 in-platform messaging, relationship sourcing, and any other Layer-3 work fan out
 **sequentially**, one platform/target per turn. Stateless `WebFetch` / `WebSearch` work
-has no such limit and parallelizes freely. The consent predicate (`mayRun()`) always
+has no such limit and parallelizes freely. The capability check (`mayRun()`) always
 runs on the **orchestrator** before any spawn — a subagent never re-checks or bypasses it.
 
 **Local storage + safety.** Store screenshots and scraped bodies only under
@@ -1376,8 +1367,7 @@ want to log into <site> so I can use it?” Yes enables only that source and ope
 exact saved URL in the visible CareerRat browser. No leaves it disabled and continues
 with every other source. Accept Yes or No as buttons or typed text. Preserve the
 pending choice and sweep state across navigation. Never send the user to Settings or
-require setup-mode, capability, platform, consent, or terms-of-service switches for
-job search. CAPTCHA and 2FA remain visible user stops.
+require capability, platform, or terms-of-service switches for job search. CAPTCHA and 2FA remain visible user stops.
 
 **Phased rollout.** Each gated capability becomes usable when its skill ships (M12 Phase 1–4):
 `status_polling` (read-only status) — **shipped as the `sync-status` skill**, which polls
@@ -1385,14 +1375,14 @@ ATS dashboards and hands transitions to `track-outcomes` (the owner of canonical
 tracker status transitions; DB mode writes via `careerrat data`, legacy mode writes tracker JSON);
 `messaging` — **shipped as the `ingest-messages` skill** (the browser analog of
 `ingest-mail`: reads LinkedIn/Wellfound DMs
-into `communications[]` under the strongest consent gate, with reply drafts going to
+into `communications[]` as a read-only capability, with reply drafts going to
 `email-comms`); and `authenticated_apply_preparation` — **shipped as supervised LinkedIn Easy Apply
 preparation in `apply-job` STEP 7b** (fill and advance the modal, follow the `submit` setting at
 the final Submit, and halt on captcha/2FA/limit). All four M12 phases
 are now shipped. `doctor` reports the configured/live automation state.
 
 **M13 — LinkedIn profile optimizer (Phase 5).** Two further capabilities on the `linkedin`
-platform, independently gated through the same `mayRun()` AND, both defaults OFF:
+platform, independently switched through the same `mayRun()` check, both on by default:
 `profile_optimize` (read the profile + propose honest, evidence-backed rewrites — read-only)
 and `profile_apply` (write the approved edits back through the session browser, **confirm-first
 per field**). Shipped as the **`optimize-linkedin`** skill, which always produces the read-only
@@ -1403,17 +1393,17 @@ suggesting and writing back are separate switches — `profile_optimize` on neve
 `current_base` privacy invariant as `tailor-application`.
 
 **M17 — Session webmail access (Phase 6).** `mail_access` is a separate session-browser
-capability, also defaults OFF and uses the same `mayRun()` AND. Primary use: during an
+capability, on by default and checked with the same `mayRun()`. Primary use: during an
 application or sign-in flow, read one specific recent emailed verification / 2FA code
 and return to the original page. This is provider-agnostic through the `webmail`
 platform; Gmail and Outlook also have named platforms. Secondary use: `ingest-mail` can
-read opted-in Gmail/Outlook recruiting messages for candidates who do not use macOS
+read Gmail/Outlook recruiting messages for candidates who do not use macOS
 Apple Mail. Generic `webmail` is verification-code-only, not mailbox ingest. The helper
 in `src/core/automation/mail-access.mjs` defines the narrow plan and blocker detection.
 Privacy rule: never browse the broader inbox for a code flow; never send, delete, reply,
 archive, or intentionally mark messages read; halt on a mail login wall, mail 2FA
 prompt, captcha, or unexpected interstitial. Turning on `messaging` for LinkedIn/
-Wellfound never turns on `mail_access`; mail access is its own explicit consent.
+Wellfound never turns on `mail_access`; mail access is its own switch.
 
 **M18 — Relationship sourcing (Phase 7).** `relationship_sourcing` is a separate
 session-browser capability for LinkedIn and Wellfound. It looks for likely recruiters,
@@ -1427,7 +1417,7 @@ message draft routes through `email-comms` and stays confirm-first.
 **M19 — Calendar provider sync (Phase 8).** `calendar_sync` is a separate
 confirm-first capability for Apple Calendar, Google Calendar, Outlook Calendar, and
 approved local automation tools. It builds on the shipped no-auth Calendar export
-path, but real provider writes are per-provider gated and user-initiated. The
+path; real provider writes are per-provider switchable and user-initiated. The
 `calendar-sync` skill previews the exact tracker-derived event before writing,
 halts on login/2FA/captcha/provider ambiguity, never runs in the background, and
 appends compact `calendarWrites[]` history only after a successful confirmed write.
@@ -1459,7 +1449,7 @@ runtime *this phase parallelizes cleanly*.
 
 **Rules (hard):**
 
-- **The orchestrator owns the gates.** Consent (`mayRun()`), the comp/honesty/privacy
+- **The orchestrator owns the gates.** The capability check (`mayRun()`), the comp/honesty/privacy
   invariants, and the application-limit checks ALWAYS run on the orchestrator *before*
   any spawn. A subagent never re-derives or bypasses a gate.
 - **A subagent gets a self-contained prompt and returns one structured block.** It does
@@ -1497,7 +1487,7 @@ Loading every input a skill *might* touch into the orchestrator is the main driv
 token burn. Split each skill's inputs into two tiers and load lazily:
 
 - **Tier 1 — load to decide.** The decision surface the orchestrator needs to route,
-  gate, and dispatch: mode/consent verdicts (`careerrat modes status`,
+  gate, and dispatch: mode and capability verdicts (`careerrat modes status`,
   `careerrat automation status`), the freshness/watermark flag, the exclusion list and
   comp floor, `usage_mode`, the tracker row being acted on. Small, cheap, always loaded.
 - **Tier 2 — load to do.** The heavy bodies only the executing step (or a subagent)
@@ -1511,7 +1501,7 @@ Skills that delegate declare the split in frontmatter so the boundary is explici
 metadata:
   tier_1_inputs:
     - modes.yml
-    - automation consent
+    - automation status
     - targeting.excluded_companies
     - profile.compensation.comp_floors
     - watermark
