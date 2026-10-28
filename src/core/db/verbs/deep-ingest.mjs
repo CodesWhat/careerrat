@@ -524,6 +524,7 @@ function writeEvidenceClaims(db, items, proposal, confirmedAt) {
   );
   let added = 0;
   let accepted = 0;
+  const ids = [];
   for (const raw of Array.isArray(items) ? items : []) {
     const claim = evidenceClaimFromItem(raw);
     if (!claim) continue;
@@ -546,9 +547,10 @@ function writeEvidenceClaims(db, items, proposal, confirmedAt) {
     };
     assertCleanEvidenceClaims([data]);
     stmt.run(id, JSON.stringify(data), nowIso());
+    ids.push(id);
     added += 1;
   }
-  return { added, accepted };
+  return { added, accepted, ids };
 }
 
 function evidenceClaimFromItem(raw) {

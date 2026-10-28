@@ -656,6 +656,8 @@ test("confirmed generic evidence edits write trusted claims and complete the lan
   const claims = candidateConfigGet({ repoRoot }).evidence.claims;
   assert.equal(claims.length, beforeClaims + 1);
   assert.equal(claims.at(-1).claim, "Built source-grounded review workflows.");
+  assert.equal(confirmed.output.evidence.added, 1);
+  assert.deepEqual(confirmed.output.evidence.ids, [claims.at(-1).id]);
   assert.equal(deepIngestStateGet({ repoRoot }).laneStates.evidence_claims.status, "completed");
 });
 

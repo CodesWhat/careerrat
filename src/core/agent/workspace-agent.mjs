@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
 
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
@@ -149,6 +149,12 @@ import {
   ISSUE_REPORT_COMP_LEAK_MARKER,
 } from "./issue-report.mjs";
 import {
+  buildKnowledgeWriteEntry,
+  configWriteEntries,
+  revertKnowledgeWrite,
+  undoNextAction,
+} from "./knowledge-write-log.mjs";
+import {
   normalizeWorkspaceIntent,
   WORKSPACE_THREAD_ID,
   workspaceIntentAppend,
@@ -198,6 +204,7 @@ export const EXECUTABLE_INTENTS = new Set([
   "strategy.stamp",
   "settings.explain",
   "settings.apply",
+  "knowledge.revert",
   "job.prepare-submit",
   "job.apply",
   "communication.draft",
@@ -6158,6 +6165,13 @@ export async function executeWorkspaceIntent({
         throw actionError("A setting change is required to apply it.", "SETTINGS_CHANGE_INVALID");
       }
 
+      // Knowledge-write log: snapshot before the write so each changed path is
+      // logged below as a reversible entry (scoped to the path, never the doc).
+      const configBefore = new Set(["gate", "mode", "automation", "profile"]).has(change.kind)
+        ? candidateConfigGet({ repoRoot, env })
+        : null;
+      const logWrites = [];
+      const laneEntries = [];
       let result;
       if (change.kind === "gate") {
         // Re-derived here, not trusted from the matcher's compReference flag:
@@ -6187,6 +6201,13 @@ export async function executeWorkspaceIntent({
           // the message as-is rather than inventing a new one.
           throw actionError(error.message, "SETTINGS_CHANGE_INVALID");
         }
+        if (GATE_ROUTES[type]?.file) {
+          logWrites.push({
+            name: GATE_ROUTES[type].file,
+            path: applied.field,
+            label: GATE_ROUTES[type].label || type,
+          });
+        }
         result = {
           label: GATE_ROUTES[type]?.label || type,
           field: applied.field,
@@ -6208,6 +6229,7 @@ export async function executeWorkspaceIntent({
         const from = modesDoc[field] ?? null;
         candidateConfigPatch({ repoRoot, env, name: "modes", patch: { [field]: value } });
         const label = field === "usage_mode" ? "Usage mode" : "Application mode";
+        logWrites.push({ name: "modes", path: field, label });
         result = { label, field, from, to: value, summary: `${label} set to ${value}.` };
       } else if (change.kind === "automation") {
         const op = String(change.op || "");
@@ -6255,6 +6277,18 @@ export async function executeWorkspaceIntent({
               },
             },
           };
+          logWrites.push(
+            {
+              name: "automation",
+              path: `capabilities.${definition.capability}.enabled`,
+              label: definition.label,
+            },
+            ...platforms.map((platform) => ({
+              name: "automation",
+              path: `capabilities.${definition.capability}.platforms.${platform}`,
+              label: `${definition.label} on ${platform}`,
+            }))
+          );
           result = {
             label: definition.label,
             field: `capabilities.${definition.capability}`,
@@ -6305,6 +6339,14 @@ export async function executeWorkspaceIntent({
             },
           };
           const label = `${CAPABILITIES[capability].label} (global switch)`;
+          logWrites.push(
+            { name: "automation", path: `capabilities.${capability}.enabled`, label },
+            ...(value ? platformList : []).map((platform) => ({
+              name: "automation",
+              path: `capabilities.${capability}.platforms.${platform}`,
+              label: `${capability} on ${platform}`,
+            }))
+          );
           result = {
             label,
             field: `capabilities.${capability}.enabled`,
@@ -6334,6 +6376,11 @@ export async function executeWorkspaceIntent({
           const value = requested;
           const from = automationDoc.capabilities?.[capability]?.platforms?.[platform] !== false;
           patch = { capabilities: { [capability]: { platforms: { [platform]: value } } } };
+          logWrites.push({
+            name: "automation",
+            path: `capabilities.${capability}.platforms.${platform}`,
+            label: `${capability} on ${platform}`,
+          });
           result = {
             label: `${capability} on ${platform}`,
             field: `capabilities.${capability}.platforms.${platform}`,
@@ -6355,6 +6402,11 @@ export async function executeWorkspaceIntent({
           }
           const from = automationDoc.session?.provider || "auto";
           patch = { session: { provider } };
+          logWrites.push({
+            name: "automation",
+            path: "session.provider",
+            label: "Session browser provider",
+          });
           result = {
             label: "Session browser provider",
             field: "session.provider",
@@ -6408,6 +6460,12 @@ export async function executeWorkspaceIntent({
             patch: { role_buckets: roleBuckets },
           });
           const to = roleBuckets.flatMap((bucket) => bucket.titles);
+          logWrites.push({
+            name: "targeting",
+            path: "role_buckets",
+            label: "Target roles",
+            op: op === "append" ? "add" : "replace",
+          });
           result = {
             label: "Target roles",
             field: "role_buckets",
@@ -6433,6 +6491,10 @@ export async function executeWorkspaceIntent({
             name: "profile",
             patch: { candidate: { location: value }, location: { home: value } },
           });
+          logWrites.push(
+            { name: "profile", path: "location.home", label: "Home market" },
+            { name: "profile", path: "candidate.location", label: "Home market" }
+          );
           result = {
             label: "Home market",
             field: "location.home",
@@ -6457,6 +6519,7 @@ export async function executeWorkspaceIntent({
               location: { [field]: change.value, mode_preferences_confirmed: true },
             },
           });
+          logWrites.push({ name: "profile", path: `location.${field}`, label: `${field} roles` });
           result = {
             label: `${field} roles`,
             field: `location.${field}`,
@@ -6480,6 +6543,36 @@ export async function executeWorkspaceIntent({
             id: current?.id,
             fields: { summary: value },
           });
+          laneEntries.push(
+            current
+              ? buildKnowledgeWriteEntry({
+                  target: "deep_ingest:writing_voice",
+                  op: "replace",
+                  id: current.id,
+                  path: "summary",
+                  before: current.summary,
+                  after: saved.item?.summary,
+                  source: { kind: "settings.apply", intentMessageId: intentMessage.message.id },
+                  writer: "settings.apply",
+                  label: "Writing style",
+                  ...(current.summary === undefined
+                    ? {
+                        revertible: false,
+                        revertNote: "This kind of change can't be undone from the thread.",
+                      }
+                    : {}),
+                })
+              : buildKnowledgeWriteEntry({
+                  target: "deep_ingest:writing_voice",
+                  op: "add",
+                  id: saved.item?.id,
+                  before: undefined,
+                  after: saved.item,
+                  source: { kind: "settings.apply", intentMessageId: intentMessage.message.id },
+                  writer: "settings.apply",
+                  label: "Writing style",
+                })
+          );
           result = {
             label: "Writing style",
             field: "writing_voice.summary",
@@ -6500,6 +6593,11 @@ export async function executeWorkspaceIntent({
             name: "targeting",
             patch: { search_preferences: { cadence: { mode: value } } },
           });
+          logWrites.push({
+            name: "targeting",
+            path: "search_preferences.cadence.mode",
+            label: "Search cadence",
+          });
           result = {
             label: "Search cadence",
             field: "search_preferences.cadence.mode",
@@ -6519,6 +6617,7 @@ export async function executeWorkspaceIntent({
             name: "targeting",
             patch: { fit_bands: { fit_floor: value } },
           });
+          logWrites.push({ name: "targeting", path: "fit_bands.fit_floor", label: "Minimum fit" });
           result = {
             label: "Minimum fit",
             field: "fit_bands.fit_floor",
@@ -6537,6 +6636,7 @@ export async function executeWorkspaceIntent({
             name: "targeting",
             patch: { [field]: values },
           });
+          logWrites.push({ name: "targeting", path: field, label });
           result = {
             label,
             field,
@@ -6554,6 +6654,11 @@ export async function executeWorkspaceIntent({
             env,
             name: "profile",
             patch: { location: { relocation: values } },
+          });
+          logWrites.push({
+            name: "profile",
+            path: "location.relocation",
+            label: "Relocation markets",
           });
           result = {
             label: "Relocation markets",
@@ -6587,15 +6692,91 @@ export async function executeWorkspaceIntent({
         // (changed: false); other writes always persist. Absent means changed.
         ...(result.changed === false ? { changed: false } : {}),
       };
+      const logEntries = [
+        ...(configBefore
+          ? configWriteEntries({
+              before: configBefore,
+              after: candidateConfigGet({ repoRoot, env }),
+              writes: logWrites,
+              source: { kind: "settings.apply", intentMessageId: intentMessage.message.id },
+              writer: "settings.apply",
+            })
+          : []),
+        ...laneEntries,
+      ];
+      // The Undo buttons need the id of the message that will hold the entries.
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
         text: result.summary,
-        artifacts: [artifact],
-        metadata: { domain: change.kind },
+        artifacts: [artifact, ...logEntries],
+        metadata: {
+          domain: change.kind,
+          ...(undoActions.length ? { nextActions: undoActions } : {}),
+        },
         operationResult: result,
+        now,
+      });
+    }
+
+    // knowledge.revert: undo one logged knowledge write. The client only names
+    // the stored message and artifact index; the entry itself (target, path,
+    // before, after) is always read back from the thread, so a caller can't
+    // smuggle in its own before/after. Plain refusals (changed again since,
+    // already undone, cited elsewhere) land as a note, not an error.
+    if (normalized.type === "knowledge.revert") {
+      const messageId = String(input.messageId || "").trim();
+      const index = Number(input.index);
+      const stored = workspaceThreadRead({ repoRoot, env }).messages.find(
+        (message) => message?.id === messageId && message.kind === "action_result"
+      );
+      const entry =
+        stored && Number.isInteger(index) && index >= 0 ? stored.artifacts?.[index] : null;
+      if (entry?.kind !== "knowledge_write") {
+        throw actionError(
+          "CareerRat couldn't find that change to undo.",
+          "KNOWLEDGE_REVERT_INVALID"
+        );
+      }
+      const existing = workspaceThreadRead({ repoRoot, env }).messages.flatMap((message) =>
+        (message.artifacts || []).filter((artifact) => artifact?.kind === "knowledge_write")
+      );
+      const reverted = revertKnowledgeWrite({
+        repoRoot,
+        env,
+        entry,
+        messageId,
+        index,
+        existing,
+      });
+      if (!reverted.ok) {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: reverted.note,
+          metadata: { state: "refused", reason: reverted.reason },
+          operationResult: { ok: false, reason: reverted.reason },
+          now,
+        });
+      }
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: reverted.summary,
+        artifacts: [reverted.entry],
+        metadata: { state: "reverted" },
+        operationResult: { ok: true },
         now,
       });
     }

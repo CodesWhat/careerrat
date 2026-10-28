@@ -2645,3 +2645,105 @@ describe("EngineDownCover", () => {
     );
   });
 });
+
+describe("knowledge writes in the thread", () => {
+  const entry = (overrides = {}) => ({
+    kind: "knowledge_write",
+    target: "candidate_config:targeting",
+    op: "set",
+    path: "fit_bands.fit_floor",
+    label: "Minimum fit",
+    before: 60,
+    after: 70,
+    revertible: true,
+    ...overrides,
+  });
+  const resultMessage = (artifacts, extra = {}) => ({
+    id: "write-1",
+    threadId: "workspace-main",
+    role: "assistant",
+    kind: "action_result",
+    text: "Minimum fit set to 70+.",
+    artifacts: [{ kind: "settings_apply", label: "Minimum fit" }, ...artifacts],
+    ...extra,
+  });
+
+  it("renders a compact change line with an Undo that runs knowledge.revert", () => {
+    const html = markup(
+      <MessageTranscript messages={[resultMessage([entry()])]} onIntentAction={vi.fn()} />
+    );
+    expect(html).toContain("Changed Minimum fit from 60 to 70");
+    expect(html).toContain("Undo");
+    expect(html).not.toContain("→");
+    expect(html).not.toContain("\u2014");
+  });
+
+  it("shows the note instead of Undo when a write is not revertible", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          resultMessage([
+            entry({
+              revertible: false,
+              revertNote: "This value is private, so it can't be undone from the thread.",
+              before: "[private]",
+              after: "[private]",
+            }),
+          ]),
+        ]}
+        onIntentAction={vi.fn()}
+      />
+    );
+    expect(html).toContain("This value is private, so it can&#x27;t be undone from the thread.");
+    expect(html).not.toContain(">Undo<");
+  });
+
+  it("marks a write as Undone once an undo entry points at it", () => {
+    const undone = {
+      id: "undo-1",
+      threadId: "workspace-main",
+      role: "assistant",
+      kind: "action_result",
+      text: "Undid: Minimum fit.",
+      artifacts: [
+        entry({
+          before: 70,
+          after: 60,
+          revertible: false,
+          revertNote: "This undo can't be undone from the thread.",
+          revertOf: { messageId: "write-1", index: 1 },
+        }),
+      ],
+    };
+    const html = markup(
+      <MessageTranscript messages={[resultMessage([entry()]), undone]} onIntentAction={vi.fn()} />
+    );
+    expect(html).toContain("Undone");
+    expect(html).not.toContain(">Undo<");
+  });
+
+  it("does not repeat the Undo as a trailing pill", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          resultMessage([entry()], {
+            metadata: {
+              nextActions: [
+                {
+                  label: "Undo",
+                  intent: {
+                    type: "knowledge.revert",
+                    entity: { type: "workspace", id: "workspace-main" },
+                    input: { messageId: "write-1", index: 1 },
+                  },
+                },
+              ],
+            },
+          }),
+        ]}
+        onIntentAction={vi.fn()}
+      />
+    );
+    expect(html.match(/>Undo</g)).toHaveLength(1);
+  });
+});

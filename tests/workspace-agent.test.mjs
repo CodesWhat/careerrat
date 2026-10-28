@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
-
 import {
   createWorkspaceOperationKinds,
   mountWorkspaceAgentRoutes,
 } from "../src/cli/workspace-agent-route.mjs";
+import { buildKnowledgeWriteEntry } from "../src/core/agent/knowledge-write-log.mjs";
 import {
   captureWorkspaceIntake,
   createWorkspaceAgentRuntime,
@@ -12642,4 +12642,276 @@ test("every offered workspace intent persists natural user copy instead of undef
     assert.doesNotMatch(message.text, /undefined|qa-|\b(?:application|workspace|communication):/i);
     assert.match(message.text, /^[A-Z].+\.$/);
   }
+});
+
+// knowledge.revert and the settings.apply knowledge-write log
+async function applySetting(repoRoot, change) {
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change },
+    },
+  });
+  return workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+}
+
+async function revertEntry(repoRoot, message, index = 1, extra = {}) {
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "knowledge.revert",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { messageId: message.id, index, ...extra },
+    },
+  });
+  return workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+}
+
+function fitFloorChange(value) {
+  return { kind: "profile", section: "fit-floor", value };
+}
+
+test("settings.apply logs a knowledge_write entry per changed path with an Undo action", async () => {
+  const repoRoot = tempRepo();
+  const message = await applySetting(repoRoot, fitFloorChange(70));
+  const entry = message.artifacts[1];
+  assert.equal(entry.kind, "knowledge_write");
+  assert.equal(entry.target, "candidate_config:targeting");
+  assert.equal(entry.path, "fit_bands.fit_floor");
+  assert.equal(entry.after, 70);
+  assert.equal(entry.writer, "settings.apply");
+  assert.equal(entry.revertible, true);
+  assert.equal(entry.source.kind, "settings.apply");
+  const undo = message.metadata.nextActions[0];
+  assert.equal(undo.intent.type, "knowledge.revert");
+  assert.deepEqual(undo.intent.input, { messageId: message.id, index: 1 });
+
+  // A write that changes nothing logs nothing.
+  const same = await applySetting(repoRoot, fitFloorChange(70));
+  assert.equal(same.artifacts.filter((artifact) => artifact.kind === "knowledge_write").length, 0);
+});
+
+test("settings.apply logs automation capability toggles", async () => {
+  const repoRoot = tempRepo();
+  const capability = CAPABILITY_KEYS[0];
+  const message = await applySetting(repoRoot, {
+    kind: "automation",
+    op: "capability",
+    capability,
+    enabled: true,
+  });
+  const entry = message.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(entry.target, "candidate_config:automation");
+  assert.equal(entry.path, `capabilities.${capability}.enabled`);
+  assert.equal(entry.after, true);
+});
+
+test("knowledge.revert restores a scalar config value and logs the undo", async () => {
+  const repoRoot = tempRepo();
+  await applySetting(repoRoot, fitFloorChange(70));
+  const second = await applySetting(repoRoot, fitFloorChange(80));
+  const undone = await revertEntry(repoRoot, second);
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
+  assert.match(undone.text, /^Undid: Minimum fit\.$/);
+  const inverse = undone.artifacts[0];
+  assert.equal(inverse.before, 80);
+  assert.equal(inverse.after, 70);
+  assert.deepEqual(inverse.revertOf, { messageId: second.id, index: 1 });
+});
+
+test("knowledge.revert unsets a path that was absent before the write", async () => {
+  const repoRoot = tempRepo();
+  const before = candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands || {};
+  assert.equal(before.fit_floor, undefined);
+  const message = await applySetting(repoRoot, fitFloorChange(65));
+  assert.equal(message.artifacts[1].beforeAbsent, true);
+  await revertEntry(repoRoot, message);
+  const bands = candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands || {};
+  assert.equal(Object.hasOwn(bands, "fit_floor"), false);
+});
+
+test("knowledge.revert refuses when the value changed again since", async () => {
+  const repoRoot = tempRepo();
+  const first = await applySetting(repoRoot, fitFloorChange(70));
+  await applySetting(repoRoot, fitFloorChange(80));
+  const note = await revertEntry(repoRoot, first);
+  assert.equal(note.text, "This changed again since, so CareerRat didn't undo it.");
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 80);
+});
+
+test("knowledge.revert refuses a double undo", async () => {
+  const repoRoot = tempRepo();
+  await applySetting(repoRoot, fitFloorChange(70));
+  const second = await applySetting(repoRoot, fitFloorChange(80));
+  await revertEntry(repoRoot, second);
+  const again = await revertEntry(repoRoot, second);
+  assert.equal(again.text, "This was already undone.");
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
+});
+
+test("knowledge.revert trusts only the stored entry, never client before/after", async () => {
+  const repoRoot = tempRepo();
+  await applySetting(repoRoot, fitFloorChange(70));
+  const second = await applySetting(repoRoot, fitFloorChange(80));
+  await revertEntry(repoRoot, second, 1, {
+    before: 5,
+    after: 80,
+    entry: { ...second.artifacts[1], before: 5 },
+  });
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "knowledge.revert",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { messageId: "nope", index: 1, before: 1, after: 2 },
+      },
+    }),
+    (error) => error.code === "KNOWLEDGE_REVERT_INVALID"
+  );
+});
+
+function storeEntry(repoRoot, entry) {
+  return workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "assistant",
+    kind: "action_result",
+    text: "Saved.",
+    artifacts: [{ kind: "note" }, entry],
+  }).message;
+}
+
+test("knowledge.revert removes an added evidence claim and keeps the entry when it is cited", async () => {
+  const repoRoot = tempRepo();
+  const claim = { id: "undo-001", claim: "Shipped the billing rewrite.", evidence: "Resume" };
+  candidateEvidenceMerge({ repoRoot, env: {}, claims: [claim] });
+  const stored = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "undo-001"
+  );
+  const message = storeEntry(
+    repoRoot,
+    buildKnowledgeWriteEntry({
+      target: "evidence",
+      op: "add",
+      id: "undo-001",
+      before: undefined,
+      after: stored,
+      source: { kind: "test" },
+      writer: "test",
+      label: "Evidence claim",
+    })
+  );
+  await revertEntry(repoRoot, message);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).evidence.claims.some(
+      (item) => item.id === "undo-001"
+    ),
+    false
+  );
+
+  const citedClaim = { id: "undo-002", claim: "Cut p99 latency in half.", evidence: "Resume" };
+  candidateEvidenceMerge({ repoRoot, env: {}, claims: [citedClaim] });
+  const citedStored = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "undo-002"
+  );
+  const db = openDb({ repoRoot, env: {} });
+  db.prepare("INSERT INTO deep_ingest_story_bank (id, data) VALUES (?, ?)").run(
+    "story-cites",
+    JSON.stringify({ id: "story-cites", status: "confirmed", evidence_ids: ["undo-002"] })
+  );
+  const citedMessage = storeEntry(
+    repoRoot,
+    buildKnowledgeWriteEntry({
+      target: "evidence",
+      op: "add",
+      id: "undo-002",
+      before: undefined,
+      after: citedStored,
+      source: { kind: "test" },
+      writer: "test",
+    })
+  );
+  const note = await revertEntry(repoRoot, citedMessage);
+  assert.equal(note.text, "Other work cites this claim now, so it can't be removed.");
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).evidence.claims.some(
+      (item) => item.id === "undo-002"
+    ),
+    true
+  );
+});
+
+test("knowledge.revert puts a replaced evidence claim back through the firewall", async () => {
+  const repoRoot = tempRepo();
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "swap-001", claim: "Led the platform team.", evidence: "Resume" }],
+  });
+  const prior = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "swap-001"
+  );
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "swap-001", claim: "Led the platform and data teams.", evidence: "Resume" }],
+  });
+  const current = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "swap-001"
+  );
+  const message = storeEntry(
+    repoRoot,
+    buildKnowledgeWriteEntry({
+      target: "evidence",
+      op: "replace",
+      id: "swap-001",
+      before: prior,
+      after: current,
+      source: { kind: "test" },
+      writer: "test",
+    })
+  );
+  await revertEntry(repoRoot, message);
+  const restored = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "swap-001"
+  );
+  assert.equal(restored.claim, "Led the platform team.");
+});
+
+test("knowledge.revert undoes a deep-ingest lane row add and replace", async () => {
+  const repoRoot = tempRepo();
+  const added = await applySetting(repoRoot, {
+    kind: "profile",
+    section: "writing-style",
+    value: "Plain and direct.",
+  });
+  const addEntry = added.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(addEntry.op, "add");
+  const replaced = await applySetting(repoRoot, {
+    kind: "profile",
+    section: "writing-style",
+    value: "Warm and brief.",
+  });
+  const replaceEntry = replaced.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(replaceEntry.op, "replace");
+  assert.equal(replaceEntry.path, "summary");
+  const replaceIndex = replaced.artifacts.indexOf(replaceEntry);
+  await revertEntry(repoRoot, replaced, replaceIndex);
+  const rows = () =>
+    openDb({ repoRoot, env: {} })
+      .prepare("SELECT data FROM deep_ingest_writing_voice")
+      .all()
+      .map((row) => JSON.parse(row.data));
+  assert.equal(rows()[0].summary, "Plain and direct.");
+
+  // The first write's row now differs (summary changed twice), so its undo is stale.
+  const stale = await revertEntry(repoRoot, added, added.artifacts.indexOf(addEntry));
+  assert.equal(stale.text, "This changed again since, so CareerRat didn't undo it.");
 });
