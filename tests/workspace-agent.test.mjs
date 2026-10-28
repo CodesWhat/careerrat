@@ -8726,7 +8726,67 @@ test("Apply on site keeps an active supervised browser session without treating 
   assert.match(last.text, /not marked Applied/i);
 });
 
-test("permission-blocked preparation offers a fresh retry instead of a missing session return", async () => {
+test("capability-off preparation says it is turned off and offers Turn it on instead of a missing session return", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: { gate: "keep", fitScore: 92 },
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-27T12:00:00.000Z",
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [
+          {
+            kind: "answers",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "internal packet diagnostic",
+          },
+        ],
+        artifacts: {},
+      },
+    })
+  );
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-submit",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "blocked",
+      code: "CAPABILITY_OFF",
+      platform: "linkedin",
+      reason:
+        "Application preparation is turned off for LinkedIn. Turn it on with `careerrat automation enable authenticated_apply_preparation --write`, or ask me to turn it on.",
+      session: { provider: "orca", blockers: ["capability off"] },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(last.metadata.nextActions[0].label, "Turn it on");
+  assert.equal(last.metadata.nextActions[0].intent.type, "settings.apply");
+  assert.deepEqual(last.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "capability",
+    capability: "authenticated_apply_preparation",
+    enabled: true,
+    platforms: ["linkedin"],
+  });
+  assert.equal(last.metadata.nextActions[1].label, "I applied");
+  assert.match(last.text, /Authenticated apply preparation is turned off for linkedin/i);
+  assert.match(last.text, /careerrat automation enable authenticated_apply_preparation/);
+  assert.doesNotMatch(last.text, /permission|consent|allow/i);
+  assert.doesNotMatch(last.text, /prepared browser session/i);
+});
+
+test("a persisted APPLICATION_PREPARATION_PERMISSION_REQUIRED result still reads as capability off", async () => {
   const repoRoot = tempRepo();
   seedApplication(
     repoRoot,
@@ -8769,17 +8829,9 @@ test("permission-blocked preparation offers a fresh retry instead of a missing s
 
   const last = result.messages.at(-1);
   assert.equal(last.metadata.state, "blocked");
-  assert.equal(last.metadata.nextActions[0].label, "Allow form preparation");
-  assert.equal(last.metadata.nextActions[0].intent.type, "settings.apply");
-  assert.deepEqual(last.metadata.nextActions[0].intent.input.change, {
-    kind: "automation",
-    op: "contextual-permission",
-    permission: "application-preparation",
-  });
-  assert.match(last.text, /CareerRat submits once everything is filled and checked/i);
-  assert.match(last.text, /type “Allow form preparation”/i);
-  assert.doesNotMatch(last.text, /settings/i);
-  assert.doesNotMatch(last.text, /prepared browser session/i);
+  assert.equal(last.metadata.nextActions[0].label, "Turn it on");
+  assert.match(last.text, /turned off/i);
+  assert.equal(last.metadata.capabilityOff.reason, last.text);
 });
 
 test("job.apply refuses a resumeSession request when the application has no passing gate verdict on record", async () => {
@@ -9244,7 +9296,7 @@ test("settings.explain never leaks current_base and surfaces the other comp fiel
   assert.equal(artifact.gates.comp_expected, 160000);
 });
 
-test("settings.explain scopes to the requested domain and reads absent automation capabilities as false", async () => {
+test("settings.explain scopes to the requested domain and shows on/off per capability with no consent or setup mode", async () => {
   const repoRoot = tempRepo();
   // A minimal stored automation doc that predates several capabilities —
   // only authenticated_apply_preparation is present.
@@ -9284,6 +9336,13 @@ test("settings.explain scopes to the requested domain and reads absent automatio
   assert.ok(allArtifact.modes);
   assert.ok(allArtifact.automation);
   assert.ok(allArtifact.gates);
+  assert.equal(allArtifact.automation.read_error, null);
+  assert.equal(Object.hasOwn(allArtifact.automation, "setup_mode"), false);
+  for (const cap of allArtifact.automation.capabilities) {
+    for (const platform of cap.platforms) {
+      assert.equal(Object.hasOwn(platform, "consent"), false);
+    }
+  }
 
   const statusPolling = allArtifact.automation.capabilities.find(
     (cap) => cap.key === "status_polling"
@@ -9773,27 +9832,26 @@ test("settings.apply automation: capability disable is allowed even for a high-t
   );
 });
 
-test("settings.apply automation: raw consent changes are unsupported from Ask", async () => {
+test("settings.apply automation: consent is retired and succeeds without writing", async () => {
   const repoRoot = tempRepo();
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "settings.apply",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: { change: { kind: "automation", op: "consent" } },
-      },
-    }),
-    (error) => {
-      assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
-      assert.equal(error.details.reason, "consent");
-      return true;
-    }
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "automation", op: "consent" } },
+    },
+  });
+  assert.equal(settingsArtifact(result).changed, false);
+  assert.match(
+    result.messages.at(-1).text,
+    /Consent and setup mode were retired; capabilities are on unless turned off\./
   );
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
-test("settings.apply automation: contextual application permission writes the reviewed site set and is replay-safe", async () => {
+test("settings.apply automation: an old application-preparation button turns the capability and its sites on and is replay-safe", async () => {
   const repoRoot = tempRepo();
   const intent = {
     type: "settings.apply",
@@ -9811,8 +9869,9 @@ test("settings.apply automation: contextual application permission writes the re
   const replay = await executeWorkspaceIntent({ repoRoot, env: {}, intent });
   const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
 
-  assert.notEqual(automation.setup_mode, "advanced");
   assert.equal(automation.capabilities.authenticated_apply_preparation.enabled, true);
+  assert.equal(Object.hasOwn(automation, "consent"), false);
+  assert.equal(Object.hasOwn(automation, "setup_mode"), false);
   for (const platform of [
     "greenhouse",
     "lever",
@@ -9822,7 +9881,6 @@ test("settings.apply automation: contextual application permission writes the re
     "linkedin",
     "external_ats",
   ]) {
-    assert.equal(automation.consent[platform], true, platform);
     assert.equal(
       automation.capabilities.authenticated_apply_preparation.platforms[platform],
       true,
@@ -9831,7 +9889,7 @@ test("settings.apply automation: contextual application permission writes the re
   }
   assert.notEqual(settingsArtifact(first).changed, false);
   assert.equal(settingsArtifact(replay).changed, false);
-  assert.match(replay.messages.at(-1).text, /already allowed/i);
+  assert.match(replay.messages.at(-1).text, /already on/i);
 });
 
 test("a narrow contextual calendar grant cannot activate a dormant relationship capability", async () => {
@@ -9871,7 +9929,7 @@ test("a narrow contextual calendar grant cannot activate a dormant relationship 
   );
 });
 
-test("the email-check contextual grant stores Gmail and Outlook only", async () => {
+test("the old email-check button turns Gmail and Outlook on and leaves other webmail off", async () => {
   const repoRoot = tempRepo();
   await executeWorkspaceIntent({
     repoRoot,
@@ -9899,7 +9957,6 @@ test("the email-check contextual grant stores Gmail and Outlook only", async () 
     ),
     { gmail: true, outlook: true, webmail: false }
   );
-  assert.notEqual(automation.consent.webmail, true);
   assert.notEqual(automation.capabilities.mail_access.platforms.webmail, true);
 });
 
@@ -9925,7 +9982,7 @@ test("settings.apply automation: an unknown contextual permission fails closed",
   );
 });
 
-test("permission text only mutates on a direct allow command and leaves questions for Paul", () => {
+test("old typed Allow commands turn the capability on, and questions leave Paul to answer", () => {
   const repoRoot = tempRepo();
   for (const [text, permission] of [
     ["Allow form preparation", "application-preparation"],
@@ -9954,74 +10011,103 @@ test("permission text only mutates on a direct allow command and leaves question
   }
 });
 
-test("settings.apply automation: enabling a high-tier capability is unsupported from Ask", async () => {
+test("typed turn on <capability> previews an enable for every capability, not only status polling", () => {
   const repoRoot = tempRepo();
-  await assert.rejects(
-    executeWorkspaceIntent({
+  for (const [text, capability] of [
+    ["Turn on apply preparation", "authenticated_apply_preparation"],
+    ["Turn on relationship sourcing", "relationship_sourcing"],
+    ["turn on mail access", "mail_access"],
+    ["Turn on calendar sync", "calendar_sync"],
+  ]) {
+    const action = previewWorkspaceIntent({ repoRoot, env: {}, text }).action;
+    assert.deepEqual(
+      action.intent.input.change,
+      { kind: "automation", op: "capability", capability, enabled: true },
+      text
+    );
+  }
+  const platform = previewWorkspaceIntent({
+    repoRoot,
+    env: {},
+    text: "Turn on apply preparation on linkedin",
+  }).action;
+  assert.deepEqual(platform.intent.input.change, {
+    kind: "automation",
+    op: "platform",
+    capability: "authenticated_apply_preparation",
+    platform: "linkedin",
+    enabled: true,
+  });
+});
+
+test("settings.apply automation: any capability can be turned on from Ask", async () => {
+  const repoRoot = tempRepo();
+  for (const capability of CAPABILITY_KEYS) {
+    const result = await executeWorkspaceIntent({
       repoRoot,
       env: {},
       intent: {
         type: "settings.apply",
         entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {
-          change: {
-            kind: "automation",
-            op: "capability",
-            capability: "authenticated_apply_preparation",
-            enabled: true,
-          },
-        },
+        input: { change: { kind: "automation", op: "capability", capability, enabled: true } },
       },
-    }),
-    (error) => {
-      assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
-      assert.equal(error.details.reason, "capability-tier");
-      assert.equal(error.details.capability, "authenticated_apply_preparation");
-      return true;
-    }
-  );
+    });
+    assert.equal(settingsArtifact(result).to, true, capability);
+  }
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+  for (const capability of CAPABILITY_KEYS) {
+    assert.equal(automation.capabilities[capability].enabled, true, capability);
+  }
+  // A platform switch is separate: capability-level enable leaves it as it was.
+  assert.equal(automation.capabilities.authenticated_apply_preparation.platforms.linkedin, false);
 });
 
-test("settings.apply automation: the value/enabled flag aliases agree — value: true both passes the gate and persists as enabled", async () => {
+test("settings.apply automation: a platform can be turned on from Ask for any capability", async () => {
   const repoRoot = tempRepo();
-
-  // A REST caller sending the flag as `value` instead of `enabled` must not
-  // pass the tier gate as an enable and then persist a disable.
-  const applied = await executeWorkspaceIntent({
+  const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
     intent: {
       type: "settings.apply",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: {
-        change: { kind: "automation", op: "capability", capability: "status_polling", value: true },
+        change: {
+          kind: "automation",
+          op: "platform",
+          capability: "authenticated_apply_preparation",
+          platform: "linkedin",
+          enabled: true,
+        },
       },
     },
   });
-  assert.equal(settingsArtifact(applied).to, true);
-  const doc = candidateConfigGet({ repoRoot, env: {} }).automation;
-  assert.equal(doc.capabilities.status_polling.enabled, true);
+  assert.equal(settingsArtifact(result).to, true);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).automation.capabilities
+      .authenticated_apply_preparation.platforms.linkedin,
+    true
+  );
+});
 
-  // And the alias is tier-gated exactly like `enabled`.
-  await assert.rejects(
-    executeWorkspaceIntent({
+test("settings.apply automation: the value/enabled flag aliases agree, value: true persists as enabled", async () => {
+  const repoRoot = tempRepo();
+
+  // A REST caller sending the flag as `value` instead of `enabled` must not
+  // be read as an enable and then persist a disable.
+  for (const capability of ["status_polling", "authenticated_apply_preparation"]) {
+    const applied = await executeWorkspaceIntent({
       repoRoot,
       env: {},
       intent: {
         type: "settings.apply",
         entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {
-          change: {
-            kind: "automation",
-            op: "capability",
-            capability: "authenticated_apply_preparation",
-            value: true,
-          },
-        },
+        input: { change: { kind: "automation", op: "capability", capability, value: true } },
       },
-    }),
-    (error) => error.code === "SETTINGS_CHANGE_UNSUPPORTED"
-  );
+    });
+    assert.equal(settingsArtifact(applied).to, true, capability);
+    const doc = candidateConfigGet({ repoRoot, env: {} }).automation;
+    assert.equal(doc.capabilities[capability].enabled, true, capability);
+  }
 });
 
 test("settings.apply automation: an unknown capability is invalid and lists the known options", async () => {
@@ -10051,7 +10137,7 @@ test("settings.apply automation: an unknown capability is invalid and lists the 
   );
 });
 
-test("settings.apply automation: setup_mode round-trips to advanced from a basic default", async () => {
+test("settings.apply automation: setup_mode is retired and succeeds without writing", async () => {
   const repoRoot = tempRepo();
 
   const result = await executeWorkspaceIntent({
@@ -10064,34 +10150,9 @@ test("settings.apply automation: setup_mode round-trips to advanced from a basic
     },
   });
   const artifact = settingsArtifact(result);
-  assert.equal(artifact.field, "setup_mode");
-  assert.equal(artifact.from, "basic");
-  assert.equal(artifact.to, "advanced");
-  assert.equal(candidateConfigGet({ repoRoot, env: {} }).automation.setup_mode, "advanced");
-});
-
-test("settings.apply writes exactly one action_result thread message and one activity event", async () => {
-  const repoRoot = tempRepo();
-  const db = openDb({ repoRoot, env: {} });
-  const before = workspaceThreadRead({ repoRoot, env: {} }).messages.length;
-  const activityBefore = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n;
-
-  await executeWorkspaceIntent({
-    repoRoot,
-    env: {},
-    intent: {
-      type: "settings.apply",
-      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { change: { kind: "mode", field: "usage_mode", value: "full" } },
-    },
-  });
-
-  const after = workspaceThreadRead({ repoRoot, env: {} });
-  assert.equal(after.messages.length, before + 2, "one intent message + one action_result message");
-  const actionResults = after.messages.filter((message) => message.kind === "action_result");
-  assert.equal(actionResults.length, 1);
-  const activityAfter = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n;
-  assert.equal(activityAfter, activityBefore + 1);
+  assert.equal(artifact.changed, false);
+  assert.match(artifact.summary, /retired/i);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
 // ---------------------------------------------------------------------------
@@ -10134,7 +10195,7 @@ test("calendar.record-write rejects a missing or unknown provider with CALENDAR_
   );
 });
 
-test("calendar.record-write offers provider-specific permission in place and never appends a row when denied", async () => {
+test("calendar.record-write says calendar sync is turned off for that provider and never appends a row when denied", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { nextInterviewAt: "2030-09-02T18:00:00.000Z" });
 
@@ -10152,12 +10213,18 @@ test("calendar.record-write offers provider-specific permission in place and nev
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /add this event to Google Calendar/i);
-  assert.doesNotMatch(message.text, /settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /Calendar provider sync is turned off for google calendar/i);
+  assert.match(message.text, /careerrat automation enable calendar_sync google_calendar --write/);
+  assert.doesNotMatch(message.text, /permission|consent/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "google-calendar-write",
+    op: "capability",
+    capability: "calendar_sync",
+    enabled: true,
+    platforms: ["google_calendar"],
   });
 
   const db = openDb({ repoRoot, env: {} });
@@ -10198,11 +10265,9 @@ test("calendar.record-write: automated provenance succeeds once calendar_sync co
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         calendar_sync: { enabled: true, platforms: { google_calendar: true } },
       },
-      consent: { google_calendar: true },
     },
   });
 
@@ -10554,7 +10619,7 @@ test("relationship.record-lead: an unrecognized type falls back to Contact and a
   assert.equal(artifact.platform, "linkedin");
 });
 
-test("relationship.source-request: zero consent offers LinkedIn and Wellfound permission in place", async () => {
+test("relationship.source-request: capability off says so and offers Turn it on", async () => {
   const repoRoot = tempRepo();
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -10566,15 +10631,19 @@ test("relationship.source-request: zero consent offers LinkedIn and Wellfound pe
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /LinkedIn and Wellfound/i);
-  assert.match(message.text, /find recruiters and hiring-team contacts/i);
-  assert.equal(message.metadata.nextActions[0].label, "Allow relationship sourcing");
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /Relationship sourcing is turned off for linkedin, wellfound/i);
+  assert.match(message.text, /careerrat automation enable relationship_sourcing --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "relationship-sourcing",
+    op: "capability",
+    capability: "relationship_sourcing",
+    enabled: true,
+    platforms: ["linkedin", "wellfound"],
   });
-  assert.doesNotMatch(message.text, /settings/i);
 });
 
 test("relationship.source-request: partial platform consent produces a per-platform receipt and records the sourcing CTA exactly once", async () => {
@@ -10586,11 +10655,9 @@ test("relationship.source-request: partial platform consent produces a per-platf
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
       },
-      consent: { linkedin: true },
     },
   });
 
@@ -10663,11 +10730,9 @@ test("relationship.source-request: a landed relationship lead flips the sourcing
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
       },
-      consent: { linkedin: true },
     },
   });
 
@@ -10708,11 +10773,9 @@ test("relationship.source-request: an empty company throws RELATIONSHIP_SOURCING
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         relationship_sourcing: { enabled: true, platforms: { linkedin: true, wellfound: true } },
       },
-      consent: { linkedin: true, wellfound: true },
     },
   });
 
@@ -11298,19 +11361,17 @@ function grantStatusPolling(repoRoot, platforms) {
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         status_polling: {
           enabled: true,
           platforms: Object.fromEntries(platforms.map((p) => [p, true])),
         },
       },
-      consent: Object.fromEntries(platforms.map((p) => [p, true])),
     },
   });
 }
 
-test("status.sync-request: zero consent offers ATS status permission in place", async () => {
+test("status.sync-request: capability off says so and offers Turn it on", async () => {
   const repoRoot = tempRepo();
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -11322,14 +11383,23 @@ test("status.sync-request: zero consent offers ATS status permission in place", 
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /Greenhouse, Workday, Ashby, and Lever/i);
-  assert.match(message.text, /application status/i);
-  assert.doesNotMatch(message.text, /LinkedIn|Indeed|settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(
+    message.text,
+    /Portal status polling is turned off for greenhouse, workday, ashby, lever/i
+  );
+  assert.match(message.text, /careerrat automation enable status_polling --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "status-checks",
+    op: "capability",
+    capability: "status_polling",
+    enabled: true,
+    platforms: ["greenhouse", "workday", "ashby", "lever"],
   });
+  assert.doesNotMatch(message.text, /LinkedIn|Indeed/i);
 });
 
 test("status portal connection is a typed in-app action that saves the dashboard URL on one application", async () => {
@@ -11744,14 +11814,12 @@ function grantMailAccess(repoRoot, platforms) {
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         mail_access: {
           enabled: true,
           platforms: Object.fromEntries(platforms.map((p) => [p, true])),
         },
       },
-      consent: Object.fromEntries(platforms.map((p) => [p, true])),
     },
   });
 }
@@ -11960,7 +12028,7 @@ test("mail.sync-request: zero mail_access grant on darwin still returns the card
   assert.equal(byId["outlook-webmail"].allowed, false);
 });
 
-test("mail.sync-request: zero webmail grant offers Gmail and Outlook permission in place", async () => {
+test("mail.sync-request: webmail capability off says so and offers Turn it on", async () => {
   const repoRoot = tempRepo();
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -11973,13 +12041,18 @@ test("mail.sync-request: zero webmail grant offers Gmail and Outlook permission 
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /Gmail and Outlook/i);
-  assert.match(message.text, /recruiting email/i);
-  assert.doesNotMatch(message.text, /settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /Session webmail access is turned off for gmail, outlook/i);
+  assert.match(message.text, /careerrat automation enable mail_access --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "mail-checks",
+    op: "capability",
+    capability: "mail_access",
+    enabled: true,
+    platforms: ["gmail", "outlook"],
   });
 });
 
@@ -12053,14 +12126,12 @@ function grantMessaging(repoRoot, platforms) {
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         messaging: {
           enabled: true,
           platforms: Object.fromEntries(platforms.map((p) => [p, true])),
         },
       },
-      consent: Object.fromEntries(platforms.map((p) => [p, true])),
     },
   });
 }
@@ -12150,7 +12221,7 @@ test("messages.sync-request: linkedin grant returns a messages_sync_handoff arti
   assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 
-test("messages.sync-request: zero consent offers LinkedIn and Wellfound message permission", async () => {
+test("messages.sync-request: capability off says so and offers Turn it on", async () => {
   const repoRoot = tempRepo();
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -12162,14 +12233,42 @@ test("messages.sync-request: zero consent offers LinkedIn and Wellfound message 
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /LinkedIn and Wellfound/i);
-  assert.match(message.text, /recruiting messages/i);
-  assert.doesNotMatch(message.text, /settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /In-platform messaging is turned off for linkedin, wellfound/i);
+  assert.match(message.text, /careerrat automation enable messaging --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "message-checks",
+    op: "capability",
+    capability: "messaging",
+    enabled: true,
+    platforms: ["linkedin", "wellfound"],
   });
+});
+
+test("default (on) automation: sync and sourcing requests proceed with no capability-off note", async () => {
+  // No fixture patch: a fresh workspace has every capability on by default.
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-"));
+  cleanupRoots.push(repoRoot);
+  openDb({ repoRoot, env: {} });
+
+  for (const [type, input] of [
+    ["messages.sync-request", {}],
+    ["status.sync-request", {}],
+    ["relationship.source-request", { company: "Acme" }],
+  ]) {
+    const result = await executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      hostPlatform: "linux",
+      intent: { type, entity: { type: "workspace", id: WORKSPACE_THREAD_ID }, input },
+    });
+    const message = result.messages.at(-1);
+    assert.notEqual(message.metadata.state, "capability-off", type);
+    assert.doesNotMatch(message.text, /turned off|permission/i, type);
+  }
 });
 
 test("messages.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {
@@ -12213,9 +12312,7 @@ function grantLinkedinOptimize(repoRoot, capabilities) {
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities,
-      consent: { linkedin: true },
     },
   });
 }
@@ -12336,7 +12433,7 @@ test("linkedin.optimize-request: a pending batch surfaces its summary in the han
   );
 });
 
-test("linkedin.optimize-request: zero consent still succeeds, never refuses, both capabilities disallowed", async () => {
+test("linkedin.optimize-request: capability off still renders the handoff card and says it is turned off", async () => {
   const repoRoot = tempRepo();
 
   const result = await executeWorkspaceIntent({
@@ -12355,12 +12452,18 @@ test("linkedin.optimize-request: zero consent still succeeds, never refuses, bot
   assert.equal(byKey.profile_apply.allowed, false);
   assert.equal(artifact.batch, null);
   const message = result.messages.at(-1);
-  assert.match(message.text, /read your LinkedIn profile/i);
-  assert.doesNotMatch(message.text, /settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /LinkedIn profile optimize is turned off for linkedin/i);
+  assert.match(message.text, /careerrat automation enable profile_optimize --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "linkedin-profile-review",
+    op: "capability",
+    capability: "profile_optimize",
+    enabled: true,
+    platforms: ["linkedin"],
   });
 });
 

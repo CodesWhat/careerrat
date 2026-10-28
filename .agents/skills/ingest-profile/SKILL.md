@@ -79,7 +79,7 @@ Before asking anything:
 Do not begin with mode, depth, question-style, optional-area, or voice menus. A new
 candidate cannot make useful implementation choices before using the product. Setup
 defaults to the full conversational setup with focused questions, standard agent voice,
-and every external capability off.
+and every external capability on by default.
 
 Start from whatever the résumé and current session already established. Ask the first
 missing candidate question, then save each settled answer immediately. If the user asks
@@ -89,10 +89,10 @@ details are captured only when the user naturally raises them or explicitly asks
 them. A later explicit request to change agent voice still goes through
 `careerrat modes set agent_voice <value> --write`.
 
-Browser, mail, calendar, messaging, and application automation are capability-on-demand.
-Do not enumerate them during initial setup and do not ask for a blanket automation mode.
-When a concrete later task needs one, explain that one capability, show the platform-
-specific consent confirmation, and leave every other capability off.
+Browser, mail, calendar, messaging, and application automation capabilities are on by
+default. Do not enumerate them during initial setup, do not ask for consent, and do not
+ask for an automation mode. If the operator asks about one, point at the capability
+reference below, and if they want one off, give the `careerrat automation disable` command.
 
 **Initialize `workspace/setup-state.json`:**
 
@@ -449,10 +449,10 @@ Save each item below through `careerrat data candidate patch form-defaults --dat
 ## STEP 14b — CAPABILITY REFERENCE (ON DEMAND, NOT AN ONBOARDING MENU)
 
 Skip this during ordinary initial setup. Do not list capabilities and ask the candidate to
-choose among them. Use this section only when a concrete user-requested task needs one of
-the capabilities below. Explain that capability in plain language, ask for its platform-
-specific consent, and record only that decision through the CLI. Everything else stays
-off. Never hand-edit `candidate/automation.yml`.
+choose among them. Use this section only when the operator asks what a capability does or
+wants one turned off. Every capability is on by default; there is nothing to consent to or
+enable. Turn one off or back on through the CLI, and never hand-edit
+`candidate/automation.yml`.
 
 ---
 
@@ -460,19 +460,19 @@ off. Never hand-edit `candidate/automation.yml`.
 
 | Key | Label | What it does | Platforms | Needs |
 |---|---|---|---|---|
-| `status_polling` | Portal status polling | Reads application status from ATS dashboards (read-only) | greenhouse, workday, ashby, lever | Session browser + ToS consent per platform |
-| `messaging` | In-platform messaging | Reads in-platform DMs into `communications[]` (read-only; replies go through `email-comms`) | linkedin, wellfound | Session browser + ToS consent per platform |
-| `authenticated_apply_preparation` | Authenticated application fill | Modal-driven application filling under the `apply-job` submit gate; submits when complete and verified, or halts before final submit when the submit mode is manual (`automation submit manual --write`) | linkedin | Session browser + ToS consent |
-| `profile_optimize` | LinkedIn profile optimize (read + suggest) | Reads your profile and proposes honest, evidence-backed rewrites of headline / About / experience / Featured (read-only; dry-run preview, also runs as a no-browser fix-doc) | linkedin | Session browser + ToS consent |
-| `profile_apply` | LinkedIn profile apply (write back) | Writes the approved profile rewrites back through the session browser, **confirm-first per field**; separate switch from `profile_optimize` (suggestions on never implies write-back) | linkedin | Session browser + ToS consent + `profile_optimize` |
-| `mail_access` | Session webmail access | Reads one specific recent verification-code email during apply/sign-in flows from any provider via `webmail`, or opted-in Gmail/Outlook recruiting messages for `ingest-mail`; never sends/deletes/replies or browses the broader inbox | gmail, outlook, webmail | Session browser + ToS consent per mail provider |
+| `status_polling` | Portal status polling | Reads application status from ATS dashboards (read-only) | greenhouse, workday, ashby, lever | Session browser |
+| `messaging` | In-platform messaging | Reads in-platform DMs into `communications[]` (read-only; replies go through `email-comms`) | linkedin, wellfound | Session browser |
+| `authenticated_apply_preparation` | Authenticated application fill | Modal-driven application filling under the `apply-job` submit gate; submits when complete and verified, or halts before final submit when the submit mode is manual (`automation submit manual --write`) | linkedin | Session browser |
+| `profile_optimize` | LinkedIn profile optimize (read + suggest) | Reads your profile and proposes honest, evidence-backed rewrites of headline / About / experience / Featured (read-only; dry-run preview, also runs as a no-browser fix-doc) | linkedin | Session browser |
+| `profile_apply` | LinkedIn profile apply (write back) | Writes the approved profile rewrites back through the session browser, **confirm-first per field**; separate switch from `profile_optimize` | linkedin | Session browser + `profile_optimize` |
+| `mail_access` | Session webmail access | Reads one specific recent verification-code email during apply/sign-in flows from any provider via `webmail`, or Gmail/Outlook recruiting messages for `ingest-mail`; never sends/deletes/replies or browses the broader inbox | gmail, outlook, webmail | Session browser |
 
 **Mail capability:**
 
 | Capability | What it does | Platform | Needs |
 |---|---|---|---|
 | Mail capture (`ingest-mail`) | Reads job-search email locally from Apple Mail (read-only, no IMAP credentials leave the machine) | macOS Apple Mail only | macOS (`uname` must return `Darwin`); Apple Mail running; Automation access in System Settings → Privacy & Security |
-| Webmail capture (`mail_access`) | Reads job-search email from Gmail/Outlook through the session browser when explicitly enabled. Generic `webmail` is for verification-code reads only, not inbox sync. | gmail, outlook | Session browser + ToS consent per mail provider |
+| Webmail capture (`mail_access`) | Reads job-search email from Gmail/Outlook through the session browser. Generic `webmail` is for verification-code reads only, not inbox sync. | gmail, outlook | Session browser |
 
 Saved job sources do not use this capability matrix. If a source needs a login,
 ask “Do you want to log into <site> so I can use it?” with Yes and No choices at
@@ -494,20 +494,19 @@ session browser" because the concrete provider is an implementation detail. See
 
 ---
 
-**Opt-in process per capability + platform the user wants to enable:**
+**Turning a capability off or back on:**
 
-Warn the user: automating a logged-in platform may violate that platform's terms of service — they must read those terms themselves before proceeding. Then, for each capability+platform they choose:
+Every capability starts on. To switch one off for a capability or one platform, or back on later:
 
 ```
-careerrat automation consent <platform> --write
-careerrat automation enable <capability> --write
-careerrat automation enable <capability> <platform> --write
+careerrat automation disable <capability> [platform] --write
+careerrat automation enable <capability> [platform] --write
 careerrat automation status
 ```
 
-Dry-run is the default (prints the change without writing); `--write` commits. Run `careerrat automation status` at the end to confirm the live verdict. CareerRat records the decision; it does not make it for you. **Never auto-run and never run on a schedule** — every automated session is user-initiated.
+Dry-run is the default (prints the change without writing); `--write` commits. Run `careerrat automation status` at the end to confirm the live verdict. **Never auto-run and never run on a schedule.** Every automated session is user-initiated.
 
-If a capability is enabled during setup because the user requested a task that needs it,
+If the operator changes a capability during setup,
 set `automationOffered: true` in `workspace/setup-state.json` and append `capabilities`
 to `completed[]`. Otherwise leave the field false and continue without mentioning it.
 

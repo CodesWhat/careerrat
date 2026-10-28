@@ -1,9 +1,9 @@
 ---
 name: ingest-mail
-description: Read job-search email updates from Apple Mail on macOS or, with separate mail_access consent, Gmail/Outlook webmail through the session browser; fold recruiter replies and status changes into CareerRat tracker communication state. Opt-in, local-only, read-only.
+description: Read job-search email updates from Apple Mail on macOS or, with the mail_access capability (on by default), Gmail/Outlook webmail through the session browser; fold recruiter replies and status changes into CareerRat tracker communication state. User-initiated, local-only, read-only.
 metadata:
   tier_1_inputs:
-    - source/opt-in gate
+    - source + capability check
     - watermark window
     - tracker thread match keys
   tier_2_inputs:
@@ -14,7 +14,7 @@ metadata:
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
-## STEP 0 — SOURCE + OPT-IN GATE
+## STEP 0: SOURCE + CAPABILITY CHECK
 
 Confirm the user explicitly requested this sync. Never run this skill unprompted
 or on a schedule.
@@ -26,7 +26,7 @@ Determine the requested mail source:
 
 Run `uname`.
 
-- If using Apple Mail and the output is not `Darwin`, stop the Apple Mail path and offer either Gmail/Outlook webmail (if they want to opt into `mail_access`) or pasted email capture via `email-comms`.
+- If using Apple Mail and the output is not `Darwin`, stop the Apple Mail path and offer either Gmail/Outlook webmail (`mail_access`) or pasted email capture via `email-comms`.
 - If using Gmail/Outlook webmail, continue to STEP 1W below.
 
 ## STEP 1 — MAIL PROCESS PRE-FLIGHT
@@ -44,7 +44,7 @@ If the first `osascript` call fails with a permission error ("Terminal wants to
 control System Events"), instruct the user to approve Automation access in
 System Settings → Privacy & Security → Automation.
 
-## STEP 1W — WEBMAIL CONSENT PREFLIGHT (GMAIL / OUTLOOK ONLY)
+## STEP 1W: WEBMAIL CAPABILITY CHECK (GMAIL / OUTLOOK ONLY)
 
 Use this path only for `gmail` or `outlook`. It is separate from Apple Mail and
 separate from in-platform messaging.
@@ -56,25 +56,18 @@ careerrat automation status --json
 ```
 
 Inspect `capabilities.mail_access` for the requested platform. `allowed: true`
-means three switches are simultaneously on: the `mail_access` capability
-global switch, that mail provider's per-capability switch, and that provider's
-one-time ToS consent. And either automation is in the "advanced" setup mode
-or the capability has a contextual scoped grant for that provider. This is the
-predicate from `mayRun()` in `src/core/automation/consent.mjs`; never
-re-derive it in prose.
+means neither the `mail_access` capability switch nor that provider's switch is
+turned off. This is the verdict from `mayRun()` in
+`src/core/automation/consent.mjs`; never re-derive it in prose. Webmail access is
+on by default.
 
-If `mail_access` is not allowed, stop before opening a browser and show the exact
-opt-in steps:
+If `mail_access` is not allowed, tell the operator it is turned off for that
+provider, give the command that turns it on, and skip the webmail path (do not open a
+browser). If `readError` is set, say the automation settings file can't be read and
+name it.
 
-1. `careerrat automation mode advanced --write`
-2. Read the provider's terms of service yourself.
-3. `careerrat automation consent <gmail|outlook> --write`
-4. `careerrat automation enable mail_access --write`
-5. `careerrat automation enable mail_access <gmail|outlook> --write`
-6. `careerrat automation status --json`
-
-A contextual scoped grant given in the app is an alternative to step 1: it
-authorizes this capability for that provider without switching to advanced mode.
+- `careerrat automation enable mail_access --write`
+- `careerrat automation enable mail_access <gmail|outlook> --write`
 
 If allowed, use the session browser. Read only job-search/recruiting messages in
 the resolved window from STEP 2; do not browse personal mail outside that scope.
@@ -187,7 +180,7 @@ message until it is either matched or explicitly skipped.
 SQLite path is local and batches across subagents; the webmail (`mail_access`) path drives
 the session browser and stays **sequential** (one-browser rule). Each subagent returns the
 captured body for its message; the orchestrator folds them into `communications[]` and
-remains the only tracker writer. The STEP 0/1W opt-in gate already cleared on the
+remains the only tracker writer. The STEP 0/1W capability check already cleared on the
 orchestrator. Degrade to inline sequential pulls with no subagent primitive. See the
 **Delegation Contract** in AGENTS.md.
 
@@ -433,7 +426,7 @@ Ingest complete:
 ## In-app and terminal paths
 
 CareerRat's in-app path reads Apple Mail on macOS and, with the separate
-`mail_access` permission, Gmail and Outlook through its owned browser workflow.
+`mail_access` capability, Gmail and Outlook through its owned browser workflow.
 It captures relevant messages into `communications[]`, stores long bodies under
 `workspace/comms/`, and advances the matching source watermark. A terminal or
 external-agent run still follows STEP 0 onward exactly as written.
@@ -442,16 +435,16 @@ external-agent run still follows STEP 0 onward exactly as written.
   new recruiter emails?" offers a "Check for new mail" chip. The handler
   reports each source's real state: Apple Mail (listed
   only when the app runs on macOS, since it reads the local Mail app and needs
-  no webmail consent), plus Gmail and Outlook with their `mayRun` consent
+  no webmail capability), plus Gmail and Outlook with their `mayRun` on/off
   state for the `mail_access` capability. Each row shows the last sweep time
   from that source's `sources[]` watermark ("Never checked" before a first
   run), and the card adds how many email threads are currently waiting on a
   reply. On a non-macOS host with both webmail platforms off, the request
-  opens the contextual permission control instead. Otherwise, choosing the
+  says it is turned off and offers a "Turn it on" action instead. Otherwise, choosing the
   action runs every allowed source and returns the captured count or a retry
   blocker in the same Ask thread.
 - **Execution and recovery.** The app performs the allowed read when the chip is
-  chosen. Login, captcha, 2FA, and permission blockers return a visible retry
+  chosen. Login, captcha, 2FA, and turned-off blockers return a visible retry
   state without advancing the watermark. The terminal path keeps the detailed
   STEP 5 match/skip review and the track-outcomes handoff. Recording a single
   recruiter email the candidate reports themselves stays with email-comms

@@ -187,7 +187,7 @@ test("onboarding does not ask candidates to choose implementation modes", async 
     assert.doesNotMatch(text, /Do you want \*\*(?:Basic|Deep|Simple)/i);
   }
   assert.doesNotMatch(setup, /## Setup Modes|Deep vs Shallow/i);
-  assert.match(skill, /capability-on-demand/i);
+  assert.match(skill, /automation capabilities are on by\s+default/i);
   assert.match(skill, /defaults to the full conversational setup/i);
 });
 

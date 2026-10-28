@@ -114,15 +114,15 @@ availability, ask — do not guess a free slot.
 
 ---
 
-## STEP 3b — Ingest real free/busy (optional, gated by `calendar_read`)
+## STEP 3b: Ingest real free/busy (optional, `calendar_read`)
 
 This is the concrete version of "calendar context": it lets the skill see the candidate's
 actual commitments so it schedules interviews *around* them, and surfaces those windows on the
 Calendar as opaque **"Busy"** blocks. It is optional — the skill is fully usable without it
 (STEP 4 falls back to draft-only). Run it when the user wants you to schedule around their real
-calendar, or whenever `calendar_read` is already enabled.
+calendar, or whenever `calendar_read` is on (it is on by default).
 
-**Consent gate.** Free/busy ingestion runs only under the `calendar_read` capability:
+**Capability check.** Free/busy ingestion runs only under the `calendar_read` capability:
 
 ```bash
 careerrat automation status --json
@@ -136,14 +136,14 @@ Inspect `capabilities.calendar_read`. Platforms:
 - `apple_calendar` / `google_calendar` / `outlook_calendar` — a personal calendar (for users
   who keep their availability there instead).
 
-A platform is usable only when its entry is `allowed: true` (global switch + platform switch +
-that platform's consent all true). If the requested platform is not allowed, **do not open any
-calendar** — fall back to the draft-only path in STEP 4 and surface the opt-in commands:
+A platform is usable when its entry is `allowed: true` (neither the capability switch nor that
+platform's switch is turned off). If the requested platform is not allowed, **do not open any
+calendar**, tell the operator it is turned off, fall back to the draft-only path in STEP 4, and
+give the enable commands (if `readError` is set, say the settings file can't be read and name it):
 
 ```bash
-careerrat automation consent <platform> --write
+careerrat automation enable calendar_read --write
 careerrat automation enable calendar_read <platform> --write
-careerrat automation status --json
 ```
 
 **Read free/busy — read-only and opaque.** Through the session browser (Browser Automation

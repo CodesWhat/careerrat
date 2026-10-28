@@ -1,9 +1,9 @@
 ---
 name: relationship-sourcing
-description: Find likely recruiters, hiring-team members, or warm contacts for tracked companies through the session browser, then capture candidate-reviewed leads into Network. Opt-in, user-initiated, local-only. Capability = relationship_sourcing; platforms = linkedin, wellfound.
+description: Find likely recruiters, hiring-team members, or warm contacts for tracked companies through the session browser, then capture candidate-reviewed leads into Network. User-initiated, local-only. Capability = relationship_sourcing; platforms = linkedin, wellfound.
 metadata:
   tier_1_inputs:
-    - consent verdict
+    - capability status
     - sourcing-target applications
     - platform scope
   tier_2_inputs:
@@ -22,7 +22,7 @@ through `email-comms` or `ingest-messages` and sending remains confirm-first.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
-## STEP 0 — Consent gate
+## STEP 0: Capability check
 
 Run:
 
@@ -31,21 +31,21 @@ careerrat automation status --json
 ```
 
 Inspect `capabilities.relationship_sourcing`. Applicable platforms are `linkedin`
-and `wellfound`. A platform may be used only when its entry has `allowed: true` —
-the global switch, platform switch, and ToS consent must all be true.
+and `wellfound`. A platform may be used when its entry has `allowed: true`, which
+means neither the capability switch nor that platform's switch is turned off.
+Relationship sourcing is on by default.
 
-If no requested platform is allowed, stop before opening a browser and explain the
-opt-in path:
+If no requested platform is allowed, tell the operator it is turned off, give the
+commands that turn it on, and stop (do not open a browser). If `readError` is set,
+say the automation settings file can't be read and name it. Skip any single platform
+that is off and note it.
 
 ```bash
-careerrat automation consent <platform> --write
 careerrat automation enable relationship_sourcing --write
 careerrat automation enable relationship_sourcing <platform> --write
-careerrat automation status --json
 ```
 
-The user must read the platform terms themselves before recording consent. Never
-run this capability on a schedule or without a fresh user request.
+Never run this capability on a schedule or without a fresh user request.
 
 ## STEP 1 — Choose targets
 
@@ -63,7 +63,7 @@ Do not treat portal-only rows as warm paths; they are search targets only.
 browser, so it runs **one at a time** (one-browser rule); delegation isolates each target's
 context, not for parallelism. Each subagent searches its target and returns compact lead
 candidates; the orchestrator captures only candidate-reviewed leads into `relationshipLeads[]`
-(STEP 3–4) — subagents never write the tracker or send outreach. STEP 0 consent already
+(STEP 3–4), subagents never write the tracker or send outreach. STEP 0 capability check already
 cleared on the orchestrator. See the **Delegation Contract** in AGENTS.md.
 
 For each allowed platform, open the platform in the session browser. Prefer the
@@ -247,16 +247,16 @@ draft. Never send automatically.
 ## In-app and terminal paths
 
 CareerRat's in-app path searches LinkedIn and Wellfound through its owned
-browser workflow after the platform-specific `relationship_sourcing` permission
-passes. Results are saved as review-only leads in Network; the app never sends a
+browser workflow unless the operator turned `relationship_sourcing` off for that
+platform. Results are saved as review-only leads in Network; the app never sends a
 message, connection request, or outreach. A terminal or external-agent run still
 follows STEP 0 → 5 exactly as written.
 
 - **Recording a contact the candidate found** (`relationship.record-lead`).
   Self-reports like "I found a recruiter at Acme on LinkedIn, named Jordan
   Lee" or "add Casey Wu as a hiring manager at Globex" offer a "Record the
-  contact you found" chip. No consent gate applies: the candidate did the
-  finding, so there is nothing for CareerRat to be permitted to do. The lead
+  contact you found" chip. No capability switch applies: the candidate did the
+  finding, so CareerRat drives no browser. The lead
   lands in `relationshipLeads[]` with `status: review` through the same
   upsert verb (same dedupe, same CTA clearing) and is approved or rejected in
   the Network tab like any sourced lead. The company links to a tracked
@@ -266,8 +266,8 @@ follows STEP 0 → 5 exactly as written.
 - **Requesting a sourcing run** (`relationship.source-request`). Requests like
   "find a recruiter at Acme" or "who can refer me at Globex" offer a "Request
   people sourcing" chip. The handler checks `mayRun` for `relationship_sourcing`
-  per platform: with every platform off it refuses and points at Settings;
-  with at least one allowed it runs the native search and reports each
+  per platform: with every platform off it says it is turned off and offers a "Turn it on"
+  action; with at least one allowed it runs the native search and reports each
   platform's result. When the linked application has no pending next action,
   it writes `nextAction: "Run relationship-sourcing for <Company>"` so the
   request survives reload. That CTA deliberately uses this skill's
@@ -275,6 +275,6 @@ follows STEP 0 → 5 exactly as written.
   the moment leads land, in the same transaction. An existing next action is
   never overwritten.
 - **Execution and recovery.** The app performs the allowed search when the chip
-  is chosen. Login, captcha, 2FA, and permission blockers leave a durable retry
+  is chosen. Login, captcha, 2FA, and turned-off blockers leave a durable retry
   action instead of clearing the request. Approval, rejection, and outreach
   handoff to `email-comms` are unchanged.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -484,4 +484,96 @@ test("Playwright fixture: authentication walls return visible retry state and wr
   } finally {
     await manager.shutdown();
   }
+});
+
+test("a turned-off capability returns a CAPABILITY_OFF blocker with the enable command, no browser opened", async () => {
+  const repoRoot = workspace({});
+  let opened = 0;
+  const result = await optimizeLinkedinInApp({
+    repoRoot,
+    env: {},
+    createSessionImpl: () => {
+      opened += 1;
+      throw new Error("no browser should open");
+    },
+  });
+  assert.equal(opened, 0);
+  assert.equal(result.state, "needs-user");
+  assert.equal(result.blockers[0].code, "CAPABILITY_OFF");
+  assert.match(result.blockers[0].message, /careerrat automation enable profile_optimize --write/);
+});
+
+test("platforms skipped because they are turned off are reported as turned off", async () => {
+  const repoRoot = workspace({});
+  const result = await ingestWebmailInApp({
+    repoRoot,
+    env: {},
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+    now: () => new Date("2026-08-24T16:00:00.000Z"),
+  });
+  assert.deepEqual(result.turnedOff, ["gmail", "outlook"]);
+  assert.match(result.summary, /Turned off, so skipped: gmail, outlook\./);
+});
+
+test("a turned-off linkedin platform switch names the platform command in the recovery message", async () => {
+  const repoRoot = workspace({
+    profile_optimize: { enabled: true, platforms: { linkedin: false } },
+  });
+  const result = await optimizeLinkedinInApp({
+    repoRoot,
+    env: {},
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+  });
+  assert.equal(result.blockers[0].code, "CAPABILITY_OFF");
+  assert.match(
+    result.blockers[0].message,
+    /careerrat automation enable profile_optimize linkedin --write/
+  );
+});
+
+test("unreadable automation settings are reported as a settings error, not as turned off", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-browser-workflow-readerr-"));
+  roots.push(dir);
+  mkdirSync(join(dir, "candidate"), { recursive: true });
+  writeFileSync(
+    join(dir, "candidate", "automation.yml"),
+    'version: 1\ncapabilities:\n  mail_access:\n    enabled: false\n  note: "unterminated\n'
+  );
+  const result = await ingestWebmailInApp({
+    repoRoot: dir,
+    env: {},
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+    now: () => new Date("2026-08-24T16:00:00.000Z"),
+  });
+  assert.equal(result.turnedOff, undefined);
+  assert.match(result.settingsError, /automation settings can't be read/);
+  assert.match(result.summary, /settings unreadable/);
+});
+
+test("status sync checks the switch per application but reports each turned-off platform once", async () => {
+  const repoRoot = workspace({});
+  const applications = ["a", "b", "c"].map((id) => ({
+    id: `app-${id}`,
+    company: `Co ${id}`,
+    role: "Engineer",
+    status: "applied",
+    statusPlatform: "greenhouse",
+    statusUrl: `${origin}/greenhouse/status-unclear`,
+  }));
+  const result = await syncStatusesInApp({
+    repoRoot,
+    env: {},
+    applications,
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+    now: () => new Date("2026-08-24T16:00:00.000Z"),
+  });
+  assert.deepEqual(result.turnedOff, ["greenhouse"]);
 });

@@ -2102,7 +2102,7 @@ test("Orca executor uploads generated PDFs through explicit live controls", asyn
   }
 });
 
-test("Orca executor refuses LinkedIn Easy Apply until supervised preparation consent is live", async () => {
+test("Orca executor refuses LinkedIn Easy Apply while application preparation is turned off", async () => {
   const commands = [];
   const execute = createOrcaApplyExecutor({
     repoRoot: "/repo",
@@ -2128,7 +2128,7 @@ test("Orca executor refuses LinkedIn Easy Apply until supervised preparation con
   assert.equal(result.state, "blocked");
   assert.equal(
     result.reason,
-    "Application preparation for LinkedIn is off. Turn it on in Settings before CareerRat opens the form."
+    "Application preparation is turned off for LinkedIn. Turn it on with `careerrat automation enable authenticated_apply_preparation --write`, or ask me to turn it on."
   );
   assert.deepEqual(commands, []);
 });

@@ -87,7 +87,7 @@ For an automatic handoff from another skill, omit `--explicit`; stop if that ver
 subagent per axis (parallel; `WebSearch`/`WebFetch` has no one-browser limit). Hand each
 its axis topic + company + `candidate_domain` and have it return a compact cited block
 (`{axis, facts:[{claim, url, title, fetchedISO, confidence}]}`); merge them in STEP 3. The
-orchestrator already cleared STEP 0's consent/mode gate and STEP 1 freshness — subagents
+orchestrator already cleared STEP 0's config load and STEP 1 freshness, subagents
 do not re-gate, do not read AGENTS.md, and do not write any file. Degrade to inline
 sequential search when no subagent primitive exists. See the **Delegation Contract** in AGENTS.md.
 

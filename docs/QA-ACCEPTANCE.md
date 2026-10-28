@@ -131,7 +131,7 @@ Test homes:
 
 - [x] `S-01` Candidate, targeting, role lanes, location/work modes, comp, and guardrails round-trip.
 - [x] `S-02` Installed runtimes, custom command, provider fallback, and selected engine round-trip.
-- [x] `S-03` Automation consent is capability-specific, off by default, and described plainly.
+- [x] `S-03` Automation is on by default, each capability has its own off switch, and the settings describe them plainly.
 - [x] `S-04` Source maintenance adds/edits/removes/tests sources without hidden writes.
 - [x] `S-05` Validation is field-specific; unsaved edits, failures, and restart do not lose input.
 - [x] `S-06` Settings remains usable before setup and correctly unlocks the product when complete.
