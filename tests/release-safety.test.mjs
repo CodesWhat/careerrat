@@ -291,6 +291,15 @@ test("onboarding skips arrangement floors for work the candidate ruled out", asy
   assert.match(skill, /do not ask for an onsite or relocation floor/i);
 });
 
+test("ingest-profile says saves apply directly with Undo and names the two confirm-first cases", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /saves directly and lands in the thread with an Undo/i);
+  assert.match(skill, /loosening an honesty boundary/i);
+  assert.match(skill, /lowering the pay floor or target/i);
+  assert.doesNotMatch(skill, /pill the user clicks|until the candidate clicks Confirm/i);
+});
+
 test("web onboarding confirms expected base once while preserving both canonical mirrors", async () => {
   const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
 

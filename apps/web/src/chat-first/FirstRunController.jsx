@@ -34,6 +34,7 @@ import {
   firstRunAgentName,
   firstRunAssistantMessage,
   firstRunRuntimeChoices,
+  LOOSENING_ACTION_LABELS,
   runtimeSelectionReady,
 } from "./first-run-controller.js";
 import { profileSettingsRoute } from "./profile-settings-controller.js";
@@ -41,6 +42,15 @@ import { useMinimumBootScreen } from "./use-boot-screen.js";
 
 const INTERVIEW_SKILL = "ingest-profile";
 const PROFILE_BLOCK_KINDS = new Set(["authorization", "candidate_patch", "evidence_claim"]);
+// Profile blocks that apply on their own skip these; a block waiting on a
+// Confirm click is neither re-applied nor treated as done.
+const PROFILE_BLOCK_SETTLED = ["error", "resolved", "saving", "needs-confirmation"];
+
+// The save came back 409 CONFIRMATION_REQUIRED: it loosens a limit, so it waits.
+function confirmationRequired(error) {
+  if (error?.body?.code !== "CONFIRMATION_REQUIRED") return null;
+  return list(error.body.reasons).filter((reason) => typeof reason === "string");
+}
 const RESUME_AI_EXTENSIONS = new Set(["jpeg", "jpg", "pdf", "png", "webp"]);
 const GUIDED_SETUP_CHECK_DELAY_MS = 4_000;
 const GUIDED_SETUP_MAX_CHECKS = 150;
@@ -193,15 +203,17 @@ function assistantText(data) {
 function confirmationOptions(blocks) {
   return list(blocks).flatMap((block, blockIndex) => {
     if (
-      PROFILE_BLOCK_KINDS.has(block?.kind) ||
+      (PROFILE_BLOCK_KINDS.has(block?.kind) && block?.status !== "needs-confirmation") ||
       block?.hidden === true ||
       ["saving", "resolved"].includes(block?.status)
     )
       return [];
-    const labels = {
-      company_add: ["Add company", "Not now"],
-      companies_suggest: ["Show suggestions", "Not now"],
-    }[block?.kind] || ["Continue", "Not now"];
+    const labels = PROFILE_BLOCK_KINDS.has(block?.kind)
+      ? LOOSENING_ACTION_LABELS
+      : {
+          company_add: ["Add company", "Not now"],
+          companies_suggest: ["Show suggestions", "Not now"],
+        }[block?.kind] || ["Continue", "Not now"];
     return [
       { id: `confirm:${blockIndex}`, label: labels[0] },
       { id: `decline:${blockIndex}`, label: labels[1] },
@@ -251,6 +263,7 @@ function restoredMessages(payload) {
               ...block,
               ...(saved?.status && saved.status !== "saving" ? { status: saved.status } : {}),
               ...(saved?.resultSummary ? { resultSummary: saved.resultSummary } : {}),
+              ...(saved?.confirmReasons ? { confirmReasons: saved.confirmReasons } : {}),
               ...(saved?.hidden === true ? { hidden: true } : {}),
             };
           })
@@ -772,8 +785,7 @@ export function FirstRunController({
         .map((block, index) => ({ block, index }))
         .filter(
           ({ block }) =>
-            PROFILE_BLOCK_KINDS.has(block?.kind) &&
-            !["error", "resolved", "saving"].includes(block?.status)
+            PROFILE_BLOCK_KINDS.has(block?.kind) && !PROFILE_BLOCK_SETTLED.includes(block?.status)
         );
       if (!messageId || !indexedBlocks.length || savingProfileMessagesRef.current.has(messageId))
         return;
@@ -797,6 +809,7 @@ export function FirstRunController({
 
       const receipts = new Map();
       const failures = [];
+      const waiting = new Map();
       try {
         for (const { block, index } of indexedBlocks) {
           try {
@@ -825,6 +838,35 @@ export function FirstRunController({
               )
             );
           } catch (error) {
+            const reasons = confirmationRequired(error);
+            if (reasons) {
+              // Loosens a limit: ask with a Confirm / Not now pill, never save quietly.
+              waiting.set(index, reasons);
+              updateMessages((current) =>
+                current.map((candidate) =>
+                  candidate.id === messageId
+                    ? {
+                        ...candidate,
+                        blocks: list(candidate.blocks).map((candidateBlock, candidateIndex) =>
+                          candidateIndex === index
+                            ? {
+                                ...candidateBlock,
+                                status: "needs-confirmation",
+                                confirmReasons: reasons,
+                              }
+                            : candidateBlock
+                        ),
+                        options: [
+                          ...list(candidate.options),
+                          { id: `confirm:${index}`, label: LOOSENING_ACTION_LABELS[0] },
+                          { id: `decline:${index}`, label: LOOSENING_ACTION_LABELS[1] },
+                        ],
+                      }
+                    : candidate
+                )
+              );
+              continue;
+            }
             failures.push({ error, block, index });
             updateMessages((current) =>
               current.map((candidate) =>
@@ -868,12 +910,14 @@ export function FirstRunController({
           );
           return;
         }
-        const hasUnresolvedAction = list(message.blocks).some(
-          (block) =>
-            !PROFILE_BLOCK_KINDS.has(block?.kind) &&
-            block?.hidden !== true &&
-            block?.status !== "resolved"
-        );
+        const hasUnresolvedAction =
+          waiting.size > 0 ||
+          list(message.blocks).some(
+            (block) =>
+              !PROFILE_BLOCK_KINDS.has(block?.kind) &&
+              block?.hidden !== true &&
+              block?.status !== "resolved"
+          );
         if (chatId && !hasUnresolvedAction && !onboardingHasUnansweredTurn(messagesRef.current)) {
           await api.sendChatMessage(
             chatId,
@@ -913,8 +957,7 @@ export function FirstRunController({
     const message = messages.find((candidate) =>
       list(candidate?.blocks).some(
         (block) =>
-          PROFILE_BLOCK_KINDS.has(block?.kind) &&
-          !["error", "resolved", "saving"].includes(block?.status)
+          PROFILE_BLOCK_KINDS.has(block?.kind) && !PROFILE_BLOCK_SETTLED.includes(block?.status)
       )
     );
     if (message) void saveExtractedProfile(message);
@@ -1000,6 +1043,7 @@ export function FirstRunController({
           api,
           state: onboardState,
           onCompanyOperation: acceptCompanyOperation,
+          confirmed: block?.status === "needs-confirmation",
         });
         savedReceipt = receipt;
         updateMessages((current) =>
@@ -1137,9 +1181,16 @@ export function FirstRunController({
       if (extractedLocation && !onboardState?.data?.profile?.location?.home?.trim()) {
         profilePatch.location = { home: extractedLocation };
       }
-      await api.saveCandidateFile("profile", profilePatch);
+      await api.saveCandidateFile("profile", profilePatch, { source: "onboarding" });
     }
-    if (claims.length) await api.saveEvidenceSeed(claims);
+    // Claims the evidence firewall refused weren't saved, so they mustn't be
+    // reported back to the agent as saved.
+    let savedClaims = claims;
+    if (claims.length) {
+      const seeded = await api.saveEvidenceSeed(claims, { source: "onboarding" });
+      const refused = new Set(list(seeded?.rejected).map((item) => item?.claim));
+      savedClaims = claims.filter((item) => !refused.has(String(item?.claim ?? "").trim()));
+    }
 
     const existingTargeting = onboardState?.data?.targeting ?? {};
     const targetingPatch = {};
@@ -1150,9 +1201,9 @@ export function FirstRunController({
       targetingPatch.keep_signals = targetingSeed.keep_signals;
     }
     if (Object.keys(targetingPatch).length) {
-      await api.saveCandidateFile("targeting", targetingPatch);
+      await api.saveCandidateFile("targeting", targetingPatch, { source: "onboarding" });
     }
-    return { candidatePatch, claims, targetingSeed };
+    return { candidatePatch, claims: savedClaims, targetingSeed };
   }
 
   async function saveKnowledgeSection(item, values = {}) {

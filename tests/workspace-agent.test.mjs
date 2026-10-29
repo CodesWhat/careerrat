@@ -13037,3 +13037,34 @@ test("knowledge.revert undoes a deep-ingest lane row add and replace", async () 
   const stale = await revertEntry(repoRoot, added, added.artifacts.indexOf(addEntry));
   assert.equal(stale.text, "This changed again since, so CareerRat didn't undo it.");
 });
+
+// Loosening changes keep their confirm-first step; everything else applies and logs.
+test("settings.apply asks first when a gate lowers the pay floor, then applies once confirmed", async () => {
+  const repoRoot = tempRepo();
+  const floor = () => candidateConfigGet({ repoRoot, env: {} }).profile.compensation.minimum_base;
+
+  // First-time value and a raise apply directly.
+  await applySetting(repoRoot, { kind: "gate", type: "comp-floor", value: 150000 });
+  assert.equal(floor(), 150000);
+  await applySetting(repoRoot, { kind: "gate", type: "comp-floor", value: 160000 });
+  assert.equal(floor(), 160000);
+
+  const asked = await applySetting(repoRoot, { kind: "gate", type: "comp-floor", value: 120000 });
+  assert.equal(asked.metadata.state, "needs-confirmation");
+  assert.match(asked.text, /Lowers your minimum base pay\. Confirm/);
+  assert.equal(asked.text.includes("120000"), false);
+  assert.equal(floor(), 160000);
+  const [confirm] = asked.metadata.nextActions;
+  assert.equal(confirm.intent.type, "settings.apply");
+  assert.equal(confirm.intent.input.confirmed, true);
+  assert.deepEqual(confirm.intent.input.change, {
+    kind: "gate",
+    type: "comp-floor",
+    value: 120000,
+  });
+
+  await executeWorkspaceIntent({ repoRoot, env: {}, intent: confirm.intent });
+  assert.equal(floor(), 120000);
+  const applied = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+  assert.ok(applied.artifacts.some((artifact) => artifact.kind === "knowledge_write"));
+});

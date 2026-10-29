@@ -127,6 +127,7 @@ export function buildKnowledgeWriteEntry({
   let entryAfter = clone(after);
   let entryPath = path;
   let entryCompanions = (companions || []).map((item) => ({
+    ...(item.name ? { name: item.name } : {}),
     path: item.path,
     ...absentAware("before", clone(item.before)),
     ...absentAware("after", clone(item.after)),
@@ -175,12 +176,20 @@ export function configWriteEntries({ before, after, writes, source, writer }) {
   for (const { name, path, label, op, companions = [] } of writes) {
     const beforeDoc = configView(name, before?.[name]);
     const afterDoc = configView(name, after?.[name]);
-    const changed = [path, ...companions]
-      .map((item) => ({
-        path: item,
-        before: readConfigPath(beforeDoc, item),
-        after: readConfigPath(afterDoc, item),
-      }))
+    // A companion is a path on this doc, or { name, path } on another config doc.
+    const changed = [
+      { path },
+      ...companions.map((item) => (typeof item === "string" ? { path: item } : item)),
+    ]
+      .map((item) => {
+        const other = item.name && item.name !== name ? item.name : undefined;
+        return {
+          ...(other ? { name: other } : {}),
+          path: item.path,
+          before: readConfigPath(other ? configView(other, before?.[other]) : beforeDoc, item.path),
+          after: readConfigPath(other ? configView(other, after?.[other]) : afterDoc, item.path),
+        };
+      })
       .filter((item) => !sameValue(item.before, item.after));
     if (!changed.length) continue;
     const [primary, ...rest] = changed;
@@ -231,6 +240,7 @@ function inverseEntry(entry, { messageId, index, writer }) {
     before: entryValue(entry, "after"),
     after: entryValue(entry, "before"),
     companions: (entry.companions || []).map((item) => ({
+      ...(item.name ? { name: item.name } : {}),
       path: item.path,
       before: entryValue(item, "after"),
       after: entryValue(item, "before"),
@@ -253,27 +263,34 @@ function currentClaims(repoRoot, env) {
 }
 
 function revertConfig({ repoRoot, env, entry }) {
-  const name = entry.target.slice("candidate_config:".length);
-  const doc = configView(name, candidateConfigGet({ repoRoot, env })[name]);
-  const items = [entry, ...(entry.companions || [])];
+  const primaryName = entry.target.slice("candidate_config:".length);
+  const stored = candidateConfigGet({ repoRoot, env });
+  const items = [entry, ...(entry.companions || [])].map((item) => ({
+    ...item,
+    name: item.name || primaryName,
+  }));
+  const view = (name) => configView(name, stored[name]);
   const stale = items.some(
-    (item) => !sameValue(readConfigPath(doc, item.path), entryValue(item, "after"))
+    (item) => !sameValue(readConfigPath(view(item.name), item.path), entryValue(item, "after"))
   );
   if (stale) return refuse(STALE_NOTE, "stale");
-  let patch = {};
-  const unset = [];
+  const byName = new Map();
   for (const item of items) {
+    const group = byName.get(item.name) || { patch: {}, unset: [] };
     const prior = entryValue(item, "before");
-    if (prior === undefined) unset.push(item.path);
-    else patch = mergePatch(patch, nestPatch(item.path, prior));
+    if (prior === undefined) group.unset.push(item.path);
+    else group.patch = mergePatch(group.patch, nestPatch(item.path, prior));
+    byName.set(item.name, group);
   }
-  candidateConfigPatch({ repoRoot, env, name, patch, unset });
-  // A patch that touches location mode fields makes the profile normalizer
-  // stamp mode_preferences_confirmed back on, so an absent prior is unset again.
-  const lingering = unset.filter(
-    (path) => readConfigPath(candidateConfigGet({ repoRoot, env })[name], path) !== undefined
-  );
-  if (lingering.length) candidateConfigPatch({ repoRoot, env, name, patch: {}, unset: lingering });
+  for (const [name, { patch, unset }] of byName) {
+    candidateConfigPatch({ repoRoot, env, name, patch, unset });
+    // A patch that touches location mode fields makes the profile normalizer
+    // stamp mode_preferences_confirmed back on, so an absent prior is unset again.
+    const now = candidateConfigGet({ repoRoot, env })[name];
+    const lingering = unset.filter((path) => readConfigPath(now, path) !== undefined);
+    if (lingering.length)
+      candidateConfigPatch({ repoRoot, env, name, patch: {}, unset: lingering });
+  }
   return { ok: true };
 }
 

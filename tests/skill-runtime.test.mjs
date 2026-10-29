@@ -1494,6 +1494,16 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   assert.match(prompt, /never include it in a candidate_patch/i);
 });
 
+test("buildPrompt: confirm blocks save directly, and only loosening changes ask first", () => {
+  const prompt = buildPrompt({ skill: "ingest-profile", input: "hi", mode: "conversational" });
+  assert.match(prompt, /saves directly and lands in the user's thread with an Undo/i);
+  assert.match(prompt, /no click to wait for/i);
+  assert.match(prompt, /loosening an honesty boundary/i);
+  assert.match(prompt, /lowering the pay floor or target/i);
+  assert.doesNotMatch(prompt, /click to save|clickable pill/i);
+  assert.match(prompt, /Never say a new fact is noted or saved unless/i);
+});
+
 test("buildPrompt: every conversational skill turn uses Powell's plain-English voice", () => {
   const prompt = buildPrompt({ skill: "ingest-profile", input: "hi", mode: "conversational" });
   assert.match(prompt, /natural, conversational plain English/i);

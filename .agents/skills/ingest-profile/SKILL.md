@@ -12,7 +12,7 @@ description: "Interview a new candidate to produce all user-layer config files: 
 > **Write mechanism depends on context.** This skill runs in two places, and only one has a shell:
 >
 > - **One-shot CLI context** — an agent shell exists. Every `careerrat ...` command named throughout this file runs directly, as written.
-> - **Conversational chat context** (the onboarding screen, now the primary path) — tools are Read/Glob/Grep/Skill only. There is no shell, so every `careerrat ...` command in this file is unreachable. The only way to save anything is to emit a fenced confirm block, which renders as a pill the user clicks to write it:
+> - **Conversational chat context** (the onboarding screen, now the primary path) — tools are Read/Glob/Grep/Skill only. There is no shell, so every `careerrat ...` command in this file is unreachable. The only way to save anything is to emit a fenced confirm block, which saves directly and lands in the thread with an Undo. Two changes still ask first, with a Confirm / Not now pill: loosening an honesty boundary (removing a do-not-claim, do-not-fabricate or boundary entry, or moving a tool to confirmed) and lowering the pay floor or target:
 >
 >   ```careerrat:confirm
 >   {"kind":"candidate_patch","summary":"Your name and contact details","payload":{"doc":"profile","patch":{"candidate":{"full_name":"Ada Lovelace","email":"ada@example.com"}}}}
@@ -30,7 +30,7 @@ description: "Interview a new candidate to produce all user-layer config files: 
 > self-identification policy and exact answers. Never ask for, read, or patch voluntary self-identification. It is intentionally absent from agent-visible candidate context,
 > including `form-defaults` reads and `candidate_patch` confirmation blocks.
 >
-> **Progressive notes are immediate.** In conversational chat, confirm-block each explicit fact immediately in the same response that acknowledges it. Do not wait for related identity or contact fields, the rest of a step, or the next turn. If the candidate says only their name, emit a profile patch for `full_name` now, then ask for the next genuinely missing fact. This is what fills Paul's Notes as the conversation unfolds; the block remains a proposal until the candidate clicks Confirm.
+> **Progressive notes are immediate.** In conversational chat, confirm-block each explicit fact immediately in the same response that acknowledges it. Do not wait for related identity or contact fields, the rest of a step, or the next turn. If the candidate says only their name, emit a profile patch for `full_name` now, then ask for the next genuinely missing fact. This is what fills Paul's Notes as the conversation unfolds; the block saves on its own and shows up in the thread with an Undo, except a loosening honesty change or a lower pay floor or target, which waits for the candidate's Confirm.
 >
 > **Every question is state-aware.** Before composing each response, inspect both saved candidate data and unresolved confirm blocks in the conversation. Never ask for a fact already present in canonical or pending state. A generic save receipt is not the source of truth; the current candidate snapshot and the actual pending block payloads are. Ask again only when the candidate explicitly corrects a value or the saved value is genuinely incomplete for the field being collected.
 >
@@ -231,7 +231,9 @@ résumés, cover letters, **and** the STAR+R story bank.
    (`app/share/:id`, `api/generate/:model`) — the placeholder firewall reads a bracket
    token like `[id]` as an unfilled `[Name]`-style placeholder and will refuse the claim.
 4. **Confirm before banking.** Evidence is the candidate's truth bank — present the
-   drafted claims and let them correct, cut, or add metrics. Confirm-first, always.
+   drafted claims and let them correct, cut, or add metrics. Confirm-first, always: ask in the
+   conversation before you emit the block. Once emitted, a claim saves directly and shows up in the
+   thread with an Undo, and the evidence check can still refuse it.
 5. **Bank each confirmed claim via the guarded helper** (dry-run, then commit). Write the
    claim to a temp YAML fragment and:
 
@@ -590,7 +592,7 @@ Any time the user states a new gate during this interview — an exclusion, cut 
 **Friction level:**
 
 - *Write-and-report* for unambiguous, low-blast-radius gates (one clear cut signal): write it, then echo the CLI confirmation.
-- *Confirm-first* for consequential gates (broad company exclusion, lowering comp floor, large re-rank): propose the exact change, get a yes, then write.
+- *Confirm-first* for consequential gates (broad company exclusion, lowering comp floor or target, loosening an honesty boundary, large re-rank): propose the exact change, get a yes, then write.
 
 A stated gate must never live only in chat. It must never be hardcoded into a skill.
 
