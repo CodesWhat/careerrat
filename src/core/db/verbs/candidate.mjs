@@ -174,6 +174,33 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+// deepMerge can't delete a key, so an undo that has to restore "this key did not
+// exist" names the dotted paths to drop. Applied BEFORE the patch merges in, so a
+// path can be unset and re-set in one call. Missing branches are a no-op.
+function unsetPaths(doc, paths) {
+  const out = clone(doc);
+  for (const path of paths) {
+    const parts = String(path).split(".").filter(Boolean);
+    if (!parts.length) continue;
+    let cursor = out;
+    for (const part of parts.slice(0, -1)) {
+      cursor = isPlainObject(cursor) ? cursor[part] : undefined;
+    }
+    if (isPlainObject(cursor)) delete cursor[parts.at(-1)];
+  }
+  return out;
+}
+
+function normalizeUnsetList(unset) {
+  if (unset === undefined) return [];
+  if (!Array.isArray(unset) || unset.some((path) => typeof path !== "string" || !path.trim())) {
+    const err = new Error("unset must be an array of dotted paths");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+  return unset;
+}
+
 const LOCATION_MODE_FIELDS = [
   "remote",
   "remote_scope",
@@ -739,7 +766,14 @@ export function applyCandidateResumeSeedInDb(
   };
 }
 
-export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivity = true } = {}) {
+export function candidateConfigPatch({
+  repoRoot,
+  env,
+  name,
+  patch,
+  unset,
+  recordActivity = true,
+} = {}) {
   if (!SINGLETON_TABLES[name]) {
     const err = new Error(`unknown candidate config "${name}"`);
     err.code = "NOT_FOUND";
@@ -750,12 +784,13 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
     err.code = "BAD_REQUEST";
     throw err;
   }
+  const unsetList = normalizeUnsetList(unset);
 
   return runVerb(
     { repoRoot, env },
     (db) => {
       if (name === "targeting") {
-        const current = readTargeting(db);
+        const current = unsetPaths(readTargeting(db), unsetList);
         const merged = deepMerge(current, patch);
         merged.role_buckets = normalizeSearchTracks(merged.role_buckets);
         merged.tracked_companies = compactStrings(merged.tracked_companies);
@@ -775,10 +810,9 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
       }
 
       if (name === "application-limits") {
-        const current = readSingleton(
-          db,
-          "candidate_application_limits",
-          DEFAULTS["application-limits"]
+        const current = unsetPaths(
+          readSingleton(db, "candidate_application_limits", DEFAULTS["application-limits"]),
+          unsetList
         );
         const merged = normalizeApplicationLimits(deepMerge(current, patch));
         assertValid(name, merged);
@@ -792,7 +826,7 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
       }
 
       const table = SINGLETON_TABLES[name];
-      const current = readSingleton(db, table, DEFAULTS[name] || {});
+      const current = unsetPaths(readSingleton(db, table, DEFAULTS[name] || {}), unsetList);
       const merged =
         name === "profile"
           ? normalizeCandidateProfile(deepMerge(current, normalizeCandidateProfilePatch(patch)))

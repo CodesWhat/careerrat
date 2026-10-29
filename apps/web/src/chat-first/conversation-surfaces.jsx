@@ -403,11 +403,94 @@ function SubmissionPacket({ artifact }) {
   );
 }
 
-function AttachedArtifacts({ message, onArtifactAction }) {
+const KNOWLEDGE_VALUE_MAX = 120;
+
+function truncateKnowledgeCopy(text) {
+  return text.length > KNOWLEDGE_VALUE_MAX ? `${text.slice(0, KNOWLEDGE_VALUE_MAX - 3)}...` : text;
+}
+
+function knowledgeItemCopy(item) {
+  if (item === null || item === undefined) return "";
+  if (typeof item !== "object") return String(item);
+  if (Array.isArray(item.titles) && item.titles.length) {
+    const name = item.name || item.label || item.title;
+    const titles = item.titles.map(String).join(", ");
+    return name ? `${name} (${titles})` : titles;
+  }
+  const name = item.title || item.name || item.label;
+  return name ? String(name) : JSON.stringify(item);
+}
+
+function knowledgeValueCopy(value, absent) {
+  if (absent || value === undefined || value === null) return "nothing";
+  if (value === true) return "on";
+  if (value === false) return "off";
+  if (Array.isArray(value)) {
+    return value.length
+      ? truncateKnowledgeCopy(value.map(knowledgeItemCopy).join(", "))
+      : "nothing";
+  }
+  if (typeof value === "object") return truncateKnowledgeCopy(knowledgeItemCopy(value));
+  return String(value);
+}
+
+function KnowledgeWriteLine({ artifact, message, index, reverted, onIntentAction, intentBusy }) {
+  const label = artifact.label || artifact.path || artifact.id || "a saved item";
+  const canUndo = artifact.revertible === true && !reverted && typeof onIntentAction === "function";
+  return (
+    <div className="chat-first-indented-card chat-first-knowledge-write">
+      <span>
+        Changed {label} from {knowledgeValueCopy(artifact.before, artifact.beforeAbsent)} to{" "}
+        {knowledgeValueCopy(artifact.after, artifact.afterAbsent)}
+      </span>
+      {reverted ? <small> Undone</small> : null}
+      {!reverted && artifact.revertible !== true && artifact.revertNote ? (
+        <small> {artifact.revertNote}</small>
+      ) : null}
+      {canUndo ? (
+        <button
+          className="chat-first-pill chat-first-pill--outline"
+          type="button"
+          disabled={intentBusy}
+          onClick={() =>
+            onIntentAction({
+              type: "knowledge.revert",
+              entity: { type: "workspace", id: message.threadId || "workspace-main" },
+              input: { messageId: message.id, index },
+            })
+          }
+        >
+          Undo
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function AttachedArtifacts({
+  message,
+  onArtifactAction,
+  revertedKeys,
+  onIntentAction,
+  intentBusy = false,
+}) {
   const artifacts = Array.isArray(message?.artifacts) ? message.artifacts : EMPTY_LIST;
   if (!artifacts.length) return null;
   return artifacts.map((artifact, index) => {
     const key = artifact?.id || `${message.id}:artifact-${index + 1}`;
+    if (artifact?.kind === "knowledge_write") {
+      return (
+        <KnowledgeWriteLine
+          key={key}
+          artifact={artifact}
+          message={message}
+          index={index}
+          reverted={Boolean(revertedKeys?.has(`${message.id}:${index}`))}
+          onIntentAction={onIntentAction}
+          intentBusy={intentBusy}
+        />
+      );
+    }
     if (artifact?.kind === "source_review") {
       return (
         <div className="chat-first-indented-card" key={key}>
@@ -703,8 +786,17 @@ export function MessageTranscript({
       : latestIndex;
   }, -1);
   const latestActionState = displayMessages[latestActionStateIndex];
+  // Undo for a logged write renders on its own entry line, not as a trailing pill.
   const latestActions = (latestActionState?.metadata?.nextActions || EMPTY_LIST).filter(
-    (action) => action?.intent?.type && action?.intent?.entity
+    (action) =>
+      action?.intent?.type && action?.intent?.entity && action.intent.type !== "knowledge.revert"
+  );
+  const revertedKeys = new Set(
+    displayMessages.flatMap((message) =>
+      (Array.isArray(message?.artifacts) ? message.artifacts : EMPTY_LIST).flatMap((artifact) =>
+        artifact?.revertOf ? [`${artifact.revertOf.messageId}:${artifact.revertOf.index}`] : []
+      )
+    )
   );
   const latestActionableIndex = latestActions.length ? latestActionStateIndex : -1;
   const latestChoiceIndex = displayMessages.reduce((latestIndex, message, index) => {
@@ -801,7 +893,13 @@ export function MessageTranscript({
         return (
           <div className="chat-first-transcript-entry" key={key}>
             {content}
-            <AttachedArtifacts message={message} onArtifactAction={onArtifactAction} />
+            <AttachedArtifacts
+              message={message}
+              onArtifactAction={onArtifactAction}
+              revertedKeys={revertedKeys}
+              onIntentAction={onIntentAction}
+              intentBusy={intentBusy}
+            />
             {index === latestChoiceIndex && typeof onAnswer === "function" ? (
               <ChoicePromptActions
                 prompt={message.metadata.choicePrompt}

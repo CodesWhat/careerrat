@@ -515,6 +515,7 @@ function writeEvidenceClaims(db, items, proposal, confirmedAt) {
     .all()
     .map((row) => JSON.parse(row.data));
   const usedIds = new Set(rows.map((row) => String(row.id || "")));
+  const rowsById = new Map(rows.map((row) => [String(row.id || ""), row]));
   const byClaim = new Map(
     rows.map((row) => [String(row.claim || "").trim(), String(row.id || "")])
   );
@@ -524,6 +525,9 @@ function writeEvidenceClaims(db, items, proposal, confirmedAt) {
   );
   let added = 0;
   let accepted = 0;
+  const insertedIds = [];
+  const replacedIds = [];
+  const replaced = [];
   for (const raw of Array.isArray(items) ? items : []) {
     const claim = evidenceClaimFromItem(raw);
     if (!claim) continue;
@@ -532,6 +536,7 @@ function writeEvidenceClaims(db, items, proposal, confirmedAt) {
     const duplicateId = byClaim.get(claim);
     if (duplicateId && duplicateId !== requestedId) continue;
     const id = requestedId || nextEvidenceId(usedIds);
+    const previous = rowsById.get(id);
     usedIds.add(id);
     byClaim.set(claim, id);
     const data = {
@@ -546,9 +551,16 @@ function writeEvidenceClaims(db, items, proposal, confirmedAt) {
     };
     assertCleanEvidenceClaims([data]);
     stmt.run(id, JSON.stringify(data), nowIso());
+    if (previous) {
+      replacedIds.push(id);
+      replaced.push({ id, before: clone(previous) });
+    } else {
+      insertedIds.push(id);
+    }
+    rowsById.set(id, data);
     added += 1;
   }
-  return { added, accepted };
+  return { added, accepted, insertedIds, replacedIds, replaced };
 }
 
 function evidenceClaimFromItem(raw) {

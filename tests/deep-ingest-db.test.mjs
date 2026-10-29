@@ -656,7 +656,67 @@ test("confirmed generic evidence edits write trusted claims and complete the lan
   const claims = candidateConfigGet({ repoRoot }).evidence.claims;
   assert.equal(claims.length, beforeClaims + 1);
   assert.equal(claims.at(-1).claim, "Built source-grounded review workflows.");
+  assert.equal(confirmed.output.evidence.added, 1);
+  assert.deepEqual(confirmed.output.evidence.insertedIds, [claims.at(-1).id]);
+  assert.deepEqual(confirmed.output.evidence.replacedIds, []);
+  assert.deepEqual(confirmed.output.evidence.replaced, []);
   assert.equal(deepIngestStateGet({ repoRoot }).laneStates.evidence_claims.status, "completed");
+});
+
+test("confirmed evidence edits report inserted and replaced ids apart, with the replaced row", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  seedSearchReadyCandidate(repoRoot);
+  const { deepIngestConfirmProposal, deepIngestProposalPut, deepIngestSourceCreate } =
+    await loadDeepIngestVerbs();
+
+  const confirmItem = (label, item) => {
+    const source = deepIngestSourceCreate({
+      repoRoot,
+      input: {
+        targetShape: "evidence",
+        sourceKind: "paste",
+        label,
+        text: `${item.title} for local candidate setup.`,
+        chunks: [{ id: `chunk-${label}`, text: `${item.title} for local candidate setup.` }],
+      },
+    }).source;
+    const full = {
+      ...item,
+      summary: "Summary.",
+      sourceId: source.id,
+      chunkId: `chunk-${label}`,
+      supportingQuote: item.title,
+    };
+    const proposal = deepIngestProposalPut({
+      repoRoot,
+      sourceId: source.id,
+      targetShape: "evidence",
+      lane: "evidence_claims",
+      proposal: { items: [full] },
+    });
+    return deepIngestConfirmProposal({
+      repoRoot,
+      proposalId: proposal.id,
+      expectedVersion: proposal.version,
+      edits: { items: [full] },
+    }).output.evidence;
+  };
+
+  const first = confirmItem("first", { id: "replace-me", title: "Shipped the first version." });
+  assert.deepEqual(first.insertedIds, ["replace-me"]);
+  assert.deepEqual(first.replacedIds, []);
+
+  const second = confirmItem("second", { id: "replace-me", title: "Shipped the second version." });
+  assert.deepEqual(second.insertedIds, []);
+  assert.deepEqual(second.replacedIds, ["replace-me"]);
+  assert.equal(second.replaced.length, 1);
+  assert.equal(second.replaced[0].id, "replace-me");
+  assert.equal(second.replaced[0].before.claim, "Shipped the first version.");
+  assert.equal(
+    candidateConfigGet({ repoRoot }).evidence.claims.find((c) => c.id === "replace-me").claim,
+    "Shipped the second version."
+  );
 });
 
 test("lane state verbs accept the documented statuses and reject invalid lane state", async () => {

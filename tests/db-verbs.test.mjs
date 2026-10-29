@@ -3952,3 +3952,52 @@ test("candidateEvidenceMerge accepts a well-formed claim with links/role_signals
   assert.deepEqual(stored.role_signals, ["self-serve onboarding"]);
   assert.deepEqual(stored.forbidden_wording, ["invented the architecture solo"]);
 });
+
+test("candidateConfigPatch unset drops a scalar path before merging and still validates", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  openDb({ repoRoot });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: { fit_bands: { fit_floor: 70 }, search_preferences: { cadence: { mode: "weekly" } } },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: {},
+    unset: ["fit_bands.fit_floor"],
+  });
+  const targeting = candidateConfigGet({ repoRoot, env: {} }).targeting;
+  assert.equal(Object.hasOwn(targeting.fit_bands || {}, "fit_floor"), false);
+  assert.equal(targeting.search_preferences.cadence.mode, "weekly");
+
+  // Unset then set in one call replaces, and a missing branch is a no-op.
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: { cut_signals: ["a"] },
+    unset: ["nope.nothing", "cut_signals"],
+  });
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).targeting.cut_signals, ["a"]);
+
+  assert.throws(
+    () =>
+      candidateConfigPatch({ repoRoot, env: {}, name: "targeting", patch: {}, unset: "fit_bands" }),
+    (error) => error.code === "BAD_REQUEST"
+  );
+  assert.throws(
+    () =>
+      candidateConfigPatch({
+        repoRoot,
+        env: {},
+        name: "targeting",
+        patch: {},
+        unset: ["keep_signals"],
+      }),
+    (error) => error.code === "VALIDATION_FAILED"
+  );
+});
