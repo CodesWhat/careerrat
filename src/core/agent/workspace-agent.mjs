@@ -4373,6 +4373,12 @@ function scheduleDetached(run) {
   });
 }
 
+// Follow-ups scheduled but not yet settled, keyed by workspace, application
+// and follow-up key. The thread check in planAutoFollowUps only sees a run once
+// its intent message is written, so two writes landing together could both
+// plan the same cost-bearing run without this.
+const autoFollowUpsInFlight = new Set();
+
 // Runs the follow-ups that a status change or a new evaluation made due
 // (company.health at fire_at_stage, coaching.plan on a review verdict). They go
 // through the same intent handlers the buttons use, so artifacts, logs and Undo
@@ -4390,6 +4396,9 @@ function scheduleAutoFollowUps({ options, before }) {
     });
     const schedule = options.scheduleAutoFollowUp || scheduleDetached;
     for (const followUp of due) {
+      const flightKey = `${repoRoot}\u0000${followUp.intent.entity?.id}\u0000${followUp.key}`;
+      if (autoFollowUpsInFlight.has(flightKey)) continue;
+      autoFollowUpsInFlight.add(flightKey);
       const rest = { ...options, intent: followUp.intent, autoFollowUps: false };
       delete rest.intentMessageId;
       delete rest.resultMessageId;
@@ -4401,6 +4410,8 @@ function scheduleAutoFollowUps({ options, before }) {
           await executeWorkspaceIntentCore(rest);
         } catch {
           // The handler already wrote the action_error into the job thread.
+        } finally {
+          autoFollowUpsInFlight.delete(flightKey);
         }
       });
     }

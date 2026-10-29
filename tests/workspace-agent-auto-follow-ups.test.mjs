@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { planAutoFollowUps, snapshotApplicationState } from "../src/core/agent/cost-gate-auto.mjs";
 import {
   createWorkspaceAgentRuntime,
   executeWorkspaceIntent,
@@ -295,4 +296,53 @@ test("a failing coaching.plan follow-up records an action_error and the evaluati
   );
   assert.equal(errors.length, 1);
   assert.equal(errors[0].error.code, "COACHING_PLAN_ERROR");
+});
+
+test("an application created inside the write counts as new, so its review verdict still plans coaching", () => {
+  const repoRoot = tempRepo();
+  const before = snapshotApplicationState({ repoRoot, env: {} });
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-new",
+      company: "Lakeside Clinic",
+      role: "Charge Nurse",
+      status: "evaluating",
+      evaluation: {
+        gate: "review",
+        evaluatedAt: "2026-10-03T00:00:00.000Z",
+        fitRisks: ["No charge nurse title on record"],
+      },
+    },
+  });
+  const due = planAutoFollowUps({ repoRoot, env: {}, before, aiRouteAvailableImpl: () => true });
+  assert.deepEqual(
+    due.map((followUp) => [followUp.intent.type, followUp.intent.entity.id]),
+    [["coaching.plan", "app-new"]]
+  );
+});
+
+test("two writes landing together schedule one follow-up, not two", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot);
+  const queued = [];
+  const healthCalls = [];
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startCompanyHealthImpl: async (input) => {
+      healthCalls.push(input);
+      return { chat: { chatId: "ch-2", skill: "company-health", state: "running" } };
+    },
+    scheduleAutoFollowUp: (run) => queued.push(run),
+    aiRouteAvailableImpl: () => true,
+  });
+  const before = runtime.snapshotApplicationState();
+  appSetStatus({ repoRoot, env: {}, id: "app-auto", to: "interview" });
+  runtime.afterApplicationWrite(before);
+  runtime.afterApplicationWrite(before);
+  assert.equal(queued.length, 1);
+  await Promise.all(queued.map((run) => run()));
+  assert.equal(healthCalls.length, 1);
 });

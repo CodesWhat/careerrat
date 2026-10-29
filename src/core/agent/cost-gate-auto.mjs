@@ -22,6 +22,7 @@ const COMPANY_HEALTH_RECHECK_DAYS_DEFAULT = 14;
 // 91) never fire.
 const FIRE_STAGE_ORDER = Object.freeze({ applied: 1, interview: 2, offer: 5 });
 const TERMINAL_ORDER = 90;
+const EMPTY_STATE = Object.freeze({ status: null, evaluatedAt: null });
 
 // candidate/modes.yml#company_health.recheck_days (SKILL.md's freshness
 // contract) — candidateConfigGet's DB-first accessor already returns the
@@ -131,8 +132,10 @@ export function planAutoFollowUps({
   if (!before || !after) return [];
   const changedIds = [...after.entries()]
     .filter(([id, state]) => {
-      const prior = before.get(id);
-      return prior && (prior.status !== state.status || prior.evaluatedAt !== state.evaluatedAt);
+      // An application created inside the same intent (a pasted URL promoted
+      // and evaluated) has no prior state; treat it as new, not as unchanged.
+      const prior = before.get(id) || EMPTY_STATE;
+      return prior.status !== state.status || prior.evaluatedAt !== state.evaluatedAt;
     })
     .map(([id]) => id);
   if (!changedIds.length) return [];
@@ -141,7 +144,7 @@ export function planAutoFollowUps({
   const messages = workspaceThreadRead({ repoRoot, env }).messages;
   const due = [];
   for (const row of loadApplications(repoRoot, env, changedIds)) {
-    const prior = before.get(row.id);
+    const prior = before.get(row.id) || EMPTY_STATE;
     const triggers = [
       typeof startCompanyHealthImpl === "function"
         ? companyHealthTrigger({ row, before: prior, modes, repoRoot, env, now })
