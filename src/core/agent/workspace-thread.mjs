@@ -549,6 +549,7 @@ function intentText(intent) {
   if (intent.type === "job.prepare-submit" && intent.input?.resumeSession === true) {
     return "Resume supervised preparation.";
   }
+  if (intent.input?.auto === true) return `Automatic: ${descriptions[intent.type]}.`;
   return `${descriptions[intent.type]}.`;
 }
 

@@ -43,10 +43,10 @@ Fires **only** when both are true on the application's current typed `evaluation
 
 Never on `gate: "keep"` (nothing to coach — the role already cleared) and never on
 `gate: "cut"` (nothing to coach toward — comp-floor failures and hard cuts are not a coaching
-problem). Always **explicit-click** — the "Coach me on this fit" button next to Re-evaluate
-in the Jobs drawer's Evaluate card, or the same request typed in Ask. Never auto-fires,
-matching the point-of-need consent rule every cost-gated skill in this workspace follows
-(company-health's own STEP 1 is the sibling precedent).
+problem). It runs on its own the moment such a verdict lands, once per evaluation, in the
+job's thread. The "Coach me on this fit" button next to Re-evaluate in the Jobs drawer's
+Evaluate card, or the same request typed in Ask, runs it again on demand. If no AI is set up
+the automatic run is skipped with a short note instead of an error.
 
 ---
 
@@ -191,8 +191,8 @@ asking rather than a prediction.
 - **No bypass of the evidence firewall.** Every write onto `candidate/evidence.yml` /
   `candidate_evidence_claims`, from any entry point, passes through the same
   validate-then-persist path this skill uses.
-- **Explicit-click only.** Never auto-fires on a review verdict; the candidate always asks
-  first.
+- **Automatic runs keep every rule above.** The auto-run saves only drafts the evidence
+  firewall accepts, logs each with an Undo, and never fires on `keep` or `cut`.
 
 ---
 

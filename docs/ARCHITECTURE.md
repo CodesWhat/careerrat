@@ -53,7 +53,8 @@ Routes are grouped below by cluster.
   artifact during a full tailor/apply run instead)
 - "How do I close this fit gap", "what should I do about this review" →
   `coach-gaps` (only fires on an `evaluate-job` verdict already at
-  `gate: review` with named `fitRisks`; explicit-click only, never auto-fires)
+  `gate: review` with named `fitRisks`; runs on its own when the verdict lands, once
+  per evaluation)
 - "Optimize / review my LinkedIn profile", make it read for targeted roles →
   `optimize-linkedin` (read-only before→after diff by default; write-back is a
   separate switch, confirm-first per field)
@@ -64,7 +65,7 @@ Routes are grouped below by cluster.
 - "What's market comp", "benchmark my salary ask" → `research-comp`
 - "Find more boards", "what sources should I add", stale queue → `research-boards`
 - "How risky / stable / healthy is this company", factor company risk into a
-  role → `company-health` (cost-gated; auto-fires at the interview stage by
+  role → `company-health` (runs on its own at the interview stage by
   default; internal signal only, never enters an outbound artifact)
 - "Find companies likely to be hiring my target roles" → `discover-companies`
   (resolves, validates, and dedupes high-confidence public ATS boards; review
