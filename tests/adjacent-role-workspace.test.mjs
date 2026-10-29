@@ -6,6 +6,7 @@ import { after, test } from "node:test";
 
 import {
   createWorkspaceAgentRuntime,
+  executeWorkspaceIntent,
   recordWorkspaceSearchCompletion,
 } from "../src/core/agent/workspace-agent.mjs";
 import { workspaceThreadRead } from "../src/core/agent/workspace-thread.mjs";
@@ -150,7 +151,7 @@ test("a zero-result completion persists a reload-safe multi-select without chang
   );
 });
 
-test("typed role choices ask for a separate confirmation before one idempotent expansion", async () => {
+test("typed role choices apply the expansion directly, once, with an Undo", async () => {
   const repoRoot = tempRepo();
   const calls = [];
   const starts = [];
@@ -192,111 +193,63 @@ test("typed role choices ask for a separate confirmation before one idempotent e
   const first = await runtime.recordSearchCompletion({ run: completedZeroRun("zero-typed") });
   const selection = first.messages.at(-1).metadata.choicePrompt;
 
-  const selected = await runtime.runTurn({
+  const applied = await runtime.runTurn({
     text: "Event operations and Training and enablement",
   });
-  const confirmationMessage = selected.messages.at(-1);
-  const confirmation = confirmationMessage.metadata.choicePrompt;
-  assert.equal(confirmationMessage.metadata.careerCoach.stage, "confirm-expansion");
-  assert.equal(confirmation.mode, "binary");
-  assert.match(confirmationMessage.text, /add those as stretch targets and run a new search/i);
-  assert.equal(starts.length, 0);
+  const expectedExecutionId = `career-coach-${selection.id}`;
+  await runtime.waitForUnifiedSearch(expectedExecutionId);
+  const appliedMessage = applied.messages.find(
+    (message) => message.metadata?.careerCoach?.stage === "expansion-applied"
+  );
+  assert.ok(appliedMessage, "the expansion applies with no second confirm step");
+  assert.equal(
+    applied.messages.some(
+      (message) => message.metadata?.careerCoach?.stage === "confirm-expansion"
+    ),
+    false
+  );
+  assert.match(appliedMessage.text, /added .* as stretch targets/i);
   assert.equal(calls.length, 1, "the deterministic choice handoff must not call Paul again");
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).targeting.role_buckets[0].titles, [
-    "Lead Bartender",
-    "Beverage Manager",
-  ]);
-  assert.deepEqual(selection.selectedOptionIds, undefined);
-
-  closeAll();
-  const restarted = createWorkspaceAgentRuntime({
-    repoRoot,
-    env: {},
-    callAIImpl: async () => {
-      throw new Error("confirmation must not call the model");
-    },
-    startManualSearchImpl,
-    runSearchInBackgroundImpl,
-  });
-  const unifiedEvents = [];
-  restarted.registerAiWebSearchStarter({
-    available: true,
-    start: async ({ searchExecutionId, deterministic }) => {
-      unifiedEvents.push(`ai:${searchExecutionId}:${deterministic.status}`);
-      return { ok: true, run: { status: "completed" } };
-    },
-  });
-  const afterReload = workspaceThreadRead({ repoRoot, env: {} });
-  const durableConfirmation = afterReload.messages.at(-1).metadata.choicePrompt;
-  assert.equal(durableConfirmation.id, confirmation.id);
-
-  const confirmed = await restarted.runTurn({
-    text: "Yes",
-    choice: { promptId: confirmation.id, version: 1, optionIds: ["yes"] },
-  });
-  const expectedExecutionId = `career-coach-${confirmation.id}`;
-  await restarted.waitForUnifiedSearch(expectedExecutionId);
-  assert.match(confirmed.messages.at(-1).text, /added .* as stretch targets/i);
   assert.equal(starts.length, 1);
   assert.equal(starts[0].searchExecutionId, expectedExecutionId);
-  assert.deepEqual(unifiedEvents, [`ai:${expectedExecutionId}:succeeded`]);
   const config = candidateConfigGet({ repoRoot, env: {} });
-  const exploration = config.targeting.role_buckets.find(
-    (bucket) => bucket.name === "Career exploration"
+  assert.deepEqual(
+    config.targeting.role_buckets.find((bucket) => bucket.name === "Career exploration"),
+    {
+      name: "Career exploration",
+      priority: "stretch",
+      titles: ["Event operations", "Training and enablement"],
+      notes: "Candidate-confirmed adjacent directions from career coaching.",
+    }
   );
-  assert.deepEqual(exploration, {
-    name: "Career exploration",
-    priority: "stretch",
-    titles: ["Event operations", "Training and enablement"],
-    notes: "Candidate-confirmed adjacent directions from career coaching.",
-  });
+
+  const entry = appliedMessage.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(entry.target, "candidate_config:targeting");
+  assert.equal(entry.path, "role_buckets");
+  assert.equal(entry.revertible, true);
+  const undo = appliedMessage.metadata.nextActions.find(
+    (action) => action.intent.type === "knowledge.revert"
+  );
+  assert.ok(undo);
 
   await assert.rejects(
-    restarted.runTurn({
-      text: "Yes",
-      choice: { promptId: confirmation.id, version: 1, optionIds: ["yes"] },
+    runtime.runTurn({
+      text: "Event operations",
+      choice: { promptId: selection.id, version: 1, optionIds: [selection.options[0].id] },
     }),
     (error) => error.code === "STALE_CHOICE_PROMPT"
   );
   assert.equal(starts.length, 1);
-  await restarted.shutdownSourcingWorkers();
-});
 
-test("a clicked role followed by a typed no leaves targeting and search untouched", async () => {
-  const repoRoot = tempRepo();
-  const starts = [];
-  const runtime = createWorkspaceAgentRuntime({
-    repoRoot,
-    env: {},
-    callAIImpl: coachingCall([]),
-    startManualSearchImpl: async (input) => {
-      starts.push(input);
-      throw new Error("declining must not start a search");
-    },
-  });
-  const first = await runtime.recordSearchCompletion({ run: completedZeroRun("zero-decline") });
-  const selection = first.messages.at(-1).metadata.choicePrompt;
-  const option = selection.options[0];
-  const selected = await runtime.runTurn({
-    text: option.label,
-    choice: { promptId: selection.id, version: 1, optionIds: [option.id] },
-  });
-  const confirmation = selected.messages.at(-1).metadata.choicePrompt;
-  const declined = await runtime.runTurn({ text: "No" });
-
-  assert.equal(declined.messages.at(-1).text, "Got it. I left your targets and search alone.");
-  assert.equal(starts.length, 0);
+  const undone = await executeWorkspaceIntent({ repoRoot, env: {}, intent: undo.intent });
+  assert.match(JSON.stringify(undone), /Undid: Target roles/);
   assert.equal(
     candidateConfigGet({ repoRoot, env: {} }).targeting.role_buckets.some(
       (bucket) => bucket.name === "Career exploration"
     ),
     false
   );
-  assert.equal(
-    declined.messages.find((message) => message.id === confirmation.messageId).metadata.choicePrompt
-      .state,
-    "resolved"
-  );
+  await runtime.shutdownSourcingWorkers();
 });
 
 test("restart recovery adds one missing coaching prompt and never duplicates it", async () => {

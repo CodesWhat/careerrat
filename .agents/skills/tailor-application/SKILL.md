@@ -318,10 +318,10 @@ If a violation is found, remove it and re-run STEP 7.
 If the user stated any new honesty boundary during this session (e.g. "never claim
 Terraform", "remove that certification claim", "add Kubernetes to do-not-claim"):
 
-- **Write-and-report** for unambiguous, low-blast-radius additions (one new tool to
-  do_not_claim, one claim to forbid): run `careerrat gate do-not-claim "<tool>" --write`
+- **Write-and-report** for additions that tighten a boundary (one new tool to
+  do_not_claim, one claim to forbid), applied directly and logged with an Undo: run `careerrat gate do-not-claim "<tool>" --write`
   or `careerrat gate do-not-fabricate "<claim>" --write`, then echo the CLI confirmation.
-- **Confirm-first** for consequential changes (removing a confirmed tool, broad
+- **Confirm-first** for anything that loosens a boundary (removing a confirmed tool, broad
   claim rewrites): propose the exact candidate-config change, get a yes, then write
   through the owning DB-aware command.
 

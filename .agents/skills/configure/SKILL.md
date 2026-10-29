@@ -13,7 +13,7 @@ description: Show current settings and route changes to the validated CLI or own
 
 `configure` is a **menu and router**. It reads state directly (read-only) and shows it to you. Every **write** goes through the existing validated, schema-checked, atomic CLI or the owning skill — configure never hand-edits a YAML file itself. In DB workspaces those CLIs write SQLite; in legacy workspaces they may patch YAML. This is the [[capture-is-skills-not-cli]] invariant: mutations go through the write-guarded, confirm-first paths that already exist, not through this skill.
 
-Consequential writes (comp floor/target, broad company exclusions) are confirm-first. Everything stays local. Nothing is ever auto-applied or run on a schedule.
+Knowledge and targeting writes apply directly through those same writers and are logged with an Undo. Lowering a comp floor or target and loosening an honesty boundary are confirm-first. Everything stays local. Nothing is run on a schedule.
 
 ---
 
@@ -86,7 +86,7 @@ Run the CLI confirm-first. The default is a **dry run** — it shows the exact l
 
 A capability runs on a platform unless its global switch or that platform's per-capability switch is turned off. This is the verdict from `mayRun()` in `src/core/automation/consent.mjs`; never re-derive it here. There is no consent step or setup mode: route "turn on X" to `careerrat automation enable` and "turn off X" to `careerrat automation disable`.
 
-**Dry-run first.** For every CLI command above, run it once without `--write` so the user sees the exact change before it commits. Only add `--write` (and `--confirm` where required) after an explicit yes.
+**Dry-run first.** For every CLI command above, run it once without `--write` so the user sees the exact change before it commits. For a loosening change (lowering a comp floor or target, loosening an honesty boundary), only add `--write` (and `--confirm` where required) after an explicit yes. Other knowledge and targeting writes go ahead directly and are reported with an Undo.
 
 **Mode semantics:** `usage_mode` changes compute/scope for discretionary work; it never lowers core gate/tailor/track/comms quality. `application_mode` changes what CareerRat does after discovery: promote, review, apply, or hold. Discovery should remain recall-oriented by default so plausible roles are not missed; application mode gates what happens next. Neither mode relaxes honesty, privacy, comp, or application-limit gates.
 
@@ -178,8 +178,8 @@ visible CareerRat browser, and No skips it.
 
 - **Never a new mutation path.** configure reads state and routes. Every write goes through the CLI or the owning skill — never a direct YAML or SQLite edit from this skill.
 - **`current_base` is private.** Never print it, never let it appear in any output or artifact. It is stored in candidate profile config with `current_comp_shareable: false` and is never an outbound value.
-- **Confirm-first on consequential writes.** Dry-run first, show the exact line that will change, get an explicit yes before adding `--write --confirm`. Consequential gates: comp floor/target, broad company exclusions.
-- **Write-and-report on low-blast-radius writes.** Cut/keep signals, expected comp, honesty boundaries, automation switches — dry-run first, then `--write` on confirmation.
+- **Confirm-first on loosening writes.** Dry-run first, show the exact line that will change, get an explicit yes before adding `--write --confirm`. Loosening gates: lowering the comp floor or target, loosening an honesty boundary.
+- **Apply directly, with an Undo, on other knowledge and targeting writes.** Cut/keep signals, company exclusions, raised comp, expected comp, tightened honesty boundaries, automation switches: write through the owning writer and echo what changed.
 - **Everything stays local.** No data leaves the machine. No automation runs on a schedule. Every automated session is user-initiated.
 - **Never auto-run browser automation.** configure surfaces the CLI commands; the user confirms each one.
 - **Domain-neutral.** No hardcoded role titles, companies, tools, or candidate-specific values in this skill. All candidate values live in SQLite in DB mode and compatibility config files only in legacy/export mode.

@@ -361,7 +361,7 @@ If the user states any new constraint during the outcome flow ("never apply to X
 - Per-company cap or cooldown → after confirmation, write `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
 - Comp floor or anchor change → `careerrat gate comp-floor <N> --write --confirm` or `careerrat gate comp-target <N> --write --confirm`
 
-**Friction rule:** write-and-report for unambiguous, low-blast-radius changes (one clear cut signal). Confirm-first for consequential changes (broad exclusion, comp floor drop, large re-rank). After writing, echo the CLI confirmation.
+**Friction rule:** knowledge and targeting writes (signals, exclusions, caps, re-ranks) apply directly through the same writers and are logged with an Undo. Confirm-first stays for lowering a comp floor or target, loosening an honesty boundary, and any strategy change backed by fewer than 3 data points (log it as a suggestion). After writing, echo the CLI confirmation.
 
 A stated gate must never live only in chat. Do not hardcode it into skill prose.
 

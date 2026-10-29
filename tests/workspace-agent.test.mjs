@@ -2484,7 +2484,7 @@ test("strategy.review preserves its frozen plan and cancellation signal at the r
   assert.equal(reviewInput.signal, controller.signal);
 });
 
-test("strategy.review returns only a 'Finish review' nextAction once drafted, and passes force through to the impl", async () => {
+test("strategy.review keeps a thin-evidence recommendation as a suggestion with Apply and Finish review, and passes force through", async () => {
   const repoRoot = tempRepo();
   const calls = [];
 
@@ -2511,7 +2511,7 @@ test("strategy.review returns only a 'Finish review' nextAction once drafted, an
             type: "cut-signal",
             title: "Cut on-call roles",
             rationale: "Every on-call-tagged role was rejected.",
-            evidenceCount: 4,
+            evidenceCount: 2,
             proposal: { signal: "on-call-rotation" },
           },
         ],
@@ -2523,11 +2523,20 @@ test("strategy.review returns only a 'Finish review' nextAction once drafted, an
   const last = result.messages.at(-1);
   assert.equal(
     last.text,
-    "5 new rejections cluster around on-call roles. Review the findings and recommendations, then finish the review."
+    "5 new rejections cluster around on-call roles. Suggested, not applied: Cut on-call roles (Only 2 data points behind it, so it stays a suggestion until you apply it.). Review the rest, then finish the review."
   );
+  assert.equal(last.artifacts[0].recommendations[0].status, "suggested");
   assert.equal(last.artifacts[0].recommendations.length, 1);
   assert.equal(last.metadata.state, "drafted");
-  assert.deepEqual(last.metadata.nextActions, [
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).targeting?.cut_signals?.includes(
+      "on-call-rotation"
+    ) ?? false,
+    false
+  );
+  assert.equal(last.metadata.nextActions[0].label, "Apply: Cut on-call roles");
+  assert.equal(last.metadata.nextActions[0].intent.type, "strategy.apply");
+  assert.deepEqual(last.metadata.nextActions.slice(1), [
     {
       label: "Finish review",
       intent: {
@@ -7975,7 +7984,7 @@ test("natural recruiter requests refuse ambiguous threads without drafting", asy
   assert.ok(actions.every((action) => action.primary === false));
 });
 
-test("one-off screening questions draft inside Ask and offer confirmed durable reuse", async () => {
+test("one-off screening questions draft inside Ask and save reusable answers with an Undo", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
   const calls = [];
@@ -8036,19 +8045,79 @@ test("one-off screening questions draft inside Ask and offer confirmed durable r
       },
     },
     {
-      label: "Save for future applications",
+      label: "Undo Saved answer",
       intent: {
-        type: "screening.answer-save",
-        entity: { type: "candidate", id: "candidate" },
-        input: {
-          question: "Will you now or later require sponsorship?",
-          key: "will you now or later require sponsorship",
-          answer: "I do not require employment sponsorship.",
-        },
+        type: "knowledge.revert",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { messageId: message.id, index: 1 },
       },
     },
   ]);
+  // The reusable answer saved as it was drafted, logged, and Undo takes it back.
+  const saved = message.artifacts[1];
+  assert.equal(saved.kind, "knowledge_write");
+  assert.equal(saved.target, "candidate_config:form-defaults");
+  assert.equal(saved.path, "screening_answers.will you now or later require sponsorship");
+  assert.equal(saved.revertible, true);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} })["form-defaults"].screening_answers[
+      "will you now or later require sponsorship"
+    ],
+    "I do not require employment sponsorship."
+  );
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: message.metadata.nextActions[1].intent,
+  });
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} })["form-defaults"]?.screening_answers?.[
+      "will you now or later require sponsorship"
+    ],
+    undefined
+  );
   assert.match(message.text, /review this answer/i);
+});
+
+test("job-specific screening answers are not saved as reusable defaults", async () => {
+  const repoRoot = tempRepo();
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { questionText: "Why do you want to work at Temporal Labs?" },
+    },
+    answerScreeningQuestionsImpl: async () => ({
+      applicationId: null,
+      answers: [
+        {
+          questionId: "q-why",
+          key: "why do you want to work at temporal labs",
+          question: "Why do you want to work at Temporal Labs?",
+          answer: "I like durable execution.",
+          source: "ai",
+          durable: true,
+          uploadReady: true,
+          confirmationRequired: false,
+        },
+      ],
+      excluded: [],
+      needsUser: false,
+      artifactPath: null,
+      ai: { used: true },
+    }),
+  });
+  const message = result.messages.at(-1);
+  assert.equal(message.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
+  assert.equal(message.metadata.nextActions, undefined);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} })["form-defaults"]?.screening_answers?.[
+      "why do you want to work at temporal labs"
+    ],
+    undefined
+  );
 });
 
 test("real one-off answer chain groups exact packet confirmations into one bounded action", async () => {
@@ -8527,7 +8596,7 @@ test("one-off screening questions reuse saved profile disclosures without requir
   assert.equal(answer.durable, true);
   assert.match(answer.answer, /do not require sponsorship/i);
   assert.equal(message.metadata.ai.used, false);
-  assert.equal(message.metadata.nextActions[0].intent.type, "screening.answer-save");
+  assert.equal(message.metadata.nextActions[0].intent.type, "knowledge.revert");
 });
 
 test("confirmed reusable screening answers persist through the owning candidate settings writer", async () => {

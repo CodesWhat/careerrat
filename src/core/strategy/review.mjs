@@ -581,6 +581,10 @@ function applyRerank({ repoRoot, env, proposal }) {
     }
     hosts.set(id, host);
   }
+  const previous = ids.map((id) => {
+    const { table, row } = hosts.get(id);
+    return { id, table, status: row.status ?? null, priority: row.priority ?? null };
+  });
   for (const id of ids) {
     const host = hosts.get(id);
     if (host.table === "applications") {
@@ -610,9 +614,16 @@ function applyRerank({ repoRoot, env, proposal }) {
   const changes = [];
   if (toStatus) changes.push(`status "${toStatus}"`);
   if (hasPriority) changes.push(`priority "${proposal.priority}"`);
+  const current = previous.map((row) => ({
+    ...row,
+    status: toStatus || row.status,
+    priority: hasPriority ? proposal.priority : row.priority,
+  }));
   return {
     rows: ids,
     count: ids.length,
+    previous,
+    current,
     summary: `Re-ranked ${ids.length} ${ids.length === 1 ? "row" : "rows"} to ${changes.join(" and ")}.`,
   };
 }
@@ -639,6 +650,43 @@ function applyGateType({ repoRoot, env, type, value }) {
     }
     throw applyError(error.message, "STRATEGY_APPLY_INVALID");
   }
+}
+
+// restoreRerankRows: Undo for a re-rank. `before`/`after` are the per-row
+// { id, table, status, priority } snapshots applyRerank returned. All-or-nothing:
+// if any row is gone or changed again since the re-rank, nothing is restored.
+export function restoreRerankRows({ repoRoot, env, before, after }) {
+  const db = requireDb({ repoRoot, env });
+  const plan = [];
+  for (const prior of before) {
+    const expected = after.find((row) => row.id === prior.id);
+    const host = findHostRow(db, prior.id);
+    if (!expected || !host) return { ok: false };
+    const live = host.row;
+    if (
+      (live.status ?? null) !== expected.status ||
+      (live.priority ?? null) !== expected.priority
+    ) {
+      return { ok: false };
+    }
+    plan.push({ prior, expected, table: host.table });
+  }
+  for (const { prior, expected, table } of plan) {
+    const note = "Undid a strategy review re-rank.";
+    if (prior.status !== expected.status) {
+      const to = prior.status || "sourced";
+      if (table === "applications") appSetStatus({ repoRoot, env, id: prior.id, to, note });
+      else sourcedSetStatus({ repoRoot, env, id: prior.id, to, note });
+    }
+    if (prior.priority !== expected.priority) {
+      if (table === "applications") {
+        appSetFields({ repoRoot, env, id: prior.id, patch: { priority: prior.priority } });
+      } else {
+        sourcedSetPriority({ repoRoot, env, id: prior.id, priority: prior.priority });
+      }
+    }
+  }
+  return { ok: true };
 }
 
 function applyFitBands({ repoRoot, env, proposal }) {

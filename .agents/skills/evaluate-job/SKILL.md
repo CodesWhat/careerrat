@@ -395,9 +395,9 @@ Then log the verdict to the Activity Pulse feed (the dashboard's live timeline â
 
 ## STEP 10 â€” GATE WRITE-BACK (new limits discovered)
 
-If a new application blocker was encountered during this evaluation (e.g., a posted cap, cooldown, or portal blocker that should affect future roles), capture it on the tracker row and persist it after confirmation. DB mode writes use `careerrat data candidate limits upsert --data '<json row>'`; legacy mode writes `candidate/application-limits.yml`.
+If a new application blocker was encountered during this evaluation (e.g., a posted cap, cooldown, or portal blocker that should affect future roles), capture it on the tracker row and persist it through the owning writer, logged with an Undo. DB mode writes use `careerrat data candidate limits upsert --data '<json row>'`; legacy mode writes `candidate/application-limits.yml`.
 
-**Write-back friction rule**: blocker facts are low-blast-radius to record on the row, but durable application-limit config is confirm-first.
+**Write-back friction rule**: blocker facts and durable application-limit config both apply directly, with an Undo.
 
 ---
 

@@ -22,6 +22,7 @@ import {
 } from "../db/verbs/deep-ingest.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { computeEvidenceWrite } from "../profile/evidence-writer.mjs";
+import { restoreRerankRows } from "../strategy/review.mjs";
 import { WORKSPACE_THREAD_ID } from "./workspace-thread.mjs";
 
 const PRIVATE_MARKER = "[private]";
@@ -321,6 +322,15 @@ function revertEvidence({ repoRoot, env, entry }) {
   return { ok: true };
 }
 
+function revertRerank({ repoRoot, env, entry }) {
+  const before = entryValue(entry, "before");
+  const after = entryValue(entry, "after");
+  if (!Array.isArray(before) || !Array.isArray(after))
+    return refuse(NO_INVERSE_NOTE, "unsupported");
+  const restored = restoreRerankRows({ repoRoot, env, before, after });
+  return restored.ok ? { ok: true } : refuse(STALE_NOTE, "stale");
+}
+
 function revertDeepIngest({ repoRoot, env, entry }) {
   const lane = entry.target.slice("deep_ingest:".length);
   const key = DEEP_INGEST_LANE_KEYS[lane];
@@ -378,6 +388,8 @@ export function revertKnowledgeWrite({
     outcome = revertEvidence({ repoRoot, env, entry });
   } else if (entry.target?.startsWith("deep_ingest:") && entry.id) {
     outcome = revertDeepIngest({ repoRoot, env, entry });
+  } else if (entry.target === "rows:rerank") {
+    outcome = revertRerank({ repoRoot, env, entry });
   } else {
     outcome = refuse(NO_INVERSE_NOTE, "unsupported");
   }

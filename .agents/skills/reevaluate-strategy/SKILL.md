@@ -131,7 +131,7 @@ Identify where the candidate is advancing. This is the double-down signal — we
 
 After completing STEP 4, synthesize STEPS 1–4 into a single structured recommendation block **before** presenting individual dimension proposals. This is the rejection-feedback nudge: use accumulated outcomes as evidence to update targeting priorities, not to silently re-score the board.
 
-**Small-N rule (explicit):** Do NOT auto-apply any adjustment when the supporting evidence is N < 3 for that dimension. Present the recommendation and state the N. Let the user confirm. Only write changes to files after explicit acceptance. This rule applies even when a threshold was tripped — the threshold determines *whether* to run the analysis; the small-N rule determines *how confidently* to act on each slice.
+**Small-N rule (explicit):** Do NOT auto-apply any adjustment when the supporting evidence is N < 3 for that dimension. Present the recommendation as a suggestion and state the N. Only write it after the user explicitly applies it. This rule applies even when a threshold was tripped. The threshold determines *whether* to run the analysis; the small-N rule determines *how confidently* to act on each slice. At N >= 3 the change applies directly (STEP 6) and is logged with an Undo.
 
 Construct the recommendation block as follows:
 
@@ -193,22 +193,22 @@ If transcripts or rejection notes reveal a recurring overclaim or framing gap: p
 
 ---
 
-## STEP 6 — CONFIRM BEFORE WRITING
+## STEP 6 — APPLY, LOG, AND SUGGEST
 
-Present all recommendations together as a numbered list with evidence for each.
+Present all recommendations together as a numbered list with evidence for each, and say how many data points back each one.
 
-**Write-and-report (unambiguous, low blast-radius):** a single new cut signal with clear evidence from >= 3 rejections; a new learning entry; a style note. Write it through the owning DB-aware command, then echo the CLI confirmation.
+**Apply directly, with an Undo:** every recommendation with N >= 3 supporting data points applies through the owning DB-aware writer (cut and keep signals, excluded companies, `fit_bands`, re-ranks, a raised comp floor or target) and is logged so the user can undo it. A new learning entry is written and logged too, but a learning is append-only, so it can't be undone. Echo the CLI confirmation for each write.
 
-**Confirm-first (consequential):** dropping the comp floor, adding a broad excluded-company entry, large re-rank (> 5 sourced roles), or any change to candidate targeting `fit_bands` (a threshold change re-scores the entire board — always confirm first). Propose the exact change and get explicit user yes before writing.
+**Still confirm-first:** lowering the comp floor or target, and any recommendation with fewer than 3 supporting data points. The thin-evidence ones are logged as suggestions only. Propose the exact change and get an explicit user yes before writing.
 
-If the user states a new gate mid-flow ("never apply to X", "below $Y is a no", "add Z as a cut signal"), write it through `careerrat gate` immediately (write-and-report for unambiguous; confirm-first for broad-exclusion/comp-drop) — a stated gate must never live only in chat.
+If the user states a new gate mid-flow ("never apply to X", "below $Y is a no", "add Z as a cut signal"), write it through `careerrat gate` immediately (a comp drop stays confirm-first). A stated gate must never live only in chat.
 
 ---
 
 ## STEP 7 — WRITE-BACK (on accept)
 
 **(a) Targeting signal changes**
-Use `careerrat gate keep-signal "<signal>" --write` or `careerrat gate cut-signal "<signal>" --write` for accepted signals. For fit-band threshold changes, use `careerrat data candidate patch targeting --data ...` in DB mode after explicit confirmation; legacy YAML is fallback only when no DB exists. Run `careerrat doctor`.
+Use `careerrat gate keep-signal "<signal>" --write` or `careerrat gate cut-signal "<signal>" --write` for accepted signals. For fit-band threshold changes, use `careerrat data candidate patch targeting --data ...` in DB mode; legacy YAML is fallback only when no DB exists. Run `careerrat doctor`.
 
 **(b) Profile comp re-anchor**
 If comp re-anchor accepted, use `careerrat gate comp-target <N> --write --confirm` or `careerrat gate comp-floor <N> --write --confirm`.
