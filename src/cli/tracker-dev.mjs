@@ -481,7 +481,7 @@ export function createDevServer({
   // Fail-closed per decision 7: every route 409s with a clear "no database
   // yet" error until `careerrat data init`/`import` creates one; there is no
   // page mounted here (no /data view), just the API surface CLI verbs mirror.
-  mountDataRoutes({ addRoute, repoRoot, env });
+  mountDataRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
   mountDeepIngestRoutes({ addRoute, repoRoot, env, appOperations });
 
   // Productization — the first "app calls AI -> structured result -> typed DB
@@ -489,7 +489,7 @@ export function createDevServer({
   // a bounded, schema-validated classification of a pasted status update,
   // persisted through the same appSetStatus/appSetFields verbs above. Same
   // fail-closed-409-no-db posture as mountDataRoutes.
-  mountTrackOutcomeRoutes({ addRoute, repoRoot, env });
+  mountTrackOutcomeRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
 
   // M10 — the server-derived dashboard view model (src/cli/dashboard-route.mjs):
   // one GET that reuses dashboard-data.js's buildDashboardViewModel UNMODIFIED

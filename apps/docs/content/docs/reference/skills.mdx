@@ -19,7 +19,7 @@ private config, not hardcoded preferences.
 | `answer-question` | Draft evidence-grounded answers to one-off application or screening questions, reuse saved disclosure answers, and return `NEEDS YOU` instead of guessing when the evidence is insufficient. |
 | `tailor-application` | Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. |
 | `apply-job` | End-to-end job application workflow: gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, prepares supported ATS forms (including LinkedIn Easy Apply), submits when complete and verified (or stops for you after `careerrat automation submit manual --write`), verifies the outcome, and updates the tracker. |
-| `coach-gaps` | Turn each named REVIEW fit gap into an evidence-grounded claim draft or an explicit no-close path, then offer re-evaluation only after the evidence firewall confirms the change. |
+| `coach-gaps` | Turn each named REVIEW fit gap into an evidence-grounded claim draft or an explicit no-close path, then offer re-evaluation only after the evidence firewall confirms the change. Runs on its own when a review verdict lands. |
 
 ## Intake extraction
 
@@ -36,7 +36,7 @@ private config, not hardcoded preferences.
 | `research-comp` | Web-search market comp for a role+location and produce a cited `.careerrat/workspace/research/comp-bench-*.md` that feeds evaluate-job COMP CHECK/ANCHOR and a confirm-first gate write-back. |
 | `research-boards` | Web-search and legitimacy-screen new job boards for the candidate's domain/role families, then propose adding to `search-sources.yml` confirm-first. |
 | `discover-companies` | Web-search companies likely to be hiring the candidate's target roles, resolve each to a scannable ATS careers board, legitimacy-screen and dedup, then propose adding to `config/sourced-scan.json` tracked_companies confirm-first. Upstream of search-jobs. |
-| `company-health` | Score a role-scoped company-risk rating (`healthy\|watch\|risky`) from web-searched layoff, hiring-momentum, financial, sentiment, and leadership signals with provenance; persist it to the tracker and feed the fit score only where it cross-cuts a stated candidate need. Cost-gated; an internal signal that never enters an outbound artifact. |
+| `company-health` | Score a role-scoped company-risk rating (`healthy\|watch\|risky`) from web-searched layoff, hiring-momentum, financial, sentiment, and leadership signals with provenance; persist it to the tracker and feed the fit score only where it cross-cuts a stated candidate need. Runs on its own at the fire stage; an internal signal that never enters an outbound artifact. |
 
 ## Communications
 

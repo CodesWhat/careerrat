@@ -144,6 +144,11 @@ import {
 import { classifyStage } from "../tracker/dashboard.mjs";
 import { readVersion } from "../version.mjs";
 import {
+  companyHealthRecheckDays,
+  planAutoFollowUps,
+  snapshotApplicationState,
+} from "./cost-gate-auto.mjs";
+import {
   buildIssueReport,
   buildIssueUrl,
   FILED_ISSUE_URL_RE,
@@ -3239,19 +3244,6 @@ function compBenchmarkActivitySummary(benchmark) {
   return parts.join(" / ") || "insufficient public data";
 }
 
-const COMPANY_HEALTH_RECHECK_DAYS_DEFAULT = 14;
-
-// candidate/modes.yml#company_health.recheck_days (SKILL.md's freshness
-// contract) — candidateConfigGet's DB-first accessor already returns the
-// raw modes doc whole (readSingleton stores/reads the JSON blob as-is), so
-// the company_health block just falls out of the same call this file
-// already makes elsewhere; no new config machinery needed.
-function companyHealthRecheckDays({ repoRoot, env }) {
-  const modes = candidateConfigGet({ repoRoot, env }).modes || {};
-  const days = Number(modes.company_health?.recheck_days);
-  return Number.isFinite(days) && days > 0 ? days : COMPANY_HEALTH_RECHECK_DAYS_DEFAULT;
-}
-
 // The comp-benchmark artifact stem embeds the year-month it was written
 // (see research-comp's STEP 1), so a fresh hit from an earlier month is
 // still found by role+location prefix rather than requiring an exact stem
@@ -4372,7 +4364,62 @@ async function executeSourceAuthDecision({
   });
 }
 
-export async function executeWorkspaceIntent({
+// Detached by default: the follow-up starts after the triggering write has
+// returned, and its own failure is recorded by the intent handler as an
+// action_error in the thread, so the rejection is only swallowed here.
+function scheduleDetached(run) {
+  setImmediate(() => {
+    run().catch(() => {});
+  });
+}
+
+// Runs the follow-ups that a status change or a new evaluation made due
+// (company.health at fire_at_stage, coaching.plan on a review verdict). They go
+// through the same intent handlers the buttons use, so artifacts, logs and Undo
+// match a click. Nothing in here may throw into the caller.
+function scheduleAutoFollowUps({ options, before }) {
+  try {
+    const { repoRoot, env = process.env } = options;
+    const due = planAutoFollowUps({
+      repoRoot,
+      env,
+      before,
+      startCompanyHealthImpl: options.startCompanyHealthImpl,
+      aiRouteAvailableImpl: options.aiRouteAvailableImpl,
+      now: options.now ? options.now().getTime() : Date.now(),
+    });
+    const schedule = options.scheduleAutoFollowUp || scheduleDetached;
+    for (const followUp of due) {
+      const rest = { ...options, intent: followUp.intent, autoFollowUps: false };
+      delete rest.intentMessageId;
+      delete rest.resultMessageId;
+      delete rest.operationAttempt;
+      delete rest.executionPlan;
+      delete rest.signal;
+      schedule(async () => {
+        try {
+          await executeWorkspaceIntentCore(rest);
+        } catch {
+          // The handler already wrote the action_error into the job thread.
+        }
+      });
+    }
+  } catch {
+    // Planning the follow-up never fails the write that triggered it.
+  }
+}
+
+export async function executeWorkspaceIntent(options = {}) {
+  const auto = options.autoFollowUps === true;
+  const before = auto
+    ? snapshotApplicationState({ repoRoot: options.repoRoot, env: options.env ?? process.env })
+    : null;
+  const result = await executeWorkspaceIntentCore(options);
+  if (before) scheduleAutoFollowUps({ options, before });
+  return result;
+}
+
+async function executeWorkspaceIntentCore({
   repoRoot,
   env = process.env,
   intent,
@@ -11904,6 +11951,9 @@ export function createWorkspaceAgentRuntime({
   stampStrategyReviewImpl = stampStrategyReview,
   captureIntakeImpl,
   sendCommunicationImpl,
+  autoFollowUps = true,
+  scheduleAutoFollowUp,
+  aiRouteAvailableImpl,
 } = {}) {
   let tail = Promise.resolve();
   let runtime;
@@ -12338,9 +12388,32 @@ export function createWorkspaceAgentRuntime({
           stampStrategyReviewImpl,
           callAIImpl,
           sendCommunicationImpl,
+          autoFollowUps,
+          scheduleAutoFollowUp,
+          aiRouteAvailableImpl,
           ...input,
         })
       );
+    },
+    // For app-side status writes that do not go through an intent (the tracker
+    // status route, track-outcome). snapshot before the write, then call
+    // afterApplicationWrite(snapshot) once it has committed.
+    snapshotApplicationState() {
+      return autoFollowUps ? snapshotApplicationState({ repoRoot, env }) : null;
+    },
+    afterApplicationWrite(before) {
+      if (!autoFollowUps || !before) return;
+      scheduleAutoFollowUps({
+        options: {
+          repoRoot,
+          env,
+          startCompanyHealthImpl,
+          scheduleAutoFollowUp,
+          aiRouteAvailableImpl,
+          autoFollowUps,
+        },
+        before,
+      });
     },
     recordSearchCompletion(input = {}) {
       return enqueue(async () => {

@@ -136,7 +136,7 @@
           "coachingPlan": {
             "type": ["object", "null"],
             "additionalProperties": true,
-            "description": "DRAWER ONLY — explicit-click coaching plan for a review-gate evaluation with named fitRisks (coach-gaps skill / coaching.plan intent). Never auto-generated; fires only on the user's own 'Coach me on this fit' click. Names each gap with either an evidence-claim draft grounded in evidence already on record, or an explicit no-close-path (a valid, honest outcome, not a failure).",
+            "description": "DRAWER ONLY — coaching plan for a review-gate evaluation with named fitRisks (coach-gaps skill / coaching.plan intent). Generated automatically when the verdict lands, once per evaluation, or on the user's 'Coach me on this fit' click. Names each gap with either an evidence-claim draft grounded in evidence already on record, or an explicit no-close-path (a valid, honest outcome, not a failure).",
             "properties": {
               "generatedAt": { "type": ["string", "null"] },
               "basedOn": {
