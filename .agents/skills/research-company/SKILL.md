@@ -295,11 +295,11 @@ Tell the user:
 If the user states during the research flow that this company is a no ("I don't want
 to apply there", "add them to the exclusion list", "this is a no"):
 
-1. Confirm with the user before writing ("Add `<Company>` to excluded companies?").
-2. On confirmation, run:
+1. The user stated it outright, so write it now. It applies directly and is logged with an Undo.
+2. Run:
 
    ```
-   careerrat gate exclude-company "<Company>" --write --confirm
+   careerrat gate exclude-company "<Company>" --write
    ```
 
 3. Echo the CLI confirmation. `careerrat gate` writes SQLite in DB mode and legacy YAML only in legacy mode.

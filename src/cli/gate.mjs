@@ -10,15 +10,18 @@ import { existsSync, readFileSync } from "node:fs";
 // Usage:
 //   careerrat gate <type> <value>            Propose the change (dry run)
 //   careerrat gate <type> <value> --write    Commit it
-//   careerrat gate exclude-company Palantir --write --confirm
+//   careerrat gate exclude-company Palantir --write
+//   careerrat gate comp-floor 150000 --write --confirm   (only when lowering)
 //   careerrat gate --list                    Show gate types
 //   careerrat gate --help
 //
 // Default is a DRY RUN: it prints the target file, the exact line that would
 // change, schema validity, and the friction level — and writes nothing. Pass
-// --write to commit. A confirm-first gate (broad exclusion, comp-floor change)
-// additionally requires --confirm, which the skill passes only after the user
-// agrees. A change that would make the file schema-invalid is always refused.
+// --write to commit. A confirm-first gate (lowering or clearing a comp floor
+// or target) additionally requires --confirm, which the skill passes only after
+// the user agrees. Raising a comp value, or setting one for the first time, and
+// excluding a company are direct writes; --confirm is accepted and ignored
+// there. A change that would make the file schema-invalid is always refused.
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { candidateConfigGet, candidateConfigPatch } from "../core/db/verbs.mjs";
@@ -31,6 +34,7 @@ import {
   computeGateEdit,
   formatErrors,
   GATE_ROUTES,
+  resolveFriction,
 } from "../core/profile/gate-writer.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -204,13 +208,14 @@ function handleDbGate(route) {
   } catch (err) {
     fail(err.message);
   }
+  const friction = resolveFriction(route, plan.previous, plan.value);
   const result = {
     type,
     file: `sqlite:${route.file}`,
     path: route.path,
     op: route.op,
     value: plan.value,
-    friction: route.friction,
+    friction,
     changed: plan.changed,
     valid: true,
     written: false,
@@ -226,7 +231,7 @@ function handleDbGate(route) {
     route.op === "append"
       ? `  + ${route.path}: ${plan.value}`
       : `  ~ ${route.path}: ${plan.previous ?? "(empty)"} → ${plan.value}`;
-  const needsConfirm = route.friction === "confirm";
+  const needsConfirm = friction === "confirm";
 
   if (!opts.write) {
     if (opts.json) {
@@ -342,9 +347,11 @@ function printList(asJson) {
   }
   console.log("Gate types (type → file#path · friction):");
   for (const [type, r] of Object.entries(GATE_ROUTES)) {
-    console.log(
-      `  ${type.padEnd(18)} ${r.file}#${r.path}  · ${r.friction === "confirm" ? "confirm-first" : "write-and-report"}`
-    );
+    const friction = {
+      confirm: "confirm-first",
+      direction: "confirm-first only when lowering or clearing",
+    }[r.friction];
+    console.log(`  ${type.padEnd(18)} ${r.file}#${r.path}  · ${friction || "write-and-report"}`);
   }
 }
 
@@ -360,7 +367,10 @@ Usage:
 
 Options:
   --write     Commit the change (default: dry run)
-  --confirm   Required to --write a confirm-first gate (after the user agrees)
+  --confirm   Required to --write a confirm-first gate (after the user agrees).
+              Lowering or clearing a comp floor or target is confirm-first; raising
+              one, setting one for the first time, and exclusions are direct writes
+              and ignore it.
   --json      Machine-readable output
   --root DIR  Repo root (default: the careerrat install)
 

@@ -848,8 +848,9 @@ hardcoded into a skill.
   <type> <value>` routes to the right DB-backed config in DB mode (or the legacy
   compatibility file in legacy mode), schema-validates the result, and prints the
   diff + friction — as a **dry run**.
-  Add `--write` to commit a write-and-report gate; `--write --confirm` to commit a
-  confirm-first one. It refuses any change that would invalidate the file and is
+  Add `--write` to commit. Only lowering or clearing a comp floor or target also needs
+  `--confirm`; raising one, setting one for the first time, and every other gate write
+  directly (`--confirm` is accepted and ignored there). It refuses any change that would invalidate the file and is
   idempotent (re-adding an existing value is a no-op). `careerrat gate --list`
   shows the types: `exclude-company`, `cut-signal`, `keep-signal`, `comp-floor`,
   `comp-target`, `comp-expected`, `do-not-claim`, `do-not-fabricate`.
@@ -1212,9 +1213,9 @@ it back via the existing gate helper. Raising a floor or target applies directly
 is logged with an Undo; **lowering one is confirm-first, never auto**:
 
 - `careerrat gate comp-floor <N>` — dry-run; updates `profile.compensation.minimum_base` (the sourcing gate).
-- `careerrat gate comp-floor <N> --write --confirm` — commits after confirmation.
+- `careerrat gate comp-floor <N> --write`: commits a raise or a first value; add `--confirm` only to lower one, after the user says yes.
 - `careerrat gate comp-target <N>` — dry-run; updates `profile.compensation.target_base`.
-- `careerrat gate comp-target <N> --write --confirm` — commits after confirmation.
+- `careerrat gate comp-target <N> --write`: commits a raise or a first value; add `--confirm` only to lower one, after the user says yes.
 
 Distinguish: a **session- or offer-specific** walk-away ("I won't go below $X on
 this one") is `profile.compensation.minimum_base` — write it directly to

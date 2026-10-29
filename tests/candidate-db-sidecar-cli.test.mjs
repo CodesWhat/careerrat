@@ -62,7 +62,6 @@ test("careerrat gate writes DB candidate config in DB mode and does not create c
     "comp-floor",
     "200000",
     "--write",
-    "--confirm",
   ]);
   assert.equal(comp.written, true);
 
@@ -74,7 +73,6 @@ test("careerrat gate writes DB candidate config in DB mode and does not create c
     "exclude-company",
     "BadCo",
     "--write",
-    "--confirm",
   ]);
   assert.equal(excluded.written, true);
 
@@ -83,6 +81,27 @@ test("careerrat gate writes DB candidate config in DB mode and does not create c
   assert.deepEqual(config.targeting.excluded_companies, ["BadCo"]);
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/targeting.yml")), false);
+});
+
+test("careerrat gate in DB mode: lowering a comp value needs --confirm, --confirm on an exclusion is a no-op", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  const gate = (...args) => ["src/cli/gate.mjs", "--root", repoRoot, "--json", ...args];
+
+  jsonCli(gate("comp-target", "200000", "--write"));
+  const refused = jsonCli(gate("comp-target", "150000", "--write"), { expectedStatus: 2 });
+  assert.equal(refused.written, false);
+  assert.equal(candidateConfigGet({ repoRoot }).profile.compensation.target_base, 200000);
+
+  const lowered = jsonCli(gate("comp-target", "150000", "--write", "--confirm"));
+  assert.equal(lowered.written, true);
+  assert.equal(candidateConfigGet({ repoRoot }).profile.compensation.target_base, 150000);
+
+  const dry = jsonCli(gate("comp-floor", "100000"));
+  assert.equal(dry.dryRun, true);
+
+  const excluded = jsonCli(gate("exclude-company", "OldCo", "--write", "--confirm"));
+  assert.equal(excluded.written, true);
 });
 
 test("careerrat data candidate CLI hides and refuses voluntary self-identification", () => {

@@ -54,14 +54,14 @@ Ask the user what they want to change. Route to the correct CLI or owning skill 
 
 ### Settings with a dedicated CLI
 
-Run the CLI confirm-first. The default is a **dry run** — it shows the exact line that will change without writing. Add `--write` to commit. Consequential changes also require `--confirm`.
+Run the CLI dry run first. The default is a **dry run**: it shows the exact line that will change without writing. Add `--write` to commit. Only lowering or clearing a comp floor or target also requires `--confirm`, after an explicit yes; `--confirm` is ignored on every other write.
 
 | What to change | Command | Friction |
 |---|---|---|
-| Comp floor (walk-away minimum) | `careerrat gate comp-floor <N> --write --confirm` | confirm-first |
-| Comp target (negotiation anchor) | `careerrat gate comp-target <N> --write --confirm` | confirm-first |
+| Comp floor (walk-away minimum) | `careerrat gate comp-floor <N> --write` (add `--confirm` only when lowering) | write-and-report when raising or first set, confirm-first when lowering |
+| Comp target (negotiation anchor) | `careerrat gate comp-target <N> --write` (add `--confirm` only when lowering) | write-and-report when raising or first set, confirm-first when lowering |
 | Comp expected (form-field value) | `careerrat gate comp-expected <N> --write` | write-and-report |
-| Excluded company | `careerrat gate exclude-company "<Name>" --write --confirm` | confirm-first |
+| Excluded company | `careerrat gate exclude-company "<Name>" --write` | write-and-report |
 | Cut signal | `careerrat gate cut-signal "<signal>" --write` | write-and-report |
 | Keep signal | `careerrat gate keep-signal "<signal>" --write` | write-and-report |
 | Honesty: do not claim a tool | `careerrat gate do-not-claim "<tool>" --write` | write-and-report |

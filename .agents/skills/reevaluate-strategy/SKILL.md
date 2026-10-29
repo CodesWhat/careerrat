@@ -61,7 +61,7 @@ Also read application limits now. In DB mode use `careerrat data candidate get -
 quantitative baseline, funnel tally, qualitative transcript read, and win analysis are
 independent slices over the same data. Fan out a subagent per slice (each reads
 `tracker.json` / transcripts and returns a structured findings block); the orchestrator
-synthesizes the recommendation in STEP 5 and owns every write (STEPS 6–7, confirm-first).
+synthesizes the recommendation in STEP 5 and owns every write (STEPS 6–7: direct with an Undo, except lowering comp).
 Subagents read only — they never write config, the tracker, or learning files. STEP 0's
 trigger gate already ran on the orchestrator. Degrade to inline sequential analysis with no
 subagent primitive. See the **Delegation Contract** in AGENTS.md.
@@ -153,12 +153,12 @@ Construct the recommendation block as follows:
 
 (Omit rows where N = 0. Mark N < 3 as "directional".)
 
-**Recommended adjustments** (one line each; write-and-report vs. confirm-first noted):
+**Recommended adjustments** (one line each; apply-directly vs. confirm-first noted):
 
-1. **Re-rank sourced prospects** — `<specific family/channel to promote or deprioritize>` (affects `workspace/tracker.json` `priority`/`status` fields). N = `<N>`. [confirm-first if > 5 rows]
-2. **Tighten targeting.yml cut-signals** — add `"<proposed signal string>"` to `cut_signals`. N = `<N>`. [write-and-report if N ≥ 3 and single clear signal; confirm-first if broad]
-3. **Re-anchor comp** — propose new candidate profile `compensation.target_base` or `compensation.minimum_base`. [confirm-first — consequential]
-4. **Fit recalibration** — `<high-fit-rejects pattern>`: spot-check with `careerrat evaluate` on 2–3 rejecting roles, then propose `fit_bands` or `keep_signals` tweak. [confirm-first — re-scores board]
+1. **Re-rank sourced prospects**: `<specific family/channel to promote or deprioritize>` (affects `workspace/tracker.json` `priority`/`status` fields). N = `<N>`. [applies directly with an Undo at N >= 3]
+2. **Tighten targeting.yml cut-signals**: add `"<proposed signal string>"` to `cut_signals`. N = `<N>`. [applies directly with an Undo at N >= 3]
+3. **Re-anchor comp**: propose new candidate profile `compensation.target_base` or `compensation.minimum_base`. [raising applies directly with an Undo; lowering or clearing is confirm-first]
+4. **Fit recalibration**: `<high-fit-rejects pattern>`: spot-check with `careerrat evaluate` on 2–3 rejecting roles, then propose `fit_bands` or `keep_signals` tweak. [applies directly with an Undo at N >= 3]
 5. **Double-down signal** — `<family or channel converting>`: increase sourcing weight here.
 
 **Your call:** Accept all / accept some / decline. State which items to apply and I will write them now.
@@ -177,7 +177,7 @@ Produce one detailed block per accepted dimension (N ≥ 3 or explicit pattern).
 Name which family/channel to prioritize or deprioritize in `workspace/tracker.json` (direct edits to the `priority` or `status` fields of affected rows). State the before/after for each affected entry.
 
 **(b) Signal tuning**
-Propose specific strings to add to candidate targeting `keep_signals` or `cut_signals`. One proposed string per evidence line. Do not propose broad exclusions (e.g., "all companies over 500 employees") — those are consequential and go to confirm-first.
+Propose specific strings to add to candidate targeting `keep_signals` or `cut_signals`. One proposed string per evidence line. Do not propose broad category exclusions (e.g., "all companies over 500 employees"). Propose named companies and specific signal strings instead.
 
 **(c) Comp re-anchor**
 Read candidate profile `compensation.target_base`, `compensation.minimum_base`, and `compensation.current_comp_shareable`. `current_comp_shareable` is a read-only gate: if true, `current_base` may exist in profile but must NEVER appear in any output or recommendation regardless. All outbound comp uses `target_base`, `minimum_base`, or `expected_base` only (see foundations-spec §9).
@@ -197,7 +197,7 @@ If transcripts or rejection notes reveal a recurring overclaim or framing gap: p
 
 Present all recommendations together as a numbered list with evidence for each, and say how many data points back each one.
 
-**Apply directly, with an Undo:** every recommendation with N >= 3 supporting data points applies through the owning DB-aware writer (cut and keep signals, excluded companies, `fit_bands`, re-ranks, a raised comp floor or target) and is logged so the user can undo it. A new learning entry is written and logged too, but a learning is append-only, so it can't be undone. Echo the CLI confirmation for each write.
+**Apply directly, with an Undo:** every recommendation with N >= 3 supporting data points applies through the owning DB-aware writer (cut and keep signals, excluded companies, per-company caps and cooldowns, `fit_bands`, re-ranks of any size, a raised comp floor or target) and is logged so the user can undo it. A new learning entry is written and logged too, but a learning is append-only, so it can't be undone. Echo the CLI confirmation for each write.
 
 **Still confirm-first:** lowering the comp floor or target, and any recommendation with fewer than 3 supporting data points. The thin-evidence ones are logged as suggestions only. Propose the exact change and get an explicit user yes before writing.
 
@@ -211,7 +211,7 @@ If the user states a new gate mid-flow ("never apply to X", "below $Y is a no", 
 Use `careerrat gate keep-signal "<signal>" --write` or `careerrat gate cut-signal "<signal>" --write` for accepted signals. For fit-band threshold changes, use `careerrat data candidate patch targeting --data ...` in DB mode; legacy YAML is fallback only when no DB exists. Run `careerrat doctor`.
 
 **(b) Profile comp re-anchor**
-If comp re-anchor accepted, use `careerrat gate comp-target <N> --write --confirm` or `careerrat gate comp-floor <N> --write --confirm`.
+If a comp re-anchor is accepted, use `careerrat gate comp-target <N> --write` or `careerrat gate comp-floor <N> --write`. Raising one writes directly. Lowering or clearing one needs the user's yes first, then add `--confirm`.
 **Do NOT touch `compensation.current_base`** — it is a private gate input, not an output.
 
 **(c) Re-rank write-back**

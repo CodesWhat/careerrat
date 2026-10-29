@@ -270,11 +270,11 @@ If during this session the user said something like "skip \<Company\> from now o
 
 | What the user said | Command |
 |---|---|
-| "skip / never / exclude \<Company\>" | `careerrat gate exclude-company "<Company>" --write --confirm` (confirm-first — broad exclusion) |
+| "skip / never / exclude \<Company\>" | `careerrat gate exclude-company "<Company>" --write` (applies directly with an Undo) |
 | "add \<signal\> as a cut signal" | `careerrat gate cut-signal "<signal>" --write` (write-and-report if unambiguous) |
 | "cap \<Company\> at N apps" | `careerrat data candidate limits upsert --data '<json row>'` in DB mode (per-company caps/cooldowns); legacy mode routes to `configure` — never hand-edit `candidate/application-limits.yml` |
-| "below $X is a no" | `careerrat gate comp-floor <N> --write --confirm` (confirm-first — changes comp floor) |
-| "I need to make $X a year including tips/commission" | `careerrat gate comp-annual-floor <N> --write --confirm` (confirm-first — changes annual cash earnings floor; excludes equity and benefits) |
+| "below $X is a no" | `careerrat gate comp-floor <N> --write` (add `--confirm` only when lowering an existing floor, after the user says yes) |
+| "I need to make $X a year including tips/commission" | `careerrat gate comp-annual-floor <N> --write` (add `--confirm` only when lowering an existing floor, after the user says yes; excludes equity and benefits) |
 
 After writing, echo the CLI's confirmation. `careerrat gate` writes SQLite in DB mode and legacy YAML only in legacy mode; never hand-edit `candidate/*.yml`.
 

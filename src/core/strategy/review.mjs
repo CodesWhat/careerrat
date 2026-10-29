@@ -386,6 +386,18 @@ function compactStrategyProposal(type, proposal) {
   return value.text ? { text: value.text } : {};
 }
 
+// The review input carries aggregates, not row ids, so a recommendation can't
+// cite rows we could check. The model's evidenceCount is clamped to the data
+// points the review actually saw: tracker rows plus recent learning entries.
+function evidenceCeiling(context) {
+  const counts = context.funnel?.counts || {};
+  const learnings = (context.learnings || []).reduce(
+    (sum, family) => sum + (family.entries?.length || 0),
+    0
+  );
+  return (Number(counts.apps) || 0) + (Number(counts.sourced) || 0) + learnings;
+}
+
 function freshDraftResult({ context, lastReview }) {
   return {
     state: "fresh",
@@ -446,6 +458,7 @@ export async function draftStrategyReview({
   }
 
   const data = aiResult.body.data || {};
+  const ceiling = evidenceCeiling(context);
   const recommendations = (Array.isArray(data.recommendations) ? data.recommendations : [])
     .slice(0, MAX_RECOMMENDATIONS)
     .map((rec, index) => {
@@ -455,7 +468,9 @@ export async function draftStrategyReview({
         type,
         title: cleanText(rec.title, 140),
         rationale: cleanText(rec.rationale, 300),
-        evidenceCount: Number.isFinite(rec.evidenceCount) ? Math.max(0, rec.evidenceCount) : 0,
+        evidenceCount: Number.isFinite(rec.evidenceCount)
+          ? Math.min(Math.max(0, rec.evidenceCount), ceiling)
+          : 0,
         proposal: compactStrategyProposal(type, rec.proposal),
       };
     });
@@ -723,7 +738,9 @@ export function restoreRerankRows({ repoRoot, env, before, after }) {
       else sourcedSetStatus({ repoRoot, env, id: prior.id, to, note });
     }
     if (prior.priority !== expected.priority) {
-      if (table === "applications") {
+      if (prior.priority === null || prior.priority === undefined) {
+        restoreRowFields({ repoRoot, env, table, id: prior.id, fields: { priority: null } });
+      } else if (table === "applications") {
         appSetFields({ repoRoot, env, id: prior.id, patch: { priority: prior.priority } });
       } else {
         sourcedSetPriority({ repoRoot, env, id: prior.id, priority: prior.priority });
