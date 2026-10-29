@@ -161,13 +161,13 @@ if (command === "start" && (rest.includes("--help") || rest.includes("-h"))) {
   process.exit(0);
 }
 
-if (command === "update") {
-  process.exit(runUpdate(rest));
-}
-
 // Select the person before anything resolves a path. Setting the env here is what
 // makes every command, subcommand and child process inherit the same workspace.
 applyPersonSelection();
+
+if (command === "update") {
+  process.exit(runUpdate(rest));
+}
 
 // Data left inside the package dir from before the ~/.careerrat anchor fix (an
 // installed package used to default its data root inside itself, which a plain
@@ -477,6 +477,7 @@ async function startDashboard(port) {
     installedVersion,
     recordedPid,
     recordedProcessIsTracker,
+    dataRoot: resolveUserPaths(pathCtx).dataRoot,
   });
 
   if (runtime.state === "current") {
@@ -498,7 +499,11 @@ async function startDashboard(port) {
       console.log("• Stale local app did not stop cleanly; continuing without replacing it");
       return null;
     }
-  } else if (runtime.state === "foreign" || runtime.state === "stale-unowned") {
+  } else if (
+    runtime.state === "foreign" ||
+    runtime.state === "stale-unowned" ||
+    runtime.state === "other-workspace"
+  ) {
     const fallbackPort = await findAvailableLoopbackPort({ startPort: resolvedPort + 1 });
     if (!fallbackPort) {
       console.log("• Local app could not find a safe loopback port; continuing without it");
@@ -507,6 +512,10 @@ async function startDashboard(port) {
     if (runtime.state === "foreign") {
       console.log(
         `• Port ${resolvedPort} belongs to another process; leaving it untouched and using ${fallbackPort}`
+      );
+    } else if (runtime.state === "other-workspace") {
+      console.log(
+        `• Port ${resolvedPort} is running CareerRat for a different workspace; leaving it running and using port ${fallbackPort} for this one`
       );
     } else {
       console.log(

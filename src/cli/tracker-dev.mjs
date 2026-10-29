@@ -361,6 +361,7 @@ export function createDevServer({
       product: "careerrat",
       version: PACKAGE_VERSION,
       pid: process.pid,
+      dataRoot: resolveUserPaths({ repoRoot, env }).dataRoot,
     });
   });
 

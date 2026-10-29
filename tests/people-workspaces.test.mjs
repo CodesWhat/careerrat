@@ -271,3 +271,13 @@ test("the app server reports who it is running for and who else exists", async (
     ],
   });
 });
+
+test("--for applies before update, so update never runs against the owner's workspace", (t) => {
+  const base = tempBase(t);
+  const res = cli(base, ["--for", "ghost", "update", "--check"], {
+    CAREERRAT_NO_UPDATE_CHECK: "1",
+  });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /No workspace for "ghost"/);
+  assert.doesNotMatch(res.stdout, /Checking npm/);
+});
