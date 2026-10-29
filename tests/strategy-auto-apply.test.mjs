@@ -314,6 +314,33 @@ test("Undo of a rerank out of interview brings the interview details back", asyn
   assert.equal(restored.statusNote, "Phone screen done.");
 });
 
+test("Undo of a rerank out of applied keeps the follow-up the status restore would clear", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-fu",
+      company: "Acme",
+      role: "Engineer",
+      status: "applied",
+      nextAction: "Email the recruiter",
+      nextActionDue: "2099-01-12",
+    },
+  });
+  const result = await review(repoRoot, [
+    rec("cut", "rerank", 3, { id: "app-fu", toStatus: "cut" }, "Cut Acme"),
+  ]);
+  const last = result.messages.at(-1);
+  const entry = last.artifacts.find((artifact) => artifact.target === "rows:rerank");
+  assert.equal(readApp(repoRoot, "app-fu").status, "cut");
+  await undoFor(repoRoot, last, last.artifacts.indexOf(entry));
+  const restored = readApp(repoRoot, "app-fu");
+  assert.equal(restored.status, "applied");
+  assert.equal(restored.nextAction, "Email the recruiter");
+  assert.equal(restored.nextActionDue, "2099-01-12");
+});
+
 test("a later edit to a snapshotted interview field blocks the rerank Undo", async () => {
   const repoRoot = tempRepo();
   appUpsert({

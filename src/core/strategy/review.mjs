@@ -746,10 +746,13 @@ export function restoreRerankRows({ repoRoot, env, before, after }) {
         sourcedSetPriority({ repoRoot, env, id: prior.id, priority: prior.priority });
       }
     }
+    // Compare against the row as the status restore left it: restoring a status
+    // can clear fields the re-rank never touched (applied clears nextAction).
+    const restored = findHostRow(db, prior.id)?.row || {};
     const extras = Object.fromEntries(
       RERANK_EXTRA_FIELDS[table]
         .filter((field) => Object.hasOwn(prior, field))
-        .filter((field) => (prior[field] ?? null) !== (expected[field] ?? null))
+        .filter((field) => (prior[field] ?? null) !== (restored[field] ?? null))
         .map((field) => [field, prior[field] ?? null])
     );
     if (Object.keys(extras).length) {
