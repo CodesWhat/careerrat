@@ -3,7 +3,7 @@
 // activity-log.mjs's own content-hash eventId (so re-importing the same
 // activity.jsonl never double-inserts).
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -331,6 +331,64 @@ test("importFromTracker migrates legacy candidate YAML into canonical SQLite set
   );
 });
 
+test("importFromTracker migrates old-workspace shapes: flow caps, auto_submit, retired capabilities", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-source");
+  writeSourceFixture(sourceDir);
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  const formPath = join(repoRoot, "candidate/form-defaults.yml");
+  const automationPath = join(repoRoot, "candidate/automation.yml");
+  const formText = "auto_submit: false\n";
+  const automationText = `capabilities_default: on
+capabilities:
+  authenticated_search: { enabled: true }
+  one_click_apply:
+    enabled: false
+  messaging:
+    enabled: true
+`;
+  writeFileSync(formPath, formText);
+  writeFileSync(automationPath, automationText);
+  writeFileSync(
+    join(repoRoot, "candidate/application-limits.yml"),
+    `companies:
+  - company: OpenAI
+    scope: all-roles
+    cap: { max: 5, window_days: 180 } # old copy
+    status: caution
+`
+  );
+
+  const result = importFromTracker({ repoRoot, sourceDir });
+
+  const config = candidateConfigGet({ repoRoot });
+  assert.deepEqual(config["application-limits"].companies[0].cap, { max: 5, window_days: 180 });
+  assert.equal(config.automation.submit, "manual");
+  assert.equal(Object.hasOwn(config["form-defaults"], "auto_submit"), false);
+  assert.equal(Object.hasOwn(config.automation.capabilities, "authenticated_search"), false);
+  assert.equal(Object.hasOwn(config.automation.capabilities, "one_click_apply"), false);
+  assert.equal(config.automation.capabilities.messaging.enabled, true);
+  assert.deepEqual(result.warnings, [
+    "Moved auto_submit to the submit setting (manual).",
+    "Dropped retired capability authenticated_search.",
+    "Dropped retired capability one_click_apply.",
+  ]);
+  assert.equal(readFileSync(formPath, "utf8"), formText, "source files are never rewritten");
+  assert.equal(readFileSync(automationPath, "utf8"), automationText);
+});
+
+test("importFromTracker still refuses a genuinely invalid candidate file", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-source");
+  writeSourceFixture(sourceDir);
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "candidate/automation.yml"),
+    "capabilities:\n  made_up_capability:\n    enabled: true\n"
+  );
+  assert.throws(() => importFromTracker({ repoRoot, sourceDir }));
+});
+
 test("importFromTracker skips the legacy source résumé artifact when the file is absent", () => {
   const repoRoot = tempRepo();
   const sourceDir = join(repoRoot, "fixture-source");
@@ -397,4 +455,14 @@ test("importFromTracker migrates legacy source config files into SQLite idempote
   const db = openDb({ repoRoot });
   const count = db.prepare("SELECT COUNT(*) AS n FROM candidate_source_configs").get().n;
   assert.equal(count, 2, "re-import must upsert source configs, not duplicate them");
+});
+
+test("importFromTracker never overwrites an existing submit setting, so a bad one is still refused", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-source");
+  writeSourceFixture(sourceDir);
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  writeFileSync(join(repoRoot, "candidate/form-defaults.yml"), "auto_submit: true\n");
+  writeFileSync(join(repoRoot, "candidate/automation.yml"), "submit: manul\n");
+  assert.throws(() => importFromTracker({ repoRoot, sourceDir }), /automation/);
 });
