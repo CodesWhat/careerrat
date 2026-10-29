@@ -17,7 +17,7 @@ export function openAnswerNeedsFromGaps(gaps) {
     const questionId = String(gap?.questionId || "").trim() || null;
     const message = String(gap?.message || "").trim();
     const quoted = message.match(/^Answer\s+[“"](.+?)[”"]\.?$/i);
-    const question = quoted ? quoted[1] : message;
+    const question = quoted ? quoted[1] : message || String(gap?.label || "").trim();
     const key = questionId || question.toLowerCase();
     if (!question || seen.has(key)) continue;
     seen.add(key);
