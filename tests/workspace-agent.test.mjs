@@ -41,6 +41,7 @@ import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import {
   appPersistEvaluation,
   appRegisterPacketQuestionCapture,
+  appSetFields,
   appUpsert,
 } from "../src/core/db/verbs/app.mjs";
 import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
@@ -69,6 +70,7 @@ import { buildCompanySeedContext } from "../src/core/discovery/company-context.m
 import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
 import { draftOneOffScreeningAnswers } from "../src/core/packet/one-off-answer.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { slugifyClaimId } from "../src/core/profile/evidence-writer.mjs";
 import {
   readResearch,
   researchRelPath,
@@ -1634,7 +1636,16 @@ test("coaching.plan persists a plan onto the application row and returns a coach
       fitRisks: ["No direct Kubernetes production experience on record"],
     },
   });
-  const plan = coachingPlanPayload();
+  const plan = coachingPlanPayload({
+    gaps: [
+      {
+        id: "no-direct-kubernetes-production-experience",
+        gapText: "No direct Kubernetes production experience on record",
+        suggestion: { kind: "no-close-path", draftClaim: null, rationale: "Nothing on record." },
+        status: "open",
+      },
+    ],
+  });
 
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -1654,6 +1665,7 @@ test("coaching.plan persists a plan onto the application row and returns a coach
   assert.equal(last.artifacts[0].applicationId, "app-coach");
   assert.deepEqual(last.artifacts[0].coachingPlan, plan);
   assert.match(last.text, /1 gap named/);
+  assert.match(last.text, /Still open/);
 
   const persisted = readApplication(repoRoot, "app-coach");
   assert.deepEqual(persisted.coachingPlan, plan);
@@ -1764,6 +1776,20 @@ test("coaching.evidence-save routes a confirmed draft through the evidence firew
     persisted.coachingPlan.gaps.find((g) => g.id === "no-direct-kubernetes-production-experience")
       .status,
     "closed"
+  );
+
+  // A save from an older thread records the same Undo coaching.plan does.
+  const entry = last.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(entry?.target, "evidence");
+  assert.equal(entry?.op, "add");
+  assert.equal(entry?.writer, "coaching.evidence-save");
+  const undo = last.metadata.nextActions.find(
+    (action) => action.intent?.type === "knowledge.revert"
+  );
+  assert.ok(undo, "the legacy save offers Undo");
+  assert.ok(
+    last.metadata.nextActions.some((action) => action.intent?.type === "job.evaluate"),
+    "the fit follow-up stays"
   );
 });
 
@@ -1933,7 +1959,7 @@ test("coaching.evidence-save ignores an input.draftClaim override and persists o
   );
 });
 
-test("coaching.evidence-save throws COACHING_GAP_NOT_OPEN instead of silently re-writing a closed gap", async () => {
+test("coaching.evidence-save on an already closed gap answers Already saved and never re-writes", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {
     id: "app-coach",
@@ -1959,18 +1985,16 @@ test("coaching.evidence-save throws COACHING_GAP_NOT_OPEN instead of silently re
     }),
   });
 
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "coaching.evidence-save",
-        entity: { type: "application", id: "app-coach" },
-        input: { gapId: "no-direct-kubernetes-production-experience" },
-      },
-    }),
-    (error) => error.code === "COACHING_GAP_NOT_OPEN"
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.evidence-save",
+      entity: { type: "application", id: "app-coach" },
+      input: { gapId: "no-direct-kubernetes-production-experience" },
+    },
+  });
+  assert.equal(result.messages.at(-1).text, "Already saved.");
 
   const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
   assert.equal(persistedClaims.length, 0, "a closed gap must never re-write the evidence bank");
@@ -2022,6 +2046,337 @@ test("coaching.evidence-save reports a duplicate claim as already saved and stil
     "closed",
     "a duplicate is still a resolved gap"
   );
+});
+
+function planWithDrafts(extraGaps = []) {
+  return coachingPlanPayload({
+    gaps: [coachingPlanPayload().gaps[0], ...extraGaps],
+  });
+}
+
+function seedCoachApp(repoRoot) {
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: currentEvaluationForPlan(),
+  });
+}
+
+function runCoachingPlan(repoRoot, plan) {
+  return executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: { type: "coaching.plan", entity: { type: "application", id: "app-coach" } },
+    buildCoachingPlanImpl: async () => ({ status: 200, body: { ok: true, data: plan } }),
+  });
+}
+
+function gapOf(repoRoot, id = "no-direct-kubernetes-production-experience") {
+  return readApplication(repoRoot, "app-coach").coachingPlan.gaps.find((g) => g.id === id);
+}
+
+const REFUSED_GAP = {
+  id: "no-oncall-history",
+  gapText: "No on-call history on record",
+  suggestion: {
+    kind: "evidence-claim",
+    draftClaim: {
+      claim: "Carried the pager for [Company] services.",
+      evidence: "Source: resume.",
+    },
+    rationale: "Thin.",
+  },
+  status: "open",
+};
+
+const NO_DRAFT_GAP = {
+  id: "no-ml-background",
+  gapText: "No machine learning background on record",
+  suggestion: { kind: "no-close-path", draftClaim: null, rationale: "Nothing on record." },
+  status: "open",
+};
+
+test("coaching.plan auto-saves open gaps that have a draft, closes them, and logs each claim with an Undo in the job thread", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts[0].kind, "coaching_plan");
+  assert.equal(last.artifacts[0].coachingPlan.gaps[0].status, "closed");
+  assert.equal(last.entity.type, "application");
+  assert.equal(last.entity.id, "app-coach");
+  assert.match(last.text, /Saved "Ran production platform tooling/);
+
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(claims.filter((c) => /production platform tooling/i.test(c.claim)).length, 1);
+  assert.equal(gapOf(repoRoot).status, "closed");
+
+  const entry = last.artifacts[1];
+  assert.equal(entry.kind, "knowledge_write");
+  assert.equal(entry.target, "evidence");
+  assert.equal(entry.op, "add");
+  assert.match(entry.after.claim, /production platform tooling/i);
+  assert.deepEqual(entry.source, {
+    kind: "coaching",
+    applicationId: "app-coach",
+    gapId: "no-direct-kubernetes-production-experience",
+  });
+  const undo = last.metadata.nextActions[0];
+  assert.equal(undo.intent.type, "knowledge.revert");
+  assert.deepEqual(undo.intent.input, { messageId: last.id, index: 1 });
+  assert.equal(
+    last.metadata.nextActions.at(-1).intent.type,
+    "job.evaluate",
+    "a plan that closed a gap offers the fit check"
+  );
+});
+
+test("coaching.plan leaves a firewall-refused draft unsaved with its gap open and says why, and leaves no-draft gaps open", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts([REFUSED_GAP, NO_DRAFT_GAP]));
+
+  const last = result.messages.at(-1);
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(claims.length, 1, "only the clean draft reaches the evidence bank");
+  assert.equal(gapOf(repoRoot).status, "closed");
+  assert.equal(gapOf(repoRoot, "no-oncall-history").status, "open");
+  assert.equal(gapOf(repoRoot, "no-ml-background").status, "open");
+  assert.match(last.text, /Didn't save a draft for "No on-call history on record"/);
+  assert.match(last.text, /Still open: "No machine learning background on record"/);
+  assert.equal(
+    last.artifacts.filter((a) => a.kind === "knowledge_write").length,
+    1,
+    "refused and no-draft gaps log nothing"
+  );
+});
+
+test("Undo of a coaching evidence add removes the claim and reopens its gap", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  const note = result.messages.at(-1);
+  assert.equal(note.metadata.state, "reverted");
+  assert.match(note.text, /coaching gap is open again/i);
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(claims.length, 0);
+  const gap = gapOf(repoRoot);
+  assert.equal(gap.status, "open");
+  assert.equal(gap.savedClaimId, undefined);
+});
+
+test("Undo of a coaching evidence add is refused when the claim is cited, and the gap stays closed", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+  const db = openDb({ repoRoot, env: {} });
+  db.prepare("INSERT INTO deep_ingest_story_bank (id, data) VALUES (?, ?)").run(
+    "story-cites",
+    JSON.stringify({ id: "story-cites", status: "confirmed", evidence_ids: [last.artifacts[1].id] })
+  );
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  assert.equal(result.messages.at(-1).metadata.state, "refused");
+  assert.equal(result.messages.at(-1).metadata.reason, "in-use");
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 1);
+  assert.equal(gapOf(repoRoot).status, "closed");
+});
+
+test("coaching.evidence-save on a gap the plan auto-saved says Already saved and does not duplicate", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.evidence-save",
+      entity: { type: "application", id: "app-coach" },
+      input: { gapId: "no-direct-kubernetes-production-experience" },
+    },
+  });
+
+  assert.equal(result.messages.at(-1).text, "Already saved.");
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(claims.length, 1);
+});
+
+test("Undo of a coaching evidence add still removes the claim but leaves a gap a newer plan replaced", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+  // A newer plan replaced the stored one: same gap id, no savedClaimId.
+  appSetFields({
+    repoRoot,
+    env: {},
+    id: "app-coach",
+    patch: {
+      coachingPlan: coachingPlanPayload({
+        gaps: [NO_DRAFT_GAP].map((g) => ({
+          ...g,
+          id: "no-direct-kubernetes-production-experience",
+        })),
+      }),
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  assert.match(result.messages.at(-1).text, /changed since/i);
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
+  assert.equal(gapOf(repoRoot).status, "open");
+});
+
+const DRAFT_K8S = coachingPlanPayload().gaps[0].suggestion.draftClaim;
+
+test("coaching.plan rerun with an identical draft closes the gap as covered, with no new Undo and the original kept", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  await runCoachingPlan(repoRoot, planWithDrafts());
+  const before = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
+  assert.equal(
+    (last.metadata.nextActions || []).filter((x) => x.intent?.type === "knowledge.revert").length,
+    0
+  );
+  assert.match(last.text, /already in your evidence bank/);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).evidence.claims, before);
+  assert.equal(gapOf(repoRoot).status, "closed");
+  assert.equal(gapOf(repoRoot).savedClaimId, undefined);
+});
+
+test("coaching.plan refuses a same-id draft that differs from the saved claim, leaves the original, and keeps the gap open", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const original = {
+    id: slugifyClaimId(DRAFT_K8S.claim),
+    ...DRAFT_K8S,
+    evidence: "Source: a different doc.",
+  };
+  candidateEvidenceMerge({ repoRoot, env: {}, claims: [original] });
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const last = result.messages.at(-1);
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].evidence, "Source: a different doc.");
+  assert.equal(gapOf(repoRoot).status, "open");
+  assert.match(last.text, /A saved claim already uses this wording, so CareerRat left it alone\./);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
+});
+
+const SECOND_SAME_DRAFT_GAP = {
+  id: "no-platform-scope",
+  gapText: "No platform scope on record",
+  suggestion: { kind: "evidence-claim", draftClaim: { ...DRAFT_K8S }, rationale: "Same." },
+  status: "open",
+};
+
+test("two gaps with the same draft save once with one Undo, close both, and Undo reopens both", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts([SECOND_SAME_DRAFT_GAP]));
+
+  const last = planned.messages.at(-1);
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence.claims || []).length, 1);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 1);
+  assert.equal(
+    last.metadata.nextActions.filter((x) => x.intent?.type === "knowledge.revert").length,
+    1
+  );
+  const claimId = last.artifacts[1].id;
+  assert.equal(gapOf(repoRoot).status, "closed");
+  assert.equal(gapOf(repoRoot).savedClaimId, claimId);
+  assert.equal(gapOf(repoRoot, "no-platform-scope").status, "closed");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").savedClaimId, claimId);
+
+  const undone = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  assert.equal(undone.messages.at(-1).metadata.state, "reverted");
+  assert.equal(gapOf(repoRoot).status, "open");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").status, "open");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").savedClaimId, undefined);
+});
+
+test("Undo still records the claim removal and reports the gap reopened when the export fails after the commit", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+    appSetFieldsImpl: (args) => {
+      appSetFields(args);
+      throw Object.assign(new Error("export failed"), { committed: true });
+    },
+  });
+
+  const note = result.messages.at(-1);
+  assert.equal(note.metadata.state, "reverted");
+  assert.match(note.text, /coaching gap is open again/i);
+  assert.equal(note.artifacts[0].kind, "knowledge_write");
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
+  assert.equal(gapOf(repoRoot).status, "open");
+});
+
+test("Undo still records the claim removal and says the gap stayed closed when the reopen fails without committing", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+    appSetFieldsImpl: () => {
+      throw new Error("db locked");
+    },
+  });
+
+  const note = result.messages.at(-1);
+  assert.equal(note.metadata.state, "reverted");
+  assert.match(note.text, /gap stayed closed/i);
+  assert.equal(note.artifacts[0].kind, "knowledge_write");
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
+  assert.equal(gapOf(repoRoot).status, "closed");
 });
 
 // ---------------------------------------------------------------------------
