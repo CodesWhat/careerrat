@@ -3377,9 +3377,12 @@ function searchRunFromReceipt(message) {
 // Saves reusable screening answers straight into form-defaults and returns the
 // knowledge_write entries for them. A refused answer (still needs the user, or
 // job-specific) is skipped, never an error: the existing refusals stay in force.
+// A real failure stops the batch but keeps what already saved: those answers get
+// their log entries (and Undo) and the failure comes back as `failure`.
 async function saveReusableScreeningAnswers({ repoRoot, env, answers, saveImpl, source, writer }) {
   const before = candidateConfigGet({ repoRoot, env });
   const saved = [];
+  let failure = null;
   for (const answer of answers) {
     try {
       saved.push(
@@ -3393,7 +3396,8 @@ async function saveReusableScreeningAnswers({ repoRoot, env, answers, saveImpl, 
       );
     } catch (error) {
       if (!new Set(["NEEDS_USER", "NON_DURABLE_ANSWER", "BAD_REQUEST"]).has(error?.code)) {
-        throw error;
+        failure = error;
+        break;
       }
     }
   }
@@ -3410,7 +3414,7 @@ async function saveReusableScreeningAnswers({ repoRoot, env, answers, saveImpl, 
         writer,
       })
     : [];
-  return { saved, entries };
+  return { saved, entries, failure };
 }
 
 async function recordWorkspaceAdjacentRoleCoaching({
@@ -4612,12 +4616,15 @@ export async function executeWorkspaceIntent({
       const savedNote = reusable.entries.length
         ? ` Saved ${reusable.entries.length === 1 ? "this answer" : `${reusable.entries.length} answers`} for future applications.`
         : "";
+      const failureNote = reusable.failure
+        ? ` Some answers couldn't be saved for future applications: ${reusable.failure.message || "an unknown error"}`
+        : "";
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `${count === 1 ? "I drafted this answer" : `I drafted ${count} answers`}. Review ${count === 1 ? "this answer" : "them"} before using ${count === 1 ? "it" : "them"}. Nothing was submitted.${savedNote}`,
+        text: `${count === 1 ? "I drafted this answer" : `I drafted ${count} answers`}. Review ${count === 1 ? "this answer" : "them"} before using ${count === 1 ? "it" : "them"}. Nothing was submitted.${savedNote}${failureNote}`,
         artifacts: [
           {
             kind: "screening_answers",
@@ -6447,6 +6454,25 @@ export async function executeWorkspaceIntent({
       const undoActions = logEntries.flatMap((entry, index) =>
         entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
       );
+      // The transcript only renders action buttons on the latest result, so carry
+      // the review's still-unapplied Apply buttons and Finish review forward
+      // (minus the one just applied), after the Undo.
+      const reviewActions = [...workspaceThreadRead({ repoRoot, env }).messages]
+        .reverse()
+        .find(
+          (message) =>
+            message.kind === "action_result" &&
+            message.metadata?.nextActions?.some(
+              (action) => action.intent?.type === "strategy.stamp"
+            )
+        )?.metadata.nextActions;
+      const carriedActions = (reviewActions || []).filter(
+        (action) =>
+          action.intent?.type === "strategy.stamp" ||
+          (action.intent?.type === "strategy.apply" &&
+            action.intent.input?.recommendation?.id !== recommendation.id)
+      );
+      const followUps = [...undoActions, ...carriedActions];
       return appendActionResult({
         repoRoot,
         env,
@@ -6462,7 +6488,7 @@ export async function executeWorkspaceIntent({
           },
           ...logEntries,
         ],
-        metadata: { state: "applied", ...(undoActions.length ? { nextActions: undoActions } : {}) },
+        metadata: { state: "applied", ...(followUps.length ? { nextActions: followUps } : {}) },
         operationResult: operation,
         now,
       });

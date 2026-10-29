@@ -8599,6 +8599,54 @@ test("one-off screening questions reuse saved profile disclosures without requir
   assert.equal(message.metadata.nextActions[0].intent.type, "knowledge.revert");
 });
 
+test("a screening save that fails mid-batch still logs the answers that saved, with an Undo", async () => {
+  const repoRoot = tempRepo();
+  let calls = 0;
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { questionText: "Two questions" },
+    },
+    answerScreeningQuestionsImpl: async () => ({
+      answers: ["first", "second"].map((key) => ({
+        question: `Question ${key}`,
+        key,
+        answer: `Answer ${key}`,
+        durable: true,
+        uploadReady: true,
+      })),
+      ai: { used: false },
+    }),
+    saveScreeningAnswerImpl: ({ key, answer }) => {
+      calls += 1;
+      if (calls === 2) throw new Error("disk full");
+      candidateConfigPatch({
+        repoRoot,
+        env: {},
+        name: "form-defaults",
+        patch: { screening_answers: { [key]: answer } },
+      });
+      return { key, answer, persisted: true };
+    },
+  });
+
+  const message = result.messages.at(-1);
+  const entries = message.artifacts.filter((artifact) => artifact.kind === "knowledge_write");
+  assert.deepEqual(
+    entries.map((entry) => entry.path),
+    ["screening_answers.first"]
+  );
+  assert.equal(
+    message.metadata.nextActions.filter((action) => action.intent.type === "knowledge.revert")
+      .length,
+    1
+  );
+  assert.match(message.text, /disk full/);
+});
+
 test("confirmed reusable screening answers persist through the owning candidate settings writer", async () => {
   const repoRoot = tempRepo();
   const calls = [];

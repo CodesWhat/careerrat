@@ -11,7 +11,7 @@ import { after, test } from "node:test";
 import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { WORKSPACE_THREAD_ID } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { appUpsert } from "../src/core/db/verbs/app.mjs";
+import { appScheduleInterview, appUpsert } from "../src/core/db/verbs/app.mjs";
 import {
   candidateConfigGet,
   candidateConfigPatch,
@@ -248,4 +248,99 @@ test("a writer failure leaves the recommendation as a suggestion instead of fail
       .metadata.nextActions.some((action) => action.label === "Apply: Change style"),
     false
   );
+});
+
+test("applying one suggestion keeps the other Apply buttons and Finish review, after the Undo", async () => {
+  const repoRoot = tempRepo();
+  const result = await review(repoRoot, [
+    rec("one", "keep-signal", 2, { signal: "remote-first" }, "Keep remote-first"),
+    rec("two", "cut-signal", 1, { signal: "on-call" }, "Cut on-call"),
+    rec("three", "exclude-company", 2, { company: "Acme Corp" }, "Skip Acme"),
+  ]);
+  const first = result.messages
+    .at(-1)
+    .metadata.nextActions.find((action) => action.label === "Apply: Keep remote-first");
+  const applied = await executeWorkspaceIntent({ repoRoot, env: {}, intent: first.intent });
+  const labels = applied.messages.at(-1).metadata.nextActions.map((action) => action.label);
+  assert.equal(applied.messages.at(-1).metadata.nextActions[0].intent.type, "knowledge.revert");
+  assert.deepEqual(labels.slice(1), ["Apply: Cut on-call", "Apply: Skip Acme", "Finish review"]);
+
+  const second = applied.messages
+    .at(-1)
+    .metadata.nextActions.find((action) => action.label === "Apply: Cut on-call");
+  const next = await executeWorkspaceIntent({ repoRoot, env: {}, intent: second.intent });
+  assert.deepEqual(
+    next.messages
+      .at(-1)
+      .metadata.nextActions.map((action) => action.label)
+      .slice(1),
+    ["Apply: Skip Acme", "Finish review"]
+  );
+});
+
+function readApp(repoRoot, id) {
+  return JSON.parse(
+    openDb({ repoRoot, env: {} }).prepare("SELECT data FROM applications WHERE id = ?").get(id).data
+  );
+}
+
+test("Undo of a rerank out of interview brings the interview details back", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-iv",
+      company: "Acme",
+      role: "Engineer",
+      status: "interview",
+      statusNote: "Phone screen done.",
+      interviewAt: "2099-01-10T15:00:00.000Z",
+      interviewNote: "Bring the portfolio.",
+    },
+  });
+  const result = await review(repoRoot, [
+    rec("cut", "rerank", 3, { id: "app-iv", toStatus: "cut" }, "Cut Acme"),
+  ]);
+  const last = result.messages.at(-1);
+  const entry = last.artifacts.find((artifact) => artifact.target === "rows:rerank");
+  assert.equal(readApp(repoRoot, "app-iv").status, "cut");
+  assert.equal(readApp(repoRoot, "app-iv").interviewAt, null);
+  await undoFor(repoRoot, last, last.artifacts.indexOf(entry));
+  const restored = readApp(repoRoot, "app-iv");
+  assert.equal(restored.status, "interview");
+  assert.equal(restored.interviewAt, "2099-01-10T15:00:00.000Z");
+  assert.equal(restored.interviewNote, "Bring the portfolio.");
+  assert.equal(restored.statusNote, "Phone screen done.");
+});
+
+test("a later edit to a snapshotted interview field blocks the rerank Undo", async () => {
+  const repoRoot = tempRepo();
+  appUpsert({
+    repoRoot,
+    env: {},
+    row: {
+      id: "app-iv2",
+      company: "Acme",
+      role: "Engineer",
+      status: "interview",
+      interviewAt: "2099-01-10T15:00:00.000Z",
+    },
+  });
+  const result = await review(repoRoot, [
+    rec("cut", "rerank", 3, { id: "app-iv2", toStatus: "cut" }, "Cut Acme"),
+  ]);
+  const last = result.messages.at(-1);
+  const entry = last.artifacts.find((artifact) => artifact.target === "rows:rerank");
+  appScheduleInterview({
+    repoRoot,
+    env: {},
+    id: "app-iv2",
+    at: "2099-02-01T15:00:00.000Z",
+    note: "Rescheduled.",
+  });
+  await undoFor(repoRoot, last, last.artifacts.indexOf(entry));
+  const live = readApp(repoRoot, "app-iv2");
+  assert.equal(live.status, "cut");
+  assert.equal(live.interviewAt, "2099-02-01T15:00:00.000Z");
 });
