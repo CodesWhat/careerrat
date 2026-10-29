@@ -303,10 +303,14 @@ export function selectInstalledAiRuntime({ runtimeId, providerFallback = false }
 // `source: "onboarding"` asks the server to log the save in the thread with an
 // Undo. A change that loosens an honesty boundary or lowers the pay floor/target
 // comes back 409 CONFIRMATION_REQUIRED until it is resent with `confirmed: true`.
-export function saveCandidateFile(name, patch, { expectedBaseRevision, source, confirmed } = {}) {
+export function saveCandidateFile(
+  name,
+  patch,
+  { expectedBaseRevision, source, confirmed, mirror } = {}
+) {
   return apiFetch(`/api/onboard/candidate/${name}`, {
     method: "POST",
-    body: JSON.stringify({ data: patch, expectedBaseRevision, source, confirmed }),
+    body: JSON.stringify({ data: patch, expectedBaseRevision, source, confirmed, mirror }),
   });
 }
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { cloneCandidateDefault } from "../src/core/profile/candidate-defaults.mjs";
 import { classifyConfigChange } from "../src/core/profile/loosening.mjs";
 
 const honesty = (over = {}) => ({
@@ -45,9 +46,30 @@ test("a tool moving from adjacent into confirmed loosens", () => {
   assert.match(verdict.reasons[0], /Kafka/);
 });
 
-test("the first honesty tools write is a first-time value, not loosening", () => {
-  const verdict = classifyConfigChange("honesty", {}, { tools: { confirmed: ["Postgres"] } });
-  assert.equal(verdict.loosens, false);
+test("the first confirmed tool on a fresh workspace is a first-time value, not loosening", () => {
+  const before = cloneCandidateDefault("honesty");
+  const after = { ...before, tools: { ...before.tools, confirmed: ["Postgres"] } };
+  assert.deepEqual(classifyConfigChange("honesty", before, after), { loosens: false, reasons: [] });
+  assert.equal(
+    classifyConfigChange("honesty", {}, { tools: { confirmed: ["Postgres"] } }).loosens,
+    false
+  );
+});
+
+test("a do_not_claim tool moving into confirmed loosens, case-insensitively", () => {
+  const before = cloneCandidateDefault("honesty");
+  before.tools.do_not_claim = ["Rust"];
+  const after = { ...before, tools: { ...before.tools, confirmed: [" rust "] } };
+  const verdict = classifyConfigChange("honesty", before, after);
+  assert.equal(verdict.loosens, true);
+  assert.match(verdict.reasons[0], /rust/);
+});
+
+test("an adjacent tool moving into confirmed loosens on a default-shaped doc", () => {
+  const before = cloneCandidateDefault("honesty");
+  before.tools.adjacent = ["Kafka"];
+  const after = { ...before, tools: { ...before.tools, confirmed: ["kafka"] } };
+  assert.equal(classifyConfigChange("honesty", before, after).loosens, true);
 });
 
 test("lowering a pay floor or target loosens; first-time and raised values do not", () => {

@@ -433,14 +433,20 @@ export async function applyFirstRunConfirmation(
 ) {
   const save = { source: "onboarding", ...(confirmed ? { confirmed: true } : {}) };
   if (block?.kind === "authorization") {
-    await api.saveCandidateFile("profile", { authorization: block.patch }, save);
+    // One request writes both docs and logs one entry, so one Undo restores both.
     await api.saveCandidateFile(
-      "form-defaults",
+      "profile",
+      { authorization: block.patch },
       {
-        work_authorization: block.patch.work_authorized ? "Yes" : "No",
-        requires_sponsorship: block.patch.requires_sponsorship ? "Yes" : "No",
-      },
-      save
+        ...save,
+        mirror: {
+          doc: "form-defaults",
+          patch: {
+            work_authorization: block.patch.work_authorized ? "Yes" : "No",
+            requires_sponsorship: block.patch.requires_sponsorship ? "Yes" : "No",
+          },
+        },
+      }
     );
     return "Work authorization saved";
   }

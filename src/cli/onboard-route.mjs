@@ -2809,6 +2809,15 @@ export function mountOnboardRoutes({
     }
   }
 
+  // A valid `mirror` body field names another setup doc (never evidence or the
+  // same doc) plus the patch to write to it.
+  function mirrorTarget(mirror, primaryName) {
+    if (!isPlainObject(mirror) || !isPlainObject(mirror.patch)) return undefined;
+    const known = CANDIDATE_ROUTE_ENTRIES.some((item) => item.name === mirror.doc);
+    if (!known || mirror.doc === primaryName || mirror.doc === "evidence") return undefined;
+    return { name: mirror.doc, patch: mirror.patch };
+  }
+
   for (const entry of CANDIDATE_ROUTE_ENTRIES) {
     addRoute("POST", `/api/onboard/candidate/${entry.name}`, async (req, res) => {
       let body;
@@ -2859,6 +2868,12 @@ export function mountOnboardRoutes({
               return;
             }
           }
+          // `mirror` ({ doc, patch }): a second doc written in this same request,
+          // logged as one entry with one Undo (work authorization lives in two docs).
+          const mirrorEntry = tracked ? mirrorTarget(body?.mirror, entry.name) : undefined;
+          const mirrorBefore = mirrorEntry
+            ? candidateConfigGet(pathCtx)[mirrorEntry.name]
+            : undefined;
           const result =
             entry.name === "evidence"
               ? candidateEvidenceMerge({
@@ -2866,13 +2881,24 @@ export function mountOnboardRoutes({
                   claims: patch.claims || [],
                 })
               : candidateConfigPatch({ ...pathCtx, name: entry.name, patch });
+          if (mirrorEntry) {
+            candidateConfigPatch({ ...pathCtx, name: mirrorEntry.name, patch: mirrorEntry.patch });
+          }
+          const afterDocs = tracked ? candidateConfigGet(pathCtx) : undefined;
           const logged = tracked
             ? logOnboardingWrite(
                 onboardingConfigEntries({
                   name: entry.name,
                   patch,
                   before,
-                  after: candidateConfigGet(pathCtx)[entry.name],
+                  after: afterDocs[entry.name],
+                  mirror: mirrorEntry
+                    ? {
+                        ...mirrorEntry,
+                        before: mirrorBefore,
+                        after: afterDocs[mirrorEntry.name],
+                      }
+                    : undefined,
                 })
               )
             : undefined;

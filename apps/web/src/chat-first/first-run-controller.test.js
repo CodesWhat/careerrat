@@ -696,12 +696,13 @@ describe("chat-first onboarding controller", () => {
         {
           authorization: { work_authorized: true, requires_sponsorship: false },
         },
-        { source: "onboarding" },
-      ],
-      [
-        "form-defaults",
-        { work_authorization: "Yes", requires_sponsorship: "No" },
-        { source: "onboarding" },
+        {
+          source: "onboarding",
+          mirror: {
+            doc: "form-defaults",
+            patch: { work_authorization: "Yes", requires_sponsorship: "No" },
+          },
+        },
       ],
     ]);
     expect(api.saveEvidenceSeed).toHaveBeenCalledWith(

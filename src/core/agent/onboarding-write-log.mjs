@@ -43,12 +43,64 @@ function labelFor(path) {
   return text ? text[0].toUpperCase() + text.slice(1) : "Setting";
 }
 
+// The profile normalizer stamps this on whenever a location mode field is saved.
+const LOCATION_MODE_FIELDS = new Set([
+  "remote",
+  "remote_scope",
+  "hybrid",
+  "onsite",
+  "relocation",
+  "max_commute_days_per_week",
+]);
+const LOCATION_CONFIRMED_PATH = "location.mode_preferences_confirmed";
+
 // Entries for one onboarding config save: a path per value the patch set.
-export function onboardingConfigEntries({ name, patch, before, after }) {
+// `mirror` ({ name, patch, before, after }) is a second doc written in the same
+// request. Its values ride as companions of ONE entry, so a single Undo puts
+// back both docs, and a change to either since makes the Undo refuse.
+export function onboardingConfigEntries({ name, patch, before, after, mirror }) {
+  const paths = patchLeafPaths(patch);
+  const beforeDocs = { [name]: before };
+  const afterDocs = { [name]: after };
+  if (mirror) {
+    beforeDocs[mirror.name] = mirror.before;
+    afterDocs[mirror.name] = mirror.after;
+    const [first, ...rest] = paths;
+    const writes = first
+      ? [
+          {
+            name,
+            path: first,
+            label: labelFor(first),
+            companions: [
+              ...rest,
+              ...patchLeafPaths(mirror.patch).map((path) => ({ name: mirror.name, path })),
+            ],
+          },
+        ]
+      : [];
+    return configWriteEntries({
+      before: beforeDocs,
+      after: afterDocs,
+      writes,
+      source: SOURCE,
+      writer: WRITER,
+    });
+  }
+  let confirmedPending = name === "profile";
+  const writes = paths.map((path) => {
+    const write = { name, path, label: labelFor(path) };
+    const [section, field] = path.split(".");
+    if (confirmedPending && section === "location" && LOCATION_MODE_FIELDS.has(field)) {
+      confirmedPending = false;
+      write.companions = [LOCATION_CONFIRMED_PATH];
+    }
+    return write;
+  });
   return configWriteEntries({
-    before: { [name]: before },
-    after: { [name]: after },
-    writes: patchLeafPaths(patch).map((path) => ({ name, path, label: labelFor(path) })),
+    before: beforeDocs,
+    after: afterDocs,
+    writes,
     source: SOURCE,
     writer: WRITER,
   });

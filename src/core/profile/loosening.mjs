@@ -48,14 +48,18 @@ function classifyHonesty(before, after, reasons) {
       if (item && !kept.has(norm(item))) reasons.push(`Removes "${item}" from your ${label}.`);
     }
   }
-  // A tool moving into confirmed, from adjacent or from nowhere. Only counts
-  // once a tools structure is already stored: the first honesty write is a
-  // first-time value, not a change to a boundary.
-  const beforeTools = readPath(before, ["tools"]);
-  if (!isPlainObject(beforeTools) || !Object.keys(beforeTools).length) return;
-  const wasConfirmed = new Set(listOf(beforeTools.confirmed).map(norm));
+  // A tool moves into confirmed from a list that held it back (adjacent or
+  // do-not-claim). A tool in no earlier list is a first-time value.
+  const heldBack = new Set(
+    ["adjacent", "do_not_claim"].flatMap((key) =>
+      listOf(readPath(before, ["tools", key])).map(norm)
+    )
+  );
+  const wasConfirmed = new Set(listOf(readPath(before, ["tools", "confirmed"])).map(norm));
   for (const tool of listOf(readPath(after, ["tools", "confirmed"]))) {
-    if (tool && !wasConfirmed.has(norm(tool))) reasons.push(`Marks "${tool}" as a confirmed tool.`);
+    if (tool && heldBack.has(norm(tool)) && !wasConfirmed.has(norm(tool))) {
+      reasons.push(`Marks "${tool}" as a confirmed tool.`);
+    }
   }
 }
 

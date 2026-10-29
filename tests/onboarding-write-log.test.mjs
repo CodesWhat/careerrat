@@ -239,3 +239,104 @@ test("removing a do-not-claim entry in onboarding needs confirmed, adding one do
   ]);
   assert.equal((await save({ do_not_claim: ["Go"] }, { confirmed: true })).status, 200);
 });
+
+test("the first confirmed tools on a fresh workspace save without a 409", async () => {
+  const repoRoot = tempRepo();
+  const server = bootServer(repoRoot);
+  const saved = await post(server, "/api/onboard/candidate/honesty", {
+    source: "onboarding",
+    data: { tools: { confirmed: ["Postgres", "Kafka"] } },
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).honesty.tools.confirmed, [
+    "Postgres",
+    "Kafka",
+  ]);
+});
+
+test("a location save logs mode_preferences_confirmed as a companion and Undo restores both", async () => {
+  const repoRoot = tempRepo();
+  const server = bootServer(repoRoot);
+  const before = candidateConfigGet({ repoRoot, env: {} }).profile.location;
+  assert.notEqual(before.mode_preferences_confirmed, true);
+  const { status } = await post(server, "/api/onboard/candidate/profile", {
+    source: "onboarding",
+    data: { location: { remote: false } },
+  });
+  assert.equal(status, 200);
+  const [message] = logged(repoRoot);
+  assert.equal(message.artifacts.length, 1);
+  const [entry] = message.artifacts;
+  assert.equal(entry.path, "location.remote");
+  assert.equal(entry.companions[0].path, "location.mode_preferences_confirmed");
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).profile.location.mode_preferences_confirmed,
+    true
+  );
+
+  await executeWorkspaceIntent({ repoRoot, env: {}, intent: undoIntent(message, 0) });
+  const restored = candidateConfigGet({ repoRoot, env: {} }).profile.location;
+  assert.equal(restored.remote, before.remote);
+  assert.notEqual(restored.mode_preferences_confirmed, true);
+});
+
+test("work authorization with a mirror logs one entry spanning both docs; Undo restores both", async () => {
+  const repoRoot = tempRepo();
+  const server = bootServer(repoRoot);
+  const docs = () => candidateConfigGet({ repoRoot, env: {} });
+  const before = {
+    profile: structuredClone(docs().profile.authorization),
+    form: structuredClone(docs()["form-defaults"]),
+  };
+  const save = () =>
+    post(server, "/api/onboard/candidate/profile", {
+      source: "onboarding",
+      data: { authorization: { work_authorized: true } },
+      mirror: { doc: "form-defaults", patch: { work_authorization: "Yes" } },
+    });
+  assert.equal((await save()).status, 200);
+  assert.equal(docs().profile.authorization.work_authorized, true);
+  assert.equal(docs()["form-defaults"].work_authorization, "Yes");
+
+  const messages = logged(repoRoot);
+  assert.equal(messages.length, 1);
+  const [message] = messages;
+  assert.equal(message.artifacts.length, 1);
+  assert.equal(message.artifacts[0].companions[0].name, "form-defaults");
+
+  await executeWorkspaceIntent({ repoRoot, env: {}, intent: undoIntent(message, 0) });
+  assert.equal(docs().profile.authorization.work_authorized, before.profile.work_authorized);
+  assert.equal(docs()["form-defaults"].work_authorization, before.form.work_authorization);
+});
+
+test("a mirrored authorization Undo refuses when either doc changed since", async () => {
+  for (const stale of ["profile", "form-defaults"]) {
+    const repoRoot = tempRepo();
+    const server = bootServer(repoRoot);
+    await post(server, "/api/onboard/candidate/profile", {
+      source: "onboarding",
+      data: { authorization: { work_authorized: true } },
+      mirror: { doc: "form-defaults", patch: { work_authorization: "Yes" } },
+    });
+    const [message] = logged(repoRoot);
+    if (stale === "profile") {
+      await post(server, "/api/onboard/candidate/profile", {
+        data: { authorization: { work_authorized: false } },
+      });
+    } else {
+      await post(server, "/api/onboard/candidate/form-defaults", {
+        data: { work_authorization: "No" },
+      });
+    }
+    const result = await executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: undoIntent(message, 0),
+    });
+    assert.equal(JSON.stringify(result).includes("changed again"), true, stale);
+    const docs = candidateConfigGet({ repoRoot, env: {} });
+    // Neither doc was touched by the refused Undo.
+    assert.equal(docs.profile.authorization.work_authorized, stale === "profile" ? false : true);
+    assert.equal(docs["form-defaults"].work_authorization, stale === "profile" ? "Yes" : "No");
+  }
+});
