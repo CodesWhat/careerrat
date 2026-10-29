@@ -229,7 +229,7 @@ Treat these as invalid placeholders: `[Company]`, `[Role]`, `{candidate}`,
 template residue. (`NEEDS YOU` is the STEP 6 unanswered-question marker — resolving
 it with the user, not deleting it, is the fix.)
 
-**Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0,
+**Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0, or its only findings are `NEEDS YOU` markers,
 write the produced artifact paths back to the application row in a single
 `tracker.json` write before proceeding to STEP 8 or STEP 12:
 

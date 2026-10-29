@@ -8806,6 +8806,8 @@ test("a confirmed answer naming the company stays on the application while a pla
   );
   await run("Do you have a reason to relocate?", "Yes, the team at ACME is why.");
   await run("Would you work with the team?", "Happy to work on your team in person.");
+  await run("Why do you want to work at this company?", "I like building tools for people.");
+  await run("Why do you want to work here?", "The mission fits what I care about.");
   assert.deepEqual(saved, []);
 
   await run("Are you authorized to work in the US?", "Yes, I'm authorized to work in the US.");

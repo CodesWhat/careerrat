@@ -730,6 +730,34 @@ test("job.prepare-submit flags a live form stopped on unanswered required fields
   );
 });
 
+test("job.prepare-submit keeps a fill failure blocked, not waiting on an answer", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => ({
+      ...unansweredFieldsResult,
+      session: {
+        ...unansweredFieldsResult.session,
+        unresolved: [
+          { label: "Favorite database", required: true },
+          { label: "Resume", required: true, reason: "This file could not be attached." },
+        ],
+      },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.label === "Return to supervised application"),
+    true
+  );
+});
+
 test("job.prepare-submit keeps a login or captcha blocker blocked even with unresolved fields", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);

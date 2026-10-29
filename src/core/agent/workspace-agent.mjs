@@ -3439,7 +3439,7 @@ async function saveReusableScreeningAnswers({ repoRoot, env, answers, saveImpl, 
 }
 
 const JOB_SPECIFIC_PHRASE =
-  /\b(?:this (?:role|position|job|opportunity)|your (?:team|company|organi[sz]ation|mission|product))\b/i;
+  /\b(?:(?:this|the) (?:role|position|job|opportunity|company|organi[sz]ation|team)|(?:your|our) (?:team|company|organi[sz]ation|mission|product)|work (?:here|with us)|join(?:ing)? us)\b/i;
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -9900,13 +9900,24 @@ async function executeWorkspaceIntentCore({
       // resume action.
       // The one exception is a live form that stopped on required fields it
       // couldn't answer: that is a NEEDS YOU on this job, not a blocker.
-      const unansweredFieldNeeds =
+      // The driver records a field it had no answer for without a `reason`; a
+      // fill or upload failure always carries one. Any failure in the mix keeps
+      // the job blocked with its resume action, since it isn't just waiting on
+      // an answer.
+      const requiredUnresolved =
         execution?.state === "blocked" &&
-        execution?.session?.stopReason === REQUIRED_FIELDS_UNANSWERED
-          ? (Array.isArray(execution.session.unresolved) ? execution.session.unresolved : [])
-              .filter((item) => item?.required && String(item?.label || "").trim())
-              .map((item) => ({ questionId: null, question: String(item.label).trim() }))
+        execution?.session?.stopReason === REQUIRED_FIELDS_UNANSWERED &&
+        Array.isArray(execution.session.unresolved)
+          ? execution.session.unresolved.filter(
+              (item) => item?.required && String(item?.label || "").trim()
+            )
           : [];
+      const unansweredFieldNeeds = requiredUnresolved.every((item) => !item.reason)
+        ? requiredUnresolved.map((item) => ({
+            questionId: null,
+            question: String(item.label).trim(),
+          }))
+        : [];
       if (!offNote && unansweredFieldNeeds.length > 0) {
         const known = new Set(openAnswerNeeds.map((need) => need.question.toLowerCase()));
         openAnswerNeeds = [
