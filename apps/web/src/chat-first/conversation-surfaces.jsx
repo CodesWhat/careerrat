@@ -1711,6 +1711,7 @@ export function DeepIngestConversation({
   counts = {},
   sources = EMPTY_LIST,
   proposals = EMPTY_LIST,
+  applied = EMPTY_LIST,
   receipt,
   inputMode = null,
   inputValue = "",
@@ -1890,11 +1891,30 @@ export function DeepIngestConversation({
           ))}
         </section>
       ) : null}
+      {applied.length ? (
+        <section className="chat-first-deep-sources" aria-label="Saved from your sources">
+          <div className="chat-first-eyebrow">SAVED FOR YOU</div>
+          <p className="chat-first-deep-review__note">
+            These passed their checks and saved on their own. You can undo any of them from your
+            thread.
+          </p>
+          {applied.slice(0, 5).map((item) => (
+            <div className="chat-first-deep-source" key={item.id}>
+              <div>
+                <strong>{item.title || "Saved item"}</strong>
+                <small>Saved to {String(item.lane || "your library").replaceAll("_", " ")}</small>
+              </div>
+            </div>
+          ))}
+          {applied.length > 5 ? <small>and {applied.length - 5} more</small> : null}
+        </section>
+      ) : null}
       {proposals.length ? (
         <section className="chat-first-deep-review" aria-label="Proposal review queue">
           <div className="chat-first-eyebrow">REVIEW 1 OF {reviewCount || proposals.length}</div>
           <p className="chat-first-deep-review__note">
-            One grounded finding at a time. Your decision brings up the next one.
+            These didn't save on their own, so they need your yes. One at a time. Your decision
+            brings up the next one.
           </p>
           {proposals.slice(0, 1).map((proposal) => {
             const editing = editingId === proposal.id;
@@ -1906,6 +1926,9 @@ export function DeepIngestConversation({
                 <div className="chat-first-deep-proposal__lane">
                   {String(proposal.lane || "proposal").replaceAll("_", " ")}
                 </div>
+                {proposal.heldReason ? (
+                  <p className="chat-first-deep-review__note">{proposal.heldReason}</p>
+                ) : null}
                 {editing ? (
                   <div className="chat-first-deep-proposal__fields">
                     <input

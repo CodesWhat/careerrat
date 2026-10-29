@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { workspaceThreadRead } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   candidateConfigGet,
@@ -1211,7 +1212,7 @@ test("POST /api/deep-ingest/proposal-decisions rejects stale expectedVersion and
   }
 });
 
-test("POST /api/deep-ingest/proposals persists builder output as review state only", async () => {
+test("POST /api/deep-ingest/proposals saves grounded builder output on its own and logs it with an Undo", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
   candidateSetupInitialize({ repoRoot });
@@ -1256,11 +1257,81 @@ test("POST /api/deep-ingest/proposals persists builder output as review state on
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.data.proposals.length, 1);
+    assert.equal(body.data.proposals[0].status, "confirmed");
+    assert.equal(body.data.proposals[0].decisionSource, "automatic");
+    assert.equal(body.data.autoApplied, 1);
+    assert.equal(body.data.state.reviewQueue.length, 0);
+    assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims + 1);
+    const logged = workspaceThreadRead({ repoRoot, env: {} }).messages.filter(
+      (message) => message.metadata?.writer === "deep_ingest.auto"
+    );
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0].artifacts[0].kind, "knowledge_write");
+    assert.equal(logged[0].metadata.nextActions[0].intent.type, "knowledge.revert");
+    assertNoRuntimeTokens(body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/deep-ingest/proposals keeps blocked builder output as review state only", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      text: "Built route-backed proposal review.",
+      chunks: [{ id: "chunk-route-1", text: "Built route-backed proposal review." }],
+    },
+  }).source;
+  const beforeClaims = candidateConfigGet({ repoRoot }).evidence.claims.length;
+  const server = await bootServer(repoRoot, {
+    proposalBuilders: {
+      evidence: async ({ source: builderSource }) => ({
+        status: "proposal_ready",
+        proposals: [
+          {
+            id: "proposal-route-evidence-1",
+            lane: "evidence",
+            sourceId: builderSource.id,
+            chunkId: "chunk-route-1",
+            status: "review_needed",
+            confidence: 0.92,
+            supportingQuote: "A quote the source never said",
+            payload: { claim: "Built route-backed proposal review." },
+            validation: { status: "passed", blockedReasons: [] },
+          },
+        ],
+        gaps: [],
+        manual: null,
+      }),
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/deep-ingest/proposals", {
+      sourceId: source.id,
+      targetShape: "evidence",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data.proposals.length, 1);
     assert.equal(body.data.proposals[0].status, "review_needed");
     assert.equal(body.data.state.reviewQueue.length, 1);
+    assert.equal(body.data.autoApplied, 0);
+    assert.equal(body.data.proposals[0].autoApply.status, "held");
     assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims);
     assert.equal(existsSync(userPath({ repoRoot }, "candidate/evidence.yml")), false);
     assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
+    assert.equal(
+      workspaceThreadRead({ repoRoot, env: {} }).messages.some(
+        (message) => message.metadata?.writer === "deep_ingest.auto"
+      ),
+      false
+    );
     assertNoRuntimeTokens(body);
   } finally {
     await closeServer(server);

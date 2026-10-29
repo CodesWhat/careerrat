@@ -21,6 +21,7 @@ import {
   prepareDeepIngestSourceScan,
   rollbackPreparedDeepIngestSourceScan,
 } from "../core/deep-ingest/app-operations.mjs";
+import { autoApplyDeepIngestProposals } from "../core/deep-ingest/auto-apply.mjs";
 import { proposeAutoFromSource } from "../core/deep-ingest/proposals/auto.mjs";
 import { proposeEvidenceFromSource } from "../core/deep-ingest/proposals/evidence.mjs";
 import { proposeGapsFromSource } from "../core/deep-ingest/proposals/gaps.mjs";
@@ -608,9 +609,12 @@ async function buildAndPersistProposals({ repoRoot, env, body, proposalBuilders 
     })
   );
 
+  const auto = autoApplyDeepIngestProposals({ repoRoot, env, proposals });
+
   return {
     source,
-    proposals,
+    proposals: auto.proposals,
+    autoApplied: auto.applied.length,
     builder: {
       status: built?.status || "proposal_ready",
       manual: built?.manual || null,
