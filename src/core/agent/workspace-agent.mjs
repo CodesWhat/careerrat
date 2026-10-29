@@ -5,7 +5,7 @@ import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE, parseChatAnswerMode } from "../ai/chat-answer-mode.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
-import { hostnameToPortal } from "../apply/form-fill.mjs";
+import { hostnameToPortal, REQUIRED_FIELDS_UNANSWERED } from "../apply/form-fill.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
 import {
   automationStatus,
@@ -3438,19 +3438,63 @@ async function saveReusableScreeningAnswers({ repoRoot, env, answers, saveImpl, 
   return { saved, entries, failure };
 }
 
+const JOB_SPECIFIC_PHRASE =
+  /\b(?:this (?:role|position|job|opportunity)|your (?:team|company|organi[sz]ation|mission|product))\b/i;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// A confirmed answer that names the application's company or role, or leans on
+// employer-specific phrasing, belongs to that application only. The writer's own
+// durability check is keyword-based and can't see this.
+function answerIsJobSpecific(entry, application) {
+  const text = String(entry?.answer || "");
+  if (JOB_SPECIFIC_PHRASE.test(text) || JOB_SPECIFIC_PHRASE.test(String(entry?.question || ""))) {
+    return true;
+  }
+  for (const name of [application?.company, application?.role]) {
+    const trimmed = String(name || "").trim();
+    if (trimmed.length < 3) continue;
+    if (
+      new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(trimmed)}(?![\\p{L}\\p{N}])`, "iu").test(text)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // A thread answer to a durable question (work authorization, notice period and
 // the like) is saved to form-defaults the same way a drafted one is, so no later
 // job asks it again. Job-specific answers stay with their application: the
 // writer refuses them and they are skipped here.
-async function saveConfirmedDurableAnswers({ repoRoot, env, answers, saveImpl, intentMessage }) {
+async function saveConfirmedDurableAnswers({
+  repoRoot,
+  env,
+  answers,
+  saveImpl,
+  intentMessage,
+  applicationId,
+}) {
+  let application = null;
+  if (applicationId) {
+    try {
+      application = applicationForIntent({ repoRoot, env, id: applicationId });
+    } catch {
+      application = null;
+    }
+  }
   const reusable = await saveReusableScreeningAnswers({
     repoRoot,
     env,
-    answers: (answers || []).map((entry) => ({
-      question: entry.question,
-      key: entry.key,
-      answer: entry.answer,
-    })),
+    answers: (answers || [])
+      .filter((entry) => !answerIsJobSpecific(entry, application))
+      .map((entry) => ({
+        question: entry.question,
+        key: entry.key,
+        answer: entry.answer,
+      })),
     saveImpl,
     source: { kind: "screening.answer-confirm", intentMessageId: intentMessage.message.id },
     writer: "screening.answer-confirm",
@@ -4650,6 +4694,7 @@ async function executeWorkspaceIntentCore({
           answers: confirmation.answers,
           saveImpl: saveScreeningAnswerImpl,
           intentMessage,
+          applicationId: confirmation.applicationId || operation.applicationId,
         });
         return appendActionResult({
           repoRoot,
@@ -4816,6 +4861,7 @@ async function executeWorkspaceIntentCore({
         answers: operation.answers,
         saveImpl: saveScreeningAnswerImpl,
         intentMessage,
+        applicationId: operation.applicationId || normalized.entity.id,
       });
       return appendActionResult({
         repoRoot,
@@ -9852,8 +9898,26 @@ async function executeWorkspaceIntentCore({
       // Only a form that is otherwise complete is "waiting on an answer". A
       // blocked session (login wall, captcha, 2FA) keeps its own state and
       // resume action.
+      // The one exception is a live form that stopped on required fields it
+      // couldn't answer: that is a NEEDS YOU on this job, not a blocker.
+      const unansweredFieldNeeds =
+        execution?.state === "blocked" &&
+        execution?.session?.stopReason === REQUIRED_FIELDS_UNANSWERED
+          ? (Array.isArray(execution.session.unresolved) ? execution.session.unresolved : [])
+              .filter((item) => item?.required && String(item?.label || "").trim())
+              .map((item) => ({ questionId: null, question: String(item.label).trim() }))
+          : [];
+      if (!offNote && unansweredFieldNeeds.length > 0) {
+        const known = new Set(openAnswerNeeds.map((need) => need.question.toLowerCase()));
+        openAnswerNeeds = [
+          ...openAnswerNeeds,
+          ...unansweredFieldNeeds.filter((need) => !known.has(need.question.toLowerCase())),
+        ];
+      }
       const flaggedNeedsAnswer =
-        !offNote && openAnswerNeeds.length > 0 && NEEDS_ANSWER_SESSION_STATES.has(execution?.state);
+        !offNote &&
+        openAnswerNeeds.length > 0 &&
+        (NEEDS_ANSWER_SESSION_STATES.has(execution?.state) || unansweredFieldNeeds.length > 0);
       const sessionState = flaggedNeedsAnswer
         ? "needs-answer"
         : prepareSubmit && execution.state === "questions-captured"

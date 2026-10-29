@@ -8775,6 +8775,43 @@ test("confirmed reusable screening answers persist through the owning candidate 
   assert.match(message.text, /future applications/i);
 });
 
+test("a confirmed answer naming the company stays on the application while a plain durable one saves", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { company: "Acme", role: "Robotics Engineer" });
+  const saved = [];
+  const confirm = async ({ question, answer }) => ({
+    applicationId: "app-temporal",
+    answers: [{ question, answer, key: question.toLowerCase() }],
+    packetManifest: { uploadReady: true, gaps: [] },
+  });
+  const run = (question, answer) =>
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: { questionId: "q1", question, answer },
+      },
+      confirmScreeningAnswerImpl: confirm,
+      saveScreeningAnswerImpl: (input) => {
+        saved.push(input.answer);
+        return { key: input.key, answer: input.answer, persisted: true };
+      },
+    });
+
+  await run(
+    "Why do you want to relocate for this role?",
+    "I want to join Acme's robotics team in Boston."
+  );
+  await run("Do you have a reason to relocate?", "Yes, the team at ACME is why.");
+  await run("Would you work with the team?", "Happy to work on your team in person.");
+  assert.deepEqual(saved, []);
+
+  await run("Are you authorized to work in the US?", "Yes, I'm authorized to work in the US.");
+  assert.deepEqual(saved, ["Yes, I'm authorized to work in the US."]);
+});
+
 test("confirming a job-specific screening answer clears its packet gap and unblocks resume", async () => {
   const repoRoot = tempRepo();
   const answerPath = "workspace/tailored/temporal-answers.md";

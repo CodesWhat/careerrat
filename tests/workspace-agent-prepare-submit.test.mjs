@@ -19,7 +19,7 @@ import {
   appUpsert,
 } from "../src/core/db/verbs/app.mjs";
 import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
-import { missionCreate } from "../src/core/db/verbs/chat-first.mjs";
+import { missionCreate, missionRun } from "../src/core/db/verbs/chat-first.mjs";
 import { capturePacketJobBody } from "../src/core/packet/context.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
@@ -689,6 +689,127 @@ test("job.prepare-submit treats open answer gaps as current packet lineage", asy
   assert.equal(applyCalls, 1, "an open answer flags the job but the form is still filled");
   assert.equal(result.messages.at(-1).metadata.state, "needs-answer");
   assert.match(result.messages.at(-1).text, /One question needs your answer/);
+});
+
+const unansweredFieldsResult = {
+  available: true,
+  verified: false,
+  state: "blocked",
+  reason: "Stopped on required fields the form still needs: Favorite database.",
+  session: {
+    provider: "test",
+    stopReason: "required-fields-unanswered",
+    unresolved: [
+      { label: "Favorite database", required: true },
+      { label: "Nickname", required: false },
+    ],
+    blockers: [],
+  },
+};
+
+test("job.prepare-submit flags a live form stopped on unanswered required fields as needs-answer", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => unansweredFieldsResult,
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "needs-answer");
+  assert.deepEqual(last.metadata.needsAnswers, [
+    { questionId: null, question: "Favorite database" },
+  ]);
+  assert.match(last.text, /Favorite database/);
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.label === "Return to supervised application"),
+    false
+  );
+});
+
+test("job.prepare-submit keeps a login or captcha blocker blocked even with unresolved fields", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "blocked",
+      session: {
+        provider: "test",
+        unresolved: [{ label: "Favorite database", required: true }],
+        blockers: ["captcha"],
+      },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(last.metadata.needsAnswers, undefined);
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.label === "Return to supervised application"),
+    true
+  );
+});
+
+test("a mission carries on with other jobs after a live form stops on unanswered required fields", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  seedPreparedApplication(repoRoot, { id: "app-clean" });
+  missionCreate({
+    repoRoot,
+    env: {},
+    id: "mission-live-needs-answer",
+    title: "Prepare two",
+    mode: "prepare-to-submit",
+    steps: ["app-prepared", "app-clean"].map((id) => ({
+      id: `prepare-${id}`,
+      label: "Prepare form",
+      action: "prepare-submit",
+      jobRef: { type: "application", id },
+    })),
+  });
+  const applied = [];
+
+  const run = await missionRun({
+    repoRoot,
+    env: {},
+    id: "mission-live-needs-answer",
+    resolveExecutionPlan: () => ({
+      policyVersion: 1,
+      operation: "application.drafting",
+      runtimeId: "codex",
+      adapterVersion: 1,
+      requested: { quality: "best", reasoning: "medium" },
+      resolved: { quality: "best", reasoning: "medium", model: "gpt-5.6-sol", effort: "medium" },
+      fallback: null,
+    }),
+    executeIntent: ({ intent }) =>
+      executeWorkspaceIntent({
+        repoRoot,
+        env: {},
+        intent,
+        applyJobImpl: async ({ applicationId }) => {
+          applied.push(applicationId);
+          return applicationId === "app-prepared"
+            ? unansweredFieldsResult
+            : { available: true, verified: false, state: "awaiting-submit" };
+        },
+      }),
+  });
+
+  assert.deepEqual(applied, ["app-prepared", "app-clean"]);
+  const steps = run.mission.steps;
+  const flagged = steps.find((step) => step.jobRef.id === "app-prepared");
+  assert.equal(flagged.result.state, "needs-answer");
+  assert.equal(steps.find((step) => step.jobRef.id === "app-clean").status, "completed");
 });
 
 test("job.prepare-submit keeps a blocked session's state and resume action when answers are open", async () => {
