@@ -1777,6 +1777,20 @@ test("coaching.evidence-save routes a confirmed draft through the evidence firew
       .status,
     "closed"
   );
+
+  // A save from an older thread records the same Undo coaching.plan does.
+  const entry = last.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(entry?.target, "evidence");
+  assert.equal(entry?.op, "add");
+  assert.equal(entry?.writer, "coaching.evidence-save");
+  const undo = last.metadata.nextActions.find(
+    (action) => action.intent?.type === "knowledge.revert"
+  );
+  assert.ok(undo, "the legacy save offers Undo");
+  assert.ok(
+    last.metadata.nextActions.some((action) => action.intent?.type === "job.evaluate"),
+    "the fit follow-up stays"
+  );
 });
 
 test("coaching.evidence-save surfaces an evidence-firewall rejection instead of swallowing it, and leaves the gap open", async () => {
@@ -2113,6 +2127,11 @@ test("coaching.plan auto-saves open gaps that have a draft, closes them, and log
   const undo = last.metadata.nextActions[0];
   assert.equal(undo.intent.type, "knowledge.revert");
   assert.deepEqual(undo.intent.input, { messageId: last.id, index: 1 });
+  assert.equal(
+    last.metadata.nextActions.at(-1).intent.type,
+    "job.evaluate",
+    "a plan that closed a gap offers the fit check"
+  );
 });
 
 test("coaching.plan leaves a firewall-refused draft unsaved with its gap open and says why, and leaves no-draft gaps open", async () => {
@@ -2244,7 +2263,10 @@ test("coaching.plan rerun with an identical draft closes the gap as covered, wit
 
   const last = result.messages.at(-1);
   assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
-  assert.equal((last.metadata.nextActions || []).length, 0);
+  assert.equal(
+    (last.metadata.nextActions || []).filter((x) => x.intent?.type === "knowledge.revert").length,
+    0
+  );
   assert.match(last.text, /already in your evidence bank/);
   assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).evidence.claims, before);
   assert.equal(gapOf(repoRoot).status, "closed");
@@ -2288,7 +2310,10 @@ test("two gaps with the same draft save once with one Undo, close both, and Undo
   const last = planned.messages.at(-1);
   assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence.claims || []).length, 1);
   assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 1);
-  assert.equal(last.metadata.nextActions.length, 1);
+  assert.equal(
+    last.metadata.nextActions.filter((x) => x.intent?.type === "knowledge.revert").length,
+    1
+  );
   const claimId = last.artifacts[1].id;
   assert.equal(gapOf(repoRoot).status, "closed");
   assert.equal(gapOf(repoRoot).savedClaimId, claimId);

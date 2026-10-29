@@ -6108,7 +6108,24 @@ export async function executeWorkspaceIntent({
         ],
         metadata: {
           state: "planned",
-          ...(undoActions.length ? { nextActions: undoActions } : {}),
+          ...(undoActions.length || saved.length
+            ? {
+                nextActions: [
+                  ...undoActions,
+                  ...(saved.length
+                    ? [
+                        {
+                          label: "See if this changed your fit",
+                          intent: {
+                            type: "job.evaluate",
+                            entity: { type: "application", id: normalized.entity.id },
+                          },
+                        },
+                      ]
+                    : []),
+                ],
+              }
+            : {}),
         },
         now,
       });
@@ -6143,6 +6160,22 @@ export async function executeWorkspaceIntent({
         applicationId: normalized.entity.id,
         gapId,
       });
+      // Same Undo record coaching.plan writes, so a save from an older thread
+      // can be undone too. A claim that was already in the bank adds nothing.
+      const legacyResultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = legacyResultId;
+      const legacyEntry = duplicate
+        ? null
+        : buildKnowledgeWriteEntry({
+            target: "evidence",
+            op: "add",
+            id: claim.id,
+            before: undefined,
+            after: claim,
+            source: { kind: "coaching", applicationId: normalized.entity.id, gapId },
+            writer: "coaching.evidence-save",
+            label: "Evidence claim",
+          });
 
       return appendActionResult({
         repoRoot,
@@ -6159,10 +6192,14 @@ export async function executeWorkspaceIntent({
             claim,
             duplicate,
           },
+          ...(legacyEntry ? [legacyEntry] : []),
         ],
         metadata: {
           state: "saved",
           nextActions: [
+            ...(legacyEntry?.revertible
+              ? [undoNextAction({ messageId: legacyResultId, index: 1, entry: legacyEntry })]
+              : []),
             {
               label: "See if this changed your fit",
               intent: {
