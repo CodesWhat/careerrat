@@ -296,6 +296,67 @@ test("parses {} as empty object", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Single-line flow collections
+// ---------------------------------------------------------------------------
+
+test("parses a flow mapping with typed scalars", () => {
+  const yaml = `cap: { a: 1, b: null, c: "x, y", d: true, e: 1.5, f: plain text, g: 'it''s' }`;
+  assert.deepEqual(parseYaml(yaml), {
+    cap: { a: 1, b: null, c: "x, y", d: true, e: 1.5, f: "plain text", g: "it's" },
+  });
+});
+
+test("parses a flow sequence with quoted commas and numbers", () => {
+  assert.deepEqual(parseYaml(`tags: [a, "b, c", 3, false, ~]`), {
+    tags: ["a", "b, c", 3, false, null],
+  });
+});
+
+test("parses one level of flow nesting", () => {
+  assert.deepEqual(parseYaml(`x: { a: [1, 2], b: { c: 3 } }`), {
+    x: { a: [1, 2], b: { c: 3 } },
+  });
+});
+
+test("flow mapping keeps working with an inline comment after the brace", () => {
+  assert.deepEqual(parseYaml(`cap: { max: 5, window_days: 180 } # per company`), {
+    cap: { max: 5, window_days: 180 },
+  });
+});
+
+test("flow collections work as sequence items and inside mapping items", () => {
+  const yaml = `companies:
+  - company: OpenAI
+    cap: { max: 4, window_days: 180 }
+  - { company: Acme, cap: 2 }
+  - [x, y]
+`;
+  assert.deepEqual(parseYaml(yaml), {
+    companies: [
+      { company: "OpenAI", cap: { max: 4, window_days: 180 } },
+      { company: "Acme", cap: 2 },
+      ["x", "y"],
+    ],
+  });
+});
+
+test("flow empties with inner whitespace and trailing commas parse", () => {
+  assert.deepEqual(parseYaml(`a: { }\nb: [ ]\nc: [1, 2,]`), { a: {}, b: [], c: [1, 2] });
+});
+
+test("text that only looks like a flow collection stays a plain string", () => {
+  assert.deepEqual(parseYaml(`note: [WIP] call back`), { note: "[WIP] call back" });
+  assert.deepEqual(parseYaml(`cap: [1, 2`), { cap: "[1, 2" });
+  assert.deepEqual(parseYaml(`cap: { max }`), { cap: "{ max }" });
+  assert.deepEqual(parseYaml(`items:\n  - [Company] intro`), { items: ["[Company] intro"] });
+});
+
+test("a flow mapping round-trips through the writer as block style", () => {
+  const parsed = parseYaml(`cap: { max: 5, window_days: 180 }`);
+  assert.deepEqual(parseYaml(stringifyYaml(parsed)), parsed);
+});
+
+// ---------------------------------------------------------------------------
 // Nested sequence-of-mappings
 // ---------------------------------------------------------------------------
 

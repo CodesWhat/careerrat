@@ -193,8 +193,49 @@ function readActivityLines(path) {
   return events;
 }
 
-function importLegacyCandidateSetup(pathCtx) {
+const RETIRED_CAPABILITIES = ["authenticated_search", "one_click_apply"];
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Older workspaces carry settings the app has since retired.
+// Migrate them on the parsed docs, in memory, before schema validation; the
+// source files on disk are never rewritten. Returns human-readable warnings.
+function migrateRetiredCandidateSettings(legacy) {
+  const warnings = [];
+  const formDefaults = legacy["form-defaults"];
+  if (isPlainObject(formDefaults) && Object.hasOwn(formDefaults, "auto_submit")) {
+    const old = formDefaults.auto_submit;
+    delete formDefaults.auto_submit;
+    if (typeof old === "boolean") {
+      const automation = isPlainObject(legacy.automation) ? legacy.automation : {};
+      if (automation.submit === "auto" || automation.submit === "manual") {
+        warnings.push(
+          `Dropped retired auto_submit; automation.yml already sets the submit setting (${automation.submit}).`
+        );
+      } else {
+        legacy.automation = { ...automation, submit: old ? "auto" : "manual" };
+        warnings.push(`Moved auto_submit to the submit setting (${legacy.automation.submit}).`);
+      }
+    } else {
+      warnings.push("Dropped retired auto_submit (value was not true or false).");
+    }
+  }
+  const capabilities = legacy.automation?.capabilities;
+  if (isPlainObject(capabilities)) {
+    for (const name of RETIRED_CAPABILITIES) {
+      if (!Object.hasOwn(capabilities, name)) continue;
+      delete capabilities[name];
+      warnings.push(`Dropped retired capability ${name}.`);
+    }
+  }
+  return warnings;
+}
+
+function importLegacyCandidateSetup(pathCtx, warnings) {
   const legacy = loadLegacyCandidateConfig(pathCtx);
+  warnings.push(...migrateRetiredCandidateSettings(legacy));
   const counts = {
     profile: false,
     targeting: false,
@@ -338,8 +379,9 @@ export function importFromTracker({ repoRoot, env, sourceDir, rebaseToday } = {}
     };
   });
 
-  counts.candidate = importLegacyCandidateSetup(pathCtx);
+  const warnings = [];
+  counts.candidate = importLegacyCandidateSetup(pathCtx, warnings);
   counts.sourceConfigs = importLegacySourceConfigs(pathCtx);
 
-  return { ok: true, sourcePath: trackerPath, activityPath, counts };
+  return { ok: true, sourcePath: trackerPath, activityPath, counts, warnings };
 }

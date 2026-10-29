@@ -305,7 +305,7 @@ function cmdImport() {
   const exported = exportToTracker(pathCtx);
   printResult(
     { ...result, exported },
-    `Imported → ${dbDisplayPath()} (${JSON.stringify(result.counts)})`
+    `Imported → ${dbDisplayPath()} (${JSON.stringify(result.counts)})${result.warnings.map((w) => `\n  note: ${w}`).join("")}`
   );
 }
 
