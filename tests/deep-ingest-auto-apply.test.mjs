@@ -105,6 +105,8 @@ test("a grounded evidence proposal saves on its own, logs one entry with an Undo
   const claims = candidateConfigGet({ repoRoot }).evidence.claims;
   assert.equal(claims.length, before + 1);
   assert.ok(claims.some((claim) => claim.id === "auto-claim"));
+  // The review list checks auto-saved evidence against the saved claim ids.
+  assert.ok(deepIngestStateGet({ repoRoot }).confirmed.evidenceClaimIds.includes("auto-claim"));
 
   const [message] = messages(repoRoot);
   assert.equal(message.kind, "action_result");
@@ -118,6 +120,7 @@ test("a grounded evidence proposal saves on its own, logs one entry with an Undo
 
   await undo(repoRoot, message, 0);
   assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, before);
+  assert.ok(!deepIngestStateGet({ repoRoot }).confirmed.evidenceClaimIds.includes("auto-claim"));
 });
 
 test("a grounded story proposal saves as a lane row and Undo removes that row", async () => {

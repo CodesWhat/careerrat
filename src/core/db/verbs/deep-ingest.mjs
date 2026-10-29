@@ -1685,6 +1685,12 @@ export function deepIngestStateGet({ repoRoot, env } = {}) {
       writingVoice: readRows(db, "deep_ingest_writing_voice"),
       honestyBoundaries: readRows(db, "deep_ingest_honesty_boundaries"),
       roleSignals: readRows(db, "deep_ingest_role_signals"),
+      // Saved evidence lives in the candidate claims table, not in the
+      // proposals above, so the client checks auto-saved evidence against it.
+      evidenceClaimIds: db
+        .prepare("SELECT id FROM candidate_evidence_claims")
+        .all()
+        .map((row) => row.id),
     },
     openGaps: proposals.filter(
       (proposal) => proposal.lane === "open_gaps" && proposal.status !== "confirmed"

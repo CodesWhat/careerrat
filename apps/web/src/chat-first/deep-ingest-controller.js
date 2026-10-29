@@ -420,14 +420,15 @@ function proposalTitle(row, summary) {
   return typeof title === "string" && title.trim() ? title.trim() : firstWords(summary);
 }
 
-function savedRowIds(row) {
+function savedEvidenceIds(row) {
   const evidence = row?.output?.evidence;
-  const ids = [
-    ...list(evidence?.insertedIds),
-    ...list(evidence?.identicalIds),
-    ...list(row?.output?.rows).map((item) => item?.id),
-  ];
-  return ids.filter(Boolean);
+  return [...list(evidence?.insertedIds), ...list(evidence?.identicalIds)].filter(Boolean);
+}
+
+function savedLaneRowIds(row) {
+  return list(row?.output?.rows)
+    .map((item) => item?.id)
+    .filter(Boolean);
 }
 
 function proposalQuote(row) {
@@ -518,16 +519,22 @@ export function buildDeepIngestReview(state) {
       heldReason: row?.autoApply?.status === "held" ? row.autoApply.reasons?.[0] || null : null,
     };
   });
-  const liveIds = new Set(
-    Object.values(state.confirmed || {}).flatMap((rows) => list(rows).map((item) => item?.id))
+  const { evidence: _evidenceProposals, evidenceClaimIds, ...laneRows } = state.confirmed || {};
+  const liveEvidenceIds = new Set(list(evidenceClaimIds));
+  const liveRowIds = new Set(
+    Object.values(laneRows).flatMap((rows) => list(rows).map((item) => item?.id))
   );
   const appliedRows = allProposals
     .filter((row) => row?.status === "confirmed" && row?.decisionSource === "automatic")
     .filter((row) => {
       // An Undo removes the saved rows but leaves the proposal confirmed, so a
       // proposal whose recorded rows are all gone no longer counts as saved.
-      const saved = savedRowIds(row);
-      return !saved.length || saved.some((id) => liveIds.has(id));
+      const evidence = savedEvidenceIds(row);
+      const rows = savedLaneRowIds(row);
+      if (!evidence.length && !rows.length) return true;
+      return (
+        evidence.some((id) => liveEvidenceIds.has(id)) || rows.some((id) => liveRowIds.has(id))
+      );
     })
     .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
   const applied = appliedRows.map((row) => ({
