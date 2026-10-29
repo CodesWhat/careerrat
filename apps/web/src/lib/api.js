@@ -299,10 +299,14 @@ export function selectInstalledAiRuntime({ runtimeId, providerFallback = false }
 // in full — never a subset — or the rest silently truncates on write. None
 // of M7's Settings fields are arrays; a future section that edits one
 // (e.g. targeting.role_families) must respect this.
-export function saveCandidateFile(name, patch, { expectedBaseRevision } = {}) {
+//
+// `source: "onboarding"` asks the server to log the save in the thread with an
+// Undo. A change that loosens an honesty boundary or lowers the pay floor/target
+// comes back 409 CONFIRMATION_REQUIRED until it is resent with `confirmed: true`.
+export function saveCandidateFile(name, patch, { expectedBaseRevision, source, confirmed } = {}) {
   return apiFetch(`/api/onboard/candidate/${name}`, {
     method: "POST",
-    body: JSON.stringify({ data: patch, expectedBaseRevision }),
+    body: JSON.stringify({ data: patch, expectedBaseRevision, source, confirmed }),
   });
 }
 
@@ -464,10 +468,10 @@ export async function extractResumeDocx(file) {
   return body;
 }
 
-export function saveEvidenceSeed(claims) {
+export function saveEvidenceSeed(claims, { source } = {}) {
   return apiFetch("/api/onboard/evidence-seed", {
     method: "POST",
-    body: JSON.stringify({ claims }),
+    body: JSON.stringify({ claims, source }),
   });
 }
 

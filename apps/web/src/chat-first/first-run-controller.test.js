@@ -696,12 +696,50 @@ describe("chat-first onboarding controller", () => {
         {
           authorization: { work_authorized: true, requires_sponsorship: false },
         },
+        { source: "onboarding" },
       ],
-      ["form-defaults", { work_authorization: "Yes", requires_sponsorship: "No" }],
+      [
+        "form-defaults",
+        { work_authorization: "Yes", requires_sponsorship: "No" },
+        { source: "onboarding" },
+      ],
     ]);
-    expect(api.saveEvidenceSeed).toHaveBeenCalledWith([
-      { claim: "Led a migration", evidence: "Shipped across three teams" },
+    expect(api.saveEvidenceSeed).toHaveBeenCalledWith(
+      [{ claim: "Led a migration", evidence: "Shipped across three teams" }],
+      { source: "onboarding" }
+    );
+  });
+
+  it("resends a loosening save with confirmed once the user said yes", async () => {
+    const api = { saveCandidateFile: vi.fn().mockResolvedValue({ ok: true }) };
+    const block = {
+      kind: "candidate_patch",
+      payload: { doc: "profile", patch: { compensation: { minimum_base: 120000 } } },
+    };
+    await applyFirstRunConfirmation(block, { api, state: {} });
+    await applyFirstRunConfirmation(block, { api, state: {}, confirmed: true });
+    expect(api.saveCandidateFile.mock.calls).toEqual([
+      ["profile", block.payload.patch, { source: "onboarding" }],
+      ["profile", block.payload.patch, { source: "onboarding", confirmed: true }],
     ]);
+  });
+
+  it("says plainly which evidence claim the firewall refused and why", async () => {
+    const api = {
+      saveEvidenceSeed: vi.fn().mockResolvedValue({
+        added: 0,
+        rejected: [{ claim: "Led the [Company] migration", reason: "has unresolved placeholder" }],
+      }),
+    };
+    await expect(
+      applyFirstRunConfirmation(
+        {
+          kind: "evidence_claim",
+          payload: { claim: "Led the [Company] migration", evidence: "x" },
+        },
+        { api, state: {} }
+      )
+    ).rejects.toThrow("CareerRat didn't save that claim: has unresolved placeholder.");
   });
 
   it("starts a durable company operation and hands its exact id to the UI follower", async () => {

@@ -103,7 +103,8 @@ import { userPath } from "../paths/workspace.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { computeEvidenceWrite, loadEvidence } from "../profile/evidence-writer.mjs";
 import { applyGateWrite, GATE_APPLY_SUMMARIES } from "../profile/gate-apply.mjs";
-import { GATE_ROUTES } from "../profile/gate-writer.mjs";
+import { coerceValue, GATE_ROUTES, resolveRoute } from "../profile/gate-writer.mjs";
+import { classifyConfigChange } from "../profile/loosening.mjs";
 import {
   canonicalSearchSourceUrl,
   platformForHost,
@@ -3698,6 +3699,31 @@ function inboundSummary(item) {
     .slice(0, 200);
 }
 
+// Would this gate write loosen a guard? Reads only the one doc the gate routes to
+// and builds the doc the write would leave; an unknown gate type or a value that
+// won't coerce is not loosening here, applyGateWrite reports those itself.
+function gateLooseningVerdict({ repoRoot, env, type, value }) {
+  let route;
+  let coerced;
+  try {
+    route = resolveRoute(type);
+    coerced = coerceValue(route, value);
+  } catch {
+    return { loosens: false, reasons: [] };
+  }
+  if (route.op !== "set") return { loosens: false, reasons: [] };
+  const before = candidateConfigGet({ repoRoot, env })[route.file];
+  const after = JSON.parse(JSON.stringify(before ?? {}));
+  const parts = route.path.split(".");
+  let cursor = after;
+  for (const part of parts.slice(0, -1)) {
+    if (cursor[part] === null || typeof cursor[part] !== "object") cursor[part] = {};
+    cursor = cursor[part];
+  }
+  cursor[parts.at(-1)] = coerced;
+  return classifyConfigChange(route.file, before, after);
+}
+
 function appendActionResult({
   repoRoot,
   env,
@@ -6192,6 +6218,39 @@ export async function executeWorkspaceIntent({
           );
         }
         const type = String(change.type || "");
+        // Lowering the pay floor or target (or loosening an honesty list) is the
+        // one thing that still asks first; every other write applies and logs.
+        if (input.confirmed !== true) {
+          const verdict = gateLooseningVerdict({ repoRoot, env, type, value: change.value });
+          if (verdict.loosens) {
+            return appendActionResult({
+              repoRoot,
+              env,
+              normalized,
+              intentMessage,
+              text: `${verdict.reasons.join(" ")} Confirm and I'll make the change.`,
+              metadata: {
+                state: "needs-confirmation",
+                nextActions: [
+                  {
+                    label: "Confirm",
+                    intent: {
+                      type: "settings.apply",
+                      entity: normalized.entity,
+                      input: { ...input, confirmed: true },
+                    },
+                  },
+                ],
+              },
+              operationResult: {
+                ok: false,
+                reason: "confirmation-required",
+                reasons: verdict.reasons,
+              },
+              now,
+            });
+          }
+        }
         let applied;
         try {
           applied = applyGateWrite({ repoRoot, env, type, value: change.value });

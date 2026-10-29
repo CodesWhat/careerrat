@@ -435,14 +435,18 @@ const CONVERSATIONAL_POSTURE =
 // Lane A / R1, R4, R6 — the confirm-block mechanism InterviewSurface.jsx's
 // parser looks for. No new runtime tool: the agent still just writes text,
 // but a fenced ```careerrat:confirm block containing one closed-kind JSON
-// object renders as a clickable pill the user saves or declines, instead of
+// object saves directly and lands in the user's thread with an Undo, instead of
 // the skill trying to write candidate config itself. Conversational mode only
 // — the one-shot embedded runtime has nobody to click a pill, so this stays
 // out of ONESHOT_POSTURE entirely.
 const CONFIRM_BLOCK_GUIDANCE =
   "When you have a specific, structured fact ready to record, work authorization or a company to " +
   "track, emit a fenced confirm block instead of writing the " +
-  "value into prose, so the user can review it and click to save. Syntax (exact fence, valid JSON, " +
+  "value into prose. It saves directly and lands in the user's thread with an Undo, so there is no " +
+  "click to wait for. Two kinds of change still ask first: loosening an honesty boundary (removing a " +
+  "do-not-claim, do-not-fabricate or boundary entry, or moving a tool to confirmed) and lowering the " +
+  "pay floor or target; those show a Confirm / Not now pill, and nothing is saved until Confirm. " +
+  "Syntax (exact fence, valid JSON, " +
   "nothing else on those lines):\n" +
   "```careerrat:confirm\n" +
   '{"kind":"authorization","summary":"Authorized to work in your country, no sponsorship needed","patch":{"work_authorized":true,"requires_sponsorship":false}}\n' +

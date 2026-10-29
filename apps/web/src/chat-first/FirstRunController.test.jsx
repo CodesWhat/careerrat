@@ -1471,9 +1471,13 @@ describe("FirstRunController chat event reconciliation", () => {
       text: "I need to confirm sponsorship. Reply yes or no.",
       answerMode: "yes-no",
     });
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      candidate: { domain: "developer infrastructure" },
-    });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      {
+        candidate: { domain: "developer infrastructure" },
+      },
+      { source: "onboarding" }
+    );
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1760,9 +1764,13 @@ describe("FirstRunController chat event reconciliation", () => {
     await flushEffects();
     const view = rerender(module, api);
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      candidate: { domain: "Developer infrastructure" },
-    });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      {
+        candidate: { domain: "Developer infrastructure" },
+      },
+      { source: "onboarding" }
+    );
     expect(view.props.messages[0].blocks).toEqual([
       expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
     ]);
@@ -1792,6 +1800,75 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.sendChatMessage.mock.calls[0][1]).toContain("profile sections");
   });
 
+  it("saves a tightening block straight away with no Confirm pill", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    await bootController(module, api);
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(twoBlockReply()), {
+      lastEventId: "2",
+    });
+    rerender(module, api);
+    await flushEffects();
+    const view = rerender(module, api);
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      { candidate: { domain: "Infrastructure" } },
+      { source: "onboarding" }
+    );
+    expect(view.props.messages[0].blocks.map((block) => block.status)).toEqual([
+      "resolved",
+      "resolved",
+    ]);
+    expect(view.props.messages[0].options).toEqual([]);
+  });
+
+  it("holds a loosening block behind Confirm and Not now, then resends it with confirmed", async () => {
+    const module = await import("./FirstRunController.jsx");
+    const api = createApi();
+    api.saveCandidateFile.mockRejectedValueOnce(
+      new ApiError(409, {
+        ok: false,
+        code: "CONFIRMATION_REQUIRED",
+        reasons: ["Lowers your minimum base pay."],
+      })
+    );
+    await bootController(module, api);
+    const reply = [
+      "Want me to lower your minimum?",
+      "```careerrat:confirm",
+      '{"kind":"candidate_patch","summary":"Lower minimum","payload":{"doc":"profile","patch":{"compensation":{"minimum_base":120000}}}}',
+      "```",
+    ].join("\n");
+    sse.calls.at(-1).options.onEvent("assistant", assistantPayload(reply), { lastEventId: "2" });
+    rerender(module, api);
+    await flushEffects();
+    let view = rerender(module, api);
+
+    const message = view.props.messages[0];
+    expect(message.blocks[0]).toEqual(
+      expect.objectContaining({
+        status: "needs-confirmation",
+        confirmReasons: ["Lowers your minimum base pay."],
+      })
+    );
+    expect(message.options.map((option) => option.label)).toEqual(["Confirm", "Not now"]);
+    // The chat is not told to move on while the change waits for a yes.
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+
+    await view.props.onChooseOption(message.id, "confirm:0");
+    await flushEffects();
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(2);
+    expect(api.saveCandidateFile).toHaveBeenLastCalledWith(
+      "profile",
+      { compensation: { minimum_base: 120000 } },
+      { source: "onboarding", confirmed: true }
+    );
+    view = rerender(module, api);
+    expect(view.props.messages[0].blocks[0].status).toBe("resolved");
+  });
+
   it("does not ask the agent to repeat a next question already carried by the saved turn", async () => {
     const module = await import("./FirstRunController.jsx");
     const api = createApi();
@@ -1812,11 +1889,15 @@ describe("FirstRunController chat event reconciliation", () => {
     await flushEffects();
     view = rerender(module, api);
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      candidate: {
-        domain: "software engineering — backend and platform infrastructure",
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      {
+        candidate: {
+          domain: "software engineering — backend and platform infrastructure",
+        },
       },
-    });
+      { source: "onboarding" }
+    );
     expect(view.props.messages[0].blocks).toEqual([
       expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
     ]);
@@ -1838,9 +1919,13 @@ describe("FirstRunController chat event reconciliation", () => {
     rerender(module, api);
     await flushEffects();
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
-      keep_signals: ["strong pay"],
-    });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "targeting",
+      {
+        keep_signals: ["strong pay"],
+      },
+      { source: "onboarding" }
+    );
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1859,9 +1944,13 @@ describe("FirstRunController chat event reconciliation", () => {
     rerender(module, api);
     await flushEffects();
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      compensation: { target_base: 210000 },
-    });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      {
+        compensation: { target_base: 210000 },
+      },
+      { source: "onboarding" }
+    );
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1885,9 +1974,13 @@ describe("FirstRunController chat event reconciliation", () => {
     rerender(module, api);
     await flushEffects();
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      candidate: { domain: "developer infrastructure" },
-    });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      {
+        candidate: { domain: "developer infrastructure" },
+      },
+      { source: "onboarding" }
+    );
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1997,9 +2090,13 @@ describe("FirstRunController chat event reconciliation", () => {
     view = rerender(module, api);
 
     expect(api.saveCandidateFile).toHaveBeenCalledTimes(2);
-    expect(api.saveCandidateFile).toHaveBeenLastCalledWith("targeting", {
-      cut_signals: ["On-site-only roles"],
-    });
+    expect(api.saveCandidateFile).toHaveBeenLastCalledWith(
+      "targeting",
+      {
+        cut_signals: ["On-site-only roles"],
+      },
+      { source: "onboarding" }
+    );
     expect(view.props.messages[0].blocks).toEqual([
       expect.objectContaining({ status: "error" }),
       expect.objectContaining({ status: "resolved", resultSummary: "Saved" }),
@@ -2623,13 +2720,18 @@ describe("FirstRunController chat event reconciliation", () => {
     expect(api.parseResumeText).toHaveBeenCalledWith("# Jordan Rivera\nStaff Software Engineer", {
       save: true,
     });
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      candidate: { full_name: "Jordan Rivera", location: "New York, NY" },
-      location: { home: "New York, NY" },
-    });
-    expect(api.saveEvidenceSeed).toHaveBeenCalledWith([
-      { claim: "Led a platform team", evidence: "Candidate resume" },
-    ]);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      {
+        candidate: { full_name: "Jordan Rivera", location: "New York, NY" },
+        location: { home: "New York, NY" },
+      },
+      { source: "onboarding" }
+    );
+    expect(api.saveEvidenceSeed).toHaveBeenCalledWith(
+      [{ claim: "Led a platform team", evidence: "Candidate resume" }],
+      { source: "onboarding" }
+    );
     expect(api.sendChatMessage.mock.calls.at(-1)[1]).toContain(
       'The resume "jordan-resume.md" was uploaded and parsed'
     );
@@ -2885,9 +2987,13 @@ describe("FirstRunController chat event reconciliation", () => {
     await Promise.resolve();
     const updated = rerender(module, api);
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      candidate: { full_name: "Jordan Rivera" },
-    });
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      {
+        candidate: { full_name: "Jordan Rivera" },
+      },
+      { source: "onboarding" }
+    );
     expect(updated.props.error).toMatch(/resume.*saved.*send any message/i);
   });
 
