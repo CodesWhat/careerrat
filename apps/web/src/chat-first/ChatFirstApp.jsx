@@ -1431,6 +1431,7 @@ export function ChatFirstAppView({
           counts={deepIngest?.counts}
           sources={deepIngest?.sources}
           proposals={deepIngest?.proposals}
+          applied={deepIngest?.applied}
           receipt={deepIngest?.receipt}
           inputMode={deepIngest?.inputMode}
           inputValue={deepIngest?.inputValue}
@@ -2272,7 +2273,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         if (controller.signal.aborted || !result) return;
         applyDeepOperationResult(result, (next) =>
           result.resultRef?.type === "deep-ingest-proposal-set"
-            ? `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+            ? `Analysis complete. Findings that passed their checks saved on their own. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need your review.`
             : `Material saved locally. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
         );
         void dashboard.refetch?.().catch(() => undefined);
@@ -2951,7 +2952,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           storage: deepOperationStorage,
         }),
       (next) =>
-        `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+        `Analysis complete. Findings that passed their checks saved on their own. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need your review.`
     );
   }
 

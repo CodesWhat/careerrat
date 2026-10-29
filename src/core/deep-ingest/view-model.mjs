@@ -38,6 +38,7 @@ export function buildDeepIngestViewModel({ repoRoot, env } = {}) {
     openGaps,
     confirmed: {
       evidence: confirmedEvidence(db),
+      evidenceClaimIds: state.confirmed.evidenceClaimIds,
       storyBank: readRows(db, CONFIRMED_TABLES.storyBank),
       writingVoice: readRows(db, CONFIRMED_TABLES.writingVoice),
       honestyBoundaries: readRows(db, CONFIRMED_TABLES.honestyBoundaries),
