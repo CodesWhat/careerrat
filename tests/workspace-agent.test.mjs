@@ -57,6 +57,7 @@ import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
 import {
   linkedinProposalBatchGet,
   linkedinProposalBatchPut,
+  linkedinProposalDecide,
 } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
@@ -12975,6 +12976,118 @@ test("linkedin.optimize-request: pure read — application and communication row
 
   assert.deepEqual(readApplication(repoRoot, app.id), appBefore);
   assert.deepEqual(readCommunication(repoRoot, comm.id), commBefore);
+});
+
+// In-app staging: the run saves the batch with autoApprove, the action result
+// carries one knowledge_write entry per staged surface plus a knowledge.revert
+// next action for each.
+async function runLinkedinStaging(repoRoot) {
+  grantLinkedinOptimize(repoRoot, {
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
+  return executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    runLinkedinOptimizeImpl: async () => {
+      const saved = linkedinProposalBatchPut({
+        repoRoot,
+        env: {},
+        autoApprove: true,
+        batch: {
+          surfaces: [
+            {
+              surfaceId: "headline",
+              surface: "Headline",
+              current: "Software Engineer",
+              proposed: "Applied AI Engineer | LLM Systems",
+              rationale: "Matches your targeting focus.",
+              evidenceRef: "evidence/ai-projects.md",
+            },
+            {
+              surfaceId: "about",
+              surface: "About",
+              current: "I build software.",
+              proposed: "Add [your top project] here",
+              rationale: "Reflects recent evidence entries.",
+              evidenceRef: "evidence/ai-projects.md",
+            },
+          ],
+        },
+      });
+      return {
+        kind: "browser_workflow_result",
+        skill: "optimize-linkedin",
+        state: "completed",
+        summary: "1 profile suggestion staged for your profile.",
+        batchId: saved.id,
+        staged: saved.staged,
+        held: saved.held,
+      };
+    },
+    intent: {
+      type: "linkedin.optimize-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+}
+
+test("linkedin.optimize-request: staged surfaces log a knowledge_write entry with a knowledge.revert Undo, and the proposals card shows them approved", async () => {
+  const repoRoot = tempRepo();
+  const result = await runLinkedinStaging(repoRoot);
+  const last = result.messages.at(-1);
+  const entries = last.artifacts.filter((a) => a.kind === "knowledge_write");
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].target, "linkedin:proposal");
+  assert.equal(entries[0].id, "headline");
+  assert.equal(entries[0].revertible, true);
+  const undo = last.metadata.nextActions.filter((a) => a.intent.type === "knowledge.revert");
+  assert.equal(undo.length, 1);
+  assert.equal(last.artifacts[undo[0].intent.input.index], entries[0]);
+  assert.equal(undo[0].intent.input.messageId, last.id);
+  const proposals = last.artifacts.find((a) => a.kind === "linkedin_profile_proposals");
+  assert.equal(proposals.surfaces[0].decision.source, "automatic");
+  assert.equal(proposals.surfaces[1].decision, null);
+});
+
+test("knowledge.revert: undoing a staged LinkedIn surface returns it to undecided, and a second undo is refused", async () => {
+  const repoRoot = tempRepo();
+  const result = await runLinkedinStaging(repoRoot);
+  const last = result.messages.at(-1);
+  const undo = last.metadata.nextActions.find((a) => a.intent.type === "knowledge.revert").intent;
+  const batchId = last.artifacts.find((a) => a.kind === "linkedin_profile_proposals").batchId;
+
+  const first = await executeWorkspaceIntent({ repoRoot, env: {}, intent: undo });
+  assert.equal(first.messages.at(-1).metadata.state, "reverted");
+  const stored = linkedinProposalBatchGet({ repoRoot, env: {}, id: batchId });
+  assert.equal(stored.surfaces[0].decision, null);
+  assert.equal(stored.status, "pending");
+
+  const second = await executeWorkspaceIntent({ repoRoot, env: {}, intent: undo });
+  assert.equal(second.messages.at(-1).metadata.state, "refused");
+  assert.equal(second.messages.at(-1).metadata.reason, "already-reverted");
+});
+
+test("knowledge.revert: a staged LinkedIn surface already applied is refused and stays applied", async () => {
+  const repoRoot = tempRepo();
+  const result = await runLinkedinStaging(repoRoot);
+  const last = result.messages.at(-1);
+  const undo = last.metadata.nextActions.find((a) => a.intent.type === "knowledge.revert").intent;
+  const batch = last.artifacts.find((a) => a.kind === "linkedin_profile_proposals");
+  linkedinProposalDecide({
+    repoRoot,
+    env: {},
+    batchId: batch.batchId,
+    surfaceId: "headline",
+    action: "applied",
+    version: batch.version,
+  });
+
+  const refused = await executeWorkspaceIntent({ repoRoot, env: {}, intent: undo });
+  assert.equal(refused.messages.at(-1).metadata.state, "refused");
+  assert.equal(refused.messages.at(-1).metadata.reason, "applied");
+  const stored = linkedinProposalBatchGet({ repoRoot, env: {}, id: batch.batchId });
+  assert.equal(stored.surfaces[0].decision.action, "applied");
 });
 
 test("linkedin.proposal-decide: approve records the decision and leaves metadata.state needs-review while a surface remains undecided", async () => {

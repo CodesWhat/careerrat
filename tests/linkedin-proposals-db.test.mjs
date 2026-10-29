@@ -17,6 +17,7 @@ import {
   linkedinProposalBatchPreflight,
   linkedinProposalBatchPut,
   linkedinProposalDecide,
+  linkedinProposalUnapprove,
 } from "../src/core/db/verbs/linkedin-proposals.mjs";
 
 const cleanupRoots = [];
@@ -573,5 +574,142 @@ test("linkedinProposalDecide: an invalid action throws BAD_REQUEST", () => {
       assert.equal(error.code, "BAD_REQUEST");
       return true;
     }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// autoApprove staging and linkedinProposalUnapprove
+// ---------------------------------------------------------------------------
+
+test("linkedinProposalBatchPut autoApprove: clean surfaces are approved automatically, a held surface stays undecided", () => {
+  const repoRoot = tempRepo();
+  const batch = twoSurfaceBatch();
+  batch.surfaces.push(
+    surface({ surfaceId: "skills", surface: "Skills", proposed: "Add [your top tool] here" })
+  );
+  const saved = linkedinProposalBatchPut({ repoRoot, env: {}, batch, autoApprove: true });
+  assert.deepEqual(
+    saved.staged.map((s) => s.surfaceId),
+    ["headline", "about"]
+  );
+  assert.equal(saved.held.length, 1);
+  assert.equal(saved.held[0].surfaceId, "skills");
+  const stored = linkedinProposalBatchGet({ repoRoot, env: {}, id: saved.id });
+  assert.equal(stored.status, "pending");
+  assert.equal(stored.version, 3);
+  const bySurface = Object.fromEntries(stored.surfaces.map((s) => [s.surfaceId, s.decision]));
+  assert.equal(bySurface.headline.action, "approve");
+  assert.equal(bySurface.headline.source, "automatic");
+  assert.equal(bySurface.skills, null);
+});
+
+test("linkedinProposalBatchPut autoApprove: every clean surface staged makes the batch reviewed", () => {
+  const repoRoot = tempRepo();
+  const saved = linkedinProposalBatchPut({
+    repoRoot,
+    env: {},
+    batch: twoSurfaceBatch(),
+    autoApprove: true,
+  });
+  assert.equal(linkedinProposalBatchGet({ repoRoot, env: {}, id: saved.id }).status, "reviewed");
+});
+
+test("linkedinProposalBatchPut without autoApprove leaves every surface undecided", () => {
+  const repoRoot = tempRepo();
+  const saved = linkedinProposalBatchPut({ repoRoot, env: {}, batch: twoSurfaceBatch() });
+  assert.deepEqual(saved.staged, []);
+  const stored = linkedinProposalBatchGet({ repoRoot, env: {}, id: saved.id });
+  assert.ok(stored.surfaces.every((s) => s.decision === null));
+});
+
+test("linkedinProposalUnapprove: returns a staged surface to undecided and the batch to pending, and a second undo is refused", () => {
+  const repoRoot = tempRepo();
+  const saved = linkedinProposalBatchPut({
+    repoRoot,
+    env: {},
+    batch: twoSurfaceBatch(),
+    autoApprove: true,
+  });
+  const decidedAt = saved.staged[0].decidedAt;
+  const after = linkedinProposalUnapprove({
+    repoRoot,
+    env: {},
+    batchId: saved.id,
+    surfaceId: "headline",
+    decidedAt,
+  });
+  assert.equal(after.surfaces.find((s) => s.surfaceId === "headline").decision, null);
+  assert.equal(after.status, "pending");
+  assert.equal(after.version, saved.meta.version + 1);
+  assert.throws(
+    () =>
+      linkedinProposalUnapprove({
+        repoRoot,
+        env: {},
+        batchId: saved.id,
+        surfaceId: "headline",
+        decidedAt,
+      }),
+    (error) => error.code === "CONFLICT"
+  );
+});
+
+test("linkedinProposalUnapprove: refuses once the field is applied, and the applied decision stays", () => {
+  const repoRoot = tempRepo();
+  const saved = linkedinProposalBatchPut({
+    repoRoot,
+    env: {},
+    batch: twoSurfaceBatch(),
+    autoApprove: true,
+  });
+  const applied = linkedinProposalDecide({
+    repoRoot,
+    env: {},
+    batchId: saved.id,
+    surfaceId: "headline",
+    action: "applied",
+    version: saved.meta.version,
+  });
+  assert.throws(
+    () =>
+      linkedinProposalUnapprove({
+        repoRoot,
+        env: {},
+        batchId: saved.id,
+        surfaceId: "headline",
+        decidedAt: saved.staged[0].decidedAt,
+      }),
+    (error) => error.code === "CONFLICT" && error.reason === "applied"
+  );
+  const stored = linkedinProposalBatchGet({ repoRoot, env: {}, id: saved.id });
+  assert.equal(stored.surfaces[0].decision.action, "applied");
+  assert.equal(stored.version, applied.version);
+});
+
+test("linkedinProposalUnapprove: refuses a user's own approval and a wrong version", () => {
+  const repoRoot = tempRepo();
+  const { id } = linkedinProposalBatchPut({ repoRoot, env: {}, batch: twoSurfaceBatch() });
+  linkedinProposalDecide({
+    repoRoot,
+    env: {},
+    batchId: id,
+    surfaceId: "headline",
+    action: "approve",
+    version: 1,
+  });
+  assert.throws(
+    () => linkedinProposalUnapprove({ repoRoot, env: {}, batchId: id, surfaceId: "headline" }),
+    (error) => error.code === "CONFLICT"
+  );
+  assert.throws(
+    () =>
+      linkedinProposalUnapprove({
+        repoRoot,
+        env: {},
+        batchId: id,
+        surfaceId: "headline",
+        version: 99,
+      }),
+    (error) => error.code === "CONFLICT"
   );
 });

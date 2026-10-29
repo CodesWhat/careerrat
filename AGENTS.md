@@ -669,7 +669,8 @@ Rules for intake:
   profile read for <roles>", "fix my headline/About", or wants a LinkedIn profile
   pass: use `optimize-linkedin` (browser automation; reads the profile and
   proposes honest, evidence-backed rewrites — dry-run preview first, then optional
-  per-field write-back). Reading + suggesting requires `careerrat automation status`
+  per-field write-back; in the app, suggestions are staged automatically with an
+  Undo, and writing to LinkedIn still asks per field). Reading + suggesting requires `careerrat automation status`
   to show `profile_optimize` allowed for `linkedin`; writing the edits back is a
   separate gate, `profile_apply`. It also runs as a no-browser suggest-only fix-doc.
 - If the user says they got an interview, screen, recruiter call, assessment, or

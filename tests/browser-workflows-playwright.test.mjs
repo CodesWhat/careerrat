@@ -282,7 +282,7 @@ test("Playwright fixture: relationship sourcing captures review-only LinkedIn le
   assert.equal(lead.status, "review");
 });
 
-test("Playwright fixture: LinkedIn profile read creates proposals without editing the profile", async () => {
+test("Playwright fixture: LinkedIn profile read stages proposals automatically without editing the profile", async () => {
   const repoRoot = workspace({
     profile_optimize: { enabled: true, platforms: { linkedin: true } },
   });
@@ -302,9 +302,15 @@ test("Playwright fixture: LinkedIn profile read creates proposals without editin
   });
   assert.equal(result.state, "completed");
   assert.equal(result.proposed, 2);
-  const batch = linkedinProposalBatchLatest({ repoRoot, env: {} });
+  const batch = linkedinProposalBatchLatest({ repoRoot, env: {}, status: null });
   assert.equal(batch.surfaces.length, 2);
-  assert.ok(batch.surfaces.every((surface) => surface.decision === null));
+  assert.equal(result.staged.length, 2);
+  assert.match(result.summary, /staged for your profile\. Nothing was written to LinkedIn/);
+  assert.ok(
+    batch.surfaces.every(
+      (surface) => surface.decision.action === "approve" && surface.decision.source === "automatic"
+    )
+  );
 });
 
 test("LinkedIn proposal schema retry keeps the frozen provider plan after provider settings change", async () => {

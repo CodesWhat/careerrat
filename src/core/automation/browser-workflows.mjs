@@ -609,12 +609,22 @@ export async function optimizeLinkedinInApp({
     repoRoot,
     env,
     batch: { surfaces: proposals },
+    autoApprove: true,
   });
+  const staged = saved.staged || [];
+  const held = saved.held || [];
+  const plural = (n) => `suggestion${n === 1 ? "" : "s"}`;
   return workflowResult("optimize-linkedin", "completed", {
     title: "LinkedIn suggestions ready",
-    summary: `${proposals.length} profile suggestion${proposals.length === 1 ? "" : "s"} ready for review. No profile edits were applied.`,
+    summary: `${staged.length} profile ${plural(staged.length)} staged for your profile. Nothing was written to LinkedIn.${
+      held.length
+        ? ` ${held.length} ${plural(held.length)} left for you to review (${held[0].reason}).`
+        : ""
+    }`,
     batchId: saved.id,
     proposed: proposals.length,
+    staged,
+    held,
     at,
   });
 }

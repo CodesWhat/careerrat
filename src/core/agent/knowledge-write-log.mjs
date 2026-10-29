@@ -20,6 +20,7 @@ import {
   deepIngestConfirmedItemUpdate,
   deepIngestStateGet,
 } from "../db/verbs/deep-ingest.mjs";
+import { linkedinProposalUnapprove } from "../db/verbs/linkedin-proposals.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { computeEvidenceWrite } from "../profile/evidence-writer.mjs";
 import { restoreRerankRows } from "../strategy/review.mjs";
@@ -32,6 +33,7 @@ const EVIDENCE_IN_USE_NOTE = "Other work cites this claim now, so it can't be re
 const NO_INVERSE_NOTE = "This kind of change can't be undone from the thread.";
 const CLAIM_TEXT_TAKEN_NOTE =
   "Another claim already has that text, so CareerRat couldn't restore it.";
+const LINKEDIN_APPLIED_NOTE = "This was already written to LinkedIn, so CareerRat didn't undo it.";
 const UNDO_NOTE = "This undo can't be undone from the thread.";
 
 const DEEP_INGEST_LANE_KEYS = {
@@ -356,6 +358,26 @@ function revertDeepIngest({ repoRoot, env, entry }) {
   return { ok: true };
 }
 
+// A staged LinkedIn suggestion goes back to undecided. The batch row refuses
+// when the field was already written to LinkedIn or was decided again since.
+function revertLinkedinStaging({ repoRoot, env, entry }) {
+  try {
+    linkedinProposalUnapprove({
+      repoRoot,
+      env,
+      batchId: entry.path,
+      surfaceId: entry.id,
+      decidedAt: entryValue(entry, "after")?.decidedAt,
+    });
+  } catch (error) {
+    if (error?.code !== "CONFLICT") throw error;
+    return error.reason === "applied"
+      ? refuse(LINKEDIN_APPLIED_NOTE, "applied")
+      : refuse(STALE_NOTE, "stale");
+  }
+  return { ok: true };
+}
+
 // revertKnowledgeWrite: runs one stored entry's inverse. Never throws for the
 // plain refusals (stale, in use, private, already undone); those come back as
 // { ok:false, note }. `existing` is the knowledge_write artifacts already in the
@@ -390,6 +412,8 @@ export function revertKnowledgeWrite({
     outcome = revertDeepIngest({ repoRoot, env, entry });
   } else if (entry.target === "rows:rerank") {
     outcome = revertRerank({ repoRoot, env, entry });
+  } else if (entry.target === "linkedin:proposal" && entry.id && entry.path) {
+    outcome = revertLinkedinStaging({ repoRoot, env, entry });
   } else {
     outcome = refuse(NO_INVERSE_NOTE, "unsupported");
   }

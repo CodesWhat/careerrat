@@ -437,12 +437,19 @@ function knowledgeValueCopy(value, absent) {
 function KnowledgeWriteLine({ artifact, message, index, reverted, onIntentAction, intentBusy }) {
   const label = artifact.label || artifact.path || artifact.id || "a saved item";
   const canUndo = artifact.revertible === true && !reverted && typeof onIntentAction === "function";
+  const staged = artifact.target === "linkedin:proposal";
   return (
     <div className="chat-first-indented-card chat-first-knowledge-write">
-      <span>
-        Changed {label} from {knowledgeValueCopy(artifact.before, artifact.beforeAbsent)} to{" "}
-        {knowledgeValueCopy(artifact.after, artifact.afterAbsent)}
-      </span>
+      {staged ? (
+        <span>
+          Staged for your profile: {label}. CareerRat asks before anything goes on LinkedIn.
+        </span>
+      ) : (
+        <span>
+          Changed {label} from {knowledgeValueCopy(artifact.before, artifact.beforeAbsent)} to{" "}
+          {knowledgeValueCopy(artifact.after, artifact.afterAbsent)}
+        </span>
+      )}
       {reverted ? <small> Undone</small> : null}
       {!reverted && artifact.revertible !== true && artifact.revertNote ? (
         <small> {artifact.revertNote}</small>

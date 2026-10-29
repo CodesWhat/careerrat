@@ -24,7 +24,8 @@ negotiation channel).
 When the user asks to optimize, review, or improve their LinkedIn profile, or to
 make it read for the roles they're targeting, run `optimize-linkedin`. It produces
 a read-only before→after diff first (the default), and only writes edits back when
-`profile_apply` is enabled, confirm-first per field.
+`profile_apply` is enabled, confirm-first per field. In the app, suggestions are
+staged automatically with an Undo, and writing to LinkedIn still asks per field.
 
 When the user asks how risky, stable, or healthy a company is (layoffs, finances,
 morale, "is this a safe place to land"), or to factor company risk into a role, run

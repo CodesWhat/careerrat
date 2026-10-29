@@ -11,6 +11,7 @@ import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 
 const DECIDE_ACTIONS = new Set(["approve", "reject", "applied"]);
+const AUTOMATIC = "automatic";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -28,6 +29,25 @@ function makeError(message, code) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+// Surfaces the auto-stage pass leaves for the user: anything the proposer
+// flagged (placeholder / needsUser / unsupported), a bracketed or NEEDS YOU
+// placeholder in the proposed text, or an evidenceRef that admits no support.
+const NO_SUPPORT_REFS = new Set(["none", "n/a", "na", "unsupported", "no evidence", "unknown"]);
+
+function holdReason(surface) {
+  if (surface.placeholder || /\[[^\]]+\]|NEEDS YOU/i.test(String(surface.proposed))) {
+    return "it has a placeholder to fill in";
+  }
+  if (surface.needsUser) return "it needs your input";
+  if (
+    surface.unsupported ||
+    NO_SUPPORT_REFS.has(String(surface.evidenceRef).trim().toLowerCase())
+  ) {
+    return "it isn't backed by your evidence";
+  }
+  return null;
 }
 
 function readBatchById(db, id) {
@@ -130,26 +150,48 @@ export function linkedinProposalBatchPreflight({ batch } = {}) {
   );
 }
 
-// linkedinProposalBatchPut({repoRoot, env, batch}) -> {id, meta}. Assigns an
-// id when missing, stores a fresh review-state batch (status "pending",
-// version 1, every surface's decision reset to null) — this is always a
-// whole-batch CREATE, never a partial patch (decide() below owns per-surface
-// state transitions on an already-stored batch). Real callers never supply
-// batch.id (the id is server-generated); a caller-supplied id (test seeds)
-// upserts and deliberately resets any prior decisions to the fresh state.
-export function linkedinProposalBatchPut({ repoRoot, env, batch } = {}) {
+// linkedinProposalBatchPut({repoRoot, env, batch, autoApprove}) -> {id, meta,
+// staged, held}. Assigns an id when missing, stores a fresh review-state batch
+// (status "pending", version 1, every surface's decision reset to null) — this
+// is always a whole-batch CREATE, never a partial patch (decide() below owns
+// per-surface state transitions on an already-stored batch). Real callers never
+// supply batch.id (the id is server-generated); a caller-supplied id (test
+// seeds) upserts and deliberately resets any prior decisions to the fresh state.
+//
+// autoApprove (the in-app review) stages every surface that passed the guards
+// above by recording an approve decision with source "automatic", in the same
+// transaction as the write. Surfaces with a placeholder, needs-user, or
+// unsupported marker stay undecided and come back in `held` with the reason.
+// Staging never writes to LinkedIn; the live write stays confirmed per field.
+export function linkedinProposalBatchPut({ repoRoot, env, batch, autoApprove = false } = {}) {
   linkedinProposalBatchPreflight({ batch });
 
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
     const id = String(batch.id || `linkedin_proposal_${randomUUID()}`);
     const createdAt = nowIso();
+    const staged = [];
+    const held = [];
+    const surfaces = clone(batch.surfaces).map((surface) => {
+      if (!autoApprove) return { ...surface, decision: null };
+      const reason = holdReason(surface);
+      if (reason) {
+        held.push({ surfaceId: surface.surfaceId, surface: surface.surface, reason });
+        return { ...surface, decision: null };
+      }
+      staged.push({ surfaceId: surface.surfaceId, surface: surface.surface, decidedAt: createdAt });
+      return {
+        ...surface,
+        decision: { action: "approve", source: AUTOMATIC, decidedAt: createdAt },
+      };
+    });
     const data = {
       id,
-      status: "pending",
+      status: surfaces.every((s) => s.decision) ? "reviewed" : "pending",
       createdAt,
-      version: 1,
-      surfaces: clone(batch.surfaces).map((surface) => ({ ...surface, decision: null })),
+      // One bump per decision, the same as decide() would have made.
+      version: 1 + staged.length,
+      surfaces,
     };
     // Second backstop pass over the actual row shape (id/status/createdAt
     // included, not just batch.surfaces) — cheap, runs once per write, right
@@ -164,7 +206,7 @@ export function linkedinProposalBatchPut({ repoRoot, env, batch } = {}) {
        VALUES (?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
     ).run(id, JSON.stringify(data), createdAt);
-    return { id, meta: { version: data.version, createdAt } };
+    return { id, meta: { version: data.version, createdAt }, staged, held };
   });
 }
 
@@ -287,6 +329,84 @@ export function linkedinProposalDecide({
       next,
       `linkedin proposal decide refused: private compensation input detected in decision payload for surface "${surfaceId}" (current-comp leak guard)`
     );
+    db.prepare(`UPDATE linkedin_profile_proposals SET data = ?, updated_at = ? WHERE id = ?`).run(
+      JSON.stringify(next),
+      nowIso(),
+      String(batchId)
+    );
+    return readBatchById(db, batchId);
+  });
+}
+
+// linkedinProposalUnapprove({repoRoot, env, batchId, surfaceId, decidedAt, version})
+// -> updated batch. The Undo for an automatic approval: returns the surface to
+// undecided. Only a surface still carrying its automatic approve can go back;
+// one already marked applied (written to LinkedIn) or decided by the user since
+// refuses with CONFLICT. `decidedAt` pins the exact approval being undone and
+// `version`, when given, is the usual whole-batch check. The user-facing
+// proposal-decide intent never reaches this; only the revert flow does.
+export function linkedinProposalUnapprove({
+  repoRoot,
+  env,
+  batchId,
+  surfaceId,
+  decidedAt,
+  version,
+} = {}) {
+  if (!String(batchId || "").trim()) {
+    throw makeError("linkedinProposalUnapprove requires batchId", "BAD_REQUEST");
+  }
+  if (!String(surfaceId || "").trim()) {
+    throw makeError("linkedinProposalUnapprove requires surfaceId", "BAD_REQUEST");
+  }
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const batch = readBatchById(db, batchId);
+    if (!batch) {
+      throw makeError(`linkedin proposal batch not found: ${batchId}`, "CONFLICT");
+    }
+    if (version != null && version !== "" && Number(batch.version) !== Number(version)) {
+      throw makeError(
+        `linkedin proposal batch version conflict: expected ${version}, found ${batch.version}`,
+        "CONFLICT"
+      );
+    }
+    const surfaceIndex = batch.surfaces.findIndex((s) => s.surfaceId === surfaceId);
+    if (surfaceIndex === -1) {
+      throw makeError(
+        `linkedin proposal surface not found: ${surfaceId} in batch ${batchId}`,
+        "CONFLICT"
+      );
+    }
+    const decision = batch.surfaces[surfaceIndex].decision;
+    if (decision?.action === "applied") {
+      const err = makeError(
+        `linkedin proposal surface is already written to LinkedIn: ${surfaceId}`,
+        "CONFLICT"
+      );
+      err.reason = "applied";
+      throw err;
+    }
+    if (
+      decision?.action !== "approve" ||
+      decision.source !== AUTOMATIC ||
+      (decidedAt && decision.decidedAt !== decidedAt)
+    ) {
+      const err = makeError(
+        `linkedin proposal surface was changed since it was staged: ${surfaceId}`,
+        "CONFLICT"
+      );
+      err.reason = "changed";
+      throw err;
+    }
+    const surfaces = clone(batch.surfaces);
+    surfaces[surfaceIndex] = { ...surfaces[surfaceIndex], decision: null };
+    const next = {
+      ...clone(batch),
+      surfaces,
+      status: surfaces.every((s) => s.decision) ? "reviewed" : "pending",
+      version: Number(batch.version) + 1,
+    };
     db.prepare(`UPDATE linkedin_profile_proposals SET data = ?, updated_at = ? WHERE id = ?`).run(
       JSON.stringify(next),
       nowIso(),
