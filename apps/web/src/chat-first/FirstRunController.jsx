@@ -1183,7 +1183,14 @@ export function FirstRunController({
       }
       await api.saveCandidateFile("profile", profilePatch, { source: "onboarding" });
     }
-    if (claims.length) await api.saveEvidenceSeed(claims, { source: "onboarding" });
+    // Claims the evidence firewall refused weren't saved, so they mustn't be
+    // reported back to the agent as saved.
+    let savedClaims = claims;
+    if (claims.length) {
+      const seeded = await api.saveEvidenceSeed(claims, { source: "onboarding" });
+      const refused = new Set(list(seeded?.rejected).map((item) => item?.claim));
+      savedClaims = claims.filter((item) => !refused.has(String(item?.claim ?? "").trim()));
+    }
 
     const existingTargeting = onboardState?.data?.targeting ?? {};
     const targetingPatch = {};
@@ -1196,7 +1203,7 @@ export function FirstRunController({
     if (Object.keys(targetingPatch).length) {
       await api.saveCandidateFile("targeting", targetingPatch, { source: "onboarding" });
     }
-    return { candidatePatch, claims, targetingSeed };
+    return { candidatePatch, claims: savedClaims, targetingSeed };
   }
 
   async function saveKnowledgeSection(item, values = {}) {
