@@ -472,3 +472,17 @@ test("round-trip: targeting-like structure with sequence of mappings", () => {
   const parsed = parseYaml(yaml);
   assert.deepEqual(parsed, targeting);
 });
+
+test("a lone bracketed word stays a string and the writer round-trips bracket-led text", () => {
+  assert.deepEqual(parseYaml("company: [Company]"), { company: "[Company]" });
+  for (const value of ["[Remote]", "[a, b]", "{ x: 1 }", "[Remote] Senior Engineer"]) {
+    assert.deepEqual(parseYaml(stringifyYaml({ note: value })), { note: value });
+  }
+});
+
+test("an apostrophe inside a plain flow item is just a character", () => {
+  assert.deepEqual(parseYaml("companies: [O'Reilly, Acme]"), { companies: ["O'Reilly", "Acme"] });
+  assert.deepEqual(parseYaml("p: { publisher: O'Reilly, enabled: true }"), {
+    p: { publisher: "O'Reilly", enabled: true },
+  });
+});

@@ -209,10 +209,15 @@ function migrateRetiredCandidateSettings(legacy) {
     const old = formDefaults.auto_submit;
     delete formDefaults.auto_submit;
     if (typeof old === "boolean") {
+      const hasAutomation = legacy.automation !== undefined && legacy.automation !== null;
       const automation = isPlainObject(legacy.automation) ? legacy.automation : {};
-      if (automation.submit === "auto" || automation.submit === "manual") {
+      // Never overwrite an existing automation doc or submit value, valid or
+      // not: validation below still has to see (and refuse) a bad one.
+      if (hasAutomation && !isPlainObject(legacy.automation)) {
+        warnings.push("Dropped retired auto_submit; automation.yml is not a settings map.");
+      } else if (Object.hasOwn(automation, "submit")) {
         warnings.push(
-          `Dropped retired auto_submit; automation.yml already sets the submit setting (${automation.submit}).`
+          `Dropped retired auto_submit; automation.yml already sets the submit setting (${String(automation.submit)}).`
         );
       } else {
         legacy.automation = { ...automation, submit: old ? "auto" : "manual" };

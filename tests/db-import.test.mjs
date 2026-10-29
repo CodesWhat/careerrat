@@ -456,3 +456,13 @@ test("importFromTracker migrates legacy source config files into SQLite idempote
   const count = db.prepare("SELECT COUNT(*) AS n FROM candidate_source_configs").get().n;
   assert.equal(count, 2, "re-import must upsert source configs, not duplicate them");
 });
+
+test("importFromTracker never overwrites an existing submit setting, so a bad one is still refused", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-source");
+  writeSourceFixture(sourceDir);
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  writeFileSync(join(repoRoot, "candidate/form-defaults.yml"), "auto_submit: true\n");
+  writeFileSync(join(repoRoot, "candidate/automation.yml"), "submit: manul\n");
+  assert.throws(() => importFromTracker({ repoRoot, sourceDir }), /automation/);
+});

@@ -364,7 +364,14 @@ function parseFlowCollection(t) {
   }
   const inner = t.slice(1, -1);
   const parts = inner.trim() === "" ? [] : splitFlowItems(inner, t);
-  if (open === "[") return parts.map((p) => parseScalar(p));
+  if (open === "[") {
+    // A lone unquoted word in brackets ("[Company]", "[Remote]") is how
+    // placeholders and labels have always been written, so it stays a string.
+    if (parts.length === 1 && !inner.includes(",") && !/^["'[{]/.test(parts[0])) {
+      throw new SyntaxError(`Single bracketed word stays a string: ${t}`);
+    }
+    return parts.map((p) => parseScalar(p));
+  }
   const obj = {};
   for (const part of parts) {
     const colonIdx = findMappingColon(part);
@@ -385,13 +392,17 @@ function splitFlowItems(s, whole) {
   let i = 0;
   while (i < s.length) {
     const ch = s[i];
-    if (ch === '"') {
+    // A quote only opens a quoted value at the item's start or right after a
+    // "key:", so an apostrophe inside a plain value (O'Reilly) is just a character.
+    const before = s.slice(start, i).trim();
+    const atItemStart = before === "" || before.endsWith(":");
+    if (ch === '"' && atItemStart) {
       i++;
       while (i < s.length && s[i] !== '"') {
         if (s[i] === "\\") i++;
         i++;
       }
-    } else if (ch === "'") {
+    } else if (ch === "'" && atItemStart) {
       i++;
       while (i < s.length) {
         if (s[i] === "'" && s[i + 1] === "'") {
@@ -574,7 +585,8 @@ function needsQuotes(s) {
   if (s === "null" || s === "~") return true;
   if (/^-?\d+$/.test(s)) return true;
   if (/^-?\d+\.\d+$/.test(s)) return true;
-  if (s === "[]" || s === "{}") return true;
+  // Anything starting like a flow collection is quoted so it reads back as text.
+  if (s.startsWith("[") || s.startsWith("{")) return true;
   // Contains characters that are problematic unquoted.
   if (s.includes(":")) return true;
   if (s.includes("#")) return true;
