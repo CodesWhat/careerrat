@@ -578,6 +578,24 @@ describe("deep ingest chat-first controller", () => {
     expect(review.sources[0].canAnalyze).toBe(false);
   });
 
+  it("drops a saved finding from the list once its rows are undone", () => {
+    const kept = proposal({
+      id: "kept",
+      status: "confirmed",
+      decisionSource: "automatic",
+      output: { rows: [{ id: "story-1", existed: false }] },
+    });
+    const undone = proposal({
+      id: "undone",
+      status: "confirmed",
+      decisionSource: "automatic",
+      output: { evidence: { insertedIds: ["evidence-gone"] } },
+    });
+    const review = buildDeepIngestReview(state({ proposals: [kept, undone], reviewQueue: [] }));
+
+    expect(review.applied.map((row) => row.id)).toEqual(["kept"]);
+  });
+
   it.each(["failed", "manual_fallback"])(
     "gives a %s source plain recovery guidance and retry/remove controls",
     (status) => {

@@ -950,6 +950,75 @@ function assertEvidenceClaimsUnused(db, claimIds) {
   throw err;
 }
 
+// The merge itself, run inside a caller's open transaction so a caller that
+// needs more writes to commit or roll back with it (deep-ingest confirm) can.
+export function mergeEvidenceClaimsInDb(db, { claims, recordActivity = true } = {}) {
+  const existing = readEvidence(db).claims;
+  const seenClaims = new Map(
+    existing.map((claim) => [String(claim.claim || "").trim(), String(claim.id || "")])
+  );
+  const usedIds = new Set(existing.map((claim) => String(claim.id || "")));
+  const existingById = new Map(existing.map((claim) => [String(claim.id || ""), claim]));
+  const stmt = db.prepare(
+    `INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)
+   ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
+  );
+  let added = 0;
+  let skipped = 0;
+  for (const raw of claims) {
+    const claimText = String(raw?.claim || "").trim();
+    const rawId = raw?.id ? String(raw.id) : "";
+    const existingIdForText = seenClaims.get(claimText);
+    if (!claimText || (existingIdForText && existingIdForText !== rawId)) {
+      skipped += 1;
+      continue;
+    }
+    const replacingExistingId = rawId && existingById.has(rawId);
+    const id =
+      rawId && (!usedIds.has(rawId) || existingIdForText === rawId || replacingExistingId)
+        ? rawId
+        : nextClaimId(usedIds);
+    if (replacingExistingId) {
+      const previousClaimText = String(existingById.get(rawId)?.claim || "").trim();
+      if (previousClaimText && previousClaimText !== claimText)
+        seenClaims.delete(previousClaimText);
+    }
+    seenClaims.set(claimText, id);
+    usedIds.add(id);
+    const data = {
+      ...raw,
+      id,
+      claim: claimText,
+      evidence: String(raw?.evidence || ""),
+    };
+    stmt.run(id, JSON.stringify(data), new Date().toISOString());
+    added += 1;
+  }
+  const evidence = readEvidence(db);
+  assertValid("evidence", evidence);
+  const meta = added > 0 && recordActivity ? bumpMeta(db) : null;
+  const event =
+    added > 0 && recordActivity
+      ? logActivityEvent(db, {
+          type: "system",
+          title: "Evidence bank updated",
+          summary: `${added} evidence ${added === 1 ? "claim" : "claims"} saved${
+            skipped ? `; ${skipped} duplicate${skipped === 1 ? "" : "s"} skipped` : ""
+          }.`,
+          tags: ["operation:candidate:evidence-save"],
+        })
+      : null;
+  return {
+    added,
+    skipped,
+    total: evidence.claims.length,
+    data: evidence,
+    setup: refreshCandidateSetup(db),
+    meta,
+    event,
+  };
+}
+
 export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity = true } = {}) {
   if (!Array.isArray(claims)) {
     const err = new Error("claims must be an array");
@@ -959,72 +1028,7 @@ export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity =
   assertCleanEvidenceClaims(claims);
   return runVerb(
     { repoRoot, env },
-    (db) => {
-      const existing = readEvidence(db).claims;
-      const seenClaims = new Map(
-        existing.map((claim) => [String(claim.claim || "").trim(), String(claim.id || "")])
-      );
-      const usedIds = new Set(existing.map((claim) => String(claim.id || "")));
-      const existingById = new Map(existing.map((claim) => [String(claim.id || ""), claim]));
-      const stmt = db.prepare(
-        `INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
-      );
-      let added = 0;
-      let skipped = 0;
-      for (const raw of claims) {
-        const claimText = String(raw?.claim || "").trim();
-        const rawId = raw?.id ? String(raw.id) : "";
-        const existingIdForText = seenClaims.get(claimText);
-        if (!claimText || (existingIdForText && existingIdForText !== rawId)) {
-          skipped += 1;
-          continue;
-        }
-        const replacingExistingId = rawId && existingById.has(rawId);
-        const id =
-          rawId && (!usedIds.has(rawId) || existingIdForText === rawId || replacingExistingId)
-            ? rawId
-            : nextClaimId(usedIds);
-        if (replacingExistingId) {
-          const previousClaimText = String(existingById.get(rawId)?.claim || "").trim();
-          if (previousClaimText && previousClaimText !== claimText)
-            seenClaims.delete(previousClaimText);
-        }
-        seenClaims.set(claimText, id);
-        usedIds.add(id);
-        const data = {
-          ...raw,
-          id,
-          claim: claimText,
-          evidence: String(raw?.evidence || ""),
-        };
-        stmt.run(id, JSON.stringify(data), new Date().toISOString());
-        added += 1;
-      }
-      const evidence = readEvidence(db);
-      assertValid("evidence", evidence);
-      const meta = added > 0 && recordActivity ? bumpMeta(db) : null;
-      const event =
-        added > 0 && recordActivity
-          ? logActivityEvent(db, {
-              type: "system",
-              title: "Evidence bank updated",
-              summary: `${added} evidence ${added === 1 ? "claim" : "claims"} saved${
-                skipped ? `; ${skipped} duplicate${skipped === 1 ? "" : "s"} skipped` : ""
-              }.`,
-              tags: ["operation:candidate:evidence-save"],
-            })
-          : null;
-      return {
-        added,
-        skipped,
-        total: evidence.claims.length,
-        data: evidence,
-        setup: refreshCandidateSetup(db),
-        meta,
-        event,
-      };
-    },
+    (db) => mergeEvidenceClaimsInDb(db, { claims, recordActivity }),
     { requireExistingTracker: true }
   );
 }

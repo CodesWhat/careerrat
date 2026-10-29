@@ -17,8 +17,8 @@ import { assertCleanEvidenceClaims } from "../../profile/evidence-validation.mjs
 import { computeEvidenceWrite } from "../../profile/evidence-writer.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
-import { candidateEvidenceMerge } from "./candidate.mjs";
-import { bumpMeta, logActivityEvent } from "./shared.mjs";
+import { mergeEvidenceClaimsInDb } from "./candidate.mjs";
+import { bumpMeta, logActivityEvent, runVerb } from "./shared.mjs";
 
 const SOURCE_TABLE = "deep_ingest_sources";
 const CHUNK_TABLE = "deep_ingest_source_chunks";
@@ -598,15 +598,21 @@ function stableRow(row) {
   return JSON.stringify(out);
 }
 
+// A saved lane row is flat and confirmed. A builder row carries its content
+// under `payload` and a review status, so both the automatic path and a manual
+// Confirm flatten it here; fields set on the item itself win over the payload.
 function laneRowData(proposal, raw, updatedAt) {
   const id = raw.id ? String(raw.id) : `${proposal.lane}_${randomUUID()}`;
+  const { payload, ...rest } = clone(raw);
+  const nested = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
   return {
-    ...clone(raw),
+    ...nested,
+    ...rest,
     id,
-    status: raw.status || "confirmed",
+    status: "confirmed",
     sourceId: String(raw.sourceId || proposal.sourceId),
     sourceProposalId: proposal.id,
-    supportingQuote: raw.supportingQuote ? String(raw.supportingQuote) : null,
+    supportingQuote: rest.supportingQuote ? String(rest.supportingQuote) : null,
     confirmedAt: updatedAt,
     updatedAt,
   };
@@ -1005,9 +1011,6 @@ export function deepIngestConfirmProposal({
   });
   const { items, evidencePlan } = prepared;
 
-  // The canonical evidence writer runs its own transaction, so it runs between
-  // the checks above and the proposal write below.
-  let evidenceMerge = null;
   if (evidencePlan) {
     if (evidencePlan.accepted === 0) {
       throw makeError("Deep ingest evidence confirmation requires a claim");
@@ -1023,18 +1026,35 @@ export function deepIngestConfirmProposal({
       };
       throw err;
     }
-    if (evidencePlan.claims.length) {
-      evidenceMerge = candidateEvidenceMerge({
-        ...ctx,
+  }
+
+  // Evidence claims land in the same transaction as the proposal write, so a
+  // version conflict or a claim id another writer took in between rolls the
+  // whole confirm back. Other lanes have no evidence write and use the plain
+  // deep-ingest transaction.
+  const run = evidencePlan?.claims.length
+    ? (fn) => runVerb(ctx, fn, { requireExistingTracker: true })
+    : (fn) => runDeepIngestVerb(ctx, fn);
+
+  const result = run((db) => {
+    const current = requireRow(db, PROPOSAL_TABLE, proposalId, "Deep ingest proposal");
+    assertProposalVersion(current, expected);
+    let evidenceMerge = null;
+    if (evidencePlan?.claims.length) {
+      const fresh = planEvidenceWrites(db, items, current, evidencePlan.claims[0].confirmedAt);
+      const planned = (plan) =>
+        JSON.stringify([plan.claims.map((claim) => claim.id), plan.refused, plan.identical]);
+      if (planned(fresh) !== planned(evidencePlan)) {
+        throw makeError(
+          "Deep ingest evidence changed while confirming; review the proposal again",
+          "VERSION_CONFLICT"
+        );
+      }
+      evidenceMerge = mergeEvidenceClaimsInDb(db, {
         claims: evidencePlan.claims,
         recordActivity: false,
       });
     }
-  }
-
-  return runDeepIngestVerb(ctx, (db) => {
-    const current = requireRow(db, PROPOSAL_TABLE, proposalId, "Deep ingest proposal");
-    assertProposalVersion(current, expected);
     const updatedAt = nowIso();
     const confirmedOutput = { ...clone(edits), items };
     const savedIds = evidencePlan ? evidencePlan.claims.map((claim) => claim.id) : [];
@@ -1102,6 +1122,9 @@ export function deepIngestConfirmProposal({
     });
     return { ...readRow(db, PROPOSAL_TABLE, next.id), ...activity };
   });
+  // runVerb adds its own envelope; callers get the proposal row as before.
+  const { ok: _ok, exported: _exported, ...proposalResult } = result;
+  return proposalResult;
 }
 
 const HOLD_BLOCKED_REASON =
@@ -1115,7 +1138,57 @@ const HOLD_ROLE_PAY = "It touches a pay floor or target, so it waits for your ye
 
 const HONESTY_LOOSEN_WORDS =
   /\b(remove|removes|removed|delete|retire|retired|revoke|revoked|withdraw|withdrawn|relax|relaxed|loosen|lift|lifted|drop|dropped|allow|allowed|permit)\b/i;
-const ROLE_PAY_KEY = /(floor|minimum|target|salary|compensation|comp|pay|earnings)/i;
+// Matched per word of the key (camelCase and snake_case split), so "supportingQuote"
+// doesn't read as "ote".
+const ROLE_PAY_WORDS = new Set([
+  "floor",
+  "minimum",
+  "min",
+  "target",
+  "salary",
+  "pay",
+  "comp",
+  "compensation",
+  "base",
+  "ote",
+]);
+const NUMERIC_LOOKING = /^[^\d]{0,3}\d[\d,._\s]*\s?[kKmM]?\s?[A-Za-z]{0,4}$/;
+
+function isPayKey(key) {
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .some((word) => ROLE_PAY_WORDS.has(word));
+}
+// A honesty boundary at one of these levels is a guard; moving off it is a loosening.
+const HONESTY_GUARD_LEVELS = /^(do[\s_-]?not[\s_-]?claim|adjacent|boundary|restricted)$/i;
+
+function levelText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+// An explicit from/to move: off a guard level, or to "removed", loosens.
+function transitionLoosens(from, to) {
+  const target = levelText(to);
+  if (!target) return false;
+  if (/^(removed?|deleted?|retired?|none|null)$/i.test(target)) return true;
+  const source = levelText(from);
+  return Boolean(source && HONESTY_GUARD_LEVELS.test(source) && !HONESTY_GUARD_LEVELS.test(target));
+}
+
+// Pay can sit under any key at any depth, as a number or a numeric-looking string.
+function valueHasPay(value, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 8) return false;
+  for (const [key, child] of Object.entries(value)) {
+    if (isPayKey(key)) {
+      if (typeof child === "number" && Number.isFinite(child)) return true;
+      if (typeof child === "string" && NUMERIC_LOOKING.test(child.trim())) return true;
+    }
+    if (child && typeof child === "object" && valueHasPay(child, depth + 1)) return true;
+  }
+  return false;
+}
 
 function itemFields(item) {
   return [item, item?.payload].filter((value) => value && typeof value === "object");
@@ -1136,14 +1209,9 @@ function laneLoosensReasons(proposal, items) {
           }
         }
         if (fields.remove === true || fields.removed === true) reasons.add(HOLD_LOOSENS_HONESTY);
+        if (transitionLoosens(fields.from, fields.to)) reasons.add(HOLD_LOOSENS_HONESTY);
       }
-      if (proposal.lane === "role_signals") {
-        for (const key of Object.keys(fields)) {
-          if (ROLE_PAY_KEY.test(key) && typeof fields[key] === "number") {
-            reasons.add(HOLD_ROLE_PAY);
-          }
-        }
-      }
+      if (proposal.lane === "role_signals" && valueHasPay(fields)) reasons.add(HOLD_ROLE_PAY);
     }
   }
   return [...reasons];

@@ -27,6 +27,8 @@ export function autoApplyDeepIngestProposals({ repoRoot, env, proposals } = {}) 
       appendDeepIngestWriteLog({ repoRoot, env, proposal: result.proposal });
       applied.push(result.proposal);
     } else if (result.held) {
+      // A proposal that saved some claims and held the rest still logs what saved.
+      if (result.partial) appendDeepIngestWriteLog({ repoRoot, env, proposal: result.proposal });
       held.push(result.proposal);
     }
   }

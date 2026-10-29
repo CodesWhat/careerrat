@@ -11,6 +11,8 @@ import {
   candidateConfigGet,
   candidateEvidenceMerge,
   candidateSetupInitialize,
+  deepIngestConfirmedForGeneration,
+  deepIngestConfirmProposal,
   deepIngestProposalPut,
   deepIngestSourceCreate,
   deepIngestStateGet,
@@ -309,4 +311,265 @@ test("an open question proposal is never saved on its own", () => {
   const result = autoApplyDeepIngestProposals({ repoRoot, proposals: [proposal] });
   assert.equal(result.applied.length, 0);
   assert.equal(stored(repoRoot, proposal).status, "review_needed");
+});
+
+// A builder row as the real pipeline stores it: content under `payload`, status
+// review_needed, the quote and chunk on the row itself.
+function seedBuilderProposal(repoRoot, { lane, payload, id, text = TEXT }) {
+  chunkCounter += 1;
+  const chunkId = `chunk-${lane}-${chunkCounter}`;
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: { targetShape: "auto", sourceKind: "paste", text, chunks: [{ id: chunkId, text }] },
+  }).source;
+  return deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "auto",
+    lane,
+    proposal: {
+      id,
+      lane,
+      sourceId: source.id,
+      chunkId,
+      status: "review_needed",
+      confidence: 0.9,
+      payload,
+      validation: { status: "passed", blockedReasons: [] },
+      supportingQuote: "Led the migration.",
+    },
+  });
+}
+
+test("auto-saved builder rows are flat, confirmed, and visible to generation in every lane", () => {
+  const repoRoot = tempRepo();
+  const rows = [
+    {
+      lane: "story_bank",
+      id: "b-story",
+      payload: { title: "Led the migration", situation: "A legacy stack.", summary: "Led it." },
+    },
+    {
+      lane: "writing_voice",
+      id: "b-voice",
+      payload: { title: "Plain voice", summary: "Short sentences.", doPhrases: ["I led"] },
+    },
+    {
+      lane: "honesty_boundaries",
+      id: "b-honesty",
+      payload: {
+        title: "No people management",
+        boundaryType: "do_not_claim",
+        text: "Do not claim to manage people.",
+        summary: "Do not claim to manage people.",
+      },
+    },
+    {
+      lane: "role_signals",
+      id: "b-signal",
+      payload: {
+        title: "Platform work",
+        roleFamily: "platform",
+        text: "Wants platform roles.",
+        summary: "Wants platform roles.",
+      },
+    },
+  ];
+  const proposals = rows.map((row) => seedBuilderProposal(repoRoot, row));
+  const result = autoApplyDeepIngestProposals({ repoRoot, proposals });
+  assert.equal(result.applied.length, 4);
+
+  const generation = deepIngestConfirmedForGeneration({ repoRoot });
+  assert.equal(generation.storyBank[0].id, "b-story");
+  assert.equal(generation.storyBank[0].situation, "A legacy stack.");
+  assert.equal(generation.writingVoice[0].id, "b-voice");
+  assert.deepEqual(generation.writingVoice[0].doPhrases, ["I led"]);
+  assert.equal(generation.honestyBoundaries[0].id, "b-honesty");
+  assert.equal(generation.honestyBoundaries[0].text, "Do not claim to manage people.");
+  assert.equal(generation.roleSignals[0].id, "b-signal");
+  assert.equal(generation.roleSignals[0].text, "Wants platform roles.");
+
+  const confirmed = deepIngestStateGet({ repoRoot }).confirmed;
+  for (const row of [
+    ...confirmed.storyBank,
+    ...confirmed.writingVoice,
+    ...confirmed.honestyBoundaries,
+    ...confirmed.roleSignals,
+  ]) {
+    assert.equal(row.status, "confirmed");
+    assert.equal(row.payload, undefined);
+  }
+});
+
+test("a confirm that loses the version race saves no evidence claims", () => {
+  const repoRoot = tempRepo();
+  const proposal = seedProposal(repoRoot, {
+    lane: "evidence_claims",
+    items: [
+      {
+        id: "race-claim",
+        claim: "Built the review queue.",
+        evidence: "Built the review queue.",
+        supportingQuote: "Built the review queue.",
+      },
+    ],
+  });
+  const before = candidateConfigGet({ repoRoot }).evidence.claims.length;
+  assert.throws(
+    () =>
+      deepIngestConfirmProposal({
+        repoRoot,
+        proposalId: proposal.id,
+        expectedVersion: proposal.version + 1,
+      }),
+    { code: "VERSION_CONFLICT" }
+  );
+  assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, before);
+  assert.equal(stored(repoRoot, proposal).status, "review_needed");
+});
+
+test("evidence claims commit with the proposal write: a failure after the merge leaves none saved", () => {
+  const repoRoot = tempRepo();
+  const proposal = seedProposal(repoRoot, {
+    lane: "evidence_claims",
+    items: [
+      {
+        id: "atomic-claim",
+        claim: "Built the review queue.",
+        evidence: "Built the review queue.",
+        supportingQuote: "Built the review queue.",
+      },
+    ],
+  });
+  const before = candidateConfigGet({ repoRoot }).evidence.claims.length;
+  const db = openDb({ repoRoot });
+  db.exec(`CREATE TEMP TRIGGER fail_proposal_write BEFORE UPDATE ON deep_ingest_proposals
+    BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END`);
+  try {
+    assert.throws(() =>
+      deepIngestConfirmProposal({
+        repoRoot,
+        proposalId: proposal.id,
+        expectedVersion: proposal.version,
+      })
+    );
+  } finally {
+    db.exec("DROP TRIGGER fail_proposal_write");
+  }
+  assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, before);
+  assert.equal(stored(repoRoot, proposal).status, "review_needed");
+});
+
+test("role signals hold on a nested pay field and on a string amount", () => {
+  const repoRoot = tempRepo();
+  const nested = seedProposal(repoRoot, {
+    lane: "role_signals",
+    items: [
+      {
+        id: "signal-nested",
+        title: "Pay",
+        summary: "Wants more.",
+        details: { ranges: [{ baseSalary: 120000 }] },
+        supportingQuote: "Led the migration.",
+      },
+    ],
+  });
+  const text = seedProposal(repoRoot, {
+    lane: "role_signals",
+    items: [
+      {
+        id: "signal-text",
+        title: "Pay",
+        summary: "Wants more.",
+        target_comp: "$150,000",
+        supportingQuote: "Led the migration.",
+      },
+    ],
+  });
+  const plain = seedProposal(repoRoot, {
+    lane: "role_signals",
+    items: [
+      {
+        id: "signal-plain",
+        title: "Platform work",
+        summary: "Wants platform roles.",
+        confidence: 0.8,
+        supportingQuote: "Led the migration.",
+      },
+    ],
+  });
+  const result = autoApplyDeepIngestProposals({ repoRoot, proposals: [nested, text, plain] });
+  assert.equal(result.held.length, 2);
+  assert.equal(result.applied.length, 1);
+  assert.match(stored(repoRoot, nested).autoApply.reasons.join(" "), /pay floor or target/);
+  assert.match(stored(repoRoot, text).autoApply.reasons.join(" "), /pay floor or target/);
+});
+
+test("honesty items with an explicit loosening transition are held", () => {
+  const repoRoot = tempRepo();
+  const loosen = (id, from, to) =>
+    seedProposal(repoRoot, {
+      lane: "honesty_boundaries",
+      items: [
+        {
+          id,
+          title: "Boundary change",
+          summary: "A boundary moves.",
+          from,
+          to,
+          supportingQuote: "Led the migration.",
+        },
+      ],
+    });
+  const toConfirmed = loosen("h-1", "do-not-claim", "confirmed");
+  const underscored = loosen("h-2", "do_not_claim", "confirmed");
+  const adjacent = loosen("h-3", "adjacent", "confirmed");
+  const removed = loosen("h-4", "confirmed", "removed");
+  const tightened = loosen("h-5", "confirmed", "do_not_claim");
+  const result = autoApplyDeepIngestProposals({
+    repoRoot,
+    proposals: [toConfirmed, underscored, adjacent, removed, tightened],
+  });
+  assert.equal(result.held.length, 4);
+  assert.deepEqual(
+    result.applied.map((row) => row.id),
+    [tightened.id]
+  );
+});
+
+test("a partly saved evidence proposal logs one entry with one Undo and keeps the refused claim in review", async () => {
+  const repoRoot = tempRepo();
+  const proposal = seedProposal(repoRoot, {
+    lane: "evidence_claims",
+    items: [
+      {
+        id: "part-good",
+        claim: "Built the review queue.",
+        evidence: "Built the review queue.",
+        supportingQuote: "Built the review queue.",
+      },
+      {
+        id: "part-bad",
+        claim: "Led the [Company] migration.",
+        evidence: "Led the migration.",
+        supportingQuote: "Led the migration.",
+      },
+    ],
+  });
+  const before = candidateConfigGet({ repoRoot }).evidence.claims.length;
+  const result = autoApplyDeepIngestProposals({ repoRoot, proposals: [proposal] });
+
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.held.length, 1);
+  assert.equal(stored(repoRoot, proposal).status, "review_needed");
+  assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, before + 1);
+
+  const logged = messages(repoRoot);
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].artifacts.length, 1);
+  assert.equal(logged[0].artifacts[0].id, "part-good");
+  assert.equal(logged[0].metadata.nextActions.length, 1);
+
+  await undo(repoRoot, logged[0], 0);
+  assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, before);
 });
