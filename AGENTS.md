@@ -166,7 +166,8 @@ task, and `workspace/tracker.json`, then recommend and run the owning skill.
 - If a sourced role is high-fit or needs a body read, run `evaluate-job`, then
   `apply-job` only after a KEEP verdict.
 - If an evaluated job is at REVIEW with named fit gaps and the user wants to
-  close them, run `coach-gaps`. It must stay evidence-grounded and may conclude
+  close them, run `coach-gaps`. The app also runs it on its own when the verdict
+  lands, once per evaluation. It must stay evidence-grounded and may conclude
   that there is no honest close path yet.
 - If an interview is scheduled or an invite arrives, run `interview-prep`; if the
   scheduling thread itself needs times or confirmation, run `schedule-meeting`.
@@ -604,8 +605,9 @@ Rules for intake:
   hiring-momentum, financial, sentiment, and leadership signals, scores a
   `healthy|watch|risky` rating with provenance, persists it to the tracker, and
   feeds the fit score only where it cross-cuts a stated candidate need (otherwise
-  it stands alone as its own signal). Cost-gated: auto-fires at the interview stage
-  by default (`modes.yml#company_health`), and runs manually anytime. The rating is
+  it stands alone as its own signal). It runs on its own when an application reaches
+  the fire stage (interview by default, `modes.yml#company_health`) with no fresh
+  rating, and manually anytime. The rating is
   an INTERNAL signal only — it never enters an outbound artifact.
 - If the user says "find more job boards", "discover new sources", "what boards
   should I be on", or `search-jobs` has gone dry: use `research-boards`.

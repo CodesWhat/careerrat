@@ -78,6 +78,7 @@ export function mountTrackOutcomeRoutes({
   repoRoot,
   env = process.env,
   runTrackOutcome = defaultRunTrackOutcome,
+  workspaceAgentRuntime,
 }) {
   addRoute("POST", "/api/track-outcome", async (req, res) => {
     let body;
@@ -133,12 +134,14 @@ export function mountTrackOutcomeRoutes({
         return;
       }
 
+      const before = workspaceAgentRuntime?.snapshotApplicationState?.();
       const persisted = persistDecision({
         repoRoot,
         env,
         applicationId,
         decision: result.decision,
       });
+      workspaceAgentRuntime?.afterApplicationWrite?.(before);
 
       sendJson(res, 200, {
         ok: true,
