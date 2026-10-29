@@ -1,6 +1,6 @@
 ---
 name: coach-gaps
-description: When a job's evaluate-job verdict lands at gate REVIEW with named fit gaps, name each gap a plan the candidate can act on — either an honest evidence-claim draft grounded in evidence already on record, or an explicit no-close-path — and route a confirmed draft through the evidence firewall before offering a re-evaluation.
+description: When a job's evaluate-job verdict lands at gate REVIEW with named fit gaps, name each gap a plan the candidate can act on — either an honest evidence-claim draft grounded in evidence already on record, or an explicit no-close-path — and save each draft through the evidence firewall, with an undo, before offering a re-evaluation.
 metadata:
   tier_1_inputs:
     - application.evaluation.gate
@@ -113,25 +113,30 @@ onto the application row's `coachingPlan` field — no new DB verb. Shape:
 ```
 
 `status` starts `"open"` on every gap and only ever moves forward — `"closed"` once its draft
-is confirmed into evidence (STEP 3), `"dismissed"` if the candidate skips it. This mirrors
+is saved into evidence (STEP 3), `"dismissed"` if the candidate skips it. This mirrors
 `config/tracker.schema.json`'s `coachingPlan` block.
 
 ---
 
-## STEP 3 — Confirm a draft into evidence (the firewall)
+## STEP 3 — Save the drafts into evidence (the firewall)
 
-The candidate reviews each gap in the Coaching card and either confirms the draft ("Add to
-evidence") or skips it. Confirming fires the `coaching.evidence-save` workspace intent, which
-persists **only** the plan's own stored, reviewed `gap.suggestion.draftClaim` — there is no
-caller-supplied override, so the text the candidate saw on the card is the exact text that
-gets written. Before touching anything, the executor checks two invariants:
+Drafts grounded in evidence already on record are saved automatically, right after the plan is
+built: `coaching.plan` runs the same save for every open gap that has an evidence-claim draft,
+and each saved claim shows up in the job thread with an Undo. A draft the firewall refuses is not
+saved: its gap stays open and the message says why. Undoing a saved claim removes it from the
+evidence bank and reopens its gap; if other work cites the claim now, the undo is refused and the
+gap stays closed. The legacy `coaching.evidence-save` intent (buttons persisted in older threads)
+runs the same save for one gap, and answers "Already saved." for a gap the plan already closed.
+Either way only the plan's own stored `gap.suggestion.draftClaim` is persisted. There is no
+caller-supplied override, so the text in the plan is the exact text that gets written. Before
+touching anything, the executor checks two invariants:
 
 - **Staleness.** `coachingPlan.basedOn` is compared against the application's current
   `evaluation` (`evaluatedAt` is the discriminator; `gate`/`fitScore` are a sanity check on
   top). A plan built against a since-superseded evaluation throws `COACHING_PLAN_STALE`
   instead of acting — re-run STEP 0 first. The Coaching card mirrors this read-only: once
   stale it stays visible but disables Add/Skip with a plain notice to coach again.
-- **Gap status.** Only an `"open"` gap can be saved; a closed or dismissed gap throws
+- **Gap status.** Only an `"open"` gap can be saved; a dismissed gap throws
   `COACHING_GAP_NOT_OPEN` rather than silently re-writing it.
 
 Then the draft routes through the **same** evidence firewall every other guarded evidence
@@ -150,8 +155,9 @@ write uses — never a bypass:
 3. On success (added or a reported duplicate), the matching gap's `status` flips to `"closed"`
    via `appSetFields`.
 
-A validation failure surfaces to the candidate as a real error — it is never silently
-swallowed or treated as a save.
+A validation failure is never silently swallowed or treated as a save: in the auto-save it
+leaves the gap open and is reported in the plan message, and from the legacy click it surfaces
+as a real error.
 
 Skipping a gap sets its `status` to `"dismissed"` via a plain `appSetFields` field patch (no
 intent needed for a skip — it changes nothing about evidence or scoring).

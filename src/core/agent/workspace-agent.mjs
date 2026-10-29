@@ -101,7 +101,7 @@ import { packetProvenanceForContext, packetProvenanceMatches } from "../packet/p
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
-import { computeEvidenceWrite, loadEvidence } from "../profile/evidence-writer.mjs";
+import { computeEvidenceWrite, loadEvidence, slugifyClaimId } from "../profile/evidence-writer.mjs";
 import { applyGateWrite, GATE_APPLY_SUMMARIES } from "../profile/gate-apply.mjs";
 import { coerceValue, GATE_ROUTES, resolveRoute } from "../profile/gate-writer.mjs";
 import { classifyConfigChange } from "../profile/loosening.mjs";
@@ -2381,6 +2381,182 @@ function coachingPlanIsStale(plan, evaluation) {
   return false;
 }
 
+// Whitespace-normalized comparison of the schema fields two claims carry.
+function sameStoredClaim(stored, next) {
+  const norm = (value) =>
+    typeof value === "string"
+      ? value.replace(/\s+/g, " ").trim()
+      : Array.isArray(value)
+        ? value.map(norm)
+        : value;
+  const fields = [
+    "claim",
+    "evidence",
+    "metrics",
+    "links",
+    "role_signals",
+    "allowed_wording",
+    "forbidden_wording",
+  ];
+  const view = (claim) =>
+    JSON.stringify(
+      fields.map((f) => {
+        const v = norm(claim?.[f]);
+        return v === undefined || v === null || (Array.isArray(v) && v.length === 0) ? null : v;
+      })
+    );
+  return view(stored) === view(next);
+}
+
+// saveCoachingDraft: the shared core of coaching.plan's auto-save and the
+// legacy coaching.evidence-save click. Persists ONE gap's stored, reviewed
+// gap.suggestion.draftClaim through the SAME evidence firewall every other
+// guarded evidence write uses: computeEvidenceWrite (evidence-writer.mjs)
+// validates the claim (id/claim/evidence required, placeholder lint,
+// current_base leak guard) and computes the merged claim set, then
+// candidateEvidenceMerge (db/verbs/candidate.mjs) is the actual DB-mode
+// persistence, the SAME branch src/cli/evidence.mjs itself takes when a DB
+// workspace exists. evidence-writer.mjs's own writeEvidence() only writes the
+// LEGACY candidate/evidence.yml file and has no DB-mode branch, so it is never
+// the right call in this DB-only web workspace; NO firewall is bypassed either
+// way, since candidateEvidenceMerge enforces the identical lint/leak backstop
+// (assertCleanEvidenceClaims) on top.
+//
+// There is no caller-supplied draft: accepting one would let a request save
+// text the plan never produced. Throws actionError for every refusal (unknown
+// gap, stale plan, gap not open, no draft, firewall rejection); the gap is only
+// closed after the write succeeded. A closed gap records savedClaimId so an
+// Undo can tell its own gap from one a newer plan replaced.
+function saveCoachingDraft({ repoRoot, env, applicationId, gapId, coveredIds }) {
+  const application = applicationForIntent({ repoRoot, env, id: applicationId });
+  const plan = application.coachingPlan;
+  const gap = Array.isArray(plan?.gaps) ? plan.gaps.find((g) => g.id === gapId) : null;
+  if (!gapId || !gap) {
+    throw actionError("CareerRat could not find that coaching gap.", "COACHING_GAP_NOT_FOUND");
+  }
+  // The schema documents basedOn as the plan's provenance but nothing
+  // enforced it: a plan built against a prior evaluation must never be
+  // actable once a new evaluation has landed (evaluatedAt is the
+  // discriminator; gate/fitScore are a sanity check on top).
+  if (coachingPlanIsStale(plan, application.evaluation)) {
+    throw actionError(
+      "This coaching plan was built for an earlier evaluation. Run Coach me on this fit again to refresh it.",
+      "COACHING_PLAN_STALE"
+    );
+  }
+  if (gap.status !== "open") {
+    throw actionError(
+      "This coaching gap was already resolved and cannot be saved again.",
+      "COACHING_GAP_NOT_OPEN"
+    );
+  }
+  const draftClaim = gap.suggestion?.draftClaim;
+  if (!draftClaim?.claim || !draftClaim?.evidence) {
+    throw actionError("This gap has no evidence-claim draft to save.", "COACHING_NO_DRAFT_CLAIM");
+  }
+
+  const { claims: currentClaims } = loadEvidence({ root: repoRoot });
+  const writePlan = computeEvidenceWrite({ newClaim: draftClaim, currentClaims });
+  if (!writePlan.ok) {
+    throw actionError(
+      `CareerRat could not save this evidence claim: ${writePlan.error}`,
+      "EVIDENCE_WRITE_REJECTED"
+    );
+  }
+  // A saved claim already holds this id: the upsert would overwrite it and an
+  // Undo would then delete the original. An identical one is simply covered;
+  // a different one is left alone and the gap stays open.
+  const stored = writePlan.replaced
+    ? currentClaims.find((c) => slugifyClaimId(c?.id) === writePlan.claim.id)
+    : null;
+  if (stored && !sameStoredClaim(stored, writePlan.claim)) {
+    throw actionError(
+      "A saved claim already uses this wording, so CareerRat left it alone.",
+      "COACHING_CLAIM_ID_TAKEN"
+    );
+  }
+  let duplicate = Boolean(stored);
+  if (!stored) {
+    const mergeResult = candidateEvidenceMerge({ repoRoot, env, claims: [writePlan.claim] });
+    duplicate = (mergeResult?.added || 0) === 0 && (mergeResult?.skipped || 0) > 0;
+  }
+  // A second gap of one plan carrying the same draft is covered by the claim
+  // the first one just saved, so its Undo reopens both.
+  const sharesSave = duplicate && coveredIds?.has(writePlan.claim.id);
+  if (!duplicate) coveredIds?.add(writePlan.claim.id);
+
+  const nextGaps = plan.gaps.map((g) =>
+    g.id === gapId
+      ? {
+          ...g,
+          status: "closed",
+          ...(duplicate && !sharesSave ? {} : { savedClaimId: writePlan.claim.id }),
+        }
+      : g
+  );
+  appSetFields({
+    repoRoot,
+    env,
+    id: applicationId,
+    patch: { coachingPlan: { ...plan, gaps: nextGaps } },
+  });
+  return { claim: writePlan.claim, duplicate, sharesSave };
+}
+
+// A refused draft's reason in plain words: the firewall's own message, minus
+// the "could not save" lead-in the legacy click used.
+function coachingRefusalReason(error) {
+  const message = String(error?.message || "CareerRat could not save it.");
+  return message.replace(/^CareerRat could not save this evidence claim:\s*/, "");
+}
+
+// After an Undo removed a coaching-saved claim: reopen its gap, but only a gap
+// that is still the one this save closed. Returns a note for the undo summary.
+function reopenCoachingGap({ repoRoot, env, entry, setFields = appSetFields }) {
+  const applicationId = entry.source?.applicationId;
+  let application;
+  try {
+    application = applicationForIntent({ repoRoot, env, id: applicationId });
+  } catch {
+    return "The job it came from is gone, so there was no gap to reopen.";
+  }
+  const plan = application.coachingPlan;
+  const matching = (Array.isArray(plan?.gaps) ? plan.gaps : []).filter(
+    (g) => g?.status === "closed" && g.savedClaimId === entry.id
+  );
+  if (!matching.length) {
+    return "The coaching gap changed since, so it was left as it is.";
+  }
+  const ids = new Set(matching.map((g) => g.id));
+  const many = matching.length > 1;
+  const open = many ? "The coaching gaps are open again." : "The coaching gap is open again.";
+  try {
+    setFields({
+      repoRoot,
+      env,
+      id: applicationId,
+      patch: {
+        coachingPlan: {
+          ...plan,
+          gaps: plan.gaps.map((g) => {
+            if (!ids.has(g.id)) return g;
+            const { savedClaimId: _saved, ...rest } = g;
+            return { ...rest, status: "open" };
+          }),
+        },
+      },
+    });
+  } catch (error) {
+    // The claim is already gone, so the undo stands either way. An export
+    // failure after the commit still reopened the gap.
+    if (error?.committed === true) return open;
+    return many
+      ? "The coaching gaps stayed closed, so reopen them from the plan."
+      : "The coaching gap stayed closed, so reopen it from the plan.";
+  }
+  return open;
+}
+
 function communicationLabel(comm) {
   return [comm.company, comm.role, comm.subject].filter(Boolean).join(", ") || "this thread";
 }
@@ -4170,6 +4346,7 @@ export async function executeWorkspaceIntent({
   runLinkedinOptimizeImpl,
   runStatusSyncImpl,
   buildCoachingPlanImpl = buildCoachingPlan,
+  appSetFieldsImpl = appSetFields,
   onSearchStarted,
   searchFetchImpl,
   applyJobImpl,
@@ -5816,6 +5993,12 @@ export async function executeWorkspaceIntent({
     // call + NO_AI_ROUTE degradation, src/core/coaching/plan.mjs), persisted
     // through the generic appSetFields patch verb — coaching earns no new DB
     // verb, it just writes one more typed field onto the application row.
+    //
+    // Every open gap whose plan carries an evidence-claim draft is then saved
+    // straight away through saveCoachingDraft (the same evidence firewall the
+    // legacy coaching.evidence-save click uses) and logged with an Undo. A
+    // draft the firewall refuses is not saved: its gap stays open and the
+    // message says why.
     if (normalized.type === "coaching.plan") {
       const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const operation = await buildCoachingPlanImpl({
@@ -5838,114 +6021,185 @@ export async function executeWorkspaceIntent({
         id: normalized.entity.id,
         patch: { coachingPlan: plan },
       });
+
+      const saved = [];
+      const refused = [];
+      const coveredIds = new Set();
+      for (const gap of Array.isArray(plan.gaps) ? plan.gaps : []) {
+        if (gap?.status !== "open") continue;
+        if (!gap.suggestion?.draftClaim?.claim || !gap.suggestion?.draftClaim?.evidence) continue;
+        try {
+          saved.push({
+            gapId: gap.id,
+            ...saveCoachingDraft({
+              repoRoot,
+              env,
+              applicationId: normalized.entity.id,
+              gapId: gap.id,
+              coveredIds,
+            }),
+          });
+        } catch (error) {
+          refused.push({
+            gapId: gap.id,
+            gapText: gap.gapText,
+            reason: coachingRefusalReason(error),
+          });
+        }
+      }
+      const finalPlan =
+        saved.length || refused.length
+          ? applicationForIntent({ repoRoot, env, id: normalized.entity.id }).coachingPlan || plan
+          : plan;
+
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const logEntries = saved
+        .filter((item) => !item.duplicate)
+        .map((item) =>
+          buildKnowledgeWriteEntry({
+            target: "evidence",
+            op: "add",
+            id: item.claim.id,
+            before: undefined,
+            after: item.claim,
+            source: { kind: "coaching", applicationId: normalized.entity.id, gapId: item.gapId },
+            writer: "coaching.plan",
+            label: "Evidence claim",
+          })
+        );
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
+      const openGaps = (finalPlan.gaps || []).filter((g) => g.status === "open");
+      const lines = [
+        `Built a coaching plan for ${applicationLabel(application)}: ${plan.gaps.length} gap${plan.gaps.length === 1 ? "" : "s"} named.`,
+      ];
+      for (const item of saved) {
+        lines.push(
+          item.duplicate
+            ? `"${item.claim.claim}" was already in your evidence bank.`
+            : `Saved "${item.claim.claim}" to your evidence bank.`
+        );
+      }
+      for (const item of refused) {
+        lines.push(`Didn't save a draft for "${item.gapText}": ${item.reason}`);
+      }
+      const noDraft = openGaps.filter((g) => !refused.some((r) => r.gapId === g.id));
+      if (noDraft.length) {
+        lines.push(
+          `Still open: ${noDraft.map((g) => `"${g.gapText}"`).join("; ")} (no honest close path yet).`
+        );
+      }
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `Built a coaching plan for ${applicationLabel(application)}: ${plan.gaps.length} gap${plan.gaps.length === 1 ? "" : "s"} named.`,
+        text: lines.join(" "),
         artifacts: [
           {
             kind: "coaching_plan",
             applicationId: normalized.entity.id,
             title: `${applicationLabel(application)}: Coaching plan`,
-            coachingPlan: plan,
+            coachingPlan: finalPlan,
           },
+          ...logEntries,
         ],
-        metadata: { state: "planned" },
+        metadata: {
+          state: "planned",
+          ...(undoActions.length || saved.length
+            ? {
+                nextActions: [
+                  ...undoActions,
+                  ...(saved.length
+                    ? [
+                        {
+                          label: "See if this changed your fit",
+                          intent: {
+                            type: "job.evaluate",
+                            entity: { type: "application", id: normalized.entity.id },
+                          },
+                        },
+                      ]
+                    : []),
+                ],
+              }
+            : {}),
+        },
         now,
       });
     }
 
-    // coaching.evidence-save — confirming one gap's evidence-claim draft.
-    // Routes through the SAME evidence firewall every other guarded evidence
-    // write uses: computeEvidenceWrite (evidence-writer.mjs) validates the
-    // claim (id/claim/evidence required, placeholder lint, current_base leak
-    // guard) and computes the merged claim set, then candidateEvidenceMerge
-    // (db/verbs/candidate.mjs) is the actual DB-mode persistence — the SAME
-    // branch src/cli/evidence.mjs itself takes when a DB workspace exists.
-    // evidence-writer.mjs's own writeEvidence() only writes the LEGACY
-    // candidate/evidence.yml file and has no DB-mode branch, so it is never
-    // the right call in this DB-only web workspace; NO firewall is bypassed
-    // either way, since candidateEvidenceMerge enforces the identical
-    // lint/leak backstop (assertCleanEvidenceClaims) on top.
-    //
-    // Only the stored, reviewed gap.suggestion.draftClaim is ever persisted —
-    // there is no caller-supplied override. The draft the candidate saw and
-    // confirmed on the card is the exact draft that gets written; nothing in
-    // the product has ever populated a different one, and accepting one from
-    // input would let a confirm click silently save text the candidate never
-    // reviewed.
+    // coaching.evidence-save: legacy per-gap click. Plans now auto-save their
+    // drafts (coaching.plan above), so this only survives for buttons persisted
+    // in older threads: a gap the plan already closed answers "Already saved."
+    // with no second write. Everything else runs the same saveCoachingDraft
+    // core, which only ever persists the stored, reviewed
+    // gap.suggestion.draftClaim; there is no caller-supplied override.
     if (normalized.type === "coaching.evidence-save") {
       const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const gapId = String(input.gapId || "").trim();
-      const plan = application.coachingPlan;
-      const gap = Array.isArray(plan?.gaps) ? plan.gaps.find((g) => g.id === gapId) : null;
-      if (!gapId || !gap) {
-        throw actionError("CareerRat could not find that coaching gap.", "COACHING_GAP_NOT_FOUND");
+      const existingGap = Array.isArray(application.coachingPlan?.gaps)
+        ? application.coachingPlan.gaps.find((g) => g.id === gapId)
+        : null;
+      if (existingGap?.status === "closed") {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: "Already saved.",
+          metadata: { state: "saved" },
+          now,
+        });
       }
-      // The schema documents basedOn as the plan's provenance but nothing
-      // enforced it: a plan built against a prior evaluation must never be
-      // actable once a new evaluation has landed (evaluatedAt is the
-      // discriminator; gate/fitScore are a sanity check on top).
-      if (coachingPlanIsStale(plan, application.evaluation)) {
-        throw actionError(
-          "This coaching plan was built for an earlier evaluation. Run Coach me on this fit again to refresh it.",
-          "COACHING_PLAN_STALE"
-        );
-      }
-      if (gap.status !== "open") {
-        throw actionError(
-          "This coaching gap was already resolved and cannot be saved again.",
-          "COACHING_GAP_NOT_OPEN"
-        );
-      }
-      const draftClaim = gap.suggestion?.draftClaim;
-      if (!draftClaim?.claim || !draftClaim?.evidence) {
-        throw actionError(
-          "This gap has no evidence-claim draft to save.",
-          "COACHING_NO_DRAFT_CLAIM"
-        );
-      }
-
-      const { claims: currentClaims } = loadEvidence({ root: repoRoot });
-      const writePlan = computeEvidenceWrite({ newClaim: draftClaim, currentClaims });
-      if (!writePlan.ok) {
-        throw actionError(
-          `CareerRat could not save this evidence claim: ${writePlan.error}`,
-          "EVIDENCE_WRITE_REJECTED"
-        );
-      }
-      const mergeResult = candidateEvidenceMerge({ repoRoot, env, claims: [writePlan.claim] });
-      const wasDuplicate = (mergeResult?.added || 0) === 0 && (mergeResult?.skipped || 0) > 0;
-
-      const nextGaps = plan.gaps.map((g) => (g.id === gapId ? { ...g, status: "closed" } : g));
-      appSetFields({
+      const { claim, duplicate } = saveCoachingDraft({
         repoRoot,
         env,
-        id: normalized.entity.id,
-        patch: { coachingPlan: { ...plan, gaps: nextGaps } },
+        applicationId: normalized.entity.id,
+        gapId,
       });
+      // Same Undo record coaching.plan writes, so a save from an older thread
+      // can be undone too. A claim that was already in the bank adds nothing.
+      const legacyResultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = legacyResultId;
+      const legacyEntry = duplicate
+        ? null
+        : buildKnowledgeWriteEntry({
+            target: "evidence",
+            op: "add",
+            id: claim.id,
+            before: undefined,
+            after: claim,
+            source: { kind: "coaching", applicationId: normalized.entity.id, gapId },
+            writer: "coaching.evidence-save",
+            label: "Evidence claim",
+          });
 
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: wasDuplicate
-          ? `"${writePlan.claim.claim}" was already in your evidence bank. See if this changed your fit.`
-          : `Saved "${writePlan.claim.claim}" to your evidence bank. See if this changed your fit.`,
+        text: duplicate
+          ? `"${claim.claim}" was already in your evidence bank. See if this changed your fit.`
+          : `Saved "${claim.claim}" to your evidence bank. See if this changed your fit.`,
         artifacts: [
           {
             kind: "evidence_claim_saved",
             applicationId: normalized.entity.id,
-            claim: writePlan.claim,
-            duplicate: wasDuplicate,
+            claim,
+            duplicate,
           },
+          ...(legacyEntry ? [legacyEntry] : []),
         ],
         metadata: {
           state: "saved",
           nextActions: [
+            ...(legacyEntry?.revertible
+              ? [undoNextAction({ messageId: legacyResultId, index: 1, entry: legacyEntry })]
+              : []),
             {
               label: "See if this changed your fit",
               intent: {
@@ -6819,6 +7073,10 @@ export async function executeWorkspaceIntent({
         messageId,
         index,
         existing,
+        afterRevert: (done) =>
+          done.target === "evidence" && done.source?.kind === "coaching"
+            ? reopenCoachingGap({ repoRoot, env, entry: done, setFields: appSetFieldsImpl })
+            : undefined,
       });
       if (!reverted.ok) {
         return appendActionResult({

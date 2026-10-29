@@ -6,7 +6,7 @@ CareerRat separates reusable system code from private candidate data.
 
 These files belong to the local user. They should be ignored by git in a public
 repo and should never be overwritten by update scripts without explicit user
-confirmation. An older install that already has top-level `candidate/` and
+confirmation (candidate knowledge follows the exception below). An older install that already has top-level `candidate/` and
 `workspace/` directories at the repo root keeps using those instead of the
 `.careerrat/` prefix shown below.
 
@@ -33,7 +33,17 @@ confirmation. An older install that already has top-level `candidate/` and
 | `.careerrat/workspace/research/` | Cited web-research artifacts (company intel, comp benchmarks) from the research-* skills. Treated as outbound; never contains `current_base`. |
 | `.careerrat/workspace/tracker.*` | Application and sourced-role tracker state. |
 
-### `companyHealth` (tracker row field)
+### Candidate knowledge writes
+
+CareerRat runs in operator mode, so grounded changes to candidate knowledge
+apply directly instead of waiting for a confirmation. That covers evidence
+claims that pass `computeEvidenceWrite`, onboarding saves, and coaching drafts.
+Each one is logged in the thread with an Undo. Changes that loosen honesty
+still need explicit confirmation: removing a do-not-claim or do-not-fabricate
+entry, moving a tool from adjacent or do-not-claim to confirmed, and lowering
+a comp floor or target. Outbound actions are unaffected by this exception.
+
+## `companyHealth` (tracker row field)
 
 A role-scoped company-health rating lives as a `companyHealth` object on an individual
 `applications[]` or `sourced[]` row in `.careerrat/workspace/tracker.*` (not a separate file). Written by
