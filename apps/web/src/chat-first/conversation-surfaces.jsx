@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { formatCurrencyThousands } from "../../../../src/core/currency-format.mjs";
+import { openAnswerNeedsFromGaps } from "../../../../src/core/packet/answer-needs.mjs";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
 import { useDialogFocus } from "../lib/use-dialog-focus.js";
@@ -1322,14 +1323,15 @@ export function CanonicalJobConversation({
         { id: "coach", label: "Coach me live", onAction: () => onCoach?.(communication) },
       ]
     : EMPTY_LIST;
+  const answerNeedCount = openAnswerNeedsFromGaps(packetReview?.gaps).length;
   return (
     <JobConversation
       eyebrow={eyebrow}
       notice={
         packetReview?.questionCaptureRequired
           ? "CareerRat needs to open the application form to discover its questions. Use Prepare form on the right."
-          : packetReview?.gaps?.length
-            ? `${packetReview.gaps.length === 1 ? "One application question needs" : `${packetReview.gaps.length} application questions need`} your answer. Everything else is done, and this job can't be submitted until you answer. Use the application review on the right.`
+          : answerNeedCount
+            ? `${answerNeedCount === 1 ? "One application question needs" : `${answerNeedCount} application questions need`} your answer. Everything else is done, and this job can't be submitted until you answer. Use the application review on the right.`
             : null
       }
       inbound={canonicalInbound(communication)}

@@ -2188,6 +2188,8 @@ const ACTIVE_APPLICATION_SESSION_STATES = new Set([
   "blocked",
 ]);
 
+const NEEDS_ANSWER_SESSION_STATES = new Set(["questions-captured", "awaiting-submit"]);
+
 function autoSubmitStopReason(execution) {
   if (execution?.state !== "awaiting-submit" || execution?.session?.submitMode !== "auto") {
     return "";
@@ -9692,7 +9694,7 @@ async function executeWorkspaceIntentCore({
         });
       }
       application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
-      if (packetAnswerNeeds.length) openAnswerNeeds = packetAnswerNeeds;
+      openAnswerNeeds = packetAnswerNeeds;
       const rerunManual = openAnswerNeeds.length > 0;
       execution = await applyJobImpl({
         repoRoot,
@@ -9847,7 +9849,11 @@ async function executeWorkspaceIntentCore({
             platforms: execution.platform ? [execution.platform] : undefined,
           })
         : null;
-      const flaggedNeedsAnswer = !offNote && openAnswerNeeds.length > 0;
+      // Only a form that is otherwise complete is "waiting on an answer". A
+      // blocked session (login wall, captcha, 2FA) keeps its own state and
+      // resume action.
+      const flaggedNeedsAnswer =
+        !offNote && openAnswerNeeds.length > 0 && NEEDS_ANSWER_SESSION_STATES.has(execution?.state);
       const sessionState = flaggedNeedsAnswer
         ? "needs-answer"
         : prepareSubmit && execution.state === "questions-captured"

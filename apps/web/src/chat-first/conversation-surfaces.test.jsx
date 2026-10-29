@@ -1668,6 +1668,28 @@ describe("SkillChatConversation", () => {
 });
 
 describe("JobConversation and JobContextPanel", () => {
+  it("counts only answer gaps in the question notice", () => {
+    const packetReview = {
+      gaps: [
+        {
+          id: "a",
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          message: "Answer “One?”.",
+        },
+        { id: "b", kind: "documents", code: "RESUME_MISSING", message: "Resume is missing." },
+      ],
+    };
+    const conversation = markup(
+      <CanonicalJobConversation
+        eyebrow="HIGHTOUCH · SOFTWARE ENGINEER"
+        packetReview={packetReview}
+      />
+    );
+    expect(conversation).toContain("One application question needs your answer");
+    expect(conversation).not.toContain("2 application questions need");
+  });
+
   it("surfaces packet gaps in an empty job thread and routes each answer into the composer", () => {
     const onAnswerGap = vi.fn();
     const packetReview = {
@@ -1677,12 +1699,16 @@ describe("JobConversation and JobContextPanel", () => {
       gaps: [
         {
           id: "linkedin-profile",
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
           label: "LinkedIn Profile",
           message: "Answer LinkedIn Profile.",
           answerable: true,
         },
         {
           id: "north-america",
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
           label: "Are you currently located in North America?",
           message: "Answer the location question.",
           answerable: true,

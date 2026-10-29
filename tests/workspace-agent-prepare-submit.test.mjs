@@ -691,6 +691,135 @@ test("job.prepare-submit treats open answer gaps as current packet lineage", asy
   assert.match(result.messages.at(-1).text, /One question needs your answer/);
 });
 
+test("job.prepare-submit keeps a blocked session's state and resume action when answers are open", async () => {
+  const repoRoot = tempRepo();
+  const openGap = {
+    kind: "answers",
+    code: "ANSWER_CONFIRMATION_REQUIRED",
+    questionId: "rendered-travel",
+    message: "Answer “Would you be willing to travel?”.",
+  };
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      applicationId: "app-prepared",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [openGap],
+      questions: {
+        source: "workspace/jobs/example-rendered.questions.json",
+        answerableCount: 2,
+        excludedCount: 0,
+        answerableIds: ["q1", "rendered-travel"],
+        excludedIds: [],
+      },
+      answerLineage: {
+        answeredQuestionIds: ["q1"],
+        skippedQuestionIds: [],
+        excludedQuestionIds: [],
+        source: "workspace/jobs/example-rendered.questions.json",
+      },
+      artifacts: { resumePdf: "workspace/tailored/example-resume.pdf" },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    generateDocumentsImpl: async () => ({
+      status: "reviewable",
+      uploadReady: false,
+      gaps: [openGap],
+      artifacts: {},
+    }),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "blocked",
+      session: { provider: "test" },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(last.metadata.needsAnswers, undefined);
+  assert.doesNotMatch(last.text, /Everything else is done/);
+  assert.equal(
+    last.metadata.nextActions.some(
+      (action) =>
+        action.label === "Return to supervised application" &&
+        action.intent?.type === "job.prepare-submit"
+    ),
+    true
+  );
+});
+
+test("job.prepare-submit drops a stale answer flag when the rebuilt packet has no answer gaps", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      applicationId: "app-prepared",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "stale-q",
+          message: "Answer “A stale question?”.",
+        },
+      ],
+    },
+  });
+  let applyCalls = 0;
+  const submitModes = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async (args) => {
+      applyCalls += 1;
+      submitModes.push(args.submitMode);
+      if (applyCalls === 1) {
+        appRegisterPacketQuestionCapture({
+          repoRoot,
+          env: {},
+          id: "app-prepared",
+          path: "workspace/jobs/example-rendered.questions.json",
+          questions: [{ id: "q1", label: "Why this role?" }],
+          excluded: [],
+        });
+        return {
+          available: true,
+          verified: false,
+          state: "questions-captured",
+          questionCaptureUpdated: true,
+          session: { provider: "test" },
+        };
+      }
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        session: { provider: "test" },
+      };
+    },
+    generateDocumentsImpl: async () => ({
+      status: "reviewable",
+      uploadReady: false,
+      gaps: [],
+      artifacts: {},
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.notEqual(last.metadata.state, "needs-answer");
+  assert.equal(last.metadata.needsAnswers, undefined);
+});
+
 test("job.prepare-submit rebuilds a packet whose answer lineage predates its saved live questions", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot, {

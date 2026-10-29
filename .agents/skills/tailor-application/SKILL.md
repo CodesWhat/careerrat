@@ -208,6 +208,11 @@ node src/cli/lint-placeholders.mjs workspace/tailored/
 
 Fix every finding before continuing. The command exits 1 on any hit.
 
+The one exception is `NEEDS YOU`. That marker is a per-job flag, not a stop, so a
+`NEEDS YOU` finding does not halt the tracker stamp or the activity log below. Fix
+every other finding first. The artifact is still never marked upload-ready while the
+marker remains.
+
 Do not mark any artifact as upload-ready or build-ready until this exits 0.
 
 Then log the tailored artifacts to the Activity Pulse feed (the dashboard's live timeline — see
