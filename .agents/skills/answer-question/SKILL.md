@@ -61,11 +61,12 @@ Write first person, in the candidate's writing style
 (`candidate/writing-style.md`). Every claim must trace to a real
 `evidence.yml` claim — never invent an angle to fit the question.
 
-Stop only on the same conditions `apply-job` stops on: the truthful answer
+Flag a question only on the same conditions `apply-job` flags it on: the truthful answer
 would require fabricating, guessing a number/date/security-clearance/tool
 depth, revealing private current compensation, or contradicting
-`honesty.yml`. On a stop condition, the answer body is the literal marker
-`NEEDS YOU: <one-line reason>` — this is already a recognized
+`honesty.yml`. On a flag condition, the answer body is the literal marker
+`NEEDS YOU: <one-line reason>`. That flags the one job for the operator's answer and
+never stops other work. The marker is already a recognized
 placeholder-lint pattern in both `src/cli/lint-placeholders.mjs` and
 `src/core/documents/placeholder-lint.mjs`; reference it, do not add new lint
 code. Mark it `SOURCE: needs-you`.

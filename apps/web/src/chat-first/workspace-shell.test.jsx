@@ -475,6 +475,33 @@ describe("NeedsYouPanel", () => {
     expect(html).toContain("old resumes, reviews, project docs");
   });
 
+  it("shows a job waiting on an answer as a plain card, never a modal", () => {
+    const html = markup(
+      <NeedsYouPanel
+        items={[
+          {
+            id: "application:app-1:needs-answer",
+            kind: "needs-answer",
+            eyebrow: "YOUR ANSWER",
+            title: "E Corp needs an answer",
+            detail: "Would you be willing to travel?",
+            tone: "attention",
+            primaryLabel: "Answer",
+            onPrimary: () => {},
+          },
+        ]}
+        deepIngestPrompt={{ visible: false }}
+      />
+    );
+
+    expect(html).toContain("YOUR ANSWER");
+    expect(html).toContain("E Corp needs an answer");
+    expect(html).toContain("Would you be willing to travel?");
+    expect(html).toContain(">Answer</button>");
+    expect(html).not.toContain('role="dialog"');
+    expect(html).not.toContain('aria-modal="true"');
+  });
+
   it("removes the deep ingest dock after completion or dismissal", () => {
     const html = markup(<NeedsYouPanel items={[]} deepIngestPrompt={{ visible: false }} />);
 

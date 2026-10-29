@@ -19,7 +19,7 @@ import {
   appUpsert,
 } from "../src/core/db/verbs/app.mjs";
 import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
-import { missionCreate } from "../src/core/db/verbs/chat-first.mjs";
+import { missionCreate, missionRun } from "../src/core/db/verbs/chat-first.mjs";
 import { capturePacketJobBody } from "../src/core/packet/context.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
@@ -617,7 +617,12 @@ test("job.prepare-submit never hands a live-question recovery off to job.apply",
 
   assert.deepEqual(generations, [{ force: true, answerableIds: ["q1", "rendered-travel"] }]);
   const last = result.messages.at(-1);
-  assert.equal(last.metadata.state, "blocked");
+  // The unanswered question flags the job; it does not stop the run.
+  assert.equal(last.metadata.state, "needs-answer");
+  assert.deepEqual(
+    last.metadata.needsAnswers.map((need) => need.question),
+    ["Would you be willing to travel?"]
+  );
   assert.equal(last.metadata.submissionVerified, false);
   assert.equal(JSON.stringify(last).includes('"type":"job.apply"'), false);
   assert.equal(
@@ -681,9 +686,287 @@ test("job.prepare-submit treats open answer gaps as current packet lineage", asy
   });
 
   assert.equal(generateCalls, 0);
-  assert.equal(applyCalls, 0);
-  assert.equal(result.messages.at(-1).metadata.state, "blocked");
-  assert.match(result.messages.at(-1).text, /open items/i);
+  assert.equal(applyCalls, 1, "an open answer flags the job but the form is still filled");
+  assert.equal(result.messages.at(-1).metadata.state, "needs-answer");
+  assert.match(result.messages.at(-1).text, /One question needs your answer/);
+});
+
+const unansweredFieldsResult = {
+  available: true,
+  verified: false,
+  state: "blocked",
+  reason: "Stopped on required fields the form still needs: Favorite database.",
+  session: {
+    provider: "test",
+    stopReason: "required-fields-unanswered",
+    unresolved: [
+      { label: "Favorite database", required: true },
+      { label: "Nickname", required: false },
+    ],
+    blockers: [],
+  },
+};
+
+test("job.prepare-submit flags a live form stopped on unanswered required fields as needs-answer", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => unansweredFieldsResult,
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "needs-answer");
+  assert.deepEqual(last.metadata.needsAnswers, [
+    { questionId: null, question: "Favorite database" },
+  ]);
+  assert.match(last.text, /Favorite database/);
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.label === "Return to supervised application"),
+    false
+  );
+});
+
+test("job.prepare-submit keeps a fill failure blocked, not waiting on an answer", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => ({
+      ...unansweredFieldsResult,
+      session: {
+        ...unansweredFieldsResult.session,
+        unresolved: [
+          { label: "Favorite database", required: true },
+          { label: "Resume", required: true, reason: "This file could not be attached." },
+        ],
+      },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.label === "Return to supervised application"),
+    true
+  );
+});
+
+test("job.prepare-submit keeps a login or captcha blocker blocked even with unresolved fields", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "blocked",
+      session: {
+        provider: "test",
+        unresolved: [{ label: "Favorite database", required: true }],
+        blockers: ["captcha"],
+      },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(last.metadata.needsAnswers, undefined);
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.label === "Return to supervised application"),
+    true
+  );
+});
+
+test("a mission carries on with other jobs after a live form stops on unanswered required fields", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  seedPreparedApplication(repoRoot, { id: "app-clean" });
+  missionCreate({
+    repoRoot,
+    env: {},
+    id: "mission-live-needs-answer",
+    title: "Prepare two",
+    mode: "prepare-to-submit",
+    steps: ["app-prepared", "app-clean"].map((id) => ({
+      id: `prepare-${id}`,
+      label: "Prepare form",
+      action: "prepare-submit",
+      jobRef: { type: "application", id },
+    })),
+  });
+  const applied = [];
+
+  const run = await missionRun({
+    repoRoot,
+    env: {},
+    id: "mission-live-needs-answer",
+    resolveExecutionPlan: () => ({
+      policyVersion: 1,
+      operation: "application.drafting",
+      runtimeId: "codex",
+      adapterVersion: 1,
+      requested: { quality: "best", reasoning: "medium" },
+      resolved: { quality: "best", reasoning: "medium", model: "gpt-5.6-sol", effort: "medium" },
+      fallback: null,
+    }),
+    executeIntent: ({ intent }) =>
+      executeWorkspaceIntent({
+        repoRoot,
+        env: {},
+        intent,
+        applyJobImpl: async ({ applicationId }) => {
+          applied.push(applicationId);
+          return applicationId === "app-prepared"
+            ? unansweredFieldsResult
+            : { available: true, verified: false, state: "awaiting-submit" };
+        },
+      }),
+  });
+
+  assert.deepEqual(applied, ["app-prepared", "app-clean"]);
+  const steps = run.mission.steps;
+  const flagged = steps.find((step) => step.jobRef.id === "app-prepared");
+  assert.equal(flagged.result.state, "needs-answer");
+  assert.equal(steps.find((step) => step.jobRef.id === "app-clean").status, "completed");
+});
+
+test("job.prepare-submit keeps a blocked session's state and resume action when answers are open", async () => {
+  const repoRoot = tempRepo();
+  const openGap = {
+    kind: "answers",
+    code: "ANSWER_CONFIRMATION_REQUIRED",
+    questionId: "rendered-travel",
+    message: "Answer “Would you be willing to travel?”.",
+  };
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      applicationId: "app-prepared",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [openGap],
+      questions: {
+        source: "workspace/jobs/example-rendered.questions.json",
+        answerableCount: 2,
+        excludedCount: 0,
+        answerableIds: ["q1", "rendered-travel"],
+        excludedIds: [],
+      },
+      answerLineage: {
+        answeredQuestionIds: ["q1"],
+        skippedQuestionIds: [],
+        excludedQuestionIds: [],
+        source: "workspace/jobs/example-rendered.questions.json",
+      },
+      artifacts: { resumePdf: "workspace/tailored/example-resume.pdf" },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    generateDocumentsImpl: async () => ({
+      status: "reviewable",
+      uploadReady: false,
+      gaps: [openGap],
+      artifacts: {},
+    }),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "blocked",
+      session: { provider: "test" },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(last.metadata.needsAnswers, undefined);
+  assert.doesNotMatch(last.text, /Everything else is done/);
+  assert.equal(
+    last.metadata.nextActions.some(
+      (action) =>
+        action.label === "Return to supervised application" &&
+        action.intent?.type === "job.prepare-submit"
+    ),
+    true
+  );
+});
+
+test("job.prepare-submit drops a stale answer flag when the rebuilt packet has no answer gaps", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      applicationId: "app-prepared",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "stale-q",
+          message: "Answer “A stale question?”.",
+        },
+      ],
+    },
+  });
+  let applyCalls = 0;
+  const submitModes = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async (args) => {
+      applyCalls += 1;
+      submitModes.push(args.submitMode);
+      if (applyCalls === 1) {
+        appRegisterPacketQuestionCapture({
+          repoRoot,
+          env: {},
+          id: "app-prepared",
+          path: "workspace/jobs/example-rendered.questions.json",
+          questions: [{ id: "q1", label: "Why this role?" }],
+          excluded: [],
+        });
+        return {
+          available: true,
+          verified: false,
+          state: "questions-captured",
+          questionCaptureUpdated: true,
+          session: { provider: "test" },
+        };
+      }
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        session: { provider: "test" },
+      };
+    },
+    generateDocumentsImpl: async () => ({
+      status: "reviewable",
+      uploadReady: false,
+      gaps: [],
+      artifacts: {},
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.notEqual(last.metadata.state, "needs-answer");
+  assert.equal(last.metadata.needsAnswers, undefined);
 });
 
 test("job.prepare-submit rebuilds a packet whose answer lineage predates its saved live questions", async () => {
@@ -736,15 +1019,17 @@ test("job.prepare-submit rebuilds a packet whose answer lineage predates its sav
     },
   });
 
-  assert.equal(applyCalls, 0, "the stale packet is reviewed before the browser can resume");
+  assert.equal(
+    applyCalls,
+    1,
+    "the rebuilt packet flags the open question and the form still fills"
+  );
   assert.equal(generations.length, 1);
   assert.equal(generations[0].force, true);
   assert.equal(generations[0].applyIntent, true);
   const last = result.messages.at(-1);
-  assert.equal(last.metadata.state, "blocked");
-  assert.equal(last.metadata.blockingGapCount, 1);
-  assert.match(last.text, /captured application questions changed/i);
-  assert.match(last.artifacts[0].gaps[0].message, /willing to travel/i);
+  assert.equal(last.metadata.state, "needs-answer");
+  assert.match(last.text, /willing to travel/i);
 });
 
 test("job.prepare-submit treats an intentionally skipped optional question as current lineage", async () => {
@@ -1355,4 +1640,86 @@ test("submit auto: an abort right after the click still leaves the marker and a 
   assert.equal(calls[0].prepareOnly, true);
   assert.equal(calls[0].submitMode, "manual");
   assert.equal(calls[0].onSubmitAttempt, undefined);
+});
+
+const OPEN_TRAVEL_GAP = {
+  kind: "answers",
+  code: "ANSWER_CONFIRMATION_REQUIRED",
+  questionId: "q-travel",
+  message: "Answer “Would you be willing to travel?”.",
+};
+
+test("an open required question flags the job and never auto-submits it", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [OPEN_TRAVEL_GAP],
+    },
+  });
+  setSubmitMode(repoRoot, "auto");
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        session: { provider: "test", filledCount: 7, unresolved: [] },
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1, "the rest of the form is still filled");
+  assert.equal(calls[0].submitMode, "manual");
+  assert.equal(calls[0].prepareOnly, true);
+  assert.equal(calls[0].input.submitMode, "manual");
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "needs-answer");
+  assert.deepEqual(last.metadata.needsAnswers, [
+    { questionId: "q-travel", question: "Would you be willing to travel?" },
+  ]);
+  assert.match(last.text, /One question needs your answer before this can be submitted/);
+  assert.equal(readApplication(repoRoot).status, "reviewed-hold");
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.intent?.type === "job.prepare-submit"),
+    false,
+    "resume is only offered after the answer is saved"
+  );
+});
+
+test("an open question does not hide a different blocking packet gap", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 2,
+      gaps: [
+        OPEN_TRAVEL_GAP,
+        { kind: "resume", code: "RESUME_UPLOAD_ARTIFACT_MISSING", message: "No resume to upload." },
+      ],
+    },
+  });
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { available: true, verified: false, state: "awaiting-submit" };
+    },
+  });
+
+  assert.equal(applyCalls, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "blocked");
 });

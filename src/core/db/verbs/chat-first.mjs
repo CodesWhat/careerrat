@@ -15,6 +15,7 @@ import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
 } from "../../deep-ingest/readiness.mjs";
+import { openAnswerNeedsFromGaps } from "../../packet/answer-needs.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 import { bumpMeta, getRow, logActivityEvent, NotFoundError, putRow, runVerb } from "./shared.mjs";
@@ -1809,7 +1810,9 @@ function retryablePrepareStep(step) {
   return (
     step.action === "prepare-submit" &&
     step.status === "blocked" &&
-    new Set(["blocked", "manual-handoff", "needs-input", "unavailable"]).has(step.result?.state)
+    new Set(["blocked", "manual-handoff", "needs-input", "unavailable", "needs-answer"]).has(
+      step.result?.state
+    )
   );
 }
 
@@ -2083,6 +2086,14 @@ function operationSummary(result) {
       : {}),
     // A turned-off capability pauses the mission on purpose (the operator chose
     // that); the stored result keeps the plain reason instead of a bare "blocked".
+    ...(last?.metadata?.state === "needs-answer" && Array.isArray(last.metadata.needsAnswers)
+      ? {
+          needsAnswers: last.metadata.needsAnswers.slice(0, 50).map((need) => ({
+            questionId: need?.questionId ? String(need.questionId) : null,
+            question: promptText(need?.question, 500),
+          })),
+        }
+      : {}),
     ...(last?.metadata?.capabilityOff?.reason
       ? { capabilityOff: { reason: promptText(last.metadata.capabilityOff.reason, 500) } }
       : {}),
@@ -2237,6 +2248,9 @@ export async function missionRun({
     }
   }
 
+  // Jobs whose prepare step came back needing the operator's answer. That is a
+  // flag on the one job: its remaining steps wait, every other job carries on.
+  const jobsNeedingAnswers = new Set();
   for (const step of mission.steps) {
     const retryablePrepare = retryablePrepareStep(step);
     const retryableFocus = focusedApplicationId
@@ -2244,6 +2258,7 @@ export async function missionRun({
       : false;
     if (focusedApplicationId && !retryableFocus) continue;
     if (step.status !== "pending" && !retryablePrepare && !retryableFocus) continue;
+    if (jobsNeedingAnswers.has(`${step.jobRef?.type}:${step.jobRef?.id}`)) continue;
     // Give a user pause request waiting on the HTTP event loop a chance to
     // commit before this runner claims more work. Some installed CLI agents
     // block the server process while they run, so a microtask-only loop would
@@ -2419,6 +2434,22 @@ export async function missionRun({
         result.state !== "awaiting-submit" &&
         result.state !== "applied"
       ) {
+        if (result.state === "needs-answer") {
+          committedWrite(() =>
+            missionStepSetStatus({
+              repoRoot,
+              env,
+              missionId,
+              stepId: step.id,
+              status: "blocked",
+              result,
+              attemptId: claimed.attempt.id,
+              now,
+            })
+          );
+          jobsNeedingAnswers.add(`${step.jobRef?.type}:${step.jobRef?.id}`);
+          continue;
+        }
         if (
           new Set([
             "blocked",
@@ -4081,6 +4112,43 @@ function applicationNextActionNeeds(applications, now) {
   });
 }
 
+// A job with unanswered required application questions shows in Today as
+// waiting on the operator's answer. It is a flag on that one job: the rest of
+// the run carries on, and the card opens the job thread where the answer goes.
+function applicationAnswerNeeds(applications) {
+  return applications.flatMap((application) => {
+    if (isJobClosed(application.status)) return [];
+    const questions = openAnswerNeedsFromGaps(application.packetManifest?.gaps);
+    if (!questions.length) return [];
+    const count = questions.length;
+    const owner = {
+      type: "application",
+      id: application.id,
+      applicationId: application.id,
+    };
+    const action = { id: "answer", label: "Answer", kind: "open-owner" };
+    return [
+      {
+        id: `application:${application.id}:needs-answer`,
+        kind: "needs-answer",
+        applicationId: application.id,
+        company: application.company || null,
+        role: application.role || null,
+        title: `${application.company || "This job"} needs ${count === 1 ? "an answer" : `${count} answers`}`,
+        detail:
+          count === 1 ? questions[0].question : `${questions[0].question} and ${count - 1} more`,
+        primaryLabel: action.label,
+        tone: "attention",
+        eyebrow: "YOUR ANSWER",
+        owner,
+        action,
+        actions: [action],
+        questions,
+      },
+    ];
+  });
+}
+
 function touchDueNeeds(touches) {
   return touches.map((touch) => {
     const owner = {
@@ -4230,6 +4298,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
         mode: applicationMode(application),
         comp: applicationCompensation(application),
         ...(packetReview ? { packetReview } : {}),
+        needsAnswers: openAnswerNeedsFromGaps(application.packetManifest?.gaps),
         applicationPlatform: applicationPlatformFromApplication(application),
         archived: archiveEligible || manuallyArchived,
         archiveEligible,
@@ -4281,6 +4350,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
   const touchDue = deriveTouchDue(db, applications, communications, current);
   const needsYou = [
     ...submitGateNeeds(missions),
+    ...applicationAnswerNeeds(applications),
     ...sourcedDecisionNeeds(sourced, missions),
     ...applicationNextActionNeeds(applications, current),
     ...touchDueNeeds(touchDue),
