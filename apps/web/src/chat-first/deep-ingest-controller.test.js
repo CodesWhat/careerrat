@@ -555,6 +555,29 @@ describe("deep ingest chat-first controller", () => {
     expect(buildDeepIngestReview(input).proposals.map((row) => row.id)).toEqual(["proposal-1"]);
   });
 
+  it("lists findings that saved on their own apart from the ones still in review", () => {
+    const saved = proposal({
+      id: "saved-1",
+      status: "confirmed",
+      decisionSource: "automatic",
+      updatedAt: "2026-10-29T10:00:00.000Z",
+    });
+    const held = proposal({
+      id: "held-1",
+      autoApply: { status: "held", reasons: ["It would replace something you already saved."] },
+    });
+    const manual = proposal({ id: "manual-1", status: "confirmed", decisionSource: "user" });
+    const review = buildDeepIngestReview(
+      state({ proposals: [saved, held, manual], reviewQueue: [held] })
+    );
+
+    expect(review.applied.map((row) => row.id)).toEqual(["saved-1"]);
+    expect(review.applied[0].title).toBe("Billing migration");
+    expect(review.proposals.map((row) => row.id)).toEqual(["held-1"]);
+    expect(review.proposals[0].heldReason).toBe("It would replace something you already saved.");
+    expect(review.sources[0].canAnalyze).toBe(false);
+  });
+
   it.each(["failed", "manual_fallback"])(
     "gives a %s source plain recovery guidance and retry/remove controls",
     (status) => {

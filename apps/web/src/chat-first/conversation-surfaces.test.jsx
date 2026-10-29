@@ -2408,6 +2408,35 @@ describe("focused conversation modes", () => {
     expect(html).toContain("Reject");
   });
 
+  it("shows saved findings apart from the ones still waiting on a yes", () => {
+    const html = markup(
+      <DeepIngestConversation
+        counts={{ sources: 1, proposals: 2, reviewQueue: 1, confirmed: 1 }}
+        applied={[{ id: "saved-1", lane: "story_bank", title: "Saved billing story" }]}
+        proposals={[
+          {
+            id: "held-1",
+            lane: "honesty_boundaries",
+            title: "Drop a boundary",
+            summary: "Stop holding back.",
+            heldReason: "It would remove or weaken one of your honesty boundaries.",
+          },
+        ]}
+        onConfirm={() => {}}
+        onDefer={() => {}}
+        onReject={() => {}}
+      />
+    );
+
+    expect(html).toContain("SAVED FOR YOU");
+    expect(html).toContain("Saved billing story");
+    expect(html).toContain("saved on their own");
+    expect(html).toContain("didn&#x27;t save on their own");
+    expect(html).toContain("It would remove or weaken one of your honesty boundaries.");
+    expect(html).toContain("Confirm");
+    expect(html.indexOf("SAVED FOR YOU")).toBeLessThan(html.indexOf("REVIEW 1 OF 1"));
+  });
+
   it("lets someone retry or remove a failed deep-ingest source", () => {
     const source = {
       id: "source-failed",

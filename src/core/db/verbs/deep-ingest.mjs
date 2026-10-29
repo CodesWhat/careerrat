@@ -14,8 +14,10 @@ import { validateDeepIngestGrounding } from "../../deep-ingest/validators/ground
 import { validateDeepIngestLaneTransition } from "../../deep-ingest/validators/lane-state.mjs";
 import { validateDeepIngestPrivacy } from "../../deep-ingest/validators/privacy.mjs";
 import { assertCleanEvidenceClaims } from "../../profile/evidence-validation.mjs";
+import { computeEvidenceWrite } from "../../profile/evidence-writer.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
+import { candidateEvidenceMerge } from "./candidate.mjs";
 import { bumpMeta, logActivityEvent } from "./shared.mjs";
 
 const SOURCE_TABLE = "deep_ingest_sources";
@@ -509,58 +511,67 @@ function assertProposalVersion(current, expectedVersion) {
   }
 }
 
-function writeEvidenceClaims(db, items, proposal, confirmedAt) {
+const SAME_ID_DIFFERENT_CLAIM =
+  "A different claim is already saved under this id, so this one was not saved over it.";
+
+// Plans the evidence lane through the canonical evidence firewall
+// (computeEvidenceWrite) before anything is written. Items the firewall
+// refuses, or that would overwrite a different claim saved under the same id,
+// come back in `refused` with a plain reason. An identical claim already in the
+// bank is `identical` and is not written again.
+function planEvidenceWrites(db, items, proposal, confirmedAt) {
   const rows = db
     .prepare("SELECT data FROM candidate_evidence_claims ORDER BY rowid ASC")
     .all()
     .map((row) => JSON.parse(row.data));
   const usedIds = new Set(rows.map((row) => String(row.id || "")));
-  const rowsById = new Map(rows.map((row) => [String(row.id || ""), row]));
-  const byClaim = new Map(
-    rows.map((row) => [String(row.claim || "").trim(), String(row.id || "")])
-  );
-  const stmt = db.prepare(
-    `INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
-  );
-  let added = 0;
+  let working = rows;
+  const claims = [];
+  const refused = [];
+  const identical = [];
   let accepted = 0;
-  const insertedIds = [];
-  const replacedIds = [];
-  const replaced = [];
-  for (const raw of Array.isArray(items) ? items : []) {
-    const claim = evidenceClaimFromItem(raw);
-    if (!claim) continue;
+  (Array.isArray(items) ? items : []).forEach((raw, index) => {
+    const claimText = evidenceClaimFromItem(raw);
+    if (!claimText) return;
     accepted += 1;
     const requestedId = String(raw?.id || "").trim();
-    const duplicateId = byClaim.get(claim);
-    if (duplicateId && duplicateId !== requestedId) continue;
-    const id = requestedId || nextEvidenceId(usedIds);
-    const previous = rowsById.get(id);
-    usedIds.add(id);
-    byClaim.set(claim, id);
+    const textOwner = working.find((row) => String(row.claim || "").trim() === claimText);
+    if (textOwner && (!requestedId || String(textOwner.id || "") !== requestedId)) {
+      identical.push({ index, id: textOwner.id });
+      return;
+    }
+    const evidence = String(raw?.evidence || raw?.supportingQuote || "");
+    const plan = computeEvidenceWrite({
+      newClaim: { id: requestedId || nextEvidenceId(usedIds), claim: claimText, evidence },
+      currentClaims: working,
+    });
+    if (!plan.ok) {
+      refused.push({ index, reason: `The evidence check refused this claim: ${plan.error}` });
+      return;
+    }
+    if (plan.replaced) {
+      const saved = working.find((row) => String(row.id || "") === plan.claim.id);
+      const same =
+        String(saved?.claim || "").trim() === claimText &&
+        String(saved?.evidence || "") === String(plan.claim.evidence || "");
+      if (same) identical.push({ index, id: plan.claim.id });
+      else refused.push({ index, reason: SAME_ID_DIFFERENT_CLAIM });
+      return;
+    }
     const data = {
       ...clone(raw),
-      id,
-      claim,
-      evidence: String(raw?.evidence || raw?.supportingQuote || ""),
+      ...plan.claim,
       sourceId: String(raw?.sourceId || proposal.sourceId),
       sourceProposalId: proposal.id,
       supportingQuote: raw?.supportingQuote ? String(raw.supportingQuote) : null,
       confirmedAt,
     };
     assertCleanEvidenceClaims([data]);
-    stmt.run(id, JSON.stringify(data), nowIso());
-    if (previous) {
-      replacedIds.push(id);
-      replaced.push({ id, before: clone(previous) });
-    } else {
-      insertedIds.push(id);
-    }
-    rowsById.set(id, data);
-    added += 1;
-  }
-  return { added, accepted, insertedIds, replacedIds, replaced };
+    usedIds.add(plan.claim.id);
+    working = plan.nextClaims;
+    claims.push(data);
+  });
+  return { accepted, claims, refused, identical };
 }
 
 function evidenceClaimFromItem(raw) {
@@ -577,36 +588,51 @@ function nextEvidenceId(usedIds) {
   return id;
 }
 
+const VOLATILE_ROW_KEYS = new Set(["confirmedAt", "updatedAt", "sourceProposalId"]);
+
+function stableRow(row) {
+  const out = {};
+  for (const key of Object.keys(row || {}).sort()) {
+    if (!VOLATILE_ROW_KEYS.has(key)) out[key] = row[key];
+  }
+  return JSON.stringify(out);
+}
+
+function laneRowData(proposal, raw, updatedAt) {
+  const id = raw.id ? String(raw.id) : `${proposal.lane}_${randomUUID()}`;
+  return {
+    ...clone(raw),
+    id,
+    status: raw.status || "confirmed",
+    sourceId: String(raw.sourceId || proposal.sourceId),
+    sourceProposalId: proposal.id,
+    supportingQuote: raw.supportingQuote ? String(raw.supportingQuote) : null,
+    confirmedAt: updatedAt,
+    updatedAt,
+  };
+}
+
+// Evidence lands through planEvidenceWrites and candidateEvidenceMerge in
+// deepIngestConfirmProposal; this writes the lanes with their own table.
 function writeConfirmedLaneOutput(db, proposal, edits, updatedAt) {
   const items = Array.isArray(edits?.items) ? edits.items : [];
-  if (proposal.lane === "evidence_claims") {
-    const evidence = writeEvidenceClaims(db, items, proposal, updatedAt);
-    if (evidence.accepted === 0) {
-      throw makeError("Deep ingest evidence confirmation requires a claim");
-    }
-    return { evidence };
-  }
-
   const table = CONFIRMED_LANE_TABLES[proposal.lane];
   if (!table) return { written: 0 };
 
   let written = 0;
+  const rows = [];
   for (const raw of items.length ? items : [edits]) {
     if (!raw || typeof raw !== "object") continue;
-    const id = raw.id ? String(raw.id) : `${proposal.lane}_${randomUUID()}`;
-    putRow(db, table, id, {
-      ...clone(raw),
-      id,
-      status: raw.status || "confirmed",
-      sourceId: String(raw.sourceId || proposal.sourceId),
-      sourceProposalId: proposal.id,
-      supportingQuote: raw.supportingQuote ? String(raw.supportingQuote) : null,
-      confirmedAt: updatedAt,
-      updatedAt,
-    });
+    const data = laneRowData(proposal, raw, updatedAt);
+    const existing = readRow(db, table, data.id);
+    rows.push({ id: data.id, existed: Boolean(existing) });
+    // An identical row already saved is left alone, so its own log entry and
+    // Undo still describe it.
+    if (existing && stableRow(existing) === stableRow(data)) continue;
+    putRow(db, table, data.id, data);
     written += 1;
   }
-  return { written };
+  return { written, rows };
 }
 
 function markLaneCompleted(db, lane, updatedAt) {
@@ -953,11 +979,13 @@ export function deepIngestConfirmProposal({
   proposalId,
   expectedVersion,
   edits = {},
+  decisionSource = "user",
 } = {}) {
   const expected = normalizeExpectedVersion(expectedVersion, "deepIngestConfirmProposal");
   assertNoPrivateCompKeys(edits);
+  const ctx = { repoRoot, env };
 
-  return runDeepIngestVerb({ repoRoot, env }, (db) => {
+  const prepared = runDeepIngestVerb(ctx, (db) => {
     const current = requireRow(db, PROPOSAL_TABLE, proposalId, "Deep ingest proposal");
     assertProposalVersion(current, expected);
     const hasEdits = Array.isArray(edits?.items) && edits.items.length > 0;
@@ -970,21 +998,101 @@ export function deepIngestConfirmProposal({
       err.validation = { status: "blocked", blockedReasons: currentBlocks };
       throw err;
     }
-    const updatedAt = nowIso();
     const items = normalizeEditedItems({ db, proposal: current, edits, forConfirm: true });
+    const evidencePlan =
+      current.lane === "evidence_claims" ? planEvidenceWrites(db, items, current, nowIso()) : null;
+    return { current, items, evidencePlan };
+  });
+  const { items, evidencePlan } = prepared;
+
+  // The canonical evidence writer runs its own transaction, so it runs between
+  // the checks above and the proposal write below.
+  let evidenceMerge = null;
+  if (evidencePlan) {
+    if (evidencePlan.accepted === 0) {
+      throw makeError("Deep ingest evidence confirmation requires a claim");
+    }
+    if (!evidencePlan.claims.length && evidencePlan.refused.length) {
+      const err = makeError(
+        "Deep ingest proposal is blocked and cannot be confirmed",
+        "PROPOSAL_BLOCKED"
+      );
+      err.validation = {
+        status: "blocked",
+        blockedReasons: [...new Set(evidencePlan.refused.map((item) => item.reason))],
+      };
+      throw err;
+    }
+    if (evidencePlan.claims.length) {
+      evidenceMerge = candidateEvidenceMerge({
+        ...ctx,
+        claims: evidencePlan.claims,
+        recordActivity: false,
+      });
+    }
+  }
+
+  return runDeepIngestVerb(ctx, (db) => {
+    const current = requireRow(db, PROPOSAL_TABLE, proposalId, "Deep ingest proposal");
+    assertProposalVersion(current, expected);
+    const updatedAt = nowIso();
     const confirmedOutput = { ...clone(edits), items };
-    const output = writeConfirmedLaneOutput(db, current, confirmedOutput, updatedAt);
+    const savedIds = evidencePlan ? evidencePlan.claims.map((claim) => claim.id) : [];
+    const output = evidencePlan
+      ? {
+          evidence: {
+            added: evidenceMerge?.added || 0,
+            accepted: evidencePlan.accepted,
+            insertedIds: savedIds,
+            // A saved claim is never overwritten, so nothing is replaced.
+            replacedIds: [],
+            replaced: [],
+            identicalIds: evidencePlan.identical.map((item) => item.id),
+            refused: evidencePlan.refused.map(({ index, reason }) => ({ index, reason })),
+          },
+        }
+      : writeConfirmedLaneOutput(db, current, confirmedOutput, updatedAt);
+
+    // Evidence the firewall refused stays in review with its reason; the rest saved.
+    if (evidencePlan?.refused.length) {
+      const heldItems = evidencePlan.refused.map(({ index, reason }) => ({
+        ...items[index],
+        heldReason: reason,
+      }));
+      const held = {
+        ...current,
+        status: "review_needed",
+        version: expected + 1,
+        proposal: mergedProposalPayload(current, { items: heldItems }, heldItems),
+        output,
+        autoApply: {
+          status: "held",
+          reasons: [...new Set(evidencePlan.refused.map((item) => item.reason))],
+        },
+        updatedAt,
+      };
+      putRow(db, PROPOSAL_TABLE, held.id, held);
+      const activity = logConfirmedCandidateActivity(db, {
+        lane: current.lane,
+        action: "confirm",
+        count: evidencePlan.claims.length,
+      });
+      return { ...readRow(db, PROPOSAL_TABLE, held.id), ...activity };
+    }
+
     const next = {
       ...current,
       status: "confirmed",
       version: expected + 1,
       decision: "confirm",
+      decisionSource,
       reason: null,
       proposal: mergedProposalPayload(current, confirmedOutput, items),
       confirmedOutput,
       output,
       updatedAt,
     };
+    delete next.autoApply;
     putRow(db, PROPOSAL_TABLE, next.id, next);
     markLaneCompleted(db, current.lane, updatedAt);
     const activity = logConfirmedCandidateActivity(db, {
@@ -994,6 +1102,148 @@ export function deepIngestConfirmProposal({
     });
     return { ...readRow(db, PROPOSAL_TABLE, next.id), ...activity };
   });
+}
+
+const HOLD_BLOCKED_REASON =
+  "It needs a supporting quote from your source before CareerRat can save it.";
+const HOLD_PRIVACY = "A privacy check held this back, so it waits for your review.";
+const HOLD_OPEN_QUESTION = "This one is a question for you, so it waits for your answer.";
+const HOLD_REPLACES_ROW = "It would replace something you already saved, so it waits for your yes.";
+const HOLD_LOOSENS_HONESTY =
+  "It would remove or weaken one of your honesty boundaries, so it waits for your yes.";
+const HOLD_ROLE_PAY = "It touches a pay floor or target, so it waits for your yes.";
+
+const HONESTY_LOOSEN_WORDS =
+  /\b(remove|removes|removed|delete|retire|retired|revoke|revoked|withdraw|withdrawn|relax|relaxed|loosen|lift|lifted|drop|dropped|allow|allowed|permit)\b/i;
+const ROLE_PAY_KEY = /(floor|minimum|target|salary|compensation|comp|pay|earnings)/i;
+
+function itemFields(item) {
+  return [item, item?.payload].filter((value) => value && typeof value === "object");
+}
+
+// Judged on the lane, not on wording in the source quote: an honesty item loosens
+// when its own action/status fields say remove or relax. A role-signal item
+// holds when it carries a pay floor or target field.
+function laneLoosensReasons(proposal, items) {
+  const reasons = new Set();
+  for (const item of items) {
+    for (const fields of itemFields(item)) {
+      if (proposal.lane === "honesty_boundaries") {
+        for (const key of ["action", "op", "operation", "change", "status", "boundaryType"]) {
+          if (key === "status" && fields[key] === "confirmed") continue;
+          if (typeof fields[key] === "string" && HONESTY_LOOSEN_WORDS.test(fields[key])) {
+            reasons.add(HOLD_LOOSENS_HONESTY);
+          }
+        }
+        if (fields.remove === true || fields.removed === true) reasons.add(HOLD_LOOSENS_HONESTY);
+      }
+      if (proposal.lane === "role_signals") {
+        for (const key of Object.keys(fields)) {
+          if (ROLE_PAY_KEY.test(key) && typeof fields[key] === "number") {
+            reasons.add(HOLD_ROLE_PAY);
+          }
+        }
+      }
+    }
+  }
+  return [...reasons];
+}
+
+function autoApplyHoldReasons(db, proposal) {
+  const payload = proposal.proposal || {};
+  const items = proposalItems(payload);
+  if (
+    (!CONFIRMED_LANE_TABLES[proposal.lane] && proposal.lane !== "evidence_claims") ||
+    payload.status === "manual_fallback" ||
+    payload.status === "gap" ||
+    payload.validation?.status === "fallback"
+  ) {
+    return [HOLD_OPEN_QUESTION];
+  }
+  const reasons = new Set();
+  if (proposalBlockedReasons(proposal).length) reasons.add(HOLD_BLOCKED_REASON);
+  for (const reason of laneLoosensReasons(proposal, items)) reasons.add(reason);
+  const table = CONFIRMED_LANE_TABLES[proposal.lane];
+  if (table) {
+    for (const raw of items) {
+      if (!raw || typeof raw !== "object" || !raw.id) continue;
+      const existing = readRow(db, table, raw.id);
+      if (existing && stableRow(existing) !== stableRow(laneRowData(proposal, raw, "x"))) {
+        reasons.add(HOLD_REPLACES_ROW);
+      }
+    }
+  }
+  return [...reasons];
+}
+
+function markProposalHeld(db, proposal, reasons) {
+  putRow(db, PROPOSAL_TABLE, proposal.id, {
+    ...proposal,
+    autoApply: { status: "held", reasons },
+  });
+}
+
+// Saves a freshly built proposal on its own when it clears every confirm-time
+// check and doesn't loosen a guard. Goes through deepIngestConfirmProposal so
+// the privacy, grounding and evidence checks all run. A proposal that doesn't
+// qualify, or whose confirm is refused, stays in review with the reasons on it.
+export function deepIngestProposalAutoApply({ repoRoot, env, proposalId } = {}) {
+  const ctx = { repoRoot, env };
+  const pre = runDeepIngestVerb(ctx, (db) => {
+    const current = requireRow(db, PROPOSAL_TABLE, proposalId, "Deep ingest proposal");
+    if (current.status !== "review_needed") return { current, skip: true, reasons: [] };
+    const reasons = autoApplyHoldReasons(db, current);
+    if (reasons.length) markProposalHeld(db, current, reasons);
+    return { current, skip: false, reasons };
+  });
+  if (pre.skip) return { applied: false, held: false, proposal: pre.current };
+  if (pre.reasons.length) {
+    return {
+      applied: false,
+      held: true,
+      reasons: pre.reasons,
+      proposal: readRow(requireDb(ctx), PROPOSAL_TABLE, proposalId),
+    };
+  }
+  try {
+    const proposal = deepIngestConfirmProposal({
+      ...ctx,
+      proposalId,
+      expectedVersion: pre.current.version,
+      edits: {},
+      decisionSource: "automatic",
+    });
+    if (proposal.status !== "confirmed") {
+      return {
+        applied: false,
+        held: true,
+        partial: true,
+        reasons: proposal.autoApply?.reasons || [],
+        proposal,
+      };
+    }
+    return { applied: true, held: false, proposal };
+  } catch (err) {
+    let finalReasons;
+    if (err?.code === "PROPOSAL_BLOCKED") {
+      const sentences = (err.validation?.blockedReasons || []).filter((reason) =>
+        reason.includes(" ")
+      );
+      finalReasons = sentences.length
+        ? sentences
+        : [err.validation?.status === "needs_quote" ? HOLD_BLOCKED_REASON : HOLD_PRIVACY];
+    } else {
+      finalReasons = [
+        `CareerRat couldn't save this on its own. ${String(err?.message || "")}`.trim(),
+      ];
+    }
+    const proposal = runDeepIngestVerb(ctx, (db) => {
+      const fresh = requireRow(db, PROPOSAL_TABLE, proposalId, "Deep ingest proposal");
+      markProposalHeld(db, fresh, finalReasons);
+      return readRow(db, PROPOSAL_TABLE, proposalId);
+    });
+    return { applied: false, held: true, reasons: finalReasons, proposal };
+  }
 }
 
 // Resolve a lane name to its confirmed-item table for the update/remove

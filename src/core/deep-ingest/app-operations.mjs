@@ -13,6 +13,7 @@ import {
   deepIngestStateGet,
 } from "../db/verbs/deep-ingest.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { autoApplyDeepIngestProposals } from "./auto-apply.mjs";
 import { proposeAutoFromSource } from "./proposals/auto.mjs";
 import { proposeEvidenceFromSource } from "./proposals/evidence.mjs";
 import { proposeGapsFromSource } from "./proposals/gaps.mjs";
@@ -595,6 +596,7 @@ export function createDeepIngestAppOperationKinds({
             proposal,
           })),
         });
+        autoApplyDeepIngestProposals({ ...pathCtx, proposals: persisted.proposals });
         return {
           resultRef: {
             type: "deep-ingest-proposal-set",
