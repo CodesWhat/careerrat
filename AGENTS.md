@@ -53,6 +53,11 @@ location:
   top-level `.internal/` directory.
 - **`CAREERRAT_HOME` override.** If set, it replaces the data root above verbatim
   and nothing is probed at the repo root.
+- **One workspace per person.** `careerrat --for <name> <command>` (or
+  `CAREERRAT_PERSON=<name>`) sets `CAREERRAT_HOME` to `<data root>/people/<name>/`
+  before anything resolves a path, so everything above applies inside that
+  person's root. Create one with `careerrat people add <name>`. With no person
+  selected, the data root is the owner's own workspace.
 - **`config/` is split.** Only four generated files move with the rule above:
   `search-sources.yml`, `search-sources.json`, `sourced-scan.json`, `ai.json`.
   Everything else under `config/` (schemas, `*.example.yml`) ships with the

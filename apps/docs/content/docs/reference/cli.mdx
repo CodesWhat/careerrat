@@ -12,6 +12,7 @@ The primary entry point. Run as `careerrat <command> [args] [--flags]`.
 | `start [agent]` | Scaffold workspace, install skills, boot dashboard, launch agent |
 | `start claude` | Same, with Claude Code as the agent |
 | `start codex` | Same, with Codex as the agent |
+| `people list` / `people add <name>` | List or create per-person workspaces. Add `--for <name>` to any command to run it for that person |
 | `init` | Scaffold workspace only (no agent, no dashboard) |
 | `doctor` | Environment health check, scaffold state, skills discoverability |
 | `next` | Show the next agent task from doctor guidance |
@@ -92,4 +93,6 @@ developing from a source checkout or running lower-level maintenance tools.
 | Variable | Default | Purpose |
 | -------- | ------- | ------- |
 | `CAREERRAT_HOME` | `<repo root>/.careerrat` | Override location of `.careerrat/` (holding `candidate/` and `workspace/`) |
+| `CAREERRAT_PERSON` | *(unset)* | Run in the workspace at `<data root>/people/<name>/`, same as `--for <name>` |
+| `CAREERRAT_DOWNLOADS_DIR` | `~/Documents/careerrat` (`~/Documents/careerrat/<name>` with a person) | Where exported documents go |
 | `NEXT_PUBLIC_SITE_URL` | *(unset)* | Docs-site base URL for metadata |

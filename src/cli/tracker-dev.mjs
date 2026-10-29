@@ -97,6 +97,7 @@ import {
   recoverOnboardingSearchPromptOperations,
 } from "./onboard-route.mjs";
 import { mountPacketRoutes } from "./packet-route.mjs";
+import { mountPeopleRoutes } from "./people-route.mjs";
 import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 import { mountSourcingRoutes } from "./sourcing-route.mjs";
@@ -398,6 +399,7 @@ export function createDevServer({
   const installedRuntimeRoutes = mountInstalledRuntimeRoutes({ addRoute, repoRoot, env });
   mountHostedInterestRoutes({ addRoute, repoRoot, env });
   mountAutomationRoutes({ addRoute, repoRoot });
+  mountPeopleRoutes({ addRoute, repoRoot, env });
 
   // M1 of the paid-POC journey — the non-AI onboarding wizard's HTTP surface
   // (candidate file seeding, resume parsing, BYOK key storage) —
