@@ -116,16 +116,33 @@ function coachingTrigger({ row, before }) {
   };
 }
 
+// Records that an automatic follow-up was skipped because no AI is set up.
+// Called from inside the detached run, so the AI-route probe (which can run a
+// CLI --version check) never holds up the write that triggered it.
+export function noteSkippedFollowUp({ repoRoot, env, followUp }) {
+  workspaceMessageAppend({
+    repoRoot,
+    env,
+    role: "assistant",
+    kind: "status",
+    text: `Skipped the automatic ${followUp.label} for ${followUp.company || "this job"}: no AI is set up yet. Connect one in Settings and run it from this job.`,
+    entity: { type: "application", id: followUp.intent.entity.id },
+    metadata: { autoFollowUp: { key: followUp.key, skipped: "no-ai-route" } },
+  });
+}
+
+export function aiRouteAvailable({ repoRoot, env }) {
+  return resolveAIRoute(env, { repoRoot }).type !== "none";
+}
+
 // Compare the application state `before` a write with what is stored now and
-// return the follow-up intents that are due. Pure decision plus one visible
-// side effect: when AI isn't configured the follow-up is skipped with a short
-// status note (once per key) instead of an error.
+// return the follow-up intents that are due. Pure decision: no AI probe and no
+// writes, so it stays cheap on the request path.
 export function planAutoFollowUps({
   repoRoot,
   env,
   before,
   startCompanyHealthImpl,
-  aiRouteAvailableImpl = () => resolveAIRoute(env, { repoRoot }).type !== "none",
   now = Date.now(),
 }) {
   const after = snapshotApplicationState({ repoRoot, env });
@@ -153,20 +170,10 @@ export function planAutoFollowUps({
     ].filter(Boolean);
     for (const trigger of triggers) {
       if (followUpHandled(messages, row.id, trigger.key)) continue;
-      if (!aiRouteAvailableImpl()) {
-        workspaceMessageAppend({
-          repoRoot,
-          env,
-          role: "assistant",
-          kind: "status",
-          text: `Skipped the automatic ${trigger.label} for ${row.company || "this job"}: no AI is set up yet. Connect one in Settings and run it from this job.`,
-          entity: { type: "application", id: row.id },
-          metadata: { autoFollowUp: { key: trigger.key, skipped: "no-ai-route" } },
-        });
-        continue;
-      }
       due.push({
         key: trigger.key,
+        label: trigger.label,
+        company: row.company || "",
         intent: {
           ...trigger.intent,
           input: { auto: true, autoKey: trigger.key },

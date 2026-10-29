@@ -144,7 +144,9 @@ import {
 import { classifyStage } from "../tracker/dashboard.mjs";
 import { readVersion } from "../version.mjs";
 import {
+  aiRouteAvailable,
   companyHealthRecheckDays,
+  noteSkippedFollowUp,
   planAutoFollowUps,
   snapshotApplicationState,
 } from "./cost-gate-auto.mjs";
@@ -4391,10 +4393,10 @@ function scheduleAutoFollowUps({ options, before }) {
       env,
       before,
       startCompanyHealthImpl: options.startCompanyHealthImpl,
-      aiRouteAvailableImpl: options.aiRouteAvailableImpl,
       now: options.now ? options.now().getTime() : Date.now(),
     });
     const schedule = options.scheduleAutoFollowUp || scheduleDetached;
+    const aiReady = options.aiRouteAvailableImpl || (() => aiRouteAvailable({ repoRoot, env }));
     for (const followUp of due) {
       const flightKey = `${repoRoot}\u0000${followUp.intent.entity?.id}\u0000${followUp.key}`;
       if (autoFollowUpsInFlight.has(flightKey)) continue;
@@ -4407,6 +4409,12 @@ function scheduleAutoFollowUps({ options, before }) {
       delete rest.signal;
       schedule(async () => {
         try {
+          // The AI-route probe can shell out to a CLI, so it runs here, after
+          // the triggering write has already returned.
+          if (!aiReady()) {
+            noteSkippedFollowUp({ repoRoot, env, followUp });
+            return;
+          }
           await executeWorkspaceIntentCore(rest);
         } catch {
           // The handler already wrote the action_error into the job thread.
@@ -6066,14 +6074,20 @@ async function executeWorkspaceIntentCore({
         operation?.chat || operation?.activeDiscoveryChat || operation,
         { skill: "company-health", title: `Company health: ${company}` }
       );
+      // One company-health chat runs at a time and a second start reuses it,
+      // so an automatic run that only reopened another check says so rather
+      // than claiming this company was researched.
+      const autoBusy = input.auto === true && artifact.reused;
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: artifact.reused
-          ? `Reopened the company-health check for ${company}.`
-          : `Started a company-health check for ${company}. This stays internal and never reaches the company.`,
+        text: autoBusy
+          ? `Didn't start the automatic company-health check for ${company}: another check is still running. Run it from this job once that one finishes.`
+          : artifact.reused
+            ? `Reopened the company-health check for ${company}.`
+            : `Started a company-health check for ${company}. This stays internal and never reaches the company.`,
         artifacts: [artifact],
         metadata: { state: artifact.state },
         operationResult: operation,

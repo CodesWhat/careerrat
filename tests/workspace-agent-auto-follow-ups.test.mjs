@@ -316,7 +316,7 @@ test("an application created inside the write counts as new, so its review verdi
       },
     },
   });
-  const due = planAutoFollowUps({ repoRoot, env: {}, before, aiRouteAvailableImpl: () => true });
+  const due = planAutoFollowUps({ repoRoot, env: {}, before });
   assert.deepEqual(
     due.map((followUp) => [followUp.intent.type, followUp.intent.entity.id]),
     [["coaching.plan", "app-new"]]
@@ -345,4 +345,40 @@ test("two writes landing together schedule one follow-up, not two", async () => 
   assert.equal(queued.length, 1);
   await Promise.all(queued.map((run) => run()));
   assert.equal(healthCalls.length, 1);
+});
+
+test("the AI-route probe runs inside the detached follow-up, never on the write's path", () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot);
+  const queued = [];
+  let probes = 0;
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startCompanyHealthImpl: async () => ({ chat: { chatId: "ch-3", state: "running" } }),
+    scheduleAutoFollowUp: (run) => queued.push(run),
+    aiRouteAvailableImpl: () => {
+      probes += 1;
+      return true;
+    },
+  });
+  const before = runtime.snapshotApplicationState();
+  appSetStatus({ repoRoot, env: {}, id: "app-auto", to: "interview" });
+  runtime.afterApplicationWrite(before);
+  assert.equal(queued.length, 1);
+  assert.equal(probes, 0);
+});
+
+test("an automatic company-health run that only reopens another check says it didn't start", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot);
+  const h = harness(repoRoot, {
+    startCompanyHealthImpl: async () => ({
+      chat: { chatId: "ch-other", skill: "company-health", state: "running", reused: true },
+    }),
+  });
+  await executeWorkspaceIntent({ ...h.base, intent: outcome("interview") });
+  await h.settle();
+  const texts = workspaceThreadRead({ repoRoot, env: {} }).messages.map((message) => message.text);
+  assert.ok(texts.some((text) => /Didn't start the automatic company-health check/.test(text)));
 });
