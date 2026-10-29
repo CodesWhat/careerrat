@@ -1696,8 +1696,11 @@ describe("JobConversation and JobContextPanel", () => {
         packetReview={packetReview}
       />
     );
-    expect(conversation).toContain("I need 2 application answers before I can continue");
+    expect(conversation).toContain("2 application questions need your answer");
+    expect(conversation).toContain("Everything else is done");
+    expect(conversation).toContain("can&#x27;t be submitted until you answer");
     expect(conversation).toContain("Use the application review on the right");
+    expect(conversation).not.toContain('role="dialog"');
 
     const tree = JobContextPanel({
       job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },

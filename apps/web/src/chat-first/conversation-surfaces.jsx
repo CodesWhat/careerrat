@@ -1329,7 +1329,7 @@ export function CanonicalJobConversation({
         packetReview?.questionCaptureRequired
           ? "CareerRat needs to open the application form to discover its questions. Use Prepare form on the right."
           : packetReview?.gaps?.length
-            ? `I need ${packetReview.gaps.length} application answer${packetReview.gaps.length === 1 ? "" : "s"} before I can continue. Use the application review on the right, then resume preparation.`
+            ? `${packetReview.gaps.length === 1 ? "One application question needs" : `${packetReview.gaps.length} application questions need`} your answer. Everything else is done, and this job can't be submitted until you answer. Use the application review on the right.`
             : null
       }
       inbound={canonicalInbound(communication)}

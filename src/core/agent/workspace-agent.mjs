@@ -85,6 +85,7 @@ import {
   startFirstSearchRun,
   startManualSearchRun,
 } from "../onboarding/first-search-run.mjs";
+import { openAnswerNeedsFromGaps } from "../packet/answer-needs.mjs";
 import { buildPacketContext } from "../packet/context.mjs";
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
@@ -1926,6 +1927,23 @@ function blockingPacketGaps(gaps) {
   return gaps.filter((gap) => !isNonBlockingPacketGap(gap));
 }
 
+// An unanswered required application question is a flag on that one job, not
+// a stop: the run keeps tailoring and filling everything else, and the job just
+// can't submit until the operator answers (see openAnswerNeeds in the apply
+// path, which also forces manual submit while any are open).
+function isAnswerNeededGap(gap) {
+  return (
+    String(gap?.kind || "").toLowerCase() === "answers" &&
+    String(gap?.code || "").toUpperCase() === "ANSWER_CONFIRMATION_REQUIRED"
+  );
+}
+
+// Gaps that stop the run before the form is opened: every blocking gap except
+// the ones that only need the operator's answer.
+function haltingPacketGaps(gaps) {
+  return blockingPacketGaps(gaps).filter((gap) => !isAnswerNeededGap(gap));
+}
+
 // Server-side corroboration for job.apply's resumeSession shortcut (see the
 // call site below): the persisted evaluation must have cleared the gate, and
 // the persisted packet manifest must be free of blocking gaps. Both fields
@@ -1945,7 +1963,7 @@ function applicationApplySafetyBlockReason({ repoRoot, env, application }) {
   }
   const gaps = Array.isArray(manifest.gaps) ? manifest.gaps : null;
   const packetComplete = gaps
-    ? blockingPacketGaps(gaps).length === 0
+    ? haltingPacketGaps(gaps).length === 0
     : manifest.uploadReady === true;
   if (!packetComplete) {
     return "This application's packet still has open items to resolve.";
@@ -2178,6 +2196,11 @@ function autoSubmitStopReason(execution) {
     .trim()
     .replace(/[.\s]+$/, "")
     .slice(0, 300);
+}
+
+function needsAnswerText(needs) {
+  const questions = needs.map((need) => `“${need.question}”`).join("; ");
+  return `${needs.length === 1 ? "One question needs" : `${needs.length} questions need`} your answer before this can be submitted: ${questions}. Everything else is done.`;
 }
 
 function applicationSessionText(execution) {
@@ -3413,6 +3436,37 @@ async function saveReusableScreeningAnswers({ repoRoot, env, answers, saveImpl, 
   return { saved, entries, failure };
 }
 
+// A thread answer to a durable question (work authorization, notice period and
+// the like) is saved to form-defaults the same way a drafted one is, so no later
+// job asks it again. Job-specific answers stay with their application: the
+// writer refuses them and they are skipped here.
+async function saveConfirmedDurableAnswers({ repoRoot, env, answers, saveImpl, intentMessage }) {
+  const reusable = await saveReusableScreeningAnswers({
+    repoRoot,
+    env,
+    answers: (answers || []).map((entry) => ({
+      question: entry.question,
+      key: entry.key,
+      answer: entry.answer,
+    })),
+    saveImpl,
+    source: { kind: "screening.answer-confirm", intentMessageId: intentMessage.message.id },
+    writer: "screening.answer-confirm",
+  });
+  const resultId = intentMessage.resultMessageId || randomUUID();
+  intentMessage.resultMessageId = resultId;
+  const undoActions = reusable.entries.flatMap((entry, index) =>
+    entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+  );
+  const savedNote = reusable.entries.length
+    ? ` Saved ${reusable.entries.length === 1 ? "this answer" : `${reusable.entries.length} answers`} for future applications.`
+    : "";
+  const failureNote = reusable.failure
+    ? ` Some answers couldn't be saved for future applications: ${reusable.failure.message || "an unknown error"}`
+    : "";
+  return { entries: reusable.entries, undoActions, savedNote: `${savedNote}${failureNote}` };
+}
+
 async function recordWorkspaceAdjacentRoleCoaching({
   repoRoot,
   env = process.env,
@@ -4588,14 +4642,23 @@ async function executeWorkspaceIntentCore({
           : Array.isArray(manifest.gaps)
             ? manifest.gaps.length
             : 0;
+        const durable = await saveConfirmedDurableAnswers({
+          repoRoot,
+          env,
+          answers: confirmation.answers,
+          saveImpl: saveScreeningAnswerImpl,
+          intentMessage,
+        });
         return appendActionResult({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          text: uploadReady
-            ? `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
-            : `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`,
+          text: `${
+            uploadReady
+              ? `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
+              : `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`
+          }${durable.savedNote}`,
           artifacts: [
             {
               kind: "screening_answer_confirmed",
@@ -4607,23 +4670,29 @@ async function executeWorkspaceIntentCore({
               answers: confirmation.answers,
               artifactPath: confirmation.artifactPath,
             },
+            ...durable.entries,
           ],
           metadata: {
             state: "confirmed",
             persisted: true,
             uploadReady,
             gapCount,
-            ...(uploadReady
+            ...(uploadReady || durable.undoActions.length
               ? {
                   nextActions: [
-                    {
-                      label: "Resume supervised apply",
-                      intent: {
-                        type: "job.prepare-submit",
-                        entity: { type: "application", id: confirmation.applicationId },
-                        input: { resumeSession: true },
-                      },
-                    },
+                    ...(uploadReady
+                      ? [
+                          {
+                            label: "Resume supervised apply",
+                            intent: {
+                              type: "job.prepare-submit",
+                              entity: { type: "application", id: confirmation.applicationId },
+                              input: { resumeSession: true },
+                            },
+                          },
+                        ]
+                      : []),
+                    ...durable.undoActions,
                   ],
                 }
               : {}),
@@ -4739,14 +4808,23 @@ async function executeWorkspaceIntentCore({
         : Array.isArray(manifest.gaps)
           ? manifest.gaps.length
           : 0;
+      const durable = await saveConfirmedDurableAnswers({
+        repoRoot,
+        env,
+        answers: operation.answers,
+        saveImpl: saveScreeningAnswerImpl,
+        intentMessage,
+      });
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: uploadReady
-          ? `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
-          : `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`,
+        text: `${
+          uploadReady
+            ? `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
+            : `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`
+        }${durable.savedNote}`,
         artifacts: [
           {
             kind: "screening_answer_confirmed",
@@ -4758,23 +4836,29 @@ async function executeWorkspaceIntentCore({
             answers: operation.answers,
             artifactPath: operation.artifactPath,
           },
+          ...durable.entries,
         ],
         metadata: {
           state: "confirmed",
           persisted: true,
           uploadReady,
           gapCount,
-          ...(uploadReady
+          ...(uploadReady || durable.undoActions.length
             ? {
                 nextActions: [
-                  {
-                    label: "Resume supervised apply",
-                    intent: {
-                      type: "job.prepare-submit",
-                      entity: { type: "application", id: operation.applicationId },
-                      input: { resumeSession: true },
-                    },
-                  },
+                  ...(uploadReady
+                    ? [
+                        {
+                          label: "Resume supervised apply",
+                          intent: {
+                            type: "job.prepare-submit",
+                            entity: { type: "application", id: operation.applicationId },
+                            input: { resumeSession: true },
+                          },
+                        },
+                      ]
+                    : []),
+                  ...durable.undoActions,
                 ],
               }
             : {}),
@@ -9163,6 +9247,8 @@ async function executeWorkspaceIntentCore({
     }
 
     let questionCapture = null;
+    // Open "needs your answer" questions from the latest packet build.
+    let packetAnswerNeeds = [];
 
     if (!resumeApplicationSession) {
       let evaluated;
@@ -9256,7 +9342,8 @@ async function executeWorkspaceIntentCore({
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
       const blockingGapCount = blockingPacketGaps(gaps).length;
-      if (blockingGapCount > 0) {
+      packetAnswerNeeds = openAnswerNeedsFromGaps(gaps);
+      if (haltingPacketGaps(gaps).length > 0) {
         return appendActionResult({
           repoRoot,
           env,
@@ -9364,7 +9451,8 @@ async function executeWorkspaceIntentCore({
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
       const blockingGapCount = blockingPacketGaps(gaps).length;
-      if (blockingGapCount > 0) {
+      packetAnswerNeeds = openAnswerNeedsFromGaps(gaps);
+      if (haltingPacketGaps(gaps).length > 0) {
         return appendActionResult({
           repoRoot,
           env,
@@ -9479,7 +9567,14 @@ async function executeWorkspaceIntentCore({
         now,
       });
     }
-    const submitMode = input.submitMode === "auto" ? "auto" : "manual";
+    // Unanswered required questions flag this job instead of stopping the run:
+    // the form is still opened and filled, but nothing is ever auto-submitted
+    // while one is open.
+    let openAnswerNeeds = packetAnswerNeeds.length
+      ? packetAnswerNeeds
+      : openAnswerNeedsFromGaps(application?.packetManifest?.gaps);
+    const submitMode =
+      input.submitMode === "auto" && openAnswerNeeds.length === 0 ? "auto" : "manual";
     const alreadyAttemptedNote =
       input.submitAlreadyAttempted === true
         ? " CareerRat already pressed Submit once without a confirmation, so it will not press it again. Check the site and record the outcome."
@@ -9542,7 +9637,8 @@ async function executeWorkspaceIntentCore({
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
       const blockingGapCount = blockingPacketGaps(gaps).length;
-      if (blockingGapCount > 0) {
+      packetAnswerNeeds = openAnswerNeedsFromGaps(gaps);
+      if (haltingPacketGaps(gaps).length > 0) {
         const sessionUrl = safeExternalHttpUrl(execution.currentUrl || postingUrl);
         return appendActionResult({
           repoRoot,
@@ -9596,6 +9692,8 @@ async function executeWorkspaceIntentCore({
         });
       }
       application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      if (packetAnswerNeeds.length) openAnswerNeeds = packetAnswerNeeds;
+      const rerunManual = openAnswerNeeds.length > 0;
       execution = await applyJobImpl({
         repoRoot,
         env,
@@ -9607,11 +9705,11 @@ async function executeWorkspaceIntentCore({
           ...executorInput,
           resumeSession: true,
           renderedQuestionsReady: true,
-          prepareOnly,
-          submitMode,
+          prepareOnly: rerunManual || prepareOnly,
+          submitMode: rerunManual ? "manual" : submitMode,
         },
-        prepareOnly,
-        submitMode,
+        prepareOnly: rerunManual || prepareOnly,
+        submitMode: rerunManual ? "manual" : submitMode,
         ...submitAttemptHook,
         signal,
         ...(input.focusSession === true ? { focusSession: true } : {}),
@@ -9749,8 +9847,12 @@ async function executeWorkspaceIntentCore({
             platforms: execution.platform ? [execution.platform] : undefined,
           })
         : null;
-      const sessionState =
-        prepareSubmit && execution.state === "questions-captured" ? "blocked" : execution.state;
+      const flaggedNeedsAnswer = !offNote && openAnswerNeeds.length > 0;
+      const sessionState = flaggedNeedsAnswer
+        ? "needs-answer"
+        : prepareSubmit && execution.state === "questions-captured"
+          ? "blocked"
+          : execution.state;
       return appendActionResult({
         repoRoot,
         env,
@@ -9758,7 +9860,9 @@ async function executeWorkspaceIntentCore({
         intentMessage,
         text: offNote
           ? offNote.text
-          : `${applicationSessionText(execution)}${alreadyAttemptedNote}`,
+          : flaggedNeedsAnswer
+            ? `${needsAnswerText(openAnswerNeeds)} ${applicationSessionText(execution)}${alreadyAttemptedNote}`
+            : `${applicationSessionText(execution)}${alreadyAttemptedNote}`,
         artifacts: [
           {
             kind: "application_handoff",
@@ -9776,29 +9880,41 @@ async function executeWorkspaceIntentCore({
           applicationId: normalized.entity.id,
           submissionVerified: false,
           ...(offNote ? { capabilityOff: { reason: offNote.text } } : {}),
+          ...(flaggedNeedsAnswer ? { needsAnswers: openAnswerNeeds } : {}),
           ...(autoSubmitStopReason(execution)
             ? { autoSubmitStopped: { reason: autoSubmitStopReason(execution) } }
             : {}),
           nextActions: [
+            ...(flaggedNeedsAnswer
+              ? [
+                  navigationAction("Answer the open questions", {
+                    surface: "job",
+                    entityType: "application",
+                    entityId: normalized.entity.id,
+                  }),
+                ]
+              : []),
             ...(offNote
               ? offNote.nextActions
-              : [
-                  {
-                    label:
-                      execution.state === "awaiting-submit"
-                        ? "Open form to review & submit"
-                        : "Return to supervised application",
-                    intent: {
-                      type: "job.prepare-submit",
-                      entity: { type: "application", id: normalized.entity.id },
-                      input: {
-                        resumeSession: true,
-                        focusSession: true,
-                        ...carriedReviewApproval(input),
+              : flaggedNeedsAnswer
+                ? []
+                : [
+                    {
+                      label:
+                        execution.state === "awaiting-submit"
+                          ? "Open form to review & submit"
+                          : "Return to supervised application",
+                      intent: {
+                        type: "job.prepare-submit",
+                        entity: { type: "application", id: normalized.entity.id },
+                        input: {
+                          resumeSession: true,
+                          focusSession: true,
+                          ...carriedReviewApproval(input),
+                        },
                       },
                     },
-                  },
-                ]),
+                  ]),
             {
               label: "I applied",
               intent: {

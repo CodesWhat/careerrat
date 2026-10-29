@@ -617,7 +617,12 @@ test("job.prepare-submit never hands a live-question recovery off to job.apply",
 
   assert.deepEqual(generations, [{ force: true, answerableIds: ["q1", "rendered-travel"] }]);
   const last = result.messages.at(-1);
-  assert.equal(last.metadata.state, "blocked");
+  // The unanswered question flags the job; it does not stop the run.
+  assert.equal(last.metadata.state, "needs-answer");
+  assert.deepEqual(
+    last.metadata.needsAnswers.map((need) => need.question),
+    ["Would you be willing to travel?"]
+  );
   assert.equal(last.metadata.submissionVerified, false);
   assert.equal(JSON.stringify(last).includes('"type":"job.apply"'), false);
   assert.equal(
@@ -681,9 +686,9 @@ test("job.prepare-submit treats open answer gaps as current packet lineage", asy
   });
 
   assert.equal(generateCalls, 0);
-  assert.equal(applyCalls, 0);
-  assert.equal(result.messages.at(-1).metadata.state, "blocked");
-  assert.match(result.messages.at(-1).text, /open items/i);
+  assert.equal(applyCalls, 1, "an open answer flags the job but the form is still filled");
+  assert.equal(result.messages.at(-1).metadata.state, "needs-answer");
+  assert.match(result.messages.at(-1).text, /One question needs your answer/);
 });
 
 test("job.prepare-submit rebuilds a packet whose answer lineage predates its saved live questions", async () => {
@@ -736,15 +741,17 @@ test("job.prepare-submit rebuilds a packet whose answer lineage predates its sav
     },
   });
 
-  assert.equal(applyCalls, 0, "the stale packet is reviewed before the browser can resume");
+  assert.equal(
+    applyCalls,
+    1,
+    "the rebuilt packet flags the open question and the form still fills"
+  );
   assert.equal(generations.length, 1);
   assert.equal(generations[0].force, true);
   assert.equal(generations[0].applyIntent, true);
   const last = result.messages.at(-1);
-  assert.equal(last.metadata.state, "blocked");
-  assert.equal(last.metadata.blockingGapCount, 1);
-  assert.match(last.text, /captured application questions changed/i);
-  assert.match(last.artifacts[0].gaps[0].message, /willing to travel/i);
+  assert.equal(last.metadata.state, "needs-answer");
+  assert.match(last.text, /willing to travel/i);
 });
 
 test("job.prepare-submit treats an intentionally skipped optional question as current lineage", async () => {
@@ -1355,4 +1362,86 @@ test("submit auto: an abort right after the click still leaves the marker and a 
   assert.equal(calls[0].prepareOnly, true);
   assert.equal(calls[0].submitMode, "manual");
   assert.equal(calls[0].onSubmitAttempt, undefined);
+});
+
+const OPEN_TRAVEL_GAP = {
+  kind: "answers",
+  code: "ANSWER_CONFIRMATION_REQUIRED",
+  questionId: "q-travel",
+  message: "Answer “Would you be willing to travel?”.",
+};
+
+test("an open required question flags the job and never auto-submits it", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [OPEN_TRAVEL_GAP],
+    },
+  });
+  setSubmitMode(repoRoot, "auto");
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        session: { provider: "test", filledCount: 7, unresolved: [] },
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1, "the rest of the form is still filled");
+  assert.equal(calls[0].submitMode, "manual");
+  assert.equal(calls[0].prepareOnly, true);
+  assert.equal(calls[0].input.submitMode, "manual");
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "needs-answer");
+  assert.deepEqual(last.metadata.needsAnswers, [
+    { questionId: "q-travel", question: "Would you be willing to travel?" },
+  ]);
+  assert.match(last.text, /One question needs your answer before this can be submitted/);
+  assert.equal(readApplication(repoRoot).status, "reviewed-hold");
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.intent?.type === "job.prepare-submit"),
+    false,
+    "resume is only offered after the answer is saved"
+  );
+});
+
+test("an open question does not hide a different blocking packet gap", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, {
+    packetManifest: {
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 2,
+      gaps: [
+        OPEN_TRAVEL_GAP,
+        { kind: "resume", code: "RESUME_UPLOAD_ARTIFACT_MISSING", message: "No resume to upload." },
+      ],
+    },
+  });
+  let applyCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    applyJobImpl: async () => {
+      applyCalls += 1;
+      return { available: true, verified: false, state: "awaiting-submit" };
+    },
+  });
+
+  assert.equal(applyCalls, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "blocked");
 });

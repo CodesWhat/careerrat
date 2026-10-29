@@ -180,8 +180,10 @@ from the JD:
 3. **Never fabricate.** A question whose truthful answer would require guessing a
    number/date/clearance/tool depth, revealing current compensation, or contradicting
    `honesty.yml` gets the literal marker `NEEDS YOU: <one-line reason>` as its body.
-   The placeholder lint (STEP 7) blocks on `NEEDS YOU`, so the packet cannot be
-   upload-ready until the user supplies the answer.
+   The marker is a flag on this one job, not a stop: keep building the rest of the
+   packet and tell the user which questions are waiting. The placeholder lint (STEP 7)
+   still blocks on `NEEDS YOU`, so the packet cannot be exported or marked upload-ready
+   until the user supplies the answer.
 4. **Persist durable answers.** When the user resolves a `NEEDS YOU` or confirms an
    answer to a recurring disclosure-style question, write it to
    `candidate/form-defaults.yml#screening_answers` (normalized question fragment →

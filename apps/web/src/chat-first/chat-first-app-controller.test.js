@@ -1192,6 +1192,9 @@ describe("chat-first app controller", () => {
     expect(
       resolveNeedDecision({ kind: "application-next-action", applicationId: "app-2" }, "primary")
     ).toEqual({ kind: "open-application", applicationId: "app-2" });
+    expect(
+      resolveNeedDecision({ kind: "needs-answer", applicationId: "app-3" }, "primary")
+    ).toEqual({ kind: "open-application", applicationId: "app-3" });
     expect(resolveNeedDecision({ kind: "submit-gate", id: "mission:gate" }, "primary")).toEqual({
       kind: "open-gate",
       gateId: "mission:gate",
