@@ -30,9 +30,14 @@ test("GATE_ROUTES covers the documented gate types with file/path/friction", () 
     assert.ok(r.file, `${type} has a file`);
     assert.ok(r.path, `${type} has a path`);
     assert.ok(["append", "set"].includes(r.op), `${type} op is append|set`);
-    assert.ok(["report", "confirm"].includes(r.friction), `${type} friction is report|confirm`);
+    assert.ok(
+      ["report", "confirm", "direction"].includes(r.friction),
+      `${type} friction is report|confirm|direction`
+    );
   }
-  assert.equal(GATE_ROUTES["exclude-company"].friction, "confirm");
+  assert.equal(GATE_ROUTES["exclude-company"].friction, "report");
+  assert.equal(GATE_ROUTES["comp-floor"].friction, "direction");
+  assert.equal(GATE_ROUTES["comp-target"].friction, "direction");
   assert.equal(GATE_ROUTES["cut-signal"].friction, "report");
 });
 
@@ -241,7 +246,7 @@ const PROFILE_SCHEMA = readSchema("config/profile.schema.json");
 const HONESTY = readTpl("templates/honesty.example.yml");
 const HONESTY_SCHEMA = readSchema("config/honesty.schema.json");
 
-test("computeGateEdit: exclude-company appends, stays schema-valid, confirm-first", () => {
+test("computeGateEdit: exclude-company appends, stays schema-valid, write-and-report", () => {
   const plan = computeGateEdit({
     type: "exclude-company",
     value: "Initech",
@@ -251,7 +256,7 @@ test("computeGateEdit: exclude-company appends, stays schema-valid, confirm-firs
   assert.equal(plan.ok, true);
   assert.equal(plan.changed, true);
   assert.equal(plan.valid, true);
-  assert.equal(plan.friction, "confirm");
+  assert.equal(plan.friction, "report");
   assert.equal(plan.file, "targeting");
   assert.match(plan.nextText, /Initech/);
   assert.ok(parseYaml(plan.nextText).excluded_companies.includes("Initech"));
@@ -270,7 +275,7 @@ test("computeGateEdit: cut-signal is write-and-report friction", () => {
   assert.ok(parseYaml(plan.nextText).cut_signals.includes("graveyard on-call"));
 });
 
-test("computeGateEdit: comp-floor sets a number, confirm-first", () => {
+test("computeGateEdit: raising comp-floor sets a number and writes directly", () => {
   const plan = computeGateEdit({
     type: "comp-floor",
     value: "$215,000",
@@ -279,8 +284,45 @@ test("computeGateEdit: comp-floor sets a number, confirm-first", () => {
   });
   assert.equal(plan.changed, true);
   assert.equal(plan.valid, true);
-  assert.equal(plan.friction, "confirm");
+  assert.equal(plan.friction, "report");
   assert.equal(parseYaml(plan.nextText).compensation.minimum_base, 215000);
+});
+
+test("computeGateEdit: lowering comp-floor or comp-target is confirm-first", () => {
+  for (const [type, value] of [
+    ["comp-floor", "100000"],
+    ["comp-target", "150000"],
+  ]) {
+    const plan = computeGateEdit({
+      type,
+      value,
+      currentText: PROFILE,
+      schema: PROFILE_SCHEMA,
+    });
+    assert.equal(plan.changed, true);
+    assert.equal(plan.friction, "confirm", `${type} lowering needs a yes`);
+  }
+});
+
+test("computeGateEdit: raising comp-target writes directly", () => {
+  const plan = computeGateEdit({
+    type: "comp-target",
+    value: "200000",
+    currentText: PROFILE,
+    schema: PROFILE_SCHEMA,
+  });
+  assert.equal(plan.friction, "report");
+});
+
+test("computeGateEdit: setting a comp value where none exists writes directly", () => {
+  const plan = computeGateEdit({
+    type: "comp-floor",
+    value: "150000",
+    currentText: PROFILE.replace(/minimum_base: 140000/, "minimum_base:"),
+    schema: PROFILE_SCHEMA,
+  });
+  assert.equal(plan.changed, true);
+  assert.equal(plan.friction, "report");
 });
 
 test("computeGateEdit: annual cash earnings floor stays separate from guaranteed base", () => {
@@ -293,7 +335,7 @@ test("computeGateEdit: annual cash earnings floor stays separate from guaranteed
   const compensation = parseYaml(plan.nextText).compensation;
   assert.equal(plan.changed, true);
   assert.equal(plan.valid, true);
-  assert.equal(plan.friction, "confirm");
+  assert.equal(plan.friction, "report");
   assert.equal(compensation.minimum_annual_earnings, 95000);
   assert.equal(compensation.minimum_base, 140000);
 });

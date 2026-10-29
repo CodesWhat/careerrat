@@ -283,7 +283,7 @@ If the user states a new gate mid-flow (e.g., "never follow up with this company
 
 Route each gate type through its owning command:
 
-- Company exclusion → `careerrat gate exclude-company "<Company>" --write --confirm`
+- Company exclusion → `careerrat gate exclude-company "<Company>" --write`
 - Comp floor change → `careerrat gate comp-floor <N> --write --confirm`
 - Per-application follow-up pause → `workspace/tracker.json` (that record's
   `nextAction`/`nextActionDue`)

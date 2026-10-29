@@ -558,7 +558,7 @@ chat.
 | A company name / "tell me about X" / a company homepage URL | `research-company` | `workspace/research/<slug>.md` |
 | A wishlist of employers to target / "find companies like X to add" | `discover-companies` | tracked-company source config through `careerrat companies` (SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise) (confirm-first) |
 | "is X a safe bet" / company risk, layoffs, financial health, morale — scoped to the role | `company-health` | `companyHealth` (role-scoped rating) on the tracker row |
-| A standalone fact / preference / constraint (comp, location, an exclusion) | `configure` / `ingest-profile` | `candidate/` config, confirm-first |
+| A standalone fact / preference / constraint (comp, location, an exclusion) | `configure` / `ingest-profile` | `candidate/` config, applied directly with an Undo (confirm-first only when it lowers a comp floor or target, or loosens honesty) |
 | Anything else with no obvious owner (a note, a stray link, a screenshot) | capture as a dated note | `workspace/intake/<slug>-<date>.md`, linked to the nearest application or company |
 
 Rules for intake:
@@ -719,7 +719,7 @@ Rules for intake:
   (`careerrat doctor`, `careerrat modes status`, `careerrat automation status`),
   then routes each change to the canonical CLI (`careerrat gate`, `careerrat modes`,
   `careerrat automation`) or owning skill (`setup-searches`, or a scoped
-  `ingest-profile` step) confirm-first. It never becomes a new way to mutate
+  `ingest-profile` step). Knowledge and targeting changes apply directly and are logged with an Undo; lowering a comp floor or target and loosening honesty stay confirm-first. It never becomes a new way to mutate
   config.
 - If a `careerrat` command crashes, throws a stack trace, exits non-zero
   unexpectedly, or a skill produces clearly-wrong output — or the user says "this
@@ -848,8 +848,9 @@ hardcoded into a skill.
   <type> <value>` routes to the right DB-backed config in DB mode (or the legacy
   compatibility file in legacy mode), schema-validates the result, and prints the
   diff + friction — as a **dry run**.
-  Add `--write` to commit a write-and-report gate; `--write --confirm` to commit a
-  confirm-first one. It refuses any change that would invalidate the file and is
+  Add `--write` to commit. Only lowering or clearing a comp floor or target also needs
+  `--confirm`; raising one, setting one for the first time, and every other gate write
+  directly (`--confirm` is accepted and ignored there). It refuses any change that would invalidate the file and is
   idempotent (re-adding an existing value is a no-op). `careerrat gate --list`
   shows the types: `exclude-company`, `cut-signal`, `keep-signal`, `comp-floor`,
   `comp-target`, `comp-expected`, `do-not-claim`, `do-not-fabricate`.
@@ -862,11 +863,13 @@ hardcoded into a skill.
   `profile.yml#compensation`; per-company cap/cooldown →
   `application-limits` (`candidate/application-limits.yml` only in legacy/export mode);
   honesty boundary → `honesty.yml`.
-- **Friction:** *write-and-report* for unambiguous, low-blast-radius gates (one clear
-  cut signal; a cap the user just hit) — `--write`, then echo `Written to <file>:
-  <key: value>`. *Confirm-first* for consequential ones (a broad exclusion, dropping
-  the comp floor, a large re-rank) — propose the exact change (a bare `careerrat gate`
-  dry run shows it), get a yes, then `--write --confirm`.
+- **Friction:** knowledge and targeting gates (a cut signal, an exclusion, a cap the
+  user just hit, a re-rank) apply directly through the same writers and are logged with
+  an Undo: `--write`, then echo `Written to <file>: <key: value>`. *Confirm-first* for
+  lowering the comp floor or target, loosening an honesty boundary, and a strategy
+  change backed by fewer than 3 data points (logged as a suggestion): propose the
+  exact change (a bare `careerrat gate` dry run shows it), get a yes, then
+  `--write --confirm`.
 - Keep it auditable: state what changed and why.
 
 ### Privacy invariant (hard)
@@ -1206,12 +1209,13 @@ never emit `current_base`.
 ### Gate Write-back
 
 When a negotiation round reveals a new comp boundary the user confirms, write
-it back via the existing gate helper — **confirm-first, never auto**:
+it back via the existing gate helper. Raising a floor or target applies directly and
+is logged with an Undo; **lowering one is confirm-first, never auto**:
 
 - `careerrat gate comp-floor <N>` — dry-run; updates `profile.compensation.minimum_base` (the sourcing gate).
-- `careerrat gate comp-floor <N> --write --confirm` — commits after confirmation.
+- `careerrat gate comp-floor <N> --write`: commits a raise or a first value; add `--confirm` only to lower one, after the user says yes.
 - `careerrat gate comp-target <N>` — dry-run; updates `profile.compensation.target_base`.
-- `careerrat gate comp-target <N> --write --confirm` — commits after confirmation.
+- `careerrat gate comp-target <N> --write`: commits a raise or a first value; add `--confirm` only to lower one, after the user says yes.
 
 Distinguish: a **session- or offer-specific** walk-away ("I won't go below $X on
 this one") is `profile.compensation.minimum_base` — write it directly to

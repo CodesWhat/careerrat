@@ -75,6 +75,8 @@ which input carried the substance, or `SOURCE: mixed` when both did.
 
 ## STEP 4 — Persist durable answers
 
+A durable answer saves as soon as it is drafted, with no confirm step, and is logged with an Undo.
+
 **Durable** = a recurring disclosure/logistics-style answer that will come up
 again verbatim on other applications: work authorization, sponsorship,
 relocation, notice period, security clearance status, start date, and

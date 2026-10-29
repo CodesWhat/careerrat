@@ -130,7 +130,6 @@ import {
   adjacentRoleChoiceQuestion,
   adjacentRoleCoachingTrigger,
   buildAdjacentRoleChoicePrompt,
-  buildAdjacentRoleConfirmationPrompt,
   generateAdjacentRoleProposal,
   mergeAdjacentRoleTargets,
 } from "../search/adjacent-role-coach.mjs";
@@ -155,6 +154,11 @@ import {
   revertKnowledgeWrite,
   undoNextAction,
 } from "./knowledge-write-log.mjs";
+import {
+  applyStrategyRecommendationLogged,
+  autoApplyStrategyRecommendations,
+  STRATEGY_NO_WRITER_TYPES,
+} from "./strategy-auto-apply.mjs";
 import {
   normalizeWorkspaceIntent,
   WORKSPACE_THREAD_ID,
@@ -3370,6 +3374,49 @@ function searchRunFromReceipt(message) {
   };
 }
 
+// Saves reusable screening answers straight into form-defaults and returns the
+// knowledge_write entries for them. A refused answer (still needs the user, or
+// job-specific) is skipped, never an error: the existing refusals stay in force.
+// A real failure stops the batch but keeps what already saved: those answers get
+// their log entries (and Undo) and the failure comes back as `failure`.
+async function saveReusableScreeningAnswers({ repoRoot, env, answers, saveImpl, source, writer }) {
+  const before = candidateConfigGet({ repoRoot, env });
+  const saved = [];
+  let failure = null;
+  for (const answer of answers) {
+    try {
+      saved.push(
+        await saveImpl({
+          repoRoot,
+          env,
+          question: answer.question,
+          key: answer.key,
+          answer: answer.answer,
+        })
+      );
+    } catch (error) {
+      if (!new Set(["NEEDS_USER", "NON_DURABLE_ANSWER", "BAD_REQUEST"]).has(error?.code)) {
+        failure = error;
+        break;
+      }
+    }
+  }
+  const entries = saved.length
+    ? configWriteEntries({
+        before,
+        after: candidateConfigGet({ repoRoot, env }),
+        writes: saved.map((item) => ({
+          name: "form-defaults",
+          path: `screening_answers.${item.key}`,
+          label: "Saved answer",
+        })),
+        source,
+        writer,
+      })
+    : [];
+  return { saved, entries, failure };
+}
+
 async function recordWorkspaceAdjacentRoleCoaching({
   repoRoot,
   env = process.env,
@@ -3543,6 +3590,7 @@ async function applyConfirmedAdjacentRoles({
   repoRoot,
   env,
   promptMessage,
+  selectedRoleIds,
   startManualSearchImpl,
   onSearchStarted,
   searchFetchImpl,
@@ -3558,7 +3606,7 @@ async function applyConfirmedAdjacentRoles({
   }
   const coach = promptMessage.metadata?.careerCoach || {};
   const proposal = coach.proposal;
-  const roles = selectedProposalRoles(proposal, coach.selectedRoleIds);
+  const roles = selectedProposalRoles(proposal, selectedRoleIds ?? coach.selectedRoleIds);
   if (!roles.length) {
     workspaceMessageAppend({
       repoRoot,
@@ -3591,6 +3639,23 @@ async function applyConfirmedAdjacentRoles({
       patch: { role_buckets: merged.roleBuckets },
     });
   }
+  // The expansion applies as soon as roles are picked, so it lands in the thread
+  // with an Undo, like every other direct knowledge write.
+  const logEntries = merged.added.length
+    ? configWriteEntries({
+        before: config,
+        after: candidateConfigGet({ repoRoot, env }),
+        writes: [{ name: "targeting", path: "role_buckets", label: "Target roles" }],
+        source: { kind: "career-coach.adjacent-roles", promptId: confirmationPromptId },
+        writer: "career-coach.adjacent-roles",
+      })
+    : [];
+  const appliedMessageId = resultMessageId || careerCoachMessageId("applied", confirmationPromptId);
+  const undoActions = logEntries.flatMap((entry, index) =>
+    entry.revertible
+      ? [undoNextAction({ messageId: appliedMessageId, index: index + 1, entry })]
+      : []
+  );
 
   let operation = null;
   let run = null;
@@ -3619,7 +3684,7 @@ async function applyConfirmedAdjacentRoles({
   workspaceMessageAppend({
     repoRoot,
     env,
-    id: resultMessageId || careerCoachMessageId("applied", confirmationPromptId),
+    id: appliedMessageId,
     role: "assistant",
     kind: started ? "action_result" : "action_error",
     text,
@@ -3644,10 +3709,12 @@ async function applyConfirmedAdjacentRoles({
         })),
         added: merged.added,
       },
+      ...logEntries,
       ...(run ? [searchRunArtifact({ run: { ...run, purpose: "manual-search" } })] : []),
     ],
     metadata: {
       source: "career-coach",
+      ...(undoActions.length ? { nextActions: undoActions } : {}),
       careerCoach: {
         stage: "expansion-applied",
         confirmationPromptId,
@@ -3681,42 +3748,18 @@ async function handleAdjacentRoleChoice({
   if (!coach) return null;
 
   if (coach.stage === "role-selection") {
-    const existing = current.messages.find(
-      (message) =>
-        message?.metadata?.careerCoach?.stage === "confirm-expansion" &&
-        message.metadata.careerCoach.selectionPromptId === choiceResolution.promptId
-    );
-    if (existing) return current;
-    const messageId = resultMessageId || careerCoachMessageId("confirm", choiceResolution.promptId);
-    const selectedRoleIds = choiceResolution.optionIds || [];
-    const choicePrompt = buildAdjacentRoleConfirmationPrompt({
-      proposal: coach.proposal,
-      selectedRoleIds,
-      threadId: WORKSPACE_THREAD_ID,
-      messageId,
-    });
-    workspaceMessageAppend({
+    return applyConfirmedAdjacentRoles({
       repoRoot,
       env,
-      id: messageId,
-      role: "assistant",
-      kind: "text",
-      text: choicePrompt.question,
-      metadata: {
-        source: "career-coach",
-        careerCoach: {
-          stage: "confirm-expansion",
-          searchRunId: coach.searchRunId,
-          proposal: coach.proposal,
-          selectionPromptId: choiceResolution.promptId,
-          selectedRoleIds,
-        },
-        choicePrompt,
-      },
+      promptMessage,
+      selectedRoleIds: choiceResolution.optionIds || [],
+      startManualSearchImpl,
+      onSearchStarted,
+      searchFetchImpl,
+      resultMessageId,
       operationAttempt,
       now,
     });
-    return workspaceThreadRead({ repoRoot, env });
   }
 
   if (coach.stage !== "confirm-expansion") return null;
@@ -3773,8 +3816,23 @@ async function recoverWorkspaceAdjacentRoleCoaching({
   for (const message of current.messages) {
     const coach = message?.metadata?.careerCoach;
     const prompt = message?.metadata?.choicePrompt;
-    if (coach?.stage !== "confirm-expansion" || prompt?.state !== "resolved") continue;
+    if (
+      !new Set(["role-selection", "confirm-expansion"]).has(coach?.stage) ||
+      prompt?.state !== "resolved"
+    ) {
+      continue;
+    }
     if (careerCoachOutcomeExists(current.messages, prompt.id)) continue;
+    // A thread from before the direct apply may hold a pending confirm step for
+    // this selection; that step owns the outcome.
+    if (
+      coach.stage === "role-selection" &&
+      current.messages.some(
+        (other) => other?.metadata?.careerCoach?.selectionPromptId === prompt.id
+      )
+    ) {
+      continue;
+    }
     await handleAdjacentRoleChoice({
       repoRoot,
       env,
@@ -4540,28 +4598,33 @@ export async function executeWorkspaceIntent({
                 },
               ]
             : [];
-      const reusableActions =
-        (operation.answers || []).length === 1
-          ? reusableAnswers.map((answer) => ({
-              label: "Save for future applications",
-              intent: {
-                type: "screening.answer-save",
-                entity: { type: "candidate", id: "candidate" },
-                input: {
-                  question: answer.question,
-                  key: answer.key,
-                  answer: answer.answer,
-                },
-              },
-            }))
-          : [];
+      // Reusable (non job-specific) answers save as they're drafted, with an Undo.
+      const reusable = await saveReusableScreeningAnswers({
+        repoRoot,
+        env,
+        answers: reusableAnswers,
+        saveImpl: saveScreeningAnswerImpl,
+        source: { kind: "screening.answer", intentMessageId: intentMessage.message.id },
+        writer: "screening.answer",
+      });
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = reusable.entries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
       const count = (operation.answers || []).length;
+      const savedNote = reusable.entries.length
+        ? ` Saved ${reusable.entries.length === 1 ? "this answer" : `${reusable.entries.length} answers`} for future applications.`
+        : "";
+      const failureNote = reusable.failure
+        ? ` Some answers couldn't be saved for future applications: ${reusable.failure.message || "an unknown error"}`
+        : "";
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `${count === 1 ? "I drafted this answer" : `I drafted ${count} answers`}. Review ${count === 1 ? "this answer" : "them"} before using ${count === 1 ? "it" : "them"}. Nothing was submitted.`,
+        text: `${count === 1 ? "I drafted this answer" : `I drafted ${count} answers`}. Review ${count === 1 ? "this answer" : "them"} before using ${count === 1 ? "it" : "them"}. Nothing was submitted.${savedNote}${failureNote}`,
         artifacts: [
           {
             kind: "screening_answers",
@@ -4573,15 +4636,16 @@ export async function executeWorkspaceIntent({
             excluded: operation.excluded || [],
             artifactPath: operation.artifactPath || null,
           },
+          ...reusable.entries,
         ],
         metadata: {
           state: operation.needsUser ? "needs-user" : "reviewable",
           requiresReview: true,
           persisted: false,
           ai: operation.ai || { used: false },
-          ...(applicationActions.length || reusableActions.length
+          ...(applicationActions.length || undoActions.length
             ? {
-                nextActions: [...applicationActions, ...reusableActions],
+                nextActions: [...applicationActions, ...undoActions],
               }
             : {}),
         },
@@ -4653,6 +4717,7 @@ export async function executeWorkspaceIntent({
     }
 
     if (normalized.type === "screening.answer-save") {
+      const before = candidateConfigGet({ repoRoot, env });
       const operation = await saveScreeningAnswerImpl({
         repoRoot,
         env,
@@ -4660,6 +4725,24 @@ export async function executeWorkspaceIntent({
         key: input.key,
         answer: input.answer,
       });
+      const logEntries = configWriteEntries({
+        before,
+        after: candidateConfigGet({ repoRoot, env }),
+        writes: [
+          {
+            name: "form-defaults",
+            path: `screening_answers.${operation.key}`,
+            label: "Saved answer",
+          },
+        ],
+        source: { kind: "screening.answer-save", intentMessageId: intentMessage.message.id },
+        writer: "screening.answer-save",
+      });
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
       return appendActionResult({
         repoRoot,
         env,
@@ -4673,8 +4756,13 @@ export async function executeWorkspaceIntent({
             key: operation.key,
             answer: operation.answer,
           },
+          ...logEntries,
         ],
-        metadata: { state: "saved", persisted: true },
+        metadata: {
+          state: "saved",
+          persisted: true,
+          ...(undoActions.length ? { nextActions: undoActions } : {}),
+        },
         operationResult: operation,
         now,
       });
@@ -6228,6 +6316,27 @@ export async function executeWorkspaceIntent({
         executionPlan: operationExecutionPlan(selectedExecutionPlan, "coach.deep"),
         signal,
       });
+      // Recommendations with at least three supporting data points apply right
+      // away and are logged with an Undo. The rest (thin evidence, a lower comp
+      // floor or target, no automated writer) stay suggestions with an Apply.
+      const sorted =
+        draft.state === "fresh"
+          ? { applied: [], suggested: [] }
+          : await autoApplyStrategyRecommendations({
+              repoRoot,
+              env,
+              recommendations: draft.recommendations,
+              applyImpl: applyStrategyRecommendationImpl,
+              source: { kind: "strategy.review", intentMessageId: intentMessage.message.id },
+              writer: "strategy.review",
+            });
+      const statusById = new Map([
+        ...sorted.applied.map((item) => [item.recommendation.id, { status: "applied" }]),
+        ...sorted.suggested.map((item) => [
+          item.recommendation.id,
+          { status: "suggested", reason: item.reason },
+        ]),
+      ]);
       const artifact = {
         kind: "strategy_review",
         state: draft.state,
@@ -6236,8 +6345,27 @@ export async function executeWorkspaceIntent({
         reevaluation: draft.reevaluation,
         headline: draft.headline,
         findings: draft.findings,
-        recommendations: draft.recommendations,
+        recommendations: (draft.recommendations || []).map((rec) => ({
+          ...rec,
+          ...(statusById.get(rec.id) || {}),
+        })),
       };
+      const logEntries = sorted.applied.flatMap((item) => item.entries);
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
+      const applyActions = sorted.suggested
+        .filter((item) => !STRATEGY_NO_WRITER_TYPES.has(item.recommendation.type))
+        .map((item) => ({
+          label: `Apply: ${item.recommendation.title || item.recommendation.type}`,
+          intent: {
+            type: "strategy.apply",
+            entity: normalized.entity,
+            input: { recommendation: item.recommendation },
+          },
+        }));
       const nextActions =
         draft.state === "fresh"
           ? [
@@ -6251,34 +6379,58 @@ export async function executeWorkspaceIntent({
               },
             ]
           : [
+              ...undoActions,
+              ...applyActions,
               {
                 label: "Finish review",
                 intent: { type: "strategy.stamp", entity: normalized.entity },
               },
             ];
-      const text =
-        draft.state === "fresh"
-          ? "Nothing new since your last strategy review."
-          : draft.state === "manual"
-            ? `${draft.headline} The AI reviewer wasn't available, so this is the deterministic read. Review it, then finish the review.`
-            : `${draft.headline} Review the findings and recommendations, then finish the review.`;
+      const lines = [];
+      if (draft.state === "fresh") {
+        lines.push("Nothing new since your last strategy review.");
+      } else {
+        lines.push(
+          draft.state === "manual"
+            ? `${draft.headline} The AI reviewer wasn't available, so this is the deterministic read.`
+            : draft.headline
+        );
+        if (sorted.applied.length) {
+          lines.push(
+            `Applied ${sorted.applied.length}, each with an Undo: ${sorted.applied
+              .map((item) => item.recommendation.title || item.recommendation.type)
+              .join("; ")}.`
+          );
+        }
+        if (sorted.suggested.length) {
+          lines.push(
+            `Suggested, not applied: ${sorted.suggested
+              .map(
+                (item) =>
+                  `${item.recommendation.title || item.recommendation.type} (${item.reason})`
+              )
+              .join("; ")}.`
+          );
+        }
+        lines.push("Review the rest, then finish the review.");
+      }
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text,
-        artifacts: [artifact],
+        text: lines.join(" "),
+        artifacts: [artifact, ...logEntries],
         metadata: { state: draft.state, nextActions },
         operationResult: draft,
         now,
       });
     }
 
-    // strategy.apply — a single confirm-first Apply click off a strategy_review
-    // artifact's recommendations[]. Apply intents are only ever fired by a user
-    // click on that card (never auto-fired), so no additional confirm gate runs
-    // here; applyStrategyRecommendation itself validates and dispatches to the
+    // strategy.apply: a single Apply click off a suggested strategy_review
+    // recommendation (one the review didn't apply on its own). The click is the
+    // confirmation, so no additional gate runs here, and the write is logged with
+    // an Undo; applyStrategyRecommendation itself validates and dispatches to the
     // owning writer (gate-writer/candidateConfigPatch, appSetStatus/appSetFields/
     // sourcedSetStatus, or learnings.mjs) per recommendation type.
     if (normalized.type === "strategy.apply") {
@@ -6289,11 +6441,38 @@ export async function executeWorkspaceIntent({
           "STRATEGY_APPLY_INVALID"
         );
       }
-      const operation = await applyStrategyRecommendationImpl({
+      const { operation, entries: logEntries } = await applyStrategyRecommendationLogged({
         repoRoot,
         env,
         recommendation,
+        applyImpl: applyStrategyRecommendationImpl,
+        source: { kind: "strategy.apply", intentMessageId: intentMessage.message.id },
+        writer: "strategy.apply",
       });
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
+      // The transcript only renders action buttons on the latest result, so carry
+      // the review's still-unapplied Apply buttons and Finish review forward
+      // (minus the one just applied), after the Undo.
+      const reviewActions = [...workspaceThreadRead({ repoRoot, env }).messages]
+        .reverse()
+        .find(
+          (message) =>
+            message.kind === "action_result" &&
+            message.metadata?.nextActions?.some(
+              (action) => action.intent?.type === "strategy.stamp"
+            )
+        )?.metadata.nextActions;
+      const carriedActions = (reviewActions || []).filter(
+        (action) =>
+          action.intent?.type === "strategy.stamp" ||
+          (action.intent?.type === "strategy.apply" &&
+            action.intent.input?.recommendation?.id !== recommendation.id)
+      );
+      const followUps = [...undoActions, ...carriedActions];
       return appendActionResult({
         repoRoot,
         env,
@@ -6307,8 +6486,9 @@ export async function executeWorkspaceIntent({
             title: operation.title,
             result: operation.result,
           },
+          ...logEntries,
         ],
-        metadata: { state: "applied" },
+        metadata: { state: "applied", ...(followUps.length ? { nextActions: followUps } : {}) },
         operationResult: operation,
         now,
       });
@@ -7053,7 +7233,9 @@ export async function executeWorkspaceIntent({
       const messageId = String(input.messageId || "").trim();
       const index = Number(input.index);
       const stored = workspaceThreadRead({ repoRoot, env }).messages.find(
-        (message) => message?.id === messageId && message.kind === "action_result"
+        (message) =>
+          message?.id === messageId &&
+          (message.kind === "action_result" || message.kind === "action_error")
       );
       const entry =
         stored && Number.isInteger(index) && index >= 0 ? stored.artifacts?.[index] : null;
