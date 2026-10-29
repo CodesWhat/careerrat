@@ -59,6 +59,7 @@ import { companyHealthSet } from "../db/verbs/company-health.mjs";
 import { deepIngestConfirmedItemUpsert, deepIngestStateGet } from "../db/verbs/deep-ingest.mjs";
 import { intakeOne } from "../db/verbs/intake.mjs";
 import {
+  linkedinProposalBatchGet,
   linkedinProposalBatchLatest,
   linkedinProposalDecide,
 } from "../db/verbs/linkedin-proposals.mjs";
@@ -154,6 +155,7 @@ import {
   revertKnowledgeWrite,
   undoNextAction,
 } from "./knowledge-write-log.mjs";
+import { linkedinStagingEntries } from "./linkedin-write-log.mjs";
 import {
   applyStrategyRecommendationLogged,
   autoApplyStrategyRecommendations,
@@ -8223,7 +8225,7 @@ export async function executeWorkspaceIntent({
           }).allowed,
         },
       ];
-      const batch = linkedinProposalBatchLatest({ repoRoot, env });
+      const priorBatch = linkedinProposalBatchLatest({ repoRoot, env });
       if (!capabilities[0].allowed) {
         return appendCapabilityOffNote({
           repoRoot,
@@ -8232,7 +8234,7 @@ export async function executeWorkspaceIntent({
           intentMessage,
           capability: "profile_optimize",
           platforms: ["linkedin"],
-          artifacts: [linkedinOptimizeHandoffArtifact({ capabilities, batch, now })],
+          artifacts: [linkedinOptimizeHandoffArtifact({ capabilities, batch: priorBatch, now })],
           now,
         });
       }
@@ -8244,6 +8246,30 @@ export async function executeWorkspaceIntent({
               executionPlan: linkedinExecutionPlan,
             })
           : null;
+      // A fresh run stages its own batch, which is no longer "pending" once
+      // every surface is staged, so read it back by id.
+      const batch =
+        (execution?.batchId &&
+          linkedinProposalBatchGet({ repoRoot, env, id: execution.batchId })) ||
+        priorBatch;
+
+      const artifacts = [
+        linkedinOptimizeHandoffArtifact({ capabilities, batch, now }),
+        ...(batch ? [linkedinProfileProposalsArtifact(batch)] : []),
+        ...(execution ? [execution] : []),
+      ];
+      // One Undo per staged surface; the entries ride after the artifacts above.
+      const stagedEntries = linkedinStagingEntries({
+        batchId: execution?.batchId,
+        staged: Array.isArray(execution?.staged) ? execution.staged : [],
+      });
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = stagedEntries.flatMap((entry, index) =>
+        entry.revertible
+          ? [undoNextAction({ messageId: resultId, index: artifacts.length + index, entry })]
+          : []
+      );
 
       return appendActionResult({
         repoRoot,
@@ -8252,13 +8278,14 @@ export async function executeWorkspaceIntent({
         intentMessage,
         text:
           execution?.summary ||
-          "LinkedIn profile review is ready in CareerRat. Suggestions come back here for your approval.",
-        artifacts: [
-          linkedinOptimizeHandoffArtifact({ capabilities, batch, now }),
-          ...(batch ? [linkedinProfileProposalsArtifact(batch)] : []),
-          ...(execution ? [execution] : []),
-        ],
-        metadata: workflowActionMetadata(normalized, execution, "Retry LinkedIn review"),
+          "LinkedIn profile review is ready in CareerRat. Suggestions are staged here, and each one asks before it goes on LinkedIn.",
+        artifacts: [...artifacts, ...stagedEntries],
+        metadata: workflowActionMetadata(
+          normalized,
+          execution,
+          "Retry LinkedIn review",
+          undoActions.length ? { nextActions: undoActions } : {}
+        ),
         now,
       });
     }

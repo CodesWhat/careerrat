@@ -199,7 +199,7 @@ This closes the Artifact Contract's two-places rule: the Documents doc plus this
 on-record batch.
 
 **If `profile_apply` is off, you are done here** — the document plus the recorded batch
-is the deliverable. The user reviews and approves fields in the app or applies edits by
+is the deliverable. The user reviews the recorded suggestions in the app or applies edits by
 hand. Do not push to write-back.
 
 ## STEP 5 — APPLY THE APPROVED EDITS (only if `profile_apply` is allowed)
@@ -209,9 +209,10 @@ is **confirm-first PER FIELD, never bulk-auto**: show the before→after for one
 get an explicit yes, write that one field, verify it, then move to the next. Nothing is
 written silently.
 
-If the candidate pre-approved fields in the Ask workspace, read the batch first
-(`careerrat data linkedin-proposals latest`) and take its approved surfaces as the
-work-list — but the in-app approval supplies **what** to apply, never permission to skip
+If the in-app pass already staged fields, read the batch first
+(`careerrat data linkedin-proposals latest --status reviewed`, or the default pending
+when some are held) and take its approved surfaces as the
+work-list. Staging supplies **what** to apply, never permission to skip
 the live confirmation. Still show each before→after and get a live yes here before
 writing that field, exactly as above.
 
@@ -366,14 +367,16 @@ external-agent run still follows STEP 0 onward exactly as written.
   and leaves any existing proposal batch visible. When reading is allowed, it runs
   the native profile pass and renders the returned proposal batch for review.
   Pasted profile text remains available on the terminal or external-agent path.
-- **Reviewing suggestions** (`linkedin.proposal-decide`). The batch recorded by
-  STEP 4 renders as per-surface before-and-after cards with Approve and Reject
-  buttons. Deciding is ungated: approving stages a field locally and never
-  writes to LinkedIn. A stale click (the batch changed underneath) refuses;
-  fresh decisions re-render the card. Once every surface is decided the batch
-  is reviewed.
-- **Write boundary.** Approving a suggestion in the app stages it locally; no
-  live LinkedIn field changes on approval. Applying approved edits live remains
+- **Staged suggestions** (`linkedin.proposal-decide`). The in-app pass stages every
+  suggestion that passes the checks on its own and saves it with an Undo. Each one
+  shows as "Staged for your profile". A suggestion with a placeholder to fill in, or
+  no evidence behind it, stays undecided for you to approve or reject. Undo returns
+  a staged suggestion to undecided, and it refuses once the field was written to
+  LinkedIn. A stale click (the batch changed underneath) refuses. Once every
+  suggestion is decided the batch is reviewed, so read it with
+  `linkedin-proposals latest --status reviewed` as well as the default pending.
+- **Write boundary.** Staging a suggestion in the app is local and automatic; no
+  live LinkedIn field changes when it is staged. Applying approved edits live remains
   behind the separate `profile_apply` switch and a per-field confirmation on
   the terminal or external-agent STEP 5 path. STEP 6 verifies the live result and
   marks only verified fields applied so the card stays honest.

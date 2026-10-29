@@ -2707,6 +2707,31 @@ describe("knowledge writes in the thread", () => {
     expect(html).not.toContain("\u2014");
   });
 
+  it("reads a staged LinkedIn suggestion as staged, with an Undo and no change line", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          resultMessage([
+            entry({
+              target: "linkedin:proposal",
+              path: "batch-1",
+              id: "headline",
+              label: "Headline",
+              before: "Not staged",
+              after: { action: "approve", source: "automatic" },
+            }),
+          ]),
+        ]}
+        onIntentAction={vi.fn()}
+      />
+    );
+    expect(html).toContain("Staged for your profile: Headline");
+    expect(html).toContain("asks before anything goes on LinkedIn");
+    expect(html).toContain("Undo");
+    expect(html).not.toContain("Changed Headline");
+    expect(html).not.toContain("\u2014");
+  });
+
   it("shows role buckets by name and titles, not as [object Object]", () => {
     const html = markup(
       <MessageTranscript

@@ -20,7 +20,7 @@ import { CAPABILITIES } from "../src/core/automation/consent.mjs";
 import { openDb, requireDb } from "../src/core/db/connection.mjs";
 import { assembleTrackerObject } from "../src/core/db/export-to-tracker.mjs";
 import { appUpsert } from "../src/core/db/verbs/app.mjs";
-import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
+import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { linkedinProposalBatchLatest } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -282,9 +282,20 @@ test("Playwright fixture: relationship sourcing captures review-only LinkedIn le
   assert.equal(lead.status, "review");
 });
 
-test("Playwright fixture: LinkedIn profile read creates proposals without editing the profile", async () => {
+test("Playwright fixture: LinkedIn profile read stages proposals automatically without editing the profile", async () => {
   const repoRoot = workspace({
     profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [
+      {
+        id: "ai-projects-001",
+        claim: "Built applied AI systems end to end.",
+        evidence: "Shipped LLM features in production.",
+      },
+    ],
   });
   const result = await optimizeLinkedinInApp({
     repoRoot,
@@ -296,15 +307,21 @@ test("Playwright fixture: LinkedIn profile read creates proposals without editin
         ...surface,
         proposed: `${surface.current} | Applied AI`,
         rationale: "Aligns the saved evidence with the target role.",
-        evidenceRef: "candidate evidence",
+        evidenceRef: "ai-projects-001",
       })),
     now: () => new Date("2026-08-24T16:00:00.000Z"),
   });
   assert.equal(result.state, "completed");
   assert.equal(result.proposed, 2);
-  const batch = linkedinProposalBatchLatest({ repoRoot, env: {} });
+  const batch = linkedinProposalBatchLatest({ repoRoot, env: {}, status: null });
   assert.equal(batch.surfaces.length, 2);
-  assert.ok(batch.surfaces.every((surface) => surface.decision === null));
+  assert.equal(result.staged.length, 2);
+  assert.match(result.summary, /staged for your profile\. Nothing was written to LinkedIn/);
+  assert.ok(
+    batch.surfaces.every(
+      (surface) => surface.decision.action === "approve" && surface.decision.source === "automatic"
+    )
+  );
 });
 
 test("LinkedIn proposal schema retry keeps the frozen provider plan after provider settings change", async () => {
