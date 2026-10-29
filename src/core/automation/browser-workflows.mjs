@@ -45,7 +45,12 @@ const LINKEDIN_PROPOSAL_SCHEMA = {
           current: { type: "string", maxLength: 4_000 },
           proposed: { type: "string", minLength: 1, maxLength: 4_000 },
           rationale: { type: "string", minLength: 1, maxLength: 500 },
-          evidenceRef: { type: "string", minLength: 1, maxLength: 240 },
+          evidenceRef: {
+            type: "string",
+            minLength: 1,
+            maxLength: 240,
+            description: "The id of one supplied evidence claim that backs this suggestion.",
+          },
         },
       },
     },
@@ -516,7 +521,7 @@ async function defaultLinkedinProposals({
     aiOperation: executionPlan ? undefined : "research.web",
     executionPlan,
     system:
-      "Draft honest LinkedIn profile improvements. Use only supplied candidate evidence. Return JSON matching the schema. Never invent experience or compensation.",
+      "Draft honest LinkedIn profile improvements. Use only supplied candidate evidence. Each surface's evidenceRef must be the id of one supplied evidence claim (candidateContext.evidence.claims[].id) that backs it; never invent an id or cite free text. Return JSON matching the schema. Never invent experience or compensation.",
     messages: [
       {
         role: "user",
@@ -605,11 +610,21 @@ export async function optimizeLinkedinInApp({
       at,
     });
   }
+  let knownEvidenceIds = [];
+  try {
+    // candidateConfigGet returns the whole config; the claims sit under .evidence.
+    const config = candidateConfigGet({ repoRoot, env, name: "evidence" });
+    const claims = config?.evidence?.claims || config?.claims || [];
+    knownEvidenceIds = claims.map((claim) => claim?.id).filter(Boolean);
+  } catch {
+    knownEvidenceIds = [];
+  }
   const saved = saveBatch({
     repoRoot,
     env,
     batch: { surfaces: proposals },
     autoApprove: true,
+    knownEvidenceIds,
   });
   const staged = saved.staged || [];
   const held = saved.held || [];

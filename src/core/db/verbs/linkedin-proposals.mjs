@@ -33,17 +33,19 @@ function nowIso() {
 
 // Surfaces the auto-stage pass leaves for the user: anything the proposer
 // flagged (placeholder / needsUser / unsupported), a bracketed or NEEDS YOU
-// placeholder in the proposed text, or an evidenceRef that admits no support.
+// placeholder in the proposed text, or an evidenceRef that isn't the id of a
+// saved evidence claim (the honesty firewall: nothing unbacked gets staged).
 const NO_SUPPORT_REFS = new Set(["none", "n/a", "na", "unsupported", "no evidence", "unknown"]);
 
-function holdReason(surface) {
+function holdReason(surface, knownEvidenceIds) {
   if (surface.placeholder || /\[[^\]]+\]|NEEDS YOU/i.test(String(surface.proposed))) {
     return "it has a placeholder to fill in";
   }
   if (surface.needsUser) return "it needs your input";
   if (
     surface.unsupported ||
-    NO_SUPPORT_REFS.has(String(surface.evidenceRef).trim().toLowerCase())
+    NO_SUPPORT_REFS.has(String(surface.evidenceRef).trim().toLowerCase()) ||
+    !knownEvidenceIds.has(String(surface.evidenceRef).trim())
   ) {
     return "it isn't backed by your evidence";
   }
@@ -161,10 +163,23 @@ export function linkedinProposalBatchPreflight({ batch } = {}) {
 // autoApprove (the in-app review) stages every surface that passed the guards
 // above by recording an approve decision with source "automatic", in the same
 // transaction as the write. Surfaces with a placeholder, needs-user, or
-// unsupported marker stay undecided and come back in `held` with the reason.
+// unsupported marker, or an evidenceRef outside `knownEvidenceIds`, stay
+// undecided and come back in `held` with the reason.
 // Staging never writes to LinkedIn; the live write stays confirmed per field.
-export function linkedinProposalBatchPut({ repoRoot, env, batch, autoApprove = false } = {}) {
+export function linkedinProposalBatchPut({
+  repoRoot,
+  env,
+  batch,
+  autoApprove = false,
+  knownEvidenceIds,
+} = {}) {
   linkedinProposalBatchPreflight({ batch });
+  // The caller supplies the saved claim ids; this verb never loads candidate
+  // config. No set while auto-staging means nothing can be resolved, so
+  // everything is held.
+  const evidenceIds = new Set(
+    [...(knownEvidenceIds || [])].map((id) => String(id).trim()).filter(Boolean)
+  );
 
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
@@ -174,7 +189,7 @@ export function linkedinProposalBatchPut({ repoRoot, env, batch, autoApprove = f
     const held = [];
     const surfaces = clone(batch.surfaces).map((surface) => {
       if (!autoApprove) return { ...surface, decision: null };
-      const reason = holdReason(surface);
+      const reason = holdReason(surface, evidenceIds);
       if (reason) {
         held.push({ surfaceId: surface.surfaceId, surface: surface.surface, reason });
         return { ...surface, decision: null };

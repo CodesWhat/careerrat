@@ -199,7 +199,7 @@ This closes the Artifact Contract's two-places rule: the Documents doc plus this
 on-record batch.
 
 **If `profile_apply` is off, you are done here** — the document plus the recorded batch
-is the deliverable. The user reviews the staged fields in the app or applies edits by
+is the deliverable. The user reviews the recorded suggestions in the app or applies edits by
 hand. Do not push to write-back.
 
 ## STEP 5 — APPLY THE APPROVED EDITS (only if `profile_apply` is allowed)

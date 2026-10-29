@@ -21,6 +21,7 @@ import {
 } from "../src/core/db/verbs/linkedin-proposals.mjs";
 
 const cleanupRoots = [];
+const KNOWN_IDS = ["evidence/ai-projects.md"];
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-linkedin-proposals-db-"));
@@ -587,7 +588,13 @@ test("linkedinProposalBatchPut autoApprove: clean surfaces are approved automati
   batch.surfaces.push(
     surface({ surfaceId: "skills", surface: "Skills", proposed: "Add [your top tool] here" })
   );
-  const saved = linkedinProposalBatchPut({ repoRoot, env: {}, batch, autoApprove: true });
+  const saved = linkedinProposalBatchPut({
+    repoRoot,
+    env: {},
+    batch,
+    autoApprove: true,
+    knownEvidenceIds: KNOWN_IDS,
+  });
   assert.deepEqual(
     saved.staged.map((s) => s.surfaceId),
     ["headline", "about"]
@@ -610,8 +617,69 @@ test("linkedinProposalBatchPut autoApprove: every clean surface staged makes the
     env: {},
     batch: twoSurfaceBatch(),
     autoApprove: true,
+    knownEvidenceIds: KNOWN_IDS,
   });
   assert.equal(linkedinProposalBatchGet({ repoRoot, env: {}, id: saved.id }).status, "reviewed");
+});
+
+test("linkedinProposalBatchPut autoApprove: a surface citing a saved claim id is staged", () => {
+  const repoRoot = tempRepo();
+  const saved = linkedinProposalBatchPut({
+    repoRoot,
+    env: {},
+    batch: { surfaces: [surface({ evidenceRef: " claim-007 " })] },
+    autoApprove: true,
+    knownEvidenceIds: ["claim-007", "claim-008"],
+  });
+  assert.deepEqual(
+    saved.staged.map((s) => s.surfaceId),
+    ["headline"]
+  );
+  assert.deepEqual(saved.held, []);
+});
+
+test("linkedinProposalBatchPut autoApprove: an unknown id or free-text evidenceRef is held", () => {
+  const repoRoot = tempRepo();
+  const saved = linkedinProposalBatchPut({
+    repoRoot,
+    env: {},
+    batch: {
+      surfaces: [
+        surface({ surfaceId: "headline", evidenceRef: "claim-999" }),
+        surface({ surfaceId: "about", evidenceRef: "my 2019 project at Acme" }),
+        surface({ surfaceId: "skills", evidenceRef: "claim-007" }),
+      ],
+    },
+    autoApprove: true,
+    knownEvidenceIds: ["claim-007"],
+  });
+  assert.deepEqual(
+    saved.staged.map((s) => s.surfaceId),
+    ["skills"]
+  );
+  assert.deepEqual(
+    saved.held.map((h) => [h.surfaceId, h.reason]),
+    [
+      ["headline", "it isn't backed by your evidence"],
+      ["about", "it isn't backed by your evidence"],
+    ]
+  );
+  const stored = linkedinProposalBatchGet({ repoRoot, env: {}, id: saved.id });
+  assert.equal(stored.surfaces[0].decision, null);
+  assert.equal(stored.surfaces[1].decision, null);
+});
+
+test("linkedinProposalBatchPut autoApprove: with no knownEvidenceIds nothing is staged", () => {
+  const repoRoot = tempRepo();
+  const saved = linkedinProposalBatchPut({
+    repoRoot,
+    env: {},
+    batch: twoSurfaceBatch(),
+    autoApprove: true,
+  });
+  assert.deepEqual(saved.staged, []);
+  assert.equal(saved.held.length, 2);
+  assert.equal(linkedinProposalBatchGet({ repoRoot, env: {}, id: saved.id }).status, "pending");
 });
 
 test("linkedinProposalBatchPut without autoApprove leaves every surface undecided", () => {
@@ -629,6 +697,7 @@ test("linkedinProposalUnapprove: returns a staged surface to undecided and the b
     env: {},
     batch: twoSurfaceBatch(),
     autoApprove: true,
+    knownEvidenceIds: KNOWN_IDS,
   });
   const decidedAt = saved.staged[0].decidedAt;
   const after = linkedinProposalUnapprove({
@@ -661,6 +730,7 @@ test("linkedinProposalUnapprove: refuses once the field is applied, and the appl
     env: {},
     batch: twoSurfaceBatch(),
     autoApprove: true,
+    knownEvidenceIds: KNOWN_IDS,
   });
   const applied = linkedinProposalDecide({
     repoRoot,

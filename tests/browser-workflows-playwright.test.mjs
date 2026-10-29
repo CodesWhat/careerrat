@@ -20,7 +20,7 @@ import { CAPABILITIES } from "../src/core/automation/consent.mjs";
 import { openDb, requireDb } from "../src/core/db/connection.mjs";
 import { assembleTrackerObject } from "../src/core/db/export-to-tracker.mjs";
 import { appUpsert } from "../src/core/db/verbs/app.mjs";
-import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
+import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { linkedinProposalBatchLatest } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -286,6 +286,17 @@ test("Playwright fixture: LinkedIn profile read stages proposals automatically w
   const repoRoot = workspace({
     profile_optimize: { enabled: true, platforms: { linkedin: true } },
   });
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [
+      {
+        id: "ai-projects-001",
+        claim: "Built applied AI systems end to end.",
+        evidence: "Shipped LLM features in production.",
+      },
+    ],
+  });
   const result = await optimizeLinkedinInApp({
     repoRoot,
     env: {},
@@ -296,7 +307,7 @@ test("Playwright fixture: LinkedIn profile read stages proposals automatically w
         ...surface,
         proposed: `${surface.current} | Applied AI`,
         rationale: "Aligns the saved evidence with the target role.",
-        evidenceRef: "candidate evidence",
+        evidenceRef: "ai-projects-001",
       })),
     now: () => new Date("2026-08-24T16:00:00.000Z"),
   });

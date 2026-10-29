@@ -12993,6 +12993,7 @@ async function runLinkedinStaging(repoRoot) {
         repoRoot,
         env: {},
         autoApprove: true,
+        knownEvidenceIds: ["evidence/ai-projects.md"],
         batch: {
           surfaces: [
             {
