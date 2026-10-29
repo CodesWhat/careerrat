@@ -486,3 +486,8 @@ test("an apostrophe inside a plain flow item is just a character", () => {
     p: { publisher: "O'Reilly", enabled: true },
   });
 });
+
+test("quoted values keep their brackets and commas inside nested flow collections", () => {
+  assert.deepEqual(parseYaml(`x: { a: ["a]", "b"], c: true }`), { x: { a: ["a]", "b"], c: true } });
+  assert.deepEqual(parseYaml(`x: [{ n: "x, y" }, 'it''s']`), { x: [{ n: "x, y" }, "it's"] });
+});

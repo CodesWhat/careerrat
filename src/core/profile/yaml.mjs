@@ -390,11 +390,13 @@ function splitFlowItems(s, whole) {
   let depth = 0;
   let start = 0;
   let i = 0;
+  // Where the current value starts at any depth: after the last [, { or comma.
+  let valueStart = 0;
   while (i < s.length) {
     const ch = s[i];
     // A quote only opens a quoted value at the item's start or right after a
     // "key:", so an apostrophe inside a plain value (O'Reilly) is just a character.
-    const before = s.slice(start, i).trim();
+    const before = s.slice(valueStart, i).trim();
     const atItemStart = before === "" || before.endsWith(":");
     if (ch === '"' && atItemStart) {
       i++;
@@ -414,11 +416,15 @@ function splitFlowItems(s, whole) {
       }
     } else if (ch === "{" || ch === "[") {
       depth++;
+      valueStart = i + 1;
     } else if (ch === "}" || ch === "]") {
       depth--;
-    } else if (ch === "," && depth === 0) {
-      items.push(s.slice(start, i));
-      start = i + 1;
+    } else if (ch === ",") {
+      valueStart = i + 1;
+      if (depth === 0) {
+        items.push(s.slice(start, i));
+        start = i + 1;
+      }
     }
     i++;
   }
