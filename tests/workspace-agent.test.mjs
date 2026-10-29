@@ -70,6 +70,7 @@ import { buildCompanySeedContext } from "../src/core/discovery/company-context.m
 import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
 import { draftOneOffScreeningAnswers } from "../src/core/packet/one-off-answer.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { slugifyClaimId } from "../src/core/profile/evidence-writer.mjs";
 import {
   readResearch,
   researchRelPath,
@@ -2067,7 +2068,7 @@ const REFUSED_GAP = {
   suggestion: {
     kind: "evidence-claim",
     draftClaim: {
-      claim: "Carried the pager for [Metric TODO] services.",
+      claim: "Carried the pager for [Company] services.",
       evidence: "Source: resume.",
     },
     rationale: "Thin.",
@@ -2229,6 +2230,128 @@ test("Undo of a coaching evidence add still removes the claim but leaves a gap a
   assert.match(result.messages.at(-1).text, /changed since/i);
   assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
   assert.equal(gapOf(repoRoot).status, "open");
+});
+
+const DRAFT_K8S = coachingPlanPayload().gaps[0].suggestion.draftClaim;
+
+test("coaching.plan rerun with an identical draft closes the gap as covered, with no new Undo and the original kept", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  await runCoachingPlan(repoRoot, planWithDrafts());
+  const before = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
+  assert.equal((last.metadata.nextActions || []).length, 0);
+  assert.match(last.text, /already in your evidence bank/);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).evidence.claims, before);
+  assert.equal(gapOf(repoRoot).status, "closed");
+  assert.equal(gapOf(repoRoot).savedClaimId, undefined);
+});
+
+test("coaching.plan refuses a same-id draft that differs from the saved claim, leaves the original, and keeps the gap open", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const original = {
+    id: slugifyClaimId(DRAFT_K8S.claim),
+    ...DRAFT_K8S,
+    evidence: "Source: a different doc.",
+  };
+  candidateEvidenceMerge({ repoRoot, env: {}, claims: [original] });
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const last = result.messages.at(-1);
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].evidence, "Source: a different doc.");
+  assert.equal(gapOf(repoRoot).status, "open");
+  assert.match(last.text, /A saved claim already uses this wording, so CareerRat left it alone\./);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
+});
+
+const SECOND_SAME_DRAFT_GAP = {
+  id: "no-platform-scope",
+  gapText: "No platform scope on record",
+  suggestion: { kind: "evidence-claim", draftClaim: { ...DRAFT_K8S }, rationale: "Same." },
+  status: "open",
+};
+
+test("two gaps with the same draft save once with one Undo, close both, and Undo reopens both", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts([SECOND_SAME_DRAFT_GAP]));
+
+  const last = planned.messages.at(-1);
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence.claims || []).length, 1);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 1);
+  assert.equal(last.metadata.nextActions.length, 1);
+  const claimId = last.artifacts[1].id;
+  assert.equal(gapOf(repoRoot).status, "closed");
+  assert.equal(gapOf(repoRoot).savedClaimId, claimId);
+  assert.equal(gapOf(repoRoot, "no-platform-scope").status, "closed");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").savedClaimId, claimId);
+
+  const undone = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  assert.equal(undone.messages.at(-1).metadata.state, "reverted");
+  assert.equal(gapOf(repoRoot).status, "open");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").status, "open");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").savedClaimId, undefined);
+});
+
+test("Undo still records the claim removal and reports the gap reopened when the export fails after the commit", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+    appSetFieldsImpl: (args) => {
+      appSetFields(args);
+      throw Object.assign(new Error("export failed"), { committed: true });
+    },
+  });
+
+  const note = result.messages.at(-1);
+  assert.equal(note.metadata.state, "reverted");
+  assert.match(note.text, /coaching gap is open again/i);
+  assert.equal(note.artifacts[0].kind, "knowledge_write");
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
+  assert.equal(gapOf(repoRoot).status, "open");
+});
+
+test("Undo still records the claim removal and says the gap stayed closed when the reopen fails without committing", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+    appSetFieldsImpl: () => {
+      throw new Error("db locked");
+    },
+  });
+
+  const note = result.messages.at(-1);
+  assert.equal(note.metadata.state, "reverted");
+  assert.match(note.text, /gap stayed closed/i);
+  assert.equal(note.artifacts[0].kind, "knowledge_write");
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
+  assert.equal(gapOf(repoRoot).status, "closed");
 });
 
 // ---------------------------------------------------------------------------
