@@ -53,6 +53,6 @@ do about a job that landed at review, run `coach-gaps`. It only fires on an
 `keep` or `cut`. Explicit-click only, mirroring company-health's cost gate: it never
 auto-fires. Every suggestion is grounded only in evidence already on record or the
 current conversation — an honest "no close path yet" is a valid, expected answer for
-a gap, not a failure. A confirmed evidence-claim draft routes through the same
+a gap, not a failure. A saved evidence-claim draft routes through the same
 evidence firewall (`computeEvidenceWrite`/`candidateEvidenceMerge`) every other
 evidence write uses; `evaluate-job` itself stays the narrow, unchanged gate.

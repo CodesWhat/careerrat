@@ -349,8 +349,18 @@ function revertDeepIngest({ repoRoot, env, entry }) {
 // revertKnowledgeWrite: runs one stored entry's inverse. Never throws for the
 // plain refusals (stale, in use, private, already undone); those come back as
 // { ok:false, note }. `existing` is the knowledge_write artifacts already in the
-// thread, used to refuse a double undo.
-export function revertKnowledgeWrite({ repoRoot, env, entry, messageId, index, existing = [] }) {
+// thread, used to refuse a double undo. `afterRevert(entry)` runs once the
+// inverse succeeded and may return a note appended to the summary (a coaching
+// claim's undo uses it to reopen its gap).
+export function revertKnowledgeWrite({
+  repoRoot,
+  env,
+  entry,
+  messageId,
+  index,
+  existing = [],
+  afterRevert,
+}) {
   if (entry?.kind !== "knowledge_write") {
     return refuse("CareerRat couldn't find that change to undo.", "missing");
   }
@@ -372,9 +382,10 @@ export function revertKnowledgeWrite({ repoRoot, env, entry, messageId, index, e
     outcome = refuse(NO_INVERSE_NOTE, "unsupported");
   }
   if (!outcome.ok) return outcome;
+  const extra = afterRevert ? afterRevert(entry) : undefined;
   return {
     ok: true,
-    summary: `Undid: ${describe(entry)}.`,
+    summary: `Undid: ${describe(entry)}.${extra ? ` ${extra}` : ""}`,
     entry: inverseEntry(entry, { messageId, index, writer: "knowledge.revert" }),
   };
 }
