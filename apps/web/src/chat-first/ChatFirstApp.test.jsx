@@ -2298,6 +2298,8 @@ describe("ChatFirstAppView", () => {
       id: "linkedin-profile",
       questionId: "linkedin-profile",
       label: "LinkedIn Profile",
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
       answerable: true,
     };
     const html = await renderView({
