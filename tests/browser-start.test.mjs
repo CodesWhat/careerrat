@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { privateDataRoot } from "../src/core/paths/workspace.mjs";
 import { readVersion } from "../src/core/version.mjs";
 
 const run = promisify(execFile);
@@ -35,7 +36,13 @@ async function fixture(t, { agentExit = 0, opener = false, appFails = false } = 
     assert.equal(req.url, "/api/health");
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
-      JSON.stringify({ ok: true, product: "careerrat", version: readVersion(), pid: process.pid })
+      JSON.stringify({
+        ok: true,
+        product: "careerrat",
+        version: readVersion(),
+        pid: process.pid,
+        dataRoot: privateDataRoot({ repoRoot: ROOT, env: { CAREERRAT_HOME: home } }),
+      })
     );
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { currentPerson } from "../paths/people.mjs";
 
 const ARCHIVED_STATUSES = new Set(["rejected", "withdrawn", "cut", "closed"]);
 
@@ -27,8 +28,12 @@ export function jobDocumentPaths({ application, env = process.env }) {
       : encodeURIComponent(character)
   ).join("");
   const job = `job-${jobId}`;
+  // A selected person gets their own folder so two people's documents never mix,
+  // unless the downloads directory was set explicitly.
+  const person = currentPerson(env);
   const root =
-    String(env.CAREERRAT_DOWNLOADS_DIR || "").trim() || join(homedir(), "Documents", "careerrat");
+    String(env.CAREERRAT_DOWNLOADS_DIR || "").trim() ||
+    join(homedir(), "Documents", "careerrat", ...(person ? [person] : []));
   const active = join(root, companyName, job);
   const archive = join(root, "_archive", companyName, job);
   const archived = ARCHIVED_STATUSES.has(
