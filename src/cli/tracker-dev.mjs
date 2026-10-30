@@ -57,6 +57,7 @@ import {
   startCompanyDiscoveryOperation,
 } from "../core/discovery/company-operation.mjs";
 import { resolvePublicHttpTarget, validatePublicHttpUrl } from "../core/net/public-http-fetch.mjs";
+import { resolvePersonSelection } from "../core/paths/people.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
 import { captureBrowserSearchSource } from "../core/search/browser-source-capture.mjs";
@@ -832,6 +833,14 @@ async function main() {
   }
   const wantOpen = args.includes("--open");
   const port = resolvePort(args, process.env);
+
+  try {
+    const personEnv = resolvePersonSelection({ repoRoot: DEFAULT_ROOT, env: process.env });
+    if (personEnv) Object.assign(process.env, personEnv);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
 
   const dev = createDevServer({ repoRoot: DEFAULT_ROOT });
 

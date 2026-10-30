@@ -73,3 +73,42 @@ export function listPersonNames(base) {
     .map((entry) => entry.name)
     .sort();
 }
+
+// The person this process was asked for, from `--for` (forName) or the environment.
+// Null means the owner's own workspace. A value that is set but blank is an error,
+// never "no person", so a typo can't write into the owner's workspace.
+function requestedPerson({ forName = null, env = process.env } = {}) {
+  if (forName !== null && forName !== undefined) {
+    if (!String(forName).trim()) throw new Error("--for needs a person name.");
+    return validatePersonName(forName);
+  }
+  const raw = env.CAREERRAT_PERSON;
+  if (raw === undefined || raw === "") return null;
+  if (!String(raw).trim())
+    throw new Error("CAREERRAT_PERSON is set but blank. Unset it or give a person name.");
+  return validatePersonName(String(raw).trim());
+}
+
+// Resolves the person selection to the env values to apply, or null for no person.
+// Shared by bin/careerrat.mjs and the direct tracker-dev entrypoint. Requires the
+// person to exist unless allowMissing is set. Idempotent: an env already set by
+// `--for` resolves to the same root and doesn't nest.
+export function resolvePersonSelection({
+  repoRoot,
+  env = process.env,
+  forName = null,
+  allowMissing = false,
+  createMissing = false,
+} = {}) {
+  const name = requestedPerson({ forName, env });
+  if (!name) return null;
+  const selected = personEnv({ repoRoot, env, name });
+  const base = selected.CAREERRAT_PEOPLE_BASE;
+  if (!personExists(base, name)) {
+    if (createMissing) createPersonRoot(base, name);
+    else if (!allowMissing) {
+      throw new Error(`No workspace for "${name}". Create it with: careerrat people add ${name}`);
+    }
+  }
+  return selected;
+}

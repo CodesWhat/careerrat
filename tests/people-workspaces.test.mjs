@@ -17,6 +17,7 @@ import {
   peopleBase,
   personEnv,
   personRoot,
+  resolvePersonSelection,
   validatePersonName,
 } from "../src/core/paths/people.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
@@ -280,4 +281,53 @@ test("--for applies before update, so update never runs against the owner's work
   assert.equal(res.status, 1);
   assert.match(res.stderr, /No workspace for "ghost"/);
   assert.doesNotMatch(res.stdout, /Checking npm/);
+});
+
+test("an empty --for= is rejected like a bare --for", (t) => {
+  const base = tempBase(t);
+  const res = cli(base, ["--for=", "evidence", "path", "--json"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /--for needs a person name/);
+  assert.equal(res.stdout, "");
+});
+
+test("a whitespace-only CAREERRAT_PERSON is rejected, an unset one means no person", (t) => {
+  const base = tempBase(t);
+  const res = cli(base, ["evidence", "path", "--json"], { CAREERRAT_PERSON: "   " });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /CAREERRAT_PERSON is set but blank/);
+  assert.equal(resolvePersonSelection({ repoRoot: REPO_ROOT, env: {} }), null);
+});
+
+test("resolvePersonSelection requires the person to exist and is idempotent", (t) => {
+  const base = tempBase(t);
+  const env = { CAREERRAT_HOME: base, CAREERRAT_PERSON: "alice" };
+  assert.throws(
+    () => resolvePersonSelection({ repoRoot: REPO_ROOT, env }),
+    /No workspace for "alice"/
+  );
+  mkdirSync(join(base, "people", "alice"), { recursive: true });
+  const first = resolvePersonSelection({ repoRoot: REPO_ROOT, env });
+  assert.equal(first.CAREERRAT_HOME, join(base, "people", "alice"));
+  assert.equal(first.CAREERRAT_PEOPLE_BASE, base);
+  const again = resolvePersonSelection({ repoRoot: REPO_ROOT, env: { ...env, ...first } });
+  assert.deepEqual(again, first);
+});
+
+test("running tracker-dev directly applies the person selection", (t) => {
+  const base = tempBase(t);
+  const run = (extra) =>
+    spawnSync(process.execPath, [join(REPO_ROOT, "src/cli/tracker-dev.mjs")], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      timeout: 8000,
+      killSignal: "SIGKILL",
+      env: cleanEnv({ CAREERRAT_HOME: base, ...extra }),
+    });
+  const missing = run({ CAREERRAT_PERSON: "ghost" });
+  assert.equal(missing.status, 1, missing.stdout + missing.stderr);
+  assert.match(missing.stderr, /No workspace for "ghost"/);
+  const blank = run({ CAREERRAT_PERSON: "  " });
+  assert.equal(blank.status, 1);
+  assert.match(blank.stderr, /CAREERRAT_PERSON is set but blank/);
 });

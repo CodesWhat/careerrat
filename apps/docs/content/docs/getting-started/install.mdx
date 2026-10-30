@@ -160,8 +160,10 @@ careerrat people list
 
 `--for <name>` works on every command, for example `careerrat --for maria doctor`.
 You can also set `CAREERRAT_PERSON=maria`. Documents for Maria export to
-`~/Documents/careerrat/maria/` unless you set `CAREERRAT_DOWNLOADS_DIR`. Without
-`--for`, you get your own workspace, exactly as before.
+`~/Documents/careerrat/maria/` under the default directory. An explicit
+`CAREERRAT_DOWNLOADS_DIR` is used as-is, so it is shared between people. If you
+override it, set a different value for each person. Without `--for`, you get
+your own workspace, exactly as before.
 
 ## Health check
 

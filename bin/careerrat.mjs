@@ -50,13 +50,7 @@ import {
   findInstalledExecutable,
   INSTALLED_RUNTIME_DEFINITIONS,
 } from "../src/core/ai/installed-runtimes.mjs";
-import {
-  createPersonRoot,
-  currentPerson,
-  personEnv,
-  personExists,
-  validatePersonName,
-} from "../src/core/paths/people.mjs";
+import { currentPerson, resolvePersonSelection } from "../src/core/paths/people.mjs";
 import {
   displayPath,
   privateDataRoot,
@@ -211,7 +205,7 @@ function extractForFlag(argv) {
     const arg = argv[i];
     if (arg === "--for") {
       const value = argv[i + 1];
-      if (!value || value.startsWith("-")) {
+      if (!value?.trim() || value.startsWith("-")) {
         console.error("--for needs a person name. Try: careerrat --for <name> <command>");
         process.exit(1);
       }
@@ -219,6 +213,10 @@ function extractForFlag(argv) {
       i++;
     } else if (arg.startsWith("--for=")) {
       person = arg.slice("--for=".length);
+      if (!person.trim()) {
+        console.error("--for needs a person name. Try: careerrat --for <name> <command>");
+        process.exit(1);
+      }
     } else {
       args.push(arg);
     }
@@ -230,26 +228,20 @@ function extractForFlag(argv) {
 // <base>/people/<name>. The person has to exist, except where the command
 // creates it: `people` (add) and `start --new`.
 function applyPersonSelection() {
-  let name;
+  let env;
   try {
-    name = forPerson ?? currentPerson(process.env);
-    if (!name) return;
-    validatePersonName(name);
+    env = resolvePersonSelection({
+      repoRoot: root,
+      env: process.env,
+      forName: forPerson,
+      allowMissing: command === "people",
+      createMissing: command === "start" && rest.includes("--new"),
+    });
   } catch (err) {
     console.error(err.message);
     process.exit(1);
   }
-  const env = personEnv({ repoRoot: root, env: process.env, name });
-  const base = env.CAREERRAT_PEOPLE_BASE;
-  if (!personExists(base, name)) {
-    if (command === "start" && rest.includes("--new")) {
-      createPersonRoot(base, name);
-    } else if (command !== "people") {
-      console.error(`No workspace for "${name}". Create it with: careerrat people add ${name}`);
-      process.exit(1);
-    }
-  }
-  Object.assign(process.env, env);
+  if (env) Object.assign(process.env, env);
 }
 
 function runInit(extra) {
