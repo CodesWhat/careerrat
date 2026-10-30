@@ -426,6 +426,34 @@ describe("buildChatFirstView", () => {
     ]);
   });
 
+  it("lists a job waiting on the operator's answer alongside the other needs", () => {
+    const view = buildChatFirstView(
+      { ...dashboard, allNextSteps: [] },
+      {
+        ...runtime,
+        missions: [],
+        needsYou: [
+          {
+            id: "application:app-1:needs-answer",
+            kind: "needs-answer",
+            applicationId: "app-1",
+            title: "E Corp needs an answer",
+            detail: "Would you be willing to travel?",
+            primaryLabel: "Answer",
+          },
+        ],
+      }
+    );
+
+    expect(view.needsYou).toEqual([
+      expect.objectContaining({
+        id: "application:app-1:needs-answer",
+        kind: "needs-answer",
+        primaryLabel: "Answer",
+      }),
+    ]);
+  });
+
   it("collapses sourced decisions into one batch action without hiding other needs", () => {
     const view = buildChatFirstView(
       { ...dashboard, allNextSteps: [] },

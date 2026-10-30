@@ -20,6 +20,7 @@ import {
   hostnameToPortal,
   isEasyApply,
   isSsoOrAccountLabel,
+  REQUIRED_FIELDS_UNANSWERED,
   submitGuard,
 } from "./form-fill.mjs";
 
@@ -1683,6 +1684,9 @@ export function createApplyDriver({
             uploadedCount: totalUploadedCount,
             unresolved,
             blockers: [],
+            // Not a real blocker (login, captcha, 2FA): the operator just has
+            // to answer these fields, so callers can flag the job instead.
+            stopReason: REQUIRED_FIELDS_UNANSWERED,
             submitMode: guard.mode,
             ...stepSessionFields(stepIndex, easyApply),
           },

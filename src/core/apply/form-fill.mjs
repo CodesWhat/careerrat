@@ -13,6 +13,10 @@ import { CANDIDATE_DEFAULTS } from "../profile/candidate-defaults.mjs";
 // CANONICAL_FIELDS
 // ---------------------------------------------------------------------------
 
+// session.stopReason when a step stops on required fields the profile can't
+// answer: a NEEDS YOU on that job, distinct from a login/captcha/2FA blocker.
+export const REQUIRED_FIELDS_UNANSWERED = "required-fields-unanswered";
+
 export const CANONICAL_FIELDS = [
   "full_name",
   "first_name",

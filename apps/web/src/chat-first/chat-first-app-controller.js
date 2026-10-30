@@ -690,7 +690,7 @@ export function resolveNeedDecision(item, decision = "primary") {
       ids,
     };
   }
-  if (kind === "application-next-action") {
+  if (kind === "application-next-action" || kind === "needs-answer") {
     const applicationId = item?.applicationId || item?.owner?.applicationId || item?.owner?.id;
     return applicationId ? { kind: "open-application", applicationId } : null;
   }

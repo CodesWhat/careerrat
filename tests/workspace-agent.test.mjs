@@ -69,6 +69,7 @@ import {
 } from "../src/core/db/verbs/sourcing-runs.mjs";
 import { buildCompanySeedContext } from "../src/core/discovery/company-context.mjs";
 import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
+import { draftPacketAnswers } from "../src/core/packet/answers.mjs";
 import { draftOneOffScreeningAnswers } from "../src/core/packet/one-off-answer.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { slugifyClaimId } from "../src/core/profile/evidence-writer.mjs";
@@ -8359,16 +8360,107 @@ test("free-form job chat durably confirms exact user-supplied screening pairs in
   assert.equal(confirmation.kind, "action_result");
   assert.equal(confirmation.metadata.persisted, true);
   assert.equal(confirmation.metadata.uploadReady, true);
-  assert.deepEqual(confirmation.metadata.nextActions, [
-    {
-      label: "Resume supervised apply",
-      intent: {
-        type: "job.prepare-submit",
-        entity: { type: "application", id: "app-temporal" },
-        input: { resumeSession: true },
-      },
+  assert.deepEqual(confirmation.metadata.nextActions[0], {
+    label: "Resume supervised apply",
+    intent: {
+      type: "job.prepare-submit",
+      entity: { type: "application", id: "app-temporal" },
+      input: { resumeSession: true },
     },
+  });
+  // The two durable questions (sponsorship, start date) also save to
+  // form-defaults with an Undo each; the job-specific ones stay on the job.
+  assert.equal(confirmation.metadata.nextActions.length, 3);
+  const savedAnswers = candidateConfigGet({ repoRoot, env: {} })["form-defaults"].screening_answers;
+  assert.deepEqual(Object.keys(savedAnswers).sort(), [
+    "when can you start",
+    "will you require sponsorship",
   ]);
+});
+
+test("answering a durable question saves it for every job, a job-specific one stays on its job", async () => {
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/needs-answer-answers.md";
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  const resumePdfPath = seedResumePdfArtifact(repoRoot, "tailored/needs-answer-resume.pdf");
+  const gap = (questionId, question) => ({
+    kind: "answers",
+    code: "ANSWER_CONFIRMATION_REQUIRED",
+    questionId,
+    message: `Answer “${question}”.`,
+  });
+  const sponsorship = "Will you now or later require sponsorship?";
+  const whyHere = "Why do you want to work here?";
+  seedApplication(repoRoot, {
+    company: "Curri",
+    role: "Senior Software Engineer",
+    status: "reviewed-hold",
+    evaluation: { gate: "keep", fitScore: 87 },
+    artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
+    packetManifest: {
+      applicationId: "app-temporal",
+      generatedAt: "2026-08-24T18:40:48.594Z",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 2,
+      gaps: [gap("q-sponsorship", sponsorship), gap("q-why", whyHere)],
+      artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
+    },
+  });
+  const { chatFirstStateGet } = await import("../src/core/db/verbs/chat-first.mjs");
+  const openQuestions = () =>
+    chatFirstStateGet({ repoRoot, env: {} })
+      .needsYou.filter((item) => item.kind === "needs-answer")
+      .flatMap((item) => item.questions.map((need) => need.question));
+  assert.deepEqual(openQuestions(), [sponsorship, whyHere]);
+
+  const confirm = (questionId, question, answer) =>
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: { questionId, question, answer },
+      },
+    });
+
+  // Job-specific: clears the flag for that question, never touches form-defaults.
+  const jobSpecific = await confirm("q-why", whyHere, "I want to improve construction logistics.");
+  assert.deepEqual(openQuestions(), [sponsorship]);
+  assert.deepEqual(
+    candidateConfigGet({ repoRoot, env: {} })["form-defaults"]?.screening_answers ?? {},
+    {}
+  );
+  assert.doesNotMatch(jobSpecific.messages.at(-1).text, /for future applications/);
+
+  // Durable: clears the flag and saves to screening_answers with an Undo.
+  const durable = await confirm("q-sponsorship", sponsorship, "I do not require sponsorship.");
+  assert.deepEqual(openQuestions(), []);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} })["form-defaults"].screening_answers, {
+    "will you now or later require sponsorship": "I do not require sponsorship.",
+  });
+  const last = durable.messages.at(-1);
+  assert.match(last.text, /Saved this answer for future applications/);
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.intent?.type === "knowledge.revert"),
+    true
+  );
+
+  // A second job with the same question is answered without asking again.
+  const drafted = await draftPacketAnswers({
+    repoRoot,
+    env: {},
+    context: { profile: {}, honesty: {}, application: {} },
+    questions: {
+      answerable: [{ id: "q-other", label: sponsorship, type: "text", required: true }],
+      excluded: [],
+    },
+  });
+  assert.equal(drafted.answers[0].answer, "I do not require sponsorship.");
+  assert.equal(drafted.answers[0].uploadReady, true);
+  assert.equal(drafted.answers[0].source, "screening_answers");
 });
 
 test("free-form screening auto-confirm persists the entire multiline answer", async () => {
@@ -8681,6 +8773,45 @@ test("confirmed reusable screening answers persist through the owning candidate 
   assert.equal(message.metadata.persisted, true);
   assert.equal(message.metadata.nextActions, undefined);
   assert.match(message.text, /future applications/i);
+});
+
+test("a confirmed answer naming the company stays on the application while a plain durable one saves", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { company: "Acme", role: "Robotics Engineer" });
+  const saved = [];
+  const confirm = async ({ question, answer }) => ({
+    applicationId: "app-temporal",
+    answers: [{ question, answer, key: question.toLowerCase() }],
+    packetManifest: { uploadReady: true, gaps: [] },
+  });
+  const run = (question, answer) =>
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: { questionId: "q1", question, answer },
+      },
+      confirmScreeningAnswerImpl: confirm,
+      saveScreeningAnswerImpl: (input) => {
+        saved.push(input.answer);
+        return { key: input.key, answer: input.answer, persisted: true };
+      },
+    });
+
+  await run(
+    "Why do you want to relocate for this role?",
+    "I want to join Acme's robotics team in Boston."
+  );
+  await run("Do you have a reason to relocate?", "Yes, the team at ACME is why.");
+  await run("Would you work with the team?", "Happy to work on your team in person.");
+  await run("Why do you want to work at this company?", "I like building tools for people.");
+  await run("Why do you want to work here?", "The mission fits what I care about.");
+  assert.deepEqual(saved, []);
+
+  await run("Are you authorized to work in the US?", "Yes, I'm authorized to work in the US.");
+  assert.deepEqual(saved, ["Yes, I'm authorized to work in the US."]);
 });
 
 test("confirming a job-specific screening answer clears its packet gap and unblocks resume", async () => {

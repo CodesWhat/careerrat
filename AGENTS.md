@@ -1367,10 +1367,22 @@ default. During `apply-job`, answer as the candidate from local context first:
 `honesty.yml`, `evidence.yml`, the saved JD, and generated tailored artifacts. Fill
 ordinary supported prompts — interest, relevant experience, availability, location,
 travel, work authorization, sponsorship, expected compensation, and confirmed-tool
-questions — without stopping. Stop only when an answer would require fabrication,
-a guess at unsupported years/metrics/dates/tool depth, a security clearance or legal
-claim not in evidence, private current compensation, a contradiction of `honesty.yml`,
-or a materially new disclosure not captured during onboarding.
+questions — without stopping. Flag the question, never guess, when an answer would
+require fabrication, a guess at unsupported years/metrics/dates/tool depth, a security
+clearance or legal claim not in evidence, private current compensation, a contradiction
+of `honesty.yml`, or a materially new disclosure not captured during onboarding.
+
+**`NEEDS YOU` is a flag on one job, never a stop for the run.** An unanswerable
+required question gets the literal `NEEDS YOU: <reason>` marker in that job's answers
+artifact. The job keeps everything that can proceed (tailoring, every other field, the
+packet minus that answer), shows a needs-answer flag on its thread that lists each
+question, and appears in Today as waiting on the operator. Other jobs and missions
+carry on. The flagged job is never submitted or exported while the marker remains
+(placeholder lint and the submit guards stay in force), and submit mode is held at
+manual for it. The operator answers once in the job thread, with no modal. A durable
+disclosure-style answer persists to `form-defaults.yml#screening_answers` with an Undo;
+a job-specific answer stays with that application. Answering the last open question
+clears the flag and offers the existing resume action.
 
 **Job-source login is point-of-use, not an automation permission.** A pasted
 LinkedIn, Indeed, Glassdoor, or other login-backed search URL becomes a disabled

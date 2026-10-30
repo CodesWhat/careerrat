@@ -2298,6 +2298,8 @@ describe("ChatFirstAppView", () => {
       id: "linkedin-profile",
       questionId: "linkedin-profile",
       label: "LinkedIn Profile",
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
       answerable: true,
     };
     const html = await renderView({
@@ -2322,7 +2324,7 @@ describe("ChatFirstAppView", () => {
       packetAnswerGap: packetGap,
     });
 
-    expect(html).toContain("I need 1 application answer before I can continue");
+    expect(html).toContain("One application question needs your answer");
     expect(html).toContain("APPLICATION ANSWERS · 1 NEEDED");
     expect(html).toContain('placeholder="Answer LinkedIn Profile…"');
   });
