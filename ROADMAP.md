@@ -20,14 +20,14 @@ The theme: agnostic to the job. It should work for anyone.
   evidence, onboarding answers, gap coaching drafts, strategy changes and
   LinkedIn suggestions. Company health and gap coaching run on their own when
   their trigger is met. A question CareerRat can't answer honestly flags that
-  one job instead of stopping the run. Lowering a comp floor still asks first,
-  and nothing is claimed that doesn't trace to a source. Built, ships in the
-  next release.
+  one job instead of stopping the run. Strategy changes backed by fewer than
+  three data points still ask first, as does lowering a comp floor. Nothing is
+  claimed that doesn't trace to a source. Built, ships in the next release.
 - **One workspace per person.** `--for <name>` runs any command in that
   person's workspace, with their own documents folder, so nothing from one
   search reaches another. Built, ships in the next release.
-- **Older workspaces import cleanly.** Settings from earlier versions migrate
-  on import instead of being refused. Built, ships in the next release.
+- **Older workspaces migrate retired settings.** Known retired settings migrate
+  on import; invalid settings still need repair. Built, ships in the next release.
 - **The terminal does the work, the browser shows it.** The AI CLI with
   CareerRat's skills does the work, and the browser app becomes the place to
   review it: today's list, the pipeline, each job's thread and the Undo log.
