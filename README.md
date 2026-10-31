@@ -530,9 +530,11 @@ Private vulnerability reports: [Security policy](.github/SECURITY.md).
 
 **[MIT License](LICENSE)**
 
-<a href="https://github.com/CodesWhat">
+<a href="https://codeswhat.com">
   <img src="apps/website/public/codeswhat-logo.png" alt="CodesWhat" height="28">
 </a>
+
+[CodesWhat](https://codeswhat.com), small, sharp tools from one developer and a lot of agents.
 
 <a href="#careerrat">Back to top</a>
 

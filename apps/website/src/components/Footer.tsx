@@ -4,7 +4,7 @@ import Image from "next/image";
 // Pattern: codeswhat-components/templates/web-shell/src/components/footer.tsx,
 // recreated in this site's plain-CSS idiom (no Tailwind here).
 
-const CODESWHAT = "https://github.com/CodesWhat";
+const CODESWHAT = "https://codeswhat.com";
 const YEAR = new Date().getFullYear();
 const BLURB =
   "CareerRat is a Mac app that turns your AI CLI into a personal recruiter. Rate jobs before you apply, use your real experience, and track every outcome.";
@@ -58,6 +58,10 @@ export function Footer() {
         <div className="footer__brand-block">
           <span className="footer__brand">CareerRat</span>
           <p className="footer__blurb">{BLURB}</p>
+          <p className="footer__blurb">
+            <a href={CODESWHAT}>CodesWhat</a>, small, sharp tools from one developer and a lot of
+            agents.
+          </p>
         </div>
         <div className="footer__columns">
           <FooterColumn heading="Product" links={productLinks} />
