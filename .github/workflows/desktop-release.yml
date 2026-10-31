@@ -194,7 +194,7 @@ jobs:
     # Pinned arm64 image. macos-14 entered deprecation on 2026-07-06 and can
     # brown out before its 2026-11-02 retirement; macos-15 is its supported
     # arm64 replacement and matches the package's arm64-only target.
-    runs-on: macos-15
+    runs-on: macos-26
     permissions:
       contents: write # upload the signed DMG and complete macOS updater feed
     # GH_TOKEN is deliberately NOT job-level env here: electron-builder
