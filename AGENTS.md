@@ -230,8 +230,11 @@ these keys to the native agent instead. The guarded Undo writer refuses stale,
 private or already-reverted entries. Validated DB `gate`, `modes` and `automation`
 CLI writes record their changed field and Undo reference in the same transaction;
 dry runs, unchanged values and refused confirmation do not create an entry.
-Low-level candidate/evidence commands do not yet create that log automatically;
-check recorded changes before offering Undo for those writes. After a job skill verifies its canonical
+DB-backed `data candidate evidence` and `evidence add --write` also record added
+or changed claims atomically, using their canonical saved ids. Unchanged and
+skipped duplicate claims create no history entry. Low-level `data candidate patch`
+does not yet create that log automatically; check recorded changes before offering
+Undo for those writes. After a job skill verifies its canonical
 writes, append its durable result and artifact references with `data thread append`
 for an application. For a sourced job, use the workspace thread with explicit
 `metadata.jobId` and `metadata.jobKind: "sourced"`; don't promote a job just to

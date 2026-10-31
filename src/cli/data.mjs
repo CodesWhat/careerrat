@@ -64,6 +64,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { recordedKnowledgeChanges } from "../core/agent/knowledge-changes.mjs";
 import { undoWorkspaceKnowledge } from "../core/agent/knowledge-history.mjs";
+import { mergeRecordedCandidateEvidence } from "../core/agent/recorded-evidence-write.mjs";
 import { workspaceMessageAppend, workspaceThreadRead } from "../core/agent/workspace-thread.mjs";
 import { dbExists, dbFilePath, NO_DATABASE_MESSAGE, openDb } from "../core/db/connection.mjs";
 import { seedDemo } from "../core/db/demo-seed.mjs";
@@ -82,7 +83,6 @@ import {
   candidateApplicationLimitUpsert,
   candidateConfigGet,
   candidateConfigPatch,
-  candidateEvidenceMerge,
   candidateSetupInitialize,
   commAppendMessage,
   commMarkSent,
@@ -686,7 +686,11 @@ function cmdCandidate(sub, rest) {
     }
     case "evidence":
       return printResult(
-        candidateEvidenceMerge({ ...pathCtx, claims: readPayload("candidate evidence") })
+        mergeRecordedCandidateEvidence({
+          ...pathCtx,
+          claims: readPayload("candidate evidence"),
+          writer: "data candidate evidence",
+        })
       );
     case "limits": {
       const [action] = rest;
