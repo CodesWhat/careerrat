@@ -5,33 +5,32 @@ record of what shipped when, is a local file that isn't published.
 
 ## Where things stand
 
-v0.19.2 is the current release. It is the last Mac app release. From here
-CareerRat is the tool its author runs for people he is helping with a job
-search, installed from npm and used in the browser. The source stays public
-so you can read how it works, and `npm install -g careerrat` still works if
-you want to run it yourself.
+v0.21.0 is the current release, installed from npm and used in the browser.
+v0.19.2 was the last Mac app release. CareerRat is the tool its author runs
+for the people he is helping with a job search. The source stays public so
+you can read how it works, and `npm install -g careerrat` works if you want
+to run it yourself.
 
 The theme: agnostic to the job. It should work for anyone.
 
 ## Next
 
-- **Browser-first workspace.** `careerrat start` opens the local browser
-  workspace by default; Claude Code and Codex terminal sessions stay optional.
-  Job conversations, recruiter messages and per-job history stay in the
-  product. The Mac app stays supported until clean browser setup, existing-data
-  compatibility and PDF parity are verified, then it is removed. Built, not
-  yet released.
-- **Operator mode.** The confirmation prompts built for an anonymous user
-  come out: applications submit, knowledge writes apply, and checks run
-  without asking, with every action recorded on the job's thread. The
-  honesty rule stays: nothing is claimed that doesn't trace to a source.
-- **One workspace per person.** Switch between the people being helped by
-  name; nothing from one person's search can reach another's documents.
-- **Per-job document folders.** Exports land in `Documents/careerrat` with one
-  folder per application. Closed jobs archive their folder; reopening restores
-  it. Earlier versions are kept. Built, not yet released.
-- **Dependency security refresh.** Runtime dependency updates have landed on
-  the development branch and ship with the next release.
+- **Operator mode, the rest of it.** Capabilities are on by default.
+  Knowledge writes apply directly, each with an Undo on the job's thread:
+  evidence, onboarding answers, gap coaching drafts, strategy changes and
+  LinkedIn suggestions. Company health and gap coaching run on their own when
+  their trigger is met. A question CareerRat can't answer honestly flags that
+  one job instead of stopping the run. Lowering a comp floor still asks first,
+  and nothing is claimed that doesn't trace to a source. Built, ships in the
+  next release.
+- **One workspace per person.** `--for <name>` runs any command in that
+  person's workspace, with their own documents folder, so nothing from one
+  search reaches another. Built, ships in the next release.
+- **Older workspaces import cleanly.** Settings from earlier versions migrate
+  on import instead of being refused. Built, ships in the next release.
+- **The terminal does the work, the browser shows it.** The AI CLI with
+  CareerRat's skills does the work, and the browser app becomes the place to
+  review it: today's list, the pipeline, each job's thread and the Undo log.
 
 ## How to read this
 
