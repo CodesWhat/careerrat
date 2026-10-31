@@ -4,6 +4,18 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Updated dependencies with security fixes for schema validation, test tooling,
+  and the retained desktop build tools.
+
+### Changed
+
+- Renovate owns dependency update PRs. Major upgrades wait in its dependency
+  dashboard; the retired Mac release workflow gets no further updates.
+
 ## [0.21.0] - 2026-10-27
 
 ### Added
