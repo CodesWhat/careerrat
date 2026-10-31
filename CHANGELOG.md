@@ -4,6 +4,22 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The browser opens a dashboard for Today, Pipeline, saved documents, job
+  history, and recorded changes without waiting for AI setup. Work continues
+  in the CLI; the previous conversation workspace remains at `/app/conversation`
+  during the transition.
+- Copied CLI commands preserve the selected person's workspace, including
+  custom data roots. A workspace switch clears the previous selection and preview.
+
+### Fixed
+
+- Recorded knowledge changes can be undone without an AI route. Undo reads the
+  saved change and preserves the existing stale-state and evidence checks.
+
 ## [0.21.0] - 2026-10-27
 
 ### Added

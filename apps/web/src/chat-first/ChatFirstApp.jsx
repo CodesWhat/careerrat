@@ -1610,7 +1610,7 @@ export function ChatFirstAppView({
   );
 }
 
-export function ChatFirstApp({ api = chatFirstApi }) {
+export function ChatFirstApp({ api = chatFirstApi, homePath = "/" }) {
   const dashboard = useDashboardSnapshot();
   const location = useLocation();
   const navigate = useNavigate();
@@ -1924,7 +1924,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       workspaceOperationIdRef.current = exactId;
       setWorkspaceOperationId(exactId);
 
-      if (location.pathname !== "/") return currentId !== exactId;
+      if (location.pathname !== homePath) return currentId !== exactId;
       const currentSearch = locationSearchRef.current;
       const search = replaceForegroundOperation(
         currentSearch,
@@ -1933,10 +1933,10 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       );
       if (search === currentSearch) return currentId !== exactId;
       locationSearchRef.current = search;
-      navigate({ pathname: "/", search }, { replace: true });
+      navigate({ pathname: homePath, search }, { replace: true });
       return true;
     },
-    [location.pathname, navigate, workspaceOperationStorage]
+    [homePath, location.pathname, navigate, workspaceOperationStorage]
   );
 
   useEffect(() => {
@@ -1956,13 +1956,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           ? { ...foregroundSnapshot.filters, ...patch.filters }
           : foregroundSnapshot.filters,
       };
-      navigate({ pathname: "/", search: serializeChatFirstForeground(next) }, { replace });
+      navigate({ pathname: homePath, search: serializeChatFirstForeground(next) }, { replace });
     },
-    [foregroundSnapshot, navigate]
+    [foregroundSnapshot, homePath, navigate]
   );
 
   useEffect(() => {
-    if (location.pathname !== "/" || dashboard.loading) return;
+    if (location.pathname !== homePath || dashboard.loading) return;
     const reviewKind = locationForeground.reviewKind;
     const reviewId = locationForeground.reviewId;
     if (!reviewKind || !reviewId) {
@@ -1990,7 +1990,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     setError("That saved review is no longer available. The conversation is still here.");
     navigate(
       {
-        pathname: "/",
+        pathname: homePath,
         search: serializeChatFirstForeground({
           ...locationForeground,
           reviewKind: null,
@@ -2003,6 +2003,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     activeJob?.messages,
     activeSkillChat?.messages,
     dashboard.loading,
+    homePath,
     location.pathname,
     locationForeground,
     navigate,
@@ -2010,7 +2011,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   ]);
 
   useEffect(() => {
-    if (location.pathname !== "/" || dashboard.loading) return;
+    if (location.pathname !== homePath || dashboard.loading) return;
     applyingLocationRef.current = true;
     const foreground = {
       ...createChatFirstState(),
@@ -2069,11 +2070,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       filters: locationForeground.filters,
     });
     if (canonicalSearch !== location.search) {
-      navigate({ pathname: "/", search: canonicalSearch }, { replace: true });
+      navigate({ pathname: homePath, search: canonicalSearch }, { replace: true });
     }
   }, [
     dashboard.loading,
     draftStorage,
+    homePath,
     location.pathname,
     location.search,
     locationForeground,
@@ -2081,16 +2083,23 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   ]);
 
   useEffect(() => {
-    if (location.pathname !== "/" || dashboard.loading) return;
+    if (location.pathname !== homePath || dashboard.loading) return;
     if (applyingLocationRef.current) {
       applyingLocationRef.current = false;
       return;
     }
     const search = serializeChatFirstForeground(foregroundSnapshot);
     if (search !== location.search) {
-      navigate({ pathname: "/", search }, { replace: true });
+      navigate({ pathname: homePath, search }, { replace: true });
     }
-  }, [dashboard.loading, foregroundSnapshot, location.pathname, location.search, navigate]);
+  }, [
+    dashboard.loading,
+    foregroundSnapshot,
+    homePath,
+    location.pathname,
+    location.search,
+    navigate,
+  ]);
 
   useEffect(() => {
     if (!packetApplicationId) {

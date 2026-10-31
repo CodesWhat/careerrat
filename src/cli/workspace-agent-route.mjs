@@ -444,7 +444,41 @@ export function mountWorkspaceAgentRoutes({
   captureIntakeImpl = captureWorkspaceIntake,
   previewIntentImpl = previewWorkspaceIntent,
   appOperations,
+  revertKnowledgeImpl = executeWorkspaceIntent,
 } = {}) {
+  addRoute("POST", "/api/workspace/knowledge/revert", async (req, res) => {
+    try {
+      const body = exactInput(
+        await readJsonBodyCapped(req, MAX_BODY_BYTES),
+        ["messageId", "index"],
+        "knowledge undo"
+      );
+      if (
+        typeof body.messageId !== "string" ||
+        !body.messageId.trim() ||
+        body.messageId.length > 500 ||
+        !Number.isInteger(body.index) ||
+        body.index < 0
+      ) {
+        const error = new Error("A saved message and artifact index are required.");
+        error.code = "BAD_REQUEST";
+        throw error;
+      }
+      const result = await revertKnowledgeImpl({
+        repoRoot,
+        env,
+        intent: {
+          type: "knowledge.revert",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { messageId: body.messageId, index: body.index },
+        },
+      });
+      sendJson(res, 200, { ok: true, data: result });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
   addRoute("GET", "/api/workspace/thread", (_req, res) => {
     try {
       sendJson(res, 200, { ok: true, data: workspaceThreadOpen({ repoRoot, env }) });

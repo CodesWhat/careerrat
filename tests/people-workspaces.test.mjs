@@ -266,6 +266,7 @@ test("the app server reports who it is running for and who else exists", async (
   assert.equal(status, 200);
   assert.deepEqual(JSON.parse(body), {
     current: "alice",
+    startCommand: `CAREERRAT_PEOPLE_BASE='${base}' careerrat --for alice start codex`,
     people: [
       { name: "alice", ready: false },
       { name: "bob", ready: false },

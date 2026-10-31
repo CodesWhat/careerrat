@@ -23,6 +23,7 @@ export function DashboardProvider({ children }) {
 function LiveDashboardProvider({ children }) {
   const [data, setData] = useState(null);
   const [setup, setSetup] = useState(null);
+  const [workspace, setWorkspace] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [noDatabase, setNoDatabase] = useState(false);
@@ -43,9 +44,14 @@ function LiveDashboardProvider({ children }) {
     }
     inFlight.current = true;
     try {
-      const { data: viewModel, setup: setupPayload } = await getDashboard();
+      const {
+        data: viewModel,
+        setup: setupPayload,
+        workspace: workspacePayload,
+      } = await getDashboard();
       setData(viewModel);
       setSetup(setupPayload ?? null);
+      setWorkspace(workspacePayload ?? null);
       setError(null);
       setNoDatabase(false);
       noDatabaseRef.current = false;
@@ -53,6 +59,9 @@ function LiveDashboardProvider({ children }) {
       if (err instanceof ApiError && err.status === 409) {
         // Fail-closed no-DB degrade (decision 7, same contract as every other
         // /api/data/* route) — an honest hint, not a generic error banner.
+        setData(null);
+        setSetup(null);
+        setWorkspace(err.body?.workspace ?? null);
         setNoDatabase(true);
         noDatabaseRef.current = true;
         setError(null);
@@ -108,7 +117,9 @@ function LiveDashboardProvider({ children }) {
   });
 
   return (
-    <DashboardCtx.Provider value={{ data, setup, loading, error, noDatabase, refetch: load }}>
+    <DashboardCtx.Provider
+      value={{ data, setup, workspace, loading, error, noDatabase, refetch: load }}
+    >
       {children}
     </DashboardCtx.Provider>
   );
