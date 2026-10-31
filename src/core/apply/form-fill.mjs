@@ -1504,10 +1504,14 @@ const CONFIRMATION_URL_SEGMENTS = [
 export function confirmationCheck({ pageText = "", currentUrl, refs = {} } = {}) {
   const activeApplication = Object.values(refs || {}).some((entry) => {
     if (entry?.disabled === true) return false;
+    if (entry?.fileInput === true) {
+      return entry?.required === true && entry?.fileAttached !== true;
+    }
     const role = String(entry?.role || "").toLowerCase();
     const label = normalizeLabel(entry?.name || "");
     if (/\b(newsletter|subscribe|subscription|job alerts?)\b/.test(label)) return false;
     if (role === "button") {
+      if (["continue browsing jobs", "review application status"].includes(label)) return false;
       return (
         isApplicationSubmitLabel(label) ||
         EASY_APPLY_ADVANCE_LABELS.some((needle) => label.includes(needle))
@@ -1552,21 +1556,27 @@ export function confirmationCheck({ pageText = "", currentUrl, refs = {} } = {})
       .replace(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'|(?<!\w)‘[^’\n]*’/g, "")
       .replace(/:\s*\n\s*/g, ": ")
       .match(/[^.!?\n]+[.!?]?/g) || [];
-  const receiptClauses = statements.map((statement) => statement.trim().split(/[,;]/, 1)[0]);
+  const receiptClauses = statements.flatMap((statement) => {
+    let through = "";
+    return statement.split(/[,;]/).map((clause) => {
+      through += `${clause};`;
+      return { clause: clause.trim(), through };
+    });
+  });
   for (const signal of CONFIRMATION_SIGNALS) {
     if (
-      receiptClauses.some((statement) => {
-        const index = statement.indexOf(signal);
+      receiptClauses.some(({ clause, through }) => {
+        const index = clause.indexOf(signal);
         if (index < 0) return false;
-        const prefix = statement.slice(0, index);
-        const suffix = statement.slice(index + signal.length);
+        const prefix = clause.slice(0, index);
+        const suffix = clause.slice(index + signal.length);
         return (
           /^(?:your |(?:your )?application (?:has been |was )?)?$/.test(prefix) &&
           !/^\w/.test(suffix) &&
-          !/[?]/.test(statement) &&
-          !/\b(example|sample|preview|confirmation message)\b/.test(statement) &&
-          !/\b(if|when|after|once|would|should|must|click|press)\b/.test(statement) &&
-          !/\bwill\s+(?:see|appear|(?:be\s+)?(?:displayed|shown))\b/.test(statement)
+          !/[?]/.test(through) &&
+          !/\b(example|sample|preview|confirmation message)\b/.test(through) &&
+          !/\b(if|when|after|once|would|should|must|click|press)\b/.test(through) &&
+          !/\bwill\s+(?:see|appear|(?:be\s+)?(?:displayed|shown))\b/.test(through)
         );
       })
     ) {

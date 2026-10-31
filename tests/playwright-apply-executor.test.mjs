@@ -107,6 +107,8 @@ function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
             name: control.name,
             required: Boolean(control.required),
             fileInput: Boolean(control.fileInput),
+            fileAttached: Boolean(control.fileAttached),
+            disabled: Boolean(control.disabled),
             groupLabel: control.groupLabel ?? null,
             choiceGroup: control.choiceGroup ?? null,
             checked: Boolean(control.checked),
@@ -2269,3 +2271,41 @@ test("createPlaywrightApplyExecutor isolates its default profile by CareerRat ho
   assert.equal(second, join("/private/candidate-b", "board-profiles", "apply"));
   assert.notEqual(first, second);
 });
+
+for (const fileAttached of [false, true]) {
+  test(`collectControls reads native file attachment state: ${fileAttached}`, () => {
+    const input = new StubElement("input", { type: "file", "aria-label": "Attach" });
+    input.files = { length: fileAttached ? 1 : 0 };
+    input.disabled = true;
+    const stub = createDomStub(new StubElement("div").append(input));
+    const controls = withDomGlobals(stub, () => collectControls([input]));
+    assert.equal(controls[0].fileInput, true);
+    assert.equal(controls[0].fileAttached, fileAttached);
+    assert.equal(controls[0].disabled, true);
+  });
+
+  test(`snapshot exports native file attachment state: ${fileAttached}`, async () => {
+    const { launchImpl } = createFakeBrowser({
+      controls: [
+        {
+          role: "button",
+          name: "Attach",
+          required: true,
+          fileInput: true,
+          fileAttached,
+          disabled: true,
+        },
+      ],
+    });
+    const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+    try {
+      const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+      const { refs } = await ops.snapshot({ pageId });
+      assert.equal(refs.e1.fileInput, true);
+      assert.equal(refs.e1.fileAttached, fileAttached);
+      assert.equal(refs.e1.disabled, true);
+    } finally {
+      await ops.close();
+    }
+  });
+}

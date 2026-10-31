@@ -1429,3 +1429,66 @@ describe("confirmationCheck receipt clause qualification", () => {
     });
   }
 });
+
+describe("confirmationCheck final verified receipt cases", () => {
+  for (const [required, fileAttached, disabled, submitted] of [
+    [true, false, false, false],
+    [true, true, false, true],
+    [false, false, false, true],
+    [true, false, true, true],
+  ]) {
+    it(`checks native attachment state required=${required} attached=${fileAttached} disabled=${disabled}`, () => {
+      assert.equal(
+        confirmationCheck({
+          pageText: "Thank you for applying",
+          refs: {
+            upload: {
+              role: "button",
+              name: "Attach résumé",
+              fileInput: true,
+              required,
+              fileAttached,
+              disabled,
+            },
+          },
+        }).submitted,
+        submitted
+      );
+    });
+  }
+  for (const name of ["Continue browsing jobs", "Review application status"]) {
+    it(`allows the exact receipt navigation control ${name}`, () => {
+      assert.equal(
+        confirmationCheck({
+          pageText: "Thank you for applying",
+          refs: { nav: { role: "button", name } },
+        }).submitted,
+        true
+      );
+    });
+  }
+  it("still rejects Continue to Review on an active application", () => {
+    assert.equal(
+      confirmationCheck({
+        pageText: "Thank you for applying",
+        refs: { nav: { role: "button", name: "Continue to Review" } },
+      }).submitted,
+      false
+    );
+  });
+  for (const pageText of [
+    "Hi Sam, thank you for applying",
+    "Thank you, your application has been submitted.",
+    "Congratulations, your application was successfully submitted.",
+  ]) {
+    it(`accepts a receipt in a subsequent clause: ${pageText}`, () => {
+      assert.equal(confirmationCheck({ pageText }).submitted, true);
+    });
+  }
+  it("preserves instructional context preceding the matched receipt clause", () => {
+    assert.equal(
+      confirmationCheck({ pageText: "After you click Submit, application submitted" }).submitted,
+      false
+    );
+  });
+});
