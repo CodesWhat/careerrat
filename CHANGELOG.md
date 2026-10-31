@@ -14,11 +14,15 @@ All notable changes to CareerRat are documented here. This project follows
   during the transition.
 - Copied CLI commands preserve the selected person's workspace, including
   custom data roots. A workspace switch clears the previous selection and preview.
+- Renovate owns dependency update PRs. Major upgrades wait in its dependency
+  dashboard; the retired Mac release workflow gets no further updates.
 
 ### Fixed
 
 - Recorded knowledge changes can be undone without an AI route. Undo reads the
   saved change and preserves the existing stale-state and evidence checks.
+- Updated dependencies with security fixes for schema validation, test tooling,
+  and the retained desktop build tools.
 
 ## [0.21.0] - 2026-10-27
 

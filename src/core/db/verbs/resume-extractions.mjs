@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { assertAIExecutionPlanForOperation } from "../../ai/operation-policy.mjs";
+import { hasUsableResumeContent } from "../../onboarding/resume-content.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 import { applyCandidateResumeSeedInDb } from "./candidate.mjs";
@@ -104,13 +105,25 @@ export function resumeExtractionStart({
     if (frozenExecutionPlan) {
       assertAIExecutionPlanForOperation(frozenExecutionPlan, "structured.extraction");
     }
+    // Local DOCX fallback has already passed its deterministic text-quality
+    // check. Its parser can keep a summary outside the counted sections, so
+    // only AI results need the shared extraction-content check here.
+    const localDocx = previous?.result?.source === "docx" && previous.result.extraction === "local";
     if (
-      previous?.status === "completed" ||
+      (previous?.status === "completed" &&
+        (localDocx ||
+          hasUsableResumeContent({
+            fullText: previous.result?.fullText,
+            claims: previous.result?.evidenceSeed?.claims,
+            sections: previous.result?.sections,
+          }))) ||
       (ACTIVE_STATUSES.has(previous?.status) && previous.ownerId === owner)
     ) {
       return { ok: true, reused: true, operation: previous };
     }
-    const now = new Date().toISOString();
+    // latestByDigest must see the replacement even when its predecessor's
+    // terminal timestamp was advanced within this same millisecond.
+    const now = nowAfter(previous?.updatedAt);
     const operation = put(db, {
       id: `resume-extraction-${randomUUID()}`,
       uploadDigest: digest,
