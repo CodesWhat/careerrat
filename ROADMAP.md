@@ -15,22 +15,10 @@ The theme: agnostic to the job. It should work for anyone.
 
 ## Next
 
-- **Operator mode, the rest of it.** Capabilities are on by default.
-  Knowledge writes apply directly, each with an Undo on the job's thread:
-  evidence, onboarding answers, gap coaching drafts, strategy changes and
-  LinkedIn suggestions. Company health and gap coaching run on their own when
-  their trigger is met. A question CareerRat can't answer honestly flags that
-  one job instead of stopping the run. Strategy changes backed by fewer than
-  three data points still ask first, as does lowering a comp floor. Nothing is
-  claimed that doesn't trace to a source. Built, ships in the next release.
-- **One workspace per person.** `--for <name>` runs any command in that
-  person's workspace, with their own documents folder, so nothing from one
-  search reaches another. Built, ships in the next release.
-- **Older workspaces migrate retired settings.** Known retired settings migrate
-  on import; invalid settings still need repair. Built, ships in the next release.
-- **The terminal does the work, the browser shows it.** The AI CLI with
-  CareerRat's skills does the work, and the browser app becomes the place to
-  review it: today's list, the pipeline, each job's thread and the Undo log.
+- **TUI-only workspace.** A persistent jobs table with status filters and
+  compensation sorting. Saved job descriptions, job history and recorded changes
+  stay accessible. CareerRat's skills run through the AI CLI; the terminal UI
+  replaces the browser product interface once the replacement is verified.
 
 ## How to read this
 
