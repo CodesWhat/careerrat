@@ -10,10 +10,12 @@ All notable changes to CareerRat are documented here. This project follows
 
 - CLI commands read and append durable job or workspace history, list recorded
   knowledge changes, and undo them through the existing stale-write checks.
-- `careerrat tui` shows saved jobs beside a native Claude or Codex terminal, with
-  status filtering, structured pay sorting and selected-job history.
-- Configured-source searches can run in bounded background workers. Dropped files
-  are captured privately before handoff; text, Markdown, DOCX and email share the
+- `careerrat tui` opens a clickable Textual workspace beside native Claude or
+  Codex chat, with status/pay controls, saved requirement reports, captured JDs,
+  conversation history and guarded Undo. Python 3.11+ with venv is required; first
+  launch installs hash-locked dependencies in a private environment.
+- Configured-source searches can run in bounded background workers. Add context
+  captures dropped files privately before handoff; text, Markdown, DOCX and email share the
   existing extractor. Unsupported formats retain their original file for follow-up.
 - DB-backed settings and evidence commands record supported changes and their
   guarded Undo in the same transaction.
