@@ -379,3 +379,28 @@ and verified atomically.
 Reusable skills, scripts, templates, and schemas are public-safe.
 
 See [DATA_CONTRACT.md](DATA_CONTRACT.md).
+
+### Textual development workspace
+
+Textual is the selected terminal UI. The source integration uses the Inspector
+layout: clickable saved jobs and details beside a native Claude or Codex pane.
+`textual-app.py` owns widgets; `textual-bridge.mjs` carries ordered JSON messages
+to `textual-session.mjs`. Canonical jobs, intake, recorded Undo, background-search
+ownership and the existing PTY/emulator stay in Node. Browsing never initializes
+or migrates a workspace. Action buttons insert requests without pressing Enter.
+Add context saves a private capture before generating its agent request; ordinary
+agent paste remains terminal input.
+
+For source development, `node scripts/dev-textual.mjs --no-agent` opens saved jobs
+without a model process. Use `--agent claude` or `--agent codex` for the native
+pane. The launcher requires an interpreter containing the exact Textual version
+in `src/core/tui/requirements.txt`; `CAREERRAT_TUI_PYTHON` selects that interpreter.
+It does not install Python packages globally. Tests run with
+`python tests/tui_textual_ui.py` in that environment, alongside the Node suite.
+CI creates its own temporary Python environment and runs the interface tests
+without model calls.
+
+This development entry does not replace `careerrat tui` or change default startup.
+Managed Python installation, a full dependency lock, packaged platform checks,
+provider workflow acceptance and the remaining report/history interactions are
+still required before the browser product is retired.
