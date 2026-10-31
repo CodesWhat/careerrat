@@ -26,6 +26,10 @@ export function createWorkspaceState(data, options = {}) {
     focus: "jobs",
     selectedId: null,
     detailOffset: 0,
+    panel: "details",
+    changeRef: null,
+    pendingUndo: null,
+    viewport: { cols: 80, rows: 30 },
     message: "",
     ...options,
   });
@@ -34,12 +38,33 @@ export function createWorkspaceState(data, options = {}) {
 export function refreshWorkspace(data, state) {
   const view = viewJobs(data, state);
   const selected = view.jobs.find((job) => job.id === view.selectedId);
-  return {
+  const change = selectedChange(data, state);
+  const pending = state.pendingUndo;
+  const current =
+    pending &&
+    data.changes?.find(
+      (item) => item.messageId === pending.messageId && item.index === pending.index
+    );
+  const changed =
+    pending && (!current || JSON.stringify(current.entry) !== JSON.stringify(pending.entry));
+  const next = {
     ...state,
     selectedId: view.selectedId,
+    changeRef: change ? changeReference(change) : null,
+    pendingUndo: changed ? null : pending,
+    message: changed ? "Saved change changed; review it again." : state.message,
+  };
+  return {
+    ...next,
     detailOffset:
       view.selectedId === state.selectedId
-        ? Math.max(0, Math.min(state.detailOffset || 0, inspectorLines(selected).length - 1))
+        ? Math.max(
+            0,
+            Math.min(
+              state.detailOffset || 0,
+              inspectorLines(selected, data, next, inspectorWidth(next)).length - 1
+            )
+          )
         : 0,
   };
 }
@@ -52,9 +77,79 @@ export function workspaceKey(data, state, key) {
     return { state, effect: { type: "quit" } };
   }
   if (key.name === "f6")
-    return { state: { ...state, focus: state.focus === "jobs" ? "agent" : "jobs" } };
+    return {
+      state: {
+        ...state,
+        focus: state.focus === "jobs" ? "agent" : "jobs",
+        pendingUndo: null,
+        message: state.pendingUndo ? "Undo cancelled." : state.message,
+      },
+    };
   if (state.focus === "agent")
     return { state, effect: { type: "agent-input", data: key.sequence || "" } };
+  if (state.pendingUndo) {
+    if (["return", "enter"].includes(key.name))
+      return {
+        state: { ...state, pendingUndo: null, message: "Applying Undo…" },
+        effect: { type: "undo", preview: state.pendingUndo },
+      };
+    if (key.name === "escape")
+      return {
+        state: { ...state, pendingUndo: null, detailOffset: 0, message: "Undo cancelled." },
+      };
+    if (!["pageup", "pagedown"].includes(key.name)) return { state };
+  }
+  if (key.name === "h") {
+    const panels = ["details", "job-history", "workspace-history", "changes"];
+    return {
+      state: {
+        ...state,
+        panel: panels[(panels.indexOf(state.panel) + 1) % panels.length],
+        detailOffset: 0,
+        message: "",
+      },
+    };
+  }
+  if (["[", "]"].includes(key.sequence || key.name)) {
+    const changes = data.changes || [];
+    const index = changes.indexOf(selectedChange(data, state));
+    const direction = (key.sequence || key.name) === "[" ? -1 : 1;
+    const change = changes[Math.max(0, Math.min(changes.length - 1, index + direction))];
+    return {
+      state: {
+        ...state,
+        panel: "changes",
+        changeRef: change ? changeReference(change) : null,
+        detailOffset: 0,
+        message: "",
+      },
+    };
+  }
+  if (key.name === "u") {
+    const change = selectedChange(data, state);
+    const unavailable = !change
+      ? "No saved changes to undo."
+      : change.reverted
+        ? "This change was already undone."
+        : change.entry.revertible === false
+          ? change.entry.revertNote || "This change cannot be undone."
+          : null;
+    return {
+      state: {
+        ...state,
+        panel: "changes",
+        detailOffset: 0,
+        pendingUndo: unavailable
+          ? null
+          : structuredClone({
+              messageId: change.messageId,
+              index: change.index,
+              entry: change.entry,
+            }),
+        message: unavailable || "Review Undo · Enter confirm · Esc cancel",
+      },
+    };
+  }
   const view = viewJobs(data, state);
   const index = view.jobs.findIndex((job) => job.id === view.selectedId);
   if (["up", "k", "down", "j"].includes(key.name)) {
@@ -110,7 +205,10 @@ export function workspaceKey(data, state, key) {
         ...state,
         detailOffset: Math.max(
           0,
-          Math.min(inspectorLines(selected).length - 1, (state.detailOffset || 0) + direction)
+          Math.min(
+            inspectorLines(selected, data, state, inspectorWidth(state)).length - 1,
+            (state.detailOffset || 0) + direction
+          )
         ),
       },
     };
@@ -156,7 +254,7 @@ function payLabel(pay) {
     : `${number.format(pay.min)}–${number.format(pay.max)}`;
 }
 
-function inspectorLines(selected) {
+function jobDetailLines(selected) {
   if (!selected) return ["None"];
   return [
     `Status: ${selected.record.status || selected.stage.label}`,
@@ -167,6 +265,112 @@ function inspectorLines(selected) {
     ...(selected.record.statusNote ? [selected.record.statusNote] : []),
     ...(selected.record.nextAction ? [`Next: ${selected.record.nextAction}`] : []),
   ];
+}
+
+function changeReference(change) {
+  return `${change.messageId}:${change.index}`;
+}
+function selectedChange(data, state) {
+  return (
+    data.changes?.find((change) => changeReference(change) === state.changeRef) ||
+    data.changes?.[0] ||
+    null
+  );
+}
+function inspectorWidth(state) {
+  return layoutFor(state.viewport?.cols || 80, state.viewport?.rows || 30).jobs.cols;
+}
+function messageLines(messages = []) {
+  return messages.length
+    ? messages.flatMap((message) => [
+        `${message.role || "message"} / ${message.createdAt || ""}`,
+        message.text || "",
+        ...(message.artifacts || []).map(
+          (artifact) =>
+            `Artifact: ${artifact.path || artifact.artifactPath || artifact.label || artifact.kind || "saved reference"}`
+        ),
+        "",
+      ])
+    : ["No saved conversation yet."];
+}
+function changeLines(change) {
+  if (!change) return ["No recorded changes."];
+  const { entry } = change;
+  const value = (item, field) =>
+    item[`${field}Absent`] ? "(absent)" : JSON.stringify(item[field]);
+  return [
+    entry.label || `${entry.target} / ${entry.path || entry.id || entry.op}`,
+    `Saved: ${change.at || ""}`,
+    `Field: ${entry.target} / ${entry.path || entry.id || ""}`,
+    `Before: ${value(entry, "before")}`,
+    `After: ${value(entry, "after")}`,
+    ...(entry.companions || []).flatMap((item) => [
+      `Also: ${item.name ? `${item.name}.` : ""}${item.path}`,
+      `Before: ${value(item, "before")}`,
+      `After: ${value(item, "after")}`,
+    ]),
+    change.reverted
+      ? "Already undone"
+      : entry.revertible === false
+        ? entry.revertNote || "Undo unavailable"
+        : "u: preview Undo",
+  ];
+}
+function inspectorLines(selected, data, state, width) {
+  let lines;
+  if (state.pendingUndo)
+    lines = [
+      "Confirm Undo of this recorded change",
+      ...changeLines({ entry: state.pendingUndo.entry }),
+      "Enter: Undo · Esc: cancel",
+    ];
+  else if (state.panel === "changes") {
+    const change = selectedChange(data, state);
+    const index = (data.changes || []).indexOf(change);
+    lines = [
+      `Workspace changes ${index + 1}/${data.changes?.length || 0} · [ ] choose`,
+      ...changeLines(change),
+    ];
+  } else if (state.panel === "workspace-history") lines = messageLines(data.workspaceMessages);
+  else if (state.panel === "job-history")
+    lines = [
+      `Job conversation / ${selected?.thread?.status || (selected?.contextMessages?.length ? "saved context" : "not started")}`,
+      ...messageLines(
+        [...(selected?.thread?.messages || []), ...(selected?.contextMessages || [])].sort((a, b) =>
+          String(a.createdAt || "").localeCompare(String(b.createdAt || ""))
+        )
+      ),
+      ...(selected?.record.conversations || []).flatMap((call) => [
+        `${call.type || call.round || "Conversation"} / ${call.at || call.date || ""}`,
+        call.notes || "",
+        call.compNote || "",
+        call.processNote || "",
+        ...(call.learnings || []).map((item) => `${item.label || "Signal"}: ${item.note || ""}`),
+      ]),
+    ];
+  else lines = jobDetailLines(selected);
+  return lines.flatMap((line) =>
+    String(line ?? "")
+      .split(/\r\n?|\n/)
+      .flatMap((part) => {
+        const text = stripVTControlCharacters(part).replace(/\p{Cc}/gu, " ");
+        const wrapped = [];
+        let current = "";
+        let used = 0;
+        for (const { segment } of graphemes.segment(text)) {
+          const size = stringWidth(segment);
+          if (used && used + size > width) {
+            wrapped.push(current);
+            current = "";
+            used = 0;
+          }
+          current += segment;
+          used += size;
+        }
+        wrapped.push(current);
+        return wrapped;
+      })
+  );
 }
 
 export function renderWorkspace(data, state, { cols, rows }, agent = null) {
@@ -210,11 +414,11 @@ export function renderWorkspace(data, state, { cols, rows }, agent = null) {
     })),
     ...(view.jobs.length ? [] : ["No jobs in this view"]),
   ];
-  const details = inspectorLines(selected);
+  const details = inspectorLines(selected, data, state, left.cols);
   const detailOffset = Math.max(0, Math.min(state.detailOffset || 0, details.length - 1));
   const detailRows = Math.max(1, left.rows - content.length - 1);
   content.push(
-    `Selected job / PgUp/PgDn details ${detailOffset + 1}–${Math.min(details.length, detailOffset + detailRows)}/${details.length}`,
+    `${state.pendingUndo ? "Undo preview" : { "job-history": "Job history", "workspace-history": "Workspace history", changes: "Recorded changes" }[state.panel] || "Selected job"} / PgUp/PgDn ${detailOffset + 1}–${Math.min(details.length, detailOffset + detailRows)}/${details.length}`,
     ...details.slice(detailOffset, detailOffset + detailRows)
   );
   content.slice(0, left.rows).forEach((entry, index) => {
@@ -244,7 +448,8 @@ export function renderWorkspace(data, state, { cols, rows }, agent = null) {
     1,
     rows - 1,
     cols - 1,
-    state.message || "↑↓ jobs · f status · s pay order · b pay basis · c currency · r refresh",
+    state.message ||
+      "↑↓ jobs · h views · [ ] changes · u Undo · f status · s pay · b basis · c currency",
     "\x1b[2m"
   );
   line(

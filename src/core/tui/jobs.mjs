@@ -4,6 +4,7 @@ import { dbFilePath } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { classifyStage, isKnownStatusLabel } from "../tracker/dashboard.mjs";
+import { readHistorySnapshot } from "./history.mjs";
 
 function jobRows(tracker) {
   const rows = new Map();
@@ -44,6 +45,7 @@ export function readJobs({ repoRoot, env = process.env } = {}) {
   const path = dbFilePath(ctx);
   let tracker;
   let searchRuns = [];
+  let history = { threads: new Map(), jobMessages: new Map(), workspaceMessages: [], changes: [] };
   let mode = "legacy";
   if (existsSync(path)) {
     const db = new DatabaseSync(path, { readOnly: true });
@@ -51,6 +53,7 @@ export function readJobs({ repoRoot, env = process.env } = {}) {
       db.exec("PRAGMA busy_timeout = 5000");
       db.exec("BEGIN");
       tracker = assembleTrackerObject(db);
+      history = readHistorySnapshot(db);
       searchRuns = db
         .prepare(
           "SELECT data FROM sourcing_runs ORDER BY (status = 'running') DESC, updated_at DESC LIMIT 6"
@@ -74,7 +77,18 @@ export function readJobs({ repoRoot, env = process.env } = {}) {
   if (!tracker || typeof tracker !== "object" || Array.isArray(tracker)) {
     throw new TypeError("Saved tracker must be an object");
   }
-  return { mode, version: tracker.meta?.version ?? null, jobs: jobRows(tracker), searchRuns };
+  return {
+    mode,
+    version: tracker.meta?.version ?? null,
+    jobs: jobRows(tracker).map((job) => ({
+      ...job,
+      thread: history.threads.get(job.id) || null,
+      contextMessages: history.jobMessages.get(job.id) || [],
+    })),
+    searchRuns,
+    workspaceMessages: history.workspaceMessages,
+    changes: history.changes,
+  };
 }
 
 function numeric(value) {

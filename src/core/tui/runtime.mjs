@@ -5,6 +5,7 @@ import { emitKeypressEvents } from "node:readline";
 import { dbFilePath } from "../db/connection.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
+import { applyTuiUndo } from "./history.mjs";
 import { captureTuiContext } from "./intake.mjs";
 import { readJobs } from "./jobs.mjs";
 import {
@@ -51,6 +52,7 @@ export async function runTerminalWorkspace({
   function render() {
     drawing = null;
     if (closing) return;
+    state = { ...state, viewport: dimensions() };
     const frame = renderWorkspace(
       data,
       state,
@@ -162,11 +164,25 @@ export async function runTerminalWorkspace({
       else pasted += key.sequence || _text || "";
       return;
     }
-    const next = workspaceKey(data, state, key);
+    const next = workspaceKey(data, { ...state, viewport: dimensions() }, key);
     state = next.state;
     if (next.effect?.type === "quit") {
       quit();
       return;
+    }
+    if (next.effect?.type === "undo") {
+      try {
+        const result = applyTuiUndo({ ...ctx, preview: next.effect.preview });
+        state = {
+          ...state,
+          message: result.operationResult?.ok
+            ? "Change undone."
+            : result.messages?.at(-1)?.text || "Undo was refused; inspect the saved change.",
+        };
+      } catch (error) {
+        state = { ...state, message: error.message };
+      }
+      refresh();
     }
     if (next.effect?.type === "refresh") refresh();
     if (next.effect?.type === "agent-input" && pane && !agentExited) pane.input(next.effect.data);

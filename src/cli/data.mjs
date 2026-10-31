@@ -62,6 +62,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { recordedKnowledgeChanges } from "../core/agent/knowledge-changes.mjs";
 import { undoWorkspaceKnowledge } from "../core/agent/knowledge-history.mjs";
 import { workspaceMessageAppend, workspaceThreadRead } from "../core/agent/workspace-thread.mjs";
 import { dbExists, dbFilePath, NO_DATABASE_MESSAGE, openDb } from "../core/db/connection.mjs";
@@ -386,30 +387,7 @@ async function cmdChanges(sub, rest) {
   if (sub === "list") {
     if (rest.length) fail("changes list takes no positional arguments");
     const { messages } = workspaceThreadRead(pathCtx);
-    const reverted = new Set(
-      messages.flatMap((message) =>
-        (message.artifacts || [])
-          .filter((entry) => entry?.kind === "knowledge_write" && entry.revertOf)
-          .map((entry) => `${entry.revertOf.messageId}:${entry.revertOf.index}`)
-      )
-    );
-    const changes = messages
-      .flatMap((message) =>
-        (message.artifacts || []).flatMap((entry, index) =>
-          entry?.kind === "knowledge_write" && !entry.revertOf
-            ? [
-                {
-                  messageId: message.id,
-                  index,
-                  at: message.createdAt,
-                  entry,
-                  reverted: reverted.has(`${message.id}:${index}`),
-                },
-              ]
-            : []
-        )
-      )
-      .reverse();
+    const changes = recordedKnowledgeChanges(messages);
     return printResult({ ok: true, changes });
   }
   if (sub === "undo") {

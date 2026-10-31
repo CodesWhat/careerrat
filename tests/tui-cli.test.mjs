@@ -462,3 +462,94 @@ test("a file dropped into the real terminal is copied and extracted before the a
   });
   await done;
 });
+
+test("real terminal previews and confirms a recorded Undo without an agent", {
+  timeout: 15000,
+}, async (t) => {
+  const { buildKnowledgeWriteEntry } = await import("../src/core/agent/knowledge-write-log.mjs");
+  const { workspaceMessageAppend } = await import("../src/core/agent/workspace-thread.mjs");
+  const { candidateSetupInitialize, candidateConfigPatch, candidateConfigGet } = await import(
+    "../src/core/db/verbs/candidate.mjs"
+  );
+  const env = fixture(t);
+  const ctx = { repoRoot: root, env };
+  importFromTracker({ ...ctx, sourceDir: join(env.CAREERRAT_HOME, "workspace") });
+  candidateSetupInitialize(ctx);
+  candidateConfigPatch({ ...ctx, name: "targeting", patch: { fit_bands: { fit_floor: 70 } } });
+  workspaceMessageAppend({
+    ...ctx,
+    role: "assistant",
+    kind: "action_result",
+    text: "Saved fit floor",
+    artifacts: [
+      buildKnowledgeWriteEntry({
+        target: "candidate_config:targeting",
+        op: "set",
+        path: "fit_bands.fit_floor",
+        before: 60,
+        after: 70,
+        label: "Fit floor",
+      }),
+    ],
+  });
+  t.after(closeAll);
+  preparePtyHelpers();
+  const terminal = new headless.Terminal({ cols: 120, rows: 36, allowProposedApi: true });
+  let child;
+  let exited = false;
+  let stage = 0;
+  let snapshot = "";
+  let rejectRun;
+  const done = new Promise((resolve, reject) => {
+    rejectRun = reject;
+    child = pty.spawn(process.execPath, [join(root, "src/cli/tui.mjs"), "--no-agent"], {
+      cwd: root,
+      env,
+      cols: 120,
+      rows: 36,
+      name: "xterm-256color",
+    });
+    child.onData((chunk) =>
+      terminal.write(chunk, () => {
+        snapshot = Array.from({ length: terminal.rows }, (_, index) =>
+          terminal.buffer.active
+            .getLine(terminal.buffer.active.baseY + index)
+            ?.translateToString(true)
+        ).join("\n");
+        if (stage === 0 && snapshot.includes("Northstar")) {
+          stage = 1;
+          child.write("u");
+        }
+        if (
+          stage === 1 &&
+          snapshot.includes("Undo preview") &&
+          snapshot.includes("Before: 60") &&
+          snapshot.includes("After: 70")
+        ) {
+          assert.equal(candidateConfigGet(ctx).targeting.fit_bands.fit_floor, 70);
+          stage = 2;
+          child.write("\r");
+        }
+        if (stage === 2 && snapshot.includes("Change undone.")) {
+          assert.equal(candidateConfigGet(ctx).targeting.fit_bands.fit_floor, 60);
+          stage = 3;
+          child.write("\x11");
+        }
+      })
+    );
+    child.onExit(({ exitCode }) => {
+      exited = true;
+      if (stage === 3 && exitCode === 0) resolve();
+      else reject(new Error(`Undo terminal exited at ${stage}: ${exitCode}\n${snapshot}`));
+    });
+  });
+  const timer = setTimeout(
+    () => rejectRun(new Error(`Undo terminal timed out at ${stage}\n${snapshot}`)),
+    10000
+  );
+  t.after(async () => {
+    clearTimeout(timer);
+    await stopTestTerminal(child, () => exited, terminal);
+  });
+  await done;
+});

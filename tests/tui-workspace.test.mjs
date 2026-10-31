@@ -118,14 +118,14 @@ test("saved job labels cannot inject terminal commands into the frame", async ()
   assert.equal(frame.output.includes("\x1b[2J"), false);
 });
 
-async function screen(data, state, rows) {
-  const terminal = new headless.Terminal({ cols: 80, rows, allowProposedApi: true });
+async function screen(data, state, rows, cols = 80) {
+  const terminal = new headless.Terminal({ cols, rows, allowProposedApi: true });
   try {
     const frame = invoke(
       "renderWorkspace",
       data,
       state,
-      { cols: 80, rows },
+      { cols, rows },
       {
         lines: ["NATIVE AGENT READY"],
         cursor: { x: 0, y: 0, visible: true },
@@ -212,4 +212,120 @@ test("search progress stays visible while typing in the agent pane", () => {
   const state = invoke("createWorkspaceState", data, { focus: "agent" });
   const frame = invoke("renderWorkspace", data, state, { cols: 120, rows: 36 });
   assert.match(frame.output, /Search running: 2\/7 sources, 3 saved/);
+});
+
+test("history wraps and scrolls the complete saved message beside the native agent", async () => {
+  const history = {
+    ...data,
+    jobs: [
+      {
+        ...data.jobs[0],
+        thread: {
+          status: "active",
+          messages: [
+            {
+              role: "user",
+              text: `${"An important history detail. ".repeat(25)}FINAL_HISTORY_FACT`,
+            },
+          ],
+        },
+      },
+    ],
+  };
+  for (const cols of [80, 120]) {
+    let state = invoke("createWorkspaceState", history, { viewport: { cols, rows: 30 } });
+    state = invoke("workspaceKey", history, state, { name: "h" }).state;
+    assert.equal(state.panel, "job-history");
+    const seen = [];
+    for (let step = 0; step < 40; step++) {
+      const content = await screen(history, state, 30, cols);
+      assert.match(content, /Northstar/);
+      assert.match(content, /NATIVE AGENT READY/);
+      seen.push(content);
+      state = invoke("workspaceKey", history, state, { name: "pagedown" }).state;
+    }
+    assert.match(seen.join("\n").replace(/\s/g, ""), /FINAL_HISTORY_FACT/);
+  }
+});
+
+test("Undo needs an exact saved-change preview and explicit confirmation", () => {
+  const first = {
+    messageId: "saved-1",
+    index: 0,
+    entry: {
+      kind: "knowledge_write",
+      target: "candidate_config:targeting",
+      path: "fit_bands.fit_floor",
+      before: 60,
+      after: 70,
+      revertible: true,
+    },
+  };
+  const second = { ...first, messageId: "saved-2", entry: { ...first.entry, after: 80 } };
+  const history = { ...data, changes: [first, second] };
+  let state = invoke("createWorkspaceState", history);
+  let next = invoke("workspaceKey", history, state, { name: "u" });
+  assert.equal(next.effect, undefined);
+  assert.deepEqual(next.state.pendingUndo, {
+    messageId: first.messageId,
+    index: first.index,
+    entry: first.entry,
+  });
+  next = invoke("workspaceKey", history, next.state, { name: "escape" });
+  assert.equal(next.state.pendingUndo, null);
+  assert.equal(next.effect, undefined);
+  state = invoke("workspaceKey", history, next.state, { name: "]", sequence: "]" }).state;
+  state = invoke("workspaceKey", history, state, { name: "u" }).state;
+  next = invoke("workspaceKey", history, state, { name: "return", sequence: "\r" });
+  assert.equal(next.effect.type, "undo");
+  assert.equal(next.effect.preview.messageId, second.messageId);
+  state = invoke("workspaceKey", history, state, { name: "f6" }).state;
+  assert.equal(state.pendingUndo, null);
+  assert.deepEqual(
+    invoke("workspaceKey", history, state, { name: "return", sequence: "\r" }).effect,
+    { type: "agent-input", data: "\r" }
+  );
+});
+
+test("refresh keeps a selected change stable and cancels a changed preview", () => {
+  const entry = {
+    kind: "knowledge_write",
+    target: "candidate_config:targeting",
+    path: "fit_bands.fit_floor",
+    before: 60,
+    after: 70,
+    revertible: true,
+  };
+  const original = { messageId: "original", index: 0, entry };
+  const history = { ...data, changes: [original] };
+  let state = invoke("createWorkspaceState", history);
+  state = invoke("workspaceKey", history, state, { name: "u" }).state;
+  const newer = { messageId: "newer", index: 0, entry: { ...entry, after: 80 } };
+  state = invoke("refreshWorkspace", { ...history, changes: [newer, original] }, state);
+  assert.equal(state.pendingUndo.messageId, "original");
+  state = invoke(
+    "refreshWorkspace",
+    { ...history, changes: [{ ...original, entry: { ...entry, after: 90 } }] },
+    state
+  );
+  assert.equal(state.pendingUndo, null);
+  assert.match(state.message, /review it again/);
+});
+
+test("unavailable recorded changes cannot produce an Undo confirmation", () => {
+  for (const change of [
+    { messageId: "done", index: 0, reverted: true, entry: { kind: "knowledge_write" } },
+    {
+      messageId: "private",
+      index: 0,
+      entry: { kind: "knowledge_write", revertible: false, revertNote: "Private value" },
+    },
+  ]) {
+    const history = { ...data, changes: [change] };
+    const state = invoke("workspaceKey", history, invoke("createWorkspaceState", history), {
+      name: "u",
+    }).state;
+    assert.equal(state.pendingUndo, null);
+    assert.equal(invoke("workspaceKey", history, state, { name: "return" }).effect, undefined);
+  }
 });

@@ -223,7 +223,16 @@ terminal workspace owns the live view. Do not start `tracker-dev`, open a
 CareerRat browser page, or create a browser chat session. Execute skills in the
 native terminal agent and write through the canonical CLI/domain owners below;
 the jobs table refreshes from those writes. Use the durable job/workspace thread
-and recorded-change commands for history and Undo. External employer websites
+and recorded-change commands for history and Undo. The Inspector's `h` cycles
+job details, job history, workspace history and recorded changes; `[`/`]` selects
+a change, `u` previews it, Enter confirms and Esc cancels. Agent focus forwards
+these keys to the native agent instead. The guarded Undo writer refuses stale,
+private or already-reverted entries. After a job skill verifies its canonical
+writes, append its durable result and artifact references with `data thread append`
+for an application. For a sourced job, use the workspace thread with explicit
+`metadata.jobId` and `metadata.jobKind: "sourced"`; don't promote a job just to
+create a conversation. This preserves skill results, not an automatic verbatim
+mirror of native-provider chat. External employer websites
 may still need browser automation. For a DB-backed configured-source sweep, run
 `careerrat search start --json`: it starts or reuses a bounded detached worker and
 returns its run ID. Keep the conversation available while it runs. Read progress
