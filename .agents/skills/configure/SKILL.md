@@ -13,7 +13,7 @@ description: Show current settings and route changes to the validated CLI or own
 
 `configure` is a **menu and router**. It reads state directly (read-only) and shows it to you. Every **write** goes through the existing validated, schema-checked, atomic CLI or the owning skill — configure never hand-edits a YAML file itself. In DB workspaces those CLIs write SQLite; in legacy workspaces they may patch YAML. This is the [[capture-is-skills-not-cli]] invariant: mutations go through the write-guarded, confirm-first paths that already exist, not through this skill.
 
-Knowledge and targeting writes apply directly through those same writers and are logged with an Undo. Lowering a comp floor or target and loosening an honesty boundary are confirm-first. Everything stays local. Nothing is run on a schedule.
+DB-backed `gate`, `modes` and `automation` writes record the changed field and its Undo reference atomically. Dry runs, no-ops and refused changes create no Undo entry. Inspect `careerrat data changes list --json` before promising Undo for a lower-level candidate/evidence write; those commands do not yet record it automatically. Legacy file writes do not create a database as a side effect. Lowering a comp floor or target and loosening an honesty boundary are confirm-first. Everything stays local. Nothing is run on a schedule.
 
 ---
 

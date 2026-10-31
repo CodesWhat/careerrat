@@ -227,7 +227,11 @@ and recorded-change commands for history and Undo. The Inspector's `h` cycles
 job details, job history, workspace history and recorded changes; `[`/`]` selects
 a change, `u` previews it, Enter confirms and Esc cancels. Agent focus forwards
 these keys to the native agent instead. The guarded Undo writer refuses stale,
-private or already-reverted entries. After a job skill verifies its canonical
+private or already-reverted entries. Validated DB `gate`, `modes` and `automation`
+CLI writes record their changed field and Undo reference in the same transaction;
+dry runs, unchanged values and refused confirmation do not create an entry.
+Low-level candidate/evidence commands do not yet create that log automatically;
+check recorded changes before offering Undo for those writes. After a job skill verifies its canonical
 writes, append its durable result and artifact references with `data thread append`
 for an application. For a sourced job, use the workspace thread with explicit
 `metadata.jobId` and `metadata.jobKind: "sourced"`; don't promote a job just to
