@@ -21,7 +21,13 @@ const view = {
   mainThread: {
     id: "workspace-main",
     messages: [
-      { id: "write-1", kind: "action_result", text: "Evidence saved", artifacts: [change] },
+      {
+        id: "write-1",
+        kind: "action_result",
+        text: "Evidence saved",
+        createdAt: "2026-10-31T12:00:00.000Z",
+        artifacts: [change],
+      },
     ],
   },
   threads: [
@@ -72,6 +78,16 @@ function render(props = {}) {
 }
 
 describe("CLI dashboard", () => {
+  it("shows the canonical saved-change timestamp", () => {
+    expect(render({ tab: "changes" })).toContain("2026-10-31T12:00:00.000Z");
+  });
+
+  it("uses a workspace label for an unset candidate name", () => {
+    const html = render({ view: { ...view, candidateName: "Not set" } });
+    expect(html).toContain("Your workspace");
+    expect(html).toContain("Your search");
+    expect(html).not.toContain("Not set");
+  });
   it("shows canonical next steps and workspace identity without an AI composer", () => {
     const html = render();
     expect(html).toContain("Alex Morgan");

@@ -96,7 +96,7 @@ function ChangeCard({ change, actions, busy }) {
       </dl>
       <p className="cli-dashboard__muted">
         {entry.source?.label || entry.source?.kind || "Saved source"}
-        {message.at ? ` · ${message.at}` : ""}
+        {message.createdAt || message.at ? ` · ${message.createdAt || message.at}` : ""}
       </p>
       {!reverted && entry.revertNote ? <p>{entry.revertNote}</p> : null}
     </article>
@@ -141,6 +141,7 @@ export function DashboardView({
   workspaceKnown = Boolean(startCommand),
 }) {
   const data = view || {};
+  const candidateName = data.candidateName === "Not set" ? null : data.candidateName;
   const browser = data.browser || {};
   const jobs = browser.pipeline?.jobs || EMPTY;
   const threads = [...(data.threads || EMPTY), ...(data.archivedThreads || EMPTY)];
@@ -163,7 +164,7 @@ export function DashboardView({
           <span aria-hidden="true" />
         </Link>
         <div className="cli-dashboard__top-actions">
-          <span>{data.candidateName || person || "Your workspace"}</span>
+          <span>{candidateName || person || "Your workspace"}</span>
           <Link to="/settings">
             <Settings size={16} /> Profile &amp; settings
           </Link>
@@ -243,7 +244,7 @@ export function DashboardView({
               {tab !== "job" ? (
                 <div className="cli-dashboard__heading">
                   <p className="cli-dashboard__eyebrow">
-                    {data.candidateName ? `${data.candidateName}'s search` : "Your search"}
+                    {candidateName ? `${candidateName}'s search` : "Your search"}
                   </p>
                   <h1>
                     {{
