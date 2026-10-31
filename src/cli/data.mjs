@@ -678,7 +678,11 @@ function cmdCandidate(sub, rest) {
       ) {
         fail("voluntary self-identification is managed only in local Application defaults");
       }
-      return printResult(candidateConfigPatch({ ...pathCtx, name, patch }));
+      const result = candidateConfigPatch({ ...pathCtx, name, patch });
+      return printResult({
+        ...result,
+        data: sanitizeCandidateConfigForAgent({ [name]: result.data })[name],
+      });
     }
     case "evidence":
       return printResult(
