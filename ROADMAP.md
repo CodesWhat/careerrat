@@ -5,7 +5,7 @@ record of what shipped when, is a local file that isn't published.
 
 ## Where things stand
 
-v0.21.0 is the current release, installed from npm and used in the browser.
+v0.22.0 is the current release, installed from npm and used in the browser.
 v0.19.2 was the last Mac app release. CareerRat is the tool its author runs
 for the people he is helping with a job search. The source stays public so
 you can read how it works, and `npm install -g careerrat` works if you want
