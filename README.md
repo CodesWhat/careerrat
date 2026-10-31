@@ -26,6 +26,7 @@
 
 <h2 align="center">Contents</h2>
 
+- [Current Status](#current-status)
 - [Documentation](#documentation)
 - [Quick Start](#quick-start)
 - [Recent Updates](#recent-updates)
@@ -36,6 +37,31 @@
 - [Built With](#built-with)
 - [For Developers](#for-developers)
 - [Community & Support](#community-support)
+
+<hr>
+
+<h2 align="center" id="current-status">Current Status</h2>
+
+**As of October 27, 2026:** v0.21.0 is the latest release. CareerRat installs
+from npm and runs in your browser, on your machine, with the AI CLI you already
+use. Terminal sessions stay optional. v0.19.2 was the last release with a Mac
+app.
+
+New in v0.21.0:
+
+- CareerRat submits an application itself once it's complete and checked: every
+  required field answered, required uploads attached, one clear submit button,
+  and a fit gate of KEEP or a REVIEW you approved. It presses Submit once and
+  looks for a confirmation page.
+- `careerrat automation submit manual --write` turns that off, so CareerRat
+  fills the form and you press Submit.
+- If no confirmation page shows up, the application isn't marked Applied and
+  CareerRat never clicks again. Today asks you to check the site.
+- When CareerRat stops before Submit, it says why. The job thread shows what
+  was sent.
+
+If you use the Mac app, it keeps working at v0.19.2. There won't be a later Mac
+build; switch with `npm install -g careerrat`.
 
 <hr>
 
@@ -74,7 +100,7 @@ your machine and you pick it.
 ### Get the Mac app (Apple Silicon)
 
 The current macOS release is a signed and notarized Apple Silicon app for macOS
-12 or newer.
+13 (Ventura) or newer.
 
 1. [Download the latest `.dmg`](https://github.com/CodesWhat/careerrat/releases/latest),
    or install it with Homebrew:
@@ -145,18 +171,16 @@ resizable, maximizable, and supports full screen, with a minimum working size of
 <h2 align="center" id="recent-updates">Recent Updates</h2>
 
 <details open>
-<summary><strong>v0.19.1 highlights</strong></summary>
+<summary><strong>v0.20.0 highlights</strong></summary>
 
-- Saved job descriptions retain their full text when evaluated, including
-  requirements and fit signals in the body.
-- Different applications at the same company keep their own recruiter history
-  and reply recipients, even when the job titles match.
-- Scheduling checks all saved calendar conflicts and removes rejected times
-  from the reply it prepares for you.
-- DOCX conversion keeps the app responsive and stops if the converter hangs.
-
-This patch builds on v0.19.0's job sorting, pay-band display, company-health
-context, per-event calendar links, and clearer People and activity panels.
+- `careerrat start` opens the browser workspace on its own. Terminal sessions
+  with Claude Code or Codex are still there when you ask for them.
+- Saved exports go to `Documents/careerrat`, one folder per job. Closed jobs
+  move to an archive and come back when reopened.
+- Today's conversation points at your next application and asks for outcomes
+  like rejections and interview invites.
+- PDF export works from an npm install.
+- CareerRat now ships through npm only. The Mac app ended at v0.19.2.
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -171,7 +195,9 @@ Full history in [CHANGELOG.md](CHANGELOG.md).
 CareerRat reads the full job posting against your location and compensation floor,
 fit, and dealbreakers before it recommends anything. It builds resumes, cover
 letters, and screening answers from your real experience, then fills supported
-application forms for your review. It never presses the final Submit button.
+application forms. When the application is complete and verified, CareerRat
+submits it. Run `careerrat automation submit manual --write` (or ask the agent to)
+and it stops for you to press Submit instead.
 
 Pay rules work for salaried, hourly, tipped, and commissioned jobs. You can set a
 guaranteed base floor, a minimum for annual cash earnings that includes wages,
@@ -216,7 +242,7 @@ the full posting through the public or supervised browser path, and applies your
 real location, compensation, eligibility, and fit rules before any tailoring or
 application work begins.
 
-### It never submits without you
+### It only submits when the application is complete
 
 - Every job is read in full before tailoring or application work begins.
 - Generated claims must trace back to your own evidence. Missing facts are asked
@@ -229,9 +255,15 @@ application work begins.
   **Profile > Application defaults**, you can leave them blank or choose the
   form's decline option when one is available. CareerRat never infers an answer.
 - Application questions stay with the exact job thread. CareerRat can prepare a
-  reviewed form through the final safe step, but CAPTCHA, sensitive attestations,
-  uncertainty, and the final Submit control always stay with the candidate. The
-  Mac app checks for signed updates, downloads them in place, and waits for an
+  form through the final safe step. CAPTCHA, sensitive attestations, and
+  uncertainty always stop it and hand the form to you. By default (`submit: auto`
+  in `automation.yml`) CareerRat presses Submit itself, once, only when every
+  required field is answered, required uploads are attached, exactly one clearly
+  labelled submit control exists, and the fit gate is KEEP or a REVIEW you
+  approved. It then waits for a confirmation page. If it doesn't see one, the
+  application is marked submitted-unverified, never retried, and you're asked to
+  check the site. Run `careerrat automation submit manual --write` and CareerRat
+  fills the form and stops for you to press Submit. The Mac app checks for signed updates, downloads them in place, and waits for an
   explicit **Restart and install**.
 
 ### One workspace for the whole search
@@ -434,10 +466,13 @@ Needs Node.js 24.15 or newer.
 
 ```bash
 npm install -g careerrat
-careerrat start claude
-# or
-careerrat start codex
+careerrat start
 ```
+
+Continue chatting in the browser workspace. It uses your selected local AI
+engine, and keeps job conversations and artifacts in the same workspace.
+To launch a terminal skill session as well, use `careerrat start claude` or
+`careerrat start codex`. Use `--no-open` to serve without opening a tab.
 
 Useful terminal commands:
 

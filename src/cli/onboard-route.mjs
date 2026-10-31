@@ -50,6 +50,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import {
+  appendOnboardingWriteLog,
+  onboardingConfigEntries,
+  onboardingEvidenceEntries,
+} from "../core/agent/onboarding-write-log.mjs";
+import {
   WORKSPACE_THREAD_ID,
   workspaceOnboardingHandoff,
 } from "../core/agent/workspace-thread.mjs";
@@ -117,7 +122,9 @@ import {
   loadCandidate,
   OPTIONAL_CANDIDATE_FILES,
 } from "../core/profile/candidate-setup.mjs";
+import { computeEvidenceWrite } from "../core/profile/evidence-writer.mjs";
 import { atomicWriteFile } from "../core/profile/gate-writer.mjs";
+import { classifyConfigChange } from "../core/profile/loosening.mjs";
 import {
   deriveEvidenceSeed,
   deriveProfileSeed,
@@ -527,13 +534,30 @@ const ONBOARDING_TRANSCRIPT_ROLES = new Set(["user", "assistant", "receipt", "sy
 const ONBOARDING_BLOCK_STATUSES = new Set(["pending", "saving", "resolved", "error"]);
 const ONBOARDING_BLOCK_KINDS = new Set([
   "authorization",
-  "consent_mode",
-  "consent_capability",
   "companies_suggest",
   "company_add",
   "candidate_patch",
   "evidence_claim",
 ]);
+
+const RETIRED_CONSENT_BLOCK_KINDS = new Set(["consent_mode", "consent_capability"]);
+const RETIRED_CONSENT_NOTE =
+  "Capabilities are on by default now; you can turn any off in Settings.";
+
+// A consent question that was still open when it was saved. Capabilities are
+// on by default now, so there is nothing left for the person to answer.
+function asksRetiredConsent(message) {
+  return (
+    message.role === "assistant" &&
+    Array.isArray(message.blocks) &&
+    message.blocks.some(
+      (block) =>
+        isPlainObject(block) &&
+        RETIRED_CONSENT_BLOCK_KINDS.has(block.kind) &&
+        block.status !== "resolved"
+    )
+  );
+}
 
 function cloneJsonValue(value, fallback = null) {
   try {
@@ -574,13 +598,17 @@ function normalizeOnboardingTranscript(value) {
         normalized.eventId = cursor.eventId;
       }
     }
+    const retiredConsent = asksRetiredConsent(message);
+    if (retiredConsent) normalized.text = RETIRED_CONSENT_NOTE;
     const binaryChoice =
+      !retiredConsent &&
       message?.metadata?.choicePrompt?.mode === "binary" &&
       message.metadata.choicePrompt.state === "pending";
     if (
-      message?.answerMode === "yes-no" ||
-      message?.metadata?.answerMode === "yes-no" ||
-      binaryChoice
+      !retiredConsent &&
+      (message?.answerMode === "yes-no" ||
+        message?.metadata?.answerMode === "yes-no" ||
+        binaryChoice)
     ) {
       normalized.answerMode = "yes-no";
       normalized.metadata = binaryChoice
@@ -609,6 +637,7 @@ function normalizeOnboardingTranscript(value) {
         ];
       });
     }
+    if (retiredConsent && !normalized.blocks?.length) return [];
     return [normalized];
   });
 }
@@ -936,11 +965,10 @@ function dbSourceResumePresent(pathCtx) {
 // ingest-profile may not write candidate/automation.yml at all, so a CLI-onboarded
 // candidate could never flip this item
 // and sat at 8 of 9 forever, permanently redirected to /onboarding. The
-// underlying automation-consent feature is untouched and still works —
-// Settings' automation controls, src/core/automation/consent.mjs, and the
-// interview's own consent_mode/consent_capability confirm pills all still
-// read/write candidate/automation.yml exactly as before. It's just no
-// longer part of the SETUP CHECKLIST or setupProgress.complete.
+// automation on/off switches live in Settings and
+// src/core/automation/consent.mjs reads/writes candidate/automation.yml; they
+// are the only automation state left (consent and setup mode were retired).
+// They're not part of the SETUP CHECKLIST or setupProgress.complete.
 export { computeSetupProgress } from "../core/onboarding/setup-progress.mjs";
 
 // Same provenance-aware reconciliation as search-route.mjs's
@@ -966,6 +994,44 @@ function validateDbProfileAndTargeting(repoRoot, config) {
     profileErrors: profileCheck.errors,
     targetingErrors: targetingCheck.errors,
   };
+}
+
+// 409 with a code the web keys on: the change loosens a guard, so it waits for
+// an explicit yes. Reasons are plain sentences with no pay figures.
+function sendConfirmationRequired(res, reasons) {
+  sendJson(res, 409, {
+    ok: false,
+    code: "CONFIRMATION_REQUIRED",
+    error: "This change loosens a limit you set, so CareerRat needs your yes first.",
+    reasons,
+  });
+}
+
+// The honesty firewall for the evidence seed, claim by claim: the same
+// computeEvidenceWrite gate `careerrat evidence add` and coaching use. A claim it
+// refuses is reported with its reason and never saved. The seed only adds, so a
+// derived id that a saved claim already holds is dropped: the merge then skips a
+// repeat of that claim's text, or picks a fresh id, instead of overwriting it.
+function screenSeedClaims(posted, existingClaims) {
+  const accepted = [];
+  const rejected = [];
+  const working = [...existingClaims];
+  for (const raw of posted) {
+    const plan = computeEvidenceWrite({ newClaim: raw, currentClaims: working });
+    if (!plan.ok) {
+      rejected.push({
+        ...(raw?.id ? { id: String(raw.id) } : {}),
+        claim: String(raw?.claim ?? "").trim(),
+        reason: plan.error,
+      });
+      continue;
+    }
+    const claim = { ...plan.claim };
+    if (working.some((item) => String(item?.id ?? "") === claim.id)) delete claim.id;
+    accepted.push(claim);
+    working.push(plan.claim);
+  }
+  return { accepted, rejected };
 }
 
 function sendCandidateError(res, err) {
@@ -2724,6 +2790,25 @@ export function mountOnboardRoutes({
   // -------------------------------------------------------------------------
   // POST /api/onboard/candidate/:name — { data } deep-merge, validate, write.
   // -------------------------------------------------------------------------
+  // One thread message per onboarding save call. A logging failure never fails
+  // the save that already happened; the response just carries no `logged` id.
+  function logOnboardingWrite(entries) {
+    try {
+      return appendOnboardingWriteLog({ ...pathCtx, entries });
+    } catch {
+      return null;
+    }
+  }
+
+  // A valid `mirror` body field names another setup doc (never evidence or the
+  // same doc) plus the patch to write to it.
+  function mirrorTarget(mirror, primaryName) {
+    if (!isPlainObject(mirror) || !isPlainObject(mirror.patch)) return undefined;
+    const known = CANDIDATE_ROUTE_ENTRIES.some((item) => item.name === mirror.doc);
+    if (!known || mirror.doc === primaryName || mirror.doc === "evidence") return undefined;
+    return { name: mirror.doc, patch: mirror.patch };
+  }
+
   for (const entry of CANDIDATE_ROUTE_ENTRIES) {
     addRoute("POST", `/api/onboard/candidate/${entry.name}`, async (req, res) => {
       let body;
@@ -2753,8 +2838,33 @@ export function mountOnboardRoutes({
         return;
       }
 
+      // Onboarding says so itself (`source: "onboarding"`); nothing is inferred.
+      // Its saves apply directly and are logged with an Undo, except a change
+      // that loosens an honesty boundary or lowers the pay floor/target, which
+      // waits for the request to carry `confirmed: true`.
+      const fromOnboarding = body?.source === "onboarding";
+
       if (dbExists(pathCtx)) {
         try {
+          const tracked = fromOnboarding && entry.name !== "evidence";
+          const before = tracked ? candidateConfigGet(pathCtx)[entry.name] : undefined;
+          if (tracked && body?.confirmed !== true) {
+            const verdict = classifyConfigChange(
+              entry.name,
+              before,
+              deepMerge(isPlainObject(before) ? before : {}, patch)
+            );
+            if (verdict.loosens) {
+              sendConfirmationRequired(res, verdict.reasons);
+              return;
+            }
+          }
+          // `mirror` ({ doc, patch }): a second doc written in this same request,
+          // logged as one entry with one Undo (work authorization lives in two docs).
+          const mirrorEntry = tracked ? mirrorTarget(body?.mirror, entry.name) : undefined;
+          const mirrorBefore = mirrorEntry
+            ? candidateConfigGet(pathCtx)[mirrorEntry.name]
+            : undefined;
           const result =
             entry.name === "evidence"
               ? candidateEvidenceMerge({
@@ -2762,7 +2872,28 @@ export function mountOnboardRoutes({
                   claims: patch.claims || [],
                 })
               : candidateConfigPatch({ ...pathCtx, name: entry.name, patch });
-          sendJson(res, 200, { ok: true, ...result });
+          if (mirrorEntry) {
+            candidateConfigPatch({ ...pathCtx, name: mirrorEntry.name, patch: mirrorEntry.patch });
+          }
+          const afterDocs = tracked ? candidateConfigGet(pathCtx) : undefined;
+          const logged = tracked
+            ? logOnboardingWrite(
+                onboardingConfigEntries({
+                  name: entry.name,
+                  patch,
+                  before,
+                  after: afterDocs[entry.name],
+                  mirror: mirrorEntry
+                    ? {
+                        ...mirrorEntry,
+                        before: mirrorBefore,
+                        after: afterDocs[mirrorEntry.name],
+                      }
+                    : undefined,
+                })
+              )
+            : undefined;
+          sendJson(res, 200, { ok: true, ...result, ...(logged ? { logged } : {}) });
         } catch (err) {
           sendCandidateError(res, err);
         }
@@ -2771,6 +2902,13 @@ export function mountOnboardRoutes({
 
       const candidatePath = userPath(pathCtx, entry.candidatePath);
       const base = readBaseDoc(entry, candidatePath);
+      if (fromOnboarding && entry.name !== "evidence" && body?.confirmed !== true) {
+        const verdict = classifyConfigChange(entry.name, base, deepMerge(base, patch));
+        if (verdict.loosens) {
+          sendConfirmationRequired(res, verdict.reasons);
+          return;
+        }
+      }
       const merged = deepMerge(base, patch);
 
       const schema = readSchema(repoRoot, entry);
@@ -2875,11 +3013,25 @@ export function mountOnboardRoutes({
       sendJson(res, 400, { error: "body.claims must be an array" });
       return;
     }
+    const fromOnboarding = body?.source === "onboarding";
 
     if (dbExists(pathCtx)) {
       try {
-        const result = candidateEvidenceMerge({ ...pathCtx, claims: posted });
-        sendJson(res, 200, result);
+        const beforeClaims = candidateConfigGet(pathCtx).evidence?.claims || [];
+        const { accepted, rejected } = screenSeedClaims(posted, beforeClaims);
+        const result = accepted.length
+          ? candidateEvidenceMerge({ ...pathCtx, claims: accepted })
+          : { added: 0, skipped: 0, total: beforeClaims.length };
+        const logged =
+          fromOnboarding && result.added > 0
+            ? logOnboardingWrite(
+                onboardingEvidenceEntries({
+                  beforeClaims,
+                  afterClaims: candidateConfigGet(pathCtx).evidence?.claims || [],
+                })
+              )
+            : undefined;
+        sendJson(res, 200, { ...result, rejected, ...(logged ? { logged } : {}) });
       } catch (err) {
         sendCandidateError(res, err);
       }
@@ -2890,13 +3042,14 @@ export function mountOnboardRoutes({
     const candidatePath = userPath(pathCtx, entry.candidatePath);
     const doc = readBaseDoc(entry, candidatePath);
     const existingClaims = Array.isArray(doc.claims) ? doc.claims : [];
+    const { accepted, rejected } = screenSeedClaims(posted, existingClaims);
 
     const existingClaimTexts = new Set(existingClaims.map((c) => String(c?.claim ?? "").trim()));
     const usedIds = new Set(existingClaims.map((c) => String(c?.id ?? "")));
 
     const added = [];
     let skipped = 0;
-    for (const raw of posted) {
+    for (const raw of accepted) {
       const claimText = String(raw?.claim ?? "").trim();
       if (!claimText || existingClaimTexts.has(claimText)) {
         skipped++;
@@ -2926,6 +3079,7 @@ export function mountOnboardRoutes({
       added: added.length,
       skipped,
       total: merged.claims.length,
+      rejected,
     });
   });
 

@@ -1,22 +1,22 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
-// careerrat automation — opt-in browser-automation config (status + safe write-back).
+// careerrat automation: browser-automation switches (status + safe write-back).
 //
-// Authenticated browser automation is OPT-IN and DEFAULTS OFF. This CLI shows the
-// capability/platform/consent matrix and toggles individual switches, never running
-// a browser itself. In DB workspaces it writes candidate_automation; in legacy
-// workspaces it patches candidate/automation.yml.
+// Every capability is ON by default. This CLI shows the capability/platform matrix
+// and turns individual switches off or back on, never running a browser itself.
+// In DB workspaces it writes candidate_automation; in legacy workspaces it patches
+// candidate/automation.yml.
 //
 // Usage:
 //   node src/cli/automation.mjs status [--json]
-//   node src/cli/automation.mjs mode <basic|advanced> [--write]
-//   node src/cli/automation.mjs consent <platform>            (dry run)
-//   node src/cli/automation.mjs consent <platform> --write
-//   node src/cli/automation.mjs revoke  <platform> --write
-//   node src/cli/automation.mjs enable  <capability> [platform] --write
+//   node src/cli/automation.mjs submit <auto|manual> [--write]
 //   node src/cli/automation.mjs disable <capability> [platform] --write
+//   node src/cli/automation.mjs enable  <capability> [platform] --write
 //   node src/cli/automation.mjs --list
 //   node src/cli/automation.mjs --help
+//
+// `consent`, `revoke` and `mode` still parse but do nothing: consent and setup
+// mode were retired.
 //
 // Default is a DRY RUN: it prints the target line + the resulting "is it live?"
 // verdict and writes nothing. Pass --write to commit. The first write scaffolds
@@ -35,14 +35,14 @@ import {
   CAPABILITY_KEYS,
   ensureAutomationFile,
   isCapability,
-  isPlatform,
   loadAutomation,
   mayRun,
   mergeAutomationDefaults,
+  migrateLegacyAutomationText,
   PLATFORMS,
   planAutomationEdit,
-  planModeEdit,
   planSessionEdit,
+  planSubmitEdit,
   resolveEditPath,
 } from "../core/automation/consent.mjs";
 import {
@@ -113,47 +113,43 @@ if (verb === "session") {
   process.exit(0); // handleSession always exits; this is a belt-and-suspenders guard
 }
 
-if (verb === "mode") {
-  handleMode(rest[0]);
-  process.exit(0); // handleMode always exits; this is a belt-and-suspenders guard
+if (verb === "mode" || verb === "consent" || verb === "revoke") {
+  // Retired verbs stay accepted so old scripts and docs don't break. They write nothing.
+  const note = `"${verb}" no longer does anything: consent and setup mode were retired; capabilities are on unless disabled. Turn one off with \`careerrat automation disable <capability> [platform] --write\`.`;
+  if (opts.json)
+    console.log(JSON.stringify({ ok: true, command: verb, written: false, note }, null, 2));
+  else console.log(note);
+  process.exit(0);
+}
+
+if (verb === "submit") {
+  handleSubmit(rest[0]);
+  process.exit(0); // handleSubmit always exits; this is a belt-and-suspenders guard
 }
 
 const WRITE_VERBS = {
-  consent: { kind: "consent", value: true },
-  revoke: { kind: "consent", value: false },
   enable: { kind: "capability-or-platform", value: true },
   disable: { kind: "capability-or-platform", value: false },
 };
 
 const spec = WRITE_VERBS[verb];
 if (!spec) {
-  fail(
-    `unknown command "${verb}". Try: status | mode | enable | disable | consent | revoke (see --help).`
-  );
+  fail(`unknown command "${verb}". Try: status | submit | enable | disable (see --help).`);
 }
 
 // Resolve the edit target from the verb + positionals.
-let kind, capability, platform;
-if (spec.kind === "consent") {
-  kind = "consent";
-  platform = rest[0];
-  if (!platform) fail(`Usage: ${verb} <platform>. Platforms: ${PLATFORMS.join(", ")}.`);
-  if (!isPlatform(platform))
-    fail(`unknown platform "${platform}". Known: ${PLATFORMS.join(", ")}.`);
-} else {
-  capability = rest[0];
-  platform = rest[1] || null;
-  if (!capability)
-    fail(`Usage: ${verb} <capability> [platform]. Capabilities: ${CAPABILITY_KEYS.join(", ")}.`);
-  if (!isCapability(capability))
-    fail(`unknown capability "${capability}". Known: ${CAPABILITY_KEYS.join(", ")}.`);
-  if (platform && !CAPABILITIES[capability].platforms.includes(platform)) {
-    fail(
-      `${capability} does not apply to "${platform}". It applies to: ${CAPABILITIES[capability].platforms.join(", ")}.`
-    );
-  }
-  kind = platform ? "platform" : "capability";
+const capability = rest[0];
+const platform = rest[1] || null;
+if (!capability)
+  fail(`Usage: ${verb} <capability> [platform]. Capabilities: ${CAPABILITY_KEYS.join(", ")}.`);
+if (!isCapability(capability))
+  fail(`unknown capability "${capability}". Known: ${CAPABILITY_KEYS.join(", ")}.`);
+if (platform && !CAPABILITIES[capability].platforms.includes(platform)) {
+  fail(
+    `${capability} does not apply to "${platform}". It applies to: ${CAPABILITIES[capability].platforms.join(", ")}.`
+  );
 }
+const kind = platform ? "platform" : "capability";
 
 const pathCtx = { repoRoot: opts.root };
 if (candidateConfigSource(pathCtx) === "db") {
@@ -167,7 +163,7 @@ const schemaPath = join(opts.root, AUTOMATION_SCHEMA);
 const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
 
 const fileExists = existsSync(candidatePath);
-const baseText = readFileSync(fileExists ? candidatePath : templatePath, "utf8");
+const baseText = readAutomationBaseText(candidatePath, templatePath);
 
 let plan;
 try {
@@ -231,7 +227,7 @@ const diff = `  ~ ${plan.path}: ${plan.previous} → ${plan.value}`;
 
 // The post-edit "is it live?" verdict (the three-part AND), so the user sees what
 // else is still required for this to actually run. Only meaningful for a
-// capability+platform edit (a bare consent or global toggle has no single pair).
+// capability+platform edit (a bare global toggle has no single pair).
 const verdict = kind === "platform" ? mayRun({ capability, platform, data: nextData() }) : null;
 
 if (!opts.write) {
@@ -250,7 +246,7 @@ if (!opts.write) {
 
 // Commit: scaffold from template if absent, then patch the real file atomically.
 const created = ensureAutomationFile({ root: opts.root }).created;
-const actualText = readFileSync(candidatePath, "utf8");
+const actualText = readAutomationBaseText(candidatePath, templatePath);
 let writePlan = plan;
 if (actualText !== baseText) {
   writePlan = planAutomationEdit({
@@ -282,10 +278,7 @@ process.exit(0);
 // The config as it WOULD be after this edit (for the live-verdict preview).
 function nextData() {
   const data = loadAutomation({ root: opts.root }).data;
-  if (kind === "consent") {
-    data.consent = data.consent || {};
-    data.consent[platform] = spec.value;
-  } else if (kind === "capability") {
+  if (kind === "capability") {
     data.capabilities = data.capabilities || {};
     data.capabilities[capability] = data.capabilities[capability] || {};
     data.capabilities[capability].enabled = spec.value;
@@ -299,7 +292,7 @@ function nextData() {
 }
 
 // `session <auto|extension|orca|playwright>` — change WHICH provider drives the session
-// browser. Distinct from the capability/consent toggles: it's a string, not a
+// browser. Distinct from the capability toggles: it's a string, not a
 // boolean, and it never affects mayRun() (provider is HOW a session runs, not
 // WHETHER a capability is allowed). Same safety as the toggles: dry-run by
 // default, schema-validated, comment-preserving, atomic; first --write scaffolds.
@@ -324,7 +317,7 @@ function handleSession(provider) {
   const schemaPath = join(opts.root, AUTOMATION_SCHEMA);
   const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
   const fileExists = existsSync(candidatePath);
-  const baseText = readFileSync(fileExists ? candidatePath : templatePath, "utf8");
+  const baseText = readAutomationBaseText(candidatePath, templatePath);
 
   let plan;
   try {
@@ -394,7 +387,7 @@ function handleSession(provider) {
   }
 
   const created = ensureAutomationFile({ root: opts.root }).created;
-  const actualText = readFileSync(candidatePath, "utf8");
+  const actualText = readAutomationBaseText(candidatePath, templatePath);
   let writePlan = plan;
   if (actualText !== baseText) {
     writePlan = planSessionEdit({ provider, currentText: actualText, schema });
@@ -416,22 +409,66 @@ function handleSession(provider) {
   process.exit(0);
 }
 
-// `mode <basic|advanced>` — flip the coarse setup-mode gate. mayRun() ANDs this
-// in alongside the granular capability/platform/consent switches: basic keeps
-// every external capability hard-off no matter what the granular switches say,
-// advanced lets them govern individually. This is the CLI verb the documented
-// consent/enable recipe (AGENTS.md → Browser Automation Contract) needs to run
-// first — without it, no combination of `consent`/`enable` can ever reach
-// mayRun()'s allowed:true. Same safety pattern as the other verbs: dry-run by
-// default, schema-validated, comment-preserving, atomic; first --write scaffolds.
-function handleMode(mode) {
-  if (mode !== "basic" && mode !== "advanced") {
-    fail(`Usage: mode <basic|advanced>.`);
+// `submit <auto|manual>`: whether the agent presses the final Submit once the
+// form is complete (auto, the default) or stops for a person (manual). Same
+// safety pattern as the toggles: dry run by default, DB candidate config patch in DB
+// workspaces, comment-preserving schema-validated automation.yml in legacy ones.
+function handleSubmit(submit) {
+  if (submit !== "auto" && submit !== "manual") {
+    fail(`Usage: submit <auto|manual>.`);
   }
-
+  const note = `  → ${submit === "auto" ? "the agent presses the final Submit once the form is complete" : "the agent fills the form and stops before Submit; you press it"}`;
   const pathCtx = { repoRoot: opts.root };
+
   if (candidateConfigSource(pathCtx) === "db") {
-    handleDbMode(mode);
+    const loaded = loadAutomation({ root: opts.root });
+    const previous = mergeAutomationDefaults(loaded.data).submit ?? "auto";
+    const result = {
+      command: "submit",
+      file: "sqlite:automation",
+      path: "submit",
+      label: "final submit mode",
+      value: submit,
+      previous,
+      changed: previous !== submit,
+      valid: true,
+      willCreate: false,
+      written: false,
+    };
+    if (!result.changed) {
+      if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
+      else console.log(`No change - submit mode is already ${submit} in SQLite.`);
+      process.exit(0);
+    }
+    if (!opts.write) {
+      if (opts.json) console.log(JSON.stringify({ ...result, dryRun: true }, null, 2));
+      else {
+        console.log(`Proposed change to SQLite automation config (${result.label}):`);
+        console.log(`  ~ submit: ${previous} → ${submit}`);
+        console.log(note);
+        console.log("Dry run - pass --write to commit.");
+      }
+      process.exit(0);
+    }
+    try {
+      candidateConfigPatch({ repoRoot: opts.root, name: "automation", patch: { submit } });
+    } catch (err) {
+      if (opts.json) {
+        console.log(
+          JSON.stringify({ ...result, error: err.message, errors: err.errors || [] }, null, 2)
+        );
+      } else {
+        console.error("Refusing: this change would make sqlite:automation invalid:");
+        if (err.errors)
+          for (const e of err.errors) console.error(`  ${e.path || "(root)"}: ${e.message}`);
+        else console.error(err.message);
+      }
+      process.exit(1);
+    }
+    result.written = true;
+    if (opts.json) console.log(JSON.stringify(result, null, 2));
+    else console.log(`Written to SQLite automation config: submit = ${submit}`);
+    process.exit(0);
   }
 
   const candidatePath = userPath(pathCtx, AUTOMATION_FILE);
@@ -440,18 +477,18 @@ function handleMode(mode) {
   const schemaPath = join(opts.root, AUTOMATION_SCHEMA);
   const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
   const fileExists = existsSync(candidatePath);
-  const baseText = readFileSync(fileExists ? candidatePath : templatePath, "utf8");
+  const baseText = readAutomationBaseText(candidatePath, templatePath);
 
   let plan;
   try {
-    plan = planModeEdit({ mode, currentText: baseText, schema });
+    plan = planSubmitEdit({ submit, currentText: baseText, schema });
   } catch (err) {
     fail(err.message);
   }
   if (!plan.ok) fail(plan.error);
 
   const result = {
-    command: "mode",
+    command: "submit",
     file: automationDisplay,
     path: plan.path,
     label: plan.label,
@@ -465,7 +502,7 @@ function handleMode(mode) {
 
   if (!plan.changed) {
     if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
-    else console.log(`No change: setup mode is already ${plan.value} in ${automationDisplay}.`);
+    else console.log(`No change: submit mode is already ${plan.value} in ${automationDisplay}.`);
     process.exit(0);
   }
 
@@ -487,8 +524,6 @@ function handleMode(mode) {
     process.exit(1);
   }
 
-  const diff = `  ~ ${plan.path}: ${plan.previous} → ${plan.value}`;
-
   if (!opts.write) {
     if (opts.json) {
       console.log(JSON.stringify({ ...result, dryRun: true }, null, 2));
@@ -496,20 +531,18 @@ function handleMode(mode) {
       if (!fileExists)
         console.log(`(first write will create ${automationDisplay} from the template)`);
       console.log(`Proposed change to ${automationDisplay} (${plan.label}):`);
-      console.log(diff);
-      console.log(
-        `  → ${mode === "basic" ? "all external capabilities hard-off" : "individual opt-ins below now apply"}`
-      );
+      console.log(`  ~ ${plan.path}: ${plan.previous} → ${plan.value}`);
+      console.log(note);
       console.log("Dry run - pass --write to commit.");
     }
     process.exit(0);
   }
 
   const created = ensureAutomationFile({ root: opts.root }).created;
-  const actualText = readFileSync(candidatePath, "utf8");
+  const actualText = readAutomationBaseText(candidatePath, templatePath);
   let writePlan = plan;
   if (actualText !== baseText) {
-    writePlan = planModeEdit({ mode, currentText: actualText, schema });
+    writePlan = planSubmitEdit({ submit, currentText: actualText, schema });
     if (!writePlan.ok || !writePlan.valid)
       fail(writePlan.error || "post-scaffold edit became invalid");
   }
@@ -521,68 +554,7 @@ function handleMode(mode) {
     console.log(JSON.stringify(result, null, 2));
   } else {
     if (created) console.log(`Created ${automationDisplay} from the template.`);
-    console.log(`Written to ${automationDisplay}: setup mode = ${mode}`);
-  }
-  process.exit(0);
-}
-
-function handleDbMode(mode) {
-  const loaded = loadAutomation({ root: opts.root });
-  const currentData = mergeAutomationDefaults(loaded.data);
-  const previous = currentData.setup_mode;
-  const changed = previous !== mode;
-  const result = {
-    command: "mode",
-    file: "sqlite:automation",
-    path: "setup_mode",
-    label: "automation setup mode",
-    value: mode,
-    previous,
-    changed,
-    valid: true,
-    willCreate: false,
-    written: false,
-  };
-
-  if (!changed) {
-    if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
-    else console.log(`No change - setup mode is already ${mode} in SQLite.`);
-    process.exit(0);
-  }
-
-  const diff = `  ~ setup_mode: ${previous} → ${mode}`;
-  if (!opts.write) {
-    if (opts.json) {
-      console.log(JSON.stringify({ ...result, dryRun: true }, null, 2));
-    } else {
-      console.log(`Proposed change to SQLite automation config (${result.label}):`);
-      console.log(diff);
-      console.log("Dry run - pass --write to commit.");
-    }
-    process.exit(0);
-  }
-
-  try {
-    candidateConfigPatch({ repoRoot: opts.root, name: "automation", patch: { setup_mode: mode } });
-  } catch (err) {
-    if (opts.json) {
-      console.log(
-        JSON.stringify({ ...result, error: err.message, errors: err.errors || [] }, null, 2)
-      );
-    } else {
-      console.error("Refusing: this change would make sqlite:automation invalid:");
-      if (err.errors)
-        for (const e of err.errors) console.error(`  ${e.path || "(root)"}: ${e.message}`);
-      else console.error(err.message);
-    }
-    process.exit(1);
-  }
-
-  result.written = true;
-  if (opts.json) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    console.log(`Written to SQLite automation config: setup_mode = ${mode}`);
+    console.log(`Written to ${automationDisplay}: submit = ${submit}`);
   }
   process.exit(0);
 }
@@ -725,6 +697,15 @@ function handleDbSession(provider) {
   process.exit(0);
 }
 
+// The text the legacy-file edit planner starts from: the stored file (or the
+// template when absent), migrated off the old off-by-default shape when it lacks
+// the `capabilities_default: on` marker. Reading only, never writes.
+function readAutomationBaseText(candidatePath, templatePath) {
+  const templateText = readFileSync(templatePath, "utf8");
+  if (!existsSync(candidatePath)) return templateText;
+  return migrateLegacyAutomationText(readFileSync(candidatePath, "utf8"), templateText);
+}
+
 function getPath(obj, parts) {
   let cursor = obj;
   for (const part of parts) {
@@ -746,9 +727,9 @@ function setPath(obj, parts, value) {
 function printVerdict(v, cap, plat) {
   if (!v) return;
   if (v.allowed) {
-    console.log(`  ✓ ${cap} on ${plat} is now LIVE (global + platform + consent all on).`);
+    console.log(`  ✓ ${cap} on ${plat} is on.`);
   } else {
-    console.log(`  ◦ ${cap} on ${plat} still won't run, remaining:`);
+    console.log(`  ◦ ${cap} on ${plat} is off, remaining:`);
     for (const r of v.reasons) console.log(`      - ${r}`);
   }
 }
@@ -770,8 +751,14 @@ function printStatus(asJson) {
   console.log("careerrat automation");
   console.log("====================");
   console.log("");
-  if (!status.exists) {
-    console.log(`Not configured: every capability is OFF (opt-in default).`);
+  if (status.readError) {
+    console.log(`ERROR: automation settings can't be read (${status.readError}).`);
+    console.log(
+      "Every capability is DENIED until this is fixed. Repair the file (or restore it), then run `careerrat automation status` again."
+    );
+    console.log("");
+  } else if (!status.exists) {
+    console.log("Every capability is on unless you turn it off.");
     console.log(`No ${loaded.path} yet; the first \`--write\` creates it from the template.`);
     console.log("");
   } else if (!status.valid) {
@@ -780,17 +767,19 @@ function printStatus(asJson) {
     console.log("");
   }
   console.log(
-    `Setup mode: ${status.mode} (${status.mode === "basic" ? "all external capabilities hard-off" : "individual opt-ins below"}). Change: \`careerrat automation mode <basic|advanced> --write\`.`
+    "Every capability is on unless you turn it off. Turn one off: `careerrat automation disable <capability> [platform] --write`."
   );
-  console.log(`Live capability×platform pairs: ${status.liveCount}`);
+  console.log(
+    `Final submit: ${status.submit} (${status.submit === "auto" ? "the agent presses Submit once the form is complete" : "you press Submit yourself"}). Change: \`careerrat automation submit <auto|manual> --write\`.`
+  );
+  console.log(`Capability×platform pairs on: ${status.liveCount}`);
   console.log("");
   for (const cap of status.capabilities) {
     const global = cap.enabled ? "on" : "off";
     console.log(`${cap.capability}  [phase ${cap.phase} · global ${global}]: ${cap.summary}`);
     for (const p of cap.platforms) {
-      const mark = p.allowed ? "LIVE " : "  -  ";
-      const bits = [`platform ${p.enabled ? "on" : "off"}`, `consent ${p.consent ? "yes" : "no"}`];
-      console.log(`  ${mark} ${p.platform.padEnd(11)} (${bits.join(", ")})`);
+      const mark = p.allowed ? "ON   " : "OFF  ";
+      console.log(`  ${mark} ${p.platform}`);
     }
     console.log("");
   }
@@ -800,7 +789,7 @@ function printStatus(asJson) {
   const statusAutomaticApplyNote = sessionAutomaticApplyNote(session.provider);
   if (statusAutomaticApplyNote) console.log(statusAutomaticApplyNote);
   console.log(
-    "Toggle: `careerrat automation enable <capability> [platform] --write`, `consent <platform> --write`."
+    "Toggle: `careerrat automation disable <capability> [platform] --write`, `enable <capability> [platform] --write`."
   );
 }
 
@@ -815,29 +804,26 @@ function printList(asJson) {
     console.log(`  ${key.padEnd(22)} phase ${c.phase}  · ${c.platforms.join(", ")}`);
   }
   console.log("");
-  console.log(`Platforms (consent ledger): ${PLATFORMS.join(", ")}`);
+  console.log(`Platforms: ${PLATFORMS.join(", ")}`);
 }
 
 function printHelp() {
-  console.log(`careerrat automation: opt-in browser-automation config (defaults OFF)
+  console.log(`careerrat automation: browser-automation switches (every capability on by default)
 
 Usage:
-  node src/cli/automation.mjs status [--json]          Show the capability/consent matrix
-  node src/cli/automation.mjs consent <platform>       Propose recording ToS consent (dry run)
-  node src/cli/automation.mjs consent <platform> --write   Record consent (after reading the ToS)
-  node src/cli/automation.mjs revoke  <platform> --write   Withdraw consent
-  node src/cli/automation.mjs enable  <capability> [platform] --write
-  node src/cli/automation.mjs disable <capability> [platform] --write
+  node src/cli/automation.mjs status [--json]          Show the capability/platform on/off matrix
+  node src/cli/automation.mjs disable <capability> [platform] --write   Turn a capability or platform off
+  node src/cli/automation.mjs enable  <capability> [platform] --write   Turn it back on
   node src/cli/automation.mjs session <auto|extension|orca|playwright> [--write]  Set the session-browser provider
-  node src/cli/automation.mjs mode <basic|advanced> [--write]  Set the setup-mode gate
+  node src/cli/automation.mjs submit <auto|manual> [--write]  Set whether the agent presses the final Submit
   node src/cli/automation.mjs --list [--json]          List capabilities + platforms
   node src/cli/automation.mjs --help
 
-A capability runs on a platform only if ALL of: setup mode is "advanced", the
-capability global switch, that platform's switch, and that platform's consent are
-on. \`mode advanced --write\` must run before consent/enable can make anything
-live; \`enable <capability>\` with no platform flips the global switch; with a
-platform flips just that platform.
+Every capability is on unless you turn it off. A capability runs on a platform
+when it applies to that platform and neither its global switch nor that platform's
+switch is off. \`disable <capability>\` with no platform turns the whole capability
+off; with a platform turns off just that platform. The old consent, revoke and
+mode commands are retired: they print a note and change nothing.
 
 Options:
   --write     Commit the change (default: dry run, writes nothing)

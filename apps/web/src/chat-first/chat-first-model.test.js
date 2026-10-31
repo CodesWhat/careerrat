@@ -426,6 +426,34 @@ describe("buildChatFirstView", () => {
     ]);
   });
 
+  it("lists a job waiting on the operator's answer alongside the other needs", () => {
+    const view = buildChatFirstView(
+      { ...dashboard, allNextSteps: [] },
+      {
+        ...runtime,
+        missions: [],
+        needsYou: [
+          {
+            id: "application:app-1:needs-answer",
+            kind: "needs-answer",
+            applicationId: "app-1",
+            title: "E Corp needs an answer",
+            detail: "Would you be willing to travel?",
+            primaryLabel: "Answer",
+          },
+        ],
+      }
+    );
+
+    expect(view.needsYou).toEqual([
+      expect.objectContaining({
+        id: "application:app-1:needs-answer",
+        kind: "needs-answer",
+        primaryLabel: "Answer",
+      }),
+    ]);
+  });
+
   it("collapses sourced decisions into one batch action without hiding other needs", () => {
     const view = buildChatFirstView(
       { ...dashboard, allNextSteps: [] },
@@ -507,6 +535,121 @@ describe("buildChatFirstView", () => {
       }),
       expect.objectContaining({ id: "touch:comm-1" }),
     ]);
+  });
+
+  describe("submit gates and unverified submits", () => {
+    const gateStep = (result = {}) => ({
+      id: "submit-one",
+      action: "submit-gate",
+      status: "blocked",
+      jobRef: { id: "one", company: "Black Mesa", role: "Engineer" },
+      result: { requiresUserSubmit: true, applicationId: "one", ...result },
+    });
+    const buildNeeds = (missions) =>
+      buildChatFirstView(
+        { ...dashboard, allNextSteps: [] },
+        { ...runtime, missions, needsYou: [], touchDue: [] }
+      ).needsYou;
+
+    it("keeps the manual gate copy word for word", () => {
+      const [need] = buildNeeds([{ id: "mission-one", steps: [gateStep()] }]);
+      expect(need.kind).toBe("submit");
+      expect(need.detail).toBe("The form is filled. You press submit.");
+    });
+
+    it("shows why auto mode stopped on the gate", () => {
+      const [need] = buildNeeds([
+        {
+          id: "mission-one",
+          steps: [
+            gateStep({ autoSubmitStopped: { reason: "1 required field still needs an answer" } }),
+          ],
+        },
+      ]);
+      expect(need.kind).toBe("submit");
+      expect(need.detail).toBe(
+        "Paul filled the form but stopped before submitting: 1 required field still needs an answer."
+      );
+      expect(need.detail).not.toContain("You press submit");
+    });
+
+    it("names the configured agent when auto mode stopped", () => {
+      const [need] = buildChatFirstView(
+        { ...dashboard, allNextSteps: [] },
+        {
+          ...runtime,
+          agentName: "Remy",
+          missions: [
+            {
+              id: "mission-one",
+              steps: [
+                gateStep({ autoSubmitStopped: { reason: "A required upload isn't attached" } }),
+              ],
+            },
+          ],
+          needsYou: [],
+          touchDue: [],
+        }
+      ).needsYou;
+      expect(need.detail).toBe(
+        "Remy filled the form but stopped before submitting: A required upload isn't attached."
+      );
+    });
+
+    it("surfaces a submitted-unverified prepare step as its own check-it need, never a submit gate", () => {
+      const unverified = {
+        id: "mission-two",
+        steps: [
+          {
+            id: "prepare-two",
+            action: "prepare-submit",
+            status: "blocked",
+            jobRef: { id: "two", company: "Tyrell", role: "Engineer" },
+            result: {
+              state: "submitted-unverified",
+              applicationId: "two",
+              reason: "No confirmation page appeared.",
+            },
+          },
+          {
+            id: "submit-two",
+            action: "submit-gate",
+            status: "pending",
+            jobRef: { id: "two", company: "Tyrell", role: "Engineer" },
+          },
+        ],
+      };
+      const needs = buildNeeds([
+        { id: "mission-one", steps: [gateStep()] },
+        {
+          id: "mission-three",
+          steps: [
+            {
+              ...gateStep(),
+              id: "submit-three",
+              jobRef: { id: "three", company: "Abstergo", role: "Engineer" },
+              result: { requiresUserSubmit: true, applicationId: "three" },
+            },
+          ],
+        },
+        unverified,
+      ]);
+      const check = needs.find((item) => item.kind === "submit-unverified");
+      expect(check).toEqual(
+        expect.objectContaining({
+          applicationId: "two",
+          title: "Check that Tyrell received your application",
+          detail: "No confirmation page appeared.",
+          primaryLabel: "I applied",
+          secondaryLabel: "Open application",
+        })
+      );
+      const group = needs.find((item) => item.kind === "submit-gate-group");
+      expect(group.items.map((item) => item.applicationId)).toEqual(["one", "three"]);
+      expect(needs.some((item) => item.kind === "submit" && item.applicationId === "two")).toBe(
+        false
+      );
+    });
   });
 
   it("personalizes generated action copy with the configured agent name", () => {

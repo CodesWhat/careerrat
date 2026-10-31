@@ -1,6 +1,6 @@
 ---
 name: apply-job
-description: End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including supervised LinkedIn Easy Apply preparation), hands final submission to the user, verifies the result, and updates the tracker.
+description: End-to-end job application workflow. Gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including supervised LinkedIn Easy Apply preparation), submits when the application is complete and verified (or stops for the user in manual mode), verifies the result, and updates the tracker.
 ---
 
 # apply-job
@@ -147,13 +147,29 @@ After building, eyeball the output: page count reasonable, fonts render, no non-
 
 ---
 
-## STEP 6 — Manual submission gate
+## STEP 6: Submission
 
-Fill the form completely, then stop at the final submit control. Show a summary of
-what will be submitted and return or focus the retained supervised browser page.
-The user must click the final Submit control themselves. The agent never clicks it,
-even after an explicit confirmation in chat, and never treats an executor's claim
-of submission as permission to mark the application Applied.
+Fill the form completely. What happens next depends on the submit mode (`auto` or
+`manual`; absent means `auto`). `careerrat automation status` shows it.
+
+- **`submit: auto` (default).** CareerRat presses the final Submit control itself,
+  once, only when every required field is answered, every required upload is
+  attached, exactly one positively labelled submit control exists, and the
+  evaluate gate is KEEP or a user-approved REVIEW. It then waits for a
+  confirmation page. If the page is seen, record Applied. If not, the outcome is
+  `submitted-unverified`. That is recorded on the operation result, not as an
+  application status: keep the application's current status, set `statusNote` (that
+  it was submitted automatically with no confirmation page seen) and `nextAction`
+  (check the site, then record it as Applied if it went through), never retry the
+  click, and never pass `submitted-unverified` to `app set-status`. When auto
+  declines to click, say why and hand the form over.
+- **`submit: manual`** (set with `careerrat automation submit manual --write`). Stop
+  at the final submit control. Show a summary of what will be submitted and return or
+  focus the retained supervised browser page. The user presses Submit themselves,
+  then reports back.
+
+Either way, never treat an executor's claim of submission as permission to mark
+the application Applied. Only a seen confirmation page or the user's report does that.
 
 **Immediately halt** if the page shows a captcha or Cloudflare human-check, an
 application-limit blocker, a required manual exercise (assessment, coding exercise,
@@ -216,7 +232,7 @@ interaction to confirm page state.
 
 **Field confirmation before fill:** call `buildFillPlan` with `formDefaults`, `profile`, and `honesty`. Treat `requiresConfirmation: true` as a hard pause, but do not create a pause just because a field is custom or unfamiliar. The resolver now fills configured `screening_answers`, routine availability/location questions, and honesty-backed tool yes/no questions before returning `skip`.
 
-**Screening answer posture:** answer as the candidate from the sanitized application defaults, `candidate/profile.yml`, `candidate/honesty.yml`, `candidate/evidence.yml`, generated tailored artifacts, and the JD. If the answer is directly supported, fill it in first person and continue. Voluntary self-identification questions are never screening prompts and stay outside packet/AI drafting. Do not stop on vague/ordinary prompts like "Why are you interested?", "Years of experience?", "Are you open to travel?", or "Describe relevant experience" when the evidence/profile already supports a truthful answer. Stop only when the answer would require fabricating, guessing a number/date/security clearance/tool depth, revealing private current compensation, contradicting `honesty.yml`, or making a materially new disclosure that is not in onboarding data.
+**Screening answer posture:** answer as the candidate from the sanitized application defaults, `candidate/profile.yml`, `candidate/honesty.yml`, `candidate/evidence.yml`, generated tailored artifacts, and the JD. If the answer is directly supported, fill it in first person and continue. Voluntary self-identification questions are never screening prompts and stay outside packet/AI drafting. Do not stop on vague/ordinary prompts like "Why are you interested?", "Years of experience?", "Are you open to travel?", or "Describe relevant experience" when the evidence/profile already supports a truthful answer. Flag the question with the literal `NEEDS YOU: <reason>` marker, instead of guessing, when the answer would require fabricating, guessing a number/date/security clearance/tool depth, revealing private current compensation, contradicting `honesty.yml`, or making a materially new disclosure that is not in onboarding data. The marker waits on the operator for that one job only: keep filling and tailoring everything else, never submit that job while the marker remains, and carry on with other jobs.
 
 **Known ATS form patterns (domain-general — apply regardless of ATS platform):**
 
@@ -237,7 +253,7 @@ If the posting is a LinkedIn Easy Apply (`isEasyApply(url)` returns true, or `ho
 
 Enter this step when `isEasyApply(url)` returns true OR `hostnameToPortal(url) === "linkedin"` and the user explicitly asked to apply via LinkedIn. Standard ATS postings proceed through STEP 7 unchanged.
 
-### Consent gate (hard stop)
+### Capability check
 
 Run:
 
@@ -245,18 +261,14 @@ Run:
 careerrat automation status --json
 ```
 
-Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means three switches are simultaneously on: the `authenticated_apply_preparation` capability global switch, LinkedIn's per-capability switch, and LinkedIn's one-time ToS consent. And either the "advanced" setup mode is on or the capability has a contextual scoped grant for LinkedIn. This is the predicate from `mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose.
+Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means neither the `authenticated_apply_preparation` capability switch nor LinkedIn's switch is turned off. This is the verdict from `mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose. This capability is on by default.
 
-If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, explain exactly how to opt in, then **stop** — do not open a browser:
+If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, tell the operator it is turned off, give the commands that turn it on, and **skip the browser step** (do not open a browser). If `readError` is set, say the automation settings file can't be read and name it. Do not ask for consent or permission to turn it on.
 
-1. Switch to advanced setup mode: `careerrat automation mode advanced --write`
-2. Read LinkedIn's terms of service yourself to confirm that automated Easy Apply is permitted under your account's usage.
-3. Record consent: `careerrat automation consent linkedin --write`
-4. Enable the capability global switch: `careerrat automation enable authenticated_apply_preparation --write`
-5. Enable for LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
-6. Verify: `careerrat automation status --json`
+1. Capability switch: `careerrat automation enable authenticated_apply_preparation --write`
+2. LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
 
-State clearly: this capability is OFF by default; enabling it is a deliberate choice. The user must read LinkedIn's ToS themselves before recording consent; CareerRat records the decision, it does not make it. This step is always user-initiated and must never run on a schedule or unattended. A contextual scoped grant given in the app is an alternative to step 1: it authorizes this capability for this platform without switching the account to advanced mode.
+This step is always user-initiated and must never run on a schedule or unattended.
 
 ### Session browser + live DOM
 
@@ -282,17 +294,18 @@ If you encounter a login wall, captcha, platform 2FA / two-step-verification pro
 
    d. Fill resolved fields. For the resume upload page, use the modal-first upload pattern documented in STEP 7 (open the Attach/Upload control within the modal before triggering the file action — direct upload without the modal fails silently).
 
-   e. **Employer-custom screening questions:** use the screening answer posture above. If a safe resolved value exists from configured answers, profile, honesty, evidence, the tailored artifacts, or the JD, fill it and continue. If no safe value exists after checking those sources, then stop and ask the user. STEP 10 honesty rules apply continuously here.
+   e. **Employer-custom screening questions:** use the screening answer posture above. If a safe resolved value exists from configured answers, profile, honesty, evidence, the tailored artifacts, or the JD, fill it and continue. If no safe value exists after checking those sources, mark that question `NEEDS YOU`, flag it on the job thread for the operator, leave the rest of the form filled, and do not submit while it is open. STEP 10 honesty rules apply continuously here.
 
    f. Advance to the next page by clicking a button whose visible text matches an entry in `EASY_APPLY_ADVANCE_LABELS` (from `src/core/apply/form-fill.mjs`). Snapshot after advancing to confirm the page changed.
 
 3. **Submit-safety gate — honor STEP 6 exactly.**
 
-   After filling the entire modal through the Review page, stop at the final
-   submit button (visible text like "Submit application" or "Submit"). Show a
-   summary, return focus to the retained page, and leave the click to the user.
-   Never click the final control from the skill, browser executor, or a later
-   agent turn.
+   After filling the entire modal through the Review page, follow STEP 6. In
+   `submit: auto`, CareerRat presses the final submit button (visible text like
+   "Submit application" or "Submit") once, only when STEP 6's conditions hold. In
+   `submit: manual`, stop at it, show a summary, return focus to the retained page,
+   and leave the click to the user. Never click it from a later agent turn or retry
+   it.
 
    **Immediately halt** on captcha, platform 2FA / two-step-verification prompt,
    an application-limit blocker, or a required exercise that cannot be completed
@@ -312,7 +325,7 @@ If you encounter a login wall, captcha, platform 2FA / two-step-verification pro
 
 ### Verify
 
-After the user clicks Submit, continue into **STEP 8**. The LinkedIn Easy Apply
+After Submit (CareerRat's click in auto mode, the user's in manual mode), continue into **STEP 8**. The LinkedIn Easy Apply
 success signal is the "Your application was sent" / "Application sent"
 confirmation modal. Screenshot it. Never trust its absence. If the confirmation
 modal does not appear, do not mark the application as submitted. Report what the
@@ -326,7 +339,7 @@ After STEP 8 confirms submission, continue into **STEP 9** with `channel: "Linke
 
 ## STEP 8 — Verify
 
-After the user reports clicking Submit, read the retained supervised browser page
+After Submit (CareerRat's click in auto mode, or the user's report in manual mode), read the retained supervised browser page
 and confirm the application advanced past the submit step. Never open the posting
 in a new profile for this verification, and never click Submit as part of checking:
 
@@ -334,12 +347,9 @@ in a new profile for this verification, and never click Submit as part of checki
 2. **Verification-code protocol (M17):** if the page shows an emailed verification-code prompt (detected by `submitGuard`/BLOCKER_SIGNALS in `form-fill.mjs` — phrases such as "verification code", "enter the code", "check your email"), handle it through the narrow mail-access path:
    - Run `careerrat automation status --json` and inspect `capabilities.mail_access`.
    - Infer the mail platform from the recipient address when obvious using `inferMailAccessPlatformFromEmail()` from `src/core/automation/mail-access.mjs`: `gmail.com` / `googlemail.com` → `gmail`; `outlook.com` / `hotmail.com` / `live.com` / `msn.com` → `outlook`; other real email domains → `webmail`. If there is no recipient address, ask the user which provider holds the code. Use `webmail` for any provider other than Gmail/Outlook.
-   - If `mail_access` is not `allowed: true` for that platform, halt and ask the user to provide the code manually. Also show the opt-in steps:
-     1. Read the mail provider's terms yourself.
-     2. `careerrat automation consent <gmail|outlook|webmail> --write`
-     3. `careerrat automation enable mail_access --write`
-     4. `careerrat automation enable mail_access <gmail|outlook|webmail> --write`
-     5. `careerrat automation status --json`
+   - If `mail_access` is not `allowed: true` for that platform, it is turned off: halt and ask the user to provide the code manually, and give the commands that turn it on (if `readError` is set, say the settings file can't be read and name it):
+     1. `careerrat automation enable mail_access --write`
+     2. `careerrat automation enable mail_access <gmail|outlook|webmail> --write`
    - If `mail_access` is allowed, use the session browser to open the provider and follow `buildVerificationCodeMailPlan()` / `classifyMailAccessBlocker()` / `extractVerificationCodes()` from `src/core/automation/mail-access.mjs`. For `webmail`, pass the visible provider name as `providerName` when known. Read only the specific recent verification-code message for this current application or sign-in flow. Do not browse the broader inbox. Do not send, delete, reply, archive, or mark messages read.
    - Halt immediately on a mail login wall, mail 2FA prompt, captcha, or unexpected interstitial. Set `status: "manual-apply"` with a note such as `"manual-apply: mail_access blocked — Gmail login wall, provide code manually"` and ask the user to provide the code manually.
    - Once the code is obtained, return to the original application page, enter the code, and continue verification.
@@ -347,7 +357,7 @@ in a new profile for this verification, and never click Submit as part of checki
    (gitignored scratch) — never the repo root or `workspace/` root — and don't commit
    it. See the **Browser Automation Contract** (Local-only + safety) in AGENTS.md.
 4. Never trust HTTP 200 alone — read the page content.
-5. If no confirmation is found: do not mark as submitted. Report what the page shows and ask the user.
+5. If no confirmation is found: do not mark as Applied and never retry the submit. In auto mode record `submitted-unverified`. Report what the page shows and ask the user to check the site.
 
 ---
 
@@ -465,15 +475,15 @@ Apply the write per mode:
   is missing or validation fails, **stop** — the application is not recorded. Fix the
   row write and re-run 9b before doing anything else. Do not proceed to 9c.
 
-### 9c — Downloads copy (only after 9b passes)
+### 9c — Documents copy (only after 9b passes)
 
-Copy every submitted artifact to the company's Downloads folder — PDF for formatted documents, `.txt` for plain-text answers — under the per-company folder (Artifact Contract: organized by company, then by round). Use the real company name (no brackets). Example filenames:
+Copy every submitted artifact to the job's Documents folder — PDF for formatted documents, `.txt` for plain-text answers — under the job folder (Artifact Contract: organized by company, job, then round). Use the real company name (no brackets). Example filenames:
 
-- `~/Downloads/careerrat/<Company>/<Company> - Resume.pdf`
-- `~/Downloads/careerrat/<Company>/<Company> - Cover Letter.pdf`
-- `~/Downloads/careerrat/<Company>/<Company> - Application Answers.txt` (if short-answer fields were submitted)
+- `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Resume.pdf`
+- `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Cover Letter.pdf`
+- `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Application Answers.txt` (if short-answer fields were submitted)
 
-If `tailor-application` already exported these files to the company folder this turn (it runs the same export), verify the files are present rather than re-copying. The contract is satisfied when the files exist — one copy is enough. `workspace/` remains the source of truth; `~/Downloads/careerrat/` is the convenience copy the candidate can find without opening the tracker. Unknown detail → generic slug; never a bracket placeholder.
+If `tailor-application` already exported these files to the job folder this turn (it runs the same export), verify the files are present rather than re-copying. The contract is satisfied when the files exist — one copy is enough. `workspace/` remains the source of truth; `~/Documents/careerrat/` is the convenience copy the candidate can find without opening the tracker. Unknown detail → generic slug; never a bracket placeholder.
 
 ### 9d — Log and commit (only after 9b passes)
 

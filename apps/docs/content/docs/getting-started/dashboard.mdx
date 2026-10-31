@@ -90,7 +90,7 @@ finishes. The assistant only speaks to ask a question or hand you a result.
 ![A search step in Ask with its spinner still running next to the "Searching the web" label](./chat-activity-pending.png)
 
 Application preparation can inspect and fill supported forms. Once the answer
-review is clear, the job panel checks its opt-in permission, offers **Allow form
-preparation** when needed, and resumes the exact paused application mission. The
-final Submit action always stays with you. External-account changes remain
+review is clear, the job panel resumes the exact paused application mission. If
+you turned form preparation off, it says so and offers **Turn it on**. The
+final Submit action follows the `submit` setting in `automation.yml`. External-account changes remain
 confirmation-gated.

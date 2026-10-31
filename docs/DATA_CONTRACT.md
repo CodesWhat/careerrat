@@ -6,7 +6,7 @@ CareerRat separates reusable system code from private candidate data.
 
 These files belong to the local user. They should be ignored by git in a public
 repo and should never be overwritten by update scripts without explicit user
-confirmation. An older install that already has top-level `candidate/` and
+confirmation (candidate knowledge follows the exception below). An older install that already has top-level `candidate/` and
 `workspace/` directories at the repo root keeps using those instead of the
 `.careerrat/` prefix shown below.
 
@@ -19,7 +19,7 @@ confirmation. An older install that already has top-level `candidate/` and
 | `.careerrat/candidate/honesty.yml` | Hard boundaries: tools, credentials, education, claims, and exclusions. |
 | `.careerrat/candidate/form-defaults.yml` | Reusable application form answers. |
 | `.careerrat/candidate/modes.yml` | Optional mode switches. `usage_mode` controls discretionary compute/scope; `application_mode` controls pursuit posture after discovery. If absent, defaults are `standard` and `balanced`. |
-| `.careerrat/candidate/automation.yml` | Optional browser-automation switchboard. Stores per-capability/per-platform opt-ins and ToS consent, including `mail_access` for Gmail/Outlook and generic `webmail`. If absent, every authenticated capability is off. |
+| `.careerrat/candidate/automation.yml` | Optional browser-automation switchboard. Every capability is on by default; set a capability or platform to `false` to turn it off (`careerrat automation disable <capability> [platform] --write`), including `mail_access` for Gmail/Outlook and generic `webmail`. A file carrying `capabilities_default: on` holds real operator choices; an older file without that marker is migrated once on the next write (its old off values are dropped, `submit` and `session` carry over). `consent` and `setup_mode` are retired and ignored. Also stores the final `submit` mode (`auto` by default, or `manual`). Workspaces with a database keep these values in SQLite and ignore this file; set `submit` with `careerrat automation submit <auto\|manual> --write`. If absent, every capability is on. If the file exists but can't be read or parsed, every capability is denied until it is fixed (`careerrat automation status` shows the error). |
 | `.careerrat/candidate/writing-style.md` | Candidate writing voice profile. |
 | `.careerrat/candidate/learnings/` | Durable per-role-family lesson files (one file per role family). Appended by `interview-prep`, `track-outcomes`, and `reevaluate-strategy` after debriefs and strategy reviews; read by `tailor-application`, `evaluate-job`, and `search-jobs` to sharpen fit signals and artifact quality over time. |
 | `.careerrat/candidate/application-limits.yml` | Per-company application caps and cooldown periods. Checked as a step-zero gate by `apply-job` (blocks re-application within the cooldown window) and used as a deprioritization signal by `search-jobs`. |
@@ -33,7 +33,17 @@ confirmation. An older install that already has top-level `candidate/` and
 | `.careerrat/workspace/research/` | Cited web-research artifacts (company intel, comp benchmarks) from the research-* skills. Treated as outbound; never contains `current_base`. |
 | `.careerrat/workspace/tracker.*` | Application and sourced-role tracker state. |
 
-### `companyHealth` (tracker row field)
+### Candidate knowledge writes
+
+CareerRat runs in operator mode, so grounded changes to candidate knowledge
+apply directly instead of waiting for a confirmation. That covers evidence
+claims that pass `computeEvidenceWrite`, onboarding saves, and coaching drafts.
+Each one is logged in the thread with an Undo. Changes that loosen honesty
+still need explicit confirmation: removing a do-not-claim or do-not-fabricate
+entry, moving a tool from adjacent or do-not-claim to confirmed, and lowering
+a comp floor or target. Outbound actions are unaffected by this exception.
+
+## `companyHealth` (tracker row field)
 
 A role-scoped company-health rating lives as a `companyHealth` object on an individual
 `applications[]` or `sourced[]` row in `.careerrat/workspace/tracker.*` (not a separate file). Written by
@@ -80,9 +90,9 @@ These files are safe for CareerRat updates and public distribution.
 - Generated text must map back to user-layer evidence.
 - The system must not invent degrees, tools, employers, metrics, credentials, or
   authorization status.
-- Public default is manual confirmation before final submit.
-- Browser automation that submits applications must be opt-in.
-- Verification-code and inbox workflows must be explicit opt-in. Generic
+- Public default is `submit: auto`: CareerRat submits only when the application is complete and verified. `submit: manual` stops before final submit. Set it with `careerrat automation submit manual --write`; legacy YAML workspaces can also edit `automation.yml` directly.
+- Verification-code and inbox workflows are on by default and read only what the
+  task needs. Generic
   `webmail` supports one-code-message verification flows; Gmail/Outlook support
   that plus webmail ingest. All are separate from in-platform messaging.
 - Communication state should store concise summaries in tracker data and keep

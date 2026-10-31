@@ -1,6 +1,6 @@
 ---
 name: calendar-sync
-description: Write tracker-derived interviews, assessments, follow-ups, prep blocks, and deadlines to Apple Calendar, Google Calendar, Outlook, or approved local automation tools. Opt-in, user-initiated, confirm-first. Capability = calendar_sync; platforms = apple_calendar, google_calendar, outlook_calendar, automation_tools.
+description: Write tracker-derived interviews, assessments, follow-ups, prep blocks, and deadlines to Apple Calendar, Google Calendar, Outlook, or approved local automation tools. User-initiated, confirm-first. Capability = calendar_sync; platforms = apple_calendar, google_calendar, outlook_calendar, automation_tools.
 ---
 
 # calendar-sync
@@ -15,7 +15,7 @@ calendar write remains confirm-first.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
-## STEP 0 — Consent gate
+## STEP 0: Capability check
 
 Run:
 
@@ -30,21 +30,21 @@ Inspect `capabilities.calendar_sync`. Applicable platforms:
 - `outlook_calendar`
 - `automation_tools`
 
-A platform may be used only when its entry has `allowed: true` — the global
-switch, platform switch, and ToS/provider consent must all be true.
+A platform may be used when its entry has `allowed: true`, which means neither the
+capability switch nor that platform's switch is turned off. Calendar sync is on by
+default.
 
-If the requested platform is not allowed, stop before opening a browser or
-running local automation and explain the opt-in path:
+If the requested platform is not allowed, tell the operator it is turned off, give
+the commands that turn it on, and skip the provider write (do not open a browser or
+run local automation). If `readError` is set, say the automation settings file can't
+be read and name it.
 
 ```bash
-careerrat automation consent <platform> --write
 careerrat automation enable calendar_sync --write
 careerrat automation enable calendar_sync <platform> --write
-careerrat automation status --json
 ```
 
-The user must read the provider/platform terms themselves before recording
-consent. Never run this capability on a schedule or without a fresh user request.
+Never run this capability on a schedule or without a fresh user request.
 
 ## STEP 1 — Resolve the event
 
@@ -156,9 +156,9 @@ cleanly to one tracker row.
 
 The Calendar dashboard renders per-provider readiness derived from
 `candidate/automation.yml`'s `calendar_sync` capability — `Ready` when the
-capability/platform/consent switches are all on for that provider, `Needs
-setup` when some but not all are on, `Off` when none are, and `Consent
-gated` only when no automation status could be read at all — plus the 5 most
+the capability and platform switches are on for that provider, `Off` when
+either is turned off, and `Unknown` only when no automation status could be
+read at all, plus the 5 most
 recent `calendarWrites[]` rows.
 
 ## STEP 5 — If the write cannot complete
@@ -195,18 +195,18 @@ follows STEP 0 → 5 exactly as written.
   handler then asks which calendar app before recording anything.
 - **Provenance gate.** Two provenances exist: `manual` (the default — the
   candidate did the write themselves, so there's nothing for CareerRat to be
-  permitted to do) and `automated` (an app-verified write, gated exactly like
+  permitted to do) and `automated` (an app-verified write, checked exactly like
   STEP 0 above — `mayRun` must return `allowed` for that `calendar_sync`
   platform). The gate is enforced by the recording verb itself, so every
   entry point (the Ask intent, the data route, and STEP 4's CLI write) meets
-  the same bar; the Ask intent additionally refuses up front with a plain
-  "turn it on in Settings" message. Manual self-reports are never
-  consent-gated.
+  the same bar; the Ask intent additionally says up front that calendar sync is turned off
+  for that provider and offers a "Turn it on" action. Manual self-reports are
+  never gated.
 - **Record, never write.** The app never drives a browser or local automation
   tool from Ask. `calendar.record-write` only appends the
   `calendarWrites[]` audit row (STEP 4's dedupe policy, extended so an
   automated record supersedes an existing manual one for the same event) and
   confirms in the thread — it does not open Apple/Google/Outlook or perform
   the provider write itself. The `.ics` export and prefilled Google/Outlook
-  links (STEP 5) remain the only no-consent path when the candidate wants
+  links (STEP 5) remain the path that needs no capability when the candidate wants
   CareerRat to hand them something to add themselves.

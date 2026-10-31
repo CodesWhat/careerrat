@@ -1,11 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
 
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE, parseChatAnswerMode } from "../ai/chat-answer-mode.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
-import { hostnameToPortal } from "../apply/form-fill.mjs";
+import { hostnameToPortal, REQUIRED_FIELDS_UNANSWERED } from "../apply/form-fill.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
 import {
   automationStatus,
@@ -13,6 +13,7 @@ import {
   CAPABILITY_KEYS,
   isCapability,
   loadAutomation,
+  loadSubmitMode,
   mayRun,
   mergeAutomationDefaults,
   PLATFORMS,
@@ -31,10 +32,12 @@ import { activityAppend } from "../db/verbs/activity.mjs";
 import {
   appApproveReview,
   appCaptureInterviewIntake,
+  appMarkSubmitAttempt,
   appRecordOutcome,
   appScheduleInterview,
   appSetFields,
   appSetStatus,
+  statusProvesApplicationWasSubmitted,
 } from "../db/verbs/app.mjs";
 import {
   WRITE_PROVIDERS as CALENDAR_WRITE_PROVIDERS,
@@ -56,6 +59,7 @@ import { companyHealthSet } from "../db/verbs/company-health.mjs";
 import { deepIngestConfirmedItemUpsert, deepIngestStateGet } from "../db/verbs/deep-ingest.mjs";
 import { intakeOne } from "../db/verbs/intake.mjs";
 import {
+  linkedinProposalBatchGet,
   linkedinProposalBatchLatest,
   linkedinProposalDecide,
 } from "../db/verbs/linkedin-proposals.mjs";
@@ -81,6 +85,7 @@ import {
   startFirstSearchRun,
   startManualSearchRun,
 } from "../onboarding/first-search-run.mjs";
+import { openAnswerNeedsFromGaps } from "../packet/answer-needs.mjs";
 import { buildPacketContext } from "../packet/context.mjs";
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
@@ -98,9 +103,10 @@ import { packetProvenanceForContext, packetProvenanceMatches } from "../packet/p
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
-import { computeEvidenceWrite, loadEvidence } from "../profile/evidence-writer.mjs";
+import { computeEvidenceWrite, loadEvidence, slugifyClaimId } from "../profile/evidence-writer.mjs";
 import { applyGateWrite, GATE_APPLY_SUMMARIES } from "../profile/gate-apply.mjs";
-import { GATE_ROUTES } from "../profile/gate-writer.mjs";
+import { coerceValue, GATE_ROUTES, resolveRoute } from "../profile/gate-writer.mjs";
+import { classifyConfigChange } from "../profile/loosening.mjs";
 import {
   canonicalSearchSourceUrl,
   platformForHost,
@@ -126,7 +132,6 @@ import {
   adjacentRoleChoiceQuestion,
   adjacentRoleCoachingTrigger,
   buildAdjacentRoleChoicePrompt,
-  buildAdjacentRoleConfirmationPrompt,
   generateAdjacentRoleProposal,
   mergeAdjacentRoleTargets,
 } from "../search/adjacent-role-coach.mjs";
@@ -140,11 +145,30 @@ import {
 import { classifyStage } from "../tracker/dashboard.mjs";
 import { readVersion } from "../version.mjs";
 import {
+  aiRouteAvailable,
+  companyHealthRecheckDays,
+  noteSkippedFollowUp,
+  planAutoFollowUps,
+  snapshotApplicationState,
+} from "./cost-gate-auto.mjs";
+import {
   buildIssueReport,
   buildIssueUrl,
   FILED_ISSUE_URL_RE,
   ISSUE_REPORT_COMP_LEAK_MARKER,
 } from "./issue-report.mjs";
+import {
+  buildKnowledgeWriteEntry,
+  configWriteEntries,
+  revertKnowledgeWrite,
+  undoNextAction,
+} from "./knowledge-write-log.mjs";
+import { linkedinStagingEntries } from "./linkedin-write-log.mjs";
+import {
+  applyStrategyRecommendationLogged,
+  autoApplyStrategyRecommendations,
+  STRATEGY_NO_WRITER_TYPES,
+} from "./strategy-auto-apply.mjs";
 import {
   normalizeWorkspaceIntent,
   WORKSPACE_THREAD_ID,
@@ -195,6 +219,7 @@ export const EXECUTABLE_INTENTS = new Set([
   "strategy.stamp",
   "settings.explain",
   "settings.apply",
+  "knowledge.revert",
   "job.prepare-submit",
   "job.apply",
   "communication.draft",
@@ -1902,6 +1927,23 @@ function blockingPacketGaps(gaps) {
   return gaps.filter((gap) => !isNonBlockingPacketGap(gap));
 }
 
+// An unanswered required application question is a flag on that one job, not
+// a stop: the run keeps tailoring and filling everything else, and the job just
+// can't submit until the operator answers (see openAnswerNeeds in the apply
+// path, which also forces manual submit while any are open).
+function isAnswerNeededGap(gap) {
+  return (
+    String(gap?.kind || "").toLowerCase() === "answers" &&
+    String(gap?.code || "").toUpperCase() === "ANSWER_CONFIRMATION_REQUIRED"
+  );
+}
+
+// Gaps that stop the run before the form is opened: every blocking gap except
+// the ones that only need the operator's answer.
+function haltingPacketGaps(gaps) {
+  return blockingPacketGaps(gaps).filter((gap) => !isAnswerNeededGap(gap));
+}
+
 // Server-side corroboration for job.apply's resumeSession shortcut (see the
 // call site below): the persisted evaluation must have cleared the gate, and
 // the persisted packet manifest must be free of blocking gaps. Both fields
@@ -1921,7 +1963,7 @@ function applicationApplySafetyBlockReason({ repoRoot, env, application }) {
   }
   const gaps = Array.isArray(manifest.gaps) ? manifest.gaps : null;
   const packetComplete = gaps
-    ? blockingPacketGaps(gaps).length === 0
+    ? haltingPacketGaps(gaps).length === 0
     : manifest.uploadReady === true;
   if (!packetComplete) {
     return "This application's packet still has open items to resolve.";
@@ -2146,7 +2188,34 @@ const ACTIVE_APPLICATION_SESSION_STATES = new Set([
   "blocked",
 ]);
 
+const NEEDS_ANSWER_SESSION_STATES = new Set(["questions-captured", "awaiting-submit"]);
+
+function autoSubmitStopReason(execution) {
+  if (execution?.state !== "awaiting-submit" || execution?.session?.submitMode !== "auto") {
+    return "";
+  }
+  return String(execution?.session?.autoSubmitStopped?.reason || "")
+    .trim()
+    .replace(/[.\s]+$/, "")
+    .slice(0, 300);
+}
+
+function needsAnswerText(needs) {
+  const questions = needs.map((need) => `“${need.question}”`).join("; ");
+  return `${needs.length === 1 ? "One question needs" : `${needs.length} questions need`} your answer before this can be submitted: ${questions}. Everything else is done.`;
+}
+
 function applicationSessionText(execution) {
+  const autoReason = autoSubmitStopReason(execution);
+  if (autoReason) {
+    const unresolvedCount = Array.isArray(execution?.session?.unresolved)
+      ? execution.session.unresolved.length
+      : 0;
+    const unresolved = unresolvedCount
+      ? ` ${unresolvedCount} field${unresolvedCount === 1 ? "" : "s"} still ${unresolvedCount === 1 ? "needs" : "need"} your review.`
+      : "";
+    return `CareerRat filled the form but stopped before submitting: ${autoReason}.${unresolved} Open the application, check the answers and attachments, finish anything that's missing, and press submit yourself. Then return here and choose "I applied". This application was not marked Applied.`;
+  }
   const filledCount = Number(execution?.session?.filledCount) || 0;
   const uploadedCount = Number(execution?.session?.uploadedCount) || 0;
   const unresolvedCount = Array.isArray(execution?.session?.unresolved)
@@ -2162,7 +2231,11 @@ function applicationSessionText(execution) {
     ? `${unresolvedCount} field${unresolvedCount === 1 ? "" : "s"} still ${unresolvedCount === 1 ? "needs" : "need"} your review. `
     : "";
   const detail = String(execution?.reason || "Review the live application form.").trim();
-  return `${filled}${uploaded}${unresolved}${detail} This application was not marked Applied.`.trim();
+  const review =
+    execution?.state === "awaiting-submit"
+      ? ' Open the application, check the answers and attachments, finish any remaining fields, and press submit when everything looks right. Then return here and choose "I applied".'
+      : "";
+  return `${filled}${uploaded}${unresolved}${detail}${review} This application was not marked Applied.`.trim();
 }
 
 function packetGapsForApplication(gaps, application, applyIntent) {
@@ -2344,6 +2417,182 @@ function coachingPlanIsStale(plan, evaluation) {
   if ((basedOn.gate ?? null) !== (evaluation?.gate ?? null)) return true;
   if ((basedOn.fitScore ?? null) !== (evaluation?.fitScore ?? null)) return true;
   return false;
+}
+
+// Whitespace-normalized comparison of the schema fields two claims carry.
+function sameStoredClaim(stored, next) {
+  const norm = (value) =>
+    typeof value === "string"
+      ? value.replace(/\s+/g, " ").trim()
+      : Array.isArray(value)
+        ? value.map(norm)
+        : value;
+  const fields = [
+    "claim",
+    "evidence",
+    "metrics",
+    "links",
+    "role_signals",
+    "allowed_wording",
+    "forbidden_wording",
+  ];
+  const view = (claim) =>
+    JSON.stringify(
+      fields.map((f) => {
+        const v = norm(claim?.[f]);
+        return v === undefined || v === null || (Array.isArray(v) && v.length === 0) ? null : v;
+      })
+    );
+  return view(stored) === view(next);
+}
+
+// saveCoachingDraft: the shared core of coaching.plan's auto-save and the
+// legacy coaching.evidence-save click. Persists ONE gap's stored, reviewed
+// gap.suggestion.draftClaim through the SAME evidence firewall every other
+// guarded evidence write uses: computeEvidenceWrite (evidence-writer.mjs)
+// validates the claim (id/claim/evidence required, placeholder lint,
+// current_base leak guard) and computes the merged claim set, then
+// candidateEvidenceMerge (db/verbs/candidate.mjs) is the actual DB-mode
+// persistence, the SAME branch src/cli/evidence.mjs itself takes when a DB
+// workspace exists. evidence-writer.mjs's own writeEvidence() only writes the
+// LEGACY candidate/evidence.yml file and has no DB-mode branch, so it is never
+// the right call in this DB-only web workspace; NO firewall is bypassed either
+// way, since candidateEvidenceMerge enforces the identical lint/leak backstop
+// (assertCleanEvidenceClaims) on top.
+//
+// There is no caller-supplied draft: accepting one would let a request save
+// text the plan never produced. Throws actionError for every refusal (unknown
+// gap, stale plan, gap not open, no draft, firewall rejection); the gap is only
+// closed after the write succeeded. A closed gap records savedClaimId so an
+// Undo can tell its own gap from one a newer plan replaced.
+function saveCoachingDraft({ repoRoot, env, applicationId, gapId, coveredIds }) {
+  const application = applicationForIntent({ repoRoot, env, id: applicationId });
+  const plan = application.coachingPlan;
+  const gap = Array.isArray(plan?.gaps) ? plan.gaps.find((g) => g.id === gapId) : null;
+  if (!gapId || !gap) {
+    throw actionError("CareerRat could not find that coaching gap.", "COACHING_GAP_NOT_FOUND");
+  }
+  // The schema documents basedOn as the plan's provenance but nothing
+  // enforced it: a plan built against a prior evaluation must never be
+  // actable once a new evaluation has landed (evaluatedAt is the
+  // discriminator; gate/fitScore are a sanity check on top).
+  if (coachingPlanIsStale(plan, application.evaluation)) {
+    throw actionError(
+      "This coaching plan was built for an earlier evaluation. Run Coach me on this fit again to refresh it.",
+      "COACHING_PLAN_STALE"
+    );
+  }
+  if (gap.status !== "open") {
+    throw actionError(
+      "This coaching gap was already resolved and cannot be saved again.",
+      "COACHING_GAP_NOT_OPEN"
+    );
+  }
+  const draftClaim = gap.suggestion?.draftClaim;
+  if (!draftClaim?.claim || !draftClaim?.evidence) {
+    throw actionError("This gap has no evidence-claim draft to save.", "COACHING_NO_DRAFT_CLAIM");
+  }
+
+  const { claims: currentClaims } = loadEvidence({ root: repoRoot });
+  const writePlan = computeEvidenceWrite({ newClaim: draftClaim, currentClaims });
+  if (!writePlan.ok) {
+    throw actionError(
+      `CareerRat could not save this evidence claim: ${writePlan.error}`,
+      "EVIDENCE_WRITE_REJECTED"
+    );
+  }
+  // A saved claim already holds this id: the upsert would overwrite it and an
+  // Undo would then delete the original. An identical one is simply covered;
+  // a different one is left alone and the gap stays open.
+  const stored = writePlan.replaced
+    ? currentClaims.find((c) => slugifyClaimId(c?.id) === writePlan.claim.id)
+    : null;
+  if (stored && !sameStoredClaim(stored, writePlan.claim)) {
+    throw actionError(
+      "A saved claim already uses this wording, so CareerRat left it alone.",
+      "COACHING_CLAIM_ID_TAKEN"
+    );
+  }
+  let duplicate = Boolean(stored);
+  if (!stored) {
+    const mergeResult = candidateEvidenceMerge({ repoRoot, env, claims: [writePlan.claim] });
+    duplicate = (mergeResult?.added || 0) === 0 && (mergeResult?.skipped || 0) > 0;
+  }
+  // A second gap of one plan carrying the same draft is covered by the claim
+  // the first one just saved, so its Undo reopens both.
+  const sharesSave = duplicate && coveredIds?.has(writePlan.claim.id);
+  if (!duplicate) coveredIds?.add(writePlan.claim.id);
+
+  const nextGaps = plan.gaps.map((g) =>
+    g.id === gapId
+      ? {
+          ...g,
+          status: "closed",
+          ...(duplicate && !sharesSave ? {} : { savedClaimId: writePlan.claim.id }),
+        }
+      : g
+  );
+  appSetFields({
+    repoRoot,
+    env,
+    id: applicationId,
+    patch: { coachingPlan: { ...plan, gaps: nextGaps } },
+  });
+  return { claim: writePlan.claim, duplicate, sharesSave };
+}
+
+// A refused draft's reason in plain words: the firewall's own message, minus
+// the "could not save" lead-in the legacy click used.
+function coachingRefusalReason(error) {
+  const message = String(error?.message || "CareerRat could not save it.");
+  return message.replace(/^CareerRat could not save this evidence claim:\s*/, "");
+}
+
+// After an Undo removed a coaching-saved claim: reopen its gap, but only a gap
+// that is still the one this save closed. Returns a note for the undo summary.
+function reopenCoachingGap({ repoRoot, env, entry, setFields = appSetFields }) {
+  const applicationId = entry.source?.applicationId;
+  let application;
+  try {
+    application = applicationForIntent({ repoRoot, env, id: applicationId });
+  } catch {
+    return "The job it came from is gone, so there was no gap to reopen.";
+  }
+  const plan = application.coachingPlan;
+  const matching = (Array.isArray(plan?.gaps) ? plan.gaps : []).filter(
+    (g) => g?.status === "closed" && g.savedClaimId === entry.id
+  );
+  if (!matching.length) {
+    return "The coaching gap changed since, so it was left as it is.";
+  }
+  const ids = new Set(matching.map((g) => g.id));
+  const many = matching.length > 1;
+  const open = many ? "The coaching gaps are open again." : "The coaching gap is open again.";
+  try {
+    setFields({
+      repoRoot,
+      env,
+      id: applicationId,
+      patch: {
+        coachingPlan: {
+          ...plan,
+          gaps: plan.gaps.map((g) => {
+            if (!ids.has(g.id)) return g;
+            const { savedClaimId: _saved, ...rest } = g;
+            return { ...rest, status: "open" };
+          }),
+        },
+      },
+    });
+  } catch (error) {
+    // The claim is already gone, so the undo stands either way. An export
+    // failure after the commit still reopened the gap.
+    if (error?.committed === true) return open;
+    return many
+      ? "The coaching gaps stayed closed, so reopen them from the plan."
+      : "The coaching gap stayed closed, so reopen it from the plan.";
+  }
+  return open;
 }
 
 function communicationLabel(comm) {
@@ -3022,19 +3271,6 @@ function compBenchmarkActivitySummary(benchmark) {
   return parts.join(" / ") || "insufficient public data";
 }
 
-const COMPANY_HEALTH_RECHECK_DAYS_DEFAULT = 14;
-
-// candidate/modes.yml#company_health.recheck_days (SKILL.md's freshness
-// contract) — candidateConfigGet's DB-first accessor already returns the
-// raw modes doc whole (readSingleton stores/reads the JSON blob as-is), so
-// the company_health block just falls out of the same call this file
-// already makes elsewhere; no new config machinery needed.
-function companyHealthRecheckDays({ repoRoot, env }) {
-  const modes = candidateConfigGet({ repoRoot, env }).modes || {};
-  const days = Number(modes.company_health?.recheck_days);
-  return Number.isFinite(days) && days > 0 ? days : COMPANY_HEALTH_RECHECK_DAYS_DEFAULT;
-}
-
 // The comp-benchmark artifact stem embeds the year-month it was written
 // (see research-comp's STEP 1), so a fresh hit from an earlier month is
 // still found by role+location prefix rather than requiring an exact stem
@@ -3157,6 +3393,124 @@ function searchRunFromReceipt(message) {
     summary: artifact.summary || null,
     error: artifact.error || null,
   };
+}
+
+// Saves reusable screening answers straight into form-defaults and returns the
+// knowledge_write entries for them. A refused answer (still needs the user, or
+// job-specific) is skipped, never an error: the existing refusals stay in force.
+// A real failure stops the batch but keeps what already saved: those answers get
+// their log entries (and Undo) and the failure comes back as `failure`.
+async function saveReusableScreeningAnswers({ repoRoot, env, answers, saveImpl, source, writer }) {
+  const before = candidateConfigGet({ repoRoot, env });
+  const saved = [];
+  let failure = null;
+  for (const answer of answers) {
+    try {
+      saved.push(
+        await saveImpl({
+          repoRoot,
+          env,
+          question: answer.question,
+          key: answer.key,
+          answer: answer.answer,
+        })
+      );
+    } catch (error) {
+      if (!new Set(["NEEDS_USER", "NON_DURABLE_ANSWER", "BAD_REQUEST"]).has(error?.code)) {
+        failure = error;
+        break;
+      }
+    }
+  }
+  const entries = saved.length
+    ? configWriteEntries({
+        before,
+        after: candidateConfigGet({ repoRoot, env }),
+        writes: saved.map((item) => ({
+          name: "form-defaults",
+          path: `screening_answers.${item.key}`,
+          label: "Saved answer",
+        })),
+        source,
+        writer,
+      })
+    : [];
+  return { saved, entries, failure };
+}
+
+const JOB_SPECIFIC_PHRASE =
+  /\b(?:(?:this|the) (?:role|position|job|opportunity|company|organi[sz]ation|team)|(?:your|our) (?:team|company|organi[sz]ation|mission|product)|work (?:here|with us)|join(?:ing)? us)\b/i;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// A confirmed answer that names the application's company or role, or leans on
+// employer-specific phrasing, belongs to that application only. The writer's own
+// durability check is keyword-based and can't see this.
+function answerIsJobSpecific(entry, application) {
+  const text = String(entry?.answer || "");
+  if (JOB_SPECIFIC_PHRASE.test(text) || JOB_SPECIFIC_PHRASE.test(String(entry?.question || ""))) {
+    return true;
+  }
+  for (const name of [application?.company, application?.role]) {
+    const trimmed = String(name || "").trim();
+    if (trimmed.length < 3) continue;
+    if (
+      new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(trimmed)}(?![\\p{L}\\p{N}])`, "iu").test(text)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A thread answer to a durable question (work authorization, notice period and
+// the like) is saved to form-defaults the same way a drafted one is, so no later
+// job asks it again. Job-specific answers stay with their application: the
+// writer refuses them and they are skipped here.
+async function saveConfirmedDurableAnswers({
+  repoRoot,
+  env,
+  answers,
+  saveImpl,
+  intentMessage,
+  applicationId,
+}) {
+  let application = null;
+  if (applicationId) {
+    try {
+      application = applicationForIntent({ repoRoot, env, id: applicationId });
+    } catch {
+      application = null;
+    }
+  }
+  const reusable = await saveReusableScreeningAnswers({
+    repoRoot,
+    env,
+    answers: (answers || [])
+      .filter((entry) => !answerIsJobSpecific(entry, application))
+      .map((entry) => ({
+        question: entry.question,
+        key: entry.key,
+        answer: entry.answer,
+      })),
+    saveImpl,
+    source: { kind: "screening.answer-confirm", intentMessageId: intentMessage.message.id },
+    writer: "screening.answer-confirm",
+  });
+  const resultId = intentMessage.resultMessageId || randomUUID();
+  intentMessage.resultMessageId = resultId;
+  const undoActions = reusable.entries.flatMap((entry, index) =>
+    entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+  );
+  const savedNote = reusable.entries.length
+    ? ` Saved ${reusable.entries.length === 1 ? "this answer" : `${reusable.entries.length} answers`} for future applications.`
+    : "";
+  const failureNote = reusable.failure
+    ? ` Some answers couldn't be saved for future applications: ${reusable.failure.message || "an unknown error"}`
+    : "";
+  return { entries: reusable.entries, undoActions, savedNote: `${savedNote}${failureNote}` };
 }
 
 async function recordWorkspaceAdjacentRoleCoaching({
@@ -3332,6 +3686,7 @@ async function applyConfirmedAdjacentRoles({
   repoRoot,
   env,
   promptMessage,
+  selectedRoleIds,
   startManualSearchImpl,
   onSearchStarted,
   searchFetchImpl,
@@ -3347,7 +3702,7 @@ async function applyConfirmedAdjacentRoles({
   }
   const coach = promptMessage.metadata?.careerCoach || {};
   const proposal = coach.proposal;
-  const roles = selectedProposalRoles(proposal, coach.selectedRoleIds);
+  const roles = selectedProposalRoles(proposal, selectedRoleIds ?? coach.selectedRoleIds);
   if (!roles.length) {
     workspaceMessageAppend({
       repoRoot,
@@ -3380,6 +3735,23 @@ async function applyConfirmedAdjacentRoles({
       patch: { role_buckets: merged.roleBuckets },
     });
   }
+  // The expansion applies as soon as roles are picked, so it lands in the thread
+  // with an Undo, like every other direct knowledge write.
+  const logEntries = merged.added.length
+    ? configWriteEntries({
+        before: config,
+        after: candidateConfigGet({ repoRoot, env }),
+        writes: [{ name: "targeting", path: "role_buckets", label: "Target roles" }],
+        source: { kind: "career-coach.adjacent-roles", promptId: confirmationPromptId },
+        writer: "career-coach.adjacent-roles",
+      })
+    : [];
+  const appliedMessageId = resultMessageId || careerCoachMessageId("applied", confirmationPromptId);
+  const undoActions = logEntries.flatMap((entry, index) =>
+    entry.revertible
+      ? [undoNextAction({ messageId: appliedMessageId, index: index + 1, entry })]
+      : []
+  );
 
   let operation = null;
   let run = null;
@@ -3408,7 +3780,7 @@ async function applyConfirmedAdjacentRoles({
   workspaceMessageAppend({
     repoRoot,
     env,
-    id: resultMessageId || careerCoachMessageId("applied", confirmationPromptId),
+    id: appliedMessageId,
     role: "assistant",
     kind: started ? "action_result" : "action_error",
     text,
@@ -3433,10 +3805,12 @@ async function applyConfirmedAdjacentRoles({
         })),
         added: merged.added,
       },
+      ...logEntries,
       ...(run ? [searchRunArtifact({ run: { ...run, purpose: "manual-search" } })] : []),
     ],
     metadata: {
       source: "career-coach",
+      ...(undoActions.length ? { nextActions: undoActions } : {}),
       careerCoach: {
         stage: "expansion-applied",
         confirmationPromptId,
@@ -3470,42 +3844,18 @@ async function handleAdjacentRoleChoice({
   if (!coach) return null;
 
   if (coach.stage === "role-selection") {
-    const existing = current.messages.find(
-      (message) =>
-        message?.metadata?.careerCoach?.stage === "confirm-expansion" &&
-        message.metadata.careerCoach.selectionPromptId === choiceResolution.promptId
-    );
-    if (existing) return current;
-    const messageId = resultMessageId || careerCoachMessageId("confirm", choiceResolution.promptId);
-    const selectedRoleIds = choiceResolution.optionIds || [];
-    const choicePrompt = buildAdjacentRoleConfirmationPrompt({
-      proposal: coach.proposal,
-      selectedRoleIds,
-      threadId: WORKSPACE_THREAD_ID,
-      messageId,
-    });
-    workspaceMessageAppend({
+    return applyConfirmedAdjacentRoles({
       repoRoot,
       env,
-      id: messageId,
-      role: "assistant",
-      kind: "text",
-      text: choicePrompt.question,
-      metadata: {
-        source: "career-coach",
-        careerCoach: {
-          stage: "confirm-expansion",
-          searchRunId: coach.searchRunId,
-          proposal: coach.proposal,
-          selectionPromptId: choiceResolution.promptId,
-          selectedRoleIds,
-        },
-        choicePrompt,
-      },
+      promptMessage,
+      selectedRoleIds: choiceResolution.optionIds || [],
+      startManualSearchImpl,
+      onSearchStarted,
+      searchFetchImpl,
+      resultMessageId,
       operationAttempt,
       now,
     });
-    return workspaceThreadRead({ repoRoot, env });
   }
 
   if (coach.stage !== "confirm-expansion") return null;
@@ -3562,8 +3912,23 @@ async function recoverWorkspaceAdjacentRoleCoaching({
   for (const message of current.messages) {
     const coach = message?.metadata?.careerCoach;
     const prompt = message?.metadata?.choicePrompt;
-    if (coach?.stage !== "confirm-expansion" || prompt?.state !== "resolved") continue;
+    if (
+      !new Set(["role-selection", "confirm-expansion"]).has(coach?.stage) ||
+      prompt?.state !== "resolved"
+    ) {
+      continue;
+    }
     if (careerCoachOutcomeExists(current.messages, prompt.id)) continue;
+    // A thread from before the direct apply may hold a pending confirm step for
+    // this selection; that step owns the outcome.
+    if (
+      coach.stage === "role-selection" &&
+      current.messages.some(
+        (other) => other?.metadata?.careerCoach?.selectionPromptId === prompt.id
+      )
+    ) {
+      continue;
+    }
     await handleAdjacentRoleChoice({
       repoRoot,
       env,
@@ -3664,6 +4029,31 @@ function inboundSummary(item) {
     .slice(0, 200);
 }
 
+// Would this gate write loosen a guard? Reads only the one doc the gate routes to
+// and builds the doc the write would leave; an unknown gate type or a value that
+// won't coerce is not loosening here, applyGateWrite reports those itself.
+function gateLooseningVerdict({ repoRoot, env, type, value }) {
+  let route;
+  let coerced;
+  try {
+    route = resolveRoute(type);
+    coerced = coerceValue(route, value);
+  } catch {
+    return { loosens: false, reasons: [] };
+  }
+  if (route.op !== "set") return { loosens: false, reasons: [] };
+  const before = candidateConfigGet({ repoRoot, env })[route.file];
+  const after = JSON.parse(JSON.stringify(before ?? {}));
+  const parts = route.path.split(".");
+  let cursor = after;
+  for (const part of parts.slice(0, -1)) {
+    if (cursor[part] === null || typeof cursor[part] !== "object") cursor[part] = {};
+    cursor = cursor[part];
+  }
+  cursor[parts.at(-1)] = coerced;
+  return classifyConfigChange(route.file, before, after);
+}
+
 function appendActionResult({
   repoRoot,
   env,
@@ -3725,94 +4115,72 @@ function workflowActionMetadata(normalized, execution, retryLabel, extra = {}) {
   };
 }
 
-const CONTEXTUAL_PERMISSIONS = Object.freeze({
+// Capabilities are on unless the operator turned one off, so nothing asks for
+// permission any more. These keys stay so thread buttons persisted by older
+// versions ({op: "contextual-permission", permission}) and the old typed commands
+// ("Allow form preparation") still resolve: both now just turn the capability on.
+const LEGACY_CONTEXTUAL_PERMISSIONS = Object.freeze({
   "application-preparation": {
     capability: "authenticated_apply_preparation",
     label: "Application form preparation",
-    allowLabel: "Allow form preparation",
     typedCommand: "Allow form preparation",
-    request:
-      "CareerRat needs permission to open and fill application forms on Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and other job sites. You still press Submit.",
   },
   "relationship-sourcing": {
     capability: "relationship_sourcing",
     label: "Relationship sourcing",
-    allowLabel: "Allow relationship sourcing",
     typedCommand: "Allow relationship sourcing",
-    request:
-      "CareerRat needs permission to use LinkedIn and Wellfound to find recruiters and hiring-team contacts for your review.",
   },
   "status-checks": {
     capability: "status_polling",
     label: "Application status checks",
-    allowLabel: "Allow status checks",
     typedCommand: "Allow status checks",
-    request:
-      "CareerRat needs permission to read your saved application status pages on Greenhouse, Workday, Ashby, and Lever.",
   },
   "mail-checks": {
     capability: "mail_access",
     platforms: ["gmail", "outlook"],
     label: "Recruiting email checks",
-    allowLabel: "Allow email checks",
     typedCommand: "Allow email checks",
-    request:
-      "CareerRat needs permission to check Gmail and Outlook for recruiting email and bring the results back here.",
   },
   "message-checks": {
     capability: "messaging",
     label: "Recruiting message checks",
-    allowLabel: "Allow message checks",
     typedCommand: "Allow message checks",
-    request:
-      "CareerRat needs permission to check LinkedIn and Wellfound for recruiting messages and bring the results back here.",
   },
   "linkedin-profile-review": {
     capability: "profile_optimize",
     label: "LinkedIn profile review",
-    allowLabel: "Allow LinkedIn review",
     typedCommand: "Allow LinkedIn review",
-    request:
-      "CareerRat needs permission to read your LinkedIn profile and draft evidence-backed suggestions. It will not edit your profile.",
   },
   "apple-calendar-write": {
     capability: "calendar_sync",
     platforms: ["apple_calendar"],
     label: "Apple Calendar access",
-    allowLabel: "Allow Apple Calendar",
     typedCommand: "Allow Apple Calendar",
-    request: "CareerRat needs permission to add this event to Apple Calendar.",
   },
   "google-calendar-write": {
     capability: "calendar_sync",
     platforms: ["google_calendar"],
     label: "Google Calendar access",
-    allowLabel: "Allow Google Calendar",
     typedCommand: "Allow Google Calendar",
-    request: "CareerRat needs permission to add this event to Google Calendar.",
   },
   "outlook-calendar-write": {
     capability: "calendar_sync",
     platforms: ["outlook_calendar"],
     label: "Outlook Calendar access",
-    allowLabel: "Allow Outlook Calendar",
     typedCommand: "Allow Outlook Calendar",
-    request: "CareerRat needs permission to add this event to Outlook Calendar.",
   },
   "automation-tools-calendar-write": {
     capability: "calendar_sync",
     platforms: ["automation_tools"],
     label: "Calendar automation access",
-    allowLabel: "Allow calendar automation",
     typedCommand: "Allow calendar automation",
-    request: "CareerRat needs permission to add this event through your calendar automation.",
   },
 });
 
 function contextualPermissionDefinition(permission) {
   const key = String(permission || "").trim();
-  return Object.hasOwn(CONTEXTUAL_PERMISSIONS, key)
-    ? { key, ...CONTEXTUAL_PERMISSIONS[key] }
+  return Object.hasOwn(LEGACY_CONTEXTUAL_PERMISSIONS, key)
+    ? { key, ...LEGACY_CONTEXTUAL_PERMISSIONS[key] }
     : null;
 }
 
@@ -3824,39 +4192,90 @@ function contextualPermissionChange(permission) {
   };
 }
 
-function appendContextualPermissionRequest({
+const CAPABILITY_OFF_STATE = "capability-off";
+const APPLICATION_CAPABILITY_OFF_CODES = new Set([
+  "CAPABILITY_OFF",
+  "APPLICATION_PREPARATION_PERMISSION_REQUIRED",
+]);
+
+// The plain "it's turned off" note a request shows when mayRun denies it: what is
+// off, the command that turns it on, and one "Turn it on" action. A settings file
+// that can't be read is reported as that, with no action, because flipping a switch
+// can't fix it. `platforms` limits the check to the platforms the request needs.
+function capabilityOffNote({ repoRoot, env, capability, platforms }) {
+  const definition = {
+    ...CAPABILITIES[capability],
+    label: CAPABILITIES[capability].label.replace(/\s*\(.*\)$/, ""),
+  };
+  const checked = platforms?.length ? platforms : definition.platforms;
+  const verdicts = checked.map((platform) => ({
+    platform,
+    verdict: mayRun({ capability, platform, root: repoRoot, env }),
+  }));
+  if (verdicts.some(({ verdict }) => verdict.checks?.readable === false)) {
+    const path = loadAutomation({ root: repoRoot, env }).path;
+    return {
+      text: `${definition.label} is off because the automation settings file can't be read (${path}). Fix that file, then ask me again.`,
+      nextActions: [],
+    };
+  }
+  const denied = verdicts.filter(({ verdict }) => !verdict.allowed);
+  const offPlatforms = (denied.length ? denied : verdicts).map(({ platform }) => platform);
+  const capabilityOff = denied.some(({ verdict }) => verdict.checks?.global === false);
+  const commands = [];
+  if (capabilityOff || !denied.length) {
+    commands.push(`careerrat automation enable ${capability} --write`);
+  }
+  for (const { platform, verdict } of denied) {
+    if (verdict.checks?.platform === false) {
+      commands.push(`careerrat automation enable ${capability} ${platform} --write`);
+    }
+  }
+  const where = offPlatforms.map((platform) => platform.replaceAll("_", " ")).join(", ");
+  return {
+    text: `${definition.label} is turned off for ${where}. Turn it on with ${commands
+      .map((command) => `\`${command}\``)
+      .join(" and ")}, or ask me to turn it on.`,
+    nextActions: [
+      {
+        label: "Turn it on",
+        intent: {
+          type: "settings.apply",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: {
+            change: {
+              kind: "automation",
+              op: "capability",
+              capability,
+              enabled: true,
+              platforms: offPlatforms,
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
+function appendCapabilityOffNote({
   repoRoot,
   env,
   normalized,
   intentMessage,
-  permission,
+  capability,
+  platforms,
   artifacts,
   now,
 }) {
-  const definition = contextualPermissionDefinition(permission);
-  if (!definition) {
-    throw actionError("That permission request is unavailable.", "SETTINGS_CHANGE_INVALID");
-  }
+  const note = capabilityOffNote({ repoRoot, env, capability, platforms });
   return appendActionResult({
     repoRoot,
     env,
     normalized,
     intentMessage,
-    text: `${definition.request} Choose ${definition.allowLabel}, or type “${definition.typedCommand}”.`,
+    text: note.text,
     artifacts,
-    metadata: {
-      state: "permission-needed",
-      nextActions: [
-        {
-          label: definition.allowLabel,
-          intent: {
-            type: "settings.apply",
-            entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-            input: { change: contextualPermissionChange(definition.key) },
-          },
-        },
-      ],
-    },
+    metadata: { state: CAPABILITY_OFF_STATE, nextActions: note.nextActions },
     now,
   });
 }
@@ -4047,7 +4466,79 @@ async function executeSourceAuthDecision({
   });
 }
 
-export async function executeWorkspaceIntent({
+// Detached by default: the follow-up starts after the triggering write has
+// returned, and its own failure is recorded by the intent handler as an
+// action_error in the thread, so the rejection is only swallowed here.
+function scheduleDetached(run) {
+  setImmediate(() => {
+    run().catch(() => {});
+  });
+}
+
+// Follow-ups scheduled but not yet settled, keyed by workspace, application
+// and follow-up key. The thread check in planAutoFollowUps only sees a run once
+// its intent message is written, so two writes landing together could both
+// plan the same cost-bearing run without this.
+const autoFollowUpsInFlight = new Set();
+
+// Runs the follow-ups that a status change or a new evaluation made due
+// (company.health at fire_at_stage, coaching.plan on a review verdict). They go
+// through the same intent handlers the buttons use, so artifacts, logs and Undo
+// match a click. Nothing in here may throw into the caller.
+function scheduleAutoFollowUps({ options, before }) {
+  try {
+    const { repoRoot, env = process.env } = options;
+    const due = planAutoFollowUps({
+      repoRoot,
+      env,
+      before,
+      startCompanyHealthImpl: options.startCompanyHealthImpl,
+      now: options.now ? options.now().getTime() : Date.now(),
+    });
+    const schedule = options.scheduleAutoFollowUp || scheduleDetached;
+    const aiReady = options.aiRouteAvailableImpl || (() => aiRouteAvailable({ repoRoot, env }));
+    for (const followUp of due) {
+      const flightKey = `${repoRoot}\u0000${followUp.intent.entity?.id}\u0000${followUp.key}`;
+      if (autoFollowUpsInFlight.has(flightKey)) continue;
+      autoFollowUpsInFlight.add(flightKey);
+      const rest = { ...options, intent: followUp.intent, autoFollowUps: false };
+      delete rest.intentMessageId;
+      delete rest.resultMessageId;
+      delete rest.operationAttempt;
+      delete rest.executionPlan;
+      delete rest.signal;
+      schedule(async () => {
+        try {
+          // The AI-route probe can shell out to a CLI, so it runs here, after
+          // the triggering write has already returned.
+          if (!aiReady()) {
+            noteSkippedFollowUp({ repoRoot, env, followUp });
+            return;
+          }
+          await executeWorkspaceIntentCore(rest);
+        } catch {
+          // The handler already wrote the action_error into the job thread.
+        } finally {
+          autoFollowUpsInFlight.delete(flightKey);
+        }
+      });
+    }
+  } catch {
+    // Planning the follow-up never fails the write that triggered it.
+  }
+}
+
+export async function executeWorkspaceIntent(options = {}) {
+  const auto = options.autoFollowUps === true;
+  const before = auto
+    ? snapshotApplicationState({ repoRoot: options.repoRoot, env: options.env ?? process.env })
+    : null;
+  const result = await executeWorkspaceIntentCore(options);
+  if (before) scheduleAutoFollowUps({ options, before });
+  return result;
+}
+
+async function executeWorkspaceIntentCore({
   repoRoot,
   env = process.env,
   intent,
@@ -4081,6 +4572,7 @@ export async function executeWorkspaceIntent({
   runLinkedinOptimizeImpl,
   runStatusSyncImpl,
   buildCoachingPlanImpl = buildCoachingPlan,
+  appSetFieldsImpl = appSetFields,
   onSearchStarted,
   searchFetchImpl,
   applyJobImpl,
@@ -4120,18 +4612,32 @@ export async function executeWorkspaceIntent({
   try {
     normalized = resolveNaturalWorkspaceRequest({ repoRoot, env, intent: normalized });
     if (new Set(["job.prepare-submit", "job.apply"]).has(normalized.type)) {
-      applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      const submitTarget = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const executionPlan = corroborateApplicationMissionAttempt({
         repoRoot,
         env,
         intent: normalized,
         now,
       });
+      // The workspace's `submit` setting decides whether the executor may press
+      // the final Submit. A focus-only request only returns to the prepared tab,
+      // so it never unlocks submit whatever the setting says.
+      // An application already auto-submitted without a confirmation (and not
+      // yet recorded as applied) is never auto-submitted again, across runs.
+      const submitAlreadyAttempted =
+        Boolean(submitTarget?.submitAttemptedAt) &&
+        !statusProvesApplicationWasSubmitted(submitTarget?.status);
+      const submitAuto =
+        loadSubmitMode({ root: repoRoot, env }) === "auto" &&
+        normalized.input?.focusSession !== true &&
+        !submitAlreadyAttempted;
       normalized = {
         ...normalized,
         input: {
           ...(normalized.input || {}),
-          prepareOnly: true,
+          prepareOnly: !submitAuto,
+          submitMode: submitAuto ? "auto" : "manual",
+          ...(submitAlreadyAttempted ? { submitAlreadyAttempted: true } : {}),
           executionPlan,
         },
       };
@@ -4182,14 +4688,24 @@ export async function executeWorkspaceIntent({
           : Array.isArray(manifest.gaps)
             ? manifest.gaps.length
             : 0;
+        const durable = await saveConfirmedDurableAnswers({
+          repoRoot,
+          env,
+          answers: confirmation.answers,
+          saveImpl: saveScreeningAnswerImpl,
+          intentMessage,
+          applicationId: confirmation.applicationId || operation.applicationId,
+        });
         return appendActionResult({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          text: uploadReady
-            ? `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
-            : `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`,
+          text: `${
+            uploadReady
+              ? `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
+              : `Confirmed ${confirmation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`
+          }${durable.savedNote}`,
           artifacts: [
             {
               kind: "screening_answer_confirmed",
@@ -4201,23 +4717,29 @@ export async function executeWorkspaceIntent({
               answers: confirmation.answers,
               artifactPath: confirmation.artifactPath,
             },
+            ...durable.entries,
           ],
           metadata: {
             state: "confirmed",
             persisted: true,
             uploadReady,
             gapCount,
-            ...(uploadReady
+            ...(uploadReady || durable.undoActions.length
               ? {
                   nextActions: [
-                    {
-                      label: "Resume supervised apply",
-                      intent: {
-                        type: "job.prepare-submit",
-                        entity: { type: "application", id: confirmation.applicationId },
-                        input: { resumeSession: true },
-                      },
-                    },
+                    ...(uploadReady
+                      ? [
+                          {
+                            label: "Resume supervised apply",
+                            intent: {
+                              type: "job.prepare-submit",
+                              entity: { type: "application", id: confirmation.applicationId },
+                              input: { resumeSession: true },
+                            },
+                          },
+                        ]
+                      : []),
+                    ...durable.undoActions,
                   ],
                 }
               : {}),
@@ -4260,28 +4782,33 @@ export async function executeWorkspaceIntent({
                 },
               ]
             : [];
-      const reusableActions =
-        (operation.answers || []).length === 1
-          ? reusableAnswers.map((answer) => ({
-              label: "Save for future applications",
-              intent: {
-                type: "screening.answer-save",
-                entity: { type: "candidate", id: "candidate" },
-                input: {
-                  question: answer.question,
-                  key: answer.key,
-                  answer: answer.answer,
-                },
-              },
-            }))
-          : [];
+      // Reusable (non job-specific) answers save as they're drafted, with an Undo.
+      const reusable = await saveReusableScreeningAnswers({
+        repoRoot,
+        env,
+        answers: reusableAnswers,
+        saveImpl: saveScreeningAnswerImpl,
+        source: { kind: "screening.answer", intentMessageId: intentMessage.message.id },
+        writer: "screening.answer",
+      });
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = reusable.entries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
       const count = (operation.answers || []).length;
+      const savedNote = reusable.entries.length
+        ? ` Saved ${reusable.entries.length === 1 ? "this answer" : `${reusable.entries.length} answers`} for future applications.`
+        : "";
+      const failureNote = reusable.failure
+        ? ` Some answers couldn't be saved for future applications: ${reusable.failure.message || "an unknown error"}`
+        : "";
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `${count === 1 ? "I drafted this answer" : `I drafted ${count} answers`}. Review ${count === 1 ? "this answer" : "them"} before using ${count === 1 ? "it" : "them"}. Nothing was submitted.`,
+        text: `${count === 1 ? "I drafted this answer" : `I drafted ${count} answers`}. Review ${count === 1 ? "this answer" : "them"} before using ${count === 1 ? "it" : "them"}. Nothing was submitted.${savedNote}${failureNote}`,
         artifacts: [
           {
             kind: "screening_answers",
@@ -4293,15 +4820,16 @@ export async function executeWorkspaceIntent({
             excluded: operation.excluded || [],
             artifactPath: operation.artifactPath || null,
           },
+          ...reusable.entries,
         ],
         metadata: {
           state: operation.needsUser ? "needs-user" : "reviewable",
           requiresReview: true,
           persisted: false,
           ai: operation.ai || { used: false },
-          ...(applicationActions.length || reusableActions.length
+          ...(applicationActions.length || undoActions.length
             ? {
-                nextActions: [...applicationActions, ...reusableActions],
+                nextActions: [...applicationActions, ...undoActions],
               }
             : {}),
         },
@@ -4327,14 +4855,24 @@ export async function executeWorkspaceIntent({
         : Array.isArray(manifest.gaps)
           ? manifest.gaps.length
           : 0;
+      const durable = await saveConfirmedDurableAnswers({
+        repoRoot,
+        env,
+        answers: operation.answers,
+        saveImpl: saveScreeningAnswerImpl,
+        intentMessage,
+        applicationId: operation.applicationId || normalized.entity.id,
+      });
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: uploadReady
-          ? `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
-          : `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`,
+        text: `${
+          uploadReady
+            ? `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. The application packet is ready to resume.`
+            : `Confirmed ${operation.answers?.length > 1 ? "these answers" : "this answer"}. ${gapCount} packet item${gapCount === 1 ? "" : "s"} still need review.`
+        }${durable.savedNote}`,
         artifacts: [
           {
             kind: "screening_answer_confirmed",
@@ -4346,23 +4884,29 @@ export async function executeWorkspaceIntent({
             answers: operation.answers,
             artifactPath: operation.artifactPath,
           },
+          ...durable.entries,
         ],
         metadata: {
           state: "confirmed",
           persisted: true,
           uploadReady,
           gapCount,
-          ...(uploadReady
+          ...(uploadReady || durable.undoActions.length
             ? {
                 nextActions: [
-                  {
-                    label: "Resume supervised apply",
-                    intent: {
-                      type: "job.prepare-submit",
-                      entity: { type: "application", id: operation.applicationId },
-                      input: { resumeSession: true },
-                    },
-                  },
+                  ...(uploadReady
+                    ? [
+                        {
+                          label: "Resume supervised apply",
+                          intent: {
+                            type: "job.prepare-submit",
+                            entity: { type: "application", id: operation.applicationId },
+                            input: { resumeSession: true },
+                          },
+                        },
+                      ]
+                    : []),
+                  ...durable.undoActions,
                 ],
               }
             : {}),
@@ -4373,6 +4917,7 @@ export async function executeWorkspaceIntent({
     }
 
     if (normalized.type === "screening.answer-save") {
+      const before = candidateConfigGet({ repoRoot, env });
       const operation = await saveScreeningAnswerImpl({
         repoRoot,
         env,
@@ -4380,6 +4925,24 @@ export async function executeWorkspaceIntent({
         key: input.key,
         answer: input.answer,
       });
+      const logEntries = configWriteEntries({
+        before,
+        after: candidateConfigGet({ repoRoot, env }),
+        writes: [
+          {
+            name: "form-defaults",
+            path: `screening_answers.${operation.key}`,
+            label: "Saved answer",
+          },
+        ],
+        source: { kind: "screening.answer-save", intentMessageId: intentMessage.message.id },
+        writer: "screening.answer-save",
+      });
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
       return appendActionResult({
         repoRoot,
         env,
@@ -4393,8 +4956,13 @@ export async function executeWorkspaceIntent({
             key: operation.key,
             answer: operation.answer,
           },
+          ...logEntries,
         ],
-        metadata: { state: "saved", persisted: true },
+        metadata: {
+          state: "saved",
+          persisted: true,
+          ...(undoActions.length ? { nextActions: undoActions } : {}),
+        },
         operationResult: operation,
         now,
       });
@@ -5638,14 +6206,20 @@ export async function executeWorkspaceIntent({
         operation?.chat || operation?.activeDiscoveryChat || operation,
         { skill: "company-health", title: `Company health: ${company}` }
       );
+      // One company-health chat runs at a time and a second start reuses it,
+      // so an automatic run that only reopened another check says so rather
+      // than claiming this company was researched.
+      const autoBusy = input.auto === true && artifact.reused;
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: artifact.reused
-          ? `Reopened the company-health check for ${company}.`
-          : `Started a company-health check for ${company}. This stays internal and never reaches the company.`,
+        text: autoBusy
+          ? `Didn't start the automatic company-health check for ${company}: another check is still running. Run it from this job once that one finishes.`
+          : artifact.reused
+            ? `Reopened the company-health check for ${company}.`
+            : `Started a company-health check for ${company}. This stays internal and never reaches the company.`,
         artifacts: [artifact],
         metadata: { state: artifact.state },
         operationResult: operation,
@@ -5713,6 +6287,12 @@ export async function executeWorkspaceIntent({
     // call + NO_AI_ROUTE degradation, src/core/coaching/plan.mjs), persisted
     // through the generic appSetFields patch verb — coaching earns no new DB
     // verb, it just writes one more typed field onto the application row.
+    //
+    // Every open gap whose plan carries an evidence-claim draft is then saved
+    // straight away through saveCoachingDraft (the same evidence firewall the
+    // legacy coaching.evidence-save click uses) and logged with an Undo. A
+    // draft the firewall refuses is not saved: its gap stays open and the
+    // message says why.
     if (normalized.type === "coaching.plan") {
       const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const operation = await buildCoachingPlanImpl({
@@ -5735,114 +6315,185 @@ export async function executeWorkspaceIntent({
         id: normalized.entity.id,
         patch: { coachingPlan: plan },
       });
+
+      const saved = [];
+      const refused = [];
+      const coveredIds = new Set();
+      for (const gap of Array.isArray(plan.gaps) ? plan.gaps : []) {
+        if (gap?.status !== "open") continue;
+        if (!gap.suggestion?.draftClaim?.claim || !gap.suggestion?.draftClaim?.evidence) continue;
+        try {
+          saved.push({
+            gapId: gap.id,
+            ...saveCoachingDraft({
+              repoRoot,
+              env,
+              applicationId: normalized.entity.id,
+              gapId: gap.id,
+              coveredIds,
+            }),
+          });
+        } catch (error) {
+          refused.push({
+            gapId: gap.id,
+            gapText: gap.gapText,
+            reason: coachingRefusalReason(error),
+          });
+        }
+      }
+      const finalPlan =
+        saved.length || refused.length
+          ? applicationForIntent({ repoRoot, env, id: normalized.entity.id }).coachingPlan || plan
+          : plan;
+
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const logEntries = saved
+        .filter((item) => !item.duplicate)
+        .map((item) =>
+          buildKnowledgeWriteEntry({
+            target: "evidence",
+            op: "add",
+            id: item.claim.id,
+            before: undefined,
+            after: item.claim,
+            source: { kind: "coaching", applicationId: normalized.entity.id, gapId: item.gapId },
+            writer: "coaching.plan",
+            label: "Evidence claim",
+          })
+        );
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
+      const openGaps = (finalPlan.gaps || []).filter((g) => g.status === "open");
+      const lines = [
+        `Built a coaching plan for ${applicationLabel(application)}: ${plan.gaps.length} gap${plan.gaps.length === 1 ? "" : "s"} named.`,
+      ];
+      for (const item of saved) {
+        lines.push(
+          item.duplicate
+            ? `"${item.claim.claim}" was already in your evidence bank.`
+            : `Saved "${item.claim.claim}" to your evidence bank.`
+        );
+      }
+      for (const item of refused) {
+        lines.push(`Didn't save a draft for "${item.gapText}": ${item.reason}`);
+      }
+      const noDraft = openGaps.filter((g) => !refused.some((r) => r.gapId === g.id));
+      if (noDraft.length) {
+        lines.push(
+          `Still open: ${noDraft.map((g) => `"${g.gapText}"`).join("; ")} (no honest close path yet).`
+        );
+      }
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `Built a coaching plan for ${applicationLabel(application)}: ${plan.gaps.length} gap${plan.gaps.length === 1 ? "" : "s"} named.`,
+        text: lines.join(" "),
         artifacts: [
           {
             kind: "coaching_plan",
             applicationId: normalized.entity.id,
             title: `${applicationLabel(application)}: Coaching plan`,
-            coachingPlan: plan,
+            coachingPlan: finalPlan,
           },
+          ...logEntries,
         ],
-        metadata: { state: "planned" },
+        metadata: {
+          state: "planned",
+          ...(undoActions.length || saved.length
+            ? {
+                nextActions: [
+                  ...undoActions,
+                  ...(saved.length
+                    ? [
+                        {
+                          label: "See if this changed your fit",
+                          intent: {
+                            type: "job.evaluate",
+                            entity: { type: "application", id: normalized.entity.id },
+                          },
+                        },
+                      ]
+                    : []),
+                ],
+              }
+            : {}),
+        },
         now,
       });
     }
 
-    // coaching.evidence-save — confirming one gap's evidence-claim draft.
-    // Routes through the SAME evidence firewall every other guarded evidence
-    // write uses: computeEvidenceWrite (evidence-writer.mjs) validates the
-    // claim (id/claim/evidence required, placeholder lint, current_base leak
-    // guard) and computes the merged claim set, then candidateEvidenceMerge
-    // (db/verbs/candidate.mjs) is the actual DB-mode persistence — the SAME
-    // branch src/cli/evidence.mjs itself takes when a DB workspace exists.
-    // evidence-writer.mjs's own writeEvidence() only writes the LEGACY
-    // candidate/evidence.yml file and has no DB-mode branch, so it is never
-    // the right call in this DB-only web workspace; NO firewall is bypassed
-    // either way, since candidateEvidenceMerge enforces the identical
-    // lint/leak backstop (assertCleanEvidenceClaims) on top.
-    //
-    // Only the stored, reviewed gap.suggestion.draftClaim is ever persisted —
-    // there is no caller-supplied override. The draft the candidate saw and
-    // confirmed on the card is the exact draft that gets written; nothing in
-    // the product has ever populated a different one, and accepting one from
-    // input would let a confirm click silently save text the candidate never
-    // reviewed.
+    // coaching.evidence-save: legacy per-gap click. Plans now auto-save their
+    // drafts (coaching.plan above), so this only survives for buttons persisted
+    // in older threads: a gap the plan already closed answers "Already saved."
+    // with no second write. Everything else runs the same saveCoachingDraft
+    // core, which only ever persists the stored, reviewed
+    // gap.suggestion.draftClaim; there is no caller-supplied override.
     if (normalized.type === "coaching.evidence-save") {
       const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
       const gapId = String(input.gapId || "").trim();
-      const plan = application.coachingPlan;
-      const gap = Array.isArray(plan?.gaps) ? plan.gaps.find((g) => g.id === gapId) : null;
-      if (!gapId || !gap) {
-        throw actionError("CareerRat could not find that coaching gap.", "COACHING_GAP_NOT_FOUND");
+      const existingGap = Array.isArray(application.coachingPlan?.gaps)
+        ? application.coachingPlan.gaps.find((g) => g.id === gapId)
+        : null;
+      if (existingGap?.status === "closed") {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: "Already saved.",
+          metadata: { state: "saved" },
+          now,
+        });
       }
-      // The schema documents basedOn as the plan's provenance but nothing
-      // enforced it: a plan built against a prior evaluation must never be
-      // actable once a new evaluation has landed (evaluatedAt is the
-      // discriminator; gate/fitScore are a sanity check on top).
-      if (coachingPlanIsStale(plan, application.evaluation)) {
-        throw actionError(
-          "This coaching plan was built for an earlier evaluation. Run Coach me on this fit again to refresh it.",
-          "COACHING_PLAN_STALE"
-        );
-      }
-      if (gap.status !== "open") {
-        throw actionError(
-          "This coaching gap was already resolved and cannot be saved again.",
-          "COACHING_GAP_NOT_OPEN"
-        );
-      }
-      const draftClaim = gap.suggestion?.draftClaim;
-      if (!draftClaim?.claim || !draftClaim?.evidence) {
-        throw actionError(
-          "This gap has no evidence-claim draft to save.",
-          "COACHING_NO_DRAFT_CLAIM"
-        );
-      }
-
-      const { claims: currentClaims } = loadEvidence({ root: repoRoot });
-      const writePlan = computeEvidenceWrite({ newClaim: draftClaim, currentClaims });
-      if (!writePlan.ok) {
-        throw actionError(
-          `CareerRat could not save this evidence claim: ${writePlan.error}`,
-          "EVIDENCE_WRITE_REJECTED"
-        );
-      }
-      const mergeResult = candidateEvidenceMerge({ repoRoot, env, claims: [writePlan.claim] });
-      const wasDuplicate = (mergeResult?.added || 0) === 0 && (mergeResult?.skipped || 0) > 0;
-
-      const nextGaps = plan.gaps.map((g) => (g.id === gapId ? { ...g, status: "closed" } : g));
-      appSetFields({
+      const { claim, duplicate } = saveCoachingDraft({
         repoRoot,
         env,
-        id: normalized.entity.id,
-        patch: { coachingPlan: { ...plan, gaps: nextGaps } },
+        applicationId: normalized.entity.id,
+        gapId,
       });
+      // Same Undo record coaching.plan writes, so a save from an older thread
+      // can be undone too. A claim that was already in the bank adds nothing.
+      const legacyResultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = legacyResultId;
+      const legacyEntry = duplicate
+        ? null
+        : buildKnowledgeWriteEntry({
+            target: "evidence",
+            op: "add",
+            id: claim.id,
+            before: undefined,
+            after: claim,
+            source: { kind: "coaching", applicationId: normalized.entity.id, gapId },
+            writer: "coaching.evidence-save",
+            label: "Evidence claim",
+          });
 
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: wasDuplicate
-          ? `"${writePlan.claim.claim}" was already in your evidence bank. See if this changed your fit.`
-          : `Saved "${writePlan.claim.claim}" to your evidence bank. See if this changed your fit.`,
+        text: duplicate
+          ? `"${claim.claim}" was already in your evidence bank. See if this changed your fit.`
+          : `Saved "${claim.claim}" to your evidence bank. See if this changed your fit.`,
         artifacts: [
           {
             kind: "evidence_claim_saved",
             applicationId: normalized.entity.id,
-            claim: writePlan.claim,
-            duplicate: wasDuplicate,
+            claim,
+            duplicate,
           },
+          ...(legacyEntry ? [legacyEntry] : []),
         ],
         metadata: {
           state: "saved",
           nextActions: [
+            ...(legacyEntry?.revertible
+              ? [undoNextAction({ messageId: legacyResultId, index: 1, entry: legacyEntry })]
+              : []),
             {
               label: "See if this changed your fit",
               intent: {
@@ -5871,6 +6522,27 @@ export async function executeWorkspaceIntent({
         executionPlan: operationExecutionPlan(selectedExecutionPlan, "coach.deep"),
         signal,
       });
+      // Recommendations with at least three supporting data points apply right
+      // away and are logged with an Undo. The rest (thin evidence, a lower comp
+      // floor or target, no automated writer) stay suggestions with an Apply.
+      const sorted =
+        draft.state === "fresh"
+          ? { applied: [], suggested: [] }
+          : await autoApplyStrategyRecommendations({
+              repoRoot,
+              env,
+              recommendations: draft.recommendations,
+              applyImpl: applyStrategyRecommendationImpl,
+              source: { kind: "strategy.review", intentMessageId: intentMessage.message.id },
+              writer: "strategy.review",
+            });
+      const statusById = new Map([
+        ...sorted.applied.map((item) => [item.recommendation.id, { status: "applied" }]),
+        ...sorted.suggested.map((item) => [
+          item.recommendation.id,
+          { status: "suggested", reason: item.reason },
+        ]),
+      ]);
       const artifact = {
         kind: "strategy_review",
         state: draft.state,
@@ -5879,8 +6551,27 @@ export async function executeWorkspaceIntent({
         reevaluation: draft.reevaluation,
         headline: draft.headline,
         findings: draft.findings,
-        recommendations: draft.recommendations,
+        recommendations: (draft.recommendations || []).map((rec) => ({
+          ...rec,
+          ...(statusById.get(rec.id) || {}),
+        })),
       };
+      const logEntries = sorted.applied.flatMap((item) => item.entries);
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
+      const applyActions = sorted.suggested
+        .filter((item) => !STRATEGY_NO_WRITER_TYPES.has(item.recommendation.type))
+        .map((item) => ({
+          label: `Apply: ${item.recommendation.title || item.recommendation.type}`,
+          intent: {
+            type: "strategy.apply",
+            entity: normalized.entity,
+            input: { recommendation: item.recommendation },
+          },
+        }));
       const nextActions =
         draft.state === "fresh"
           ? [
@@ -5894,34 +6585,58 @@ export async function executeWorkspaceIntent({
               },
             ]
           : [
+              ...undoActions,
+              ...applyActions,
               {
                 label: "Finish review",
                 intent: { type: "strategy.stamp", entity: normalized.entity },
               },
             ];
-      const text =
-        draft.state === "fresh"
-          ? "Nothing new since your last strategy review."
-          : draft.state === "manual"
-            ? `${draft.headline} The AI reviewer wasn't available, so this is the deterministic read. Review it, then finish the review.`
-            : `${draft.headline} Review the findings and recommendations, then finish the review.`;
+      const lines = [];
+      if (draft.state === "fresh") {
+        lines.push("Nothing new since your last strategy review.");
+      } else {
+        lines.push(
+          draft.state === "manual"
+            ? `${draft.headline} The AI reviewer wasn't available, so this is the deterministic read.`
+            : draft.headline
+        );
+        if (sorted.applied.length) {
+          lines.push(
+            `Applied ${sorted.applied.length}, each with an Undo: ${sorted.applied
+              .map((item) => item.recommendation.title || item.recommendation.type)
+              .join("; ")}.`
+          );
+        }
+        if (sorted.suggested.length) {
+          lines.push(
+            `Suggested, not applied: ${sorted.suggested
+              .map(
+                (item) =>
+                  `${item.recommendation.title || item.recommendation.type} (${item.reason})`
+              )
+              .join("; ")}.`
+          );
+        }
+        lines.push("Review the rest, then finish the review.");
+      }
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text,
-        artifacts: [artifact],
+        text: lines.join(" "),
+        artifacts: [artifact, ...logEntries],
         metadata: { state: draft.state, nextActions },
         operationResult: draft,
         now,
       });
     }
 
-    // strategy.apply — a single confirm-first Apply click off a strategy_review
-    // artifact's recommendations[]. Apply intents are only ever fired by a user
-    // click on that card (never auto-fired), so no additional confirm gate runs
-    // here; applyStrategyRecommendation itself validates and dispatches to the
+    // strategy.apply: a single Apply click off a suggested strategy_review
+    // recommendation (one the review didn't apply on its own). The click is the
+    // confirmation, so no additional gate runs here, and the write is logged with
+    // an Undo; applyStrategyRecommendation itself validates and dispatches to the
     // owning writer (gate-writer/candidateConfigPatch, appSetStatus/appSetFields/
     // sourcedSetStatus, or learnings.mjs) per recommendation type.
     if (normalized.type === "strategy.apply") {
@@ -5932,11 +6647,38 @@ export async function executeWorkspaceIntent({
           "STRATEGY_APPLY_INVALID"
         );
       }
-      const operation = await applyStrategyRecommendationImpl({
+      const { operation, entries: logEntries } = await applyStrategyRecommendationLogged({
         repoRoot,
         env,
         recommendation,
+        applyImpl: applyStrategyRecommendationImpl,
+        source: { kind: "strategy.apply", intentMessageId: intentMessage.message.id },
+        writer: "strategy.apply",
       });
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
+      // The transcript only renders action buttons on the latest result, so carry
+      // the review's still-unapplied Apply buttons and Finish review forward
+      // (minus the one just applied), after the Undo.
+      const reviewActions = [...workspaceThreadRead({ repoRoot, env }).messages]
+        .reverse()
+        .find(
+          (message) =>
+            message.kind === "action_result" &&
+            message.metadata?.nextActions?.some(
+              (action) => action.intent?.type === "strategy.stamp"
+            )
+        )?.metadata.nextActions;
+      const carriedActions = (reviewActions || []).filter(
+        (action) =>
+          action.intent?.type === "strategy.stamp" ||
+          (action.intent?.type === "strategy.apply" &&
+            action.intent.input?.recommendation?.id !== recommendation.id)
+      );
+      const followUps = [...undoActions, ...carriedActions];
       return appendActionResult({
         repoRoot,
         env,
@@ -5950,8 +6692,9 @@ export async function executeWorkspaceIntent({
             title: operation.title,
             result: operation.result,
           },
+          ...logEntries,
         ],
-        metadata: { state: "applied" },
+        metadata: { state: "applied", ...(followUps.length ? { nextActions: followUps } : {}) },
         operationResult: operation,
         now,
       });
@@ -6013,8 +6756,8 @@ export async function executeWorkspaceIntent({
       if (domain === "all" || domain === "automation") {
         const status = automationStatus({ root: repoRoot });
         automation = {
-          setup_mode: status.mode,
           session_provider: status.session?.provider || null,
+          read_error: status.readError || null,
           capabilities: status.capabilities.map((cap) => ({
             key: cap.capability,
             label: cap.label,
@@ -6022,7 +6765,6 @@ export async function executeWorkspaceIntent({
             platforms: cap.platforms.map((platform) => ({
               key: platform.platform,
               enabled: platform.enabled,
-              consent: platform.consent,
             })),
           })),
         };
@@ -6089,6 +6831,13 @@ export async function executeWorkspaceIntent({
         throw actionError("A setting change is required to apply it.", "SETTINGS_CHANGE_INVALID");
       }
 
+      // Knowledge-write log: snapshot before the write so each changed path is
+      // logged below as a reversible entry (scoped to the path, never the doc).
+      const configBefore = new Set(["gate", "mode", "automation", "profile"]).has(change.kind)
+        ? candidateConfigGet({ repoRoot, env })
+        : null;
+      const logWrites = [];
+      const laneEntries = [];
       let result;
       if (change.kind === "gate") {
         // Re-derived here, not trusted from the matcher's compReference flag:
@@ -6109,6 +6858,39 @@ export async function executeWorkspaceIntent({
           );
         }
         const type = String(change.type || "");
+        // Lowering the pay floor or target (or loosening an honesty list) is the
+        // one thing that still asks first; every other write applies and logs.
+        if (input.confirmed !== true) {
+          const verdict = gateLooseningVerdict({ repoRoot, env, type, value: change.value });
+          if (verdict.loosens) {
+            return appendActionResult({
+              repoRoot,
+              env,
+              normalized,
+              intentMessage,
+              text: `${verdict.reasons.join(" ")} Confirm and I'll make the change.`,
+              metadata: {
+                state: "needs-confirmation",
+                nextActions: [
+                  {
+                    label: "Confirm",
+                    intent: {
+                      type: "settings.apply",
+                      entity: normalized.entity,
+                      input: { ...input, confirmed: true },
+                    },
+                  },
+                ],
+              },
+              operationResult: {
+                ok: false,
+                reason: "confirmation-required",
+                reasons: verdict.reasons,
+              },
+              now,
+            });
+          }
+        }
         let applied;
         try {
           applied = applyGateWrite({ repoRoot, env, type, value: change.value });
@@ -6117,6 +6899,13 @@ export async function executeWorkspaceIntent({
           // type, non-numeric comp amount, a schema-invalid write) — surface
           // the message as-is rather than inventing a new one.
           throw actionError(error.message, "SETTINGS_CHANGE_INVALID");
+        }
+        if (GATE_ROUTES[type]?.file) {
+          logWrites.push({
+            name: GATE_ROUTES[type].file,
+            path: applied.field,
+            label: GATE_ROUTES[type].label || type,
+          });
         }
         result = {
           label: GATE_ROUTES[type]?.label || type,
@@ -6139,45 +6928,28 @@ export async function executeWorkspaceIntent({
         const from = modesDoc[field] ?? null;
         candidateConfigPatch({ repoRoot, env, name: "modes", patch: { [field]: value } });
         const label = field === "usage_mode" ? "Usage mode" : "Application mode";
+        logWrites.push({ name: "modes", path: field, label });
         result = { label, field, from, to: value, summary: `${label} set to ${value}.` };
       } else if (change.kind === "automation") {
         const op = String(change.op || "");
-        if (op === "consent") {
-          const error = actionError(
-            "Consent changes happen in Settings where the terms are shown.",
-            "SETTINGS_CHANGE_UNSUPPORTED"
-          );
-          error.details = { reason: "consent" };
-          throw error;
-        }
-        // One normalized boolean for both the tier gate and the writers below
-        // — REST callers have sent the flag as either `enabled` or `value`,
-        // and gating on one while persisting the other would let "turn this
-        // on" record it off.
+        // One normalized boolean for the writers below: REST callers have sent
+        // the flag as either `enabled` or `value`, and persisting a different one
+        // than the caller meant would let "turn this on" record it off.
         const requested = change.enabled === true || change.value === true;
-        if ((op === "capability" || op === "platform") && requested) {
-          const capability = change.capability;
-          if (!isCapability(capability)) {
-            const error = actionError(
-              `Unknown capability "${capability}".`,
-              "SETTINGS_CHANGE_INVALID"
-            );
-            error.details = { options: CAPABILITY_KEYS };
-            throw error;
-          }
-          if (capability !== "status_polling") {
-            const error = actionError(
-              `Turning on ${CAPABILITIES[capability].label} happens in Settings, where the permissions are explained.`,
-              "SETTINGS_CHANGE_UNSUPPORTED"
-            );
-            error.details = { reason: "capability-tier", capability };
-            throw error;
-          }
-        }
 
         const automationDoc = mergeAutomationDefaults(loadAutomation({ root: repoRoot, env }).data);
         let patch;
-        if (op === "contextual-permission") {
+        if (op === "consent" || op === "setup_mode") {
+          // Retired: capabilities are on unless turned off. Older buttons and the
+          // current web still send these, so they succeed without writing.
+          patch = null;
+          result = {
+            label: op === "consent" ? "Automation consent" : "Automation setup mode",
+            field: op,
+            changed: false,
+            summary: "Consent and setup mode were retired; capabilities are on unless turned off.",
+          };
+        } else if (op === "contextual-permission") {
           const definition = contextualPermissionDefinition(change.permission);
           if (!definition) {
             const error = actionError(
@@ -6197,15 +6969,25 @@ export async function executeWorkspaceIntent({
               }).allowed
           );
           patch = {
-            consent: Object.fromEntries(platforms.map((platform) => [platform, true])),
             capabilities: {
               [definition.capability]: {
                 enabled: true,
                 platforms: Object.fromEntries(platforms.map((platform) => [platform, true])),
-                scoped_grants: Object.fromEntries(platforms.map((platform) => [platform, true])),
               },
             },
           };
+          logWrites.push(
+            {
+              name: "automation",
+              path: `capabilities.${definition.capability}.enabled`,
+              label: definition.label,
+            },
+            ...platforms.map((platform) => ({
+              name: "automation",
+              path: `capabilities.${definition.capability}.platforms.${platform}`,
+              label: `${definition.label} on ${platform}`,
+            }))
+          );
           result = {
             label: definition.label,
             field: `capabilities.${definition.capability}`,
@@ -6213,25 +6995,8 @@ export async function executeWorkspaceIntent({
             to: true,
             changed: !alreadyAllowed,
             summary: alreadyAllowed
-              ? `${definition.label} is already allowed.`
-              : `${definition.label} is allowed now.`,
-          };
-        } else if (op === "setup_mode") {
-          const value = String(change.value || "");
-          if (value !== "basic" && value !== "advanced") {
-            throw actionError(
-              'Setup mode must be "basic" or "advanced".',
-              "SETTINGS_CHANGE_INVALID"
-            );
-          }
-          const from = automationDoc.setup_mode || "basic";
-          patch = { setup_mode: value };
-          result = {
-            label: "Automation setup mode",
-            field: "setup_mode",
-            from,
-            to: value,
-            summary: `Setup mode set to ${value}.`,
+              ? `${definition.label} is already on.`
+              : `${definition.label} is on now.`,
           };
         } else if (op === "capability") {
           const capability = change.capability;
@@ -6244,9 +7009,43 @@ export async function executeWorkspaceIntent({
             throw error;
           }
           const value = requested;
-          const from = automationDoc.capabilities?.[capability]?.enabled === true;
-          patch = { capabilities: { [capability]: { enabled: value } } };
+          const from = automationDoc.capabilities?.[capability]?.enabled !== false;
+          // "Turn it on" notes name the denied platforms too, so turning the
+          // capability on also clears any of those platform switches.
+          const platformList = Array.isArray(change.platforms) ? change.platforms : [];
+          for (const platform of platformList) {
+            if (!CAPABILITIES[capability].platforms.includes(platform)) {
+              const error = actionError(
+                `Unknown platform "${platform}" for ${capability}.`,
+                "SETTINGS_CHANGE_INVALID"
+              );
+              error.details = { options: CAPABILITIES[capability].platforms };
+              throw error;
+            }
+          }
+          patch = {
+            capabilities: {
+              [capability]: {
+                enabled: value,
+                ...(value && platformList.length
+                  ? {
+                      platforms: Object.fromEntries(
+                        platformList.map((platform) => [platform, true])
+                      ),
+                    }
+                  : {}),
+              },
+            },
+          };
           const label = `${CAPABILITIES[capability].label} (global switch)`;
+          logWrites.push(
+            { name: "automation", path: `capabilities.${capability}.enabled`, label },
+            ...(value ? platformList : []).map((platform) => ({
+              name: "automation",
+              path: `capabilities.${capability}.platforms.${platform}`,
+              label: `${capability} on ${platform}`,
+            }))
+          );
           result = {
             label,
             field: `capabilities.${capability}.enabled`,
@@ -6274,8 +7073,13 @@ export async function executeWorkspaceIntent({
             throw error;
           }
           const value = requested;
-          const from = automationDoc.capabilities?.[capability]?.platforms?.[platform] === true;
+          const from = automationDoc.capabilities?.[capability]?.platforms?.[platform] !== false;
           patch = { capabilities: { [capability]: { platforms: { [platform]: value } } } };
+          logWrites.push({
+            name: "automation",
+            path: `capabilities.${capability}.platforms.${platform}`,
+            label: `${capability} on ${platform}`,
+          });
           result = {
             label: `${capability} on ${platform}`,
             field: `capabilities.${capability}.platforms.${platform}`,
@@ -6297,6 +7101,11 @@ export async function executeWorkspaceIntent({
           }
           const from = automationDoc.session?.provider || "auto";
           patch = { session: { provider } };
+          logWrites.push({
+            name: "automation",
+            path: "session.provider",
+            label: "Session browser provider",
+          });
           result = {
             label: "Session browser provider",
             field: "session.provider",
@@ -6310,7 +7119,7 @@ export async function executeWorkspaceIntent({
             "SETTINGS_CHANGE_UNSUPPORTED"
           );
         }
-        candidateConfigPatch({ repoRoot, env, name: "automation", patch });
+        if (patch) candidateConfigPatch({ repoRoot, env, name: "automation", patch });
       } else if (change.kind === "profile") {
         const section = String(change.section || "");
         const config = candidateConfigGet({ repoRoot, env });
@@ -6350,6 +7159,12 @@ export async function executeWorkspaceIntent({
             patch: { role_buckets: roleBuckets },
           });
           const to = roleBuckets.flatMap((bucket) => bucket.titles);
+          logWrites.push({
+            name: "targeting",
+            path: "role_buckets",
+            label: "Target roles",
+            op: op === "append" ? "add" : "replace",
+          });
           result = {
             label: "Target roles",
             field: "role_buckets",
@@ -6375,6 +7190,10 @@ export async function executeWorkspaceIntent({
             name: "profile",
             patch: { candidate: { location: value }, location: { home: value } },
           });
+          logWrites.push(
+            { name: "profile", path: "location.home", label: "Home market" },
+            { name: "profile", path: "candidate.location", label: "Home market" }
+          );
           result = {
             label: "Home market",
             field: "location.home",
@@ -6399,6 +7218,12 @@ export async function executeWorkspaceIntent({
               location: { [field]: change.value, mode_preferences_confirmed: true },
             },
           });
+          logWrites.push({
+            name: "profile",
+            path: `location.${field}`,
+            label: `${field} roles`,
+            companions: ["location.mode_preferences_confirmed"],
+          });
           result = {
             label: `${field} roles`,
             field: `location.${field}`,
@@ -6422,6 +7247,36 @@ export async function executeWorkspaceIntent({
             id: current?.id,
             fields: { summary: value },
           });
+          laneEntries.push(
+            current
+              ? buildKnowledgeWriteEntry({
+                  target: "deep_ingest:writing_voice",
+                  op: "replace",
+                  id: current.id,
+                  path: "summary",
+                  before: current.summary,
+                  after: saved.item?.summary,
+                  source: { kind: "settings.apply", intentMessageId: intentMessage.message.id },
+                  writer: "settings.apply",
+                  label: "Writing style",
+                  ...(current.summary === undefined
+                    ? {
+                        revertible: false,
+                        revertNote: "This kind of change can't be undone from the thread.",
+                      }
+                    : {}),
+                })
+              : buildKnowledgeWriteEntry({
+                  target: "deep_ingest:writing_voice",
+                  op: "add",
+                  id: saved.item?.id,
+                  before: undefined,
+                  after: saved.item,
+                  source: { kind: "settings.apply", intentMessageId: intentMessage.message.id },
+                  writer: "settings.apply",
+                  label: "Writing style",
+                })
+          );
           result = {
             label: "Writing style",
             field: "writing_voice.summary",
@@ -6442,6 +7297,11 @@ export async function executeWorkspaceIntent({
             name: "targeting",
             patch: { search_preferences: { cadence: { mode: value } } },
           });
+          logWrites.push({
+            name: "targeting",
+            path: "search_preferences.cadence.mode",
+            label: "Search cadence",
+          });
           result = {
             label: "Search cadence",
             field: "search_preferences.cadence.mode",
@@ -6461,6 +7321,7 @@ export async function executeWorkspaceIntent({
             name: "targeting",
             patch: { fit_bands: { fit_floor: value } },
           });
+          logWrites.push({ name: "targeting", path: "fit_bands.fit_floor", label: "Minimum fit" });
           result = {
             label: "Minimum fit",
             field: "fit_bands.fit_floor",
@@ -6479,6 +7340,7 @@ export async function executeWorkspaceIntent({
             name: "targeting",
             patch: { [field]: values },
           });
+          logWrites.push({ name: "targeting", path: field, label });
           result = {
             label,
             field,
@@ -6496,6 +7358,11 @@ export async function executeWorkspaceIntent({
             env,
             name: "profile",
             patch: { location: { relocation: values } },
+          });
+          logWrites.push({
+            name: "profile",
+            path: "location.relocation",
+            label: "Relocation markets",
           });
           result = {
             label: "Relocation markets",
@@ -6525,19 +7392,101 @@ export async function executeWorkspaceIntent({
         from: result.from,
         to: result.to,
         summary: result.summary,
-        // Only the gate branch reports a no-op (applyGateWrite's changed:
-        // false); mode/automation writes always persist. Absent means changed.
+        // The gate branch and the retired consent/setup_mode ops report a no-op
+        // (changed: false); other writes always persist. Absent means changed.
         ...(result.changed === false ? { changed: false } : {}),
       };
+      const logEntries = [
+        ...(configBefore
+          ? configWriteEntries({
+              before: configBefore,
+              after: candidateConfigGet({ repoRoot, env }),
+              writes: logWrites,
+              source: { kind: "settings.apply", intentMessageId: intentMessage.message.id },
+              writer: "settings.apply",
+            })
+          : []),
+        ...laneEntries,
+      ];
+      // The Undo buttons need the id of the message that will hold the entries.
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = logEntries.flatMap((entry, index) =>
+        entry.revertible ? [undoNextAction({ messageId: resultId, index: index + 1, entry })] : []
+      );
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
         text: result.summary,
-        artifacts: [artifact],
-        metadata: { domain: change.kind },
+        artifacts: [artifact, ...logEntries],
+        metadata: {
+          domain: change.kind,
+          ...(undoActions.length ? { nextActions: undoActions } : {}),
+        },
         operationResult: result,
+        now,
+      });
+    }
+
+    // knowledge.revert: undo one logged knowledge write. The client only names
+    // the stored message and artifact index; the entry itself (target, path,
+    // before, after) is always read back from the thread, so a caller can't
+    // smuggle in its own before/after. Plain refusals (changed again since,
+    // already undone, cited elsewhere) land as a note, not an error.
+    if (normalized.type === "knowledge.revert") {
+      const messageId = String(input.messageId || "").trim();
+      const index = Number(input.index);
+      const stored = workspaceThreadRead({ repoRoot, env }).messages.find(
+        (message) =>
+          message?.id === messageId &&
+          (message.kind === "action_result" || message.kind === "action_error")
+      );
+      const entry =
+        stored && Number.isInteger(index) && index >= 0 ? stored.artifacts?.[index] : null;
+      if (entry?.kind !== "knowledge_write") {
+        throw actionError(
+          "CareerRat couldn't find that change to undo.",
+          "KNOWLEDGE_REVERT_INVALID"
+        );
+      }
+      const existing = workspaceThreadRead({ repoRoot, env }).messages.flatMap((message) =>
+        (message.artifacts || []).filter((artifact) => artifact?.kind === "knowledge_write")
+      );
+      const reverted = revertKnowledgeWrite({
+        repoRoot,
+        env,
+        entry,
+        messageId,
+        index,
+        existing,
+        afterRevert: (done) =>
+          done.target === "evidence" && done.source?.kind === "coaching"
+            ? reopenCoachingGap({ repoRoot, env, entry: done, setFields: appSetFieldsImpl })
+            : undefined,
+      });
+      if (!reverted.ok) {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: reverted.note,
+          metadata: { state: "refused", reason: reverted.reason },
+          operationResult: { ok: false, reason: reverted.reason },
+          now,
+        });
+      }
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: reverted.summary,
+        artifacts: [reverted.entry],
+        metadata: { state: "reverted" },
+        operationResult: { ok: true },
         now,
       });
     }
@@ -6956,9 +7905,9 @@ export async function executeWorkspaceIntent({
         );
       }
       // Manual provenance (a self-report of something the candidate already did
-      // in their own calendar app) is NOT consent-gated — CareerRat isn't writing
-      // anything. Automated provenance IS gated: it asserts the app itself wrote
-      // the event, so it must be backed by an actual calendar_sync consent grant.
+      // in their own calendar app) is never gated: CareerRat isn't writing
+      // anything. Automated provenance asserts the app itself wrote the event, so
+      // it needs calendar_sync to be on (it is, unless the operator turned it off).
       const provenance = input.provenance === "automated" ? "automated" : "manual";
       if (provenance === "automated") {
         const verdict = mayRun({
@@ -6968,19 +7917,13 @@ export async function executeWorkspaceIntent({
           env,
         });
         if (!verdict.allowed) {
-          const providerPermission =
-            {
-              apple_calendar: "apple-calendar-write",
-              google_calendar: "google-calendar-write",
-              outlook_calendar: "outlook-calendar-write",
-              automation_tools: "automation-tools-calendar-write",
-            }[provider] || null;
-          return appendContextualPermissionRequest({
+          return appendCapabilityOffNote({
             repoRoot,
             env,
             normalized,
             intentMessage,
-            permission: providerPermission,
+            capability: "calendar_sync",
+            platforms: [provider],
             now,
           });
         }
@@ -7183,12 +8126,13 @@ export async function executeWorkspaceIntent({
           .allowed,
       }));
       if (platforms.every((entry) => !entry.allowed)) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "relationship-sourcing",
+          capability: "relationship_sourcing",
+          platforms: platforms.map((entry) => entry.platform),
           now,
         });
       }
@@ -7266,12 +8210,13 @@ export async function executeWorkspaceIntent({
         allowed: mayRun({ capability: "status_polling", platform, root: repoRoot, env }).allowed,
       }));
       if (platforms.every((entry) => !entry.allowed)) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "status-checks",
+          capability: "status_polling",
+          platforms: platforms.map((entry) => entry.platform),
           now,
         });
       }
@@ -7328,12 +8273,13 @@ export async function executeWorkspaceIntent({
         tracker,
       });
       if (sources.every((source) => !source.allowed)) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "mail-checks",
+          capability: MAIL_ACCESS_CAPABILITY,
+          platforms: sources.filter((source) => source.platform).map((source) => source.platform),
           now,
         });
       }
@@ -7411,12 +8357,13 @@ export async function executeWorkspaceIntent({
       const tracker = assembleTrackerObject(requireDb({ repoRoot, env }));
       const sources = messagesSyncSources({ repoRoot, env, tracker });
       if (sources.every((source) => !source.allowed)) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "message-checks",
+          capability: "messaging",
+          platforms: sources.map((source) => source.platform),
           now,
         });
       }
@@ -7457,10 +8404,9 @@ export async function executeWorkspaceIntent({
     }
 
     if (normalized.type === "linkedin.optimize-request") {
-      // Never refuses: the handoff card always renders so the candidate can
-      // see current consent state and turn capabilities on from there. The
-      // gate that actually blocks a browser write lives in the skill, not
-      // here.
+      // The handoff card always renders so the candidate can see which
+      // capabilities are on. profile_optimize off gets the plain "turned off"
+      // note; the per-field confirm before a browser write lives in the skill.
       const capabilities = [
         {
           key: "profile_optimize",
@@ -7483,15 +8429,16 @@ export async function executeWorkspaceIntent({
           }).allowed,
         },
       ];
-      const batch = linkedinProposalBatchLatest({ repoRoot, env });
+      const priorBatch = linkedinProposalBatchLatest({ repoRoot, env });
       if (!capabilities[0].allowed) {
-        return appendContextualPermissionRequest({
+        return appendCapabilityOffNote({
           repoRoot,
           env,
           normalized,
           intentMessage,
-          permission: "linkedin-profile-review",
-          artifacts: [linkedinOptimizeHandoffArtifact({ capabilities, batch, now })],
+          capability: "profile_optimize",
+          platforms: ["linkedin"],
+          artifacts: [linkedinOptimizeHandoffArtifact({ capabilities, batch: priorBatch, now })],
           now,
         });
       }
@@ -7503,6 +8450,30 @@ export async function executeWorkspaceIntent({
               executionPlan: linkedinExecutionPlan,
             })
           : null;
+      // A fresh run stages its own batch, which is no longer "pending" once
+      // every surface is staged, so read it back by id.
+      const batch =
+        (execution?.batchId &&
+          linkedinProposalBatchGet({ repoRoot, env, id: execution.batchId })) ||
+        priorBatch;
+
+      const artifacts = [
+        linkedinOptimizeHandoffArtifact({ capabilities, batch, now }),
+        ...(batch ? [linkedinProfileProposalsArtifact(batch)] : []),
+        ...(execution ? [execution] : []),
+      ];
+      // One Undo per staged surface; the entries ride after the artifacts above.
+      const stagedEntries = linkedinStagingEntries({
+        batchId: execution?.batchId,
+        staged: Array.isArray(execution?.staged) ? execution.staged : [],
+      });
+      const resultId = intentMessage.resultMessageId || randomUUID();
+      intentMessage.resultMessageId = resultId;
+      const undoActions = stagedEntries.flatMap((entry, index) =>
+        entry.revertible
+          ? [undoNextAction({ messageId: resultId, index: artifacts.length + index, entry })]
+          : []
+      );
 
       return appendActionResult({
         repoRoot,
@@ -7511,13 +8482,14 @@ export async function executeWorkspaceIntent({
         intentMessage,
         text:
           execution?.summary ||
-          "LinkedIn profile review is ready in CareerRat. Suggestions come back here for your approval.",
-        artifacts: [
-          linkedinOptimizeHandoffArtifact({ capabilities, batch, now }),
-          ...(batch ? [linkedinProfileProposalsArtifact(batch)] : []),
-          ...(execution ? [execution] : []),
-        ],
-        metadata: workflowActionMetadata(normalized, execution, "Retry LinkedIn review"),
+          "LinkedIn profile review is ready in CareerRat. Suggestions are staged here, and each one asks before it goes on LinkedIn.",
+        artifacts: [...artifacts, ...stagedEntries],
+        metadata: workflowActionMetadata(
+          normalized,
+          execution,
+          "Retry LinkedIn review",
+          undoActions.length ? { nextActions: undoActions } : {}
+        ),
         now,
       });
     }
@@ -8323,6 +9295,8 @@ export async function executeWorkspaceIntent({
     }
 
     let questionCapture = null;
+    // Open "needs your answer" questions from the latest packet build.
+    let packetAnswerNeeds = [];
 
     if (!resumeApplicationSession) {
       let evaluated;
@@ -8416,7 +9390,8 @@ export async function executeWorkspaceIntent({
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
       const blockingGapCount = blockingPacketGaps(gaps).length;
-      if (blockingGapCount > 0) {
+      packetAnswerNeeds = openAnswerNeedsFromGaps(gaps);
+      if (haltingPacketGaps(gaps).length > 0) {
         return appendActionResult({
           repoRoot,
           env,
@@ -8524,7 +9499,8 @@ export async function executeWorkspaceIntent({
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
       const blockingGapCount = blockingPacketGaps(gaps).length;
-      if (blockingGapCount > 0) {
+      packetAnswerNeeds = openAnswerNeedsFromGaps(gaps);
+      if (haltingPacketGaps(gaps).length > 0) {
         return appendActionResult({
           repoRoot,
           env,
@@ -8639,10 +9615,45 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
+    // Unanswered required questions flag this job instead of stopping the run:
+    // the form is still opened and filled, but nothing is ever auto-submitted
+    // while one is open.
+    let openAnswerNeeds = packetAnswerNeeds.length
+      ? packetAnswerNeeds
+      : openAnswerNeedsFromGaps(application?.packetManifest?.gaps);
+    const submitMode =
+      input.submitMode === "auto" && openAnswerNeeds.length === 0 ? "auto" : "manual";
+    const alreadyAttemptedNote =
+      input.submitAlreadyAttempted === true
+        ? " CareerRat already pressed Submit once without a confirmation, so it will not press it again. Check the site and record the outcome."
+        : "";
+    const prepareOnly = submitMode !== "auto";
+    // Written by the driver right before it presses Submit, so the marker is
+    // durable even if the run is aborted or the process stops after the click.
+    const submitAttemptHook =
+      submitMode === "auto"
+        ? {
+            onSubmitAttempt: async () => {
+              try {
+                appMarkSubmitAttempt({
+                  repoRoot,
+                  env,
+                  id: normalized.entity.id,
+                  at: requestDate(now).toISOString(),
+                });
+              } catch (error) {
+                // The marker is in the canonical database even when the tracker
+                // export after it fails; that is enough to block a second submit.
+                if (error?.committed !== true) throw error;
+              }
+            },
+          }
+        : {};
     const executorInput = {
       ...input,
       ...(prepareSubmit ? { resumeSession: true } : {}),
-      prepareOnly: true,
+      prepareOnly,
+      submitMode,
     };
     let execution = await applyJobImpl({
       repoRoot,
@@ -8652,7 +9663,9 @@ export async function executeWorkspaceIntent({
       postingUrl,
       questionCapture,
       input: executorInput,
-      prepareOnly: true,
+      prepareOnly,
+      submitMode,
+      ...submitAttemptHook,
       signal,
       ...(input.focusSession === true ? { focusSession: true } : {}),
     });
@@ -8672,7 +9685,8 @@ export async function executeWorkspaceIntent({
       });
       const gaps = packetGapsForApplication(packet.gaps, application, true);
       const blockingGapCount = blockingPacketGaps(gaps).length;
-      if (blockingGapCount > 0) {
+      packetAnswerNeeds = openAnswerNeedsFromGaps(gaps);
+      if (haltingPacketGaps(gaps).length > 0) {
         const sessionUrl = safeExternalHttpUrl(execution.currentUrl || postingUrl);
         return appendActionResult({
           repoRoot,
@@ -8726,6 +9740,8 @@ export async function executeWorkspaceIntent({
         });
       }
       application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      openAnswerNeeds = packetAnswerNeeds;
+      const rerunManual = openAnswerNeeds.length > 0;
       execution = await applyJobImpl({
         repoRoot,
         env,
@@ -8737,9 +9753,12 @@ export async function executeWorkspaceIntent({
           ...executorInput,
           resumeSession: true,
           renderedQuestionsReady: true,
-          prepareOnly: true,
+          prepareOnly: rerunManual || prepareOnly,
+          submitMode: rerunManual ? "manual" : submitMode,
         },
-        prepareOnly: true,
+        prepareOnly: rerunManual || prepareOnly,
+        submitMode: rerunManual ? "manual" : submitMode,
+        ...submitAttemptHook,
         signal,
         ...(input.focusSession === true ? { focusSession: true } : {}),
       });
@@ -8784,24 +9803,147 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    if (execution?.verified !== true && ACTIVE_APPLICATION_SESSION_STATES.has(execution?.state)) {
+    if (execution?.verified !== true && execution?.state === "submitted-unverified") {
+      // submit: auto pressed Submit once but never saw a confirmation page. Not
+      // Applied, never retried: the status stays put and the person is told to
+      // check the site, with the screenshot of the page the click left behind.
+      const detail = String(
+        execution.reason || "CareerRat pressed Submit but saw no confirmation page."
+      ).trim();
+      const label = applicationLabel(application);
+      appSetFields({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        patch: {
+          statusNote: `Submitted automatically, but no confirmation page was seen. ${detail}`.slice(
+            0,
+            500
+          ),
+          nextAction:
+            "Check the application on the site, then record it as Applied if it went through",
+        },
+      });
+      // Normally already set by the pre-click hook; set-once either way.
+      appMarkSubmitAttempt({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        at: requestDate(now).toISOString(),
+      });
       const sessionUrl = safeExternalHttpUrl(
         execution.currentUrl || application.link || application.url || application.sourceUrl
       );
-      const permissionRequired = execution?.code === "APPLICATION_PREPARATION_PERMISSION_REQUIRED";
-      const permission = permissionRequired
-        ? contextualPermissionDefinition("application-preparation")
-        : null;
-      const sessionState =
-        prepareSubmit && execution.state === "questions-captured" ? "blocked" : execution.state;
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: permission
-          ? `${permission.request} Choose ${permission.allowLabel}, or type “${permission.typedCommand}”.`
-          : applicationSessionText(execution),
+        text: `CareerRat submitted ${label}, but no confirmation page appeared, so this application was not marked Applied. CareerRat will not submit it again. Check the application on the site.`,
+        artifacts: [
+          ...(Array.isArray(execution.artifacts) ? execution.artifacts : []),
+          ...(sessionUrl
+            ? [
+                {
+                  kind: "application_handoff",
+                  title: `${label}: Application site`,
+                  applicationId: normalized.entity.id,
+                  url: sessionUrl,
+                  submissionVerified: false,
+                  executorAvailable: true,
+                  session: execution.session || { provider: "session-browser" },
+                },
+              ]
+            : []),
+        ],
+        metadata: {
+          state: "submitted-unverified",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          reason: detail,
+          nextActions: [
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+            navigationAction("Review application", {
+              surface: "job",
+              entityType: "application",
+              entityId: normalized.entity.id,
+            }),
+          ],
+        },
+        operationResult: execution,
+        now,
+      });
+    }
+    if (execution?.verified !== true && ACTIVE_APPLICATION_SESSION_STATES.has(execution?.state)) {
+      const sessionUrl = safeExternalHttpUrl(
+        execution.currentUrl || application.link || application.url || application.sourceUrl
+      );
+      // APPLICATION_PREPARATION_PERMISSION_REQUIRED is the code older persisted
+      // results carry; the driver now emits CAPABILITY_OFF.
+      const capabilityOff = APPLICATION_CAPABILITY_OFF_CODES.has(execution?.code);
+      const offNote = capabilityOff
+        ? capabilityOffNote({
+            repoRoot,
+            env,
+            capability: "authenticated_apply_preparation",
+            platforms: execution.platform ? [execution.platform] : undefined,
+          })
+        : null;
+      // Only a form that is otherwise complete is "waiting on an answer". A
+      // blocked session (login wall, captcha, 2FA) keeps its own state and
+      // resume action.
+      // The one exception is a live form that stopped on required fields it
+      // couldn't answer: that is a NEEDS YOU on this job, not a blocker.
+      // The driver records a field it had no answer for without a `reason`; a
+      // fill or upload failure always carries one. Any failure in the mix keeps
+      // the job blocked with its resume action, since it isn't just waiting on
+      // an answer.
+      const requiredUnresolved =
+        execution?.state === "blocked" &&
+        execution?.session?.stopReason === REQUIRED_FIELDS_UNANSWERED &&
+        Array.isArray(execution.session.unresolved)
+          ? execution.session.unresolved.filter(
+              (item) => item?.required && String(item?.label || "").trim()
+            )
+          : [];
+      const unansweredFieldNeeds = requiredUnresolved.every((item) => !item.reason)
+        ? requiredUnresolved.map((item) => ({
+            questionId: null,
+            question: String(item.label).trim(),
+          }))
+        : [];
+      if (!offNote && unansweredFieldNeeds.length > 0) {
+        const known = new Set(openAnswerNeeds.map((need) => need.question.toLowerCase()));
+        openAnswerNeeds = [
+          ...openAnswerNeeds,
+          ...unansweredFieldNeeds.filter((need) => !known.has(need.question.toLowerCase())),
+        ];
+      }
+      const flaggedNeedsAnswer =
+        !offNote &&
+        openAnswerNeeds.length > 0 &&
+        (NEEDS_ANSWER_SESSION_STATES.has(execution?.state) || unansweredFieldNeeds.length > 0);
+      const sessionState = flaggedNeedsAnswer
+        ? "needs-answer"
+        : prepareSubmit && execution.state === "questions-captured"
+          ? "blocked"
+          : execution.state;
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: offNote
+          ? offNote.text
+          : flaggedNeedsAnswer
+            ? `${needsAnswerText(openAnswerNeeds)} ${applicationSessionText(execution)}${alreadyAttemptedNote}`
+            : `${applicationSessionText(execution)}${alreadyAttemptedNote}`,
         artifacts: [
           {
             kind: "application_handoff",
@@ -8818,25 +9960,42 @@ export async function executeWorkspaceIntent({
           state: sessionState,
           applicationId: normalized.entity.id,
           submissionVerified: false,
+          ...(offNote ? { capabilityOff: { reason: offNote.text } } : {}),
+          ...(flaggedNeedsAnswer ? { needsAnswers: openAnswerNeeds } : {}),
+          ...(autoSubmitStopReason(execution)
+            ? { autoSubmitStopped: { reason: autoSubmitStopReason(execution) } }
+            : {}),
           nextActions: [
-            {
-              label: permissionRequired
-                ? permission.allowLabel
-                : "Return to supervised application",
-              intent: {
-                type: permissionRequired ? "settings.apply" : "job.prepare-submit",
-                entity: permissionRequired
-                  ? { type: "workspace", id: WORKSPACE_THREAD_ID }
-                  : { type: "application", id: normalized.entity.id },
-                input: permissionRequired
-                  ? { change: contextualPermissionChange("application-preparation") }
-                  : {
-                      resumeSession: true,
-                      focusSession: true,
-                      ...carriedReviewApproval(input),
+            ...(flaggedNeedsAnswer
+              ? [
+                  navigationAction("Answer the open questions", {
+                    surface: "job",
+                    entityType: "application",
+                    entityId: normalized.entity.id,
+                  }),
+                ]
+              : []),
+            ...(offNote
+              ? offNote.nextActions
+              : flaggedNeedsAnswer
+                ? []
+                : [
+                    {
+                      label:
+                        execution.state === "awaiting-submit"
+                          ? "Open form to review & submit"
+                          : "Return to supervised application",
+                      intent: {
+                        type: "job.prepare-submit",
+                        entity: { type: "application", id: normalized.entity.id },
+                        input: {
+                          resumeSession: true,
+                          focusSession: true,
+                          ...carriedReviewApproval(input),
+                        },
+                      },
                     },
-              },
-            },
+                  ]),
             {
               label: "I applied",
               intent: {
@@ -8895,7 +10054,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `${detail} CareerRat stopped before submission and did not mark this application Applied.`,
+        text: `${detail} CareerRat stopped before submission and did not mark this application Applied.${alreadyAttemptedNote}`,
         metadata: {
           state: "blocked",
           applicationId: normalized.entity.id,
@@ -9454,8 +10613,13 @@ function settingsExplainFromText(text) {
   const value = String(text || "").trim();
   if (/^(?:please\s+)?what(?:\s+are)?\s+my\s+settings\s*[.?!]*$/i.test(value)) return {};
   if (/^(?:please\s+)?show\s+my\s+settings\s*[.?!]*$/i.test(value)) return {};
-  if (/^(?:please\s+)?show\s+my\s+automation\s+permissions\s*[.?!]*$/i.test(value))
+  if (
+    /^(?:please\s+)?(?:show\s+(?:me\s+)?(?:my\s+)?automation\s+(?:permissions|settings)|(?:what(?:'s|\s+is|\s+are)\s+)?(?:my\s+)?automation\s+settings)\s*[.?!]*$/i.test(
+      value
+    )
+  )
     return { domain: "automation" };
+  if (/^what(?:'s|\s+is)\s+turned\s+on\s*[.?!]*$/i.test(value)) return { domain: "automation" };
   if (/^what\s+automation\s+is\s+enabled\s*[.?!]*$/i.test(value)) return { domain: "automation" };
   if (/^what\s+mode\s+am\s+i\s+in\s*[.?!]*$/i.test(value)) return { domain: "modes" };
   return null;
@@ -9648,12 +10812,10 @@ function matchAutomationPlatformPhrase(text) {
   return PLATFORMS.find((platform) => lower === platform || lower === platform.replace(/_/g, " "));
 }
 
-// "turn off <capability> [on <platform>]" (any capability — disabling is
-// always allowed), "turn on status polling [on <platform>]" (the ONLY
-// capability allowed to enable from Ask — see the
-// settings.apply handler's own capability-tier restriction, enforced there
-// too since REST can call the intent directly), "set setup mode to
-// advanced/basic", "use <provider> for browser sessions".
+// "turn off <capability> [on <platform>]" and "turn on <capability> [on
+// <platform>]" (any capability, either direction), "use <provider> for browser
+// sessions". The old "set setup mode to advanced/basic" phrase still parses and
+// lands on the settings.apply no-op note.
 function settingsAutomationFromText(text) {
   const value = String(text || "").trim();
 
@@ -9676,7 +10838,7 @@ function settingsAutomationFromText(text) {
   match = value.match(/^(?:please\s+)?turn\s+on\s+(.+?)(?:\s+on\s+(.+?))?\s*[.?!]*$/i);
   if (match) {
     const capability = matchAutomationCapabilityPhrase(match[1]);
-    if (!capability || capability !== "status_polling") return null;
+    if (!capability) return null;
     return automationToggleChange(capability, match[2], true);
   }
 
@@ -9691,7 +10853,7 @@ function settingsContextualPermissionFromText(text) {
     .replace(/[.!]+$/g, "")
     .trim()
     .toLowerCase();
-  const match = Object.entries(CONTEXTUAL_PERMISSIONS).find(
+  const match = Object.entries(LEGACY_CONTEXTUAL_PERMISSIONS).find(
     ([, definition]) => definition.typedCommand.toLowerCase() === value
   );
   return match ? contextualPermissionChange(match[0]) : null;
@@ -9771,11 +10933,10 @@ function settingsApplyPreviewLabel(change) {
   }
   if (change.kind === "automation") {
     if (change.op === "contextual-permission") {
-      return (
-        contextualPermissionDefinition(change.permission)?.allowLabel || "Allow this permission"
-      );
+      const label = contextualPermissionDefinition(change.permission)?.label;
+      return label ? `Turn on ${label}` : "Turn on this capability";
     }
-    if (change.op === "setup_mode") return `Set automation setup mode to ${change.value}`;
+    if (change.op === "setup_mode") return "Setup mode was retired";
     if (change.op === "session") return `Use ${change.value} for browser sessions`;
     const capabilityLabel = CAPABILITIES[change.capability]?.label || change.capability;
     const verb = change.enabled ? "Turn on" : "Turn off";
@@ -11012,6 +12173,9 @@ export function createWorkspaceAgentRuntime({
   stampStrategyReviewImpl = stampStrategyReview,
   captureIntakeImpl,
   sendCommunicationImpl,
+  autoFollowUps = true,
+  scheduleAutoFollowUp,
+  aiRouteAvailableImpl,
 } = {}) {
   let tail = Promise.resolve();
   let runtime;
@@ -11446,9 +12610,32 @@ export function createWorkspaceAgentRuntime({
           stampStrategyReviewImpl,
           callAIImpl,
           sendCommunicationImpl,
+          autoFollowUps,
+          scheduleAutoFollowUp,
+          aiRouteAvailableImpl,
           ...input,
         })
       );
+    },
+    // For app-side status writes that do not go through an intent (the tracker
+    // status route, track-outcome). snapshot before the write, then call
+    // afterApplicationWrite(snapshot) once it has committed.
+    snapshotApplicationState() {
+      return autoFollowUps ? snapshotApplicationState({ repoRoot, env }) : null;
+    },
+    afterApplicationWrite(before) {
+      if (!autoFollowUps || !before) return;
+      scheduleAutoFollowUps({
+        options: {
+          repoRoot,
+          env,
+          startCompanyHealthImpl,
+          scheduleAutoFollowUp,
+          aiRouteAvailableImpl,
+          autoFollowUps,
+        },
+        before,
+      });
     },
     recordSearchCompletion(input = {}) {
       return enqueue(async () => {

@@ -9,12 +9,9 @@
 // which items are "done"; this module only adds display copy (labels,
 // detail lines, UP NEXT) on top of that server-computed done/undone shape.
 //
-// `consent` (automation setup_mode) was REMOVED from the setup checklist —
-// see computeSetupProgress's own SETUP_PROGRESS_ITEMS comment in
-// onboard-route.mjs for why. Automation consent still works everywhere it
-// already lived (Settings' automation controls, the interview's own
-// consent_mode/consent_capability confirm pills) — it's just no longer a
-// setup row here.
+// Automation has no setup row: capabilities are on by default, and the
+// on/off switches live in Settings. See computeSetupProgress's own
+// SETUP_PROGRESS_ITEMS comment in onboard-route.mjs.
 
 export const SETUP_ITEM_ORDER = [
   "engine",

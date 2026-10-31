@@ -1,150 +1,130 @@
 # Browser automation — EXAMPLE (copy to candidate/automation.yml, which is gitignored).
 #
-# OPT-IN, DEFAULTS OFF. If this file is absent, NOTHING is automated — that is the
-# safe default and the intended state for most users. Everything below is off until
-# you deliberately turn it on, one capability and one platform at a time.
+# ON BY DEFAULT. Every capability below is on for every platform it applies to.
+# Set a capability's `enabled` or a single platform to false to turn it off; a
+# missing key means on. Turning one off is one command, and the agent tells you
+# which switch is off and how to turn it back on.
 #
-# THE RULE (read this once): a capability runs on a platform ONLY IF these three
-# switches are all true:
-#   1. capabilities.<capability>.enabled            (the capability's global switch)
-#   2. capabilities.<capability>.platforms.<name>   (that platform, for that capability)
-#   3. consent.<name>                               (you've read that platform's ToS)
-# AND EITHER setup_mode: advanced (the coarse opt-in gate below) OR the app has
-# granted a contextual scoped grant for that capability and platform in the moment
-# (set by the app, not hand-edited here). Miss a switch and the agent will not act,
-# it tells you which one is off.
+# `capabilities_default: on` marks this file as written for the on-by-default
+# contract. Keep it: without it, the capability values below are read as the old
+# off default and everything reads as on.
+#
+# Safety checks that are not switches still apply: a capability only runs on the
+# platforms it applies to, the agent halts on captcha / 2FA, application limits
+# and comp-leak guards hold, and mail_access never sends, replies or deletes.
 #
 # NO STORED CREDENTIALS. CareerRat never stores your passwords. The browser session
 # holds your logins. With `session.provider: auto`, CareerRat selects Orca inside an
 # Orca workspace, otherwise CareerRat's app-owned Playwright browser. See
 # docs/BROWSER.md and AGENTS.md → Browser Automation Contract.
 #
-# TERMS OF SERVICE ARE YOUR CALL. Automating a logged-in platform may violate its
-# terms. `consent.<platform>` is your one-time acknowledgment that you've read that
-# platform's terms and accept the risk. The agent surfaces the ToS note, records your
-# yes here, and NEVER runs on a schedule or without you in the loop.
-#
 # Don't hand-edit blindly — use the CLI (it validates + preserves these comments):
 #   careerrat automation status                     show the full matrix
-#   careerrat automation mode <basic|advanced> --write     flip the coarse setup-mode gate
-#   careerrat automation consent <platform> --write       record ToS consent
-#   careerrat automation enable <capability> [platform] --write
-#   careerrat automation disable <capability> [platform] --write
-#   careerrat automation revoke <platform> --write        withdraw consent
+#   careerrat automation submit <auto|manual> --write      choose who presses the final Submit
+#   careerrat automation disable <capability> [platform] --write   turn one off
+#   careerrat automation enable <capability> [platform] --write    turn it back on
 
 version: 1
-setup_mode: basic
+capabilities_default: on
 
-# ── ToS consent — one-time, per platform ──────────────────────────────────────
-# Set a platform true ONLY after you've read its automation terms. Withdraw with
-# `careerrat automation revoke <platform> --write`.
-consent:
-  linkedin: false
-  wellfound: false
-  greenhouse: false
-  workday: false
-  ashby: false
-  lever: false
-  workable: false
-  smartrecruiters: false
-  external_ats: false
-  gmail: false
-  outlook: false
-  webmail: false
-  apple_calendar: false
-  google_calendar: false
-  outlook_calendar: false
-  automation_tools: false
-  work_calendar: false
+# ── Final submit ──────────────────────────────────────────────────────────────
+# auto   = once the form is complete (no unresolved required fields, every required
+#          attachment attached), the agent presses the final Submit once and checks
+#          for the confirmation page. No confirmation page means "submitted but
+#          unverified": it is never retried and never marked Applied.
+# manual = fill and stop before Submit; a person presses it.
+# Absent means auto. Any other value is an error. Change it with
+# `careerrat automation submit <auto|manual> --write`.
+submit: auto
 
 # ── Capabilities ──────────────────────────────────────────────────────────────
-# Each has a global `enabled` switch plus per-platform flags. Turn the capability
-# on AND the platform on AND record consent for that platform (see THE RULE above).
+# Each has a global `enabled` switch plus per-platform flags. All are on; set a
+# switch to false to turn that capability, or just that platform, off.
 capabilities:
 
   # Phase 1 — read-only application-status polling from your ATS dashboards.
   # The lowest-risk loop-closer: reads each application's status and hands
   # transitions to track-outcomes (still the only writer of tracker.json).
   status_polling:
-    enabled: false
+    enabled: true
     platforms:
-      greenhouse: false
-      workday: false
-      ashby: false
-      lever: false
+      greenhouse: true
+      workday: true
+      ashby: true
+      lever: true
 
   # Phase 3 — read in-platform messages/DMs into communications[]. Highest ToS
-  # exposure → strongest consent gate.
+  # exposure of the set, so it is the first one to turn off if you want less.
   messaging:
-    enabled: false
+    enabled: true
     platforms:
-      linkedin: false
-      wellfound: false
+      linkedin: true
+      wellfound: true
 
   # Phase 4 — authenticated form preparation across supported ATS forms.
   # Fill and advance safely, halt on captcha / 2FA / application limits, and
-  # always stop for the candidate to press the final submit control.
+  # follow the `submit` setting at the final submit control.
   authenticated_apply_preparation:
-    enabled: false
+    enabled: true
     platforms:
-      greenhouse: false
-      lever: false
-      ashby: false
-      workable: false
-      smartrecruiters: false
-      linkedin: false
-      external_ats: false
+      greenhouse: true
+      lever: true
+      ashby: true
+      workable: true
+      smartrecruiters: true
+      linkedin: true
+      external_ats: true
 
   # Phase 5 (M13) — LinkedIn profile optimizer. TWO separately-gated capabilities:
   # reading + suggesting profile rewrites is a different switch from writing them
   # back. profile_optimize is read-only (diffs your live profile against your
   # targeting + evidence and proposes honest rewrites); profile_apply lets the agent
   # write the approved edits back through the session browser, confirm-first PER
-  # FIELD. Turning on suggestions never implies write-back.
+  # FIELD. The two switches are independent.
   profile_optimize:
-    enabled: false
+    enabled: true
     platforms:
-      linkedin: false
+      linkedin: true
 
   profile_apply:
-    enabled: false
+    enabled: true
     platforms:
-      linkedin: false
+      linkedin: true
 
   # Phase 6 (M17) — session webmail access. Separately gated from in-platform
   # messaging and Apple Mail ingest. `webmail` is provider-agnostic and only for
   # one recent verification-code message during apply/sign-in flows. Gmail/Outlook
-  # are also supported for opted-in webmail recruiting ingest. Never send, delete,
+  # are also supported for webmail recruiting ingest. Never send, delete,
   # reply, archive, mark read, or browse the broader inbox. Halt on mail login
   # wall / 2FA / captcha.
   mail_access:
-    enabled: false
+    enabled: true
     platforms:
-      gmail: false
-      outlook: false
-      webmail: false
+      gmail: true
+      outlook: true
+      webmail: true
 
-  # Phase 7 — opt-in relationship sourcing. Finds likely recruiters,
+  # Phase 7: relationship sourcing. Finds likely recruiters,
   # hiring-team members, or warm contacts for candidate review, then captures
   # reviewed leads into Network. Never sends messages or treats a found person
   # as an action path until the candidate approves the lead.
   relationship_sourcing:
-    enabled: false
+    enabled: true
     platforms:
-      linkedin: false
-      wellfound: false
+      linkedin: true
+      wellfound: true
 
   # Phase 8 — confirm-first calendar provider sync. Builds on the no-auth
   # Calendar export path, but real provider writes stay behind their own gates.
   # Never writes on a schedule; every event/provider write needs a fresh user
   # request and confirmation.
   calendar_sync:
-    enabled: false
+    enabled: true
     platforms:
-      apple_calendar: false
-      google_calendar: false
-      outlook_calendar: false
-      automation_tools: false
+      apple_calendar: true
+      google_calendar: true
+      outlook_calendar: true
+      automation_tools: true
 
   # Phase 8 — read-only free/busy ingestion. Lets CareerRat see your existing
   # commitments so it schedules interviews around them and renders "busy" blocks
@@ -152,12 +132,12 @@ capabilities:
   # attendees. work_calendar = a work calendar open in your session browser
   # (e.g. via the Chrome extension); apple/google/outlook = personal calendars.
   calendar_read:
-    enabled: false
+    enabled: true
     platforms:
-      work_calendar: false
-      apple_calendar: false
-      google_calendar: false
-      outlook_calendar: false
+      work_calendar: true
+      apple_calendar: true
+      google_calendar: true
+      outlook_calendar: true
 
 # ── Session browser (tool-agnostic) ───────────────────────────────────────────
 # provider: auto (recommended; Orca in Orca, CareerRat's own Playwright browser otherwise) |

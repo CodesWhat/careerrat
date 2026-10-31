@@ -2,7 +2,7 @@ name: sbom
 
 # Generates a Software Bill of Materials (SBOM) for a published release and
 # attaches it as a release asset. Closes the gap left when #73 shipped without
-# one: the release pipeline (desktop-release.yml, publish.yml) never produced
+# one: the release pipeline (release.yml, publish.yml) never produced
 # a dependency manifest for the npm package.
 #
 # Tool choice: `npm sbom --sbom-format spdx` was the first choice (no extra
@@ -18,7 +18,7 @@ name: sbom
 # without npm's strict validation and produces the same SPDX format.
 #
 # workflow_dispatch takes no inputs on purpose: checkov CKV_GHA_7 requires
-# them to be empty, matching release-assets.yml and desktop-release.yml's
+# them to be empty, matching release.yml and desktop-release.yml's
 # dispatch triggers. A tag-pinned dispatch targets that exact release; a
 # manual branch dispatch targets the latest published release, resolved by
 # listing `repos/{repo}/releases` and filtering, never

@@ -52,17 +52,17 @@ CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens
 exact saved search in the visible session browser. No skips it and keeps
 searching the other sources.
 
-## Opt-in private-account capabilities
+## Private-account capabilities
 
-Reading public posting bodies requires no permission. The private-account uses
-below are opt-in and default OFF. With no `.careerrat/candidate/automation.yml`,
-none of them run.
+Reading public posting bodies needs nothing from you. The private-account uses
+below are on by default, so there is nothing to set up first. Each one still
+runs through your own signed-in browser, and you can turn any of them off.
 
 | Capability | Skill | What it does |
 |------------|-------|-------------|
 | `status_polling` | `sync-status` | Read application status from ATS dashboards |
 | `messaging` | `ingest-messages` | Read LinkedIn / Wellfound DMs |
-| `authenticated_apply_preparation` | `apply-job` | Prepare supported ATS forms, including LinkedIn Easy Apply, and stop before final submit |
+| `authenticated_apply_preparation` | `apply-job` | Prepare supported ATS forms, including LinkedIn Easy Apply, and follow the `submit` setting at final submit |
 | `profile_optimize` | `optimize-linkedin` | Read LinkedIn profile for analysis |
 | `profile_apply` | `optimize-linkedin` | Write approved edits back to the profile |
 | `mail_access` | `ingest-mail`, `apply-job` | Webmail verification codes + Gmail/Outlook ingest |
@@ -70,26 +70,28 @@ none of them run.
 | `calendar_read` | `schedule-meeting` | Read free/busy for double-booking avoidance |
 | `calendar_sync` | `calendar-sync` | Write events to a calendar provider |
 
-## Enabling a capability
+## Turning a capability off or back on
 
-The desktop job review offers **Allow form preparation** when an otherwise-ready
-application needs this permission. Terminal users can manage the same underlying
-capability matrix with the commands below.
+A capability runs on a platform unless you switch it off. Two switches matter:
+the capability's own switch, and that platform's switch under it. Turn either
+one off and the capability skips that platform.
 
-Three switches must all be on for a capability to run on a platform, and the
-setup mode must be "advanced" **or** the capability must have a contextual
-scoped grant for that platform:
-
-1. The capability's global switch is on.
-2. That platform's per-capability switch is on.
-3. That platform's one-time ToS consent is recorded.
+Settings has one switch per capability. Switches for a single platform are not
+in Settings: use the `careerrat automation disable|enable <capability> <platform> --write`
+commands below, or ask Paul to change one. If something you ask for is turned
+off, CareerRat says so in plain words and offers a **Turn it on** button that
+turns on only the platform that job needs.
 
 ```bash
-careerrat automation status                               # current matrix
-careerrat automation consent linkedin --write             # record consent
-careerrat automation enable profile_optimize linkedin --write
+careerrat automation status                               # what is on and off
+careerrat automation disable mail_access --write          # turn a capability off
+careerrat automation disable messaging linkedin --write   # turn off one platform
+careerrat automation enable mail_access --write           # turn it back on
 careerrat automation session extension --write            # set provider
 ```
+
+If CareerRat can't read your automation settings, it treats everything as off
+until the file is fixed, and `careerrat automation status` shows the read error.
 
 ## Safety rules (always enforced)
 
@@ -101,9 +103,11 @@ careerrat automation session extension --write            # set provider
   default. The local-only **Profile > Application defaults** editor can keep them
   blank or choose the form's decline option when available. Existing exact answers
   remain hidden and may be used only when the candidate explicitly saved them.
-- **Never submit an application.** CareerRat prepares the form and the candidate
-  presses the final submit control. Other outward-facing actions, such as sending
-  a message, require explicit confirmation.
+- **Submit only complete, verified applications.** With `submit: auto` (the
+  default) CareerRat presses the final submit control once, then waits for a
+  confirmation page. Run `careerrat automation submit manual --write` and it prepares
+  the form and you press submit. Other outward-facing actions, such as sending a message, require
+  explicit confirmation.
 - **Capture artifacts are scratch.** Screenshots go to `.careerrat/workspace/captures/`
   (gitignored), never the repo root.
 - **No credential storage.** The session browser holds your logins. CareerRat does

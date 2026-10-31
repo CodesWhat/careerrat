@@ -10,10 +10,12 @@ import { workspaceMessagesForDisplay } from "../../agent/workspace-thread.mjs";
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../../ai/agent-voice.mjs";
 import { runBoundedAI } from "../../ai/bounded-ai.mjs";
 import { assertAIExecutionPlanForRuntime } from "../../ai/operation-policy.mjs";
+import { applicationPlatformForUrl } from "../../apply/form-fill.mjs";
 import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
 } from "../../deep-ingest/readiness.mjs";
+import { openAnswerNeedsFromGaps } from "../../packet/answer-needs.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 import { bumpMeta, getRow, logActivityEvent, NotFoundError, putRow, runVerb } from "./shared.mjs";
@@ -1349,26 +1351,43 @@ export function completeSubmitGatesForApplicationInDb(
 ) {
   const id = cleanId(applicationId, "applicationId");
   const status = cleanText(applicationStatus, "applicationStatus", { max: 120 });
-  const rows = db
-    .prepare(
-      `SELECT data
-         FROM mission_steps
-        WHERE json_extract(data, '$.action') = 'submit-gate'
-          AND json_extract(data, '$.status') = 'blocked'
-          AND (
-            json_extract(data, '$.result.applicationId') = ?
-            OR json_extract(data, '$.jobRef.id') = ?
-          )
-        ORDER BY mission_id, sequence`
-    )
-    .all(id, id);
-  if (!rows.length) return { completedStepIds: [], completedMissionIds: [] };
+  const forApplication = (action, stepStatus) =>
+    db
+      .prepare(
+        `SELECT data
+           FROM mission_steps
+          WHERE json_extract(data, '$.action') = ?
+            AND json_extract(data, '$.status') = ?
+            AND (
+              json_extract(data, '$.result.applicationId') = ?
+              OR json_extract(data, '$.jobRef.id') = ?
+            )
+          ORDER BY mission_id, sequence`
+      )
+      .all(action, stepStatus, id, id)
+      .map(parseRow)
+      .filter(Boolean);
+
+  // A prepare-submit that auto-pressed Submit but saw no confirmation is left
+  // blocked with its pending submit-gate. Once the operator records the
+  // outcome, both close without re-running prepare.
+  const unverifiedPrepares = forApplication("prepare-submit", "blocked").filter(
+    (step) => step.result?.state === "submitted-unverified"
+  );
+  const unverifiedMissionIds = new Set(unverifiedPrepares.map((step) => step.missionId));
+  const gates = [
+    ...forApplication("submit-gate", "blocked"),
+    ...forApplication("submit-gate", "pending").filter((step) =>
+      unverifiedMissionIds.has(step.missionId)
+    ),
+  ];
+  if (!gates.length && !unverifiedPrepares.length) {
+    return { completedStepIds: [], completedMissionIds: [] };
+  }
 
   const completedStepIds = [];
   const touchedMissionIds = new Set();
-  for (const row of rows) {
-    const step = parseRow(row);
-    if (!step) continue;
+  for (const step of [...unverifiedPrepares, ...gates]) {
     const at = nextIso(step.updatedAt, now);
     const updatedStep = {
       ...step,
@@ -1791,7 +1810,9 @@ function retryablePrepareStep(step) {
   return (
     step.action === "prepare-submit" &&
     step.status === "blocked" &&
-    new Set(["blocked", "manual-handoff", "needs-input", "unavailable"]).has(step.result?.state)
+    new Set(["blocked", "manual-handoff", "needs-input", "unavailable", "needs-answer"]).has(
+      step.result?.state
+    )
   );
 }
 
@@ -2060,6 +2081,25 @@ function operationSummary(result) {
     ...(operation?.applicationId ? { applicationId: String(operation.applicationId) } : {}),
     ...(operation?.status ? { status: String(operation.status) } : {}),
     ...(last?.metadata?.state ? { state: String(last.metadata.state) } : {}),
+    ...(last?.metadata?.state === "submitted-unverified" && last.metadata.reason
+      ? { reason: promptText(last.metadata.reason, 500) }
+      : {}),
+    // A turned-off capability pauses the mission on purpose (the operator chose
+    // that); the stored result keeps the plain reason instead of a bare "blocked".
+    ...(last?.metadata?.state === "needs-answer" && Array.isArray(last.metadata.needsAnswers)
+      ? {
+          needsAnswers: last.metadata.needsAnswers.slice(0, 50).map((need) => ({
+            questionId: need?.questionId ? String(need.questionId) : null,
+            question: promptText(need?.question, 500),
+          })),
+        }
+      : {}),
+    ...(last?.metadata?.capabilityOff?.reason
+      ? { capabilityOff: { reason: promptText(last.metadata.capabilityOff.reason, 500) } }
+      : {}),
+    ...(last?.metadata?.autoSubmitStopped?.reason
+      ? { autoSubmitStopped: { reason: promptText(last.metadata.autoSubmitStopped.reason, 300) } }
+      : {}),
     ...(handoff
       ? {
           handoff: jsonClone(
@@ -2208,6 +2248,9 @@ export async function missionRun({
     }
   }
 
+  // Jobs whose prepare step came back needing the operator's answer. That is a
+  // flag on the one job: its remaining steps wait, every other job carries on.
+  const jobsNeedingAnswers = new Set();
   for (const step of mission.steps) {
     const retryablePrepare = retryablePrepareStep(step);
     const retryableFocus = focusedApplicationId
@@ -2215,6 +2258,7 @@ export async function missionRun({
       : false;
     if (focusedApplicationId && !retryableFocus) continue;
     if (step.status !== "pending" && !retryablePrepare && !retryableFocus) continue;
+    if (jobsNeedingAnswers.has(`${step.jobRef?.type}:${step.jobRef?.id}`)) continue;
     // Give a user pause request waiting on the HTTP event loop a chance to
     // commit before this runner claims more work. Some installed CLI agents
     // block the server process while they run, so a microtask-only loop would
@@ -2227,6 +2271,24 @@ export async function missionRun({
     if (step.action === "submit-gate") {
       const applicationId = applicationIds.get(step.jobRef.id);
       const application = applicationId ? getRow(db, "applications", applicationId) : null;
+      // submit: auto. A verified "applied" prepare-submit already pressed and
+      // confirmed Submit, so the gate resolves through the same reconcile path
+      // a manually recorded Applied outcome takes.
+      const submittedByAgent = missionSteps(db, missionId).some(
+        (candidate) =>
+          candidate.action === "prepare-submit" &&
+          candidate.status === "completed" &&
+          candidate.result?.state === "applied" &&
+          sameMissionJob(candidate, step)
+      );
+      // submit: auto stopped before pressing Submit: carry why onto the gate.
+      const autoStopReason = missionSteps(db, missionId).find(
+        (candidate) =>
+          candidate.action === "prepare-submit" &&
+          candidate.result?.state === "awaiting-submit" &&
+          candidate.result?.autoSubmitStopped?.reason &&
+          sameMissionJob(candidate, step)
+      )?.result?.autoSubmitStopped?.reason;
       committedWrite(() =>
         missionStepSetStatus({
           repoRoot,
@@ -2237,6 +2299,7 @@ export async function missionRun({
           result: {
             applicationId,
             requiresUserSubmit: true,
+            ...(autoStopReason ? { autoSubmitStopped: { reason: autoStopReason } } : {}),
             ...(step.jobRef.deadline ? { deadline: step.jobRef.deadline } : {}),
             ...(step.jobRef.expiryLabel ? { expiryLabel: step.jobRef.expiryLabel } : {}),
             ...applicationGateState(application),
@@ -2244,6 +2307,16 @@ export async function missionRun({
           now,
         })
       );
+      if (submittedByAgent) {
+        committedWrite(() =>
+          completeSubmitGatesForApplicationInDb(db, {
+            applicationId,
+            applicationStatus: "applied",
+            appliedAt: application?.appliedAt || null,
+            now,
+          })
+        );
+      }
       continue;
     }
     const applicationId = applicationIds.get(step.jobRef.id);
@@ -2354,9 +2427,37 @@ export async function missionRun({
           );
         applicationIds.set(step.jobRef.id, promotedId);
       }
-      if (step.action === "prepare-submit" && result.state !== "awaiting-submit") {
+      // "applied" (verified) and "submitted-unverified" only occur when the
+      // workspace has submit: auto; every other state keeps today's handling.
+      if (
+        step.action === "prepare-submit" &&
+        result.state !== "awaiting-submit" &&
+        result.state !== "applied"
+      ) {
+        if (result.state === "needs-answer") {
+          committedWrite(() =>
+            missionStepSetStatus({
+              repoRoot,
+              env,
+              missionId,
+              stepId: step.id,
+              status: "blocked",
+              result,
+              attemptId: claimed.attempt.id,
+              now,
+            })
+          );
+          jobsNeedingAnswers.add(`${step.jobRef?.type}:${step.jobRef?.id}`);
+          continue;
+        }
         if (
-          new Set(["blocked", "manual-handoff", "needs-input", "unavailable"]).has(result.state)
+          new Set([
+            "blocked",
+            "manual-handoff",
+            "needs-input",
+            "unavailable",
+            "submitted-unverified",
+          ]).has(result.state)
         ) {
           committedWrite(() =>
             missionStepSetStatus({
@@ -4011,6 +4112,43 @@ function applicationNextActionNeeds(applications, now) {
   });
 }
 
+// A job with unanswered required application questions shows in Today as
+// waiting on the operator's answer. It is a flag on that one job: the rest of
+// the run carries on, and the card opens the job thread where the answer goes.
+function applicationAnswerNeeds(applications) {
+  return applications.flatMap((application) => {
+    if (isJobClosed(application.status)) return [];
+    const questions = openAnswerNeedsFromGaps(application.packetManifest?.gaps);
+    if (!questions.length) return [];
+    const count = questions.length;
+    const owner = {
+      type: "application",
+      id: application.id,
+      applicationId: application.id,
+    };
+    const action = { id: "answer", label: "Answer", kind: "open-owner" };
+    return [
+      {
+        id: `application:${application.id}:needs-answer`,
+        kind: "needs-answer",
+        applicationId: application.id,
+        company: application.company || null,
+        role: application.role || null,
+        title: `${application.company || "This job"} needs ${count === 1 ? "an answer" : `${count} answers`}`,
+        detail:
+          count === 1 ? questions[0].question : `${questions[0].question} and ${count - 1} more`,
+        primaryLabel: action.label,
+        tone: "attention",
+        eyebrow: "YOUR ANSWER",
+        owner,
+        action,
+        actions: [action],
+        questions,
+      },
+    ];
+  });
+}
+
 function touchDueNeeds(touches) {
   return touches.map((touch) => {
     const owner = {
@@ -4073,6 +4211,11 @@ function packetQuestionOptions(manifest, questionId) {
     if (options.length === 12) break;
   }
   return options;
+}
+
+function applicationPlatformFromApplication(application) {
+  const url = String(application?.link || application?.url || application?.sourceUrl || "").trim();
+  return url ? applicationPlatformForUrl(url) : null;
 }
 
 function packetReviewFromApplication(application) {
@@ -4155,6 +4298,8 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
         mode: applicationMode(application),
         comp: applicationCompensation(application),
         ...(packetReview ? { packetReview } : {}),
+        needsAnswers: openAnswerNeedsFromGaps(application.packetManifest?.gaps),
+        applicationPlatform: applicationPlatformFromApplication(application),
         archived: archiveEligible || manuallyArchived,
         archiveEligible,
         archiveReason: archiveEligible ? "job-closed" : manuallyArchived ? "user" : null,
@@ -4205,6 +4350,7 @@ export function chatFirstStateFromDb(db, { now = new Date() } = {}) {
   const touchDue = deriveTouchDue(db, applications, communications, current);
   const needsYou = [
     ...submitGateNeeds(missions),
+    ...applicationAnswerNeeds(applications),
     ...sourcedDecisionNeeds(sourced, missions),
     ...applicationNextActionNeeds(applications, current),
     ...touchDueNeeds(touchDue),

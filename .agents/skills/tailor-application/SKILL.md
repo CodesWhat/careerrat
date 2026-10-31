@@ -38,8 +38,7 @@ Read in this order:
 2. `candidate/evidence.yml` — note `claims[]`, `allowed_wording[]`,
    `forbidden_wording[]`
 3. `candidate/targeting.yml` — note `role_buckets`, `degree_policy`, `fit_bands`
-4. `candidate/form-defaults.yml` — note `expected_base`, `work_authorization`,
-   `auto_submit`
+4. `candidate/form-defaults.yml`: note `expected_base`, `work_authorization`
 5. `candidate/profile.yml` — note `candidate.toolchain`, `candidate.domain`,
    `compensation.expected_base` (outbound-safe); **do not read or echo
    `compensation.current_base`** — it is private and must not appear in any artifact
@@ -181,8 +180,10 @@ from the JD:
 3. **Never fabricate.** A question whose truthful answer would require guessing a
    number/date/clearance/tool depth, revealing current compensation, or contradicting
    `honesty.yml` gets the literal marker `NEEDS YOU: <one-line reason>` as its body.
-   The placeholder lint (STEP 7) blocks on `NEEDS YOU`, so the packet cannot be
-   upload-ready until the user supplies the answer.
+   The marker is a flag on this one job, not a stop: keep building the rest of the
+   packet and tell the user which questions are waiting. The placeholder lint (STEP 7)
+   still blocks on `NEEDS YOU`, so the packet cannot be exported or marked upload-ready
+   until the user supplies the answer.
 4. **Persist durable answers.** When the user resolves a `NEEDS YOU` or confirms an
    answer to a recurring disclosure-style question, write it to
    `candidate/form-defaults.yml#screening_answers` (normalized question fragment →
@@ -207,6 +208,11 @@ node src/cli/lint-placeholders.mjs workspace/tailored/
 
 Fix every finding before continuing. The command exits 1 on any hit.
 
+The one exception is `NEEDS YOU`. That marker is a per-job flag, not a stop, so a
+`NEEDS YOU` finding does not halt the tracker stamp or the activity log below. Fix
+every other finding first. The artifact is still never marked upload-ready while the
+marker remains.
+
 Do not mark any artifact as upload-ready or build-ready until this exits 0.
 
 Then log the tailored artifacts to the Activity Pulse feed (the dashboard's live timeline — see
@@ -223,7 +229,7 @@ Treat these as invalid placeholders: `[Company]`, `[Role]`, `{candidate}`,
 template residue. (`NEEDS YOU` is the STEP 6 unanswered-question marker — resolving
 it with the user, not deleting it, is the fix.)
 
-**Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0,
+**Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0, or its only findings are `NEEDS YOU` markers,
 write the produced artifact paths back to the application row in a single
 `tracker.json` write before proceeding to STEP 8 or STEP 12:
 
@@ -319,10 +325,10 @@ If a violation is found, remove it and re-run STEP 7.
 If the user stated any new honesty boundary during this session (e.g. "never claim
 Terraform", "remove that certification claim", "add Kubernetes to do-not-claim"):
 
-- **Write-and-report** for unambiguous, low-blast-radius additions (one new tool to
-  do_not_claim, one claim to forbid): run `careerrat gate do-not-claim "<tool>" --write`
+- **Write-and-report** for additions that tighten a boundary (one new tool to
+  do_not_claim, one claim to forbid), applied directly and logged with an Undo: run `careerrat gate do-not-claim "<tool>" --write`
   or `careerrat gate do-not-fabricate "<claim>" --write`, then echo the CLI confirmation.
-- **Confirm-first** for consequential changes (removing a confirmed tool, broad
+- **Confirm-first** for anything that loosens a boundary (removing a confirmed tool, broad
   claim rewrites): propose the exact candidate-config change, get a yes, then write
   through the owning DB-aware command.
 
@@ -377,21 +383,21 @@ built-in OOXML writer. Zero new dependencies in either case.
 Use `--out <path>` to override the output location, `--title "..."` to set the
 document title (defaults to the file's stem).
 
-**Export a convenience copy to the company's Downloads folder.** After every PDF
+**Export a convenience copy to the job's Documents folder.** After every PDF
 renders (resume and cover letter), copy it there unconditionally, under the
-per-company folder (Artifact Contract: organized by company, then by round):
+job folder (Artifact Contract: organized by company, job, then round):
 
 ```text
-~/Downloads/careerrat/<Company>/<Company> - Resume.pdf
-~/Downloads/careerrat/<Company>/<Company> - Cover Letter.pdf   # if produced
+~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Resume.pdf
+~/Documents/careerrat/<Company>/job-<application-id>/<Company> - Cover Letter.pdf   # if produced
 ```
 
 Use the real company name for the folder and filename (no brackets — truly
 unknown company → `unknown`). If a prior round's file with the same name is at
-that company root, move it to `~/Downloads/careerrat/<Company>/archive/` first so
+that job root, move it to `~/Documents/careerrat/<Company>/job-<application-id>/archive/` first so
 the root only shows what's live. `workspace/tailored/` remains the source of
-truth; Downloads is a convenience copy for quick access. Plain-text artifacts
-(short answers, outreach notes) export as `.txt` to the same company folder.
+truth; Documents is a convenience copy for quick access. Plain-text artifacts
+(short answers, outreach notes) export as `.txt` to the same job folder.
 
 ## STEP 12 — Hand off
 
@@ -403,10 +409,11 @@ workspace/tailored/<Company> — <Role>.docx   (if built)
 workspace/tailored/<Company> — <Role>.pdf    (if built)
 ```
 
-- If the user intends to submit: hand off to `apply-job`. `apply-job` will re-verify
-  the gate, fill the form, and handle submission per `form-defaults.yml#auto_submit`.
+- If the user intends to apply: hand off to `apply-job`. `apply-job` will re-verify
+  the gate, fill the form, and handle submission per `automation.yml#submit`
+  (`auto` by default, `manual` to stop for the user).
 - If the user only wanted the artifacts: confirm files are ready and list their paths.
-- Do not auto-submit from within this skill. Submission is owned by `apply-job`.
+- Do not submit from within this skill. Submission is owned by `apply-job`.
 - **Learnings write-back is owned by `track-outcomes`, not this skill.** Read it
   via `careerrat learnings read "<role>"` (STEP 2); appends are `track-outcomes`'
   job. After an outcome is known (rejection, advance, offer), run `track-outcomes`

@@ -540,6 +540,11 @@ test("proposal persistence is atomic and idempotent for the frozen source versio
             payload: { claim: "Built a second durable Deep Ingest lifecycle." },
           });
         }
+        // Held rows stay in review, which is the state this test tracks. A row that
+        // passes every check saves on its own and is no longer a review row.
+        for (const row of built.proposals) {
+          row.validation = { status: "blocked", blockedReasons: ["ungrounded"] };
+        }
         return built;
       },
     },

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // CareerRat launcher — the `npx careerrat <command>` entrypoint.
 //
-//   careerrat start [ai]  One command: scaffold + skills + local app + agent
+//   careerrat start [ai]  Open the local app; optionally launch a terminal agent
 //   careerrat init        Scaffold candidate/ + workspace dirs, print next steps
 //   careerrat doctor      Environment health check
 //   careerrat next        Show the next agent task
@@ -13,7 +13,11 @@
 //   careerrat tracker     One-shot tracker snapshot (use `start` for the live dev server)
 //   careerrat restore     Recover workspace/tracker.json from a rolling snapshot
 //   careerrat export      Render a tailored artifact / packet to PDF or DOCX
+//   careerrat people      List or add people, one workspace each (see --for)
 //   careerrat help        Show this list
+//
+// Global: `--for <name>` runs any command in that person's workspace
+// (<data root>/people/<name>/). CAREERRAT_PERSON=<name> does the same.
 //
 // Each subcommand delegates to the matching src/cli script, forwarding args.
 
@@ -46,6 +50,7 @@ import {
   findInstalledExecutable,
   INSTALLED_RUNTIME_DEFINITIONS,
 } from "../src/core/ai/installed-runtimes.mjs";
+import { currentPerson, resolvePersonSelection } from "../src/core/paths/people.mjs";
 import {
   displayPath,
   privateDataRoot,
@@ -74,7 +79,8 @@ import { readVersion } from "../src/core/version.mjs";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const pathCtx = { repoRoot: root };
-const [command, ...rest] = process.argv.slice(2);
+const { args: cliArgs, person: forPerson } = extractForFlag(process.argv.slice(2));
+const [command, ...rest] = cliArgs;
 
 const CLIS = {
   doctor: "src/cli/doctor.mjs",
@@ -86,6 +92,7 @@ const CLIS = {
   questions: "src/cli/questions.mjs",
   tracker: "src/cli/tracker.mjs",
   "tracker-dev": "src/cli/tracker-dev.mjs",
+  people: "src/cli/people.mjs",
   data: "src/cli/data.mjs",
   modes: "src/cli/modes.mjs",
   automation: "src/cli/automation.mjs",
@@ -143,6 +150,15 @@ if (!command || command === "help" || command === "--help" || command === "-h") 
   process.exit(command ? 0 : 1);
 }
 
+if (command === "start" && (rest.includes("--help") || rest.includes("-h"))) {
+  printHelp();
+  process.exit(0);
+}
+
+// Select the person before anything resolves a path. Setting the env here is what
+// makes every command, subcommand and child process inherit the same workspace.
+applyPersonSelection();
+
 if (command === "update") {
   process.exit(runUpdate(rest));
 }
@@ -180,6 +196,54 @@ if (command === "start") {
 
 // ---------------------------------------------------------------------------
 
+// Pulls a global `--for <name>` (or `--for=<name>`) out of argv so no command
+// ever sees it. The last one wins.
+function extractForFlag(argv) {
+  const args = [];
+  let person = null;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--for") {
+      const value = argv[i + 1];
+      if (!value?.trim() || value.startsWith("-")) {
+        console.error("--for needs a person name. Try: careerrat --for <name> <command>");
+        process.exit(1);
+      }
+      person = value;
+      i++;
+    } else if (arg.startsWith("--for=")) {
+      person = arg.slice("--for=".length);
+      if (!person.trim()) {
+        console.error("--for needs a person name. Try: careerrat --for <name> <command>");
+        process.exit(1);
+      }
+    } else {
+      args.push(arg);
+    }
+  }
+  return { args, person };
+}
+
+// `--for <name>` or an inherited CAREERRAT_PERSON points CAREERRAT_HOME at
+// <base>/people/<name>. The person has to exist, except where the command
+// creates it: `people` (add) and `start --new`.
+function applyPersonSelection() {
+  let env;
+  try {
+    env = resolvePersonSelection({
+      repoRoot: root,
+      env: process.env,
+      forName: forPerson,
+      allowMissing: command === "people",
+      createMissing: command === "start" && rest.includes("--new"),
+    });
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+  if (env) Object.assign(process.env, env);
+}
+
 function runInit(extra) {
   for (const dir of WORKSPACE_DIRS) {
     const abs = userPath(pathCtx, dir);
@@ -201,11 +265,12 @@ function runInit(extra) {
 // (`careerrat start claude`); `--agent <name>` is an equivalent alias. Both
 // accept either supported launcher by name.
 function parseStartArgs(extra) {
-  const out = { agent: null, port: null, noAgent: false, noDashboard: false };
+  const out = { agent: null, port: null, noAgent: false, noDashboard: false, noOpen: false };
   for (let i = 0; i < extra.length; i++) {
     const a = extra[i];
     if (a === "--no-agent") out.noAgent = true;
     else if (a === "--no-dashboard") out.noDashboard = true;
+    else if (a === "--no-open") out.noOpen = true;
     else if (a === "--agent") out.agent = extra[++i] || out.agent;
     else if (a === "--port") out.port = extra[++i] || out.port;
     else if (a.startsWith("-")) {
@@ -216,16 +281,18 @@ function parseStartArgs(extra) {
 }
 
 // `careerrat start [agent]` — the one-command front door:
-//   scaffold workspace → install skills → boot the local app (:7777) →
-//   hand off to the named agent (or first found on PATH) with the starter prompt.
+//   scaffold workspace → boot the local app (:7777) → open the browser.
+//   An explicit agent name or --no-dashboard retains the terminal skill path.
 // Usage: careerrat start [claude|codex]
-//        [--agent <name>] [--no-agent] [--no-dashboard] [--port <n>]
+//        [--agent <name>] [--no-agent] [--no-dashboard] [--no-open] [--port <n>]
 async function runStart(extra) {
   const opts = parseStartArgs(extra);
   const wantDashboard = !opts.noDashboard;
-  const wantAgent = !opts.noAgent;
+  const wantAgent = !opts.noAgent && (Boolean(opts.agent) || opts.noDashboard);
   const forcedAgent = opts.agent;
 
+  const person = currentPerson(process.env);
+  if (person) console.log(`• CareerRat for ${person}`);
   console.log(`• Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
 
   // 1) Scaffold workspace dirs (idempotent).
@@ -236,10 +303,12 @@ async function runStart(extra) {
 
   // 2) Install skills so Claude Code sees /apply-job etc. Non-fatal: agents that
   //    read AGENTS.md natively (Codex) work without the shim.
-  console.log("• Installing skills…");
-  const skillCode = run(join(root, "scripts/install-skills.mjs"), ["--soft"]);
-  if (skillCode !== 0) {
-    console.log("  (skill shim reported an issue, AGENTS.md-native agents still work)");
+  if (wantAgent) {
+    console.log("• Installing skills…");
+    const skillCode = run(join(root, "scripts/install-skills.mjs"), ["--soft"]);
+    if (skillCode !== 0) {
+      console.log("  (skill shim reported an issue, AGENTS.md-native agents still work)");
+    }
   }
 
   // 3) Seed a tracker so the local app can boot. Never clobber real data.
@@ -247,10 +316,19 @@ async function runStart(extra) {
   if (!existsSync(trackerJson)) {
     try {
       mkdirSync(userPath(pathCtx, "workspace"), { recursive: true });
-      copyFileSync(join(root, "templates/tracker.json"), trackerJson);
-      console.log(
-        `• Seeded ${displayPath(pathCtx, "workspace/tracker.json")} (demo data, replaced as you add real roles)`
-      );
+      if (person) {
+        // A person's workspace starts empty: demo rows would mix into a real
+        // person's job search.
+        const seed = JSON.parse(readFileSync(join(root, "templates/tracker.json"), "utf8"));
+        for (const key of Object.keys(seed)) if (Array.isArray(seed[key])) seed[key] = [];
+        writeFileSync(trackerJson, `${JSON.stringify(seed, null, 2)}\n`);
+        console.log(`• Started an empty tracker for ${person}`);
+      } else {
+        copyFileSync(join(root, "templates/tracker.json"), trackerJson);
+        console.log(
+          `• Seeded ${displayPath(pathCtx, "workspace/tracker.json")} (demo data, replaced as you add real roles)`
+        );
+      }
     } catch {
       /* non-fatal: the local app simply won't boot until a tracker exists */
     }
@@ -260,6 +338,30 @@ async function runStart(extra) {
   let dash = null;
   if (wantDashboard && existsSync(trackerJson)) {
     dash = await startDashboard(opts.port);
+  }
+
+  if (dash && dash.ready === false && wantDashboard && !wantAgent) {
+    const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
+    console.error(
+      `The browser workspace did not come up at ${dash.url}/app. See the local app log at ${relLog} and try again.`
+    );
+    return 1;
+  }
+
+  if (dash && dash.ready === false) {
+    const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
+    console.error(
+      `The browser workspace did not come up at ${dash.url}/app. See the local app log at ${relLog}. Continuing with the terminal session.`
+    );
+  } else if (dash) {
+    const appUrl = `${dash.url}/app`;
+    if (!wantAgent) console.log(`• Continue in your browser → ${appUrl}`);
+    if (!opts.noOpen && !(await openAppInBrowser(appUrl))) {
+      console.log(`Open this address in your browser: ${appUrl}`);
+    }
+  } else if (wantDashboard && !wantAgent) {
+    console.error("The browser workspace could not start. Check the local app log and try again.");
+    return 1;
   }
 
   // 5) Hand off to the agent.
@@ -292,11 +394,32 @@ async function runStart(extra) {
       }
       printManualAgentHandoff(dash);
     }
-  } else {
+  } else if (!wantDashboard) {
     console.log("");
     printManualAgentHandoff(dash);
   }
   return exitCode;
+}
+
+async function openAppInBrowser(url) {
+  const command =
+    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(command, [url], {
+        stdio: "ignore",
+        detached: true,
+        shell: process.platform === "win32",
+      });
+      child.once("error", () => resolve(false));
+      child.once("spawn", () => {
+        child.unref();
+        resolve(true);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 // The agent has to start where AGENTS.md and .agents/skills/ live, which is the
@@ -346,6 +469,7 @@ async function startDashboard(port) {
     installedVersion,
     recordedPid,
     recordedProcessIsTracker,
+    dataRoot: resolveUserPaths(pathCtx).dataRoot,
   });
 
   if (runtime.state === "current") {
@@ -367,7 +491,11 @@ async function startDashboard(port) {
       console.log("• Stale local app did not stop cleanly; continuing without replacing it");
       return null;
     }
-  } else if (runtime.state === "foreign" || runtime.state === "stale-unowned") {
+  } else if (
+    runtime.state === "foreign" ||
+    runtime.state === "stale-unowned" ||
+    runtime.state === "other-workspace"
+  ) {
     const fallbackPort = await findAvailableLoopbackPort({ startPort: resolvedPort + 1 });
     if (!fallbackPort) {
       console.log("• Local app could not find a safe loopback port; continuing without it");
@@ -376,6 +504,10 @@ async function startDashboard(port) {
     if (runtime.state === "foreign") {
       console.log(
         `• Port ${resolvedPort} belongs to another process; leaving it untouched and using ${fallbackPort}`
+      );
+    } else if (runtime.state === "other-workspace") {
+      console.log(
+        `• Port ${resolvedPort} is running CareerRat for a different workspace; leaving it running and using port ${fallbackPort} for this one`
       );
     } else {
       console.log(
@@ -399,17 +531,21 @@ async function startDashboard(port) {
     });
     closeSync(logFd);
     logFd = null;
+    let childExited = false;
+    child.once("exit", () => {
+      childExited = true;
+    });
     child.unref();
     writeFileSync(pidPath, `${child.pid}\n`);
 
-    const ready = await waitForUrl(url, installedVersion, 8000);
+    const ready = await waitForUrl(url, installedVersion, 8000, () => childExited);
     const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
     if (ready) {
       console.log(`• Local app live → ${url} (pid ${child.pid}, log ${relLog})`);
     } else {
       console.log(`• Local app starting → ${url} (pid ${child.pid}, log ${relLog})`);
     }
-    return { url, pid: child.pid, logPath };
+    return { url, pid: child.pid, logPath, ready };
   } catch {
     if (logFd != null) {
       try {
@@ -456,11 +592,12 @@ function recordedTrackerProcessCommand(pid) {
   return inspected.status === 0 ? inspected.stdout : "";
 }
 
-async function waitForUrl(url, installedVersion, timeoutMs) {
+async function waitForUrl(url, installedVersion, timeoutMs, hasExited = () => false) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const health = await readLocalAppHealth(url);
     if (health.careerrat && health.version === installedVersion) return true;
+    if (hasExited()) return false;
     await delay(150);
   }
   return false;
@@ -711,7 +848,7 @@ function printHelp() {
 Usage: careerrat <command> [options]
 
 Commands:
-  start [ai]  Scaffold + install skills + local app + launch your agent
+  start [ai]  Open the browser workspace; optionally launch a terminal agent
   init        Scaffold candidate/ + workspace dirs, print next steps
   install-skills  Create/repair the .claude/skills -> .agents/skills shim (--check to verify only)
   doctor      Environment health check
@@ -723,6 +860,7 @@ Commands:
   questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)
   tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat start')
   tracker-dev  Serve the live local app without launching an agent
+  people      List or add people, one workspace each (run any command for them with --for)
   data        sqlite-backed data layer: status/init/import/export/verify + per-domain verbs (M6)
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)
   modes       Show/change optional usage and application modes
@@ -744,12 +882,18 @@ Commands:
   help        Show this list
 
 start [ai]:
-  the first bare word picks the agent to launch. Claude and Codex are detected
-  automatically; an explicitly named compatible command is also accepted.
+  With no agent name, continue chatting in the browser workspace.
+  Name Claude or Codex explicitly to launch a terminal skill session as well.
   --agent <name>      same as the positional, alternate spelling
   --no-agent          scaffold + local app only, don't launch an agent
-  --no-dashboard      skip the local app
+  --no-dashboard      terminal session only; detect a supported agent if unnamed
+  --no-open           serve the local app without opening a browser tab
   --port <n>          local app port (default 7777)
+  --new               with --for, create that person's workspace first
+
+--for <name>:
+  Works on every command. Runs it in that person's workspace
+  (<data root>/people/<name>/). Create one with: careerrat people add <name>
 
 Run any command with --help for its own options.`);
 }

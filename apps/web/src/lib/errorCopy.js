@@ -72,14 +72,7 @@ function communicationChannelUnsupportedMessage(details) {
     : "CareerRat can only prepare email sends. Reply on that channel yourself, then choose “I sent this”.";
 }
 
-function settingsChangeUnsupportedMessage(details) {
-  const reason = details?.reason;
-  if (reason === "consent") {
-    return "Consent changes happen in Settings, where CareerRat shows you exactly what each platform allows.";
-  }
-  if (reason === "capability-tier") {
-    return "That automation level gets turned on in Settings so you can review what it does first.";
-  }
+function settingsChangeUnsupportedMessage() {
   return "CareerRat can't change that setting from here. Use the Settings page.";
 }
 
@@ -269,7 +262,7 @@ const RULES = [
   },
   {
     match: ({ code }) => code === "SETTINGS_CHANGE_UNSUPPORTED",
-    message: ({ details }) => settingsChangeUnsupportedMessage(details),
+    message: () => settingsChangeUnsupportedMessage(),
     action: { label: "Open Settings", to: "/settings" },
   },
   {

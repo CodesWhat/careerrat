@@ -308,7 +308,7 @@ Combine `GATE` + `COMP` + `FIT` + app-limits + company-history result into a sin
 | --- | --- |
 | fit score below `targeting.fit_bands.fit_floor` | `cut` — auto-drop; no manual triage (config-driven; absent = no auto-drop) |
 | GATE=KEEP, COMP=clear, FIT=high or med | `apply-now` |
-| GATE=KEEP or REVIEW, COMP=review or unlisted | `manual` (verify comp before submitting) |
+| GATE=KEEP or REVIEW, COMP=review or unlisted | `manual` (verify comp before applying) |
 | COMP=below-floor on a **relocation** floor (`comp.relo`) | `cut` — hard gate; relocating for under-floor comp is a no-go (do not promote to apply-now) |
 | COMP=estimated-below-floor (no posted band, estimate under floor) | `hold` — advisory only; confirm real band before deciding |
 | GATE=KEEP, COMP=below-floor (remote/home metro, not relo) | `hold` (negotiable; unless user overrides) |
@@ -395,9 +395,12 @@ Then log the verdict to the Activity Pulse feed (the dashboard's live timeline �
 
 ## STEP 10 — GATE WRITE-BACK (new limits discovered)
 
-If a new application blocker was encountered during this evaluation (e.g., a posted cap, cooldown, or portal blocker that should affect future roles), capture it on the tracker row and persist it after confirmation. DB mode writes use `careerrat data candidate limits upsert --data '<json row>'`; legacy mode writes `candidate/application-limits.yml`.
+If a new application blocker was encountered during this evaluation (e.g., a posted cap, cooldown, or portal blocker that should affect future roles), record it in two places, each logged with an Undo.
 
-**Write-back friction rule**: blocker facts are low-blast-radius to record on the row, but durable application-limit config is confirm-first.
+- **Durable application-limit config.** DB mode: `careerrat data candidate limits upsert --data '<json row>'`. Legacy mode writes `candidate/application-limits.yml`. This writes only the limit config, never the tracker row.
+- **The tracker row.** Record the blocker on the evaluated row with its own writer. For an application row in a DB workspace: `careerrat data app set-fields <id> --data '{"statusNote":"<blocker>"}'`. For a sourced row: read the row, set `note`, and persist the whole row with `careerrat data sourced upsert-batch --data '[<patched full sourced row JSON>]'`. Legacy mode edits `workspace/tracker.json` directly.
+
+**Write-back friction rule**: blocker facts and durable application-limit config both apply directly, with an Undo.
 
 ---
 

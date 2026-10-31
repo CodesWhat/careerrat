@@ -4,6 +4,71 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-10-27
+
+### Added
+
+- CareerRat now submits an application itself when it's complete and verified.
+  Every required field has an answer, required uploads are attached, exactly one
+  clearly labelled submit control is on the page, and the fit gate is KEEP or a
+  REVIEW you approved. It presses Submit once, then looks for a confirmation
+  page. This is the default.
+- `careerrat automation submit manual --write` turns that off. CareerRat fills
+  the form and stops for you to press Submit. `careerrat automation status` shows
+  the current setting.
+- When CareerRat doesn't press Submit, it says why and hands you the form.
+- The job thread shows "What was sent" after an automatic submit.
+
+### Changed
+
+- If no confirmation page shows up after Submit, the application is marked
+  submitted-unverified. CareerRat never retries the click and asks you to check
+  the site.
+- The README, agent instructions, skills, docs and disclaimer now describe
+  automatic submit and the manual setting instead of saying you always press
+  Submit. The permission prompt for form preparation says the same. The honesty
+  and evidence rules are unchanged.
+
+## [0.20.0] - 2026-10-26
+
+### Added
+
+- `careerrat start` opens the browser workspace on its own, without starting a
+  terminal agent. `careerrat start claude` and `careerrat start codex` still
+  open a terminal session, and `--no-open` serves the workspace without opening
+  a tab.
+- Saved exports go to `Documents/careerrat`, with one folder per job. A job you
+  reject, withdraw or close moves to an archive folder, and reopening it moves
+  it back. Earlier versions of a document are kept.
+- Today's conversation points at your next application: either the one ready
+  for you to check and submit, or a saved role you can start applying to. Once
+  you have applications, it asks you to paste rejections, interview invites,
+  offers or recruiter feedback so they shape later searches.
+
+### Changed
+
+- CareerRat now ships through npm only. The Mac app ended at v0.19.2: it keeps
+  working, but there are no more Mac builds or Homebrew cask updates. Install
+  or update with `npm install -g careerrat`.
+- When a supervised application is filled and waiting, its next step reads
+  "Open form to review & submit" and tells you to come back and choose
+  "I applied" once it's sent.
+
+### Fixed
+
+- PDF export works from an npm install, not just a source checkout. The browser
+  renderer is now a runtime dependency.
+
+## [0.19.2] - 2026-10-25
+
+### Fixed
+
+- Bundled libraries with published security advisories are updated in both the
+  app and the desktop runtime: the HTML sanitizer, the HTTP client, the schema
+  validator, and the source-map helper. No change to how CareerRat behaves.
+- The website and documentation analytics record the page a visitor arrived
+  from, under the same privacy settings as before.
+
 ## [0.19.1] - 2026-09-08
 
 ### Fixed

@@ -14,6 +14,7 @@ import { useEventSource } from "../lib/sse.js";
 import { chatFirstApi } from "./api.js";
 import { filterFiles, filterPeople, filterSearchJobs } from "./browser-model.js";
 import {
+  APPLICATION_PREPARATION_UNCHECKED,
   applicationPreparationPermission,
   calendarAction,
   commitComposerTurn,
@@ -27,6 +28,7 @@ import {
   engineUnavailable,
   findGate,
   focusApplicationHandoff,
+  isApplicationPreparationEnable,
   isEngineFailure,
   isMockInterviewStartRequest,
   loadChatFirstArtifact,
@@ -693,7 +695,8 @@ function missionPresentation(mission) {
       (step) =>
         `${marks[step?.status] || "○"} ${step?.label || titleCase(step?.action, "Mission step")}`
     ),
-    footnote: "Packets are built from the full posting. Every submit gates back here.",
+    footnote:
+      "Packets are built from the full posting. Each one is checked against the full posting before it goes out.",
     choicePrompt: hasRemainingWork ? mission.choicePrompt || null : null,
   };
 }
@@ -1428,6 +1431,7 @@ export function ChatFirstAppView({
           counts={deepIngest?.counts}
           sources={deepIngest?.sources}
           proposals={deepIngest?.proposals}
+          applied={deepIngest?.applied}
           receipt={deepIngest?.receipt}
           inputMode={deepIngest?.inputMode}
           inputValue={deepIngest?.inputValue}
@@ -1546,6 +1550,16 @@ export function ChatFirstAppView({
           answerBusy={busy}
           mission={missionPresentation(activeMission)}
           strategy={view.strategy}
+          applicationNeed={
+            view.needsYou.find((item) =>
+              ["submit", "submit-gate", "submit-gate-group"].includes(item.kind)
+            ) ||
+            view.needsYou.find((item) =>
+              ["sourced-decision", "sourced-decision-group"].includes(item.kind)
+            )
+          }
+          hasApplications={view.counts.pipeline > 0}
+          onApplicationAction={(item) => actions.decideNeed?.(item, "primary")}
         />
       </ConversationPanel>
     );
@@ -1733,6 +1747,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
   }, [baseView, newSearchIds]);
   const activeJob = threadForUi(view, ui);
   const packetApplicationId = activeJob?.packetReview ? activeJob.applicationId : null;
+  const packetPlatform = activeJob?.applicationPlatform || null;
   const persistedSkillChat = list(view.skillChats).find((thread) => thread.id === ui.activeThread);
   const activeSkillChat = persistedSkillChat
     ? skillChatState?.id === persistedSkillChat.id
@@ -2083,25 +2098,25 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return;
     }
     if (typeof api.getAutomationSettings !== "function") {
-      setApplicationPreparation({ status: "blocked", ready: false });
+      setApplicationPreparation(null);
       return;
     }
     let cancelled = false;
-    setApplicationPreparation({ status: "checking", ready: false });
+    setApplicationPreparation(null);
     void api
       .getAutomationSettings()
       .then((automation) => {
         if (!cancelled) {
-          setApplicationPreparation(applicationPreparationPermission(automation));
+          setApplicationPreparation(applicationPreparationPermission(automation, packetPlatform));
         }
       })
       .catch(() => {
-        if (!cancelled) setApplicationPreparation({ status: "blocked", ready: false });
+        if (!cancelled) setApplicationPreparation(APPLICATION_PREPARATION_UNCHECKED);
       });
     return () => {
       cancelled = true;
     };
-  }, [api, packetApplicationId]);
+  }, [api, packetApplicationId, packetPlatform]);
 
   useEffect(() => {
     if (dashboard.loading || ui.searchSelectionSeeded || !baseView.browser.search.length) return;
@@ -2258,7 +2273,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
         if (controller.signal.aborted || !result) return;
         applyDeepOperationResult(result, (next) =>
           result.resultRef?.type === "deep-ingest-proposal-set"
-            ? `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+            ? `Analysis complete. Findings that passed their checks saved on their own. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need your review.`
             : `Material saved locally. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
         );
         void dashboard.refetch?.().catch(() => undefined);
@@ -2763,13 +2778,12 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     if (workspaceOperation) replaceWorkspaceOperation(workspaceOperation.id);
     if (result) setComposerValue("");
     if (
-      result?.intent?.input?.change?.op === "contextual-permission" &&
-      result.intent.input.change.permission === "application-preparation" &&
+      isApplicationPreparationEnable(result?.intent?.input?.change) &&
       typeof api.getAutomationSettings === "function"
     ) {
       const automation = await run(() => api.getAutomationSettings());
       if (automation) {
-        setApplicationPreparation(applicationPreparationPermission(automation));
+        setApplicationPreparation(applicationPreparationPermission(automation, packetPlatform));
       }
     }
     const launchedSkillChat = skillChatFromWorkspaceResult(result);
@@ -2938,7 +2952,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           storage: deepOperationStorage,
         }),
       (next) =>
-        `Analysis complete. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need review.`
+        `Analysis complete. Findings that passed their checks saved on their own. ${next.counts.reviewQueue} proposal${next.counts.reviewQueue === 1 ? "" : "s"} need your review.`
     );
   }
 
@@ -3111,6 +3125,17 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       await openJob(resolved.applicationId);
       return;
     }
+    if (resolved.kind === "record-external") {
+      await run(() =>
+        api.runWorkspaceIntent(
+          "application.record-external",
+          { type: "application", id: resolved.applicationId },
+          {},
+          { requestId: createWorkspaceRequestId() }
+        )
+      );
+      return;
+    }
     if (resolved.kind === "dismiss-touch") {
       await run(() => api.dismissTouchDue(resolved.payload));
       return;
@@ -3195,10 +3220,6 @@ export function ChatFirstApp({ api = chatFirstApi }) {
           activeJob?.applicationId &&
           typedIntent.entity?.id === activeJob.applicationId
         ) {
-          if (applicationPreparation?.ready !== true) {
-            setError("Allow form preparation in the application review on the right first.");
-            return false;
-          }
           return run(async () => {
             const resumed = await resumePacketPreparation({
               api,
@@ -3225,12 +3246,11 @@ export function ChatFirstApp({ api = chatFirstApi }) {
             return response;
           }
           if (
-            typedIntent.input?.change?.op === "contextual-permission" &&
-            typedIntent.input.change.permission === "application-preparation" &&
+            isApplicationPreparationEnable(typedIntent.input?.change) &&
             typeof api.getAutomationSettings === "function"
           ) {
             const automation = await api.getAutomationSettings();
-            setApplicationPreparation(applicationPreparationPermission(automation));
+            setApplicationPreparation(applicationPreparationPermission(automation, packetPlatform));
           }
           if (
             activeJob?.applicationId &&
@@ -3365,9 +3385,7 @@ export function ChatFirstApp({ api = chatFirstApi }) {
     runMessageIntent,
     packetAnswerGap,
     packetBusy: busy,
-    applicationPreparation: packetApplicationId
-      ? applicationPreparation || { status: "checking", ready: false }
-      : null,
+    applicationPreparation: packetApplicationId ? applicationPreparation : null,
     startPacketAnswer: (gap, answer) => {
       if (String(answer || "").trim()) {
         void persistPacketGapAnswer(gap, answer);
@@ -3377,10 +3395,6 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       navigateForeground({ packetGapId: gap?.id || null });
     },
     resumePacketPreparation: async (applicationId) => {
-      if (applicationPreparation?.ready !== true) {
-        setError("Allow form preparation in the application review on the right first.");
-        return false;
-      }
       const resumed = await run(() =>
         resumePacketPreparation({ api, missions: view.missions, applicationId })
       );
@@ -3388,7 +3402,13 @@ export function ChatFirstApp({ api = chatFirstApi }) {
       return resumed;
     },
     enableApplicationPreparation: async () => {
-      const updated = await run(() => enableApplicationPreparation({ api }));
+      const updated = await run(() =>
+        enableApplicationPreparation({
+          api,
+          offPlatforms: applicationPreparation?.offPlatforms,
+          platform: packetPlatform,
+        })
+      );
       if (updated) setApplicationPreparation(updated);
       return updated;
     },

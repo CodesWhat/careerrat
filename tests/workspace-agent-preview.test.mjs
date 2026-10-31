@@ -1397,6 +1397,20 @@ test("previewWorkspaceIntent: 'what are my settings' classifies as settings.expl
   });
 });
 
+test("previewWorkspaceIntent: 'show my automation settings' classifies as settings.explain for automation", () => {
+  const repoRoot = tempRepo();
+  for (const text of [
+    "show my automation settings",
+    "automation settings",
+    "what's turned on",
+    "show my automation permissions",
+  ]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.equal(result.action?.intent?.type, "settings.explain", text);
+    assert.deepEqual(result.action.intent.input, { domain: "automation" }, text);
+  }
+});
+
 test("previewWorkspaceIntent: a bare job search phrasing still wins the search.run catch-all over settings", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({ text: "search for backend jobs", repoRoot, env: {} });

@@ -1,4 +1,5 @@
 import {
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -9,7 +10,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { hasUploadableResumeArtifact } from "../apply/apply-driver.mjs";
 import { requireDb } from "../db/connection.mjs";
@@ -27,6 +27,7 @@ import {
   MARKDOWN_SOURCE_MAX_BYTES,
   readBoundedSource,
 } from "../documents/export.mjs";
+import { jobDocumentPaths, syncJobDocumentFolder } from "../documents/job-folders.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 
 function cleanText(value) {
@@ -194,19 +195,7 @@ function titleFor(app, kind) {
   return [app.company, app.role, label].filter(Boolean).join(" - ") || label;
 }
 
-// tailor-application SKILL.md STEP 11b: every rendered resume/cover-letter
-// document also gets a convenience copy under the real OS home, organized by
-// company — never a workspace-relative location. CAREERRAT_DOWNLOADS_DIR lets
-// tests redirect this away from the real home (mirroring the CAREERRAT_HOME
-// override in paths/workspace.mjs); production always resolves the real
-// os.homedir().
-function downloadsRoot(env) {
-  const override = String(env.CAREERRAT_DOWNLOADS_DIR || "").trim();
-  if (override) return override;
-  return join(homedir(), "Downloads", "careerrat");
-}
-
-// Only resume/coverLetter get the Downloads convenience copy per SKILL.md
+// Only resume/coverLetter get the Documents convenience copy per SKILL.md
 // STEP 11b ("After every PDF renders (resume and cover letter)...") —
 // answers artifacts are not part of that convention. Plain-text exports
 // reuse the same restriction: an "answers" text export never had an
@@ -218,36 +207,41 @@ function downloadsLabelFor(kind) {
   return null;
 }
 
-function safePathSegment(value, fallback) {
-  const cleaned = String(value || "")
-    .replace(/[/\\\0]/g, "-")
-    .trim();
-  return cleaned || fallback;
-}
-
 // A same-named file left by a prior round is displaced into archive/ first,
-// so the company root only ever shows what's live (SKILL.md STEP 11b).
+// so the job root only ever shows what's live (SKILL.md STEP 11b).
 function archivePriorDownloadsCopy(companyDir, fileName) {
   const existing = join(companyDir, fileName);
   if (!existsSync(existing)) return;
   const archiveDir = join(companyDir, "archive");
   mkdirSync(archiveDir, { recursive: true });
-  renameSync(existing, join(archiveDir, fileName));
+  for (let version = 1; ; version++) {
+    const extension = extname(fileName);
+    const name =
+      version === 1 ? fileName : `${basename(fileName, extension)} (${version})${extension}`;
+    try {
+      copyFileSync(existing, join(archiveDir, name), constants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error.code === "EEXIST") continue;
+      throw error;
+    }
+    unlinkSync(existing);
+    return;
+  }
 }
 
-// Non-fatal by design: a Downloads-copy failure must never fail the export
+// Non-fatal by design: a Documents-copy failure must never fail the export
 // itself, so every error is swallowed and returned for the caller to record
 // rather than thrown. `format` picks the copy's extension (and therefore
 // which rendered file this is) — PDF was the only caller until the TXT
 // retrieval gap closed this up to also copy plain-text exports the same way,
 // with the same collision handling (archive-then-replace, never delete).
-function copyArtifactToDownloads({ env, company, kind, format, absPath }) {
+function copyArtifactToDownloads({ env, application, kind, format, absPath }) {
   const label = downloadsLabelFor(kind);
   const ext = FORMAT_EXTENSION[format];
   if (!label || !ext) return null;
   try {
-    const companyName = safePathSegment(company, "unknown");
-    const companyDir = join(downloadsRoot(env), companyName);
+    syncJobDocumentFolder({ env, application });
+    const { companyName, path: companyDir } = jobDocumentPaths({ env, application });
     mkdirSync(companyDir, { recursive: true });
     const fileName = `${companyName} - ${label}${ext}`;
     archivePriorDownloadsCopy(companyDir, fileName);
@@ -418,10 +412,10 @@ export async function exportPacketArtifacts({
   // synchronous DB reservation (decision 2) -- always released in the outer
   // finally below, on every exit path, success or failure.
   const reservedPaths = [];
-  // Downloads copies queued during rendering but not yet performed
+  // Documents copies queued during rendering but not yet performed
   // (decision 5): { entry, finalPath } pairs, executed only once
   // registration durably commits, so a batch that fails after this point
-  // never mutates Downloads at all.
+  // never mutates Documents at all.
   const pendingDownloads = [];
 
   // Every export format writes to `${outBase}${ext}`, so an outBase that
@@ -742,14 +736,14 @@ export async function exportPacketArtifacts({
         pendingPromotions.push({ stagedPath, finalPath, displayPath });
         const entry = { format, path: artifacts[key], name: basename(finalPath) };
         if (format === "pdf" || format === "text") {
-          // Downloads publish (decision 5, widened to close the TXT
+          // Documents publish (decision 5, widened to close the TXT
           // retrieval gap): queued, not performed here. The copy itself
           // only runs once registration durably commits, and reads from
           // `finalPath` (the promoted file), not the staged one — by the
           // time the deferred copy runs, promotion has already renamed the
           // staged file into place, so the staging copy no longer exists. A
           // batch that fails before registration commits must leave
-          // Downloads completely untouched.
+          // Documents completely untouched.
           pendingDownloads.push({ entry, kind, format, finalPath });
         }
         userFacing[kind].push(entry);
@@ -997,15 +991,16 @@ export async function exportPacketArtifacts({
       }
     }
 
-    // Downloads publish (decision 5): performed ONLY now, after promotion
+    // Documents publish (decision 5): performed ONLY now, after promotion
     // and registration have both durably committed. Reads from `finalPath`
     // (the promoted file, real destination) rather than the vacated
     // staging path. Never fatal to the export itself — a copy failure here
     // is recorded the same way it always was, via downloadsErrors.
+    const currentApplication = findApplication({ repoRoot, env, appId: id });
     for (const { entry, kind, format, finalPath } of pendingDownloads) {
       const copy = copyArtifactToDownloads({
         env,
-        company: app.company,
+        application: currentApplication,
         kind,
         format,
         absPath: finalPath,

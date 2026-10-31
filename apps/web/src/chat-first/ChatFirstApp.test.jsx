@@ -1579,6 +1579,8 @@ describe("ChatFirstAppView", () => {
     expect(html).toContain("1 touch due");
     expect(html).toContain("next: Thu");
     expect(html).toContain("chat-first-browser-launcher--attention");
+    expect(html).toContain("Open the application");
+    expect(html).toContain("rejection, interview invite, offer, or recruiter feedback");
   });
 
   it("keeps first-run Search visibly actionable and labels its running state", async () => {
@@ -2296,6 +2298,8 @@ describe("ChatFirstAppView", () => {
       id: "linkedin-profile",
       questionId: "linkedin-profile",
       label: "LinkedIn Profile",
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
       answerable: true,
     };
     const html = await renderView({
@@ -2320,12 +2324,12 @@ describe("ChatFirstAppView", () => {
       packetAnswerGap: packetGap,
     });
 
-    expect(html).toContain("I need 1 application answer before I can continue");
+    expect(html).toContain("One application question needs your answer");
     expect(html).toContain("APPLICATION ANSWERS · 1 NEEDED");
     expect(html).toContain('placeholder="Answer LinkedIn Profile…"');
   });
 
-  it("keeps packet resume behind a clear application-preparation permission action", async () => {
+  it("offers resume with no permission step while form preparation is on", async () => {
     const html = await renderView({
       view: {
         ...VIEW,
@@ -2344,12 +2348,39 @@ describe("ChatFirstAppView", () => {
       },
       ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
       actions: {
-        applicationPreparation: { status: "blocked", ready: false },
+        applicationPreparation: { status: "ready", ready: true },
       },
     });
 
-    expect(html).toContain("Allow form preparation");
-    expect(html).not.toContain("Resume preparation");
+    expect(html).toContain("Resume preparation");
+    expect(html).not.toMatch(/Allow form preparation|Turn it on/);
+  });
+
+  it("says so and offers Turn it on when form preparation is turned off", async () => {
+    const html = await renderView({
+      view: {
+        ...VIEW,
+        threads: [
+          {
+            ...VIEW.threads[0],
+            packetReview: {
+              status: "upload-ready",
+              uploadReady: true,
+              gapCount: 0,
+              canResume: true,
+              gaps: [],
+            },
+          },
+        ],
+      },
+      ui: { ...BASE_UI, activeThread: "app-1", activeApplicationId: "app-1" },
+      actions: {
+        applicationPreparation: { status: "off", ready: false },
+      },
+    });
+
+    expect(html).toContain("Preparing application forms is turned off.");
+    expect(html).toContain("Turn it on");
   });
 
   it("labels each canonical job date by what happened", async () => {

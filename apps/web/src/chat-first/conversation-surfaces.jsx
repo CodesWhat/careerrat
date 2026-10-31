@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { formatCurrencyThousands } from "../../../../src/core/currency-format.mjs";
+import { openAnswerNeedsFromGaps } from "../../../../src/core/packet/answer-needs.mjs";
 import { resolvePersistedErrorCopy } from "../lib/errorCopy.js";
 import { safeDisplayDetail } from "../lib/safe-display-details.js";
 import { useDialogFocus } from "../lib/use-dialog-focus.js";
@@ -239,6 +240,7 @@ function browserWorkflowBlockerCode(artifact) {
   const blockers = Array.isArray(artifact?.blockers) ? artifact.blockers : EMPTY_LIST;
   const codes = new Set(blockers.map((blocker) => String(blocker?.code || "").toUpperCase()));
   return [
+    "CAPABILITY_OFF",
     "CONSENT_REQUIRED",
     "STATUS_URL_REQUIRED",
     "AUTH_REQUIRED",
@@ -251,9 +253,9 @@ function browserWorkflowBlockerCode(artifact) {
 
 function browserWorkflowRecovery(artifact) {
   const blockerCode = browserWorkflowBlockerCode(artifact);
-  if (blockerCode === "CONSENT_REQUIRED") {
-    const task = browserWorkflowTitle(artifact);
-    return `CareerRat needs permission to ${task === "LinkedIn profile review" ? "review your LinkedIn profile" : `run ${task.toLowerCase()}`}. Ask Paul to run this task again and the permission control will appear here.`;
+  // CONSENT_REQUIRED is only in results saved before consent was retired.
+  if (blockerCode === "CAPABILITY_OFF" || blockerCode === "CONSENT_REQUIRED") {
+    return `${browserWorkflowTitle(artifact)} is turned off. Turn it on in Settings or ask Paul to turn it on.`;
   }
   if (blockerCode === "STATUS_URL_REQUIRED") {
     return "CareerRat needs the signed-in application dashboard link. Open the job, save that link, then retry.";
@@ -353,11 +355,150 @@ function artifactView(artifact, message, onArtifactAction) {
   };
 }
 
-function AttachedArtifacts({ message, onArtifactAction }) {
+const PACKET_VALUE_PREVIEW = 80;
+
+// What an auto submit actually sent: the answered fields and attached files,
+// collapsed by default; a long value shows a preview and expands on click.
+function SubmissionPacket({ artifact }) {
+  const answers = Array.isArray(artifact?.answers) ? artifact.answers : EMPTY_LIST;
+  const attachments = Array.isArray(artifact?.attachments) ? artifact.attachments : EMPTY_LIST;
+  if (!answers.length && !attachments.length) return null;
+  const parts = [
+    answers.length ? `${answers.length} answer${answers.length === 1 ? "" : "s"}` : null,
+    attachments.length ? `${attachments.length} file${attachments.length === 1 ? "" : "s"}` : null,
+  ].filter(Boolean);
+  // The packet is a fixed record of one submission, so a row's position is a
+  // stable identity; labels alone can repeat across wizard steps.
+  const answerRows = answers.map((row, position) => ({ row, id: `answer:${position}` }));
+  const fileRows = attachments.map((file, position) => ({ file, id: `file:${position}` }));
+  return (
+    <details className="chat-first-submission-packet">
+      <summary>What was sent ({parts.join(", ")})</summary>
+      <ul>
+        {answerRows.map(({ row, id }) => {
+          const value = String(row?.value ?? "");
+          const long = value.length > PACKET_VALUE_PREVIEW;
+          return (
+            <li key={id}>
+              <strong>{row?.label}</strong>
+              {long ? (
+                <details className="chat-first-submission-packet__value">
+                  <summary>{`${value.slice(0, PACKET_VALUE_PREVIEW).trimEnd()}…`}</summary>
+                  <p>{value}</p>
+                  {row?.truncated ? <small>(shortened in this record)</small> : null}
+                </details>
+              ) : (
+                <span>{value}</span>
+              )}
+            </li>
+          );
+        })}
+        {fileRows.map(({ file, id }) => (
+          <li key={id}>
+            <strong>{file?.label || "Attachment"}</strong>
+            <span>{file?.name}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+const KNOWLEDGE_VALUE_MAX = 120;
+
+function truncateKnowledgeCopy(text) {
+  return text.length > KNOWLEDGE_VALUE_MAX ? `${text.slice(0, KNOWLEDGE_VALUE_MAX - 3)}...` : text;
+}
+
+function knowledgeItemCopy(item) {
+  if (item === null || item === undefined) return "";
+  if (typeof item !== "object") return String(item);
+  if (Array.isArray(item.titles) && item.titles.length) {
+    const name = item.name || item.label || item.title;
+    const titles = item.titles.map(String).join(", ");
+    return name ? `${name} (${titles})` : titles;
+  }
+  const name = item.title || item.name || item.label;
+  return name ? String(name) : JSON.stringify(item);
+}
+
+function knowledgeValueCopy(value, absent) {
+  if (absent || value === undefined || value === null) return "nothing";
+  if (value === true) return "on";
+  if (value === false) return "off";
+  if (Array.isArray(value)) {
+    return value.length
+      ? truncateKnowledgeCopy(value.map(knowledgeItemCopy).join(", "))
+      : "nothing";
+  }
+  if (typeof value === "object") return truncateKnowledgeCopy(knowledgeItemCopy(value));
+  return String(value);
+}
+
+function KnowledgeWriteLine({ artifact, message, index, reverted, onIntentAction, intentBusy }) {
+  const label = artifact.label || artifact.path || artifact.id || "a saved item";
+  const canUndo = artifact.revertible === true && !reverted && typeof onIntentAction === "function";
+  const staged = artifact.target === "linkedin:proposal";
+  return (
+    <div className="chat-first-indented-card chat-first-knowledge-write">
+      {staged ? (
+        <span>
+          Staged for your profile: {label}. CareerRat asks before anything goes on LinkedIn.
+        </span>
+      ) : (
+        <span>
+          Changed {label} from {knowledgeValueCopy(artifact.before, artifact.beforeAbsent)} to{" "}
+          {knowledgeValueCopy(artifact.after, artifact.afterAbsent)}
+        </span>
+      )}
+      {reverted ? <small> Undone</small> : null}
+      {!reverted && artifact.revertible !== true && artifact.revertNote ? (
+        <small> {artifact.revertNote}</small>
+      ) : null}
+      {canUndo ? (
+        <button
+          className="chat-first-pill chat-first-pill--outline"
+          type="button"
+          disabled={intentBusy}
+          onClick={() =>
+            onIntentAction({
+              type: "knowledge.revert",
+              entity: { type: "workspace", id: message.threadId || "workspace-main" },
+              input: { messageId: message.id, index },
+            })
+          }
+        >
+          Undo
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function AttachedArtifacts({
+  message,
+  onArtifactAction,
+  revertedKeys,
+  onIntentAction,
+  intentBusy = false,
+}) {
   const artifacts = Array.isArray(message?.artifacts) ? message.artifacts : EMPTY_LIST;
   if (!artifacts.length) return null;
   return artifacts.map((artifact, index) => {
     const key = artifact?.id || `${message.id}:artifact-${index + 1}`;
+    if (artifact?.kind === "knowledge_write") {
+      return (
+        <KnowledgeWriteLine
+          key={key}
+          artifact={artifact}
+          message={message}
+          index={index}
+          reverted={Boolean(revertedKeys?.has(`${message.id}:${index}`))}
+          onIntentAction={onIntentAction}
+          intentBusy={intentBusy}
+        />
+      );
+    }
     if (artifact?.kind === "source_review") {
       return (
         <div className="chat-first-indented-card" key={key}>
@@ -368,6 +509,13 @@ function AttachedArtifacts({ message, onArtifactAction }) {
               else onArtifactAction?.(artifact, message);
             }}
           />
+        </div>
+      );
+    }
+    if (artifact?.kind === "submission_packet") {
+      return (
+        <div className="chat-first-indented-card" key={key}>
+          <SubmissionPacket artifact={artifact} />
         </div>
       );
     }
@@ -646,8 +794,17 @@ export function MessageTranscript({
       : latestIndex;
   }, -1);
   const latestActionState = displayMessages[latestActionStateIndex];
+  // Undo for a logged write renders on its own entry line, not as a trailing pill.
   const latestActions = (latestActionState?.metadata?.nextActions || EMPTY_LIST).filter(
-    (action) => action?.intent?.type && action?.intent?.entity
+    (action) =>
+      action?.intent?.type && action?.intent?.entity && action.intent.type !== "knowledge.revert"
+  );
+  const revertedKeys = new Set(
+    displayMessages.flatMap((message) =>
+      (Array.isArray(message?.artifacts) ? message.artifacts : EMPTY_LIST).flatMap((artifact) =>
+        artifact?.revertOf ? [`${artifact.revertOf.messageId}:${artifact.revertOf.index}`] : []
+      )
+    )
   );
   const latestActionableIndex = latestActions.length ? latestActionStateIndex : -1;
   const latestChoiceIndex = displayMessages.reduce((latestIndex, message, index) => {
@@ -744,7 +901,13 @@ export function MessageTranscript({
         return (
           <div className="chat-first-transcript-entry" key={key}>
             {content}
-            <AttachedArtifacts message={message} onArtifactAction={onArtifactAction} />
+            <AttachedArtifacts
+              message={message}
+              onArtifactAction={onArtifactAction}
+              revertedKeys={revertedKeys}
+              onIntentAction={onIntentAction}
+              intentBusy={intentBusy}
+            />
             {index === latestChoiceIndex && typeof onAnswer === "function" ? (
               <ChoicePromptActions
                 prompt={message.metadata.choicePrompt}
@@ -953,6 +1116,9 @@ export function TodayConversation({
   artifacts = EMPTY_LIST,
   mission,
   strategy = null,
+  applicationNeed = null,
+  hasApplications = false,
+  onApplicationAction,
   userMessages = EMPTY_LIST,
   onArtifactAction,
   onMessageAction,
@@ -965,6 +1131,33 @@ export function TodayConversation({
     <div className="chat-first-conversation-flow">
       <div className="chat-first-conversation-eyebrow">{dateLabel}</div>
       {intro ? <AgentBubble agentName={agentName}>{intro}</AgentBubble> : null}
+      {applicationNeed ? (
+        <AgentBubble agentName={agentName}>
+          <strong>{applicationNeed.title}</strong>
+          <p>
+            {["submit", "submit-gate", "submit-gate-group"].includes(applicationNeed.kind)
+              ? 'Open the application, review the answers and attachments, then press submit when everything looks right. Come back and choose "I applied" once it is sent.'
+              : "Start an application and I’ll check the fit, prepare your materials, and fill the form. Your submit setting decides whether I press submit or you do. If anything is missing, I’ll stop and show you what."}
+          </p>
+          <div className="chat-first-inline-actions">
+            <button
+              className="chat-first-pill chat-first-pill--lime"
+              type="button"
+              disabled={intentBusy}
+              onClick={() => onApplicationAction?.(applicationNeed)}
+            >
+              {applicationNeed.primaryLabel}
+            </button>
+          </div>
+        </AgentBubble>
+      ) : null}
+      {hasApplications ? (
+        <AgentBubble agentName={agentName}>
+          Paste any rejection, interview invite, offer, or recruiter feedback here with the company
+          and role, or tell me what changed. Even a rejection without a reason helps track the
+          funnel. Those outcomes inform future search and application recommendations.
+        </AgentBubble>
+      ) : null}
       <RunReceipt receipt={run} />
       <StrategyInsightsCard strategy={strategy} agentName={agentName} />
       {messages.length ? (
@@ -1130,14 +1323,15 @@ export function CanonicalJobConversation({
         { id: "coach", label: "Coach me live", onAction: () => onCoach?.(communication) },
       ]
     : EMPTY_LIST;
+  const answerNeedCount = openAnswerNeedsFromGaps(packetReview?.gaps).length;
   return (
     <JobConversation
       eyebrow={eyebrow}
       notice={
         packetReview?.questionCaptureRequired
           ? "CareerRat needs to open the application form to discover its questions. Use Prepare form on the right."
-          : packetReview?.gaps?.length
-            ? `I need ${packetReview.gaps.length} application answer${packetReview.gaps.length === 1 ? "" : "s"} before I can continue. Use the application review on the right, then resume preparation.`
+          : answerNeedCount
+            ? `${answerNeedCount === 1 ? "One application question needs" : `${answerNeedCount} application questions need`} your answer. Everything else is done, and this job can't be submitted until you answer. Use the application review on the right.`
             : null
       }
       inbound={canonicalInbound(communication)}
@@ -1170,7 +1364,6 @@ export function JobContextPanel({
   onEnableApplicationPreparation,
 }) {
   const location = jobLocationCopy(job);
-  const preparationReady = applicationPreparation == null || applicationPreparation.ready === true;
 
   return (
     <aside className="chat-first-context-stack" aria-label="This job">
@@ -1313,28 +1506,30 @@ export function JobContextPanel({
               ) : null}
             </div>
           ))}
-          {applicationPreparation?.status === "checking" ? (
-            <small>Checking form permission…</small>
-          ) : null}
-          {applicationPreparation?.ready === false &&
-          applicationPreparation?.status !== "checking" ? (
+          {applicationPreparation?.status === "off" ? (
             <div className="chat-first-packet-review__permission">
-              <strong>Allow CareerRat to prepare the form</strong>
-              <small>
-                CareerRat needs permission to open and fill application forms. You still press
-                Submit. Choose the button, or type “Allow form preparation”.
-              </small>
+              <small>Preparing application forms is turned off.</small>
               <button
                 className="chat-first-context-action"
                 type="button"
                 disabled={packetBusy}
                 onClick={onEnableApplicationPreparation}
               >
-                Allow form preparation
+                Turn it on
               </button>
             </div>
           ) : null}
-          {(packetReview.canResume || packetReview.canPrepare) && preparationReady ? (
+          {applicationPreparation?.status === "unreadable" ? (
+            <div className="chat-first-packet-review__permission">
+              <small>
+                {applicationPreparation.notice ||
+                  "CareerRat can't read your settings, so form preparation is paused."}
+              </small>
+            </div>
+          ) : null}
+          {(packetReview.canResume || packetReview.canPrepare) &&
+          applicationPreparation?.status !== "off" &&
+          applicationPreparation?.status !== "unreadable" ? (
             <button
               className="chat-first-context-action"
               type="button"
@@ -1525,6 +1720,7 @@ export function DeepIngestConversation({
   counts = {},
   sources = EMPTY_LIST,
   proposals = EMPTY_LIST,
+  applied = EMPTY_LIST,
   receipt,
   inputMode = null,
   inputValue = "",
@@ -1704,11 +1900,30 @@ export function DeepIngestConversation({
           ))}
         </section>
       ) : null}
+      {applied.length ? (
+        <section className="chat-first-deep-sources" aria-label="Saved from your sources">
+          <div className="chat-first-eyebrow">SAVED FOR YOU</div>
+          <p className="chat-first-deep-review__note">
+            These passed their checks and saved on their own. You can undo any of them from your
+            thread.
+          </p>
+          {applied.slice(0, 5).map((item) => (
+            <div className="chat-first-deep-source" key={item.id}>
+              <div>
+                <strong>{item.title || "Saved item"}</strong>
+                <small>Saved to {String(item.lane || "your library").replaceAll("_", " ")}</small>
+              </div>
+            </div>
+          ))}
+          {applied.length > 5 ? <small>and {applied.length - 5} more</small> : null}
+        </section>
+      ) : null}
       {proposals.length ? (
         <section className="chat-first-deep-review" aria-label="Proposal review queue">
           <div className="chat-first-eyebrow">REVIEW 1 OF {reviewCount || proposals.length}</div>
           <p className="chat-first-deep-review__note">
-            One grounded finding at a time. Your decision brings up the next one.
+            These didn't save on their own, so they need your yes. One at a time. Your decision
+            brings up the next one.
           </p>
           {proposals.slice(0, 1).map((proposal) => {
             const editing = editingId === proposal.id;
@@ -1720,6 +1935,9 @@ export function DeepIngestConversation({
                 <div className="chat-first-deep-proposal__lane">
                   {String(proposal.lane || "proposal").replaceAll("_", " ")}
                 </div>
+                {proposal.heldReason ? (
+                  <p className="chat-first-deep-review__note">{proposal.heldReason}</p>
+                ) : null}
                 {editing ? (
                   <div className="chat-first-deep-proposal__fields">
                     <input

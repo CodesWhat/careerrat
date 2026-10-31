@@ -2,18 +2,26 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://careerrat.local/schemas/automation.schema.json",
   "title": "CareerRat Browser-Automation Config",
-  "description": "Opt-in authenticated browser automation. Defaults OFF — absence of this file means nothing is automated. A capability runs on a platform only if capabilities.<cap>.enabled AND capabilities.<cap>.platforms.<platform> AND consent.<platform> are all true.",
+  "description": "Browser-automation switches. Every capability is on by default; set a capability or platform to false to turn it off.",
   "type": "object",
   "additionalProperties": true,
   "properties": {
     "version": { "type": "integer" },
+    "capabilities_default": {
+      "description": "Marker written once the config follows the on-by-default contract. Without it, stored capability values are treated as the old off default and every capability reads as on.",
+      "enum": ["on"]
+    },
     "setup_mode": {
-      "description": "The off state disables every external capability. The custom state only reveals per-capability opt-ins; it enables nothing by itself.",
-      "enum": ["basic", "advanced"],
-      "default": "basic"
+      "description": "Deprecated and ignored. Setup modes were retired; capabilities are on unless turned off. Kept so older files still validate.",
+      "enum": ["basic", "advanced"]
+    },
+    "submit": {
+      "description": "auto lets the agent press the final Submit once the form is complete and verifies the confirmation page. manual stops before Submit for a person to press. Absent means auto.",
+      "enum": ["auto", "manual"],
+      "default": "auto"
     },
     "consent": {
-      "description": "One-time per-platform ToS acknowledgment. true = the user has read that platform's automation terms and accepts the risk. Never set programmatically without the user's explicit yes.",
+      "description": "Deprecated and ignored. The per-platform consent ledger was retired. Kept so older files still validate.",
       "type": "object",
       "additionalProperties": { "type": "boolean" }
     },

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as controller from "./chat-first-app-controller.js";
 import {
+  APPLICATION_PREPARATION_UNCHECKED,
   applicationPreparationPermission,
   calendarAction,
   commitComposerTurn,
@@ -14,6 +15,7 @@ import {
   engineUnavailable,
   findGate,
   focusApplicationHandoff,
+  isApplicationPreparationEnable,
   isEngineFailure,
   mapActivityItems,
   mapComposerChips,
@@ -281,15 +283,16 @@ describe("chat-first app controller", () => {
     expect(result.kind).toBe("message");
   });
 
-  it("returns the exact committed permission intent so the open job can refresh in place", async () => {
+  it("returns the exact committed turn-on intent so the open job can refresh in place", async () => {
     const intent = {
       type: "settings.apply",
       entity: { type: "workspace", id: "workspace-main" },
       input: {
         change: {
           kind: "automation",
-          op: "contextual-permission",
-          permission: "application-preparation",
+          op: "capability",
+          capability: "authenticated_apply_preparation",
+          enabled: true,
         },
       },
     };
@@ -298,8 +301,8 @@ describe("chat-first app controller", () => {
 
     const result = await commitComposerTurn({
       api,
-      text: "Allow form preparation",
-      preview: { action: { label: "Allow form preparation", intent } },
+      text: "Turn it on",
+      preview: { action: { label: "Turn it on", intent } },
       requestId,
     });
 
@@ -356,7 +359,7 @@ describe("chat-first app controller", () => {
     expect(packetExportReceipt({ data: { userFacing: {} } })).toBeNull();
   });
 
-  it("names the Downloads file for a text export instead of showing the bare workspace path", () => {
+  it("names the saved text file and its actual Documents location", () => {
     expect(
       packetExportReceipt({
         data: {
@@ -367,7 +370,8 @@ describe("chat-first app controller", () => {
                 format: "text",
                 name: "Acme - Resume.txt",
                 path: "workspace/tailored/acme-resume.txt",
-                downloadsPath: "/Users/riley/Downloads/careerrat/Acme/Acme - Resume.txt",
+                downloadsPath:
+                  "/Users/riley/Documents/careerrat/Acme/job-app-export/Acme - Resume.txt",
               },
             ],
             coverLetter: [],
@@ -380,7 +384,9 @@ describe("chat-first app controller", () => {
       artifact: {
         kind: "Export receipt",
         text: [
-          "Saved to your Downloads folder as Acme - Resume.txt.",
+          "Saved as Acme - Resume.txt.",
+          "",
+          "/Users/riley/Documents/careerrat/Acme/job-app-export/Acme - Resume.txt",
           "",
           "workspace/tailored/acme-resume.txt",
         ].join("\n"),
@@ -865,11 +871,35 @@ describe("chat-first app controller", () => {
     expect(api.resumeChatFirstMission).toHaveBeenCalledWith("mission-current-prepare");
   });
 
-  it("treats form preparation as ready only when its supported application sites are allowed", () => {
+  it("treats form preparation as ready by default and only off when explicitly turned off", () => {
     expect(applicationPreparationPermission({ capabilities: [] })).toMatchObject({
-      status: "blocked",
-      ready: false,
+      status: "ready",
+      ready: true,
     });
+    expect(applicationPreparationPermission(undefined)).toMatchObject({ ready: true });
+    expect(
+      applicationPreparationPermission(
+        {
+          capabilities: [
+            {
+              capability: "authenticated_apply_preparation",
+              enabled: true,
+              platforms: [
+                { platform: "greenhouse", enabled: true, allowed: true },
+                { platform: "external_ats", enabled: false, allowed: false },
+              ],
+            },
+          ],
+        },
+        "external_ats"
+      )
+    ).toMatchObject({ status: "off", ready: false, offPlatforms: ["external_ats"] });
+    expect(
+      applicationPreparationPermission({
+        capabilities: [{ capability: "authenticated_apply_preparation", enabled: false }],
+      })
+    ).toMatchObject({ status: "off", ready: false });
+    // With no known platform, only the capability switch itself counts.
     expect(
       applicationPreparationPermission({
         capabilities: [
@@ -877,36 +907,94 @@ describe("chat-first app controller", () => {
             capability: "authenticated_apply_preparation",
             enabled: true,
             platforms: [
-              { platform: "greenhouse", allowed: true },
-              { platform: "external_ats", allowed: false },
+              { platform: "greenhouse", enabled: false },
+              { platform: "lever", enabled: false },
             ],
           },
         ],
       })
-    ).toMatchObject({ status: "blocked", ready: false });
-    expect(
-      applicationPreparationPermission({
-        capabilities: [
-          {
-            capability: "authenticated_apply_preparation",
-            enabled: true,
-            platforms: [
-              { platform: "greenhouse", allowed: true },
-              { platform: "external_ats", allowed: true },
-            ],
-          },
-        ],
-      })
-    ).toMatchObject({ status: "ready", ready: true });
+    ).toMatchObject({ status: "ready", ready: true, offPlatforms: [] });
   });
 
-  it("enables supervised form preparation in place and re-reads the effective permission", async () => {
+  it("judges form preparation by the job's own platform", () => {
     const automation = {
       capabilities: [
         {
           capability: "authenticated_apply_preparation",
           enabled: true,
-          platforms: [{ platform: "greenhouse", allowed: true }],
+          platforms: [
+            { platform: "linkedin", enabled: false },
+            { platform: "greenhouse", enabled: true },
+            { platform: "lever", enabled: false },
+          ],
+        },
+      ],
+    };
+    expect(applicationPreparationPermission(automation, "linkedin")).toMatchObject({
+      status: "off",
+      ready: false,
+      offPlatforms: ["linkedin"],
+    });
+    expect(applicationPreparationPermission(automation, "greenhouse")).toMatchObject({
+      status: "ready",
+      ready: true,
+      offPlatforms: [],
+    });
+    expect(
+      applicationPreparationPermission(
+        { capabilities: [{ capability: "authenticated_apply_preparation", enabled: false }] },
+        "greenhouse"
+      )
+    ).toMatchObject({ status: "off", ready: false, offPlatforms: [] });
+  });
+
+  it("reports a failed settings request as unreadable with its own notice", () => {
+    expect(APPLICATION_PREPARATION_UNCHECKED).toMatchObject({
+      status: "unreadable",
+      ready: false,
+      notice: "CareerRat couldn't check whether form preparation is on.",
+    });
+  });
+
+  it("fails closed when the automation settings can't be read", () => {
+    expect(
+      applicationPreparationPermission({ readError: "bad yaml", capabilities: [] })
+    ).toMatchObject({ status: "unreadable", ready: false });
+  });
+
+  it("recognizes the turn-on intent, including buttons saved before consent was retired", () => {
+    expect(
+      isApplicationPreparationEnable({
+        op: "capability",
+        capability: "authenticated_apply_preparation",
+        enabled: true,
+      })
+    ).toBe(true);
+    expect(
+      isApplicationPreparationEnable({
+        op: "capability",
+        capability: "authenticated_apply_preparation",
+        enabled: false,
+      })
+    ).toBe(false);
+    expect(isApplicationPreparationEnable({ op: "capability", capability: "mail_access" })).toBe(
+      false
+    );
+    expect(
+      isApplicationPreparationEnable({
+        op: "contextual-permission",
+        permission: "application-preparation",
+      })
+    ).toBe(true);
+  });
+
+  it("turns form preparation on in place and re-reads the effective setting", async () => {
+    const automation = {
+      capabilities: [
+        {
+          capability: "authenticated_apply_preparation",
+          enabled: true,
+          platforms: [{ platform: "greenhouse", enabled: true, allowed: true }],
         },
       ],
     };
@@ -915,25 +1003,26 @@ describe("chat-first app controller", () => {
       getAutomationSettings: vi.fn().mockResolvedValue(automation),
     };
 
-    await expect(enableApplicationPreparation({ api })).resolves.toMatchObject({
-      status: "ready",
-      ready: true,
-    });
+    await expect(
+      enableApplicationPreparation({ api, offPlatforms: ["greenhouse"] })
+    ).resolves.toMatchObject({ status: "ready", ready: true });
     expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
       "settings.apply",
       { type: "workspace", id: "workspace-main" },
       {
         change: {
           kind: "automation",
-          op: "contextual-permission",
-          permission: "application-preparation",
+          op: "capability",
+          capability: "authenticated_apply_preparation",
+          enabled: true,
+          platforms: ["greenhouse"],
         },
       }
     );
     expect(api.getAutomationSettings).toHaveBeenCalledOnce();
   });
 
-  it("does not claim form permission when the server-owned write fails", async () => {
+  it("does not claim form preparation is on when the server-owned write fails", async () => {
     const api = {
       runWorkspaceIntent: vi.fn().mockRejectedValue(new Error("write failed")),
       getAutomationSettings: vi.fn(),
@@ -1103,6 +1192,9 @@ describe("chat-first app controller", () => {
     expect(
       resolveNeedDecision({ kind: "application-next-action", applicationId: "app-2" }, "primary")
     ).toEqual({ kind: "open-application", applicationId: "app-2" });
+    expect(
+      resolveNeedDecision({ kind: "needs-answer", applicationId: "app-3" }, "primary")
+    ).toEqual({ kind: "open-application", applicationId: "app-3" });
     expect(resolveNeedDecision({ kind: "submit-gate", id: "mission:gate" }, "primary")).toEqual({
       kind: "open-gate",
       gateId: "mission:gate",
@@ -1113,6 +1205,19 @@ describe("chat-first app controller", () => {
         "primary"
       )
     ).toEqual({ kind: "open-gate", gateId: "mission-a:gate" });
+  });
+
+  it("routes an unverified submit to Applied or the application, never to the submit gate", () => {
+    const need = { kind: "submit-unverified", id: "mission:prepare", applicationId: "app-9" };
+    expect(resolveNeedDecision(need, "primary")).toEqual({
+      kind: "record-external",
+      applicationId: "app-9",
+    });
+    expect(resolveNeedDecision(need, "secondary")).toEqual({
+      kind: "open-application",
+      applicationId: "app-9",
+    });
+    expect(resolveNeedDecision({ ...need, applicationId: null }, "primary")).toBeNull();
   });
 
   it("maps durable search-run snapshots without claiming a running sweep completed", () => {

@@ -41,7 +41,7 @@ if (typeof window !== "undefined" && posthogConfig) {
     persistence: "memory",
     disable_persistence: true,
     respect_dnt: true,
-    save_referrer: false,
+    save_referrer: true,
     save_campaign_params: false,
     disable_capture_url_hashes: true,
     disable_scroll_properties: true,

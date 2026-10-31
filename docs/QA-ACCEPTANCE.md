@@ -100,8 +100,8 @@ Test homes:
 - [x] `J-07` Apply on site cannot mark Applied without verified or user-reported completion.
 - [x] `J-08` Status, follow-up, note, communication, and interview actions clear satisfied CTAs.
 - [x] `J-09` Jobs writes update Home, Calendar, Network, Library inputs, activity, and Ask context.
-- [x] `J-10` Supervised Apply captures the live form, fills only confirmed values, stops before
-  Submit, and requires confirmation-page screenshot evidence before writing Applied.
+- [x] `J-10` Supervised Apply captures the live form, fills only confirmed values, follows the
+  `submit` setting (stops before Submit in manual mode), and requires confirmation-page screenshot evidence before writing Applied.
 
 ## Calendar
 
@@ -131,7 +131,7 @@ Test homes:
 
 - [x] `S-01` Candidate, targeting, role lanes, location/work modes, comp, and guardrails round-trip.
 - [x] `S-02` Installed runtimes, custom command, provider fallback, and selected engine round-trip.
-- [x] `S-03` Automation consent is capability-specific, off by default, and described plainly.
+- [x] `S-03` Automation is on by default, each capability has its own off switch, and the settings describe them plainly.
 - [x] `S-04` Source maintenance adds/edits/removes/tests sources without hidden writes.
 - [x] `S-05` Validation is field-specific; unsaved edits, failures, and restart do not lose input.
 - [x] `S-06` Settings remains usable before setup and correctly unlocks the product when complete.

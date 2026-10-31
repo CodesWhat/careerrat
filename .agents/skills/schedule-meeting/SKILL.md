@@ -32,7 +32,7 @@ scheduling, hand it back to `email-comms`. This skill draws on the same comms ma
 ## Outputs
 
 - a complete availability / confirmation reply (subject + body, no placeholders)
-- an optional calendar-ready hold (`.ics`) written to `~/Downloads/careerrat/`
+- an optional calendar-ready hold (`.ics`) written to `~/Documents/careerrat/`
 - updated `workspace/tracker.json` — `communications[].messages[]` + status, a
   `applications[].conversations[]` entry when a meeting is booked, and
   `interviewAt` / `nextInterviewAt` + `interviewNote` on the application row
@@ -114,15 +114,15 @@ availability, ask — do not guess a free slot.
 
 ---
 
-## STEP 3b — Ingest real free/busy (optional, gated by `calendar_read`)
+## STEP 3b: Ingest real free/busy (optional, `calendar_read`)
 
 This is the concrete version of "calendar context": it lets the skill see the candidate's
 actual commitments so it schedules interviews *around* them, and surfaces those windows on the
 Calendar as opaque **"Busy"** blocks. It is optional — the skill is fully usable without it
 (STEP 4 falls back to draft-only). Run it when the user wants you to schedule around their real
-calendar, or whenever `calendar_read` is already enabled.
+calendar, or whenever `calendar_read` is on (it is on by default).
 
-**Consent gate.** Free/busy ingestion runs only under the `calendar_read` capability:
+**Capability check.** Free/busy ingestion runs only under the `calendar_read` capability:
 
 ```bash
 careerrat automation status --json
@@ -136,14 +136,14 @@ Inspect `capabilities.calendar_read`. Platforms:
 - `apple_calendar` / `google_calendar` / `outlook_calendar` — a personal calendar (for users
   who keep their availability there instead).
 
-A platform is usable only when its entry is `allowed: true` (global switch + platform switch +
-that platform's consent all true). If the requested platform is not allowed, **do not open any
-calendar** — fall back to the draft-only path in STEP 4 and surface the opt-in commands:
+A platform is usable when its entry is `allowed: true` (neither the capability switch nor that
+platform's switch is turned off). If the requested platform is not allowed, **do not open any
+calendar**, tell the operator it is turned off, fall back to the draft-only path in STEP 4, and
+give the enable commands (if `readError` is set, say the settings file can't be read and name it):
 
 ```bash
-careerrat automation consent <platform> --write
+careerrat automation enable calendar_read --write
 careerrat automation enable calendar_read <platform> --write
-careerrat automation status --json
 ```
 
 **Read free/busy — read-only and opaque.** Through the session browser (Browser Automation
@@ -233,8 +233,8 @@ When a slot is settled (or proposed for the candidate's own hold), prepare a cal
 hold so it lands cleanly:
 
 - **Always-available, dependency-free:** write a valid `.ics` (VEVENT) to the
-  company's Downloads folder — `~/Downloads/careerrat/<Company>/<Company> - <Round> Invite.ics`
-  (per the Artifact Contract: organized by company, then by round; real company
+  company's Documents folder — `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - <Round> Invite.ics`
+  (per the Artifact Contract: organized by company, job, then round; real company
   name, no brackets) — `UID`, `DTSTART`/`DTEND`
   with the correct timezone (or UTC `Z`), `SUMMARY` (e.g. "<Company> — <stage> with <who>"),
   `DESCRIPTION` (channel + dial-in/link if known), and a `VALARM` reminder. The user
@@ -245,7 +245,7 @@ hold so it lands cleanly:
   confirm-first action — show what you'll create and wait for an explicit yes. Never create,
   move, or delete a calendar event silently.
 
-Keep `.ics` content local (`~/Downloads/careerrat/` or `workspace/`). Never put
+Keep `.ics` content local (`~/Documents/careerrat/` or `workspace/`). Never put
 `current_base` or any private comp field in a hold.
 
 ---
@@ -442,7 +442,7 @@ draft awaiting send → log it as needing the user:
   scheduling state and the conversations[] entry, then hands the stage change + prep off — it
   does not own interview outcomes.
 - **Privacy + local-only.** No `current_base` or private comp in any reply, hold, or note.
-  `.ics` and raw thread bodies stay under `~/Downloads/careerrat/` / `workspace/`.
+  `.ics` and raw thread bodies stay under `~/Documents/careerrat/` / `workspace/`.
 - **No placeholder brackets.** Unknown detail → generic or omit; never a bracket token.
 - **Domain-neutral.** No hardcoded companies, names, or times. The candidate's
   `availability` block + the thread make it specific; absent config stays neutral (derive +

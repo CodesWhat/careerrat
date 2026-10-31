@@ -1,6 +1,6 @@
 {
   "name": "careerrat",
-  "version": "0.19.1",
+  "version": "0.21.0",
   "private": false,
   "packageManager": "npm@12.0.2",
   "publishConfig": {
@@ -137,7 +137,7 @@
     "export": "node src/cli/export.mjs",
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
     "check:install-scripts": "node scripts/check-install-scripts.mjs",
-    "test": "node --test 'tests/**/*.test.mjs'",
+    "test": "node --test --test-concurrency=2 'tests/**/*.test.mjs'",
     "scan:sourced": "node scripts/scan-sourced.mjs",
     "delta:sourced": "node scripts/delta-sourced.mjs",
     "capture:board": "node scripts/capture-board-snapshot.mjs",
@@ -167,9 +167,8 @@
     "lefthook": "2.1.12",
     "nopt": "10.0.1",
     "npm-package-arg": "14.0.0",
-    "playwright": "1.62.1",
     "semver": "7.8.5",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "turbo": "2.10.12",
     "yaml": "2.9.0"
   },
@@ -182,7 +181,7 @@
     "core-js": false
   },
   "overrides": {
-    "vite": "8.2.2",
+    "vite": "8.2.4",
     "postcss": "^8.5.10",
     "sharp": "$sharp"
   },
@@ -191,6 +190,7 @@
     "htmlparser2": "^12.0.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
+    "playwright": "1.62.1",
     "sanitize-html": "^2.17.4",
     "undici": "^8.0.0"
   }

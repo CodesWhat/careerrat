@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,10 +16,11 @@ import {
   sourceRelationshipsInApp,
   syncStatusesInApp,
 } from "../src/core/automation/browser-workflows.mjs";
+import { CAPABILITIES } from "../src/core/automation/consent.mjs";
 import { openDb, requireDb } from "../src/core/db/connection.mjs";
 import { assembleTrackerObject } from "../src/core/db/export-to-tracker.mjs";
 import { appUpsert } from "../src/core/db/verbs/app.mjs";
-import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
+import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { linkedinProposalBatchLatest } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -117,22 +118,32 @@ after(async () => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-function workspace(capabilities, consent) {
+// Capabilities are on by default, so a fixture names the ones it wants and every
+// other capability or platform is turned off explicitly.
+function workspace(capabilities) {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-browser-workflow-"));
   roots.push(repoRoot);
   openDb({ repoRoot, env: {} });
+  const matrix = {};
+  for (const [cap, def] of Object.entries(CAPABILITIES)) {
+    const wanted = capabilities[cap];
+    matrix[cap] = {
+      enabled: Boolean(wanted?.enabled),
+      platforms: Object.fromEntries(
+        def.platforms.map((platform) => [platform, wanted?.platforms?.[platform] === true])
+      ),
+    };
+  }
   candidateConfigPatch({
     repoRoot,
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       session: {
         provider: "playwright",
         profile_root: join(repoRoot, "profiles"),
       },
-      capabilities,
-      consent,
+      capabilities: matrix,
     },
   });
   return repoRoot;
@@ -156,12 +167,9 @@ function tracker(repoRoot) {
 }
 
 test("Playwright fixtures: Gmail and Outlook ingest write canonical inbound mail", async () => {
-  const repoRoot = workspace(
-    {
-      mail_access: { enabled: true, platforms: { gmail: true, outlook: true } },
-    },
-    { gmail: true, outlook: true }
-  );
+  const repoRoot = workspace({
+    mail_access: { enabled: true, platforms: { gmail: true, outlook: true } },
+  });
   appUpsert({
     repoRoot,
     env: {},
@@ -206,15 +214,12 @@ test("Playwright fixtures: Gmail and Outlook ingest write canonical inbound mail
 });
 
 test("Playwright fixtures: LinkedIn and Wellfound message ingest write separate channels", async () => {
-  const repoRoot = workspace(
-    {
-      messaging: {
-        enabled: true,
-        platforms: { linkedin: true, wellfound: true },
-      },
+  const repoRoot = workspace({
+    messaging: {
+      enabled: true,
+      platforms: { linkedin: true, wellfound: true },
     },
-    { linkedin: true, wellfound: true }
-  );
+  });
   appUpsert({
     repoRoot,
     env: {},
@@ -257,10 +262,9 @@ test("Playwright fixtures: LinkedIn and Wellfound message ingest write separate 
 });
 
 test("Playwright fixture: relationship sourcing captures review-only LinkedIn leads", async () => {
-  const repoRoot = workspace(
-    { relationship_sourcing: { enabled: true, platforms: { linkedin: true } } },
-    { linkedin: true }
-  );
+  const repoRoot = workspace({
+    relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
+  });
   const result = await sourceRelationshipsInApp({
     repoRoot,
     env: {},
@@ -278,11 +282,21 @@ test("Playwright fixture: relationship sourcing captures review-only LinkedIn le
   assert.equal(lead.status, "review");
 });
 
-test("Playwright fixture: LinkedIn profile read creates proposals without editing the profile", async () => {
-  const repoRoot = workspace(
-    { profile_optimize: { enabled: true, platforms: { linkedin: true } } },
-    { linkedin: true }
-  );
+test("Playwright fixture: LinkedIn profile read stages proposals automatically without editing the profile", async () => {
+  const repoRoot = workspace({
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [
+      {
+        id: "ai-projects-001",
+        claim: "Built applied AI systems end to end.",
+        evidence: "Shipped LLM features in production.",
+      },
+    ],
+  });
   const result = await optimizeLinkedinInApp({
     repoRoot,
     env: {},
@@ -293,22 +307,27 @@ test("Playwright fixture: LinkedIn profile read creates proposals without editin
         ...surface,
         proposed: `${surface.current} | Applied AI`,
         rationale: "Aligns the saved evidence with the target role.",
-        evidenceRef: "candidate evidence",
+        evidenceRef: "ai-projects-001",
       })),
     now: () => new Date("2026-08-24T16:00:00.000Z"),
   });
   assert.equal(result.state, "completed");
   assert.equal(result.proposed, 2);
-  const batch = linkedinProposalBatchLatest({ repoRoot, env: {} });
+  const batch = linkedinProposalBatchLatest({ repoRoot, env: {}, status: null });
   assert.equal(batch.surfaces.length, 2);
-  assert.ok(batch.surfaces.every((surface) => surface.decision === null));
+  assert.equal(result.staged.length, 2);
+  assert.match(result.summary, /staged for your profile\. Nothing was written to LinkedIn/);
+  assert.ok(
+    batch.surfaces.every(
+      (surface) => surface.decision.action === "approve" && surface.decision.source === "automatic"
+    )
+  );
 });
 
 test("LinkedIn proposal schema retry keeps the frozen provider plan after provider settings change", async () => {
-  const repoRoot = workspace(
-    { profile_optimize: { enabled: true, platforms: { linkedin: true } } },
-    { linkedin: true }
-  );
+  const repoRoot = workspace({
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
   const env = { ANTHROPIC_API_KEY: "sk-ant-test" };
   const executionPlan = {
     policyVersion: 1,
@@ -381,10 +400,9 @@ test("LinkedIn proposal schema retry keeps the frozen provider plan after provid
 });
 
 test("Playwright fixture: ATS sync reads status and atomically clears portal CTAs", async () => {
-  const repoRoot = workspace(
-    { status_polling: { enabled: true, platforms: { greenhouse: true } } },
-    { greenhouse: true }
-  );
+  const repoRoot = workspace({
+    status_polling: { enabled: true, platforms: { greenhouse: true } },
+  });
   const application = {
     id: "app-acme",
     company: "Acme",
@@ -427,10 +445,9 @@ test("Playwright fixture: ATS sync reads status and atomically clears portal CTA
 });
 
 test("Playwright fixture: ambiguous ATS status stays visible for review and writes nothing", async () => {
-  const repoRoot = workspace(
-    { status_polling: { enabled: true, platforms: { greenhouse: true } } },
-    { greenhouse: true }
-  );
+  const repoRoot = workspace({
+    status_polling: { enabled: true, platforms: { greenhouse: true } },
+  });
   const application = {
     id: "app-acme-review",
     company: "Acme",
@@ -454,10 +471,7 @@ test("Playwright fixture: ambiguous ATS status stays visible for review and writ
 });
 
 test("Playwright fixture: authentication walls return visible retry state and write nothing", async () => {
-  const repoRoot = workspace(
-    { mail_access: { enabled: true, platforms: { gmail: true } } },
-    { gmail: true }
-  );
+  const repoRoot = workspace({ mail_access: { enabled: true, platforms: { gmail: true } } });
   const manager = createBrowserSessionManager({
     createSessionImpl: headlessSession,
   });
@@ -487,4 +501,96 @@ test("Playwright fixture: authentication walls return visible retry state and wr
   } finally {
     await manager.shutdown();
   }
+});
+
+test("a turned-off capability returns a CAPABILITY_OFF blocker with the enable command, no browser opened", async () => {
+  const repoRoot = workspace({});
+  let opened = 0;
+  const result = await optimizeLinkedinInApp({
+    repoRoot,
+    env: {},
+    createSessionImpl: () => {
+      opened += 1;
+      throw new Error("no browser should open");
+    },
+  });
+  assert.equal(opened, 0);
+  assert.equal(result.state, "needs-user");
+  assert.equal(result.blockers[0].code, "CAPABILITY_OFF");
+  assert.match(result.blockers[0].message, /careerrat automation enable profile_optimize --write/);
+});
+
+test("platforms skipped because they are turned off are reported as turned off", async () => {
+  const repoRoot = workspace({});
+  const result = await ingestWebmailInApp({
+    repoRoot,
+    env: {},
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+    now: () => new Date("2026-08-24T16:00:00.000Z"),
+  });
+  assert.deepEqual(result.turnedOff, ["gmail", "outlook"]);
+  assert.match(result.summary, /Turned off, so skipped: gmail, outlook\./);
+});
+
+test("a turned-off linkedin platform switch names the platform command in the recovery message", async () => {
+  const repoRoot = workspace({
+    profile_optimize: { enabled: true, platforms: { linkedin: false } },
+  });
+  const result = await optimizeLinkedinInApp({
+    repoRoot,
+    env: {},
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+  });
+  assert.equal(result.blockers[0].code, "CAPABILITY_OFF");
+  assert.match(
+    result.blockers[0].message,
+    /careerrat automation enable profile_optimize linkedin --write/
+  );
+});
+
+test("unreadable automation settings are reported as a settings error, not as turned off", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-browser-workflow-readerr-"));
+  roots.push(dir);
+  mkdirSync(join(dir, "candidate"), { recursive: true });
+  writeFileSync(
+    join(dir, "candidate", "automation.yml"),
+    'version: 1\ncapabilities:\n  mail_access:\n    enabled: false\n  note: "unterminated\n'
+  );
+  const result = await ingestWebmailInApp({
+    repoRoot: dir,
+    env: {},
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+    now: () => new Date("2026-08-24T16:00:00.000Z"),
+  });
+  assert.equal(result.turnedOff, undefined);
+  assert.match(result.settingsError, /automation settings can't be read/);
+  assert.match(result.summary, /settings unreadable/);
+});
+
+test("status sync checks the switch per application but reports each turned-off platform once", async () => {
+  const repoRoot = workspace({});
+  const applications = ["a", "b", "c"].map((id) => ({
+    id: `app-${id}`,
+    company: `Co ${id}`,
+    role: "Engineer",
+    status: "applied",
+    statusPlatform: "greenhouse",
+    statusUrl: `${origin}/greenhouse/status-unclear`,
+  }));
+  const result = await syncStatusesInApp({
+    repoRoot,
+    env: {},
+    applications,
+    createSessionImpl: () => {
+      throw new Error("no browser should open");
+    },
+    now: () => new Date("2026-08-24T16:00:00.000Z"),
+  });
+  assert.deepEqual(result.turnedOff, ["greenhouse"]);
 });

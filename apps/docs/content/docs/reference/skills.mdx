@@ -18,8 +18,8 @@ private config, not hardcoded preferences.
 | `evaluate-job` | Body-read gate for a single job posting — fetch, save, check limits/comp/fit, emit GATE/FIT/COMP/ACTION, and write calibrated fit back to the tracker. Run before any tailoring or submission. |
 | `answer-question` | Draft evidence-grounded answers to one-off application or screening questions, reuse saved disclosure answers, and return `NEEDS YOU` instead of guessing when the evidence is insufficient. |
 | `tailor-application` | Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. |
-| `apply-job` | End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, prepares supported ATS forms (including LinkedIn Easy Apply), stops for user submission, verifies the reported outcome, and updates the tracker. |
-| `coach-gaps` | Turn each named REVIEW fit gap into an evidence-grounded claim draft or an explicit no-close path, then offer re-evaluation only after the evidence firewall confirms the change. |
+| `apply-job` | End-to-end job application workflow: gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, prepares supported ATS forms (including LinkedIn Easy Apply), submits when complete and verified (or stops for you after `careerrat automation submit manual --write`), verifies the outcome, and updates the tracker. |
+| `coach-gaps` | Turn each named REVIEW fit gap into an evidence-grounded claim draft or an explicit no-close path, then offer re-evaluation only after the evidence firewall confirms the change. Runs on its own when a review verdict lands. |
 
 ## Intake extraction
 
@@ -36,7 +36,7 @@ private config, not hardcoded preferences.
 | `research-comp` | Web-search market comp for a role+location and produce a cited `.careerrat/workspace/research/comp-bench-*.md` that feeds evaluate-job COMP CHECK/ANCHOR and a confirm-first gate write-back. |
 | `research-boards` | Web-search and legitimacy-screen new job boards for the candidate's domain/role families, then propose adding to `search-sources.yml` confirm-first. |
 | `discover-companies` | Web-search companies likely to be hiring the candidate's target roles, resolve each to a scannable ATS careers board, legitimacy-screen and dedup, then propose adding to `config/sourced-scan.json` tracked_companies confirm-first. Upstream of search-jobs. |
-| `company-health` | Score a role-scoped company-risk rating (`healthy\|watch\|risky`) from web-searched layoff, hiring-momentum, financial, sentiment, and leadership signals with provenance; persist it to the tracker and feed the fit score only where it cross-cuts a stated candidate need. Cost-gated; an internal signal that never enters an outbound artifact. |
+| `company-health` | Score a role-scoped company-risk rating (`healthy\|watch\|risky`) from web-searched layoff, hiring-momentum, financial, sentiment, and leadership signals with provenance; persist it to the tracker and feed the fit score only where it cross-cuts a stated candidate need. Runs on its own at the fire stage; an internal signal that never enters an outbound artifact. |
 
 ## Communications
 
@@ -44,8 +44,8 @@ private config, not hardcoded preferences.
 | ------- | ----------- |
 | `email-comms` | Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the CareerRat tracker. |
 | `schedule-meeting` | Handle recruiter / hiring-team scheduling threads — read the proposed slots, the candidate's timezone and availability, and any calendar context; draft a clear availability reply, prepare a calendar-ready hold, and write scheduling state back to the tracker. Confirm-first before any outbound reply or calendar write. |
-| `ingest-mail` | CareerRat's in-app workflow reads job-search updates from Apple Mail on macOS or, with separate mail_access consent, Gmail/Outlook webmail; it captures relevant threads and source watermarks locally. The terminal skill provides the same workflow for external agents. Opt-in and read-only at the source. |
-| `ingest-messages` | CareerRat's in-app workflow reads LinkedIn and Wellfound DMs through the session browser and captures relevant threads and source watermarks locally. The terminal skill provides the same workflow for external agents. Opt-in, user-initiated, and read-only at the source. |
+| `ingest-mail` | CareerRat's in-app workflow reads job-search updates from Apple Mail on macOS or Gmail/Outlook webmail while `mail_access` is on; it captures relevant threads and source watermarks locally. The terminal skill provides the same workflow for external agents. Read-only at the source. |
+| `ingest-messages` | CareerRat's in-app workflow reads LinkedIn and Wellfound DMs through the session browser and captures relevant threads and source watermarks locally. The terminal skill provides the same workflow for external agents. User-initiated and read-only at the source. |
 
 ## Interview & outcomes
 
@@ -59,16 +59,16 @@ private config, not hardcoded preferences.
 
 | Skill | Description |
 | ------- | ----------- |
-| `optimize-linkedin` | CareerRat's in-app workflow reads the candidate's LinkedIn profile and proposes honest, evidence-backed rewrites for review. Approval stays local; a separate opt-in and per-field confirmation are required before the terminal skill writes approved edits live. |
-| `sync-status` | CareerRat's in-app workflow reads saved ATS dashboards, normalizes each raw label, applies verified high-confidence advances atomically, and leaves regressions or low-confidence labels for review. Terminal agents route confirmed transitions through track-outcomes. Opt-in, user-initiated, and read-only at the portal. |
-| `relationship-sourcing` | CareerRat's in-app workflow finds likely recruiters, hiring-team members, or warm contacts through LinkedIn and Wellfound, then saves review-only leads in Network. The terminal skill provides the same workflow for external agents. Opt-in, user-initiated, and local-only. |
+| `optimize-linkedin` | CareerRat's in-app workflow reads the candidate's LinkedIn profile and proposes honest, evidence-backed rewrites for review. Approval stays local; the terminal skill writes approved edits live only with per-field confirmation and the `profile_apply` capability on. |
+| `sync-status` | CareerRat's in-app workflow reads saved ATS dashboards, normalizes each raw label, applies verified high-confidence advances atomically, and leaves regressions or low-confidence labels for review. Terminal agents route confirmed transitions through track-outcomes. User-initiated and read-only at the portal. |
+| `relationship-sourcing` | CareerRat's in-app workflow finds likely recruiters, hiring-team members, or warm contacts through LinkedIn and Wellfound, then saves review-only leads in Network. The terminal skill provides the same workflow for external agents. User-initiated and local-only. |
 
 ## Settings & calendar
 
 | Skill | Description |
 | ------- | ----------- |
 | `configure` | Show current settings and route changes to the validated CLI or owning skill — never a new mutation path itself. |
-| `calendar-sync` | Write tracker-derived interviews, assessments, follow-ups, prep blocks, and deadlines to Apple Calendar, Google Calendar, Outlook, or approved local automation tools. Opt-in, user-initiated, confirm-first. |
+| `calendar-sync` | Write tracker-derived interviews, assessments, follow-ups, prep blocks, and deadlines to Apple Calendar, Google Calendar, Outlook, or approved local automation tools. User-initiated, confirm-first, and off if you turn `calendar_sync` off. |
 
 ## Diagnostics
 

@@ -1,9 +1,9 @@
 ---
 name: sync-status
-description: Read application status from ATS dashboards, normalize each raw label to the canonical tracker vocabulary, atomically apply verified in-app advances, and route external or candidate-reported outcomes through track-outcomes. Opt-in, user-initiated, read-only at the portal.
+description: Read application status from ATS dashboards, normalize each raw label to the canonical tracker vocabulary, atomically apply verified in-app advances, and route external or candidate-reported outcomes through track-outcomes. User-initiated, read-only at the portal.
 metadata:
   tier_1_inputs:
-    - consent verdict
+    - capability status
     - applications-to-poll list
     - platform scope
   tier_2_inputs:
@@ -14,7 +14,7 @@ metadata:
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
-## STEP 0 — Consent gate (hard stop)
+## STEP 0: Capability check
 
 Run:
 
@@ -24,24 +24,17 @@ careerrat automation status --json
 
 Inspect the `capabilities.status_polling` entry. The applicable platforms are
 `greenhouse`, `workday`, `ashby`, and `lever`. For each platform, `allowed: true`
-means three switches are on: the capability global switch, that platform's
-per-capability switch, and the platform's one-time ToS consent. And either
-automation is in the "advanced" setup mode or the capability has a contextual
-scoped grant for that platform. This is the predicate from `mayRun()` in
-`src/core/automation/consent.mjs`; never hardcode it here.
+means neither the capability switch nor that platform's switch is turned off. This
+is the verdict from `mayRun()` in `src/core/automation/consent.mjs`; never hardcode
+it here. Status polling is on by default.
 
-If **no platform** shows `allowed: true`, explain exactly how to opt in, then
-stop — do not open a browser:
+If **no platform** shows `allowed: true`, tell the operator status polling is turned
+off, give the command that turns it on, and stop (do not open a browser). If
+`readError` is set, say the automation settings file can't be read and name it.
+Skip any single platform that is off and report it as skipped.
 
-1. `careerrat automation mode advanced --write`
-2. Read the platform's terms of service yourself.
-3. Record consent: `careerrat automation consent <platform> --write`
-4. Enable the capability: `careerrat automation enable status_polling --write`
-5. Enable for the specific platform: `careerrat automation enable status_polling <platform> --write`
-6. Verify: `careerrat automation status --json`
-
-A contextual scoped grant given in the app is an alternative to step 1: it
-authorizes this capability for that platform without switching to advanced mode.
+- Capability: `careerrat automation enable status_polling --write`
+- One platform: `careerrat automation enable status_polling <platform> --write`
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
 
@@ -68,7 +61,7 @@ rows qualify, report that and stop.
 platforms are read **one at a time** (one-browser rule); delegation isolates each platform's
 context rather than parallelizing. Each subagent reads its platform's rows and returns raw
 statuses; the orchestrator normalizes (STEP 3) and hands transitions to `track-outcomes`
-(the only tracker writer). STEP 0 consent already cleared on the orchestrator. See the
+(the only tracker writer). STEP 0 capability check already cleared on the orchestrator. See the
 **Delegation Contract** in AGENTS.md.
 
 For each allowed, in-scope platform, navigate to that platform's candidate
@@ -163,7 +156,7 @@ sync-status complete:
   Application rows checked: M
   Transitions applied:      A  (handed to track-outcomes)
   Awaiting confirmation:    C  (listed below)
-  Platforms skipped:        S  (<reason: no consent / not allowed>)
+  Platforms skipped:        S  (<reason: turned off>)
 ```
 
 For each item awaiting confirmation, list: company, role, current status →
@@ -185,7 +178,7 @@ the comm thread open after a portal-confirmed transition.
   tracker mutations to `track-outcomes`. The CareerRat in-app path uses the
   canonical atomic status-sync DB verb described below. Never fabricate a
   tracker mutation or hand-edit generated `workspace/tracker.json`.
-- Opt-in and OFF by default. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the predicate (global switch, platform switch, ToS consent, all on, and either "advanced" setup mode or a contextual scoped grant for that platform) from `mayRun()`; never re-derive the predicate in prose.
+- On by default, with an off-switch. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field is the `mayRun()` verdict (the capability switch and the platform switch are not off); never re-derive it in prose. A turned-off platform is skipped and reported, not asked about.
 - Never run on a schedule or unattended. Always user-initiated with the agent in the loop.
 - Halt and ask on captcha, 2FA, login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge.
 - Use tool-agnostic browser prose: "the session browser," "snapshot or read the page."
@@ -201,15 +194,14 @@ the comm thread open after a portal-confirmed transition.
 ## In-app and terminal paths
 
 CareerRat's in-app path reads Greenhouse, Workday, Ashby, and Lever through its
-owned browser workflow after the platform-specific `status_polling` permission
-passes. A terminal or external-agent run still follows STEP 0 → 5 exactly as
+owned browser workflow unless the operator turned `status_polling` off for that platform. A terminal or external-agent run still follows STEP 0 → 5 exactly as
 written and hands confirmed transitions to `track-outcomes`.
 
 - **Requesting a status check** (`status.sync-request`). "Check my application
   statuses" offers a "Check portal statuses" chip. The handler checks `mayRun`
-  for `status_polling` per platform: with every platform off it refuses and
-  opens the contextual permission control; otherwise it reports each platform's
-  real consent state and how many in-flight applications map to it by URL host,
+  for `status_polling` per platform: with every platform off it says it is turned
+  off and offers a "Turn it on" action; otherwise it reports which platforms are on
+  and how many in-flight applications map to it by URL host,
   then runs the allowed in-app portal reads. Results return in the same Ask
   thread as applied counts, review rows, or retry blockers.
 - **Recording one portal-observed update** (`status.record-portal`, offered as
@@ -221,7 +213,7 @@ written and hands confirmed transitions to `track-outcomes`.
   `reviewing` into `awaiting`; round granularity is preserved separately). A
   regress or low-confidence read never writes: it renders a review card whose
   Apply button fires `status.apply-transition`, which re-checks the
-  application's current status and refuses stale proposals. No consent gate
+  application's current status and refuses stale proposals. No capability switch
   applies to these self-reports; the candidate saw the portal themselves. The
   note on every write says so: `Portal status reported by user: "<raw>"`.
 - **Native write boundary.** An `autoApplicable` result uses CareerRat's atomic
