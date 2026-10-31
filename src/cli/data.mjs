@@ -62,6 +62,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { executeWorkspaceIntent } from "../core/agent/workspace-agent.mjs";
+import { workspaceMessageAppend, workspaceThreadRead } from "../core/agent/workspace-thread.mjs";
 import { dbExists, dbFilePath, NO_DATABASE_MESSAGE, openDb } from "../core/db/connection.mjs";
 import { seedDemo } from "../core/db/demo-seed.mjs";
 import { exportToTracker } from "../core/db/export-to-tracker.mjs";
@@ -97,6 +99,8 @@ import {
   intakeList,
   intakeOne,
   intakeUpdate,
+  jobThreadGet,
+  jobThreadMessageAppend,
   linkedinProposalBatchLatest,
   linkedinProposalBatchPreflight,
   linkedinProposalBatchPut,
@@ -208,6 +212,12 @@ try {
       break;
     case "app":
       cmdApp(sub, rest);
+      break;
+    case "thread":
+      cmdThread(sub, rest);
+      break;
+    case "changes":
+      await cmdChanges(sub, rest);
       break;
     case "sourced":
       cmdSourced(sub, rest);
@@ -346,6 +356,85 @@ function cmdVerify() {
 // ---------------------------------------------------------------------------
 // app <sub>
 // ---------------------------------------------------------------------------
+
+function cmdThread(sub, rest) {
+  const [id] = rest;
+  if (!id || rest.length !== 1) fail("thread requires read|append <application-id|workspace>");
+  if (sub === "read") {
+    return printResult(
+      id === "workspace"
+        ? workspaceThreadRead(pathCtx)
+        : jobThreadGet({ ...pathCtx, applicationId: id })
+    );
+  }
+  if (sub === "append") {
+    const payload = readPayload("thread append");
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      fail("thread append requires a message object");
+    const { role = "assistant", kind = "text", text, metadata, artifacts, id: messageId } = payload;
+    const message = { role, kind, text, metadata, artifacts, id: messageId, now: opts.at };
+    return printResult(
+      id === "workspace"
+        ? workspaceMessageAppend({ ...pathCtx, ...message })
+        : jobThreadMessageAppend({ ...pathCtx, ...message, applicationId: id })
+    );
+  }
+  fail(`unknown thread action "${sub}". See --help.`);
+}
+
+async function cmdChanges(sub, rest) {
+  if (sub === "list") {
+    if (rest.length) fail("changes list takes no positional arguments");
+    const { messages } = workspaceThreadRead(pathCtx);
+    const reverted = new Set(
+      messages.flatMap((message) =>
+        (message.artifacts || [])
+          .filter((entry) => entry?.kind === "knowledge_write" && entry.revertOf)
+          .map((entry) => `${entry.revertOf.messageId}:${entry.revertOf.index}`)
+      )
+    );
+    const changes = messages
+      .flatMap((message) =>
+        (message.artifacts || []).flatMap((entry, index) =>
+          entry?.kind === "knowledge_write" && !entry.revertOf
+            ? [
+                {
+                  messageId: message.id,
+                  index,
+                  at: message.createdAt,
+                  entry,
+                  reverted: reverted.has(`${message.id}:${index}`),
+                },
+              ]
+            : []
+        )
+      )
+      .reverse();
+    return printResult({ ok: true, changes });
+  }
+  if (sub === "undo") {
+    const [messageId, rawIndex] = rest;
+    const index = Number(rawIndex);
+    if (
+      !messageId ||
+      rest.length !== 2 ||
+      !/^\d+$/.test(rawIndex || "") ||
+      !Number.isSafeInteger(index)
+    )
+      fail("changes undo requires <message-id> <nonnegative-artifact-index>");
+    return printResult(
+      await executeWorkspaceIntent({
+        ...pathCtx,
+        intent: {
+          type: "knowledge.revert",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { messageId, index },
+        },
+      })
+    );
+  }
+  fail(`unknown changes action "${sub}". See --help.`);
+}
 
 function cmdApp(sub, rest) {
   switch (sub) {
@@ -847,6 +936,11 @@ function printHelp() {
   console.log(`careerrat data: sqlite-backed data layer (M6)
 
 Usage:
+  node src/cli/data.mjs thread read <application-id|workspace> [--json]
+  node src/cli/data.mjs thread append <application-id|workspace> --data <json> | --data-file <path>
+  node src/cli/data.mjs changes list [--json]
+  node src/cli/data.mjs changes undo <message-id> <artifact-index> [--json]
+
   node src/cli/data.mjs status [--json]
   node src/cli/data.mjs init [--demo] [--json]
   node src/cli/data.mjs import [--source <dir>] [--json]

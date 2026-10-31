@@ -6,6 +6,11 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- CLI commands read and append durable job or workspace history, list recorded
+  knowledge changes, and undo them through the existing stale-write checks.
+
 ### Fixed
 
 - Updated dependencies with security fixes for schema validation, test tooling,
