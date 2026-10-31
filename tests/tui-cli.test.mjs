@@ -14,6 +14,7 @@ import { sourcingRunLatest } from "../src/core/db/verbs/sourcing-runs.mjs";
 import { preparePtyHelpers } from "../src/core/tui/prepare.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const legacyDriver = `import {runTerminalWorkspace} from ${JSON.stringify(new URL("../src/core/tui/runtime.mjs", import.meta.url).href)};process.exitCode=await runTerminalWorkspace({repoRoot:${JSON.stringify(root)},env:process.env});`;
 
 async function stopTestTerminal(child, isExited, terminal, pids = []) {
   if (!isExited()) {
@@ -60,7 +61,7 @@ test("tui JSON reads saved jobs without a terminal, agent or browser server", (t
   assert.equal(result.mode, "legacy");
 });
 
-test("real terminal can browse, filter and quit without launching an agent", {
+test("legacy renderer can browse, filter and quit without launching an agent", {
   timeout: 12000,
 }, async (t) => {
   const env = fixture(t);
@@ -74,7 +75,7 @@ test("real terminal can browse, filter and quit without launching an agent", {
   let rejectRun;
   const done = new Promise((resolve, reject) => {
     rejectRun = reject;
-    child = pty.spawn(process.execPath, [join(root, "src/cli/tui.mjs"), "--no-agent"], {
+    child = pty.spawn(process.execPath, ["--input-type=module", "-e", legacyDriver], {
       env,
       cwd: root,
       cols: 120,
@@ -463,7 +464,7 @@ test("a file dropped into the real terminal is copied and extracted before the a
   await done;
 });
 
-test("real terminal previews and confirms a recorded Undo without an agent", {
+test("legacy renderer previews and confirms a recorded Undo without an agent", {
   timeout: 15000,
 }, async (t) => {
   const { buildKnowledgeWriteEntry } = await import("../src/core/agent/knowledge-write-log.mjs");
@@ -502,7 +503,7 @@ test("real terminal previews and confirms a recorded Undo without an agent", {
   let rejectRun;
   const done = new Promise((resolve, reject) => {
     rejectRun = reject;
-    child = pty.spawn(process.execPath, [join(root, "src/cli/tui.mjs"), "--no-agent"], {
+    child = pty.spawn(process.execPath, ["--input-type=module", "-e", legacyDriver], {
       cwd: root,
       env,
       cols: 120,

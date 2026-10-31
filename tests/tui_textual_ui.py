@@ -4,10 +4,12 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
-from textual.widgets import DataTable, Input, TabbedContent
+from textual.widgets import Button, DataTable, Input, TabbedContent
 from textual import events
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,153 @@ async def until(check):
 
 
 class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_recorded_undo_previews_then_updates_canonical_state(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-undo-") as folder:
+            home = Path(folder)
+            (home / "workspace").mkdir()
+            (home / "workspace/tracker.json").write_text(
+                json.dumps(
+                    {
+                        "applications": [
+                            {
+                                "id": "saved-role",
+                                "company": "Example",
+                                "role": "Lead",
+                                "status": "applied",
+                            }
+                        ]
+                    }
+                )
+            )
+            env = {**os.environ, "CAREERRAT_HOME": folder}
+
+            def module(value):
+                return json.dumps((ROOT / value).as_uri())
+
+            code = f"""
+import {{ importFromTracker }} from {module('src/core/db/import-from-tracker.mjs')};
+import {{ closeAll }} from {module('src/core/db/connection.mjs')};
+import {{ candidateSetupInitialize, candidateConfigPatch }} from {module('src/core/db/verbs/candidate.mjs')};
+import {{ workspaceMessageAppend }} from {module('src/core/agent/workspace-thread.mjs')};
+import {{ buildKnowledgeWriteEntry }} from {module('src/core/agent/knowledge-write-log.mjs')};
+const ctx={{repoRoot:{json.dumps(str(ROOT))},env:process.env}};
+importFromTracker({{...ctx,sourceDir:{json.dumps(str(home / 'workspace'))}}});
+candidateSetupInitialize(ctx);
+candidateConfigPatch({{...ctx,name:'targeting',patch:{{fit_bands:{{fit_floor:70}}}}}});
+workspaceMessageAppend({{...ctx,role:'assistant',kind:'action_result',text:'Saved fit floor',artifacts:[buildKnowledgeWriteEntry({{target:'candidate_config:targeting',op:'set',path:'fit_bands.fit_floor',before:60,after:70,label:'Fit floor'}})]}});
+closeAll();
+"""
+            setup = await asyncio.to_thread(
+                subprocess.run,
+                [shutil.which("node"), "--input-type=module", "-e", code],
+                env=env,
+                capture_output=True,
+                timeout=15,
+            )
+            self.assertEqual(setup.returncode, 0, setup.stderr.decode())
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.snapshot["view"]["changes"])
+                await pilot.click("#--content-tab-changes")
+                self.assertTrue(
+                    await pilot.click("#preview-undo"),
+                    str(app.query_one("#preview-undo").region),
+                )
+                await until(lambda: app.snapshot["state"].get("pendingUndo"))
+                self.assertFalse(app.query_one("#confirm-undo", Button).disabled)
+                await pilot.click("#confirm-undo")
+                await until(
+                    lambda: "undone" in app.snapshot["state"].get("message", "").lower()
+                )
+                self.assertTrue(app.snapshot["view"]["changes"][0]["reverted"])
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+            verify = f"import {{candidateConfigGet}} from {module('src/core/db/verbs/candidate.mjs')}; console.log(candidateConfigGet({{repoRoot:{json.dumps(str(ROOT))},env:process.env}}).targeting.fit_bands.fit_floor);"
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [shutil.which("node"), "--input-type=module", "-e", verify],
+                env=env,
+                capture_output=True,
+                timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual(result.stdout.strip(), b"60")
+
+    @unittest.skipIf(
+        sys.platform == "win32", "Unix outer-PTY proof; Windows acceptance is separate"
+    )
+    async def test_normal_cli_installs_privately_and_launches_textual(self):
+        import pty
+
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-cli-") as folder:
+            home = Path(folder)
+            (home / "workspace").mkdir()
+            path = home / "workspace/tracker.json"
+            saved = {
+                "applications": [
+                    {
+                        "id": "northstar",
+                        "company": "Northstar",
+                        "role": "Staff Engineer",
+                        "status": "interview",
+                    }
+                ]
+            }
+            path.write_text(json.dumps(saved))
+            env = {
+                **os.environ,
+                "CAREERRAT_HOME": folder,
+                "CAREERRAT_TUI_PYTHON": sys.executable,
+                "TERM": "xterm-256color",
+            }
+            node = shutil.which("node")
+            installed = await asyncio.to_thread(
+                subprocess.run,
+                [node, str(ROOT / "src/cli/tui.mjs"), "setup"],
+                env=env,
+                capture_output=True,
+                timeout=150,
+            )
+            self.assertEqual(installed.returncode, 0, installed.stderr.decode())
+            self.assertTrue(list((home / "internal/tui").glob("python-*/.ready.json")))
+            terminal_fd, application_fd = pty.openpty()
+            process = await asyncio.create_subprocess_exec(
+                node,
+                str(ROOT / "src/cli/tui.mjs"),
+                "--no-agent",
+                env=env,
+                stdin=application_fd,
+                stdout=application_fd,
+                stderr=application_fd,
+                start_new_session=True,
+            )
+            os.close(application_fd)
+            os.set_blocking(terminal_fd, False)
+            output = b""
+            try:
+                async with asyncio.timeout(10):
+                    while b"Northstar" not in output:
+                        try:
+                            output += os.read(terminal_fd, 65536)
+                        except BlockingIOError:
+                            await asyncio.sleep(0.03)
+                os.write(terminal_fd, b"\x11")
+                async with asyncio.timeout(10):
+                    while process.returncode is None:
+                        try:
+                            output += os.read(terminal_fd, 65536)
+                        except (BlockingIOError, OSError):
+                            pass
+                        await asyncio.sleep(0.03)
+                self.assertEqual(process.returncode, 0, output.decode(errors="replace"))
+                self.assertEqual(json.loads(path.read_text()), saved)
+                self.assertFalse((home / "db").exists())
+            finally:
+                if process.returncode is None:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), 10)
+                os.close(terminal_fd)
+
     async def test_native_pane_typing_paste_resize_and_process_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-native-") as folder:
             home = Path(folder)
@@ -76,6 +225,26 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
                         "company": "Northstar",
                         "role": "Staff Engineer",
                         "status": "interview",
+                        "evaluation": {
+                            "gate": "keep",
+                            "requirements": [
+                                {
+                                    "requirement": "Distributed systems",
+                                    "importance": "critical",
+                                    "evidence": "stated",
+                                    "jdSignal": "Own distributed services",
+                                    "match": "strong",
+                                    "note": "Led production platform work",
+                                }
+                            ],
+                        },
+                        "conversations": [
+                            {
+                                "type": "recruiter-screen",
+                                "notes": "Discussed team scope",
+                                "processNote": "Hiring manager next",
+                            }
+                        ],
                     },
                     {
                         "id": "harbor",
@@ -88,6 +257,13 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
                 ],
             }
             path = home / "workspace/tracker.json"
+            tracker["applications"][0]["artifacts"] = {
+                "jd": "workspace/jobs/northstar.md"
+            }
+            (home / "workspace/jobs").mkdir()
+            (home / "workspace/jobs/northstar.md").write_text(
+                "# Saved role\n\nOwn the platform and its services."
+            )
             path.write_text(json.dumps(tracker))
             app = MODULE.CareerRatApp(
                 env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
@@ -100,6 +276,28 @@ class WorkspaceTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(
                     "Recruiter replied", str(app.query_one("#details").render())
                 )
+                await pilot.click("#jobs", offset=(10, 3))
+                await until(lambda: app.selected_id == "northstar")
+                await pilot.click("#--content-tab-assessment")
+                report = app.query_one("#requirements", DataTable)
+                await until(lambda: report.row_count == 1)
+                self.assertIn("Distributed systems", str(report.get_row_at(0)))
+                self.assertIn("Led production platform work", str(report.get_row_at(0)))
+                await pilot.click("#--content-tab-fit")
+                await pilot.click("#open-jd")
+                await until(lambda: isinstance(app.screen, MODULE.JobDocument))
+                self.assertIn(
+                    "Own the platform", app.screen.document["artifact"]["markdown"]
+                )
+                await pilot.click("#close-document")
+                await pilot.click("#--content-tab-history")
+                self.assertIn(
+                    "Discussed team scope", str(app.query_one("#history-text").render())
+                )
+                await pilot.click("#jobs", offset=(10, 2))
+                await until(lambda: app.selected_id == "harbor")
+                self.assertEqual(report.row_count, 0)
+                await pilot.click("#--content-tab-fit")
                 screenshot_dir = os.environ.get("CAREERRAT_TUI_SCREENSHOT_DIR")
                 if screenshot_dir:
                     Path(screenshot_dir).mkdir(parents=True, exist_ok=True)

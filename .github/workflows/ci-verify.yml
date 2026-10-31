@@ -153,7 +153,7 @@ jobs:
       - name: Textual interface tests (isolated Python environment, no model calls)
         run: |
           python3 -m venv "$RUNNER_TEMP/careerrat-textual"
-          "$RUNNER_TEMP/careerrat-textual/bin/python" -m pip install -r src/core/tui/requirements.txt
+          "$RUNNER_TEMP/careerrat-textual/bin/python" -m pip install --require-hashes --only-binary=:all: -r src/core/tui/requirements.txt
           "$RUNNER_TEMP/careerrat-textual/bin/python" tests/tui_textual_ui.py
       - name: Web UI test suite
         run: npm --workspace apps/web test

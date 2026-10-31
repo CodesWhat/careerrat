@@ -22,6 +22,7 @@ from textual.widgets import (
     Footer,
     Header,
     Input,
+    MarkdownViewer,
     Select,
     Static,
     TabbedContent,
@@ -119,6 +120,37 @@ class ContextCapture(ModalScreen):
         self.dismiss()
 
 
+class JobDocument(ModalScreen):
+    CSS = """
+    JobDocument { align: center middle; background: $background 70%; }
+    #document-dialog { width: 90%; height: 90%; padding: 1 2; border: round $accent; background: $surface; }
+    #jd-viewer { height: 1fr; margin: 1 0; }
+    """
+
+    def __init__(self, document):
+        super().__init__()
+        self.document = document
+
+    def compose(self) -> ComposeResult:
+        artifact = self.document["artifact"]
+        with Vertical(id="document-dialog"):
+            yield Static(
+                f"{self.document.get('company') or ''} · {self.document.get('role') or ''}\nSaved JD · {artifact['completeness']}",
+                markup=False,
+            )
+            yield MarkdownViewer(
+                artifact["markdown"],
+                show_table_of_contents=False,
+                open_links=False,
+                id="jd-viewer",
+            )
+            yield Button("Close", id="close-document")
+
+    def on_button_pressed(self, event):
+        event.stop()
+        self.dismiss()
+
+
 class CareerRatApp(App):
     TITLE = "CareerRat · Workspace"
     ENABLE_COMMAND_PALETTE = False
@@ -135,6 +167,7 @@ class CareerRatApp(App):
     #jobs { height: 1fr; border: round $accent; }
     #inspector { height: 1fr; border: round $secondary; }
     TabPane { padding: 1; overflow-y: auto; }
+    .change-controls { height: 3; }
     #native { row-span: 2; height: 1fr; border: round $primary; }
     #native:focus { border: double $accent; }
     #request { margin: 0 1; }
@@ -189,18 +222,22 @@ class CareerRatApp(App):
             yield NativePane(id="native")
             with TabbedContent(id="inspector"):
                 with TabPane("Job details", id="fit"):
+                    yield Button("Read saved JD", id="open-jd")
                     yield Static(id="details", markup=False)
+                with TabPane("Fit report", id="assessment"):
+                    yield Static(id="assessment-summary", markup=False)
+                    yield DataTable(id="requirements", cursor_type="row")
                 with TabPane("History", id="history"):
                     yield Static(id="history-text", markup=False)
                 with TabPane("Changes", id="changes"):
-                    yield Static(id="changes-text", markup=False)
-                    with Horizontal():
+                    with Horizontal(classes="change-controls"):
                         yield Button("Previous", id="previous-change")
                         yield Button("Next", id="next-change")
                         yield Button("Preview Undo", id="preview-undo")
-                    with Horizontal():
+                    with Horizontal(classes="change-controls"):
                         yield Button("Confirm Undo", id="confirm-undo", disabled=True)
                         yield Button("Cancel", id="cancel-undo")
+                    yield Static(id="changes-text", markup=False)
         yield Input(
             id="request",
             disabled=True,
@@ -217,6 +254,14 @@ class CareerRatApp(App):
         self.query_one("#jobs", DataTable).add_columns(
             "Company", "Role", "Status", "Fit", "Pay"
         )
+        report = self.query_one("#requirements", DataTable)
+        for label, width in [
+            ("Requirement", 26),
+            ("JD signal", 24),
+            ("Evidence / notes", 34),
+            ("Match", 9),
+        ]:
+            report.add_column(label, width=width)
         self.query_one("#native").border_title = "Native agent · F6 to focus"
         node = self.env.get("CAREERRAT_NODE") or shutil.which(
             "node", path=self.env.get("PATH")
@@ -273,7 +318,7 @@ class CareerRatApp(App):
         try:
             while line := await self.proc.stdout.readline():
                 value = json.loads(line)
-                if self.stopping:
+                if self.stopping or not len(self.query("#jobs")):
                     continue
                 kind = value["type"]
                 if kind == "workspace":
@@ -292,6 +337,8 @@ class CareerRatApp(App):
                     )
                     if value["inserted"]:
                         self.query_one(NativePane).focus()
+                elif kind == "document":
+                    self.push_screen(JobDocument(value))
                 elif kind == "context":
                     self.show_message("Context saved: " + value["path"])
                 elif kind == "agent-exited":
@@ -406,11 +453,39 @@ class CareerRatApp(App):
         )
 
     def update_details(self, selected):
+        report = self.query_one("#requirements", DataTable)
+        report.clear()
         if not selected:
             self.query_one("#details", Static).update("No jobs in this view.")
             self.query_one("#history-text", Static).update("No selected job.")
+            self.query_one("#assessment-summary", Static).update("No selected job.")
             return
         row = selected["record"]
+        evaluation = row.get("evaluation") or {}
+        requirements = evaluation.get("requirements") or []
+        self.query_one("#assessment-summary", Static).update(
+            f"Saved evaluation: {evaluation.get('gate') or 'Not evaluated'} · {evaluation.get('evaluatedAt') or 'No evaluation date'}\n"
+            + (
+                "Scroll across for the complete evidence table."
+                if requirements
+                else "No saved requirements report. Use Review matches to evaluate the saved JD."
+            )
+        )
+        for item in requirements:
+            report.add_row(
+                Text(f"{item['requirement']}\n{item['importance']}"),
+                Text(item["jdSignal"]),
+                Text(f"{item['evidence']}\n{item['note']}"),
+                Text(
+                    item["match"],
+                    style={
+                        "strong": "green",
+                        "partial": "yellow",
+                        "missing": "red",
+                    }.get(item["match"], "dim"),
+                ),
+                height=None,
+            )
         lines = [
             f"{row.get('company', '')} · {row.get('role', '')}",
             "",
@@ -431,15 +506,42 @@ class CareerRatApp(App):
             "contextMessages", []
         )
         messages += self.snapshot["view"].get("workspaceMessages", [])
+        calls = row.get("conversations") or []
         self.query_one("#history-text", Static).update(
             "\n\n".join(
                 f"{item.get('role', '')} · {item.get('createdAt', '')}\n{item.get('text', '')}"
                 for item in messages
             )
+            + (
+                "\n\nCalls and interviews\n"
+                + "\n\n".join(
+                    "\n".join(
+                        filter(
+                            None,
+                            [
+                                call.get("type") or call.get("round"),
+                                call.get("at") or call.get("date"),
+                                call.get("notes"),
+                                call.get("compNote"),
+                                call.get("processNote"),
+                                *[
+                                    f"{item.get('label', '')}: {item.get('note', '')}"
+                                    for item in call.get("learnings") or []
+                                ],
+                            ],
+                        )
+                    )
+                    for call in calls
+                )
+                if calls
+                else ""
+            )
             or "No saved conversation yet."
         )
 
     async def on_data_table_row_highlighted(self, event):
+        if event.data_table.id != "jobs":
+            return
         if (
             self.updating
             or not event.row_key.value
@@ -468,6 +570,8 @@ class CareerRatApp(App):
         name = event.button.id
         if name == "context":
             self.push_screen(ContextCapture())
+        elif name == "open-jd" and self.selected_id:
+            await self.send({"op": "document", "id": self.selected_id})
         elif name == "refresh":
             await self.send({"op": "refresh"})
         elif name in ("search", "review", "apply"):

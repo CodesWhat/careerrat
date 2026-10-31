@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, watch } from "node:fs";
 import { dirname } from "node:path";
 import { dbFilePath } from "../db/connection.mjs";
+import { readSavedJobDescription } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
 import { applyTuiUndo } from "./history.mjs";
@@ -117,6 +118,18 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
       case "refresh":
         refresh();
         break;
+      case "document": {
+        const job = data.jobs.find((item) => item.id === message.id);
+        if (!job) throw new Error("Saved job was not found");
+        const document = readSavedJobDescription({
+          ...ctx,
+          record: job.record,
+          recordType: job.kind,
+          recordId: job.id,
+        });
+        send({ type: "document", ...document });
+        break;
+      }
       case "request": {
         const name = { search: "1", review: "2", apply: "3", context: "4" }[message.action];
         if (!name) throw new TypeError("Unknown agent action");
@@ -143,6 +156,12 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
         state = next.state;
         if (next.effect?.type === "undo") {
           const result = applyTuiUndo({ ...ctx, preview: next.effect.preview });
+          state = {
+            ...state,
+            message: result.operationResult?.ok
+              ? "Change undone."
+              : result.messages?.at(-1)?.text || "Undo was refused; inspect the saved change.",
+          };
           send({ type: "undo", result });
           refresh();
         } else snapshot();

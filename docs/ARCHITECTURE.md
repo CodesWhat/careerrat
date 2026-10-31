@@ -391,16 +391,23 @@ or migrates a workspace. Action buttons insert requests without pressing Enter.
 Add context saves a private capture before generating its agent request; ordinary
 agent paste remains terminal input.
 
-For source development, `node scripts/dev-textual.mjs --no-agent` opens saved jobs
-without a model process. Use `--agent claude` or `--agent codex` for the native
-pane. The launcher requires an interpreter containing the exact Textual version
-in `src/core/tui/requirements.txt`; `CAREERRAT_TUI_PYTHON` selects that interpreter.
-It does not install Python packages globally. Tests run with
-`python tests/tui_textual_ui.py` in that environment, alongside the Node suite.
-CI creates its own temporary Python environment and runs the interface tests
-without model calls.
+`careerrat tui` opens Textual; use `--no-agent` for saved jobs only or
+`--agent claude` / `--agent codex` for a particular native CLI. First launch
+creates a private Python environment under the resolved internal data directory.
+Python 3.11+ with venv is required; `CAREERRAT_TUI_PYTHON` can select the bootstrap
+interpreter. `careerrat tui setup` prepares the environment without opening a UI.
+Dependencies are version- and hash-locked in `src/core/tui/requirements.txt` and
+installed from wheels only. A completed environment is reused without contacting
+pip. Setup failures remove incomplete environments; global Python packages and
+workspace data are untouched. The source development launcher uses this same
+entry.
 
-This development entry does not replace `careerrat tui` or change default startup.
-Managed Python installation, a full dependency lock, packaged platform checks,
-provider workflow acceptance and the remaining report/history interactions are
-still required before the browser product is retired.
+Tests run with `python tests/tui_textual_ui.py` in an environment containing the
+locked dependencies, alongside the Node suite. CI creates its own temporary
+Python environment. Its UI tests include first installation and the normal CLI
+in an actual outer terminal, without model calls.
+
+Default `careerrat start` still opens the browser during TUI acceptance.
+Packaged platform checks, provider workflow acceptance and remaining report/history
+interactions are required before that startup changes and the browser product
+is retired.

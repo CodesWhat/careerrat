@@ -223,10 +223,11 @@ terminal workspace owns the live view. Do not start `tracker-dev`, open a
 CareerRat browser page, or create a browser chat session. Execute skills in the
 native terminal agent and write through the canonical CLI/domain owners below;
 the jobs table refreshes from those writes. Use the durable job/workspace thread
-and recorded-change commands for history and Undo. The Inspector's `h` cycles
-job details, job history, workspace history and recorded changes; `[`/`]` selects
-a change, `u` previews it, Enter confirms and Esc cancels. Agent focus forwards
-these keys to the native agent instead. The guarded Undo writer refuses stale,
+and recorded-change commands for history and Undo. Textual Inspector tabs show
+job details, the saved requirements report, history and recorded changes. Its
+change controls select, preview, confirm and cancel Undo. F6 switches jobs/agent
+focus; native keyboard input goes to the agent. Action buttons insert requests
+without pressing Enter. Read saved JD opens the captured document locally. The guarded Undo writer refuses stale,
 private or already-reverted entries. Validated DB `gate`, `modes` and `automation`
 CLI writes record their changed field and Undo reference in the same transaction;
 dry runs, unchanged values and refused confirmation do not create an entry.
@@ -252,8 +253,11 @@ normal TUI exit; independently started CLI searches keep their bounded lifetime.
 Search and source setup remain owned by search-jobs and the discovery skills;
 agent-led research still uses those skills.
 
-**Terminal file intake.** Pasted text, URLs and dropped file paths are saved
-before a request reaches the native agent. Files have a private original copy,
+**Terminal file intake.** Textual Add context saves pasted text, URLs and
+dropped file paths before generating a request for the native agent. Ordinary
+paste while agent chat has focus remains native terminal input; do not assume it
+created an intake receipt. If that input supplies a document or facts to retain,
+the owning skill must capture and persist it before reporting ingestion complete. Files have a private original copy,
 a receipt and, for text/Markdown, DOCX or email, shared local text extraction.
 Read the extracted text when available. PDFs/images retain their originals with
 an explicit incomplete extraction status; use native document/image tools or
@@ -494,7 +498,7 @@ role fit. Each of those is a different field below.
 **Typed display fields (per `applications[]` row):**
 
 | Field | Budget | One topic only | Renders on |
-|-------|--------|----------------|------------|
+| ------- | -------- | ---------------- | ------------ |
 | `interviewAt` | ISO 8601 datetime | **Structured datetime only** — first scheduled round. A real FUTURE value is the ONLY thing that promotes an interview to the Focus card. Never inferred from notes. Writer: **schedule-meeting** (the booking authority). **interview-prep** may PROMOTE it — set it from explicit invite context only when it is not already a future datetime; if schedule-meeting already booked a future value, interview-prep reads it, never overwrites it (a different time hands back to schedule-meeting). Cleared by: track-outcomes on round completion. | Focus card (`buildInterviewFocus`) + calendar |
 | `nextInterviewAt` | ISO 8601 datetime | **Structured datetime only** — subsequent rounds (set when `interviewAt` round completes and a next round is already booked). Same writer rules and same no-overwrite guard as `interviewAt`. Cleared by: track-outcomes. | Focus card (`buildInterviewFocus`) + calendar |
 | `followUp.dueAt` | ISO 8601 date | Auto-advances Focus from a passed interview to a follow-up action. Writer: email-comms (general follow-ups) / interview-prep (sets to interview date + 1 business day on debrief). Reader: Focus 'action' kind + Next Steps + cadence. | Focus card + Next Steps + cadence |
@@ -507,7 +511,7 @@ role fit. Each of those is a different field below.
 **Per `conversations[]` entry:**
 
 | Field | Budget | One topic only |
-|-------|--------|----------------|
+| ------- | -------- | ---------------- |
 | `notes` | ≤200 chars | 2 sentences max: what happened + immediate next step |
 | `compNote` | ≤140 chars | Comp signal heard on this call (else omit) |
 | `processNote` | ≤160 chars | Next round + who + timing (else omit) |
@@ -516,7 +520,7 @@ role fit. Each of those is a different field below.
 **Topic routing (where each thing goes):**
 
 | You learned… | Write to |
-|--------------|----------|
+| -------------- | ---------- |
 | Interview scheduled (structured datetime booked) | `interviewAt` (first round) or `nextInterviewAt` (subsequent) + `interviewNote` + a `conversations[]` entry |
 | Interview round completed | clear `interviewAt`/`nextInterviewAt` via track-outcomes; set `followUp.dueAt` = interview date + 1 business day via interview-prep debrief |
 | Interview prep packet built | `artifacts.interviewDossier` (markdown copy of the prep `.md`) — see `interview-prep` |
@@ -579,7 +583,7 @@ it is mirrored by the classifier in `src/core/tracker/dashboard-data.js`
 **Canonical ladder (deepest wins):**
 
 | `conversations[].kind` to write | Rung shown | Use it for |
-|--------------------------------|------------|------------|
+| -------------------------------- | ------------ | ------------ |
 | `recruiter screen` | Screen | recruiter / phone / HR / intro screen |
 | `assessment` | Assessment | async take-home, coding test, CodeSignal, online assessment |
 | `technical` | Technical | live coding, system design, pair-programming interview |
@@ -1364,7 +1368,7 @@ switch or that platform's per-capability switch is explicitly off. If the automa
 settings exist but can't be read, everything is treated as off. Never hardcode this in
 skill prose. Ask the config:
 
-```
+```js
 import { mayRun } from "src/core/automation/consent.mjs";
 const { allowed, reasons } = mayRun({ capability, platform, root });
 // allowed === capabilities[cap].enabled !== false ∧ capabilities[cap].platforms[platform] !== false (and the file is readable)

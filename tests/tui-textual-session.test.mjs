@@ -32,7 +32,7 @@ async function fixture(t, agent = null) {
             basis: "base",
             source: "job-description",
             minBase: 190000,
-            maxBase: 220000,
+            maxBase: 211000,
           },
         },
       },
@@ -111,6 +111,28 @@ test("Textual context capture uses the durable owner before generating its reque
   assert.ok(receipt?.path);
   assert.match(readFileSync(receipt.path, "utf8"), /Recruiter transcript/);
   assert.match(events.find((event) => event.type === "request").text, /saved|context|intake/i);
+});
+
+test("Textual opens the saved JD through the existing guarded artifact reader", async (t) => {
+  const { session, events, home, path, tracker } = await fixture(t);
+  mkdirSync(join(home, "workspace/jobs"));
+  writeFileSync(
+    join(home, "workspace/jobs/northstar.md"),
+    "# Saved role\n\nOwn the platform and its services."
+  );
+  tracker.applications[0].artifacts = { jd: "workspace/jobs/northstar.md" };
+  writeFileSync(path, JSON.stringify(tracker));
+  session.refresh();
+  await session.dispatch({ op: "document", id: "northstar" });
+  assert.match(
+    events.find((event) => event.type === "document").artifact.markdown,
+    /Own the platform/
+  );
+  await assert.rejects(session.dispatch({ op: "document", id: "missing" }), /job/i);
+  tracker.applications[0].artifacts.jd = "../outside.md";
+  writeFileSync(path, JSON.stringify(tracker));
+  session.refresh();
+  await assert.rejects(session.dispatch({ op: "document", id: "northstar" }), /outside/);
 });
 
 test("Textual rejects invalid controls and cannot reopen a closed native session", async (t) => {
