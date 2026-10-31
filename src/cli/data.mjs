@@ -62,7 +62,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { executeWorkspaceIntent } from "../core/agent/workspace-agent.mjs";
+import { undoWorkspaceKnowledge } from "../core/agent/knowledge-history.mjs";
 import { workspaceMessageAppend, workspaceThreadRead } from "../core/agent/workspace-thread.mjs";
 import { dbExists, dbFilePath, NO_DATABASE_MESSAGE, openDb } from "../core/db/connection.mjs";
 import { seedDemo } from "../core/db/demo-seed.mjs";
@@ -422,16 +422,7 @@ async function cmdChanges(sub, rest) {
       !Number.isSafeInteger(index)
     )
       fail("changes undo requires <message-id> <nonnegative-artifact-index>");
-    return printResult(
-      await executeWorkspaceIntent({
-        ...pathCtx,
-        intent: {
-          type: "knowledge.revert",
-          entity: { type: "workspace", id: "workspace-main" },
-          input: { messageId, index },
-        },
-      })
-    );
+    return printResult(undoWorkspaceKnowledge({ ...pathCtx, messageId, index }));
   }
   fail(`unknown changes action "${sub}". See --help.`);
 }

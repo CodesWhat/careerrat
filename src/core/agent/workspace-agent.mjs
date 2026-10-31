@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
-
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE, parseChatAnswerMode } from "../ai/chat-answer-mode.mjs";
@@ -157,10 +156,10 @@ import {
   FILED_ISSUE_URL_RE,
   ISSUE_REPORT_COMP_LEAK_MARKER,
 } from "./issue-report.mjs";
+import { revertSavedKnowledge } from "./knowledge-history.mjs";
 import {
   buildKnowledgeWriteEntry,
   configWriteEntries,
-  revertKnowledgeWrite,
   undoNextAction,
 } from "./knowledge-write-log.mjs";
 import { linkedinStagingEntries } from "./linkedin-write-log.mjs";
@@ -2546,53 +2545,6 @@ function saveCoachingDraft({ repoRoot, env, applicationId, gapId, coveredIds }) 
 function coachingRefusalReason(error) {
   const message = String(error?.message || "CareerRat could not save it.");
   return message.replace(/^CareerRat could not save this evidence claim:\s*/, "");
-}
-
-// After an Undo removed a coaching-saved claim: reopen its gap, but only a gap
-// that is still the one this save closed. Returns a note for the undo summary.
-function reopenCoachingGap({ repoRoot, env, entry, setFields = appSetFields }) {
-  const applicationId = entry.source?.applicationId;
-  let application;
-  try {
-    application = applicationForIntent({ repoRoot, env, id: applicationId });
-  } catch {
-    return "The job it came from is gone, so there was no gap to reopen.";
-  }
-  const plan = application.coachingPlan;
-  const matching = (Array.isArray(plan?.gaps) ? plan.gaps : []).filter(
-    (g) => g?.status === "closed" && g.savedClaimId === entry.id
-  );
-  if (!matching.length) {
-    return "The coaching gap changed since, so it was left as it is.";
-  }
-  const ids = new Set(matching.map((g) => g.id));
-  const many = matching.length > 1;
-  const open = many ? "The coaching gaps are open again." : "The coaching gap is open again.";
-  try {
-    setFields({
-      repoRoot,
-      env,
-      id: applicationId,
-      patch: {
-        coachingPlan: {
-          ...plan,
-          gaps: plan.gaps.map((g) => {
-            if (!ids.has(g.id)) return g;
-            const { savedClaimId: _saved, ...rest } = g;
-            return { ...rest, status: "open" };
-          }),
-        },
-      },
-    });
-  } catch (error) {
-    // The claim is already gone, so the undo stands either way. An export
-    // failure after the commit still reopened the gap.
-    if (error?.committed === true) return open;
-    return many
-      ? "The coaching gaps stayed closed, so reopen them from the plan."
-      : "The coaching gap stayed closed, so reopen it from the plan.";
-  }
-  return open;
 }
 
 function communicationLabel(comm) {
@@ -7438,33 +7390,12 @@ async function executeWorkspaceIntentCore({
     if (normalized.type === "knowledge.revert") {
       const messageId = String(input.messageId || "").trim();
       const index = Number(input.index);
-      const stored = workspaceThreadRead({ repoRoot, env }).messages.find(
-        (message) =>
-          message?.id === messageId &&
-          (message.kind === "action_result" || message.kind === "action_error")
-      );
-      const entry =
-        stored && Number.isInteger(index) && index >= 0 ? stored.artifacts?.[index] : null;
-      if (entry?.kind !== "knowledge_write") {
-        throw actionError(
-          "CareerRat couldn't find that change to undo.",
-          "KNOWLEDGE_REVERT_INVALID"
-        );
-      }
-      const existing = workspaceThreadRead({ repoRoot, env }).messages.flatMap((message) =>
-        (message.artifacts || []).filter((artifact) => artifact?.kind === "knowledge_write")
-      );
-      const reverted = revertKnowledgeWrite({
+      const reverted = revertSavedKnowledge({
         repoRoot,
         env,
-        entry,
         messageId,
         index,
-        existing,
-        afterRevert: (done) =>
-          done.target === "evidence" && done.source?.kind === "coaching"
-            ? reopenCoachingGap({ repoRoot, env, entry: done, setFields: appSetFieldsImpl })
-            : undefined,
+        setFields: appSetFieldsImpl,
       });
       if (!reverted.ok) {
         return appendActionResult({
