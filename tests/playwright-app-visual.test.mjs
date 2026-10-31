@@ -120,7 +120,7 @@ test("real Chromium renders the built chat-first workspace without selection glo
     // auto-retry absorbs however long the redirect effect takes to fire.
     const [finishResponse] = await Promise.all([
       page.waitForResponse((response) => response.url().endsWith("/api/onboard/finish")),
-      page.goto(`${baseUrl}/app/`, { waitUntil: "domcontentloaded" }),
+      page.goto(`${baseUrl}/app/conversation`, { waitUntil: "domcontentloaded" }),
     ]);
     assert.equal(
       finishResponse.ok(),
