@@ -551,14 +551,18 @@ test("a listing with no application-form entry never reports awaiting submit", a
   assert.equal(result.session.filledCount, 0);
 });
 
-test("LinkedIn form preparation uses the supervised-preparation consent capability", async () => {
+test("LinkedIn form preparation uses the authenticated_apply_preparation capability", async () => {
   const seen = [];
   const { ops } = createFakeOps([]);
   const execute = makeDriver({
     ops,
     mayRunImpl: (request) => {
       seen.push(request);
-      return { allowed: false, reasons: ["permission off"] };
+      return {
+        allowed: false,
+        reasons: ["capability off"],
+        checks: { global: true, platform: false },
+      };
     },
   });
 
@@ -569,13 +573,18 @@ test("LinkedIn form preparation uses the supervised-preparation consent capabili
   });
 
   assert.equal(result.state, "blocked");
-  assert.equal(result.code, "APPLICATION_PREPARATION_PERMISSION_REQUIRED");
+  assert.equal(result.code, "CAPABILITY_OFF");
+  assert.equal(result.platform, "linkedin");
+  assert.equal(
+    result.reason,
+    "Application preparation is turned off for LinkedIn. Turn it on with `careerrat automation enable authenticated_apply_preparation linkedin --write`, or ask me to turn it on."
+  );
   assert.equal(seen.length, 1);
   assert.equal(seen[0].capability, "authenticated_apply_preparation");
   assert.equal(seen[0].platform, "linkedin");
 });
 
-test("external ATS preparation checks consent before opening the application", async () => {
+test("external ATS preparation checks the capability switch before opening the application", async () => {
   const seen = [];
   const { ops, log } = createFakeOps([]);
   const execute = makeDriver({
@@ -585,9 +594,10 @@ test("external ATS preparation checks consent before opening the application", a
       return {
         allowed: false,
         reasons: [
-          'capability "authenticated_apply_preparation" is disabled (enable: `careerrat automation enable authenticated_apply_preparation --write`)',
-          'platform "greenhouse" is off for authenticated_apply_preparation',
+          'capability "authenticated_apply_preparation" is turned off (turn on: `careerrat automation enable authenticated_apply_preparation --write`)',
+          'platform "greenhouse" is turned off for authenticated_apply_preparation (turn on: `careerrat automation enable authenticated_apply_preparation greenhouse --write`)',
         ],
+        checks: { global: false, platform: false },
       };
     },
   });
@@ -599,12 +609,11 @@ test("external ATS preparation checks consent before opening the application", a
   });
 
   assert.equal(result.state, "blocked");
-  assert.equal(result.code, "APPLICATION_PREPARATION_PERMISSION_REQUIRED");
+  assert.equal(result.code, "CAPABILITY_OFF");
   assert.equal(
     result.reason,
-    "Application preparation for Greenhouse is off. Turn it on in Settings before CareerRat opens the form."
+    "Application preparation is turned off for Greenhouse. Turn it on with `careerrat automation enable authenticated_apply_preparation --write` and `careerrat automation enable authenticated_apply_preparation greenhouse --write`, or ask me to turn it on."
   );
-  assert.doesNotMatch(result.reason, /authenticated_apply_preparation|careerrat automation|`/i);
   assert.deepEqual(result.session.blockers, [result.reason]);
   assert.equal(seen.length, 1);
   assert.equal(seen[0].capability, "authenticated_apply_preparation");
@@ -3728,3 +3737,215 @@ test("auto submit packet: a choice whose final state cannot be read keeps the ch
     { label: "Country", value: "Canada" },
   ]);
 });
+
+for (const [name, origin, pageText] of [
+  [
+    "instructional receipt copy",
+    GREENHOUSE_URL,
+    'After you click Submit, you will see "Thank you for applying".',
+  ],
+  [
+    "partial receipt slug",
+    "https://job-boards.greenhouse.io/thanks-company/jobs/123",
+    "Application form",
+  ],
+  ["receipt route with active form", `${GREENHOUSE_URL}/confirmation`, "Application form"],
+]) {
+  test(`auto submit: ${name} cannot bypass filling and the single submit`, async () => {
+    const form = { ...SUBMIT_FORM, origin, pageText };
+    const { ops, log } = createFakeOps([form, SUBMIT_CONFIRMATION]);
+    const result = await makeDriver({ ops, ...fastWaits })({ ...AUTO_REQUEST, postingUrl: origin });
+    assert.equal(result.state, "submitted");
+    assert.equal(result.verified, true);
+    assert.equal(
+      log.some(({ op }) => op === "fillField"),
+      true
+    );
+    assert.equal(clicks(log).length, 1);
+  });
+}
+
+test("focusSession does not verify receipt copy while the retained application form is active", async () => {
+  let page = SUBMIT_FORM;
+  const { ops, log } = createFakeOps([SUBMIT_FORM]);
+  ops.snapshot = async () => page;
+  const execute = makeDriver({ ops });
+  const request = { ...AUTO_REQUEST, prepareOnly: true };
+  assert.equal((await execute(request)).state, "awaiting-submit");
+  page = {
+    ...SUBMIT_FORM,
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+  };
+  const result = await execute({ ...request, focusSession: true });
+  assert.equal(result.verified, false);
+  assert.notEqual(result.state, "submitted");
+  assert.equal(clicks(log).length, 0);
+});
+
+test("application-entry navigation cannot verify a receipt route that still has an active form", async () => {
+  const listing = {
+    origin: ASHBY_URL,
+    pageText: "Job description",
+    refs: refsOf([["tab", "tab", "Application"]]),
+  };
+  const form = {
+    ...SUBMIT_FORM,
+    origin: `${ASHBY_URL}/confirmation`,
+    pageText: "Thank you for applying",
+  };
+  const { ops, log } = createFakeOps([listing, form]);
+  const result = await makeDriver({ ops })({
+    ...AUTO_REQUEST,
+    postingUrl: ASHBY_URL,
+    prepareOnly: true,
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.state, "awaiting-submit");
+  assert.equal(
+    log.some(({ op }) => op === "fillField"),
+    true
+  );
+  assert.deepEqual(
+    clicks(log).map(({ ref }) => ref),
+    ["tab"]
+  );
+});
+
+test("post-advance receipt copy cannot verify a form that still needs application input", async () => {
+  const first = {
+    origin: GREENHOUSE_URL,
+    pageText: "Additional questions",
+    refs: refsOf([["next", "button", "Next"]]),
+  };
+  const form = { ...SUBMIT_FORM, pageText: "Thank you for applying" };
+  const { ops, log } = createFakeOps([first, form]);
+  const result = await makeDriver({ ops, ...fastWaits })(AUTO_REQUEST);
+  assert.equal(result.state, "submitted-unverified");
+  assert.equal(result.verified, false);
+  assert.equal(
+    log.some(({ op }) => op === "fillField"),
+    true
+  );
+  assert.equal(clicks(log).filter(({ ref }) => ref === "e2").length, 1);
+});
+
+test("post-submit receipt copy alongside an active form stays unverified and never retries", async () => {
+  const ambiguous = {
+    ...SUBMIT_FORM,
+    origin: `${GREENHOUSE_URL}/confirmation`,
+    pageText: "Thank you for applying",
+  };
+  const { ops, log } = createFakeOps([SUBMIT_FORM, ambiguous]);
+  const execute = makeDriver({ ops, ...fastWaits });
+  const result = await execute(AUTO_REQUEST);
+  assert.equal(result.state, "submitted-unverified");
+  assert.equal(result.verified, false);
+  assert.equal((await execute(AUTO_REQUEST)).state, "submitted-unverified");
+  assert.equal(clicks(log).length, 1);
+});
+
+for (const pageText of [
+  "After you submit, you will see:\nThank you for applying",
+  "Application submitted? Click Apply to begin.",
+  "Application received (example confirmation message)",
+]) {
+  test(`an initial Apply-link listing cannot verify qualified receipt copy: ${pageText}`, async () => {
+    const listing = {
+      origin: GREENHOUSE_URL,
+      pageText,
+      refs: refsOf([
+        ["apply", "link", "Apply now", false, { href: `${GREENHOUSE_URL}/application` }],
+      ]),
+    };
+    const { ops } = createFakeOps([listing]);
+    const result = await makeDriver({ ops, ...fastWaits })({ ...AUTO_REQUEST, prepareOnly: true });
+    assert.equal(result.verified, false);
+    assert.notEqual(result.state, "submitted");
+  });
+}
+
+for (const pageText of [
+  "Application successfully submitted.",
+  "Thank you for applying, you should receive a confirmation email shortly.",
+  "Thank you for applying, we will contact you if shortlisted.",
+  "Thank you for applying, once we review your résumé we will contact you.",
+]) {
+  test(`a genuine receipt on the original URL verifies after exactly one submit: ${pageText}`, async () => {
+    const receipt = { origin: GREENHOUSE_URL, pageText, refs: {} };
+    const { ops, log } = createFakeOps([SUBMIT_FORM, receipt]);
+    const result = await makeDriver({ ops, ...fastWaits })(AUTO_REQUEST);
+    assert.equal(result.state, "submitted");
+    assert.equal(result.verified, true);
+    assert.equal(clicks(log).length, 1);
+  });
+
+  test(`manual retained verification accepts the original-URL receipt: ${pageText}`, async () => {
+    let page = SUBMIT_FORM;
+    const { ops, log } = createFakeOps([SUBMIT_FORM]);
+    ops.snapshot = async () => page;
+    const execute = makeDriver({ ops, ...fastWaits });
+    const request = { ...AUTO_REQUEST, prepareOnly: true };
+    assert.equal((await execute(request)).state, "awaiting-submit");
+    page = { origin: GREENHOUSE_URL, pageText, refs: {} };
+    const result = await execute({ ...request, focusSession: true });
+    assert.equal(result.state, "submitted");
+    assert.equal(result.verified, true);
+    assert.equal(clicks(log).length, 0);
+  });
+}
+
+for (const [label, pageText, refs, expected] of [
+  [
+    "missing required file",
+    "Thank you for applying",
+    refsOf([["upload", "button", "Attach", true, { fileInput: true, fileAttached: false }]]),
+    "submitted-unverified",
+  ],
+  [
+    "completed required file",
+    "Thank you for applying",
+    refsOf([["upload", "button", "Attach", true, { fileInput: true, fileAttached: true }]]),
+    "submitted",
+  ],
+  [
+    "optional file",
+    "Thank you for applying",
+    refsOf([["upload", "button", "Attach", false, { fileInput: true, fileAttached: false }]]),
+    "submitted",
+  ],
+  [
+    "receipt browsing navigation",
+    "Thank you for applying",
+    refsOf([["nav", "button", "Continue browsing jobs"]]),
+    "submitted",
+  ],
+  [
+    "receipt status navigation",
+    "Thank you for applying",
+    refsOf([["nav", "button", "Review application status"]]),
+    "submitted",
+  ],
+  ["greeting receipt", "Hi Sam, thank you for applying", {}, "submitted"],
+  ["second-clause receipt", "Thank you, your application has been submitted.", {}, "submitted"],
+  [
+    "congratulations receipt",
+    "Congratulations, your application was successfully submitted.",
+    {},
+    "submitted",
+  ],
+]) {
+  test(`auto submit final verified case: ${label} has exactly one submit`, async () => {
+    const receipt = { origin: GREENHOUSE_URL, pageText, refs };
+    const { ops, log } = createFakeOps([SUBMIT_FORM, receipt]);
+    const execute = makeDriver({ ops, ...fastWaits });
+    const result = await execute(AUTO_REQUEST);
+    assert.equal(result.state, expected);
+    assert.equal(result.verified, expected === "submitted");
+    assert.equal(clicks(log).length, 1);
+    if (expected === "submitted-unverified") {
+      assert.equal((await execute(AUTO_REQUEST)).state, expected);
+      assert.equal(clicks(log).length, 1);
+    }
+  });
+}

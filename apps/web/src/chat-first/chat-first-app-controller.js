@@ -494,29 +494,48 @@ export async function resumePacketPreparation({ api, missions, applicationId }) 
   return api.runChatFirstMission(createdMission.id);
 }
 
-export function applicationPreparationPermission(automation) {
+// Application preparation is on by default. This only reports the explicit
+// "turned off" case (or unreadable settings, which fail closed) so the review
+// panel can say so and offer one "Turn it on" action.
+// Shown when the settings request itself failed, so we can't tell either way.
+export const APPLICATION_PREPARATION_UNCHECKED = {
+  status: "unreadable",
+  ready: false,
+  offPlatforms: [],
+  notice: "CareerRat couldn't check whether form preparation is on.",
+};
+
+export function applicationPreparationPermission(automation, platform = null) {
   const value = automation?.automation || automation?.data || automation || {};
+  if (value.readError) return { status: "unreadable", ready: false, offPlatforms: [] };
   const capability = list(value.capabilities).find(
     (row) => row?.capability === "authenticated_apply_preparation"
   );
   const platforms = list(capability?.platforms);
-  const ready =
-    capability?.enabled === true &&
-    platforms.length > 0 &&
-    platforms.every((platform) => platform?.allowed === true);
-  return {
-    status: ready ? "ready" : "blocked",
-    ready,
-    submitMode: value.submit === "manual" ? "manual" : "auto",
-  };
+  const target = String(platform || "").trim();
+  // The job's own platform decides. With no known platform, only the
+  // capability switch itself counts as off.
+  const targetRow = target ? platforms.find((row) => row?.platform === target) : null;
+  const off = capability?.enabled === false || targetRow?.enabled === false;
+  const offPlatforms = targetRow?.enabled === false ? [target] : [];
+  return { status: off ? "off" : "ready", ready: !off, offPlatforms };
 }
 
-export async function enableApplicationPreparation({ api }) {
+// True for the settings.apply change that turns application preparation on.
+// Buttons saved in older threads still carry the retired contextual-permission op.
+export function isApplicationPreparationEnable(change) {
+  if (change?.op === "capability") {
+    return change.capability === "authenticated_apply_preparation" && change.enabled === true;
+  }
+  return change?.op === "contextual-permission" && change.permission === "application-preparation";
+}
+
+export async function enableApplicationPreparation({ api, offPlatforms = [], platform = null }) {
   if (
     typeof api?.runWorkspaceIntent !== "function" ||
     typeof api?.getAutomationSettings !== "function"
   ) {
-    throw new Error("Application form permission is unavailable");
+    throw new Error("Application form preparation can't be turned on from here");
   }
   await api.runWorkspaceIntent(
     "settings.apply",
@@ -524,12 +543,14 @@ export async function enableApplicationPreparation({ api }) {
     {
       change: {
         kind: "automation",
-        op: "contextual-permission",
-        permission: "application-preparation",
+        op: "capability",
+        capability: "authenticated_apply_preparation",
+        enabled: true,
+        ...(offPlatforms.length ? { platforms: offPlatforms } : {}),
       },
     }
   );
-  return applicationPreparationPermission(await api.getAutomationSettings());
+  return applicationPreparationPermission(await api.getAutomationSettings(), platform);
 }
 
 export function isMockInterviewStartRequest(text) {
@@ -669,7 +690,7 @@ export function resolveNeedDecision(item, decision = "primary") {
       ids,
     };
   }
-  if (kind === "application-next-action") {
+  if (kind === "application-next-action" || kind === "needs-answer") {
     const applicationId = item?.applicationId || item?.owner?.applicationId || item?.owner?.id;
     return applicationId ? { kind: "open-application", applicationId } : null;
   }

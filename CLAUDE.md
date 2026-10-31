@@ -24,14 +24,16 @@ negotiation channel).
 When the user asks to optimize, review, or improve their LinkedIn profile, or to
 make it read for the roles they're targeting, run `optimize-linkedin`. It produces
 a read-only before→after diff first (the default), and only writes edits back when
-`profile_apply` is enabled, confirm-first per field.
+`profile_apply` is enabled, confirm-first per field. In the app, suggestions are
+staged automatically with an Undo, and writing to LinkedIn still asks per field.
 
 When the user asks how risky, stable, or healthy a company is (layoffs, finances,
 morale, "is this a safe place to land"), or to factor company risk into a role, run
 `company-health`. It scores a role-scoped `healthy|watch|risky` rating with
 provenance, persists it to the tracker, and feeds the fit score only where it
-cross-cuts a stated candidate need. Cost-gated: auto-fires at the interview stage by
-default; the rating is an internal signal and never enters an outbound artifact.
+cross-cuts a stated candidate need. It runs on its own when an application reaches the
+fire stage (interview by default, `modes.yml#company_health`) with no fresh rating, and on
+demand anytime; the rating is an internal signal and never enters an outbound artifact.
 
 When a `careerrat` command crashes or behaves like it's broken, or the user asks to
 report a bug or file an issue, run `report-issue`. It separates a real defect from a
@@ -50,9 +52,9 @@ tailor/apply run, `tailor-application` STEP 6 owns the answers artifact instead.
 When the user asks how to close a fit gap, improve their fit for a role, or what to
 do about a job that landed at review, run `coach-gaps`. It only fires on an
 `evaluate-job` verdict already at `gate: review` with named `fitRisks`, never on
-`keep` or `cut`. Explicit-click only, mirroring company-health's cost gate: it never
-auto-fires. Every suggestion is grounded only in evidence already on record or the
+`keep` or `cut`. It runs on its own when that verdict lands (once per evaluation), and on
+demand from the Coach me button. Every suggestion is grounded only in evidence already on record or the
 current conversation — an honest "no close path yet" is a valid, expected answer for
-a gap, not a failure. A confirmed evidence-claim draft routes through the same
+a gap, not a failure. A saved evidence-claim draft routes through the same
 evidence firewall (`computeEvidenceWrite`/`candidateEvidenceMerge`) every other
 evidence write uses; `evaluate-job` itself stays the narrow, unchanged gate.

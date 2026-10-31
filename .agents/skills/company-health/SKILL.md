@@ -16,8 +16,8 @@ metadata:
 
 Use this skill when the user asks how risky, stable, or healthy a company is — layoffs,
 financials, morale, "is this a safe place to land" — or when they ask to factor company
-risk into a role. Also use it **automatically** when a tracked company reaches the
-configured firing stage (default: the interview band), subject to the cost gate in STEP 1.
+risk into a role. It also runs on its own when a tracked company reaches the configured
+firing stage (default: the interview band) with no fresh rating; STEP 1 is that decision.
 
 The question is never "is this a good company." It is **"is *my function* a risky place to
 land at this company *right now*."** Role-scoped, time-stamped, judgment surface — a
@@ -86,6 +86,8 @@ fire before spending a single search:
      recruiter/phone screen counts, since `classifyStage` ranks `screen` at the interview
      threshold); `offer` = an offer is in hand.
      Default `interview` keeps the set tiny (only companies you actually reached).
+     The app checks this on every status change and starts the run in the job's thread on
+     its own, once per job and stage. If no AI is set up it leaves a short note instead.
 3. **Freshness / decay** → if a `companyHealth` object already exists on the row and its
    `asOf` is newer than `recheck_days` ago, **reuse it** (do not re-research) unless the user
    forces a refresh or the row just crossed into the offer band. Older than `recheck_days`, or

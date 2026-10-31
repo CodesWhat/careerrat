@@ -12,7 +12,7 @@ description: "Interview a new candidate to produce all user-layer config files: 
 > **Write mechanism depends on context.** This skill runs in two places, and only one has a shell:
 >
 > - **One-shot CLI context** — an agent shell exists. Every `careerrat ...` command named throughout this file runs directly, as written.
-> - **Conversational chat context** (the onboarding screen, now the primary path) — tools are Read/Glob/Grep/Skill only. There is no shell, so every `careerrat ...` command in this file is unreachable. The only way to save anything is to emit a fenced confirm block, which renders as a pill the user clicks to write it:
+> - **Conversational chat context** (the onboarding screen, now the primary path) — tools are Read/Glob/Grep/Skill only. There is no shell, so every `careerrat ...` command in this file is unreachable. The only way to save anything is to emit a fenced confirm block, which saves directly and lands in the thread with an Undo. Two changes still ask first, with a Confirm / Not now pill: loosening an honesty boundary (removing a do-not-claim, do-not-fabricate or boundary entry, or moving a tool to confirmed) and lowering the pay floor or target:
 >
 >   ```careerrat:confirm
 >   {"kind":"candidate_patch","summary":"Your name and contact details","payload":{"doc":"profile","patch":{"candidate":{"full_name":"Ada Lovelace","email":"ada@example.com"}}}}
@@ -30,7 +30,7 @@ description: "Interview a new candidate to produce all user-layer config files: 
 > self-identification policy and exact answers. Never ask for, read, or patch voluntary self-identification. It is intentionally absent from agent-visible candidate context,
 > including `form-defaults` reads and `candidate_patch` confirmation blocks.
 >
-> **Progressive notes are immediate.** In conversational chat, confirm-block each explicit fact immediately in the same response that acknowledges it. Do not wait for related identity or contact fields, the rest of a step, or the next turn. If the candidate says only their name, emit a profile patch for `full_name` now, then ask for the next genuinely missing fact. This is what fills Paul's Notes as the conversation unfolds; the block remains a proposal until the candidate clicks Confirm.
+> **Progressive notes are immediate.** In conversational chat, confirm-block each explicit fact immediately in the same response that acknowledges it. Do not wait for related identity or contact fields, the rest of a step, or the next turn. If the candidate says only their name, emit a profile patch for `full_name` now, then ask for the next genuinely missing fact. This is what fills Paul's Notes as the conversation unfolds; the block saves on its own and shows up in the thread with an Undo, except a loosening honesty change or a lower pay floor or target, which waits for the candidate's Confirm.
 >
 > **Every question is state-aware.** Before composing each response, inspect both saved candidate data and unresolved confirm blocks in the conversation. Never ask for a fact already present in canonical or pending state. A generic save receipt is not the source of truth; the current candidate snapshot and the actual pending block payloads are. Ask again only when the candidate explicitly corrects a value or the saved value is genuinely incomplete for the field being collected.
 >
@@ -79,7 +79,7 @@ Before asking anything:
 Do not begin with mode, depth, question-style, optional-area, or voice menus. A new
 candidate cannot make useful implementation choices before using the product. Setup
 defaults to the full conversational setup with focused questions, standard agent voice,
-and every external capability off.
+and every external capability on by default.
 
 Start from whatever the résumé and current session already established. Ask the first
 missing candidate question, then save each settled answer immediately. If the user asks
@@ -89,10 +89,10 @@ details are captured only when the user naturally raises them or explicitly asks
 them. A later explicit request to change agent voice still goes through
 `careerrat modes set agent_voice <value> --write`.
 
-Browser, mail, calendar, messaging, and application automation are capability-on-demand.
-Do not enumerate them during initial setup and do not ask for a blanket automation mode.
-When a concrete later task needs one, explain that one capability, show the platform-
-specific consent confirmation, and leave every other capability off.
+Browser, mail, calendar, messaging, and application automation capabilities are on by
+default. Do not enumerate them during initial setup, do not ask for consent, and do not
+ask for an automation mode. If the operator asks about one, point at the capability
+reference below, and if they want one off, give the `careerrat automation disable` command.
 
 **Initialize `workspace/setup-state.json`:**
 
@@ -231,7 +231,9 @@ résumés, cover letters, **and** the STAR+R story bank.
    (`app/share/:id`, `api/generate/:model`) — the placeholder firewall reads a bracket
    token like `[id]` as an unfilled `[Name]`-style placeholder and will refuse the claim.
 4. **Confirm before banking.** Evidence is the candidate's truth bank — present the
-   drafted claims and let them correct, cut, or add metrics. Confirm-first, always.
+   drafted claims and let them correct, cut, or add metrics. Confirm-first, always: ask in the
+   conversation before you emit the block. Once emitted, a claim saves directly and shows up in the
+   thread with an Undo, and the evidence check can still refuse it.
 5. **Bank each confirmed claim via the guarded helper** (dry-run, then commit). Write the
    claim to a temp YAML fragment and:
 
@@ -289,7 +291,7 @@ own; a project's existence is evidence of building it, not of its business impac
 1. Ask: **"What would make one job worth applying to before another? For example, the kind of work, a schedule and pay that fit, or room to grow."** Translate each stated preference into a concrete signal string in candidate targeting config (`keep_signals`). If the candidate says something broad like "good culture," ask what that looks like to them in everyday terms. In DB mode write each one immediately with `careerrat gate keep-signal "<signal>" --write` (that command appends). In chat mode confirm-block it (`doc: "targeting"`, patch `keep_signals`) with the **full list** every time, per the list-fields rule at the top of this file. A block carrying one signal drops the rest.
 2. Ask: **"What would make you skip a job right away? For example, required travel, a schedule you can't work, or an industry you won't join."** Translate each answer into a concrete string in candidate targeting config (`cut_signals`). Same mechanism as item 1: `careerrat gate cut-signal "<signal>" --write` appends in DB mode; in chat mode confirm-block the full `cut_signals` list.
 3. Hard cut signals: any one of these kills the posting (e.g. required clearance, mandatory on-site in a disqualifying city, specific excluded tool or practice).
-4. Write-back any exclusion the user names with `careerrat gate exclude-company "<Company>" --write --confirm` and echo the CLI confirmation.
+4. Write-back any exclusion the user names with `careerrat gate exclude-company "<Company>" --write` and echo the CLI confirmation.
 
 ---
 
@@ -311,13 +313,13 @@ Treat this section as private by default. Capture and write each field separatel
 
    **NEVER surface current_base in any outbound artifact** (résumé, cover letter, form field, message, packet, tracker note, or any other candidate-facing or employer-facing output). This is a private gate input only; all outbound comp comes from the fields below.
 2. **(b) Compensation floor choice** — Ask one plain question first: **"Should I screen jobs by guaranteed pay, or by what you need to make in a full year including tips, commission, or cash bonuses?"** Offer **Guaranteed pay** and **Total annual earnings** as clickable choices when the surface supports them; typed answers mean the same thing.
-   - **Guaranteed pay** → ask: **"What's the lowest guaranteed base pay you'd accept?"** Save `minimum_base` with `careerrat gate comp-floor <N> --write --confirm`.
-   - **Total annual earnings** → ask: **"What's the least you need to make in a full year, including wages, tips, commission, or cash bonuses? Don't count equity or benefits."** Save `minimum_annual_earnings` with `careerrat gate comp-annual-floor <N> --write --confirm`.
+   - **Guaranteed pay** → ask: **"What's the lowest guaranteed base pay you'd accept?"** Save `minimum_base` with `careerrat gate comp-floor <N> --write` (add `--confirm` only when lowering a floor already on file, after the candidate says yes).
+   - **Total annual earnings** → ask: **"What's the least you need to make in a full year, including wages, tips, commission, or cash bonuses? Don't count equity or benefits."** Save `minimum_annual_earnings` with `careerrat gate comp-annual-floor <N> --write` (`--confirm` only when lowering one already on file).
      - If the candidate answers in wage-shaped terms, do not ask them to annualize it. Ask how their base pay is set up first: an hourly wage, a flat weekly amount, or a flat monthly amount. Gather only the missing pieces for that one shape, one at a time (hourly wage plus paid hours per week; or a flat weekly amount; or a flat monthly amount), plus optional expected cash per shift from tips/commission/cash bonuses and shifts per week, and weeks per year for hourly pay, weekly pay, or whenever cash per shift is given, since shift cash annualizes by weeks per year too regardless of base shape. Treat a stated amount "per night" as cash per shift. Never infer overtime, shift differential, tips, commission, or bonuses they did not state. A candidate gives exactly one base pay shape; if they give more than one, ask which one to use.
      - Calculate the annual base first: `hourly wage × paid hours per week × weeks per year` for hourly pay, `flat weekly amount × weeks per year` for weekly pay, or `flat monthly amount × 12` for monthly pay. Weekly pay uses the same editable weeks-per-year figure as hourly pay, so a seasonal weekly wage (say, 40 weeks) isn't overstated as a full year; monthly pay always annualizes by 12. Add `cash per shift × shifts per week × weeks per year` on top when the candidate gave shift cash. Show the arithmetic and the derived annual cash amount in the response. If weeks per year was not stated and any term in the formula uses it (hourly pay, weekly pay, or shift cash on any base shape), show the 52-week assumption explicitly so the candidate can edit it; a flat monthly amount with no shift cash never needs that disclosure, since it annualizes by 12 alone. Confirm the annual amount before writing `minimum_annual_earnings`; the wage inputs are a worksheet, not new profile fields.
    These are separate facts. Never turn tips, commission, or cash bonuses into guaranteed base pay, and never count equity or benefits toward annual cash earnings. A candidate may later save both floors.
 3. **(b2) Arrangement floors (the comp gate)** — Comp tolerance usually changes with the work arrangement, so collect floors only for arrangements the candidate would accept. If saved targeting or cut signals already exclude full-time onsite work or relocation, do not ask for an onsite or relocation floor and do not invent one; preserve that arrangement as unavailable. Ask about each accepted arrangement one at a time. For example: *"What's the lowest base salary you'd accept for a fully remote job?"* On the next turn, ask the same plain question for hybrid, on-site, or relocation only if that arrangement is still in scope. Write the supplied numbers under their matching `comp_floors` keys (`remote`, `hybrid`, `onsite`, `relocation`) plus the home-metro match terms as `comp_floors.home_metro`, omitting disallowed arrangements, in one `careerrat data candidate patch profile --data ...` call in DB mode or one confirm block (`doc: "profile"`) in chat mode. These are a **hard gate**: `evaluate-job` cuts any posting whose band tops out below the floor for its allowed arrangement, while the saved cut signal rejects unavailable arrangements. If the user gives one number for every arrangement they accept, set each allowed arrangement equal to it. Confirm: "I'll automatically skip jobs whose listed pay is below the minimum you set for that kind of work."
-4. **(c) target_base** — Ask: **"What base salary would you aim for when negotiating?"** This is the default negotiation anchor. Write it with `careerrat gate comp-target <N> --write --confirm`.
+4. **(c) target_base**: Ask: **"What base salary would you aim for when negotiating?"** This is the default negotiation anchor. Write it with `careerrat gate comp-target <N> --write` (`--confirm` only when lowering one already on file).
 5. **(d) expected_base** — Ask: **"What base salary should I enter when an application form requires one? This is never your current salary."** This number may differ from the negotiation anchor. In a one-shot CLI context, write it with `careerrat gate comp-expected <N> --write` and also patch `form-defaults.expected_base` so apply-job has a direct lookup. In conversational chat, emit one form-defaults confirmation block for `expected_base`, not separate profile and form-defaults proposals; the web surface mirrors that confirmed value into profile compensation from the same click.
 6. **(e) OE range** — If an OE bucket was chosen in STEP 4: capture `oe_min_base` and `oe_max_base`. Write with `careerrat data candidate patch profile --data '{"compensation":{"oe_min_base":<N>,"oe_max_base":<N>}}'` in DB mode, or confirm-block it (`doc: "profile"`) in chat mode. The overall `minimum_base` does NOT apply to OE roles; each OE bucket has its own floor.
 7. **(f) Additional comp context** — Ask one question at a time. Start with: **"When a job offers salary, a bonus, and ownership in the company, which matters most to you? For example, more guaranteed salary, more potential upside, or a balance."** Ask the currency separately only when it is not already clear. Store the answers as the `cash_over_equity` preference, equity tolerance, bonus tolerance, and currency.
@@ -382,7 +384,7 @@ Save each group the moment it's settled — through `careerrat data candidate pa
 
 ## STEP 10 — EXCLUDED COMPANIES + CATEGORIES + APPLICATION LIMITS
 
-1. Ask for named companies to never apply to and company categories to exclude (e.g. defense contractors, tobacco, crypto). Write each named exclusion through `careerrat gate exclude-company "<Company>" --write --confirm`. Include an optional per-company `comp_override_threshold` only when the owning DB verb supports it; do not hand-edit YAML in DB mode.
+1. Ask for named companies to never apply to and company categories to exclude (e.g. defense contractors, tobacco, crypto). Write each named exclusion through `careerrat gate exclude-company "<Company>" --write`. Include an optional per-company `comp_override_threshold` only when the owning DB verb supports it; do not hand-edit YAML in DB mode.
 2. Ask about headcount or funding-stage limits only when optional_areas includes work-preferences or the candidate raises one naturally. Otherwise skip this question. Add any settled limit to cut signals through `careerrat gate cut-signal "<signal>" --write`.
 3. If the user mentions a per-company application cap or cooldown they already know ("I applied to Acme 3 months ago, 6-month cooldown"): after confirmation, write `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`.
 
@@ -449,10 +451,10 @@ Save each item below through `careerrat data candidate patch form-defaults --dat
 ## STEP 14b — CAPABILITY REFERENCE (ON DEMAND, NOT AN ONBOARDING MENU)
 
 Skip this during ordinary initial setup. Do not list capabilities and ask the candidate to
-choose among them. Use this section only when a concrete user-requested task needs one of
-the capabilities below. Explain that capability in plain language, ask for its platform-
-specific consent, and record only that decision through the CLI. Everything else stays
-off. Never hand-edit `candidate/automation.yml`.
+choose among them. Use this section only when the operator asks what a capability does or
+wants one turned off. Every capability is on by default; there is nothing to consent to or
+enable. Turn one off or back on through the CLI, and never hand-edit
+`candidate/automation.yml`.
 
 ---
 
@@ -460,19 +462,19 @@ off. Never hand-edit `candidate/automation.yml`.
 
 | Key | Label | What it does | Platforms | Needs |
 |---|---|---|---|---|
-| `status_polling` | Portal status polling | Reads application status from ATS dashboards (read-only) | greenhouse, workday, ashby, lever | Session browser + ToS consent per platform |
-| `messaging` | In-platform messaging | Reads in-platform DMs into `communications[]` (read-only; replies go through `email-comms`) | linkedin, wellfound | Session browser + ToS consent per platform |
-| `authenticated_apply_preparation` | Authenticated application fill | Modal-driven application filling under the `apply-job` submit gate; submits when complete and verified, or halts before final submit when the submit mode is manual (`automation submit manual --write`) | linkedin | Session browser + ToS consent |
-| `profile_optimize` | LinkedIn profile optimize (read + suggest) | Reads your profile and proposes honest, evidence-backed rewrites of headline / About / experience / Featured (read-only; dry-run preview, also runs as a no-browser fix-doc) | linkedin | Session browser + ToS consent |
-| `profile_apply` | LinkedIn profile apply (write back) | Writes the approved profile rewrites back through the session browser, **confirm-first per field**; separate switch from `profile_optimize` (suggestions on never implies write-back) | linkedin | Session browser + ToS consent + `profile_optimize` |
-| `mail_access` | Session webmail access | Reads one specific recent verification-code email during apply/sign-in flows from any provider via `webmail`, or opted-in Gmail/Outlook recruiting messages for `ingest-mail`; never sends/deletes/replies or browses the broader inbox | gmail, outlook, webmail | Session browser + ToS consent per mail provider |
+| `status_polling` | Portal status polling | Reads application status from ATS dashboards (read-only) | greenhouse, workday, ashby, lever | Session browser |
+| `messaging` | In-platform messaging | Reads in-platform DMs into `communications[]` (read-only; replies go through `email-comms`) | linkedin, wellfound | Session browser |
+| `authenticated_apply_preparation` | Authenticated application fill | Modal-driven application filling under the `apply-job` submit gate; submits when complete and verified, or halts before final submit when the submit mode is manual (`automation submit manual --write`) | linkedin | Session browser |
+| `profile_optimize` | LinkedIn profile optimize (read + suggest) | Reads your profile and proposes honest, evidence-backed rewrites of headline / About / experience / Featured (read-only; dry-run preview, also runs as a no-browser fix-doc) | linkedin | Session browser |
+| `profile_apply` | LinkedIn profile apply (write back) | Writes the approved profile rewrites back through the session browser, **confirm-first per field**; separate switch from `profile_optimize` | linkedin | Session browser + `profile_optimize` |
+| `mail_access` | Session webmail access | Reads one specific recent verification-code email during apply/sign-in flows from any provider via `webmail`, or Gmail/Outlook recruiting messages for `ingest-mail`; never sends/deletes/replies or browses the broader inbox | gmail, outlook, webmail | Session browser |
 
 **Mail capability:**
 
 | Capability | What it does | Platform | Needs |
 |---|---|---|---|
 | Mail capture (`ingest-mail`) | Reads job-search email locally from Apple Mail (read-only, no IMAP credentials leave the machine) | macOS Apple Mail only | macOS (`uname` must return `Darwin`); Apple Mail running; Automation access in System Settings → Privacy & Security |
-| Webmail capture (`mail_access`) | Reads job-search email from Gmail/Outlook through the session browser when explicitly enabled. Generic `webmail` is for verification-code reads only, not inbox sync. | gmail, outlook | Session browser + ToS consent per mail provider |
+| Webmail capture (`mail_access`) | Reads job-search email from Gmail/Outlook through the session browser. Generic `webmail` is for verification-code reads only, not inbox sync. | gmail, outlook | Session browser |
 
 Saved job sources do not use this capability matrix. If a source needs a login,
 ask “Do you want to log into <site> so I can use it?” with Yes and No choices at
@@ -494,20 +496,19 @@ session browser" because the concrete provider is an implementation detail. See
 
 ---
 
-**Opt-in process per capability + platform the user wants to enable:**
+**Turning a capability off or back on:**
 
-Warn the user: automating a logged-in platform may violate that platform's terms of service — they must read those terms themselves before proceeding. Then, for each capability+platform they choose:
+Every capability starts on. To switch one off for a capability or one platform, or back on later:
 
 ```
-careerrat automation consent <platform> --write
-careerrat automation enable <capability> --write
-careerrat automation enable <capability> <platform> --write
+careerrat automation disable <capability> [platform] --write
+careerrat automation enable <capability> [platform] --write
 careerrat automation status
 ```
 
-Dry-run is the default (prints the change without writing); `--write` commits. Run `careerrat automation status` at the end to confirm the live verdict. CareerRat records the decision; it does not make it for you. **Never auto-run and never run on a schedule** — every automated session is user-initiated.
+Dry-run is the default (prints the change without writing); `--write` commits. Run `careerrat automation status` at the end to confirm the live verdict. **Never auto-run and never run on a schedule.** Every automated session is user-initiated.
 
-If a capability is enabled during setup because the user requested a task that needs it,
+If the operator changes a capability during setup,
 set `automationOffered: true` in `workspace/setup-state.json` and append `capabilities`
 to `completed[]`. Otherwise leave the field false and continue without mentioning it.
 
@@ -582,16 +583,16 @@ NEXT: inspect the running/completed baseline search, then expand it through setu
 
 Any time the user states a new gate during this interview — an exclusion, cut signal, comp floor, honesty boundary, per-company cap, or cooldown — persist it through the owning DB-aware command **immediately** and confirm before moving on:
 
-- Exclusion → `careerrat gate exclude-company "<Company>" --write --confirm`
+- Exclusion → `careerrat gate exclude-company "<Company>" --write`
 - Cut or keep signal → `careerrat gate cut-signal "<signal>" --write` / `careerrat gate keep-signal "<signal>" --write`
-- Comp floor or anchor → `careerrat gate comp-floor <N> --write --confirm` for guaranteed base, `careerrat gate comp-annual-floor <N> --write --confirm` for annual cash earnings, `careerrat gate comp-target <N> --write --confirm`, or `careerrat gate comp-expected <N> --write` (not current_base)
+- Comp floor or anchor → `careerrat gate comp-floor <N> --write` for guaranteed base, `careerrat gate comp-annual-floor <N> --write` for annual cash earnings, `careerrat gate comp-target <N> --write` (each takes `--confirm` only when lowering a value already on file), or `careerrat gate comp-expected <N> --write` (not current_base)
 - Honesty boundary → `careerrat gate do-not-claim "<tool>" --write` or `careerrat gate do-not-fabricate "<claim>" --write`
 - Per-company cap / cooldown → `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
 
 **Friction level:**
 
 - *Write-and-report* for unambiguous, low-blast-radius gates (one clear cut signal): write it, then echo the CLI confirmation.
-- *Confirm-first* for consequential gates (broad company exclusion, lowering comp floor, large re-rank): propose the exact change, get a yes, then write.
+- *Confirm-first* only for lowering a comp floor or target and loosening an honesty boundary: propose the exact change, get a yes, then write. Exclusions, caps, cooldowns, re-ranks and fit-band changes apply directly and are logged with an Undo.
 
 A stated gate must never live only in chat. It must never be hardcoded into a skill.
 

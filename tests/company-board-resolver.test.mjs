@@ -13,6 +13,7 @@ import {
   REFRESH_REASONS,
   RESOLUTION_CACHE_TTL_DAYS,
   RESOLUTION_FAILURE_REFRESH_THRESHOLD,
+  RESOLVER_FETCH_MAX_BYTES,
   RESOLVER_FETCH_TIMEOUT_MS,
   RESOLVER_REDIRECT_CAP,
   resolutionNeedsRefresh,
@@ -44,7 +45,7 @@ after(() => {
 
 function lookupHostFor(addressesByHost = {}) {
   return async (host) => {
-    const value = addressesByHost[host] || "203.0.113.10";
+    const value = addressesByHost[host] || "93.184.216.10";
     return Array.isArray(value) ? value : [{ address: value }];
   };
 }
@@ -100,6 +101,7 @@ test("exports the pinned company discovery resolver constants and refresh reason
   assert.equal(COMPANY_DISCOVERY_BATCH_MAX, 12);
   assert.equal(RESOLUTION_CACHE_TTL_DAYS, 14);
   assert.equal(RESOLVER_FETCH_TIMEOUT_MS, 8000);
+  assert.equal(RESOLVER_FETCH_MAX_BYTES, 1024 * 1024);
   assert.equal(RESOLVER_REDIRECT_CAP, 3);
   assert.equal(ZERO_JOB_REFRESH_THRESHOLD, 2);
   assert.equal(RESOLUTION_FAILURE_REFRESH_THRESHOLD, 2);
@@ -139,7 +141,7 @@ test("normalizes company keys and identifies local/private hosts before fetching
   }
 
   assert.equal(isPrivateOrLocalHost("jobs.lever.co"), false);
-  assert.equal(isPrivateOrLocalHost("203.0.113.10"), false);
+  assert.equal(isPrivateOrLocalHost("93.184.216.10"), false);
 });
 
 test("rejects unsafe scheme and local/private host hints before cache promotion", async () => {
@@ -192,7 +194,7 @@ test("rejects redirect targets that become local or private", async () => {
         repoRoot,
         seed: { name: "Acme AI", domain_hint: "https://acme.example" },
         fetchImpl,
-        lookupHost: lookupHostFor({ "acme.example": "203.0.113.20" }),
+        lookupHost: lookupHostFor({ "acme.example": "93.184.216.20" }),
         now: NOW,
       }),
     (err) => err.code === "UNSAFE_COMPANY_BOARD_URL"
@@ -256,7 +258,7 @@ test("caches API URLs for Recruitee and Workday supported ATS hints", async () =
       repoRoot,
       seed: { name: fixture.name, domain_hint: fixture.domainHint },
       fetchImpl: rejectingFetch(),
-      lookupHost: lookupHostFor({ [fixture.host]: "203.0.113.30" }),
+      lookupHost: lookupHostFor({ [fixture.host]: "93.184.216.30" }),
       now: NOW,
     });
 
@@ -279,7 +281,7 @@ test("resolves newly supported Career Ops ATS hints without requiring a hand-bui
     repoRoot,
     seed: { name: "Acme Bamboo", domain_hint: "https://acme.bamboohr.com/careers" },
     fetchImpl: rejectingFetch(),
-    lookupHost: lookupHostFor({ "acme.bamboohr.com": "203.0.113.31" }),
+    lookupHost: lookupHostFor({ "acme.bamboohr.com": "93.184.216.31" }),
     now: NOW,
   });
 
@@ -317,7 +319,7 @@ test("discovers a supported ATS board from public homepage and careers links wit
     seed: { name: "Acme AI", domain_hint: "https://acme.example" },
     fetchImpl,
     lookupHost: lookupHostFor({
-      "acme.example": "203.0.113.20",
+      "acme.example": "93.184.216.20",
       "jobs.lever.co": "54.211.1.10",
     }),
     now: NOW,
@@ -356,7 +358,7 @@ test("persists unrecognized public careers pages as promotable generic browser s
     repoRoot,
     seed: { name: "Plain Co", domain_hint: "https://plain.example/careers" },
     fetchImpl,
-    lookupHost: lookupHostFor({ "plain.example": "203.0.113.50" }),
+    lookupHost: lookupHostFor({ "plain.example": "93.184.216.50" }),
     now: NOW,
   });
 
@@ -446,4 +448,226 @@ test("resolutionNeedsRefresh covers explicit, stale, scan, threshold, and stored
   for (const [label, resolution, options, reason] of cases) {
     assert.deepEqual(resolutionNeedsRefresh(resolution, options), { needed: true, reason }, label);
   }
+});
+
+function trackedTransport(fetchImpl) {
+  const dispatchers = [];
+  return {
+    dispatchers,
+    fetchImpl,
+    lookupHost: lookupHostFor(),
+    dispatcherFactory(target) {
+      const dispatcher = {
+        ...target,
+        closed: false,
+        async close() {
+          this.closed = true;
+        },
+      };
+      dispatchers.push(dispatcher);
+      return dispatcher;
+    },
+  };
+}
+
+test("pins each connected seed, redirect, and careers link to its approved DNS addresses", async () => {
+  const fetchImpl = fetchFrom({
+    "https://acme.example/": response("redirect body", {
+      status: 302,
+      headers: { location: "https://www.acme.example/" },
+    }),
+    "https://www.acme.example/": response('<a href="/careers">Careers</a>'),
+    "https://www.acme.example/careers": response('<a href="https://jobs.lever.co/acme">Jobs</a>'),
+  });
+  const transport = trackedTransport(fetchImpl);
+  const lookups = [];
+  transport.lookupHost = async (host) => {
+    lookups.push(host);
+    return [{ address: "93.184.216.34", family: 4 }];
+  };
+  const result = await resolveCompanyBoard({
+    seed: { name: "Acme", domain_hint: "acme.example" },
+    ...transport,
+  });
+  assert.equal(result.atsProvider, "lever");
+  assert.equal(transport.dispatchers.length, 3);
+  for (const [index, call] of fetchImpl.calls.entries()) {
+    assert.equal(call.options.dispatcher, transport.dispatchers[index]);
+    assert.equal(call.options.dispatcher.hostname, new URL(call.url).hostname);
+    assert.deepEqual(call.options.dispatcher.addresses, [{ address: "93.184.216.34", family: 4 }]);
+    assert.equal(call.options.dispatcher.closed, true);
+  }
+  assert.equal(lookups.filter((host) => host === "acme.example").length, 1);
+});
+
+test("blocks private DNS redirect and careers-link hops before connection and cancels redirects", async () => {
+  for (const redirect of [true, false]) {
+    let cancelled = false;
+    const body = new ReadableStream({
+      start(controller) {
+        if (!redirect) {
+          controller.enqueue(
+            new TextEncoder().encode('<a href="https://hidden.example/careers">Careers</a>')
+          );
+          controller.close();
+        }
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const transport = trackedTransport(
+      async () =>
+        new Response(
+          body,
+          redirect ? { status: 302, headers: { location: "https://hidden.example/careers" } } : {}
+        )
+    );
+    transport.lookupHost = lookupHostFor({
+      "acme.example": "93.184.216.34",
+      "hidden.example": "10.0.0.5",
+    });
+    await assert.rejects(
+      resolveCompanyBoard({ seed: { name: "Acme", domain_hint: "acme.example" }, ...transport }),
+      { code: "UNSAFE_COMPANY_BOARD_URL" }
+    );
+    assert.equal(transport.dispatchers.length, 1);
+    assert.equal(transport.dispatchers[0].closed, true);
+    if (redirect) assert.equal(cancelled, true);
+  }
+});
+
+test("bounds body reading by the request deadline and cancels stalled streams", async () => {
+  let cancelled = false;
+  const transport = trackedTransport(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            this.timer = setTimeout(() => {
+              controller.enqueue(new TextEncoder().encode("late body"));
+              controller.close();
+            }, 65);
+          },
+          cancel() {
+            clearTimeout(this.timer);
+            cancelled = true;
+          },
+        })
+      )
+  );
+  transport.lookupHost = lookupHostFor({ "acme.example": "93.184.216.34" });
+  await assert.rejects(
+    resolveCompanyBoard({
+      seed: { name: "Acme", domain_hint: "acme.example" },
+      timeoutMs: 20,
+      ...transport,
+    }),
+    { code: "COMPANY_BOARD_FETCH_TIMEOUT" }
+  );
+  assert.equal(cancelled, true);
+  assert.equal(transport.dispatchers[0].closed, true);
+});
+
+test("rejects and cancels declared and chunked oversized bodies before extracting ATS links", async () => {
+  for (const declared of [true, false]) {
+    let cancelled = false;
+    let reads = 0;
+    const transport = trackedTransport(
+      async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              reads += 1;
+              controller.enqueue(new Uint8Array(128));
+              if (reads === 4) controller.close();
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { headers: declared ? { "content-length": "1024" } : {} }
+        )
+    );
+    transport.lookupHost = lookupHostFor({ "acme.example": "93.184.216.34" });
+    await assert.rejects(
+      resolveCompanyBoard({
+        seed: { name: "Acme", domain_hint: "acme.example" },
+        maxBytes: 64,
+        ...transport,
+      }),
+      { code: "COMPANY_BOARD_RESPONSE_TOO_LARGE" }
+    );
+    assert.equal(cancelled, true);
+    assert.ok(reads <= 2);
+    assert.equal(transport.dispatchers[0].closed, true);
+  }
+});
+
+test("cancels unread HTTP error bodies and closes dispatchers after fetch failure", async () => {
+  let cancelled = false;
+  const transport = trackedTransport(
+    async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 500 }
+      )
+  );
+  transport.lookupHost = lookupHostFor({ "acme.example": "93.184.216.34" });
+  await assert.rejects(
+    resolveCompanyBoard({ seed: { name: "Acme", domain_hint: "acme.example" }, ...transport }),
+    { code: "COMPANY_BOARD_FETCH_FAILED" }
+  );
+  assert.equal(cancelled, true);
+  assert.equal(transport.dispatchers[0].closed, true);
+  transport.fetchImpl = async () => {
+    throw new Error("network failed");
+  };
+  await assert.rejects(
+    resolveCompanyBoard({ seed: { name: "Acme", domain_hint: "acme.example" }, ...transport }),
+    /network failed/
+  );
+  assert.equal(transport.dispatchers[1].closed, true);
+});
+
+test("cancels and closes a response returned as the caller aborts", async () => {
+  const controller = new AbortController();
+  let cancelled = false;
+  const transport = trackedTransport(async () => {
+    controller.abort(new Error("stopped"));
+    return new Response(
+      new ReadableStream({
+        cancel() {
+          cancelled = true;
+        },
+      })
+    );
+  });
+  transport.lookupHost = lookupHostFor({ "acme.example": "93.184.216.34" });
+  await assert.rejects(
+    resolveCompanyBoard({
+      seed: { name: "Acme", domain_hint: "acme.example" },
+      signal: controller.signal,
+      ...transport,
+    }),
+    /stopped/
+  );
+  assert.equal(cancelled, true);
+  assert.equal(transport.dispatchers[0].closed, true);
+});
+
+test("keeps the resolution deadline active during DNS lookup", async () => {
+  await assert.rejects(
+    resolveCompanyBoard({
+      seed: { name: "Acme", domain_hint: "acme.example" },
+      lookupHost: () => new Promise(() => {}),
+      fetchImpl: rejectingFetch(),
+      timeoutMs: 20,
+    }),
+    { code: "COMPANY_BOARD_FETCH_TIMEOUT" }
+  );
 });

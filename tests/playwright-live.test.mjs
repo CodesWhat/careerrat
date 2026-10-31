@@ -106,6 +106,8 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
 
     // --- Step 2: Documents ---
     const resumeRef = refByName(snapshot, "Resume/CV");
+    assert.equal(snapshot.refs[resumeRef].fileInput, true);
+    assert.equal(snapshot.refs[resumeRef].fileAttached, false);
     const coverLetterRef = refByName(snapshot, "Cover letter");
     const agreeRef = refByName(snapshot, "I agree to the terms");
     nextRef = refByName(snapshot, "Next");
@@ -125,6 +127,8 @@ test("real Chromium end-to-end: openTab -> snapshot -> fill/select/toggle/upload
     // span on "change" specifically so this is observable through
     // snapshot()'s body text — no reach into Playwright internals here.
     snapshot = await ops.snapshot({ pageId });
+    assert.equal(snapshot.refs[refByName(snapshot, "Resume/CV")].fileInput, true);
+    assert.equal(snapshot.refs[refByName(snapshot, "Resume/CV")].fileAttached, true);
     assert.match(
       snapshot.pageText,
       /resume\.pdf/,

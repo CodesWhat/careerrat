@@ -1,4 +1,13 @@
 import { createServer } from "node:net";
+import { resolve } from "node:path";
+
+// A running server may be reused only when it serves this run's data root.
+// A server that doesn't report a root (older build) can't be proven to match.
+export function sameDataRoot(runningRoot, expectedRoot) {
+  if (typeof runningRoot !== "string" || !runningRoot) return false;
+  if (typeof expectedRoot !== "string" || !expectedRoot) return false;
+  return resolve(runningRoot) === resolve(expectedRoot);
+}
 
 export function parseRecordedPid(value) {
   const text = String(value ?? "").trim();
@@ -30,9 +39,22 @@ export function classifyLocalAppRuntime({
   installedVersion,
   recordedPid,
   recordedProcessIsTracker = false,
+  dataRoot,
 } = {}) {
   if (!health?.responding) return { state: "absent" };
   if (!health.careerrat) return { state: "foreign" };
+  // Another workspace's server (owner vs. a person, or two people). Never reuse
+  // or replace it, whatever its version or recorded PID say.
+  if (
+    dataRoot != null &&
+    health.productVerified === true &&
+    !sameDataRoot(health.dataRoot, dataRoot)
+  ) {
+    return {
+      state: "other-workspace",
+      runningVersion: String(health.version || "").trim() || null,
+    };
+  }
 
   const runningVersion = String(health.version || "").trim() || null;
   const runningPid = parseRecordedPid(health.pid);
@@ -76,6 +98,7 @@ export async function readLocalAppHealth(
         productVerified: false,
         version: null,
         pid: null,
+        dataRoot: null,
       };
     }
     let body;
@@ -88,6 +111,7 @@ export async function readLocalAppHealth(
         productVerified: false,
         version: null,
         pid: null,
+        dataRoot: null,
       };
     }
     const version = typeof body?.version === "string" ? body.version.trim() : "";
@@ -99,6 +123,7 @@ export async function readLocalAppHealth(
       productVerified,
       version: careerrat ? version : null,
       pid: careerrat ? parseRecordedPid(body.pid) : null,
+      dataRoot: careerrat && typeof body.dataRoot === "string" ? body.dataRoot : null,
     };
   } catch {
     return {
@@ -107,6 +132,7 @@ export async function readLocalAppHealth(
       productVerified: false,
       version: null,
       pid: null,
+      dataRoot: null,
     };
   } finally {
     clearTimeout(timer);

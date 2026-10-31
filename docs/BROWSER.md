@@ -5,11 +5,11 @@ each is the right tool at a different layer. Skills and scripts should name the
 layer they use and link here, so the agent always knows which capability to
 reach for.
 
-> This is the lightweight **substrate map**. The opt-in, consent-gated,
+> This is the lightweight **substrate map**. The on-by-default
 > authenticated automation model (status polling, in-platform
 > messaging, supervised apply preparation, profile optimization, webmail access) is specified by the
 > **Browser Automation Contract** in
-> `AGENTS.md` and configured by `.careerrat/candidate/automation.yml` (see *Opt-in authenticated
+> `AGENTS.md` and configured by `.careerrat/candidate/automation.yml` (see *Authenticated
 > automation* below) — this doc describes the layers that contract builds on.
 
 ## The three layers
@@ -76,30 +76,29 @@ Capabilities the agent uses at this layer (each maps to whichever provider is ac
 | Export a résumé / packet to PDF | 2 | `careerrat export` (bundled Playwright) |
 | Fill an application form through submit | 3 | session browser, modal-first uploads, final Submit per the `submit` setting |
 | Drive a portal that needs the user's login | 3 | automatically selected session browser, with a supervised handoff when no provider is ready |
-| Read one emailed verification code or opted-in webmail recruiting messages | 3 | session browser gated by `mail_access`; generic `webmail` for one-code reads, Gmail/Outlook for one-code reads and webmail ingest |
+| Read one emailed verification code or webmail recruiting messages | 3 | session browser, switchable with `mail_access`; generic `webmail` for one-code reads, Gmail/Outlook for one-code reads and webmail ingest |
 
-## Opt-in authenticated automation
+## Authenticated automation
 
 Reading public posting bodies (above) needs no permission. But **logged-in** Layer-3
 uses — polling your ATS dashboards for application status, reading in-platform DMs,
 supervised apply preparation, profile optimization, and
-webmail access — are gated. They are
-**opt-in and default OFF**: with no `.careerrat/candidate/automation.yml`, none of them run.
+webmail access, can be switched off. They are
+**on by default**: with no `.careerrat/candidate/automation.yml`, all of them can run, and
+`careerrat automation disable <capability> [platform] --write` turns one off.
 
-The authenticated capabilities are live behind the switchboard: `status_polling`
+The authenticated capabilities are live and each has an off-switch: `status_polling`
 (**`sync-status`** skill), `messaging` (**`ingest-messages`** skill), and
 `authenticated_apply_preparation` (**supervised LinkedIn Easy Apply preparation**,
 which follows the `submit` setting at the final Submit),
 `profile_optimize` / `profile_apply` (**`optimize-linkedin`**), and `mail_access`
 (generic `webmail` for one recent verification-code message; Gmail/Outlook for
-verification-code reads and opted-in `ingest-mail` webmail reads).
+verification-code reads and `ingest-mail` webmail reads).
 
 The switchboard is `.careerrat/candidate/automation.yml` (gitignored; schema
 `config/automation.schema.json`, template `templates/automation.example.yml`). A
-capability runs on a platform **only if the three switches are all on**: the
-capability's global switch, that platform's per-capability switch, and that
-platform's one-time ToS consent. **And** either the setup mode is "advanced"
-or the capability has a contextual scoped grant for that platform. Query it
+capability runs on a platform unless its global switch or that platform's per-capability
+switch is explicitly `false`. There is no consent step or setup mode. Query it
 with `mayRun()` in `src/core/automation/consent.mjs`; never hardcode the
 policy in skill prose.
 
@@ -113,12 +112,12 @@ comment-preserving and schema-validated):
 
 ```
 careerrat automation status                          # the live matrix
-careerrat automation consent <platform> --write      # record ToS consent
 careerrat automation enable <capability> [platform] --write
+careerrat automation disable <capability> [platform] --write
 ```
 
 No credentials are ever stored — the session browser (Orca, extension, or a Playwright
-persistent profile) holds the logins. The full normative rules — ToS handling, "never
+persistent profile) holds the logins. The full normative rules, the off-switch check, "never
 on a schedule," halt-on-captcha/2FA, local-only data — are the **Browser Automation
 Contract** in `AGENTS.md`. The capabilities activate phase by phase as their skills
 ship.

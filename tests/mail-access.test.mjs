@@ -14,23 +14,25 @@ import {
 test("mail access: canUseMailAccess delegates to the automation switchboard", () => {
   const cfg = defaultAutomation();
   let verdict = canUseMailAccess({ platform: "outlook", data: cfg });
-  assert.equal(verdict.allowed, false);
-
-  cfg.setup_mode = "advanced";
-  cfg.capabilities.mail_access.enabled = true;
-  cfg.capabilities.mail_access.platforms.outlook = true;
-  cfg.consent.outlook = true;
-
-  verdict = canUseMailAccess({ platform: "outlook", data: cfg });
   assert.equal(verdict.allowed, true);
+
+  cfg.capabilities.mail_access.platforms.outlook = false;
+  verdict = canUseMailAccess({ platform: "outlook", data: cfg });
+  assert.equal(verdict.allowed, false);
+  assert.match(
+    verdict.reasons.join(" "),
+    /careerrat automation enable mail_access outlook --write/
+  );
+
+  cfg.capabilities.mail_access.platforms.outlook = true;
+  cfg.capabilities.mail_access.enabled = false;
+  verdict = canUseMailAccess({ platform: "outlook", data: cfg });
+  assert.equal(verdict.allowed, false);
+  assert.match(verdict.reasons.join(" "), /careerrat automation enable mail_access --write/);
 });
 
 test("mail access: generic webmail is a first-class verification-code platform", () => {
   const cfg = defaultAutomation();
-  cfg.setup_mode = "advanced";
-  cfg.capabilities.mail_access.enabled = true;
-  cfg.capabilities.mail_access.platforms.webmail = true;
-  cfg.consent.webmail = true;
 
   const verdict = canUseMailAccess({ platform: "webmail", data: cfg });
   assert.equal(verdict.allowed, true);

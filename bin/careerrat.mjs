@@ -13,7 +13,11 @@
 //   careerrat tracker     One-shot tracker snapshot (use `start` for the live dev server)
 //   careerrat restore     Recover workspace/tracker.json from a rolling snapshot
 //   careerrat export      Render a tailored artifact / packet to PDF or DOCX
+//   careerrat people      List or add people, one workspace each (see --for)
 //   careerrat help        Show this list
+//
+// Global: `--for <name>` runs any command in that person's workspace
+// (<data root>/people/<name>/). CAREERRAT_PERSON=<name> does the same.
 //
 // Each subcommand delegates to the matching src/cli script, forwarding args.
 
@@ -46,6 +50,7 @@ import {
   findInstalledExecutable,
   INSTALLED_RUNTIME_DEFINITIONS,
 } from "../src/core/ai/installed-runtimes.mjs";
+import { currentPerson, resolvePersonSelection } from "../src/core/paths/people.mjs";
 import {
   displayPath,
   privateDataRoot,
@@ -74,7 +79,8 @@ import { readVersion } from "../src/core/version.mjs";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const pathCtx = { repoRoot: root };
-const [command, ...rest] = process.argv.slice(2);
+const { args: cliArgs, person: forPerson } = extractForFlag(process.argv.slice(2));
+const [command, ...rest] = cliArgs;
 
 const CLIS = {
   doctor: "src/cli/doctor.mjs",
@@ -86,6 +92,7 @@ const CLIS = {
   questions: "src/cli/questions.mjs",
   tracker: "src/cli/tracker.mjs",
   "tracker-dev": "src/cli/tracker-dev.mjs",
+  people: "src/cli/people.mjs",
   data: "src/cli/data.mjs",
   modes: "src/cli/modes.mjs",
   automation: "src/cli/automation.mjs",
@@ -148,6 +155,10 @@ if (command === "start" && (rest.includes("--help") || rest.includes("-h"))) {
   process.exit(0);
 }
 
+// Select the person before anything resolves a path. Setting the env here is what
+// makes every command, subcommand and child process inherit the same workspace.
+applyPersonSelection();
+
 if (command === "update") {
   process.exit(runUpdate(rest));
 }
@@ -184,6 +195,54 @@ if (command === "start") {
 }
 
 // ---------------------------------------------------------------------------
+
+// Pulls a global `--for <name>` (or `--for=<name>`) out of argv so no command
+// ever sees it. The last one wins.
+function extractForFlag(argv) {
+  const args = [];
+  let person = null;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--for") {
+      const value = argv[i + 1];
+      if (!value?.trim() || value.startsWith("-")) {
+        console.error("--for needs a person name. Try: careerrat --for <name> <command>");
+        process.exit(1);
+      }
+      person = value;
+      i++;
+    } else if (arg.startsWith("--for=")) {
+      person = arg.slice("--for=".length);
+      if (!person.trim()) {
+        console.error("--for needs a person name. Try: careerrat --for <name> <command>");
+        process.exit(1);
+      }
+    } else {
+      args.push(arg);
+    }
+  }
+  return { args, person };
+}
+
+// `--for <name>` or an inherited CAREERRAT_PERSON points CAREERRAT_HOME at
+// <base>/people/<name>. The person has to exist, except where the command
+// creates it: `people` (add) and `start --new`.
+function applyPersonSelection() {
+  let env;
+  try {
+    env = resolvePersonSelection({
+      repoRoot: root,
+      env: process.env,
+      forName: forPerson,
+      allowMissing: command === "people",
+      createMissing: command === "start" && rest.includes("--new"),
+    });
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+  if (env) Object.assign(process.env, env);
+}
 
 function runInit(extra) {
   for (const dir of WORKSPACE_DIRS) {
@@ -232,6 +291,8 @@ async function runStart(extra) {
   const wantAgent = !opts.noAgent && (Boolean(opts.agent) || opts.noDashboard);
   const forcedAgent = opts.agent;
 
+  const person = currentPerson(process.env);
+  if (person) console.log(`• CareerRat for ${person}`);
   console.log(`• Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
 
   // 1) Scaffold workspace dirs (idempotent).
@@ -255,10 +316,19 @@ async function runStart(extra) {
   if (!existsSync(trackerJson)) {
     try {
       mkdirSync(userPath(pathCtx, "workspace"), { recursive: true });
-      copyFileSync(join(root, "templates/tracker.json"), trackerJson);
-      console.log(
-        `• Seeded ${displayPath(pathCtx, "workspace/tracker.json")} (demo data, replaced as you add real roles)`
-      );
+      if (person) {
+        // A person's workspace starts empty: demo rows would mix into a real
+        // person's job search.
+        const seed = JSON.parse(readFileSync(join(root, "templates/tracker.json"), "utf8"));
+        for (const key of Object.keys(seed)) if (Array.isArray(seed[key])) seed[key] = [];
+        writeFileSync(trackerJson, `${JSON.stringify(seed, null, 2)}\n`);
+        console.log(`• Started an empty tracker for ${person}`);
+      } else {
+        copyFileSync(join(root, "templates/tracker.json"), trackerJson);
+        console.log(
+          `• Seeded ${displayPath(pathCtx, "workspace/tracker.json")} (demo data, replaced as you add real roles)`
+        );
+      }
     } catch {
       /* non-fatal: the local app simply won't boot until a tracker exists */
     }
@@ -399,6 +469,7 @@ async function startDashboard(port) {
     installedVersion,
     recordedPid,
     recordedProcessIsTracker,
+    dataRoot: resolveUserPaths(pathCtx).dataRoot,
   });
 
   if (runtime.state === "current") {
@@ -420,7 +491,11 @@ async function startDashboard(port) {
       console.log("• Stale local app did not stop cleanly; continuing without replacing it");
       return null;
     }
-  } else if (runtime.state === "foreign" || runtime.state === "stale-unowned") {
+  } else if (
+    runtime.state === "foreign" ||
+    runtime.state === "stale-unowned" ||
+    runtime.state === "other-workspace"
+  ) {
     const fallbackPort = await findAvailableLoopbackPort({ startPort: resolvedPort + 1 });
     if (!fallbackPort) {
       console.log("• Local app could not find a safe loopback port; continuing without it");
@@ -429,6 +504,10 @@ async function startDashboard(port) {
     if (runtime.state === "foreign") {
       console.log(
         `• Port ${resolvedPort} belongs to another process; leaving it untouched and using ${fallbackPort}`
+      );
+    } else if (runtime.state === "other-workspace") {
+      console.log(
+        `• Port ${resolvedPort} is running CareerRat for a different workspace; leaving it running and using port ${fallbackPort} for this one`
       );
     } else {
       console.log(
@@ -781,6 +860,7 @@ Commands:
   questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)
   tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat start')
   tracker-dev  Serve the live local app without launching an agent
+  people      List or add people, one workspace each (run any command for them with --for)
   data        sqlite-backed data layer: status/init/import/export/verify + per-domain verbs (M6)
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)
   modes       Show/change optional usage and application modes
@@ -809,6 +889,11 @@ start [ai]:
   --no-dashboard      terminal session only; detect a supported agent if unnamed
   --no-open           serve the local app without opening a browser tab
   --port <n>          local app port (default 7777)
+  --new               with --for, create that person's workspace first
+
+--for <name>:
+  Works on every command. Runs it in that person's workspace
+  (<data root>/people/<name>/). Create one with: careerrat people add <name>
 
 Run any command with --help for its own options.`);
 }

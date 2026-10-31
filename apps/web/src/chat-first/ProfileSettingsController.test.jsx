@@ -1457,6 +1457,22 @@ describe("ProfileSettingsController AI preferences", () => {
     });
   });
 
+  it("shows capability rows as unavailable when the first automation request fails", async () => {
+    const module = await import("./ProfileSettingsController.jsx");
+    const api = createApi();
+    api.getAutomationSettings.mockRejectedValue(new Error("automation settings unavailable"));
+
+    renderController(module, api);
+    await flushEffects();
+
+    const props = settingsProps(renderController(module, api));
+    expect(props.permissionsReadError).toBeTruthy();
+    const rows = props.permissions.filter((row) => row.id !== "draft_documents");
+    expect(rows.every((row) => row.mutable === false && row.statusLabel === "Unavailable")).toBe(
+      true
+    );
+  });
+
   it("keeps the AI preference controls disabled, with an error, when their own mount fetch fails even though the rest of hydration completes", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
@@ -1584,7 +1600,7 @@ describe("ProfileSettingsController source setup", () => {
   });
 });
 
-describe("ProfileSettingsController permission consent", () => {
+describe("ProfileSettingsController capability switches", () => {
   it("does not expose a job-source login Settings write path", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
@@ -1604,7 +1620,7 @@ describe("ProfileSettingsController permission consent", () => {
     expect(api.saveCandidateFile).not.toHaveBeenCalled();
   });
 
-  it("does not preserve consent for a hidden job-source permission", async () => {
+  it("writes only the capability switch, with no consent or setup mode", async () => {
     const module = await import("./ProfileSettingsController.jsx");
     const api = createApi();
     api.getAutomationSettings.mockResolvedValue({
@@ -1619,10 +1635,9 @@ describe("ProfileSettingsController permission consent", () => {
     const view = renderController(module, api);
     await settingsProps(view).onPermissionChange("authenticated_apply_preparation", false);
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith(
-      "automation",
-      expect.objectContaining({ consent: expect.objectContaining({ linkedin: false }) })
-    );
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("automation", {
+      capabilities: { authenticated_apply_preparation: { enabled: false } },
+    });
   });
 });
 

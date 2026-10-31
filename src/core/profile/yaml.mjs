@@ -1,7 +1,8 @@
 // Dependency-free YAML reader/writer for CareerRat's candidate-config subset.
 // Supports: block mappings, block sequences (scalars and mapping-items),
 // nested structures, quoted/unquoted scalars, booleans, numbers, null,
-// empty/flow empties ([] {}), and full-line / inline comments.
+// single-line flow mappings/sequences ({ a: 1 }, [a, "b, c"]), and full-line /
+// inline comments. Anything that isn't a valid single-line flow stays a string.
 
 // ---------------------------------------------------------------------------
 // parseYaml
@@ -232,7 +233,8 @@ function parseSequence(tokens, pos, indent) {
       }
     } else {
       // Inline content after `- `. Could be a scalar or start of a mapping.
-      const colonIdx = findMappingColon(content);
+      const isFlow = content.startsWith("{") || content.startsWith("[");
+      const colonIdx = isFlow ? -1 : findMappingColon(content);
       if (colonIdx !== -1) {
         // Mapping item: `- key: value` with optional continuation lines.
         const itemObj = {};
@@ -305,9 +307,17 @@ function parseScalar(s) {
   if (s === null || s === undefined) return null;
   const t = s.trim();
 
-  // Flow empties.
-  if (t === "[]") return [];
-  if (t === "{}") return {};
+  // Flow collections (single line; empties fall out naturally).
+  // A value that only looks like one ("[WIP] call back") stays the plain string
+  // it always was, so free text in a person's files never breaks loading.
+  if (t.startsWith("{") || t.startsWith("[")) {
+    try {
+      return parseFlowCollection(t);
+    } catch (error) {
+      if (error instanceof SyntaxError) return t;
+      throw error;
+    }
+  }
 
   // Empty / explicit null.
   if (t === "" || t === "null" || t === "~") return null;
@@ -340,6 +350,90 @@ function parseScalar(s) {
 
   // Fallback: plain string.
   return t;
+}
+
+// Parse a single-line flow mapping or sequence. Items are split on top-level
+// commas (outside quotes and nested brackets); scalars reuse parseScalar.
+function parseFlowCollection(t) {
+  const open = t[0];
+  const close = open === "{" ? "}" : "]";
+  if (!t.endsWith(close)) {
+    throw new SyntaxError(
+      `Unsupported or malformed YAML flow collection (multi-line flow collections are not supported): ${t}`
+    );
+  }
+  const inner = t.slice(1, -1);
+  const parts = inner.trim() === "" ? [] : splitFlowItems(inner, t);
+  if (open === "[") {
+    // A lone unquoted word in brackets ("[Company]", "[Remote]") is how
+    // placeholders and labels have always been written, so it stays a string.
+    if (parts.length === 1 && !inner.includes(",") && !/^["'[{]/.test(parts[0])) {
+      throw new SyntaxError(`Single bracketed word stays a string: ${t}`);
+    }
+    return parts.map((p) => parseScalar(p));
+  }
+  const obj = {};
+  for (const part of parts) {
+    const colonIdx = findMappingColon(part);
+    if (colonIdx === -1) {
+      throw new SyntaxError(`Expected "key: value" in YAML flow mapping: ${t}`);
+    }
+    const rawKey = part.slice(0, colonIdx).trim();
+    const key = typeof parseScalar(rawKey) === "string" ? parseScalar(rawKey) : rawKey;
+    obj[key] = parseScalar(part.slice(colonIdx + 1));
+  }
+  return obj;
+}
+
+function splitFlowItems(s, whole) {
+  const items = [];
+  let depth = 0;
+  let start = 0;
+  let i = 0;
+  // Where the current value starts at any depth: after the last [, { or comma.
+  let valueStart = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    // A quote only opens a quoted value at the item's start or right after a
+    // "key:", so an apostrophe inside a plain value (O'Reilly) is just a character.
+    const before = s.slice(valueStart, i).trim();
+    const atItemStart = before === "" || before.endsWith(":");
+    if (ch === '"' && atItemStart) {
+      i++;
+      while (i < s.length && s[i] !== '"') {
+        if (s[i] === "\\") i++;
+        i++;
+      }
+    } else if (ch === "'" && atItemStart) {
+      i++;
+      while (i < s.length) {
+        if (s[i] === "'" && s[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        if (s[i] === "'") break;
+        i++;
+      }
+    } else if (ch === "{" || ch === "[") {
+      depth++;
+      valueStart = i + 1;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+    } else if (ch === ",") {
+      valueStart = i + 1;
+      if (depth === 0) {
+        items.push(s.slice(start, i));
+        start = i + 1;
+      }
+    }
+    i++;
+  }
+  if (depth !== 0) throw new SyntaxError(`Unbalanced YAML flow collection: ${whole}`);
+  items.push(s.slice(start));
+  // Allow one trailing comma ([a, b,]); anything else empty stays a null item.
+  const trimmed = items.map((x) => x.trim());
+  if (trimmed.length > 0 && trimmed[trimmed.length - 1] === "") trimmed.pop();
+  return trimmed;
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +591,8 @@ function needsQuotes(s) {
   if (s === "null" || s === "~") return true;
   if (/^-?\d+$/.test(s)) return true;
   if (/^-?\d+\.\d+$/.test(s)) return true;
-  if (s === "[]" || s === "{}") return true;
+  // Anything starting like a flow collection is quoted so it reads back as text.
+  if (s.startsWith("[") || s.startsWith("{")) return true;
   // Contains characters that are problematic unquoted.
   if (s.includes(":")) return true;
   if (s.includes("#")) return true;

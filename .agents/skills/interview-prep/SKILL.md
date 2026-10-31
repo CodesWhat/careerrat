@@ -494,8 +494,8 @@ Read candidate config via the shared DB-first accessor (`profile.compensation.mi
   Comp and Logistics section and flag the gap to the user.
 - **Unposted comp (estimated from comparables).** If the tracker row's `compEstimate.source === "comparables"` — meaning the role never had a posted band and the gate estimated it from comparable tracker rows — surface this at the top of the Comp and Logistics Script section: state the estimate range ("Our best guess from N comparable roles: $<low>K–$<high>K, mid $<mid>K; confidence <X>") and instruct the candidate to confirm the real band early in the first live conversation before anchoring on any number. We're prepping off a guess; the first screen call is the chance to ground it. If the estimate is `estimated-below-floor`, also flag the likely gap and include the walk-away script as a contingency.
 - If the user states a new comp gate mid-session (e.g. "below $190K is a no"):
-  - **Confirm-first** for broad changes (dropping the floor globally).
-  - **Write-and-report** for unambiguous per-session adjustments.
+  - **Confirm-first** for lowering the floor.
+  - **Write-and-report** (applied directly, logged with an Undo) for raising it or other unambiguous per-session adjustments.
   - Run `careerrat gate comp-floor <N> --write --confirm`, then echo the CLI confirmation.
     `careerrat gate` writes SQLite in DB mode and legacy YAML only in legacy mode; never hand-edit `candidate/profile.yml`.
 
@@ -608,7 +608,7 @@ Run `careerrat tracker --verify` immediately after. Then write the outcome to th
    This clears the pre-call CTA and replaces it with the correct waiting state so the per-job action cell and Next Steps card reflect the live negotiation state.
 3. Append the call summary to `conversations[]` in `workspace/tracker.json`
    (STEP 6 mechanics).
-4. Confirm-first before any comp-boundary write-back:
+4. Confirm-first before any comp-boundary write-back that lowers a floor or target; a raise applies directly and is logged with an Undo:
    - Per-offer walk-away floor ("I won't go below $X on this one"): use
      `careerrat gate comp-floor <N> --write --confirm` and echo the CLI confirmation.
    - Permanent sourcing floor change: `careerrat gate comp-floor <N>` (dry-run);

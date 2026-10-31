@@ -7,6 +7,7 @@ import {
   findAvailableLoopbackPort,
   parseRecordedPid,
   readLocalAppHealth,
+  sameDataRoot,
   trackerCommandPort,
 } from "../src/core/update/local-app-runtime.mjs";
 
@@ -180,6 +181,7 @@ test("health reader distinguishes CareerRat JSON from a foreign HTTP listener", 
     productVerified: true,
     version: "0.7.2",
     pid: 42,
+    dataRoot: null,
   });
 
   const legacy = await readLocalAppHealth("http://127.0.0.1:7777", {
@@ -194,6 +196,7 @@ test("health reader distinguishes CareerRat JSON from a foreign HTTP listener", 
     productVerified: false,
     version: "0.7.1",
     pid: null,
+    dataRoot: null,
   });
 
   const foreign = await readLocalAppHealth("http://127.0.0.1:7777", {
@@ -205,6 +208,7 @@ test("health reader distinguishes CareerRat JSON from a foreign HTTP listener", 
     productVerified: false,
     version: null,
     pid: null,
+    dataRoot: null,
   });
 });
 
@@ -221,4 +225,70 @@ test("fallback port selection skips occupied ports without mutating them", async
 
   assert.equal(port, 7780);
   assert.deepEqual(visited, [7778, 7779, 7780]);
+});
+
+test("a server for another data root is never reused or replaced", () => {
+  const health = {
+    responding: true,
+    careerrat: true,
+    productVerified: true,
+    version: "0.7.2",
+    pid: 42,
+    dataRoot: "/home/u/.careerrat",
+  };
+  const base = {
+    health,
+    installedVersion: "0.7.2",
+    recordedPid: 42,
+    recordedProcessIsTracker: true,
+  };
+  assert.deepEqual(classifyLocalAppRuntime({ ...base, dataRoot: "/home/u/.careerrat" }), {
+    state: "current",
+    pid: 42,
+  });
+  assert.equal(
+    classifyLocalAppRuntime({ ...base, dataRoot: "/home/u/.careerrat/people/alice" }).state,
+    "other-workspace"
+  );
+  // Even a stale, recorded-PID server is left alone when it serves another root.
+  assert.equal(
+    classifyLocalAppRuntime({
+      ...base,
+      installedVersion: "0.8.0",
+      dataRoot: "/home/u/.careerrat/people/alice",
+    }).state,
+    "other-workspace"
+  );
+  // A server that reports no root can't be proven to match.
+  assert.equal(
+    classifyLocalAppRuntime({
+      ...base,
+      health: { ...health, dataRoot: null },
+      dataRoot: "/home/u/.careerrat",
+    }).state,
+    "other-workspace"
+  );
+});
+
+test("sameDataRoot compares resolved paths and rejects missing roots", () => {
+  assert.equal(sameDataRoot("/a/b/", "/a/b"), true);
+  assert.equal(sameDataRoot("/a/b", "/a/b/people/x"), false);
+  assert.equal(sameDataRoot(null, "/a/b"), false);
+  assert.equal(sameDataRoot("/a/b", ""), false);
+});
+
+test("readLocalAppHealth reports the server's data root", async () => {
+  const health = await readLocalAppHealth("http://localhost:1", {
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        product: "careerrat",
+        version: "1.0.0",
+        pid: 7,
+        dataRoot: "/x",
+      }),
+    }),
+  });
+  assert.equal(health.dataRoot, "/x");
 });

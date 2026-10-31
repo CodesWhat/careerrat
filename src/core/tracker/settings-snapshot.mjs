@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { normalizeAutomationConfig } from "../automation/consent.mjs";
 import { displayPath, userPath } from "../paths/workspace.mjs";
 import {
   CANDIDATE_DOCS,
@@ -167,7 +168,7 @@ export function loadSettingsSnapshot({ root = DEFAULT_ROOT } = {}) {
     profile: config.profile || {},
     targeting: config.targeting || {},
     honesty: config.honesty || {},
-    automation: config.automation || {},
+    automation: normalizeAutomationConfig(config.automation),
     files: [...files],
   });
 }

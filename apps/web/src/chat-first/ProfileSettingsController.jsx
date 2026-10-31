@@ -514,7 +514,11 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
             runtimes:
               runtimesResult.status === "fulfilled" ? runtimesResult.value : current.runtimes,
             automation:
-              automationResult.status === "fulfilled" ? automationResult.value : current.automation,
+              automationResult.status === "fulfilled"
+                ? automationResult.value
+                : (current.automation ?? {
+                    readError: "CareerRat couldn't load automation settings.",
+                  }),
             sources: sourcesResult.status === "fulfilled" ? sourcesResult.value : current.sources,
             aiPreferences:
               aiPreferencesResult.status === "fulfilled"
@@ -695,14 +699,14 @@ export function ProfileSettingsController({ api = profileSettingsApi }) {
   }
 
   async function changePermission(id, enabled) {
-    const patch = permissionPatch(id, enabled, model.permissionState || model.permissions);
+    const patch = permissionPatch(id, enabled);
     if (!patch) return;
     try {
       await api.saveCandidateFile("automation", patch);
       await load();
     } catch (cause) {
       setError(
-        profileSettingsErrorMessage(cause, "CareerRat couldn't save that permission. Try again.")
+        profileSettingsErrorMessage(cause, "CareerRat couldn't change that setting. Try again.")
       );
     }
   }

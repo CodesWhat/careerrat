@@ -28,6 +28,7 @@ import {
   applyStrategyRecommendation,
   buildStrategyReviewContext,
   draftStrategyReview,
+  restoreRerankRows,
   stampStrategyReview,
 } from "../src/core/strategy/review.mjs";
 
@@ -418,6 +419,7 @@ test("draftStrategyReview degrades to a manual, deterministic result when the AI
 test("draftStrategyReview passes through a schema-shaped AI recommendation set and caps at MAX_RECOMMENDATIONS", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { id: "app-1", status: "applied" });
+  for (const id of ["app-2", "app-3", "app-4"]) seedApplication(repoRoot, { id });
 
   const recommendations = [
     {
@@ -1080,4 +1082,65 @@ test("buildStrategyReviewContext reads learning headings written with either sep
   assert.equal(entry.entries[1].title, "Take-homes convert better than live coding");
   assert.equal(entry.entries[2].title, "Panel loops need a written brief");
   assert.equal(entry.entries[3].title, "Onsite: bring a written question list");
+});
+
+test("draftStrategyReview clamps a model-claimed evidenceCount to the rows the review saw", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-1", status: "applied" });
+  seedApplication(repoRoot, { id: "app-2", status: "applied" });
+
+  const draft = await draftStrategyReview({
+    repoRoot,
+    env: {},
+    force: true,
+    now: new Date("2026-08-15T12:00:00.000Z"),
+    runAI: async () => ({
+      body: {
+        ok: true,
+        ai: { engine: { id: "claude", label: "Claude Code" } },
+        data: {
+          headline: "Inflated count.",
+          findings: [],
+          recommendations: [
+            {
+              id: "rec-1",
+              type: "exclude-company",
+              title: "Exclude Acme",
+              rationale: "Claimed lots of evidence.",
+              evidenceCount: 40,
+              proposal: { company: "Acme" },
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  assert.equal(draft.recommendations[0].evidenceCount, 2);
+});
+
+test("restoreRerankRows deletes priority for a row that had none instead of writing null", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-np", status: "applied" });
+  seedSourced(repoRoot, { id: "sourced-np", status: "sourced" });
+
+  for (const [id, read] of [
+    ["app-np", readApplication],
+    ["sourced-np", readSourced],
+  ]) {
+    const applied = await applyStrategyRecommendation({
+      repoRoot,
+      env: {},
+      recommendation: { type: "rerank", title: "Bump", proposal: { id, priority: 2 } },
+    });
+    assert.equal(read(repoRoot, id).priority, 2);
+    const { previous, current } = applied.result;
+    const undone = restoreRerankRows({ repoRoot, env: {}, before: previous, after: current });
+    assert.equal(undone.ok, true);
+    assert.equal(
+      Object.hasOwn(read(repoRoot, id), "priority"),
+      false,
+      `${id} must not keep priority`
+    );
+  }
 });

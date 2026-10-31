@@ -389,6 +389,8 @@ export function collectControls(elements) {
       name: accessibleName(el),
       required: el.required === true || el.getAttribute("aria-required") === "true",
       fileInput: isFileInput,
+      fileAttached: isFileInput && (el.files?.length || 0) > 0,
+      disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
       groupLabel:
         role === "button"
           ? nearestGroupLabel(el)
@@ -1009,6 +1011,10 @@ export function createPlaywrightOps({
           role: control.role,
           name: control.name,
           required: Boolean(control.required),
+          ...(control.fileInput === true
+            ? { fileInput: true, fileAttached: Boolean(control.fileAttached) }
+            : {}),
+          ...(control.disabled === true ? { disabled: true } : {}),
           ...(control.advanceSafe === true ? { advanceSafe: true } : {}),
         };
       }

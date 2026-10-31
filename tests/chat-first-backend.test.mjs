@@ -700,6 +700,25 @@ test("jobThreadMessageAppend refuses to reuse one message id for different trans
   );
 });
 
+test("job threads name the automation platform their posting runs under", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  const rows = [
+    ["app-platform-linkedin", "https://www.linkedin.com/jobs/view/123", "linkedin"],
+    ["app-platform-greenhouse", "https://boards.greenhouse.io/acme/jobs/1", "greenhouse"],
+    ["app-platform-other", "https://careers.example.com/role", "external_ats"],
+    ["app-platform-none", undefined, null],
+  ];
+  for (const [id, link] of rows) {
+    seedApplication(repoRoot, { id, company: "Acme", status: "reviewed-hold", link });
+    api.jobThreadSetPinned({ repoRoot, applicationId: id });
+  }
+  const threads = api.chatFirstStateGet({ repoRoot }).jobThreads;
+  for (const [id, , platform] of rows) {
+    assert.equal(threads.find((row) => row.applicationId === id).applicationPlatform, platform);
+  }
+});
+
 test("job threads expose live packet gaps without leaking the packet manifest", async () => {
   const api = await chatFirstApi();
   const repoRoot = tempRepo();
@@ -1976,6 +1995,116 @@ test("an operational job mission promotes sourced roles, evaluates applications,
   assert.equal(
     gates.every((step) => step.result?.requiresUserSubmit === true),
     true
+  );
+});
+
+test("an unanswered required question flags that one job and the mission carries on", async () => {
+  const api = await chatFirstApi();
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-needs-answer",
+    company: "Needs Answer Corp",
+    status: "manual-apply",
+    packetManifest: {
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [
+        {
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          questionId: "q-travel",
+          message: "Answer “Would you be willing to travel?”.",
+        },
+      ],
+    },
+  });
+  seedApplication(repoRoot, {
+    id: "app-clean",
+    company: "Clean Corp",
+    status: "manual-apply",
+  });
+  api.missionCreateForJobs({
+    repoRoot,
+    id: "mission-needs-answer",
+    jobs: [
+      { type: "application", id: "app-needs-answer" },
+      { type: "application", id: "app-clean" },
+    ],
+  });
+  const calls = [];
+  await api.missionRun({
+    repoRoot,
+    id: "mission-needs-answer",
+    executeIntent: async ({ intent }) => {
+      calls.push(`${intent.type}:${intent.entity.id}`);
+      if (intent.type === "job.prepare-submit" && intent.entity.id === "app-needs-answer") {
+        return {
+          operationResult: { ok: true },
+          messages: [
+            {
+              metadata: {
+                state: "needs-answer",
+                needsAnswers: [
+                  { questionId: "q-travel", question: "Would you be willing to travel?" },
+                ],
+              },
+            },
+          ],
+        };
+      }
+      return {
+        operationResult: { ok: true },
+        ...(intent.type === "job.prepare-submit"
+          ? { messages: [{ metadata: { state: "awaiting-submit" } }] }
+          : {}),
+      };
+    },
+  });
+
+  // The second job ran all the way to its submit gate after the first was flagged.
+  assert.deepEqual(calls, [
+    "job.evaluate:app-needs-answer",
+    "job.generate-documents:app-needs-answer",
+    "job.prepare-submit:app-needs-answer",
+    "job.evaluate:app-clean",
+    "job.generate-documents:app-clean",
+    "job.prepare-submit:app-clean",
+  ]);
+  const state = api.chatFirstStateGet({ repoRoot });
+  const mission = state.missions.find((row) => row.id === "mission-needs-answer");
+  const flagged = mission.steps.find(
+    (step) => step.action === "prepare-submit" && step.jobRef.id === "app-needs-answer"
+  );
+  assert.equal(flagged.status, "blocked");
+  assert.equal(flagged.result.state, "needs-answer");
+  assert.deepEqual(flagged.result.needsAnswers, [
+    { questionId: "q-travel", question: "Would you be willing to travel?" },
+  ]);
+  // The flagged job never reaches a submit gate; the clean one does.
+  const gateFor = (id) =>
+    mission.steps.find((step) => step.action === "submit-gate" && step.jobRef.id === id);
+  assert.equal(gateFor("app-needs-answer").status, "pending");
+  assert.equal(gateFor("app-clean").status, "blocked");
+  assert.equal(
+    state.needsYou.some(
+      (item) => item.kind === "submit-gate" && item.applicationId === "app-needs-answer"
+    ),
+    false
+  );
+
+  // Today lists the flagged job as waiting on the operator's answer, and the
+  // job thread carries the same question.
+  const need = state.needsYou.find((item) => item.kind === "needs-answer");
+  assert.equal(need.applicationId, "app-needs-answer");
+  assert.deepEqual(need.questions, [
+    { questionId: "q-travel", question: "Would you be willing to travel?" },
+  ]);
+  assert.equal(need.action.kind, "open-owner");
+  assert.equal(
+    state.needsYou.filter((item) => item.kind === "needs-answer").length,
+    1,
+    "the clean job is not flagged"
   );
 });
 

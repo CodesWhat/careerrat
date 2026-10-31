@@ -656,7 +656,143 @@ test("confirmed generic evidence edits write trusted claims and complete the lan
   const claims = candidateConfigGet({ repoRoot }).evidence.claims;
   assert.equal(claims.length, beforeClaims + 1);
   assert.equal(claims.at(-1).claim, "Built source-grounded review workflows.");
+  assert.equal(confirmed.output.evidence.added, 1);
+  assert.deepEqual(confirmed.output.evidence.insertedIds, [claims.at(-1).id]);
+  assert.deepEqual(confirmed.output.evidence.replacedIds, []);
+  assert.deepEqual(confirmed.output.evidence.replaced, []);
   assert.equal(deepIngestStateGet({ repoRoot }).laneStates.evidence_claims.status, "completed");
+});
+
+test("confirmed evidence never overwrites a different claim saved under the same id", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  seedSearchReadyCandidate(repoRoot);
+  const {
+    deepIngestConfirmProposal,
+    deepIngestProposalPut,
+    deepIngestSourceCreate,
+    deepIngestStateGet,
+  } = await loadDeepIngestVerbs();
+
+  const confirmItem = (label, item) => {
+    const source = deepIngestSourceCreate({
+      repoRoot,
+      input: {
+        targetShape: "evidence",
+        sourceKind: "paste",
+        label,
+        text: `${item.title} for local candidate setup.`,
+        chunks: [{ id: `chunk-${label}`, text: `${item.title} for local candidate setup.` }],
+      },
+    }).source;
+    const full = {
+      ...item,
+      summary: "Summary.",
+      sourceId: source.id,
+      chunkId: `chunk-${label}`,
+      supportingQuote: item.title,
+    };
+    const proposal = deepIngestProposalPut({
+      repoRoot,
+      sourceId: source.id,
+      targetShape: "evidence",
+      lane: "evidence_claims",
+      proposal: { items: [full] },
+    });
+    const run = () =>
+      deepIngestConfirmProposal({
+        repoRoot,
+        proposalId: proposal.id,
+        expectedVersion: proposal.version,
+        edits: { items: [full] },
+      });
+    return { proposal, run };
+  };
+
+  const first = confirmItem("first", { id: "replace-me", title: "Shipped the first version." });
+  const saved = first.run().output.evidence;
+  assert.deepEqual(saved.insertedIds, ["replace-me"]);
+  assert.deepEqual(saved.replacedIds, []);
+
+  const second = confirmItem("second", { id: "replace-me", title: "Shipped the second version." });
+  assert.throws(
+    () => second.run(),
+    (error) =>
+      error?.code === "PROPOSAL_BLOCKED" &&
+      error.validation.blockedReasons.some((reason) =>
+        /different claim is already saved/.test(reason)
+      )
+  );
+  assert.equal(
+    candidateConfigGet({ repoRoot }).evidence.claims.find((c) => c.id === "replace-me").claim,
+    "Shipped the first version."
+  );
+  const stored = deepIngestStateGet({ repoRoot }).proposals.find(
+    (row) => row.id === second.proposal.id
+  );
+  assert.equal(stored.status, "review_needed");
+});
+
+test("confirmed evidence goes through the evidence firewall, keeping good claims and holding refused ones", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  seedSearchReadyCandidate(repoRoot);
+  const { deepIngestConfirmProposal, deepIngestProposalPut, deepIngestSourceCreate } =
+    await loadDeepIngestVerbs();
+  const text = "Built the review queue. Cut triage time by half.";
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      text,
+      chunks: [{ id: "chunk-firewall", text }],
+    },
+  }).source;
+  const items = [
+    {
+      id: "firewall-good",
+      claim: "Built the review queue.",
+      evidence: "Built the review queue.",
+      sourceId: source.id,
+      chunkId: "chunk-firewall",
+      supportingQuote: "Built the review queue.",
+    },
+    {
+      id: "firewall-placeholder",
+      claim: "Cut triage time at [Company] by half.",
+      evidence: "Cut triage time by half.",
+      sourceId: source.id,
+      chunkId: "chunk-firewall",
+      supportingQuote: "Cut triage time by half.",
+    },
+  ];
+  const proposal = deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "evidence",
+    lane: "evidence_claims",
+    proposal: { items },
+  });
+  const beforeClaims = candidateConfigGet({ repoRoot }).evidence.claims.length;
+  const result = deepIngestConfirmProposal({
+    repoRoot,
+    proposalId: proposal.id,
+    expectedVersion: proposal.version,
+    edits: { items },
+  });
+  const claims = candidateConfigGet({ repoRoot }).evidence.claims;
+  assert.equal(claims.length, beforeClaims + 1);
+  assert.ok(claims.some((claim) => claim.id === "firewall-good"));
+  assert.equal(
+    claims.some((claim) => claim.id === "firewall-placeholder"),
+    false
+  );
+  assert.equal(result.status, "review_needed");
+  assert.equal(result.output.evidence.refused.length, 1);
+  assert.equal(result.proposal.items.length, 1);
+  assert.equal(result.proposal.items[0].id, "firewall-placeholder");
+  assert.match(result.autoApply.reasons[0], /evidence check refused/i);
 });
 
 test("lane state verbs accept the documented statuses and reject invalid lane state", async () => {

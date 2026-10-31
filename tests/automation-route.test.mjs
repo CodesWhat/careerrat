@@ -35,7 +35,7 @@ function invokeJson(handler, body) {
   });
 }
 
-test("GET automation settings returns the canonical Basic all-off matrix", () => {
+test("GET automation settings returns the canonical all-on matrix", () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-automation-route-"));
   try {
     const routes = new Map();
@@ -59,14 +59,18 @@ test("GET automation settings returns the canonical Basic all-off matrix", () =>
       }
     );
     assert.equal(status, 200);
-    assert.equal(body.mode, "basic");
-    assert.equal(body.liveCount, 0);
+    assert.equal(Object.hasOwn(body, "mode"), false);
+    assert.equal(Object.hasOwn(body, "consent"), false);
     assert.equal(
-      body.capabilities.every(({ enabled }) => enabled === false),
+      body.liveCount,
+      body.capabilities.reduce((n, { platforms }) => n + platforms.length, 0)
+    );
+    assert.equal(
+      body.capabilities.every(({ enabled }) => enabled === true),
       true
     );
     assert.equal(
-      body.capabilities.every(({ platforms }) => platforms.every(({ allowed }) => !allowed)),
+      body.capabilities.every(({ platforms }) => platforms.every(({ allowed }) => allowed)),
       true
     );
   } finally {

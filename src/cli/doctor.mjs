@@ -178,9 +178,9 @@ const storyBank = loadStories({ root });
 // is already a hard prereq above; `careerrat evidence check` is the validator.
 const evidenceBank = loadEvidence({ root });
 
-// Browser automation (candidate/automation.yml). Informational + opt-in — an
-// absent file means everything is OFF, which is the normal, safe default, so it
-// never fails doctor. Reports how many capability×platform pairs are actually live.
+// Browser automation (candidate/automation.yml). Informational: an absent file
+// means every capability is ON, so it never fails doctor. Reports how many
+// capabilities are on or off and how many capability×platform pairs are live.
 const automation = automationStatus({ root });
 const modes = loadModes({ root });
 
@@ -535,20 +535,17 @@ if (!modes.valid) {
   console.log("");
 }
 
-if (!automation.exists) {
-  console.log(
-    "Browser automation: not configured - all capabilities OFF (opt-in; `careerrat automation status`)."
-  );
-  console.log("");
-} else if (!automation.valid) {
+if (!automation.valid) {
   console.log(
     "Browser automation: candidate/automation.yml is INVALID against its schema - run `careerrat automation status`."
   );
   console.log("");
 } else {
-  const enabled = automation.capabilities.filter((c) => c.enabled).map((c) => c.capability);
+  const on = automation.capabilities.filter((c) => c.enabled).length;
+  const off = automation.capabilities.length - on;
+  const offNames = automation.capabilities.filter((c) => !c.enabled).map((c) => c.capability);
   console.log(
-    `Browser automation: ${automation.liveCount} live capability×platform pair(s)${enabled.length ? `, enabled: ${enabled.join(", ")}` : ", no capability enabled yet"}.`
+    `Browser automation: ${on} capabilit${on === 1 ? "y" : "ies"} on, ${off} off${offNames.length ? ` (${offNames.join(", ")})` : ""}; ${automation.liveCount} live capability×platform pair(s).`
   );
   console.log("");
 }

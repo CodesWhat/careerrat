@@ -104,7 +104,7 @@
       "id": "standalone-fact",
       "whatTheyPasted": "A standalone fact / preference / constraint (comp, location, an exclusion)",
       "routeTo": "`configure` / `ingest-profile`",
-      "capturesInto": "`candidate/` config, confirm-first",
+      "capturesInto": "`candidate/` config, applied directly with an Undo (confirm-first only when it lowers a comp floor or target, or loosens honesty)",
       "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": null }
     },
     {

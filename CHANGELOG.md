@@ -4,6 +4,41 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.22.0] - 2026-10-31
+
+### Added
+
+- Keep a separate workspace for each person with `careerrat people` and
+  `careerrat --for <name> <command>`.
+- Candidate knowledge changes carry saved before/after values and Undo.
+  Grounded onboarding, evidence, coaching, strategy and LinkedIn suggestions
+  can be saved directly; changes that loosen honesty still need confirmation.
+- Company-health checks and gap coaching run when their triggers are met.
+
+### Fixed
+
+- Incomplete resume extractions fail clearly and can be retried instead of
+  silently saving a title without the source resume's experience.
+- Workspace import accepts YAML flow collections and migrates retired settings.
+- Application verification rejects instructional examples and partial confirmation
+  URLs while preserving genuine receipts and the single-submit rule.
+- Company discovery pins validated public DNS addresses and bounds careers-page
+  downloads by size and a deadline that includes reading the response body.
+- Updated dependencies with security fixes for schema validation, test tooling,
+  and the retained desktop build tools.
+
+### Changed
+
+- Browser capabilities are on by default and can be turned off individually.
+  A disabled capability produces a clear note instead of another permission
+  prompt. Required application and evidence checks still apply.
+- An unanswered screening question flags the affected job while other work
+  continues. That application stays blocked until the answer is resolved.
+- Renovate owns dependency update PRs. Major upgrades wait in its dependency
+  dashboard; the retired Mac release workflow gets no further updates.
+
 ## [0.21.0] - 2026-10-27
 
 ### Added

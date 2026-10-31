@@ -232,7 +232,7 @@ interaction to confirm page state.
 
 **Field confirmation before fill:** call `buildFillPlan` with `formDefaults`, `profile`, and `honesty`. Treat `requiresConfirmation: true` as a hard pause, but do not create a pause just because a field is custom or unfamiliar. The resolver now fills configured `screening_answers`, routine availability/location questions, and honesty-backed tool yes/no questions before returning `skip`.
 
-**Screening answer posture:** answer as the candidate from the sanitized application defaults, `candidate/profile.yml`, `candidate/honesty.yml`, `candidate/evidence.yml`, generated tailored artifacts, and the JD. If the answer is directly supported, fill it in first person and continue. Voluntary self-identification questions are never screening prompts and stay outside packet/AI drafting. Do not stop on vague/ordinary prompts like "Why are you interested?", "Years of experience?", "Are you open to travel?", or "Describe relevant experience" when the evidence/profile already supports a truthful answer. Stop only when the answer would require fabricating, guessing a number/date/security clearance/tool depth, revealing private current compensation, contradicting `honesty.yml`, or making a materially new disclosure that is not in onboarding data.
+**Screening answer posture:** answer as the candidate from the sanitized application defaults, `candidate/profile.yml`, `candidate/honesty.yml`, `candidate/evidence.yml`, generated tailored artifacts, and the JD. If the answer is directly supported, fill it in first person and continue. Voluntary self-identification questions are never screening prompts and stay outside packet/AI drafting. Do not stop on vague/ordinary prompts like "Why are you interested?", "Years of experience?", "Are you open to travel?", or "Describe relevant experience" when the evidence/profile already supports a truthful answer. Flag the question with the literal `NEEDS YOU: <reason>` marker, instead of guessing, when the answer would require fabricating, guessing a number/date/security clearance/tool depth, revealing private current compensation, contradicting `honesty.yml`, or making a materially new disclosure that is not in onboarding data. The marker waits on the operator for that one job only: keep filling and tailoring everything else, never submit that job while the marker remains, and carry on with other jobs.
 
 **Known ATS form patterns (domain-general — apply regardless of ATS platform):**
 
@@ -253,7 +253,7 @@ If the posting is a LinkedIn Easy Apply (`isEasyApply(url)` returns true, or `ho
 
 Enter this step when `isEasyApply(url)` returns true OR `hostnameToPortal(url) === "linkedin"` and the user explicitly asked to apply via LinkedIn. Standard ATS postings proceed through STEP 7 unchanged.
 
-### Consent gate (hard stop)
+### Capability check
 
 Run:
 
@@ -261,18 +261,14 @@ Run:
 careerrat automation status --json
 ```
 
-Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means three switches are simultaneously on: the `authenticated_apply_preparation` capability global switch, LinkedIn's per-capability switch, and LinkedIn's one-time ToS consent. And either the "advanced" setup mode is on or the capability has a contextual scoped grant for LinkedIn. This is the predicate from `mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose.
+Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means neither the `authenticated_apply_preparation` capability switch nor LinkedIn's switch is turned off. This is the verdict from `mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose. This capability is on by default.
 
-If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, explain exactly how to opt in, then **stop** — do not open a browser:
+If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, tell the operator it is turned off, give the commands that turn it on, and **skip the browser step** (do not open a browser). If `readError` is set, say the automation settings file can't be read and name it. Do not ask for consent or permission to turn it on.
 
-1. Switch to advanced setup mode: `careerrat automation mode advanced --write`
-2. Read LinkedIn's terms of service yourself to confirm that automated Easy Apply is permitted under your account's usage.
-3. Record consent: `careerrat automation consent linkedin --write`
-4. Enable the capability global switch: `careerrat automation enable authenticated_apply_preparation --write`
-5. Enable for LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
-6. Verify: `careerrat automation status --json`
+1. Capability switch: `careerrat automation enable authenticated_apply_preparation --write`
+2. LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
 
-State clearly: this capability is OFF by default; enabling it is a deliberate choice. The user must read LinkedIn's ToS themselves before recording consent; CareerRat records the decision, it does not make it. This step is always user-initiated and must never run on a schedule or unattended. A contextual scoped grant given in the app is an alternative to step 1: it authorizes this capability for this platform without switching the account to advanced mode.
+This step is always user-initiated and must never run on a schedule or unattended.
 
 ### Session browser + live DOM
 
@@ -298,7 +294,7 @@ If you encounter a login wall, captcha, platform 2FA / two-step-verification pro
 
    d. Fill resolved fields. For the resume upload page, use the modal-first upload pattern documented in STEP 7 (open the Attach/Upload control within the modal before triggering the file action — direct upload without the modal fails silently).
 
-   e. **Employer-custom screening questions:** use the screening answer posture above. If a safe resolved value exists from configured answers, profile, honesty, evidence, the tailored artifacts, or the JD, fill it and continue. If no safe value exists after checking those sources, then stop and ask the user. STEP 10 honesty rules apply continuously here.
+   e. **Employer-custom screening questions:** use the screening answer posture above. If a safe resolved value exists from configured answers, profile, honesty, evidence, the tailored artifacts, or the JD, fill it and continue. If no safe value exists after checking those sources, mark that question `NEEDS YOU`, flag it on the job thread for the operator, leave the rest of the form filled, and do not submit while it is open. STEP 10 honesty rules apply continuously here.
 
    f. Advance to the next page by clicking a button whose visible text matches an entry in `EASY_APPLY_ADVANCE_LABELS` (from `src/core/apply/form-fill.mjs`). Snapshot after advancing to confirm the page changed.
 
@@ -351,12 +347,9 @@ in a new profile for this verification, and never click Submit as part of checki
 2. **Verification-code protocol (M17):** if the page shows an emailed verification-code prompt (detected by `submitGuard`/BLOCKER_SIGNALS in `form-fill.mjs` — phrases such as "verification code", "enter the code", "check your email"), handle it through the narrow mail-access path:
    - Run `careerrat automation status --json` and inspect `capabilities.mail_access`.
    - Infer the mail platform from the recipient address when obvious using `inferMailAccessPlatformFromEmail()` from `src/core/automation/mail-access.mjs`: `gmail.com` / `googlemail.com` → `gmail`; `outlook.com` / `hotmail.com` / `live.com` / `msn.com` → `outlook`; other real email domains → `webmail`. If there is no recipient address, ask the user which provider holds the code. Use `webmail` for any provider other than Gmail/Outlook.
-   - If `mail_access` is not `allowed: true` for that platform, halt and ask the user to provide the code manually. Also show the opt-in steps:
-     1. Read the mail provider's terms yourself.
-     2. `careerrat automation consent <gmail|outlook|webmail> --write`
-     3. `careerrat automation enable mail_access --write`
-     4. `careerrat automation enable mail_access <gmail|outlook|webmail> --write`
-     5. `careerrat automation status --json`
+   - If `mail_access` is not `allowed: true` for that platform, it is turned off: halt and ask the user to provide the code manually, and give the commands that turn it on (if `readError` is set, say the settings file can't be read and name it):
+     1. `careerrat automation enable mail_access --write`
+     2. `careerrat automation enable mail_access <gmail|outlook|webmail> --write`
    - If `mail_access` is allowed, use the session browser to open the provider and follow `buildVerificationCodeMailPlan()` / `classifyMailAccessBlocker()` / `extractVerificationCodes()` from `src/core/automation/mail-access.mjs`. For `webmail`, pass the visible provider name as `providerName` when known. Read only the specific recent verification-code message for this current application or sign-in flow. Do not browse the broader inbox. Do not send, delete, reply, archive, or mark messages read.
    - Halt immediately on a mail login wall, mail 2FA prompt, captcha, or unexpected interstitial. Set `status: "manual-apply"` with a note such as `"manual-apply: mail_access blocked — Gmail login wall, provide code manually"` and ask the user to provide the code manually.
    - Once the code is obtained, return to the original application page, enter the code, and continue verification.

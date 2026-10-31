@@ -11,6 +11,7 @@ import {
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { runAbortable, throwIfAborted, withAbortSignal } from "./cancellation.mjs";
 import {
+  applicationPlatformForUrl,
   buildFillPlan,
   confirmationCheck,
   EASY_APPLY_STEPS,
@@ -19,6 +20,7 @@ import {
   hostnameToPortal,
   isEasyApply,
   isSsoOrAccountLabel,
+  REQUIRED_FIELDS_UNANSWERED,
   submitGuard,
 } from "./form-fill.mjs";
 
@@ -318,13 +320,27 @@ function hasPublicApplicationFormEvidence(snapshot) {
   });
 }
 
-function applicationPermissionReason(platform) {
+function applicationCapabilityOffReason(platform, permission) {
   const label = PLATFORM_LABELS[platform] || "this application site";
-  return `Application preparation for ${label} is off. Turn it on in Settings before CareerRat opens the form.`;
-}
-
-function applicationPlatformForUrl(url) {
-  return isEasyApply(url) ? "linkedin" : hostnameToPortal(url) || "external_ats";
+  if (permission?.checks?.readable === false) {
+    return `Application preparation for ${label} is blocked: ${permission.reasons[0]}.`;
+  }
+  const commands = [];
+  if (permission?.checks?.global !== false && permission?.checks?.platform !== false) {
+    // Denied without a per-switch breakdown: name the capability switch.
+    commands.push("careerrat automation enable authenticated_apply_preparation --write");
+  }
+  if (permission?.checks?.global === false) {
+    commands.push("careerrat automation enable authenticated_apply_preparation --write");
+  }
+  if (permission?.checks?.platform === false) {
+    commands.push(
+      `careerrat automation enable authenticated_apply_preparation ${platform} --write`
+    );
+  }
+  return `Application preparation is turned off for ${label}. Turn it on with ${commands
+    .map((command) => `\`${command}\``)
+    .join(" and ")}, or ask me to turn it on.`;
 }
 
 function fillPlan({ fields, config, application, answers }) {
@@ -906,6 +922,14 @@ function stepSessionFields(stepIndex, easyApply) {
   return { stepIndex, stepKey: easyApply ? easyApplyStepKey(stepIndex) : null };
 }
 
+function confirmationFromSnapshot(snapshot) {
+  return confirmationCheck({
+    pageText: snapshot.pageText,
+    currentUrl: snapshot.origin,
+    refs: snapshot.refs,
+  });
+}
+
 // Shared by the entry-point confirmation check and the Easy Apply loop's
 // post-advance confirmation check (an advance click can land on a
 // confirmation page directly) — same screenshot + verified response either way.
@@ -1069,10 +1093,7 @@ export function createApplyDriver({
       throwIfAborted(signal);
       try {
         latest = await browserOp(ops, "snapshot", { pageId }, signal);
-        const confirmation = confirmationCheck({
-          pageText: latest.pageText,
-          currentUrl: latest.origin,
-        });
+        const confirmation = confirmationFromSnapshot(latest);
         if (confirmation.submitted) {
           return submittedResult({
             ops,
@@ -1185,10 +1206,7 @@ export function createApplyDriver({
         if (!retainedOriginIsTrusted(retainedSession, retainedSnapshot.origin)) {
           throw new Error("The prepared tab left the trusted application site.");
         }
-        const confirmation = confirmationCheck({
-          pageText: retainedSnapshot.pageText,
-          currentUrl: retainedSnapshot.origin,
-        });
+        const confirmation = confirmationFromSnapshot(retainedSnapshot);
         if (confirmation.submitted) {
           return submittedResult({
             ops,
@@ -1238,12 +1256,13 @@ export function createApplyDriver({
       root: repoRoot,
     });
     if (!permission.allowed) {
-      const reason = applicationPermissionReason(applicationPlatform);
+      const reason = applicationCapabilityOffReason(applicationPlatform, permission);
       return {
         available: true,
         verified: false,
         state: "blocked",
-        code: "APPLICATION_PREPARATION_PERMISSION_REQUIRED",
+        code: "CAPABILITY_OFF",
+        platform: applicationPlatform,
         reason,
         currentUrl: url,
         session: { provider: providerLabel, blockers: [reason] },
@@ -1316,10 +1335,7 @@ export function createApplyDriver({
       };
     }
     trustRetainedOrigin(retainedSession, snapshot.origin);
-    let confirmation = confirmationCheck({
-      pageText: snapshot.pageText,
-      currentUrl: snapshot.origin,
-    });
+    let confirmation = confirmationFromSnapshot(snapshot);
     if (confirmation.submitted) {
       return submittedResult({
         ops,
@@ -1361,12 +1377,13 @@ export function createApplyDriver({
           root: repoRoot,
         });
         if (!targetPermission.allowed) {
-          const reason = applicationPermissionReason(targetPlatform);
+          const reason = applicationCapabilityOffReason(targetPlatform, targetPermission);
           return {
             available: true,
             verified: false,
             state: "blocked",
-            code: "APPLICATION_PREPARATION_PERMISSION_REQUIRED",
+            code: "CAPABILITY_OFF",
+            platform: targetPlatform,
             reason,
             currentUrl: detailSnapshot.origin || url,
             session: { provider: providerLabel, blockers: [reason] },
@@ -1441,10 +1458,7 @@ export function createApplyDriver({
         };
       }
       trustRetainedOrigin(retainedSession, snapshot.origin);
-      confirmation = confirmationCheck({
-        pageText: snapshot.pageText,
-        currentUrl: snapshot.origin,
-      });
+      confirmation = confirmationFromSnapshot(snapshot);
       if (confirmation.submitted) {
         return submittedResult({
           ops,
@@ -1666,6 +1680,9 @@ export function createApplyDriver({
             uploadedCount: totalUploadedCount,
             unresolved,
             blockers: [],
+            // Not a real blocker (login, captcha, 2FA): the operator just has
+            // to answer these fields, so callers can flag the job instead.
+            stopReason: REQUIRED_FIELDS_UNANSWERED,
             submitMode: guard.mode,
             ...stepSessionFields(stepIndex, easyApply),
           },
@@ -1864,10 +1881,7 @@ export function createApplyDriver({
       // A click meant to advance the page can land on a confirmation page
       // directly (the driver's click-safety fixes make this unexpected, not
       // impossible): report reality instead of treating it as a stalled step.
-      const postAdvanceConfirmation = confirmationCheck({
-        pageText: nextSnapshot.pageText,
-        currentUrl: nextSnapshot.origin,
-      });
+      const postAdvanceConfirmation = confirmationFromSnapshot(nextSnapshot);
       if (postAdvanceConfirmation.submitted) {
         return submittedResult({
           ops,

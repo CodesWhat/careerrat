@@ -29,13 +29,16 @@
 // possible and fall back to parent+2; schema validation backstops any slip.
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { classifyConfigChange } from "./loosening.mjs";
 import { formatErrors, validate } from "./schema-validator.mjs";
 import { parseYaml } from "./yaml.mjs";
 
 // ---------------------------------------------------------------------------
 // Routing table — gate type → where it lives + how consequential it is.
 // friction: "report" = write-and-report (low blast radius); "confirm" =
-// confirm-first (the caller must get a yes before committing).
+// confirm-first (the caller must get a yes before committing); "direction" =
+// decided per write by resolveFriction: lowering or clearing a value is
+// confirm-first, raising it or setting it for the first time is write-and-report.
 // ---------------------------------------------------------------------------
 
 export const GATE_ROUTES = {
@@ -43,7 +46,7 @@ export const GATE_ROUTES = {
     file: "targeting",
     path: "excluded_companies",
     op: "append",
-    friction: "confirm",
+    friction: "report",
     label: "excluded company",
   },
   "cut-signal": {
@@ -65,7 +68,7 @@ export const GATE_ROUTES = {
     path: "compensation.minimum_base",
     op: "set",
     coerce: "number",
-    friction: "confirm",
+    friction: "direction",
     label: "comp floor (minimum_base)",
   },
   "comp-annual-floor": {
@@ -73,7 +76,7 @@ export const GATE_ROUTES = {
     path: "compensation.minimum_annual_earnings",
     op: "set",
     coerce: "number",
-    friction: "confirm",
+    friction: "direction",
     label: "annual cash earnings floor (minimum_annual_earnings)",
   },
   "comp-target": {
@@ -81,7 +84,7 @@ export const GATE_ROUTES = {
     path: "compensation.target_base",
     op: "set",
     coerce: "number",
-    friction: "confirm",
+    friction: "direction",
     label: "comp anchor (target_base)",
   },
   "comp-expected": {
@@ -107,6 +110,32 @@ export const GATE_ROUTES = {
     label: "do-not-fabricate claim",
   },
 };
+
+function parsePriorNumber(previous) {
+  if (typeof previous === "number") return Number.isFinite(previous) ? previous : undefined;
+  const text = String(previous ?? "").trim();
+  if (!text) return undefined;
+  const n = Number(text.replace(/[$,\s]/g, ""));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function docAt(parts, value) {
+  let out = value;
+  for (let i = parts.length - 1; i >= 0; i--) out = { [parts[i]]: out };
+  return out;
+}
+
+// resolveFriction: the friction one write needs. Direction-aware routes ask
+// classifyConfigChange whether the write lowers or clears an existing value.
+export function resolveFriction(route, previous, next) {
+  if (route.friction !== "direction") return route.friction;
+  const parts = route.path.split(".");
+  const prior = parsePriorNumber(previous);
+  const before = prior === undefined ? {} : docAt(parts, prior);
+  return classifyConfigChange(route.file, before, docAt(parts, next)).loosens
+    ? "confirm"
+    : "report";
+}
 
 export function resolveRoute(type) {
   // Object.hasOwn, not a bare truthy lookup: `type` can arrive straight from
@@ -391,7 +420,7 @@ export function computeGateEdit({ type, value, currentText, schema = null }) {
     file: route.file,
     path: route.path,
     op: route.op,
-    friction: route.friction,
+    friction: resolveFriction(route, patch.previous, coerced),
     value: coerced,
     changed: patch.changed,
     previous: patch.previous,

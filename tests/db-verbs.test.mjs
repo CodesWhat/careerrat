@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { automationStatus, mayRun } from "../src/core/automation/consent.mjs";
 import { resolveRecipient } from "../src/core/comms/recipient.mjs";
 import { slugifyThreadId } from "../src/core/comms/threads.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
@@ -2488,20 +2489,8 @@ test("calendarWriteAppend defaults provenance to manual, coerces an invalid valu
   assert.equal(invalid.record.provenance, "manual");
   assert.equal(invalid.event.title, "Calendar write recorded");
 
-  // The verb itself gates automated provenance on a live calendar_sync
-  // grant, so the consent has to exist before an automated row can persist.
-  candidateConfigPatch({
-    repoRoot,
-    env: {},
-    name: "automation",
-    patch: {
-      setup_mode: "advanced",
-      capabilities: {
-        calendar_sync: { enabled: true, platforms: { outlook_calendar: true } },
-      },
-      consent: { outlook_calendar: true },
-    },
-  });
+  // The verb itself gates automated provenance on calendar_sync being on for the
+  // provider. It is on by default, so a fresh workspace needs no setup here.
   const automated = calendarWriteAppend({
     repoRoot,
     env: {},
@@ -2525,20 +2514,8 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   seedFixture(repoRoot);
   const db = openDb({ repoRoot });
 
-  // Automated rows in the matrix below must clear the verb-level consent
-  // gate, so grant calendar_sync for the matrix provider up front.
-  candidateConfigPatch({
-    repoRoot,
-    env: {},
-    name: "automation",
-    patch: {
-      setup_mode: "advanced",
-      capabilities: {
-        calendar_sync: { enabled: true, platforms: { google_calendar: true } },
-      },
-      consent: { google_calendar: true },
-    },
-  });
+  // Automated rows in the matrix below clear the verb-level on/off gate because
+  // calendar_sync is on by default.
 
   const sameEvent = {
     provider: "google_calendar",
@@ -2609,14 +2586,20 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   assert.equal(readKv(db, "calendarWrites").length, 1);
 });
 
-test("calendarWriteAppend refuses an automated record without a live calendar_sync grant", () => {
+test("calendarWriteAppend refuses an automated record when calendar_sync is turned off", () => {
   const repoRoot = tempRepo();
   seedFixture(repoRoot);
   const db = openDb({ repoRoot });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: { capabilities: { calendar_sync: { platforms: { google_calendar: false } } } },
+  });
 
   // The gate lives in the verb itself, so the ungated legacy entry points
-  // (the data route and the CLI) meet the same bar as the Ask intent: no
-  // grant, no "automated, app-verified" row.
+  // (the data route and the CLI) meet the same bar as the Ask intent: switched
+  // off, no "automated, app-verified" row.
   assert.throws(
     () =>
       calendarWriteAppend({
@@ -2630,9 +2613,58 @@ test("calendarWriteAppend refuses an automated record without a live calendar_sy
           provenance: "automated",
         },
       }),
-    (error) => error.code === "CALENDAR_WRITE_NOT_ALLOWED"
+    (error) =>
+      error.code === "CALENDAR_WRITE_NOT_ALLOWED" &&
+      /careerrat automation enable calendar_sync google_calendar --write/.test(error.message)
   );
   assert.equal(readKv(db, "calendarWrites"), null);
+});
+
+test("a fresh DB workspace reports every automation capability on; a legacy all-off stored doc loads on and loading writes nothing", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const fresh = automationStatus({ root: repoRoot, env: {} });
+  assert.ok(fresh.capabilities.every((cap) => cap.enabled));
+  assert.ok(fresh.capabilities.every((cap) => cap.platforms.every((p) => p.allowed)));
+
+  // Seed the pre-change shape directly (no marker, old off default).
+  const legacyDoc = {
+    setup_mode: "basic",
+    consent: { gmail: false },
+    capabilities: { mail_access: { enabled: false, platforms: { gmail: false } } },
+  };
+  db.prepare(
+    `INSERT INTO candidate_automation (id, data, updated_at) VALUES (1, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
+  ).run(JSON.stringify(legacyDoc), "2026-01-01T00:00:00.000Z");
+  const readStored = () =>
+    db.prepare("SELECT data, updated_at FROM candidate_automation WHERE id = 1").get();
+  const storedBefore = readStored();
+  const legacy = automationStatus({ root: repoRoot, env: {} });
+  assert.ok(legacy.capabilities.every((cap) => cap.enabled));
+  assert.equal(
+    mayRun({ capability: "mail_access", platform: "gmail", root: repoRoot, env: {} }).allowed,
+    true
+  );
+  assert.deepEqual(readStored(), storedBefore);
+
+  // The next write stores the marker and the full on-matrix, then respects false.
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: { capabilities: { mail_access: { enabled: false } } },
+  });
+  const stored = JSON.parse(readStored().data);
+  assert.equal(stored.capabilities_default, "on");
+  assert.equal(stored.capabilities.mail_access.enabled, false);
+  assert.equal(stored.capabilities.messaging.enabled, true);
+  assert.equal(Object.hasOwn(stored, "setup_mode"), false);
+  const denied = mayRun({ capability: "mail_access", platform: "gmail", root: repoRoot, env: {} });
+  assert.equal(denied.allowed, false);
+  assert.match(denied.reasons.join(" "), /careerrat automation enable mail_access --write/);
 });
 
 test("relationshipLeadUpsertBatch stores review leads, dedupes company/name/platform, and clears sourcing CTAs on linked apps", () => {
@@ -3919,4 +3951,53 @@ test("candidateEvidenceMerge accepts a well-formed claim with links/role_signals
   assert.deepEqual(stored.links, ["https://example.com/case-study"]);
   assert.deepEqual(stored.role_signals, ["self-serve onboarding"]);
   assert.deepEqual(stored.forbidden_wording, ["invented the architecture solo"]);
+});
+
+test("candidateConfigPatch unset drops a scalar path before merging and still validates", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  openDb({ repoRoot });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: { fit_bands: { fit_floor: 70 }, search_preferences: { cadence: { mode: "weekly" } } },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: {},
+    unset: ["fit_bands.fit_floor"],
+  });
+  const targeting = candidateConfigGet({ repoRoot, env: {} }).targeting;
+  assert.equal(Object.hasOwn(targeting.fit_bands || {}, "fit_floor"), false);
+  assert.equal(targeting.search_preferences.cadence.mode, "weekly");
+
+  // Unset then set in one call replaces, and a missing branch is a no-op.
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "targeting",
+    patch: { cut_signals: ["a"] },
+    unset: ["nope.nothing", "cut_signals"],
+  });
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).targeting.cut_signals, ["a"]);
+
+  assert.throws(
+    () =>
+      candidateConfigPatch({ repoRoot, env: {}, name: "targeting", patch: {}, unset: "fit_bands" }),
+    (error) => error.code === "BAD_REQUEST"
+  );
+  assert.throws(
+    () =>
+      candidateConfigPatch({
+        repoRoot,
+        env: {},
+        name: "targeting",
+        patch: {},
+        unset: ["keep_signals"],
+      }),
+    (error) => error.code === "VALIDATION_FAILED"
+  );
 });

@@ -555,6 +555,89 @@ describe("deep ingest chat-first controller", () => {
     expect(buildDeepIngestReview(input).proposals.map((row) => row.id)).toEqual(["proposal-1"]);
   });
 
+  it("lists findings that saved on their own apart from the ones still in review", () => {
+    const saved = proposal({
+      id: "saved-1",
+      status: "confirmed",
+      decisionSource: "automatic",
+      updatedAt: "2026-10-29T10:00:00.000Z",
+    });
+    const held = proposal({
+      id: "held-1",
+      autoApply: { status: "held", reasons: ["It would replace something you already saved."] },
+    });
+    const manual = proposal({ id: "manual-1", status: "confirmed", decisionSource: "user" });
+    const review = buildDeepIngestReview(
+      state({ proposals: [saved, held, manual], reviewQueue: [held] })
+    );
+
+    expect(review.applied.map((row) => row.id)).toEqual(["saved-1"]);
+    expect(review.applied[0].title).toBe("Billing migration");
+    expect(review.proposals.map((row) => row.id)).toEqual(["held-1"]);
+    expect(review.proposals[0].heldReason).toBe("It would replace something you already saved.");
+    expect(review.sources[0].canAnalyze).toBe(false);
+  });
+
+  it("drops a saved finding from the list once its rows are undone", () => {
+    const kept = proposal({
+      id: "kept",
+      status: "confirmed",
+      decisionSource: "automatic",
+      output: { rows: [{ id: "story-1", existed: false }] },
+    });
+    const undone = proposal({
+      id: "undone",
+      status: "confirmed",
+      decisionSource: "automatic",
+      output: { evidence: { insertedIds: ["evidence-gone"] } },
+    });
+    const review = buildDeepIngestReview(state({ proposals: [kept, undone], reviewQueue: [] }));
+
+    expect(review.applied.map((row) => row.id)).toEqual(["kept"]);
+  });
+
+  it("keeps a saved evidence finding while its claim is still saved", () => {
+    const saved = proposal({
+      id: "evidence-proposal",
+      lane: "evidence_claims",
+      status: "confirmed",
+      decisionSource: "automatic",
+      output: { evidence: { insertedIds: ["claim-1"] } },
+    });
+    const live = state({
+      proposals: [saved],
+      reviewQueue: [],
+      confirmed: { evidence: [saved], evidenceClaimIds: ["claim-1"], storyBank: [] },
+    });
+    expect(buildDeepIngestReview(live).applied.map((row) => row.id)).toEqual(["evidence-proposal"]);
+
+    const undone = state({
+      proposals: [saved],
+      reviewQueue: [],
+      confirmed: { evidence: [saved], evidenceClaimIds: [], storyBank: [] },
+    });
+    expect(buildDeepIngestReview(undone).applied).toEqual([]);
+  });
+
+  it("checks evidence claims and lane rows separately", () => {
+    const saved = proposal({
+      id: "evidence-proposal",
+      lane: "evidence_claims",
+      status: "confirmed",
+      decisionSource: "automatic",
+      output: { evidence: { insertedIds: ["claim-1"] } },
+    });
+    // A story row sharing the claim id must not keep the evidence card alive.
+    const review = buildDeepIngestReview(
+      state({
+        proposals: [saved],
+        reviewQueue: [],
+        confirmed: { evidence: [saved], evidenceClaimIds: [], storyBank: [{ id: "claim-1" }] },
+      })
+    );
+    expect(review.applied).toEqual([]);
+  });
+
   it.each(["failed", "manual_fallback"])(
     "gives a %s source plain recovery guidance and retry/remove controls",
     (status) => {

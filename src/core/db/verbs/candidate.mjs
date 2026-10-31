@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeAutomationConfig } from "../../automation/consent.mjs";
 import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
@@ -99,7 +100,7 @@ const CANDIDATE_ACTIVITY = {
   automation: {
     title: "Automation permissions updated",
     operation: "candidate:automation-update",
-    summary: "Saved consent settings for optional automation capabilities.",
+    summary: "Saved on/off switches for browser automation capabilities.",
   },
   "application-limits": {
     title: "Application limits updated",
@@ -171,6 +172,33 @@ function deepMerge(base, patch) {
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// deepMerge can't delete a key, so an undo that has to restore "this key did not
+// exist" names the dotted paths to drop. Applied BEFORE the patch merges in, so a
+// path can be unset and re-set in one call. Missing branches are a no-op.
+function unsetPaths(doc, paths) {
+  const out = clone(doc);
+  for (const path of paths) {
+    const parts = String(path).split(".").filter(Boolean);
+    if (!parts.length) continue;
+    let cursor = out;
+    for (const part of parts.slice(0, -1)) {
+      cursor = isPlainObject(cursor) ? cursor[part] : undefined;
+    }
+    if (isPlainObject(cursor)) delete cursor[parts.at(-1)];
+  }
+  return out;
+}
+
+function normalizeUnsetList(unset) {
+  if (unset === undefined) return [];
+  if (!Array.isArray(unset) || unset.some((path) => typeof path !== "string" || !path.trim())) {
+    const err = new Error("unset must be an array of dotted paths");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+  return unset;
 }
 
 const LOCATION_MODE_FIELDS = [
@@ -738,7 +766,14 @@ export function applyCandidateResumeSeedInDb(
   };
 }
 
-export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivity = true } = {}) {
+export function candidateConfigPatch({
+  repoRoot,
+  env,
+  name,
+  patch,
+  unset,
+  recordActivity = true,
+} = {}) {
   if (!SINGLETON_TABLES[name]) {
     const err = new Error(`unknown candidate config "${name}"`);
     err.code = "NOT_FOUND";
@@ -749,12 +784,13 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
     err.code = "BAD_REQUEST";
     throw err;
   }
+  const unsetList = normalizeUnsetList(unset);
 
   return runVerb(
     { repoRoot, env },
     (db) => {
       if (name === "targeting") {
-        const current = readTargeting(db);
+        const current = unsetPaths(readTargeting(db), unsetList);
         const merged = deepMerge(current, patch);
         merged.role_buckets = normalizeSearchTracks(merged.role_buckets);
         merged.tracked_companies = compactStrings(merged.tracked_companies);
@@ -774,10 +810,9 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
       }
 
       if (name === "application-limits") {
-        const current = readSingleton(
-          db,
-          "candidate_application_limits",
-          DEFAULTS["application-limits"]
+        const current = unsetPaths(
+          readSingleton(db, "candidate_application_limits", DEFAULTS["application-limits"]),
+          unsetList
         );
         const merged = normalizeApplicationLimits(deepMerge(current, patch));
         assertValid(name, merged);
@@ -791,11 +826,13 @@ export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivit
       }
 
       const table = SINGLETON_TABLES[name];
-      const current = readSingleton(db, table, DEFAULTS[name] || {});
+      const current = unsetPaths(readSingleton(db, table, DEFAULTS[name] || {}), unsetList);
       const merged =
         name === "profile"
           ? normalizeCandidateProfile(deepMerge(current, normalizeCandidateProfilePatch(patch)))
-          : deepMerge(current, patch);
+          : name === "automation"
+            ? deepMerge(normalizeAutomationConfig(current), patch)
+            : deepMerge(current, patch);
       assertValid(name, merged);
       putSingleton(db, table, merged);
       return completeCandidateConfigWrite(
@@ -913,6 +950,75 @@ function assertEvidenceClaimsUnused(db, claimIds) {
   throw err;
 }
 
+// The merge itself, run inside a caller's open transaction so a caller that
+// needs more writes to commit or roll back with it (deep-ingest confirm) can.
+export function mergeEvidenceClaimsInDb(db, { claims, recordActivity = true } = {}) {
+  const existing = readEvidence(db).claims;
+  const seenClaims = new Map(
+    existing.map((claim) => [String(claim.claim || "").trim(), String(claim.id || "")])
+  );
+  const usedIds = new Set(existing.map((claim) => String(claim.id || "")));
+  const existingById = new Map(existing.map((claim) => [String(claim.id || ""), claim]));
+  const stmt = db.prepare(
+    `INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)
+   ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
+  );
+  let added = 0;
+  let skipped = 0;
+  for (const raw of claims) {
+    const claimText = String(raw?.claim || "").trim();
+    const rawId = raw?.id ? String(raw.id) : "";
+    const existingIdForText = seenClaims.get(claimText);
+    if (!claimText || (existingIdForText && existingIdForText !== rawId)) {
+      skipped += 1;
+      continue;
+    }
+    const replacingExistingId = rawId && existingById.has(rawId);
+    const id =
+      rawId && (!usedIds.has(rawId) || existingIdForText === rawId || replacingExistingId)
+        ? rawId
+        : nextClaimId(usedIds);
+    if (replacingExistingId) {
+      const previousClaimText = String(existingById.get(rawId)?.claim || "").trim();
+      if (previousClaimText && previousClaimText !== claimText)
+        seenClaims.delete(previousClaimText);
+    }
+    seenClaims.set(claimText, id);
+    usedIds.add(id);
+    const data = {
+      ...raw,
+      id,
+      claim: claimText,
+      evidence: String(raw?.evidence || ""),
+    };
+    stmt.run(id, JSON.stringify(data), new Date().toISOString());
+    added += 1;
+  }
+  const evidence = readEvidence(db);
+  assertValid("evidence", evidence);
+  const meta = added > 0 && recordActivity ? bumpMeta(db) : null;
+  const event =
+    added > 0 && recordActivity
+      ? logActivityEvent(db, {
+          type: "system",
+          title: "Evidence bank updated",
+          summary: `${added} evidence ${added === 1 ? "claim" : "claims"} saved${
+            skipped ? `; ${skipped} duplicate${skipped === 1 ? "" : "s"} skipped` : ""
+          }.`,
+          tags: ["operation:candidate:evidence-save"],
+        })
+      : null;
+  return {
+    added,
+    skipped,
+    total: evidence.claims.length,
+    data: evidence,
+    setup: refreshCandidateSetup(db),
+    meta,
+    event,
+  };
+}
+
 export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity = true } = {}) {
   if (!Array.isArray(claims)) {
     const err = new Error("claims must be an array");
@@ -922,72 +1028,7 @@ export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity =
   assertCleanEvidenceClaims(claims);
   return runVerb(
     { repoRoot, env },
-    (db) => {
-      const existing = readEvidence(db).claims;
-      const seenClaims = new Map(
-        existing.map((claim) => [String(claim.claim || "").trim(), String(claim.id || "")])
-      );
-      const usedIds = new Set(existing.map((claim) => String(claim.id || "")));
-      const existingById = new Map(existing.map((claim) => [String(claim.id || ""), claim]));
-      const stmt = db.prepare(
-        `INSERT INTO candidate_evidence_claims (id, data, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
-      );
-      let added = 0;
-      let skipped = 0;
-      for (const raw of claims) {
-        const claimText = String(raw?.claim || "").trim();
-        const rawId = raw?.id ? String(raw.id) : "";
-        const existingIdForText = seenClaims.get(claimText);
-        if (!claimText || (existingIdForText && existingIdForText !== rawId)) {
-          skipped += 1;
-          continue;
-        }
-        const replacingExistingId = rawId && existingById.has(rawId);
-        const id =
-          rawId && (!usedIds.has(rawId) || existingIdForText === rawId || replacingExistingId)
-            ? rawId
-            : nextClaimId(usedIds);
-        if (replacingExistingId) {
-          const previousClaimText = String(existingById.get(rawId)?.claim || "").trim();
-          if (previousClaimText && previousClaimText !== claimText)
-            seenClaims.delete(previousClaimText);
-        }
-        seenClaims.set(claimText, id);
-        usedIds.add(id);
-        const data = {
-          ...raw,
-          id,
-          claim: claimText,
-          evidence: String(raw?.evidence || ""),
-        };
-        stmt.run(id, JSON.stringify(data), new Date().toISOString());
-        added += 1;
-      }
-      const evidence = readEvidence(db);
-      assertValid("evidence", evidence);
-      const meta = added > 0 && recordActivity ? bumpMeta(db) : null;
-      const event =
-        added > 0 && recordActivity
-          ? logActivityEvent(db, {
-              type: "system",
-              title: "Evidence bank updated",
-              summary: `${added} evidence ${added === 1 ? "claim" : "claims"} saved${
-                skipped ? `; ${skipped} duplicate${skipped === 1 ? "" : "s"} skipped` : ""
-              }.`,
-              tags: ["operation:candidate:evidence-save"],
-            })
-          : null;
-      return {
-        added,
-        skipped,
-        total: evidence.claims.length,
-        data: evidence,
-        setup: refreshCandidateSetup(db),
-        meta,
-        event,
-      };
-    },
+    (db) => mergeEvidenceClaimsInDb(db, { claims, recordActivity }),
     { requireExistingTracker: true }
   );
 }
