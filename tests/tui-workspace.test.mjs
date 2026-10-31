@@ -197,3 +197,19 @@ test("inspector scrolling resets on changed selection and forwards in agent focu
     assert.equal(forwarded.state.detailOffset, state.detailOffset);
   }
 });
+
+test("search progress stays visible while typing in the agent pane", () => {
+  const data = {
+    jobs: [],
+    searchRuns: [
+      {
+        id: "scan-1",
+        status: "running",
+        progress: { completedSources: 2, totalSources: 7, foundCount: 3 },
+      },
+    ],
+  };
+  const state = invoke("createWorkspaceState", data, { focus: "agent" });
+  const frame = invoke("renderWorkspace", data, state, { cols: 120, rows: 36 });
+  assert.match(frame.output, /Search running: 2\/7 sources, 3 saved/);
+});

@@ -118,7 +118,7 @@ export function workspaceKey(data, state, key) {
   let text;
   if (key.name === "1")
     text =
-      "Run search-jobs using my saved targeting and sources. Save full JD bodies, dedupe, and report the saved results and any partial failures.";
+      "Run search-jobs using my saved targeting and sources. For the configured-source scan, start or reuse careerrat search start --json and keep the conversation available while it runs. Use careerrat search status --id <returned-run-id> --json and its saved completion handoff before reviewing results. Follow the skill for additional agent-led research. Save full JD bodies, dedupe, and report partial failures.";
   if (key.name === "2")
     text = `Use evaluate-job to review these saved job IDs: ${JSON.stringify(view.jobs.slice(0, 5).map((job) => job.id))}. Read their saved full JDs and evidence, explain fit/pay/risks, and persist verdicts. Do not submit applications.`;
   if (key.name === "3" && selected)
@@ -187,7 +187,16 @@ export function renderWorkspace(data, state, { cols, rows }, agent = null) {
     "\x1b[32m"
   );
   line(1, 2, cols - 1, "1 Search   2 Review matches   3 Apply selected   4 Add context", "\x1b[2m");
-  line(1, 3, cols - 1, "─".repeat(Math.max(0, cols - 1)));
+  const run = data.searchRuns?.[0];
+  let searchText = "─".repeat(Math.max(0, cols - 1));
+  if (run) {
+    const progress = run.progress || {};
+    searchText =
+      run.status === "running"
+        ? `Search running: ${progress.completedSources || 0}/${progress.totalSources || "?"} sources, ${progress.foundCount || 0} saved · ${run.id}`
+        : `Search ${run.status}: ${run.summary?.new || 0} saved${run.summary?.errorCount ? `, ${run.summary.errorCount} source errors` : ""} · ${run.id}`;
+  }
+  line(1, 3, cols - 1, searchText);
   const left = layout.jobs;
   const visibleCount = Math.max(1, Math.min(8, Math.floor(left.rows / 2) - 2));
   const index = view.jobs.findIndex((job) => job.id === view.selectedId);

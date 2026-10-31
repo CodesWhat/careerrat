@@ -175,3 +175,21 @@ test("explicit data roots isolate people and malformed legacy data is not silent
   writeFileSync(join(first.workspace, "tracker.json"), "broken");
   assert.throws(() => readJobs(first), /JSON|Unexpected/);
 });
+
+test("background search progress is read from the same canonical snapshot", async (t) => {
+  const { sourcingRunStart, sourcingRunProgress } = await import(
+    "../src/core/db/verbs/sourcing-runs.mjs"
+  );
+  const ctx = fixture(t, { applications: [], sourced: [] }, true);
+  const { run } = sourcingRunStart({ ...ctx, purpose: "manual-search" });
+  sourcingRunProgress({
+    ...ctx,
+    id: run.id,
+    progress: { completedSources: 2, totalSources: 7, foundCount: 3 },
+  });
+  const before = readFileSync(join(ctx.env.CAREERRAT_HOME, "db/careerrat.db"));
+  const data = readJobs(ctx);
+  assert.equal(data.searchRuns[0].id, run.id);
+  assert.equal(data.searchRuns[0].progress.foundCount, 3);
+  assert.deepEqual(readFileSync(join(ctx.env.CAREERRAT_HOME, "db/careerrat.db")), before);
+});

@@ -87,6 +87,7 @@ const CLIS = {
   next: "src/cli/next.mjs",
   ingest: "src/cli/ingest.mjs",
   searches: "src/cli/searches.mjs",
+  search: "src/cli/search.mjs",
   companies: "src/cli/companies.mjs",
   evaluate: "src/cli/evaluate.mjs",
   questions: "src/cli/questions.mjs",
@@ -856,6 +857,7 @@ Commands:
   next        Show the next agent task from doctor guidance
   ingest      Guided candidate setup (profile, targeting, evidence, ...)
   searches    Build and curate the search-source config
+  search      Start, inspect or cancel a background configured-source scan
   companies   Manage tracked employer ATS boards
   evaluate    Run the body-read gate on a saved job (GATE/FIT/COMP/ACTION)
   questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)

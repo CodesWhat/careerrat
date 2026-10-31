@@ -43,6 +43,7 @@ export function readJobs({ repoRoot, env = process.env } = {}) {
   const ctx = { repoRoot, env };
   const path = dbFilePath(ctx);
   let tracker;
+  let searchRuns = [];
   let mode = "legacy";
   if (existsSync(path)) {
     const db = new DatabaseSync(path, { readOnly: true });
@@ -50,6 +51,12 @@ export function readJobs({ repoRoot, env = process.env } = {}) {
       db.exec("PRAGMA busy_timeout = 5000");
       db.exec("BEGIN");
       tracker = assembleTrackerObject(db);
+      searchRuns = db
+        .prepare(
+          "SELECT data FROM sourcing_runs ORDER BY (status = 'running') DESC, updated_at DESC LIMIT 6"
+        )
+        .all()
+        .map((row) => JSON.parse(row.data));
       db.exec("COMMIT");
       mode = "database";
     } finally {
@@ -67,7 +74,7 @@ export function readJobs({ repoRoot, env = process.env } = {}) {
   if (!tracker || typeof tracker !== "object" || Array.isArray(tracker)) {
     throw new TypeError("Saved tracker must be an object");
   }
-  return { mode, version: tracker.meta?.version ?? null, jobs: jobRows(tracker) };
+  return { mode, version: tracker.meta?.version ?? null, jobs: jobRows(tracker), searchRuns };
 }
 
 function numeric(value) {
