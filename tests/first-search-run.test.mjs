@@ -570,7 +570,7 @@ test("prepareFirstSearchSources uses AI domain hints to promote a bare tracked c
   const fetchImpl = async (url) => {
     fetchCalls.push(url);
     return new Response(
-      '<html><a href="https://203.0.113.11/jobs.lever.co/neutral-labs">Jobs</a></html>'
+      '<html><a href="https://93.184.216.11/jobs.lever.co/neutral-labs">Jobs</a></html>'
     );
   };
 
@@ -581,13 +581,13 @@ test("prepareFirstSearchSources uses AI domain hints to promote a bare tracked c
     call: async (options) => {
       calls.push(options);
       return domainHintResponse([
-        { name: "Neutral Labs", domain_hint: "https://203.0.113.10/careers" },
+        { name: "Neutral Labs", domain_hint: "https://93.184.216.10/careers" },
       ]);
     },
   });
 
   assert.equal(calls.length, 1);
-  assert.deepEqual(fetchCalls, ["https://203.0.113.10/careers"]);
+  assert.deepEqual(fetchCalls, ["https://93.184.216.10/careers"]);
   assert.deepEqual(result.companyBoardResolution.aiHintFill, {
     requested: 1,
     hinted: 1,
@@ -597,7 +597,7 @@ test("prepareFirstSearchSources uses AI domain hints to promote a bare tracked c
   assert.deepEqual(result.sourcedScan.tracked_companies, [
     {
       name: "Neutral Labs",
-      careers_url: "https://203.0.113.11/jobs.lever.co/neutral-labs",
+      careers_url: "https://93.184.216.11/jobs.lever.co/neutral-labs",
     },
   ]);
   assert.deepEqual(

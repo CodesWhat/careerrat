@@ -1498,11 +1498,42 @@ const CONFIRMATION_URL_SEGMENTS = [
 /**
  * Detect a post-submit confirmation page.
  *
- * @param {{ pageText?: string, currentUrl?: string }} opts
+ * @param {{ pageText?: string, currentUrl?: string, refs?: Record<string, object> }} opts
  * @returns {{ submitted: boolean, signal: string|null }}
  */
-export function confirmationCheck({ pageText = "", currentUrl } = {}) {
-  // [#8] URL-segment check (optional; callers that don't pass currentUrl are unaffected)
+export function confirmationCheck({ pageText = "", currentUrl, refs = {} } = {}) {
+  const activeApplication = Object.values(refs || {}).some((entry) => {
+    if (entry?.disabled === true) return false;
+    if (entry?.fileInput === true) {
+      return entry?.required === true && entry?.fileAttached !== true;
+    }
+    const role = String(entry?.role || "").toLowerCase();
+    const label = normalizeLabel(entry?.name || "");
+    if (/\b(newsletter|subscribe|subscription|job alerts?)\b/.test(label)) return false;
+    if (role === "button") {
+      if (["continue browsing jobs", "review application status"].includes(label)) return false;
+      return (
+        isApplicationSubmitLabel(label) ||
+        EASY_APPLY_ADVANCE_LABELS.some((needle) => label.includes(needle))
+      );
+    }
+    if (entry?.field === false) return false;
+    if (
+      !["textbox", "combobox", "checkbox", "radio", "radiogroup", "spinbutton", "file"].includes(
+        role
+      )
+    )
+      return false;
+    const field = genericMatch(label);
+    return (
+      entry?.required === true ||
+      (field !== null && field !== "email") ||
+      /\b(resume|curriculum vitae|cv|cover letter|application)\b/.test(label)
+    );
+  });
+  if (activeApplication) return { submitted: false, signal: null };
+
+  // Match whole route segments, never employer slugs such as /thanks-company.
   if (currentUrl) {
     let urlPath = "";
     try {
@@ -1511,15 +1542,44 @@ export function confirmationCheck({ pageText = "", currentUrl } = {}) {
       // malformed URL — fall through to text check
     }
     for (const segment of CONFIRMATION_URL_SEGMENTS) {
-      if (urlPath.includes(segment)) {
+      if (urlPath === segment || urlPath.endsWith(segment) || urlPath.includes(`${segment}/`)) {
         return { submitted: true, signal: segment };
       }
     }
   }
 
-  const lower = String(pageText).toLowerCase();
+  // Receipt statements must stand on their own, rather than occur inside
+  // quoted examples or instructions describing what a future submit will show.
+  const statements =
+    String(pageText)
+      .toLowerCase()
+      .replace(/"[^"\n]*"|“[^”\n]*”|(?<!\w)'[^'\n]*'|(?<!\w)‘[^’\n]*’/g, "")
+      .replace(/:\s*\n\s*/g, ": ")
+      .match(/[^.!?\n]+[.!?]?/g) || [];
+  const receiptClauses = statements.flatMap((statement) => {
+    let through = "";
+    return statement.split(/[,;]/).map((clause) => {
+      through += `${clause};`;
+      return { clause: clause.trim(), through };
+    });
+  });
   for (const signal of CONFIRMATION_SIGNALS) {
-    if (lower.includes(signal)) {
+    if (
+      receiptClauses.some(({ clause, through }) => {
+        const index = clause.indexOf(signal);
+        if (index < 0) return false;
+        const prefix = clause.slice(0, index);
+        const suffix = clause.slice(index + signal.length);
+        return (
+          /^(?:your |(?:your )?application (?:has been |was )?)?$/.test(prefix) &&
+          !/^\w/.test(suffix) &&
+          !/[?]/.test(through) &&
+          !/\b(example|sample|preview|confirmation message)\b/.test(through) &&
+          !/\b(if|when|after|once|would|should|must|click|press)\b/.test(through) &&
+          !/\bwill\s+(?:see|appear|(?:be\s+)?(?:displayed|shown))\b/.test(through)
+        );
+      })
+    ) {
       return { submitted: true, signal };
     }
   }
