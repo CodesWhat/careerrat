@@ -7,5 +7,22 @@
     "an independent commit target. Roll this at each dev-line cut; a stale",
     "pattern matches nothing and silently stops producing PRs."
   ],
-  "baseBranchPatterns": ["dev/v0.16"]
+  "baseBranchPatterns": ["dev/v0.16"],
+  "prConcurrentLimit": 2,
+  "prHourlyLimit": 1,
+  "lockFileMaintenance": {
+    "enabled": false
+  },
+  "packageRules": [
+    {
+      "description": "Queue major upgrades in the dependency dashboard until selected.",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The Mac app ended at v0.19.2; do not update its retired release workflow.",
+      "matchFileNames": [".github/workflows/desktop-release.yml"],
+      "enabled": false
+    }
+  ]
 }
