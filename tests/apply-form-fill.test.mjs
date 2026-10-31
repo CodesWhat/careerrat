@@ -1337,3 +1337,95 @@ describe("findSubmitButtonRef (auto-submit only)", () => {
     );
   });
 });
+
+describe("confirmationCheck receipt evidence", () => {
+  for (const path of [
+    "/thanks-company/jobs/123",
+    "/confirmation-required",
+    "/submitted-role",
+    "/apply/success-story",
+    "/application/complete-profile",
+  ]) {
+    it(`rejects partial confirmation route ${path}`, () => {
+      assert.equal(
+        confirmationCheck({ currentUrl: `https://jobs.example.com${path}` }).submitted,
+        false
+      );
+    });
+  }
+  for (const pageText of [
+    'After you click Submit, you will see "Thank you for applying".',
+    "If successful, the page says application submitted.",
+    'The confirmation message is "Your application has been submitted".',
+    "You will see: Thank you for applying",
+  ]) {
+    it(`rejects instructional receipt copy: ${pageText}`, () => {
+      assert.equal(confirmationCheck({ pageText }).submitted, false);
+    });
+  }
+  for (const entry of [
+    { role: "textbox", name: "Name", required: true },
+    { role: "textbox", name: "Resume", required: false },
+    { role: "button", name: "Submit application" },
+    { role: "button", name: "Next" },
+  ]) {
+    it(`rejects receipt copy and routes alongside active ${entry.name}`, () => {
+      assert.equal(
+        confirmationCheck({
+          pageText: "Thank you for applying",
+          currentUrl: "https://jobs.example.com/confirmation",
+          refs: { e1: entry },
+        }).submitted,
+        false
+      );
+    });
+  }
+  it("allows unrelated newsletter controls on a genuine receipt", () => {
+    assert.equal(
+      confirmationCheck({
+        pageText: "Thank you for applying",
+        refs: {
+          e1: { role: "textbox", name: "Email" },
+          e2: { role: "button", name: "Subscribe" },
+        },
+      }).submitted,
+      true
+    );
+  });
+});
+
+it("accepts a standalone receipt followed by what the employer will do", () => {
+  assert.equal(
+    confirmationCheck({ pageText: "Thank you for applying, we will be in touch." }).submitted,
+    true
+  );
+});
+
+describe("confirmationCheck receipt clause qualification", () => {
+  for (const pageText of [
+    "After you submit, you will see:\nThank you for applying",
+    "Application submitted? Click Apply to begin.",
+    "Application received (example confirmation message)",
+  ]) {
+    it(`rejects a qualified receipt: ${pageText}`, () => {
+      assert.equal(confirmationCheck({ pageText }).submitted, false);
+    });
+  }
+  for (const pageText of [
+    "Application successfully submitted.",
+    "Thank you for applying, you should receive a confirmation email shortly.",
+    "Thank you for applying, we will contact you if shortlisted.",
+    "Thank you for applying, once we review your résumé we will contact you.",
+    "Application received (reference 123).",
+  ]) {
+    it(`accepts a genuine receipt clause: ${pageText}`, () => {
+      assert.equal(
+        confirmationCheck({
+          pageText,
+          refs: { otherJob: { role: "button", name: "Apply to another role" } },
+        }).submitted,
+        true
+      );
+    });
+  }
+});

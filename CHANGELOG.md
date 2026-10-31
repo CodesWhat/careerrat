@@ -8,6 +8,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Application verification rejects instructional examples and partial confirmation
+  URLs while preserving genuine receipts and the single-submit rule.
+- Company discovery pins validated public DNS addresses and bounds careers-page
+  downloads by size and a deadline that includes reading the response body.
 - Updated dependencies with security fixes for schema validation, test tooling,
   and the retained desktop build tools.
 
