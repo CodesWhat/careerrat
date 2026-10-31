@@ -3894,3 +3894,58 @@ for (const pageText of [
     assert.equal(clicks(log).length, 0);
   });
 }
+
+for (const [label, pageText, refs, expected] of [
+  [
+    "missing required file",
+    "Thank you for applying",
+    refsOf([["upload", "button", "Attach", true, { fileInput: true, fileAttached: false }]]),
+    "submitted-unverified",
+  ],
+  [
+    "completed required file",
+    "Thank you for applying",
+    refsOf([["upload", "button", "Attach", true, { fileInput: true, fileAttached: true }]]),
+    "submitted",
+  ],
+  [
+    "optional file",
+    "Thank you for applying",
+    refsOf([["upload", "button", "Attach", false, { fileInput: true, fileAttached: false }]]),
+    "submitted",
+  ],
+  [
+    "receipt browsing navigation",
+    "Thank you for applying",
+    refsOf([["nav", "button", "Continue browsing jobs"]]),
+    "submitted",
+  ],
+  [
+    "receipt status navigation",
+    "Thank you for applying",
+    refsOf([["nav", "button", "Review application status"]]),
+    "submitted",
+  ],
+  ["greeting receipt", "Hi Sam, thank you for applying", {}, "submitted"],
+  ["second-clause receipt", "Thank you, your application has been submitted.", {}, "submitted"],
+  [
+    "congratulations receipt",
+    "Congratulations, your application was successfully submitted.",
+    {},
+    "submitted",
+  ],
+]) {
+  test(`auto submit final verified case: ${label} has exactly one submit`, async () => {
+    const receipt = { origin: GREENHOUSE_URL, pageText, refs };
+    const { ops, log } = createFakeOps([SUBMIT_FORM, receipt]);
+    const execute = makeDriver({ ops, ...fastWaits });
+    const result = await execute(AUTO_REQUEST);
+    assert.equal(result.state, expected);
+    assert.equal(result.verified, expected === "submitted");
+    assert.equal(clicks(log).length, 1);
+    if (expected === "submitted-unverified") {
+      assert.equal((await execute(AUTO_REQUEST)).state, expected);
+      assert.equal(clicks(log).length, 1);
+    }
+  });
+}
