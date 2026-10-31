@@ -10,14 +10,44 @@ All notable changes to CareerRat are documented here. This project follows
 
 - CLI commands read and append durable job or workspace history, list recorded
   knowledge changes, and undo them through the existing stale-write checks.
+- `careerrat tui` shows saved jobs beside a native Claude or Codex terminal, with
+  status filtering, structured pay sorting and selected-job history.
+- Configured-source searches can run in bounded background workers. Dropped files
+  are captured privately before handoff; text, Markdown, DOCX and email share the
+  existing extractor. Unsupported formats retain their original file for follow-up.
+- DB-backed settings and evidence commands record supported changes and their
+  guarded Undo in the same transaction.
+
+## [0.22.0] - 2026-10-31
+
+### Added
+
+- Keep a separate workspace for each person with `careerrat people` and
+  `careerrat --for <name> <command>`.
+- Candidate knowledge changes carry saved before/after values and Undo.
+  Grounded onboarding, evidence, coaching, strategy and LinkedIn suggestions
+  can be saved directly; changes that loosen honesty still need confirmation.
+- Company-health checks and gap coaching run when their triggers are met.
 
 ### Fixed
 
+- Incomplete resume extractions fail clearly and can be retried instead of
+  silently saving a title without the source resume's experience.
+- Workspace import accepts YAML flow collections and migrates retired settings.
+- Application verification rejects instructional examples and partial confirmation
+  URLs while preserving genuine receipts and the single-submit rule.
+- Company discovery pins validated public DNS addresses and bounds careers-page
+  downloads by size and a deadline that includes reading the response body.
 - Updated dependencies with security fixes for schema validation, test tooling,
   and the retained desktop build tools.
 
 ### Changed
 
+- Browser capabilities are on by default and can be turned off individually.
+  A disabled capability produces a clear note instead of another permission
+  prompt. Required application and evidence checks still apply.
+- An unanswered screening question flags the affected job while other work
+  continues. That application stays blocked until the answer is resolved.
 - Renovate owns dependency update PRs. Major upgrades wait in its dependency
   dashboard; the retired Mac release workflow gets no further updates.
 

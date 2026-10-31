@@ -922,6 +922,14 @@ function stepSessionFields(stepIndex, easyApply) {
   return { stepIndex, stepKey: easyApply ? easyApplyStepKey(stepIndex) : null };
 }
 
+function confirmationFromSnapshot(snapshot) {
+  return confirmationCheck({
+    pageText: snapshot.pageText,
+    currentUrl: snapshot.origin,
+    refs: snapshot.refs,
+  });
+}
+
 // Shared by the entry-point confirmation check and the Easy Apply loop's
 // post-advance confirmation check (an advance click can land on a
 // confirmation page directly) — same screenshot + verified response either way.
@@ -1085,10 +1093,7 @@ export function createApplyDriver({
       throwIfAborted(signal);
       try {
         latest = await browserOp(ops, "snapshot", { pageId }, signal);
-        const confirmation = confirmationCheck({
-          pageText: latest.pageText,
-          currentUrl: latest.origin,
-        });
+        const confirmation = confirmationFromSnapshot(latest);
         if (confirmation.submitted) {
           return submittedResult({
             ops,
@@ -1201,10 +1206,7 @@ export function createApplyDriver({
         if (!retainedOriginIsTrusted(retainedSession, retainedSnapshot.origin)) {
           throw new Error("The prepared tab left the trusted application site.");
         }
-        const confirmation = confirmationCheck({
-          pageText: retainedSnapshot.pageText,
-          currentUrl: retainedSnapshot.origin,
-        });
+        const confirmation = confirmationFromSnapshot(retainedSnapshot);
         if (confirmation.submitted) {
           return submittedResult({
             ops,
@@ -1333,10 +1335,7 @@ export function createApplyDriver({
       };
     }
     trustRetainedOrigin(retainedSession, snapshot.origin);
-    let confirmation = confirmationCheck({
-      pageText: snapshot.pageText,
-      currentUrl: snapshot.origin,
-    });
+    let confirmation = confirmationFromSnapshot(snapshot);
     if (confirmation.submitted) {
       return submittedResult({
         ops,
@@ -1459,10 +1458,7 @@ export function createApplyDriver({
         };
       }
       trustRetainedOrigin(retainedSession, snapshot.origin);
-      confirmation = confirmationCheck({
-        pageText: snapshot.pageText,
-        currentUrl: snapshot.origin,
-      });
+      confirmation = confirmationFromSnapshot(snapshot);
       if (confirmation.submitted) {
         return submittedResult({
           ops,
@@ -1885,10 +1881,7 @@ export function createApplyDriver({
       // A click meant to advance the page can land on a confirmation page
       // directly (the driver's click-safety fixes make this unexpected, not
       // impossible): report reality instead of treating it as a stalled step.
-      const postAdvanceConfirmation = confirmationCheck({
-        pageText: nextSnapshot.pageText,
-        currentUrl: nextSnapshot.origin,
-      });
+      const postAdvanceConfirmation = confirmationFromSnapshot(nextSnapshot);
       if (postAdvanceConfirmation.submitted) {
         return submittedResult({
           ops,

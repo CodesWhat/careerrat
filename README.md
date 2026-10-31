@@ -42,12 +42,22 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of October 27, 2026:** v0.21.0 is the latest release. CareerRat installs
+**As of October 31, 2026:** v0.22.0 is the latest release. CareerRat installs
 from npm and runs in your browser, on your machine, with the AI CLI you already
 use. Terminal sessions stay optional. v0.19.2 was the last release with a Mac
 app.
 
-New in v0.21.0:
+New in v0.22.0:
+
+- Separate each person's search with `careerrat people` and `--for <name>`.
+- Grounded candidate knowledge changes have a saved history and Undo. Honesty
+  changes that loosen a boundary still need confirmation.
+- Browser capabilities are on by default, with individual off switches. A
+  disabled capability produces a clear note instead of a repeated prompt.
+- Resume uploads reject incomplete extraction, and company discovery pins
+  validated public DNS addresses and bounds response downloads.
+
+Automatic submission, introduced in v0.21.0:
 
 - CareerRat submits an application itself once it's complete and checked: every
   required field answered, required uploads attached, one clear submit button,
