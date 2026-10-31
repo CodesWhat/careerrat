@@ -391,3 +391,74 @@ test("shutdown cannot reopen watchers when the workspace disappears during agent
   });
   await done;
 });
+
+test("a file dropped into the real terminal is copied and extracted before the agent sees it", {
+  timeout: 15000,
+}, async (t) => {
+  const env = fixture(t);
+  const source = join(env.HOME, "interview notes.md");
+  const body = "Interviewer: Tell me about ownership.\nCandidate: I built the shared platform.";
+  writeFileSync(source, body);
+  preparePtyHelpers();
+  const terminal = new headless.Terminal({ cols: 160, rows: 36, allowProposedApi: true });
+  const program = `const {readFileSync}=require('node:fs');
+    process.stdin.setRawMode(true);process.stdin.resume();
+    process.stdout.write('\\x1b[?2004hREADY_FILE_AGENT\\r\\n');
+    let buffer='';process.stdin.on('data',data=>{buffer+=data;
+      if(buffer.includes('\\x1b[201~')){
+        const match=buffer.match(/"path":("(?:\\\\.|[^"\\\\])*")/);
+        const saved=match && readFileSync(JSON.parse(match[1]),'utf8')===${JSON.stringify(body)};
+        process.stdout.write('FILE_SAVED:'+!!saved+' AUTO_SUBMIT:'+buffer.includes('\\r')+'\\r\\n');
+      }
+    });`;
+  const runtimeUrl = new URL("../src/core/tui/runtime.mjs", import.meta.url).href;
+  const driver = `import {runTerminalWorkspace} from ${JSON.stringify(runtimeUrl)};
+    process.exitCode=await runTerminalWorkspace({repoRoot:${JSON.stringify(root)},env:process.env,agent:{command:process.execPath,args:['-e',${JSON.stringify(program)}]}});`;
+  let child;
+  let exited = false;
+  let stage = 0;
+  let snapshot = "";
+  let rejectRun;
+  const done = new Promise((resolve, reject) => {
+    rejectRun = reject;
+    child = pty.spawn(process.execPath, ["--input-type=module", "-e", driver], {
+      cwd: root,
+      env,
+      cols: 160,
+      rows: 36,
+      name: "xterm-256color",
+    });
+    child.onData((data) =>
+      terminal.write(data, () => {
+        snapshot = Array.from({ length: terminal.rows }, (_, index) =>
+          terminal.buffer.active
+            .getLine(terminal.buffer.active.baseY + index)
+            ?.translateToString(true)
+        ).join("\n");
+        if (stage === 0 && snapshot.includes("READY_FILE_AGENT")) {
+          stage = 1;
+          child.write(`\x1b[200~'${source}'\x1b[201~`);
+        }
+        if (stage === 1 && snapshot.includes("FILE_SAVED:true AUTO_SUBMIT:false")) {
+          assert.match(snapshot, /Atlas/);
+          stage = 2;
+          child.write("\x11");
+        }
+      })
+    );
+    child.onExit(({ exitCode }) => {
+      exited = true;
+      if (stage === 2 && exitCode === 0) resolve();
+      else reject(new Error(`File drop exited at ${stage}: ${exitCode}\n${snapshot}`));
+    });
+  });
+  const timer = setTimeout(
+    () => rejectRun(new Error(`File drop timed out at ${stage}\n${snapshot}`)),
+    10000
+  );
+  t.after(async () => {
+    clearTimeout(timer);
+    await stopTestTerminal(child, () => exited, terminal);
+  });
+  await done;
+});

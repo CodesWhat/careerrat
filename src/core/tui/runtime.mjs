@@ -5,7 +5,7 @@ import { emitKeypressEvents } from "node:readline";
 import { dbFilePath } from "../db/connection.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
-import { captureTuiPaste } from "./intake.mjs";
+import { captureTuiContext } from "./intake.mjs";
 import { readJobs } from "./jobs.mjs";
 import {
   createWorkspaceState,
@@ -125,12 +125,13 @@ export async function runTerminalWorkspace({
       state = { ...state, message: error.message };
     }
   }
-  function finishPaste() {
+  async function finishPaste() {
     const text = pasted;
     pasted = null;
     if (!text.trim()) return;
     try {
-      const captured = captureTuiPaste({ ...ctx, text });
+      const captured = await captureTuiContext({ ...ctx, text, selectedId: state.selectedId });
+      if (closing) return;
       request(captured.request);
       state = {
         ...state,
