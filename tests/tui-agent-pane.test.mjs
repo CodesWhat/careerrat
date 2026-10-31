@@ -31,6 +31,113 @@ function requireFunction(owner, name) {
 
 const write = (terminal, value) => new Promise((resolve) => terminal.write(value, resolve));
 
+test("POSIX cleanup waits for an exiting group after a transient permission probe", {
+  skip: process.platform === "win32",
+  timeout: 8000,
+}, async (t) => {
+  const pane = api.createAgentPane({
+    command: process.execPath,
+    args: ["-e", "process.stdin.resume()"],
+    cwd: process.cwd(),
+    cols: 20,
+    rows: 5,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME },
+  });
+  const kill = process.kill.bind(process);
+  let injected = false;
+  t.mock.method(process, "kill", (pid, signal) => {
+    if (pid === -pane.pid && signal === 0 && !injected) {
+      injected = true;
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }
+    return kill(pid, signal);
+  });
+  t.after(() => {
+    t.mock.restoreAll();
+    try {
+      kill(-pane.pid, "SIGKILL");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  });
+  await pane.dispose();
+  assert.equal(injected, true);
+});
+
+test("POSIX cleanup tolerates the exited leader's group disappearing after a permission response", {
+  skip: process.platform === "win32",
+  timeout: 8000,
+}, async (t) => {
+  let finished;
+  const exited = new Promise((resolve) => {
+    finished = resolve;
+  });
+  const pane = api.createAgentPane({
+    command: process.execPath,
+    args: ["-e", "process.exit(0)"],
+    cwd: process.cwd(),
+    cols: 20,
+    rows: 5,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME },
+    onExit: finished,
+  });
+  await exited;
+  const kill = process.kill.bind(process);
+  let injected = false;
+  t.mock.method(process, "kill", (pid, signal) => {
+    if (pid === -pane.pid && signal === "SIGTERM" && !injected) {
+      injected = true;
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }
+    return kill(pid, signal);
+  });
+  try {
+    await pane.dispose();
+    assert.equal(injected, true);
+  } finally {
+    t.mock.restoreAll();
+  }
+});
+
+test("POSIX cleanup does not report success when permission probes never clear", {
+  skip: process.platform === "win32",
+  timeout: 8000,
+}, async (t) => {
+  const pane = api.createAgentPane({
+    command: process.execPath,
+    args: ["-e", "process.stdin.resume();setTimeout(()=>process.exit(),5000)"],
+    cwd: process.cwd(),
+    cols: 20,
+    rows: 5,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME },
+  });
+  const kill = process.kill.bind(process);
+  t.mock.method(process, "kill", (pid, signal) => {
+    if (pid === -pane.pid) throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    return kill(pid, signal);
+  });
+  t.after(async () => {
+    t.mock.restoreAll();
+    try {
+      kill(-pane.pid, "SIGKILL");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+    const deadline = Date.now() + 1000;
+    while (true) {
+      try {
+        kill(pane.pid, 0);
+      } catch (error) {
+        if (error.code === "ESRCH") break;
+        throw error;
+      }
+      if (Date.now() >= deadline) throw new Error("permission fixture did not exit");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  });
+  await assert.rejects(pane.dispose(), /process group did not stop/);
+});
+
 test("terminal framebuffer preserves color, wide characters and cell boundaries", async () => {
   const render = requireFunction(api, "renderTerminalRows");
   const terminal = new Terminal({ cols: 12, rows: 3, allowProposedApi: true });

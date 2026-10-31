@@ -166,7 +166,8 @@ export function createAgentPane({
         child.kill();
       } else process.kill(-groupPid, name);
     } catch (error) {
-      if (error.code !== "ESRCH") throw error;
+      if (error.code !== "ESRCH" && !(process.platform !== "win32" && error.code === "EPERM"))
+        throw error;
     }
   }
   function waitForExit(ms) {
@@ -186,7 +187,8 @@ export function createAgentPane({
         process.kill(-groupPid, 0);
       } catch (error) {
         if (error.code === "ESRCH") return true;
-        throw error;
+        // Darwin can briefly report EPERM for a group containing only zombies.
+        if (error.code !== "EPERM") throw error;
       }
       const remaining = deadline - Date.now();
       if (remaining <= 0) return false;
