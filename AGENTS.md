@@ -218,6 +218,15 @@ value is chmod `0600`, loaded at server boot, and never echoed back by the API.
 
 ## Dashboard Dev Server Contract
 
+**Terminal workspace exception.** When `CAREERRAT_SURFACE=tui`, the persistent
+terminal workspace owns the live view. Do not start `tracker-dev`, open a
+CareerRat browser page, or create a browser chat session. Execute skills in the
+native terminal agent and write through the canonical CLI/domain owners below;
+the jobs table refreshes from those writes. Use the durable job/workspace thread
+and recorded-change commands for history and Undo. External employer websites
+may still need browser automation. The server instructions below apply to the
+existing browser entry while its retirement is in progress.
+
 The dashboard is part of the live CareerRat workspace, not a one-off artifact. In
 any active job-search session, make sure `careerrat tracker-dev` is serving the
 tracker before telling the user to open the dashboard.

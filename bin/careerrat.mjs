@@ -91,6 +91,7 @@ const CLIS = {
   evaluate: "src/cli/evaluate.mjs",
   questions: "src/cli/questions.mjs",
   tracker: "src/cli/tracker.mjs",
+  tui: "src/cli/tui.mjs",
   "tracker-dev": "src/cli/tracker-dev.mjs",
   people: "src/cli/people.mjs",
   data: "src/cli/data.mjs",

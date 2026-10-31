@@ -42,7 +42,7 @@ const row = (id, evaluation, more = {}) => ({
 });
 
 test("legacy browsing preserves complete job records and doesn't create a database", (t) => {
-  const app = row("a", pay(190000, 220000), {
+  const app = row("a", pay(176000, 204000), {
     status: "technical interview",
     artifacts: { jd: "workspace/jobs/a.md" },
     conversations: [{ notes: "Prior round" }],
