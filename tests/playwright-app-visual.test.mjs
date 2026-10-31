@@ -7,10 +7,15 @@ import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
+import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import { seedDemo } from "../src/core/db/demo-seed.mjs";
-import { candidateConfigPatch, sourcingRunComplete } from "../src/core/db/verbs/index.mjs";
+import {
+  candidateConfigGet,
+  candidateConfigPatch,
+  sourcingRunComplete,
+} from "../src/core/db/verbs/index.mjs";
 import { startFirstSearchRun } from "../src/core/onboarding/first-search-run.mjs";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -61,6 +66,90 @@ async function closeDevServer(dev) {
     await new Promise((resolve) => dev.server.close(resolve));
   }
 }
+
+test("real Chromium opens the CLI dashboard, restores history, and undoes a saved change without AI", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run the built app visual contract",
+  timeout: 90_000,
+}, async () => {
+  const home = mkdtempSync(join(tmpdir(), "careerrat-cli-dashboard-"));
+  const pathCtx = {
+    repoRoot: PRODUCT_ROOT,
+    env: { ...process.env, CAREERRAT_HOME: home, CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:9" },
+  };
+  seedDemo({ ...pathCtx, today: "2026-10-31" });
+  const before = candidateConfigGet(pathCtx).targeting.fit_bands?.fit_floor;
+  await executeWorkspaceIntent({
+    ...pathCtx,
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: { change: { kind: "profile", section: "fit-floor", value: before === 70 ? 75 : 70 } },
+    },
+  });
+  const dev = createDevServer(pathCtx);
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  page.setDefaultTimeout(20_000);
+  const errors = [];
+  const executionRequests = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("request", (request) => {
+    if (
+      /\/api\/(?:chat\/(?:start|message)|workspace\/(?:message|intent|preview)|skill\/run|onboard\/finish)/.test(
+        request.url()
+      )
+    )
+      executionRequests.push(request.url());
+  });
+  const screenshots = join(PRODUCT_ROOT, "output", "playwright");
+  mkdirSync(screenshots, { recursive: true });
+  try {
+    await dev.listen({ port: 0, host: "127.0.0.1" });
+    await page.goto(`http://127.0.0.1:${dev.server.address().port}/app/`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.getByRole("heading", { name: "Today, in focus." }).waitFor();
+    assert.equal(await page.locator(".chat-first-composer").count(), 0);
+    await page.screenshot({ path: join(screenshots, "cli-workspace.png"), fullPage: true });
+    await page.locator(".cli-dashboard__job").first().click();
+    await page.getByRole("heading", { name: "The job thread", exact: true }).waitFor();
+    const selectedUrl = page.url();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("heading", { name: "The job thread", exact: true }).waitFor();
+    assert.equal(page.url(), selectedUrl);
+    await page
+      .getByRole("navigation", { name: "Dashboard" })
+      .getByRole("button", { name: "Pipeline", exact: true })
+      .click();
+    await page.getByRole("heading", { name: "The whole picture." }).waitFor();
+    await page
+      .getByRole("navigation", { name: "Dashboard" })
+      .getByRole("button", { name: "Changes", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await page.getByText("Undone", { exact: true }).waitFor();
+    assert.equal(candidateConfigGet(pathCtx).targeting.fit_bands?.fit_floor, before);
+    await page.screenshot({ path: join(screenshots, "cli-workspace-changes.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page
+      .getByRole("navigation", { name: "Dashboard" })
+      .getByRole("button", { name: "Today", exact: true })
+      .click();
+    await page.getByRole("heading", { name: "Today, in focus." }).waitFor();
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      true
+    );
+    await page.screenshot({ path: join(screenshots, "cli-workspace-mobile.png"), fullPage: true });
+    assert.deepEqual(executionRequests, []);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+    await closeDevServer(dev);
+    closeAll();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 test("real Chromium renders the built chat-first workspace without selection glow or alignment drift", {
   skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run the built app visual contract",
@@ -120,7 +209,7 @@ test("real Chromium renders the built chat-first workspace without selection glo
     // auto-retry absorbs however long the redirect effect takes to fire.
     const [finishResponse] = await Promise.all([
       page.waitForResponse((response) => response.url().endsWith("/api/onboard/finish")),
-      page.goto(`${baseUrl}/app/`, { waitUntil: "domcontentloaded" }),
+      page.goto(`${baseUrl}/app/conversation`, { waitUntil: "domcontentloaded" }),
     ]);
     assert.equal(
       finishResponse.ok(),

@@ -648,3 +648,56 @@ test("GET /api/data/dashboard includes the durable chat-first aggregate without 
     await closeServer(server);
   }
 });
+
+test("dashboard workspace metadata matches the people launcher in ready and empty workspaces", async () => {
+  const { mountPeopleRoutes } = await import("../src/cli/people-route.mjs");
+  for (const initialized of [false, true]) {
+    const repoRoot = tempRepo();
+    if (initialized)
+      seedFixture(repoRoot, {
+        meta: {},
+        applications: [],
+        sourced: [],
+        sources: [],
+        communications: [],
+      });
+    const server = bootServer(repoRoot);
+    mountPeopleRoutes({
+      addRoute: (method, path, handler) => server.routes.set(`${method} ${path}`, handler),
+      repoRoot,
+      env: {},
+    });
+    const people = await getJson(server, "/api/people");
+    const dashboard = await getJson(server, "/api/data/dashboard");
+    assert.equal(dashboard.status, initialized ? 200 : 409);
+    assert.deepEqual(dashboard.body.workspace, {
+      id: join(repoRoot, ".careerrat"),
+      current: people.body.current,
+      startCommand: people.body.startCommand,
+    });
+  }
+});
+
+test("dashboard identity distinguishes the same person in different custom roots", async () => {
+  const { mountPeopleRoutes } = await import("../src/cli/people-route.mjs");
+  const { personEnv } = await import("../src/core/paths/people.mjs");
+  const repoRoot = tempRepo();
+  const identities = [];
+  for (const base of [join(repoRoot, "first owner's workspace"), join(repoRoot, "second owner")]) {
+    const env = personEnv({ repoRoot, env: { CAREERRAT_PEOPLE_BASE: base }, name: "alice" });
+    const routes = new Map();
+    const addRoute = (method, path, handler) => routes.set(`${method} ${path}`, handler);
+    mountDashboardRoutes({ addRoute, repoRoot, env });
+    mountPeopleRoutes({ addRoute, repoRoot, env });
+    const people = await getJson({ routes }, "/api/people");
+    const dashboard = await getJson({ routes }, "/api/data/dashboard");
+    assert.equal(dashboard.status, 409);
+    assert.deepEqual(dashboard.body.workspace, {
+      id: env.CAREERRAT_HOME,
+      current: "alice",
+      startCommand: people.body.startCommand,
+    });
+    identities.push(dashboard.body.workspace.id);
+  }
+  assert.notEqual(identities[0], identities[1]);
+});

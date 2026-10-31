@@ -659,6 +659,13 @@ export function getDashboard() {
   return apiFetch("/api/data/dashboard");
 }
 
+export function revertKnowledgeChange({ messageId, index }) {
+  return apiFetch("/api/workspace/knowledge/revert", {
+    method: "POST",
+    body: JSON.stringify({ messageId, index }),
+  });
+}
+
 // Visible status changes belong to the one durable workspace agent. The
 // deterministic outcome writer still owns the canonical DB transition behind
 // this typed intent.

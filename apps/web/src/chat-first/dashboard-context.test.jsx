@@ -112,6 +112,7 @@ async function flushEffects() {
 beforeEach(() => {
   hookHarness.clear();
   vi.clearAllMocks();
+  apiMocks.getDashboard.mockReset();
   sse.calls = [];
   vi.stubGlobal(
     "setInterval",
@@ -121,13 +122,37 @@ beforeEach(() => {
 });
 
 describe("DashboardContext", () => {
+  it("replaces old rows and launcher with the new empty workspace on a 409", async () => {
+    const dashboardContext = await loadDashboardContext();
+    const { ApiError } = await import("../lib/api.js");
+    const workspace = { id: "/new/people/alice", current: "alice", startCommand: "command B" };
+    apiMocks.getDashboard
+      .mockResolvedValueOnce({
+        data: { stats: { active: 2 } },
+        workspace: { id: "/old", startCommand: "command A" },
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new ApiError("no database"), { status: 409, body: { workspace } })
+      );
+    renderProvider(dashboardContext);
+    await flushEffects();
+    let provider = renderProvider(dashboardContext);
+    await provider.props.value.refetch();
+    provider = renderProvider(dashboardContext);
+    expect(provider.props.value.data).toBeNull();
+    expect(provider.props.value.workspace).toEqual(workspace);
+    expect(provider.props.value.noDatabase).toBe(true);
+  });
+
   it("exposes dashboard data and setup, then updates setup on refetch", async () => {
     const first = {
       data: { stats: { active: 2 } },
+      workspace: { id: "/owner-a/people/alice", current: "alice", startCommand: "command A" },
       setup: { readiness: { search_ready: true, gate_ready: false } },
     };
     const second = {
       data: { stats: { active: 3 } },
+      workspace: { id: "/owner-b/people/alice", current: "alice", startCommand: "command B" },
       setup: { readiness: { search_ready: true, gate_ready: true } },
     };
     apiMocks.getDashboard.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
@@ -141,6 +166,7 @@ describe("DashboardContext", () => {
 
     expect(snapshot.data).toEqual(first.data);
     expect(snapshot.setup).toEqual(first.setup);
+    expect(snapshot.workspace).toEqual(first.workspace);
 
     await snapshot.refetch();
     provider = renderProvider(dashboardContext);
@@ -149,6 +175,7 @@ describe("DashboardContext", () => {
 
     expect(snapshot.data).toEqual(second.data);
     expect(snapshot.setup).toEqual(second.setup);
+    expect(snapshot.workspace).toEqual(second.workspace);
   });
 
   it("resolves a failed non-409 dashboard fetch into a friendly {message, action, detail} error, with retry wired to load", async () => {

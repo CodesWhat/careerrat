@@ -41,6 +41,7 @@ import { requireDb } from "../core/db/connection.mjs";
 import { assembleActivityEvents, assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { candidateConfigGet, chatFirstStateFromDb } from "../core/db/verbs.mjs";
 import { hydrateJobDescriptionCompleteness } from "../core/jobs/job-description.mjs";
+import { workspaceContext } from "../core/people/launcher.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
 import { loadAgentGuidanceSnapshotAsync } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../core/tracker/dashboard-data.js";
@@ -79,9 +80,10 @@ function statusForError(err) {
   return 500; // this route has no caller-supplied body/params to 400 on
 }
 
-function respondError(res, err) {
+function respondError(res, err, workspace) {
   sendJson(res, statusForError(err), {
     ok: false,
+    workspace,
     setup: null,
     error: err?.message || String(err),
   });
@@ -128,11 +130,12 @@ export function mountDashboardRoutes({
   loadAgentGuidance: loadAgentGuidanceForRoute = loadAgentGuidanceSnapshotAsync,
 }) {
   addRoute("GET", "/api/data/dashboard", async (_req, res) => {
+    const workspace = workspaceContext({ repoRoot, env });
     let db;
     try {
       db = requireDb({ repoRoot, env });
     } catch (err) {
-      respondError(res, err);
+      respondError(res, err, workspace);
       return;
     }
 
@@ -167,9 +170,9 @@ export function mountDashboardRoutes({
 
       const setup = readSetup({ repoRoot, env, candidateConfigGetForRoute });
 
-      sendJson(res, 200, { ok: true, meta: dbSnapshot.meta, data: viewModel, setup });
+      sendJson(res, 200, { ok: true, meta: dbSnapshot.meta, data: viewModel, setup, workspace });
     } catch (err) {
-      respondError(res, err);
+      respondError(res, err, workspace);
     }
   });
 }
