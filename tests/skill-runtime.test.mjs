@@ -1479,7 +1479,7 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   const prompt = buildPrompt({ skill: "ingest-profile", input: "hi", mode: "conversational" });
   assert.match(prompt, /```careerrat:confirm/);
   assert.match(prompt, /"kind":"authorization"/);
-  assert.match(prompt, /consent_capability/);
+  assert.doesNotMatch(prompt, /consent_capability/);
   assert.match(prompt, /companies_suggest/);
   assert.match(prompt, /company_add/);
   assert.doesNotMatch(prompt, /consent_mode/);
@@ -1487,11 +1487,21 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   assert.match(prompt, /role_buckets.*name.*priority.*titles/i);
   assert.match(prompt, /seniority_ladder.*at least two/i);
   assert.match(prompt, /titles array.*non-empty strings/i);
-  assert.match(prompt, /capability.*only when.*needed/i);
-  assert.match(prompt, /never.*saved job-source search/i);
+  assert.match(prompt, /on by default.*never ask the user for permission/i);
+  assert.match(prompt, /saved job-source search uses the site's plain/i);
   assert.match(prompt, /site-specific Yes\/No login question/i);
   assert.match(prompt, /voluntary self-identification.*local Application defaults/i);
   assert.match(prompt, /never include it in a candidate_patch/i);
+});
+
+test("buildPrompt: confirm blocks save directly, and only loosening changes ask first", () => {
+  const prompt = buildPrompt({ skill: "ingest-profile", input: "hi", mode: "conversational" });
+  assert.match(prompt, /saves directly and lands in the user's thread with an Undo/i);
+  assert.match(prompt, /no click to wait for/i);
+  assert.match(prompt, /loosening an honesty boundary/i);
+  assert.match(prompt, /lowering the pay floor or target/i);
+  assert.doesNotMatch(prompt, /click to save|clickable pill/i);
+  assert.match(prompt, /Never say a new fact is noted or saved unless/i);
 });
 
 test("buildPrompt: every conversational skill turn uses Powell's plain-English voice", () => {

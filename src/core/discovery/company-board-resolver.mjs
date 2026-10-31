@@ -5,11 +5,13 @@ import {
   companyBoardResolutionGet,
   companyBoardResolutionUpsert,
 } from "../db/verbs/company-discovery.mjs";
+import { guardedFetch, resolvePublicHttpTarget } from "../net/public-http-fetch.mjs";
 import { inferProvider } from "../scoring/sourced-scanner.mjs";
 
 export const COMPANY_DISCOVERY_BATCH_MAX = 12;
 export const RESOLUTION_CACHE_TTL_DAYS = 14;
 export const RESOLVER_FETCH_TIMEOUT_MS = 8000;
+export const RESOLVER_FETCH_MAX_BYTES = 1024 * 1024;
 export const RESOLVER_REDIRECT_CAP = 3;
 export const ZERO_JOB_REFRESH_THRESHOLD = 2;
 export const RESOLUTION_FAILURE_REFRESH_THRESHOLD = 2;
@@ -179,46 +181,87 @@ async function defaultLookupHost(host) {
   return dnsLookup(host, { all: true, verbatim: true });
 }
 
-function lookupAddresses(result) {
-  if (!result) return [];
-  const values = Array.isArray(result) ? result : [result];
-  return values
-    .map((item) => (typeof item === "string" ? item : item?.address))
-    .filter((address) => typeof address === "string" && address.trim());
+async function assertSafeUrl(url, { lookupHost = defaultLookupHost, signal } = {}) {
+  const target = await resolvePublicHttpTarget(url.toString(), { resolveHost: lookupHost, signal });
+  signal?.throwIfAborted();
+  if (!target.ok) throw makeError(target.reason, "UNSAFE_COMPANY_BOARD_URL");
 }
 
-async function assertSafeUrl(url, { lookupHost = defaultLookupHost } = {}) {
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw makeError(
-      `unsupported company board URL scheme: ${url.protocol}`,
-      "UNSAFE_COMPANY_BOARD_URL"
-    );
-  }
-  const host = url.hostname;
-  if (isPrivateOrLocalHost(host)) {
-    throw makeError(`unsafe local/private company board host: ${host}`, "UNSAFE_COMPANY_BOARD_URL");
-  }
-  if (lookupHost) {
-    const addresses = lookupAddresses(await lookupHost(host));
-    if (addresses.some(isPrivateOrLocalHost)) {
-      throw makeError(
-        `company board host resolves to local/private address: ${host}`,
-        "UNSAFE_COMPANY_BOARD_URL"
-      );
+function withAbort(promise, signal) {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(promise)
+      .then(resolve, reject)
+      .finally(() => {
+        signal.removeEventListener("abort", onAbort);
+      });
+  });
+}
+
+async function fetchPage(url, { fetchImpl, lookupHost, dispatcherFactory, maxBytes, signal }) {
+  const guarded = await guardedFetch(
+    url.toString(),
+    { signal, redirect: "manual" },
+    {
+      fetchImpl,
+      resolveHost: lookupHost,
+      dispatcherFactory,
     }
+  );
+  if (!guarded.ok) {
+    signal.throwIfAborted();
+    throw makeError(guarded.reason, "UNSAFE_COMPANY_BOARD_URL");
   }
-}
-
-async function fetchWithTimeout(url, fetchImpl, timeoutMs, signal) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const response = guarded.response;
+  let reader;
+  let consumed = false;
   try {
-    return await fetchImpl(url.toString(), {
-      signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
-      redirect: "manual",
-    });
+    signal.throwIfAborted();
+    if (redirectTarget(response, url) || !response.ok) return { response, text: "" };
+    const tooLarge = () =>
+      makeError(
+        `company board response exceeds ${maxBytes} bytes`,
+        "COMPANY_BOARD_RESPONSE_TOO_LARGE"
+      );
+    const declared = Number(response.headers?.get?.("content-length"));
+    if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+    reader = response.body?.getReader?.();
+    if (!reader) {
+      if (response.body)
+        throw makeError(
+          "company board response has no readable stream",
+          "COMPANY_BOARD_FETCH_FAILED"
+        );
+      consumed = true;
+      return { response, text: "" };
+    }
+    const chunks = [];
+    let bytes = 0;
+    while (true) {
+      const { done, value } = await withAbort(reader.read(), signal);
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) throw tooLarge();
+      chunks.push(Buffer.from(value));
+    }
+    consumed = true;
+    return { response, text: Buffer.concat(chunks).toString("utf8") };
   } finally {
-    clearTimeout(timeout);
+    if (!consumed) {
+      try {
+        if (reader) await reader.cancel();
+        else await response.body?.cancel?.();
+      } catch {
+        // Best effort after an aborted response.
+      }
+    }
+    try {
+      reader?.releaseLock();
+    } finally {
+      await guarded.close();
+    }
   }
 }
 
@@ -409,15 +452,16 @@ async function resolveSupportedUrl({
   proof,
   lookupHost,
   fetchImpl,
-  timeoutMs,
+  dispatcherFactory,
+  maxBytes,
   depth,
   visited,
   signal,
 }) {
   signal?.throwIfAborted?.();
-  await assertSafeUrl(url, { lookupHost });
   const provider = directProvider(url);
   if (provider) {
+    await assertSafeUrl(url, { lookupHost, signal });
     return supportedResult({
       seed,
       url,
@@ -431,6 +475,7 @@ async function resolveSupportedUrl({
   }
 
   if (depth >= RESOLVER_REDIRECT_CAP) {
+    await assertSafeUrl(url, { lookupHost, signal });
     return genericPublicResult({ seed, url, observedAt, provenance: proof });
   }
 
@@ -439,10 +484,15 @@ async function resolveSupportedUrl({
   }
   visited.add(url.toString());
 
-  const response = await fetchWithTimeout(url, fetchImpl, timeoutMs, signal);
+  const { response, text } = await fetchPage(url, {
+    fetchImpl,
+    lookupHost,
+    dispatcherFactory,
+    maxBytes,
+    signal,
+  });
   const redirected = redirectTarget(response, url);
   if (redirected) {
-    await assertSafeUrl(redirected, { lookupHost });
     return resolveSupportedUrl({
       seed,
       url: redirected,
@@ -456,7 +506,8 @@ async function resolveSupportedUrl({
       ],
       lookupHost,
       fetchImpl,
-      timeoutMs,
+      dispatcherFactory,
+      maxBytes,
       depth: depth + 1,
       visited,
       signal,
@@ -470,12 +521,11 @@ async function resolveSupportedUrl({
     );
   }
 
-  const text = await response.text();
   const pageProof = [...proof, provenance("public-page-fetch", url, observedAt)];
   for (const link of extractLinks(text, url)) {
-    await assertSafeUrl(link, { lookupHost });
     const provider = directProvider(link);
     if (provider) {
+      await assertSafeUrl(link, { lookupHost, signal });
       return supportedResult({
         seed,
         url: link,
@@ -494,7 +544,8 @@ async function resolveSupportedUrl({
       proof: [...pageProof, provenance("homepage-link", link, observedAt)],
       lookupHost,
       fetchImpl,
-      timeoutMs,
+      dispatcherFactory,
+      maxBytes,
       depth: depth + 1,
       visited,
       signal,
@@ -514,6 +565,8 @@ export async function resolveCompanyBoard({
   forceRefresh = false,
   now = new Date(),
   timeoutMs = RESOLVER_FETCH_TIMEOUT_MS,
+  maxBytes = RESOLVER_FETCH_MAX_BYTES,
+  dispatcherFactory,
   signal,
   stageResolution,
 } = {}) {
@@ -538,18 +591,41 @@ export async function resolveCompanyBoard({
   }
 
   const observedAt = nowIso(now);
-  const result = await resolveSupportedUrl({
-    seed,
-    url: hintUrl,
-    observedAt,
-    proof: [provenance("seed-url-hint", hintUrl, observedAt)],
-    lookupHost,
-    fetchImpl,
-    timeoutMs,
-    depth: 0,
-    visited: new Set(),
-    signal,
-  });
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0)
+    throw makeError("invalid response byte limit", "BAD_REQUEST");
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () =>
+      controller.abort(
+        makeError(
+          `company board fetch timed out after ${timeoutMs}ms`,
+          "COMPANY_BOARD_FETCH_TIMEOUT"
+        )
+      ),
+    timeoutMs
+  );
+  const requestSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
+  let result;
+  try {
+    result = await resolveSupportedUrl({
+      seed,
+      url: hintUrl,
+      observedAt,
+      proof: [provenance("seed-url-hint", hintUrl, observedAt)],
+      lookupHost,
+      fetchImpl,
+      dispatcherFactory,
+      maxBytes,
+      depth: 0,
+      visited: new Set(),
+      signal: requestSignal,
+    });
+  } catch (error) {
+    requestSignal.throwIfAborted();
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   return writeCachedResolution({
     repoRoot,

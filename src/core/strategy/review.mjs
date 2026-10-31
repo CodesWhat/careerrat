@@ -386,6 +386,18 @@ function compactStrategyProposal(type, proposal) {
   return value.text ? { text: value.text } : {};
 }
 
+// The review input carries aggregates, not row ids, so a recommendation can't
+// cite rows we could check. The model's evidenceCount is clamped to the data
+// points the review actually saw: tracker rows plus recent learning entries.
+function evidenceCeiling(context) {
+  const counts = context.funnel?.counts || {};
+  const learnings = (context.learnings || []).reduce(
+    (sum, family) => sum + (family.entries?.length || 0),
+    0
+  );
+  return (Number(counts.apps) || 0) + (Number(counts.sourced) || 0) + learnings;
+}
+
 function freshDraftResult({ context, lastReview }) {
   return {
     state: "fresh",
@@ -446,6 +458,7 @@ export async function draftStrategyReview({
   }
 
   const data = aiResult.body.data || {};
+  const ceiling = evidenceCeiling(context);
   const recommendations = (Array.isArray(data.recommendations) ? data.recommendations : [])
     .slice(0, MAX_RECOMMENDATIONS)
     .map((rec, index) => {
@@ -455,7 +468,9 @@ export async function draftStrategyReview({
         type,
         title: cleanText(rec.title, 140),
         rationale: cleanText(rec.rationale, 300),
-        evidenceCount: Number.isFinite(rec.evidenceCount) ? Math.max(0, rec.evidenceCount) : 0,
+        evidenceCount: Number.isFinite(rec.evidenceCount)
+          ? Math.min(Math.max(0, rec.evidenceCount), ceiling)
+          : 0,
         proposal: compactStrategyProposal(type, rec.proposal),
       };
     });
@@ -511,6 +526,49 @@ function sourcedSetPriority({ repoRoot, env, id, priority, row }) {
       tags: ["operation:sourced:priority-update", "skill:reevaluate-strategy"],
     });
     return { id, meta, event };
+  });
+}
+
+// Every field a rerank can change or clear on a row, beyond status and priority:
+// appSetStatus writes statusNote, clears the interview fields when a row leaves
+// the interview stage, and clears nextAction/nextActionDue when it moves to
+// applied; sourcedSetStatus writes note. The Undo snapshot carries all of them.
+const RERANK_EXTRA_FIELDS = {
+  applications: [
+    "statusNote",
+    "interviewAt",
+    "nextInterviewAt",
+    "interviewNote",
+    "nextAction",
+    "nextActionDue",
+  ],
+  sourced: ["note"],
+};
+
+function rerankSnapshot(table, row) {
+  const snapshot = {
+    id: row.id,
+    table,
+    status: row.status ?? null,
+    priority: row.priority ?? null,
+  };
+  for (const field of RERANK_EXTRA_FIELDS[table]) snapshot[field] = row[field] ?? null;
+  return snapshot;
+}
+
+// Put back the extra fields a status write changed, in one transaction. A null
+// snapshot value deletes the key again, so a row that never had it stays clean.
+function restoreRowFields({ repoRoot, env, table, id, fields }) {
+  return runVerb({ repoRoot, env }, (db) => {
+    const current = getRow(db, table, id);
+    if (!current) throw new NotFoundError(`no row with id "${id}"`);
+    const updated = { ...current };
+    for (const [field, value] of Object.entries(fields)) {
+      if (value === null) delete updated[field];
+      else updated[field] = value;
+    }
+    putRow(db, table, id, updated);
+    return { id, meta: bumpMeta(db) };
   });
 }
 
@@ -581,6 +639,10 @@ function applyRerank({ repoRoot, env, proposal }) {
     }
     hosts.set(id, host);
   }
+  const previous = ids.map((id) => {
+    const { table, row } = hosts.get(id);
+    return rerankSnapshot(table, row);
+  });
   for (const id of ids) {
     const host = hosts.get(id);
     if (host.table === "applications") {
@@ -610,9 +672,15 @@ function applyRerank({ repoRoot, env, proposal }) {
   const changes = [];
   if (toStatus) changes.push(`status "${toStatus}"`);
   if (hasPriority) changes.push(`priority "${proposal.priority}"`);
+  const current = ids.map((id) => {
+    const { table } = hosts.get(id);
+    return rerankSnapshot(table, getRow(db, table, id));
+  });
   return {
     rows: ids,
     count: ids.length,
+    previous,
+    current,
     summary: `Re-ranked ${ids.length} ${ids.length === 1 ? "row" : "rows"} to ${changes.join(" and ")}.`,
   };
 }
@@ -639,6 +707,59 @@ function applyGateType({ repoRoot, env, type, value }) {
     }
     throw applyError(error.message, "STRATEGY_APPLY_INVALID");
   }
+}
+
+// restoreRerankRows: Undo for a re-rank. `before`/`after` are the per-row
+// snapshots applyRerank returned (status, priority, plus the extra fields in
+// RERANK_EXTRA_FIELDS; a snapshot from before those existed only compares and
+// restores status and priority). All-or-nothing: if any row is gone or any
+// snapshotted field changed again since the re-rank, nothing is restored.
+export function restoreRerankRows({ repoRoot, env, before, after }) {
+  const db = requireDb({ repoRoot, env });
+  const plan = [];
+  for (const prior of before) {
+    const expected = after.find((row) => row.id === prior.id);
+    const host = findHostRow(db, prior.id);
+    if (!expected || !host) return { ok: false };
+    const live = host.row;
+    const fields = ["status", "priority", ...RERANK_EXTRA_FIELDS[host.table]].filter((field) =>
+      Object.hasOwn(expected, field)
+    );
+    if (fields.some((field) => (live[field] ?? null) !== (expected[field] ?? null))) {
+      return { ok: false };
+    }
+    plan.push({ prior, expected, table: host.table });
+  }
+  for (const { prior, expected, table } of plan) {
+    const note = "Undid a strategy review re-rank.";
+    if (prior.status !== expected.status) {
+      const to = prior.status || "sourced";
+      if (table === "applications") appSetStatus({ repoRoot, env, id: prior.id, to, note });
+      else sourcedSetStatus({ repoRoot, env, id: prior.id, to, note });
+    }
+    if (prior.priority !== expected.priority) {
+      if (prior.priority === null || prior.priority === undefined) {
+        restoreRowFields({ repoRoot, env, table, id: prior.id, fields: { priority: null } });
+      } else if (table === "applications") {
+        appSetFields({ repoRoot, env, id: prior.id, patch: { priority: prior.priority } });
+      } else {
+        sourcedSetPriority({ repoRoot, env, id: prior.id, priority: prior.priority });
+      }
+    }
+    // Compare against the row as the status restore left it: restoring a status
+    // can clear fields the re-rank never touched (applied clears nextAction).
+    const restored = findHostRow(db, prior.id)?.row || {};
+    const extras = Object.fromEntries(
+      RERANK_EXTRA_FIELDS[table]
+        .filter((field) => Object.hasOwn(prior, field))
+        .filter((field) => (prior[field] ?? null) !== (restored[field] ?? null))
+        .map((field) => [field, prior[field] ?? null])
+    );
+    if (Object.keys(extras).length) {
+      restoreRowFields({ repoRoot, env, table, id: prior.id, fields: extras });
+    }
+  }
+  return { ok: true };
 }
 
 function applyFitBands({ repoRoot, env, proposal }) {

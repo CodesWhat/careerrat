@@ -31,7 +31,8 @@ function actionableOptions(message, blocks) {
   return safeArray(message.options).filter((option) => {
     const match = /^(?:confirm|decline):(\d+)$/.exec(String(option?.id || ""));
     if (!match) return true;
-    return !isFirstRunExtractedFact(blocks[Number(match[1])]);
+    const block = blocks[Number(match[1])];
+    return !isFirstRunExtractedFact(block) || block?.status === "needs-confirmation";
   });
 }
 
@@ -634,6 +635,16 @@ function AssistantMessage({
         ) : hasExtractedFacts ? null : (
           <p>{agentName} is ready for your answer.</p>
         )}
+        {blocks
+          .filter((block) => block?.status === "needs-confirmation")
+          .map((block) => (
+            <p
+              key={`confirm-${blocks.indexOf(block)}`}
+              className="cf-first-run__assistant-follow-up"
+            >
+              {safeArray(block.confirmReasons).join(" ")} Confirm to save it.
+            </p>
+          ))}
         {options.length > 0 ? (
           <div className="cf-first-run__answer-options">
             {options.map((option) => (

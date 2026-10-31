@@ -1,4 +1,5 @@
 import { parseChatAnswerMode } from "../../../../src/core/ai/chat-answer-mode.mjs";
+import { UserFacingError } from "../lib/errorCopy.js";
 import { parseConfirmBlocks } from "../onboarding/confirmBlocks.js";
 import { setupDisclosureRows, setupProgressFromState } from "../onboarding/onboardingSetup.js";
 import { emptyAnnualCashWorksheet } from "./annual-cash-worksheet.js";
@@ -13,9 +14,8 @@ const FIRST_ROLE_SUGGESTION = {
 };
 
 const EXTRACTED_FACT_KINDS = new Set(["authorization", "candidate_patch", "evidence_claim"]);
+export const LOOSENING_ACTION_LABELS = ["Confirm", "Not now"];
 const EXPLICIT_ACTION_LABELS = {
-  consent_capability: ["Allow", "Not now"],
-  consent_mode: ["Use this setup", "Keep current"],
   company_add: ["Add company", "Not now"],
   companies_suggest: ["Show suggestions", "Not now"],
 };
@@ -415,13 +415,39 @@ function companyExamples(state) {
   return list(state?.data?.targeting?.company_preferences?.examples);
 }
 
-export async function applyFirstRunConfirmation(block, { api, state, onCompanyOperation } = {}) {
+// Thrown when the evidence firewall refuses a claim, so the caller can show why.
+function evidenceRejectedError(rejected) {
+  const reason = String(rejected[0]?.reason || "it didn't pass the evidence check").replace(
+    /[.\s]+$/,
+    ""
+  );
+  return new UserFacingError(`CareerRat didn't save that claim: ${reason}.`);
+}
+
+// An onboarding save applies directly and is logged in the thread. A change that
+// loosens a limit comes back CONFIRMATION_REQUIRED; `confirmed` is the resend
+// after the user said yes.
+export async function applyFirstRunConfirmation(
+  block,
+  { api, state, onCompanyOperation, confirmed = false } = {}
+) {
+  const save = { source: "onboarding", ...(confirmed ? { confirmed: true } : {}) };
   if (block?.kind === "authorization") {
-    await api.saveCandidateFile("profile", { authorization: block.patch });
-    await api.saveCandidateFile("form-defaults", {
-      work_authorization: block.patch.work_authorized ? "Yes" : "No",
-      requires_sponsorship: block.patch.requires_sponsorship ? "Yes" : "No",
-    });
+    // One request writes both docs and logs one entry, so one Undo restores both.
+    await api.saveCandidateFile(
+      "profile",
+      { authorization: block.patch },
+      {
+        ...save,
+        mirror: {
+          doc: "form-defaults",
+          patch: {
+            work_authorization: block.patch.work_authorized ? "Yes" : "No",
+            requires_sponsorship: block.patch.requires_sponsorship ? "Yes" : "No",
+          },
+        },
+      }
+    );
     return "Work authorization saved";
   }
   if (block?.kind === "candidate_patch") {
@@ -431,11 +457,15 @@ export async function applyFirstRunConfirmation(block, { api, state, onCompanyOp
     ) {
       throw new Error("Voluntary self-identification is owned by local Application defaults");
     }
-    await api.saveCandidateFile(block.payload.doc, block.payload.patch);
+    await api.saveCandidateFile(block.payload.doc, block.payload.patch, save);
     return "Saved";
   }
   if (block?.kind === "evidence_claim") {
-    await api.saveEvidenceSeed([{ claim: block.payload.claim, evidence: block.payload.evidence }]);
+    const result = await api.saveEvidenceSeed(
+      [{ claim: block.payload.claim, evidence: block.payload.evidence }],
+      { source: "onboarding" }
+    );
+    if (list(result?.rejected).length) throw evidenceRejectedError(result.rejected);
     return "Evidence saved";
   }
   if (block?.kind === "companies_suggest") {
@@ -452,21 +482,6 @@ export async function applyFirstRunConfirmation(block, { api, state, onCompanyOp
       company_preferences: { ...preferences, confirmed: true, examples },
     });
     return `${block.payload.name} saved`;
-  }
-  if (block?.kind === "consent_mode") {
-    await api.saveCandidateFile("automation", { setup_mode: block.payload });
-    return block.payload === "advanced" ? "Advanced permissions ready" : "Basic permissions kept";
-  }
-  if (block?.kind === "consent_capability") {
-    const { capability, platform } = block.payload;
-    await api.saveCandidateFile("automation", {
-      setup_mode: "advanced",
-      capabilities: {
-        [capability]: { enabled: true, platforms: { [platform]: true } },
-      },
-      consent: { [platform]: true },
-    });
-    return "Permission granted";
   }
   throw new Error(`Unsupported first-run confirmation: ${block?.kind || "unknown"}`);
 }

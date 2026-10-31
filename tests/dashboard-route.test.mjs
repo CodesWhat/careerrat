@@ -363,10 +363,10 @@ test("GET /api/data/dashboard: the route's view model deep-equals a direct build
     const agentGuidance = loadAgentGuidanceSnapshot({ root: repoRoot, env: {} });
     // The route's default automationStatusForRoute is the real automationStatus()
     // (src/core/automation/consent.mjs), reduced by readCalendarProviderStatus
-    // (dashboard-route.mjs) into calendar_sync's per-platform {enabled, consent,
+    // (dashboard-route.mjs) into calendar_sync's per-platform {enabled,
     // allowed}. A direct buildDashboardViewModel() call that omits this input
-    // defaults to null ("Consent gated" for every provider), which disagreed with
-    // the route's real (all-off, but non-null) calendarProviderStatus — mirror the
+    // defaults to null ("On" for every provider), which disagrees with
+    // the route's real (all-allowed, but non-null) calendarProviderStatus, mirror the
     // same reduction here so both sides compute the identical calendar.sync.providers.
     const rawAutomationStatus = automationStatus({ root: repoRoot });
     const calendarSync = rawAutomationStatus.capabilities.find(
@@ -376,7 +376,7 @@ test("GET /api/data/dashboard: the route's view model deep-equals a direct build
       ? Object.fromEntries(
           calendarSync.platforms.map((platform) => [
             platform.platform,
-            { enabled: platform.enabled, consent: platform.consent, allowed: platform.allowed },
+            { enabled: platform.enabled, allowed: platform.allowed },
           ])
         )
       : null;
@@ -570,7 +570,7 @@ test("GET /api/data/dashboard: focus card features the interview within the 3-ho
 // (readCalendarProviderStatus -> buildCalendarSync's calendarProviderStatusLabel).
 // ---------------------------------------------------------------------------
 
-test("GET /api/data/dashboard: calendar sync providers reflect real automation consent — the granted platform reads Ready, every other platform does not", async () => {
+test("GET /api/data/dashboard: calendar sync providers reflect the real on/off switches, a provider turned off reads Off, the rest read Ready", async () => {
   const repoRoot = tempRepo();
   seedFixture(repoRoot, {
     meta: {},
@@ -584,11 +584,9 @@ test("GET /api/data/dashboard: calendar sync providers reflect real automation c
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
-        calendar_sync: { enabled: true, platforms: { google_calendar: true } },
+        calendar_sync: { platforms: { outlook_calendar: false } },
       },
-      consent: { google_calendar: true },
     },
   });
 
@@ -600,9 +598,9 @@ test("GET /api/data/dashboard: calendar sync providers reflect real automation c
       body.data.calendar.sync.providers.map((provider) => [provider.key, provider.status])
     );
     assert.equal(statusByKey.google_calendar, "Ready");
-    assert.notEqual(statusByKey.outlook_calendar, "Ready");
-    assert.notEqual(statusByKey.apple_calendar, "Ready");
-    assert.notEqual(statusByKey.automation_tools, "Ready");
+    assert.equal(statusByKey.outlook_calendar, "Off");
+    assert.equal(statusByKey.apple_calendar, "Ready");
+    assert.equal(statusByKey.automation_tools, "Ready");
   } finally {
     await closeServer(server);
   }

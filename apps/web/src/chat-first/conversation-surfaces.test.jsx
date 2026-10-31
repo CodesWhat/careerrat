@@ -567,14 +567,28 @@ describe("TodayConversation", () => {
       <MessageTranscript
         messages={[
           {
-            id: "browser-consent",
+            id: "browser-off",
             role: "assistant",
             kind: "action_result",
-            text: "raw consent backend output",
+            text: "raw off backend output",
             artifacts: [
               {
                 kind: "browser_workflow_result",
                 skill: "optimize-linkedin",
+                state: "needs-user",
+                blockers: [{ code: "CAPABILITY_OFF" }],
+              },
+            ],
+          },
+          {
+            id: "browser-old-consent",
+            role: "assistant",
+            kind: "action_result",
+            text: "raw old backend output",
+            artifacts: [
+              {
+                kind: "browser_workflow_result",
+                skill: "ingest-mail",
                 state: "needs-user",
                 blockers: [{ code: "CONSENT_REQUIRED" }],
               },
@@ -612,11 +626,16 @@ describe("TodayConversation", () => {
       />
     );
 
-    expect(html).toContain("CareerRat needs permission to review your LinkedIn profile");
+    expect(html).toContain(
+      "LinkedIn profile review is turned off. Turn it on in Settings or ask Paul to turn it on."
+    );
+    expect(html).toContain(
+      "Email check is turned off. Turn it on in Settings or ask Paul to turn it on."
+    );
     expect(html).toContain("signed-in application dashboard link");
     expect(html).toContain("Sign in or finish the verification step in the CareerRat browser");
     expect(html).not.toContain("Open Settings");
-    expect(html).not.toMatch(/raw (?:consent|status|auth) backend output/i);
+    expect(html).not.toMatch(/raw (?:off|old|status|auth) backend output/i);
   });
 
   it("keeps a malformed persisted artifact field from crashing the transcript", () => {
@@ -1055,7 +1074,7 @@ describe("TodayConversation", () => {
     );
   });
 
-  it("restores a persisted contextual permission action and sends its server-owned intent", () => {
+  it("restores a persisted turn-on action and sends its server-owned intent", () => {
     const onIntentAction = vi.fn();
     const intent = {
       type: "settings.apply",
@@ -1063,8 +1082,9 @@ describe("TodayConversation", () => {
       input: {
         change: {
           kind: "automation",
-          op: "contextual-permission",
-          permission: "status-checks",
+          op: "capability",
+          capability: "status_polling",
+          enabled: true,
         },
       },
     };
@@ -1072,13 +1092,13 @@ describe("TodayConversation", () => {
       onIntentAction,
       messages: [
         {
-          id: "permission-after-reload",
+          id: "turned-off-after-reload",
           role: "assistant",
           kind: "action_result",
-          text: "CareerRat needs permission to read Greenhouse, Workday, Ashby, and Lever application statuses. Choose Allow status checks, or type “Allow status checks”.",
+          text: "Portal status polling is turned off. Turn it on with `careerrat enable status_polling`, or ask me to turn it on.",
           metadata: {
-            state: "permission-needed",
-            nextActions: [{ label: "Allow status checks", intent }],
+            state: "capability-off",
+            nextActions: [{ label: "Turn it on", intent }],
           },
         },
       ],
@@ -1093,13 +1113,13 @@ describe("TodayConversation", () => {
     }
     visit(tree);
 
-    const allow = buttons.find((button) => button.props.children === "Allow status checks");
+    const allow = buttons.find((button) => button.props.children === "Turn it on");
     expect(allow).toBeTruthy();
     allow.props.onClick();
     expect(onIntentAction).toHaveBeenCalledWith(
       intent,
-      expect.objectContaining({ id: "permission-after-reload" }),
-      expect.objectContaining({ label: "Allow status checks" })
+      expect.objectContaining({ id: "turned-off-after-reload" }),
+      expect.objectContaining({ label: "Turn it on" })
     );
   });
 
@@ -1648,6 +1668,28 @@ describe("SkillChatConversation", () => {
 });
 
 describe("JobConversation and JobContextPanel", () => {
+  it("counts only answer gaps in the question notice", () => {
+    const packetReview = {
+      gaps: [
+        {
+          id: "a",
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
+          message: "Answer “One?”.",
+        },
+        { id: "b", kind: "documents", code: "RESUME_MISSING", message: "Resume is missing." },
+      ],
+    };
+    const conversation = markup(
+      <CanonicalJobConversation
+        eyebrow="HIGHTOUCH · SOFTWARE ENGINEER"
+        packetReview={packetReview}
+      />
+    );
+    expect(conversation).toContain("One application question needs your answer");
+    expect(conversation).not.toContain("2 application questions need");
+  });
+
   it("surfaces packet gaps in an empty job thread and routes each answer into the composer", () => {
     const onAnswerGap = vi.fn();
     const packetReview = {
@@ -1657,12 +1699,16 @@ describe("JobConversation and JobContextPanel", () => {
       gaps: [
         {
           id: "linkedin-profile",
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
           label: "LinkedIn Profile",
           message: "Answer LinkedIn Profile.",
           answerable: true,
         },
         {
           id: "north-america",
+          kind: "answers",
+          code: "ANSWER_CONFIRMATION_REQUIRED",
           label: "Are you currently located in North America?",
           message: "Answer the location question.",
           answerable: true,
@@ -1676,8 +1722,11 @@ describe("JobConversation and JobContextPanel", () => {
         packetReview={packetReview}
       />
     );
-    expect(conversation).toContain("I need 2 application answers before I can continue");
+    expect(conversation).toContain("2 application questions need your answer");
+    expect(conversation).toContain("Everything else is done");
+    expect(conversation).toContain("can&#x27;t be submitted until you answer");
     expect(conversation).toContain("Use the application review on the right");
+    expect(conversation).not.toContain('role="dialog"');
 
     const tree = JobContextPanel({
       job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
@@ -1741,7 +1790,26 @@ describe("JobConversation and JobContextPanel", () => {
     expect(onResumePacket).toHaveBeenCalledOnce();
   });
 
-  it("explains and enables form preparation before offering resume", () => {
+  it("shows no permission UI by default and offers resume", () => {
+    const onResumePacket = vi.fn();
+    const tree = JobContextPanel({
+      job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+      packetReview: {
+        status: "upload-ready",
+        uploadReady: true,
+        gapCount: 0,
+        canResume: true,
+        gaps: [],
+      },
+      applicationPreparation: null,
+      onResumePacket,
+    });
+    const html = markup(tree);
+    expect(html).not.toMatch(/permission|Allow|turned off|Turn it on/i);
+    expect(html).toContain("Resume preparation");
+  });
+
+  it("says form preparation is turned off and offers one Turn it on button", () => {
     const onEnableApplicationPreparation = vi.fn();
     const tree = JobContextPanel({
       job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
@@ -1752,7 +1820,7 @@ describe("JobConversation and JobContextPanel", () => {
         canResume: true,
         gaps: [],
       },
-      applicationPreparation: { status: "blocked", ready: false },
+      applicationPreparation: { status: "off", ready: false },
       onEnableApplicationPreparation,
     });
     const buttons = [];
@@ -1764,33 +1832,86 @@ describe("JobConversation and JobContextPanel", () => {
     }
     visit(tree);
     const html = markup(tree);
-    expect(html).toContain("CareerRat needs permission to open and fill application forms");
-    expect(html).toContain("CareerRat submits once everything is filled and checked");
-    expect(html).toContain("or type “Allow form preparation”");
-    expect(html).not.toContain("Open Settings");
-    expect(html).not.toContain("Resume preparation");
-    const enable = buttons.find((button) => button.props.children === "Allow form preparation");
+    expect(html).toContain("Preparing application forms is turned off.");
+    expect(html).not.toMatch(/Allow form preparation|consent/i);
+    const enable = buttons.find((button) => button.props.children === "Turn it on");
     expect(enable).toBeTruthy();
     enable.props.onClick();
     expect(onEnableApplicationPreparation).toHaveBeenCalledOnce();
   });
 
-  it("tells a manual-submit person they press submit in the form permission prompt", () => {
+  it("says form preparation is paused when settings can't be read", () => {
     const tree = JobContextPanel({
       job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
-      packetReview: {
-        status: "upload-ready",
-        uploadReady: true,
-        gapCount: 0,
-        canResume: true,
-        gaps: [],
-      },
-      applicationPreparation: { status: "blocked", ready: false, submitMode: "manual" },
-      onEnableApplicationPreparation: vi.fn(),
+      packetReview: { status: "upload-ready", uploadReady: true, gapCount: 0, gaps: [] },
+      applicationPreparation: { status: "unreadable", ready: false },
     });
     const html = markup(tree);
-    expect(html).toContain("check the answers and attachments, and press submit");
-    expect(html).not.toContain("CareerRat submits once everything is filled and checked");
+    expect(html).toContain(
+      "CareerRat can&#x27;t read your settings, so form preparation is paused."
+    );
+    expect(html).not.toContain("Turn it on");
+  });
+
+  it("hides Prepare and Resume while form preparation is off or unreadable", () => {
+    for (const applicationPreparation of [
+      { status: "off", ready: false },
+      { status: "unreadable", ready: false },
+    ]) {
+      for (const packetReview of [
+        { status: "upload-ready", uploadReady: true, gapCount: 0, canResume: true, gaps: [] },
+        {
+          status: "reviewable",
+          uploadReady: false,
+          gapCount: 0,
+          canResume: false,
+          canPrepare: true,
+          gaps: [],
+        },
+      ]) {
+        const html = markup(
+          JobContextPanel({
+            job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+            packetReview,
+            applicationPreparation,
+          })
+        );
+        expect(html).not.toContain("Resume preparation");
+        expect(html).not.toContain("Prepare form");
+      }
+    }
+    for (const applicationPreparation of [null, { status: "ready", ready: true }]) {
+      const html = markup(
+        JobContextPanel({
+          job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+          packetReview: {
+            status: "reviewable",
+            uploadReady: false,
+            gapCount: 0,
+            canResume: false,
+            canPrepare: true,
+            gaps: [],
+          },
+          applicationPreparation,
+        })
+      );
+      expect(html).toContain("Prepare form");
+    }
+  });
+
+  it("shows the failed-check notice when settings couldn't be checked", () => {
+    const html = markup(
+      JobContextPanel({
+        job: { company: "Hightouch", role: "Software Engineer", stage: "Ready", fit: 88 },
+        packetReview: { status: "upload-ready", uploadReady: true, gapCount: 0, gaps: [] },
+        applicationPreparation: {
+          status: "unreadable",
+          ready: false,
+          notice: "CareerRat couldn't check whether form preparation is on.",
+        },
+      })
+    );
+    expect(html).toContain("CareerRat couldn&#x27;t check whether form preparation is on.");
   });
 
   it("offers supervised form preparation without rendering packet diagnostics as questions", () => {
@@ -2316,6 +2437,35 @@ describe("focused conversation modes", () => {
     expect(html).toContain("Reject");
   });
 
+  it("shows saved findings apart from the ones still waiting on a yes", () => {
+    const html = markup(
+      <DeepIngestConversation
+        counts={{ sources: 1, proposals: 2, reviewQueue: 1, confirmed: 1 }}
+        applied={[{ id: "saved-1", lane: "story_bank", title: "Saved billing story" }]}
+        proposals={[
+          {
+            id: "held-1",
+            lane: "honesty_boundaries",
+            title: "Drop a boundary",
+            summary: "Stop holding back.",
+            heldReason: "It would remove or weaken one of your honesty boundaries.",
+          },
+        ]}
+        onConfirm={() => {}}
+        onDefer={() => {}}
+        onReject={() => {}}
+      />
+    );
+
+    expect(html).toContain("SAVED FOR YOU");
+    expect(html).toContain("Saved billing story");
+    expect(html).toContain("saved on their own");
+    expect(html).toContain("didn&#x27;t save on their own");
+    expect(html).toContain("It would remove or weaken one of your honesty boundaries.");
+    expect(html).toContain("Confirm");
+    expect(html.indexOf("SAVED FOR YOU")).toBeLessThan(html.indexOf("REVIEW 1 OF 1"));
+  });
+
   it("lets someone retry or remove a failed deep-ingest source", () => {
     const source = {
       id: "source-failed",
@@ -2551,5 +2701,156 @@ describe("EngineDownCover", () => {
     expect(html).not.toMatch(
       /provider route|schema parser|RUNTIME_UNAVAILABLE|\/Users\/person|api_key|secret|runAgent|runtime\.mjs/i
     );
+  });
+});
+
+describe("knowledge writes in the thread", () => {
+  const entry = (overrides = {}) => ({
+    kind: "knowledge_write",
+    target: "candidate_config:targeting",
+    op: "set",
+    path: "fit_bands.fit_floor",
+    label: "Minimum fit",
+    before: 60,
+    after: 70,
+    revertible: true,
+    ...overrides,
+  });
+  const resultMessage = (artifacts, extra = {}) => ({
+    id: "write-1",
+    threadId: "workspace-main",
+    role: "assistant",
+    kind: "action_result",
+    text: "Minimum fit set to 70+.",
+    artifacts: [{ kind: "settings_apply", label: "Minimum fit" }, ...artifacts],
+    ...extra,
+  });
+
+  it("renders a compact change line with an Undo that runs knowledge.revert", () => {
+    const html = markup(
+      <MessageTranscript messages={[resultMessage([entry()])]} onIntentAction={vi.fn()} />
+    );
+    expect(html).toContain("Changed Minimum fit from 60 to 70");
+    expect(html).toContain("Undo");
+    expect(html).not.toContain("→");
+    expect(html).not.toContain("\u2014");
+  });
+
+  it("reads a staged LinkedIn suggestion as staged, with an Undo and no change line", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          resultMessage([
+            entry({
+              target: "linkedin:proposal",
+              path: "batch-1",
+              id: "headline",
+              label: "Headline",
+              before: "Not staged",
+              after: { action: "approve", source: "automatic" },
+            }),
+          ]),
+        ]}
+        onIntentAction={vi.fn()}
+      />
+    );
+    expect(html).toContain("Staged for your profile: Headline");
+    expect(html).toContain("asks before anything goes on LinkedIn");
+    expect(html).toContain("Undo");
+    expect(html).not.toContain("Changed Headline");
+    expect(html).not.toContain("\u2014");
+  });
+
+  it("shows role buckets by name and titles, not as [object Object]", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          resultMessage([
+            entry({
+              path: "role_buckets",
+              label: "Target roles",
+              before: [{ name: "Primary", priority: 1, titles: ["Staff Engineer"] }],
+              after: [
+                { name: "Primary", priority: 1, titles: ["Staff Engineer"] },
+                { name: "Secondary", priority: 2, titles: ["Engineering Manager", "Tech Lead"] },
+              ],
+            }),
+          ]),
+        ]}
+        onIntentAction={vi.fn()}
+      />
+    );
+    expect(html).not.toContain("[object Object]");
+    expect(html).toContain("Primary (Staff Engineer)");
+    expect(html).toContain("Secondary (Engineering Manager, Tech Lead)");
+  });
+
+  it("shows the note instead of Undo when a write is not revertible", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          resultMessage([
+            entry({
+              revertible: false,
+              revertNote: "This value is private, so it can't be undone from the thread.",
+              before: "[private]",
+              after: "[private]",
+            }),
+          ]),
+        ]}
+        onIntentAction={vi.fn()}
+      />
+    );
+    expect(html).toContain("This value is private, so it can&#x27;t be undone from the thread.");
+    expect(html).not.toContain(">Undo<");
+  });
+
+  it("marks a write as Undone once an undo entry points at it", () => {
+    const undone = {
+      id: "undo-1",
+      threadId: "workspace-main",
+      role: "assistant",
+      kind: "action_result",
+      text: "Undid: Minimum fit.",
+      artifacts: [
+        entry({
+          before: 70,
+          after: 60,
+          revertible: false,
+          revertNote: "This undo can't be undone from the thread.",
+          revertOf: { messageId: "write-1", index: 1 },
+        }),
+      ],
+    };
+    const html = markup(
+      <MessageTranscript messages={[resultMessage([entry()]), undone]} onIntentAction={vi.fn()} />
+    );
+    expect(html).toContain("Undone");
+    expect(html).not.toContain(">Undo<");
+  });
+
+  it("does not repeat the Undo as a trailing pill", () => {
+    const html = markup(
+      <MessageTranscript
+        messages={[
+          resultMessage([entry()], {
+            metadata: {
+              nextActions: [
+                {
+                  label: "Undo",
+                  intent: {
+                    type: "knowledge.revert",
+                    entity: { type: "workspace", id: "workspace-main" },
+                    input: { messageId: "write-1", index: 1 },
+                  },
+                },
+              ],
+            },
+          }),
+        ]}
+        onIntentAction={vi.fn()}
+      />
+    );
+    expect(html.match(/>Undo</g)).toHaveLength(1);
   });
 });

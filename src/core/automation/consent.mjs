@@ -1,11 +1,14 @@
-// consent.mjs — the decision layer for opt-in browser automation.
+// consent.mjs: the decision layer for browser automation.
 //
-// Everything authenticated-browser is OPT-IN and DEFAULTS OFF: no
-// candidate/automation.yml means nothing is automated. This module is the single
-// place that answers "may I drive a logged-in browser for capability C on platform
-// P?" so no skill hardcodes that policy in prose. The predicate is a hard
-// three-part AND (capability global switch · per-platform switch · per-platform ToS
-// consent) — see AGENTS.md → Browser Automation Contract.
+// Every capability is ON by default per workspace; the operator turns one off with
+// a single switch (`careerrat automation disable <capability> [platform] --write`).
+// There is no ToS consent ledger, setup mode, or scoped grant any more. This module
+// is the single place that answers "may I drive a logged-in browser for capability C
+// on platform P?" so no skill hardcodes that policy in prose. The predicate is:
+// the capability applies to the platform, and neither the capability switch nor the
+// platform switch is explicitly false. Safety checks that are not consent
+// (origin checks, captcha/2FA halts, mail_access never-send scope, comp-leak guards,
+// application limits) live in their own modules and are unchanged.
 //
 // Reads are dependency-free (parseYaml + the repo schema validator). Writes reuse
 // the gate-writer text primitives so candidate/automation.yml is patched
@@ -106,7 +109,7 @@ export const CAPABILITIES = {
 
 export const CAPABILITY_KEYS = Object.keys(CAPABILITIES);
 
-// Every platform referenced by any capability, plus the consent ledger order.
+// Every platform referenced by any capability.
 export const PLATFORMS = Array.from(
   new Set(CAPABILITY_KEYS.flatMap((k) => CAPABILITIES[k].platforms))
 ).sort();
@@ -115,40 +118,47 @@ export function isCapability(name) {
   return Object.hasOwn(CAPABILITIES, name);
 }
 
-export function isPlatform(name) {
-  return PLATFORMS.includes(name);
-}
-
 // ---------------------------------------------------------------------------
-// The all-OFF synthetic — what an absent (or empty) automation.yml means.
+// The all-ON default: what an absent (or empty) automation config means.
 // ---------------------------------------------------------------------------
 
 export function defaultAutomation() {
-  const consent = {};
-  for (const p of PLATFORMS) consent[p] = false;
   const capabilities = {};
   for (const [cap, def] of Object.entries(CAPABILITIES)) {
     const platforms = {};
-    for (const p of def.platforms) platforms[p] = false;
-    capabilities[cap] = { enabled: false, platforms };
+    for (const p of def.platforms) platforms[p] = true;
+    capabilities[cap] = { enabled: true, platforms };
   }
   return {
     version: 1,
-    setup_mode: "basic",
-    consent,
+    capabilities_default: "on",
     capabilities,
-    session: { provider: "auto", profile_root: null },
+    session: { provider: "auto" },
   };
 }
 
-// mergeAutomationDefaults — fill in every capability/platform/session field a
-// stored automation doc doesn't set yet, so a newly-added capability (or a
-// doc that predates one) reads `false`/defaults instead of `undefined`. Used
-// by the CLI's DB-mode edit path (src/cli/automation.mjs) and by the
-// settings.explain/settings.apply Ask intents (workspace-agent.mjs) so both
-// surfaces compute the same "current value" for a toggle.
+// normalizeAutomationConfig: the one place that reconciles a stored automation
+// doc with the on-by-default contract. A doc carrying `capabilities_default: "on"`
+// was written under the new contract, so its explicit false values are real
+// operator choices and only missing keys are filled (as on). A doc without the
+// marker predates the change: its false values are just the old off default, so
+// every capability key (plus the retired consent/setup_mode keys) is dropped and
+// the effective config is the all-on default merged with the doc's other keys
+// (session, submit, anything else). Pure: never touches disk, so loading never writes.
+export function normalizeAutomationConfig(stored) {
+  const doc = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+  if (doc.capabilities_default === "on") return deepMerge(defaultAutomation(), doc);
+  const { capabilities: _c, consent: _k, setup_mode: _m, capabilities_default: _d, ...rest } = doc;
+  return deepMerge(defaultAutomation(), rest);
+}
+
+// mergeAutomationDefaults: the normalized view of a stored automation doc, so a
+// newly-added capability (or a doc that predates one) reads on instead of
+// `undefined`. Used by the CLI's DB-mode edit path (src/cli/automation.mjs), the
+// DB patch path, and the settings.explain/settings.apply Ask intents
+// (workspace-agent.mjs) so every surface computes the same "current value".
 export function mergeAutomationDefaults(data) {
-  return deepMerge(defaultAutomation(), data && typeof data === "object" ? data : {});
+  return normalizeAutomationConfig(data);
 }
 
 function deepMerge(base, patch) {
@@ -166,34 +176,43 @@ function deepMerge(base, patch) {
   return out;
 }
 
-export function automationModePatch(mode) {
-  if (mode === "advanced") return { setup_mode: "advanced" };
-  if (mode !== "basic") throw new Error('automation mode must be "basic" or "advanced"');
-  return defaultAutomation();
-}
-
-function effectiveAutomationMode(cfg) {
-  if (cfg?.setup_mode === "basic" || cfg?.setup_mode === "advanced") return cfg.setup_mode;
-  const hasLegacyOptIn =
-    Object.values(cfg?.consent || {}).some((value) => value === true) ||
-    Object.values(cfg?.capabilities || {}).some(
-      (capability) =>
-        capability?.enabled === true ||
-        Object.values(capability?.platforms || {}).some((value) => value === true)
-    );
-  return hasLegacyOptIn ? "advanced" : "basic";
+// Setup modes were retired. 72b-2/72b-3 remove the remaining callers.
+export function automationModePatch() {
+  return {};
 }
 
 // ---------------------------------------------------------------------------
-// loadAutomation — read + validate. Absent file => all-OFF synthetic, exists:false.
+// loadAutomation: read + validate. Absent file => all-ON default, exists:false.
 // ---------------------------------------------------------------------------
+
+// An existing config that can't be read must not read as the all-on default: that
+// would silently re-enable something the operator turned off. The returned data
+// carries `readError`, which mayRun treats as a denial of every capability.
+function unreadableAutomation({ display, source, message }) {
+  const readError = `${display}: ${message}`;
+  return {
+    exists: true,
+    valid: false,
+    errors: [{ path: "", message }],
+    readError,
+    data: { ...defaultAutomation(), readError },
+    path: display,
+    source,
+  };
+}
 
 export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) {
   const path = userPath({ repoRoot: root, env }, AUTOMATION_FILE);
   const display = displayPath({ repoRoot: root, env }, AUTOMATION_FILE);
   const source = candidateConfigSource({ repoRoot: root, env });
   if (source === "db") {
-    const data = loadCandidateDoc("automation", { repoRoot: root, env }) || {};
+    let stored;
+    try {
+      stored = loadCandidateDoc("automation", { repoRoot: root, env });
+    } catch (err) {
+      return unreadableAutomation({ display, source, message: err.message });
+    }
+    const data = stored || {};
     const schemaPath = join(root, AUTOMATION_SCHEMA);
     const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
     const { valid, errors } = schema ? validate(data, schema) : { valid: true, errors: [] };
@@ -201,7 +220,8 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
       exists: true,
       valid,
       errors,
-      data: data && typeof data === "object" ? data : {},
+      readError: null,
+      data: normalizeAutomationConfig(data),
       path: display,
       source,
     };
@@ -211,6 +231,7 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
       exists: false,
       valid: true,
       errors: [],
+      readError: null,
       data: defaultAutomation(),
       path: display,
       source,
@@ -220,14 +241,11 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
   try {
     data = parseYaml(readFileSync(path, "utf8"));
   } catch (err) {
-    return {
-      exists: true,
-      valid: false,
-      errors: [{ path: "", message: `YAML parse error: ${err.message}` }],
-      data: defaultAutomation(),
-      path: display,
+    return unreadableAutomation({
+      display,
       source,
-    };
+      message: `YAML parse error: ${err.message}`,
+    });
   }
   const schemaPath = join(root, AUTOMATION_SCHEMA);
   const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
@@ -236,7 +254,8 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
     exists: true,
     valid,
     errors,
-    data: data && typeof data === "object" ? data : defaultAutomation(),
+    readError: null,
+    data: normalizeAutomationConfig(data),
     path: display,
     source,
   };
@@ -271,9 +290,11 @@ export function loadSubmitMode({ root = DEFAULT_ROOT, env = process.env } = {}) 
 }
 
 // ---------------------------------------------------------------------------
-// mayRun — the hard predicate. allowed iff global ∧ platform ∧ consent.
-// Accepts a preloaded `data`, or loads from `root`. Returns { allowed, reasons,
-// checks } so callers can show the user exactly which switch is off.
+// mayRun: the predicate. allowed iff the capability applies to the platform and
+// neither the capability switch nor the platform switch is explicitly false.
+// Missing keys mean on. Accepts a preloaded `data`, or loads from `root`. Returns
+// { allowed, reasons, checks } so callers can show the user exactly which switch
+// is off and the command that turns it back on.
 // ---------------------------------------------------------------------------
 
 export function mayRun({
@@ -298,35 +319,32 @@ export function mayRun({
   }
 
   const cfg = data || loadAutomation({ root, env }).data;
-  const advancedMode = effectiveAutomationMode(cfg) === "advanced";
-  const cap = cfg.capabilities?.[capability] || {};
-  const scopedGrant = cap.scoped_grants?.[platform] === true;
-  const globalOn = cap.enabled === true;
-  const platformOn = !!(cap.platforms && cap.platforms[platform] === true);
-  const consentOn = !!(cfg.consent && cfg.consent[platform] === true);
+  if (cfg?.readError) {
+    return {
+      allowed: false,
+      reasons: [
+        `automation settings can't be read (${cfg.readError}); fix the file or run \`careerrat automation status\``,
+      ],
+      checks: { global: false, platform: false, readable: false },
+    };
+  }
+  const cap = cfg?.capabilities?.[capability] || {};
+  const globalOn = cap.enabled !== false;
+  const platformOn = cap.platforms?.[platform] !== false;
 
   if (!globalOn)
     reasons.push(
-      `capability "${capability}" is disabled (enable: \`careerrat automation enable ${capability} --write\`)`
+      `capability "${capability}" is turned off (turn on: \`careerrat automation enable ${capability} --write\`)`
     );
   if (!platformOn)
     reasons.push(
-      `platform "${platform}" is off for ${capability} (enable: \`careerrat automation enable ${capability} ${platform} --write\`)`
-    );
-  if (!consentOn)
-    reasons.push(
-      `ToS consent for "${platform}" not recorded (record: \`careerrat automation consent ${platform} --write\`)`
+      `platform "${platform}" is turned off for ${capability} (turn on: \`careerrat automation enable ${capability} ${platform} --write\`)`
     );
 
-  if (!advancedMode && !scopedGrant) {
-    reasons.push("Basic mode keeps capabilities disabled until they are allowed in context");
-  }
-
-  const allowed = (advancedMode || scopedGrant) && globalOn && platformOn && consentOn;
   return {
-    allowed,
+    allowed: globalOn && platformOn,
     reasons,
-    checks: { global: globalOn, platform: platformOn, consent: consentOn },
+    checks: { global: globalOn, platform: platformOn },
   };
 }
 
@@ -345,13 +363,12 @@ export function automationStatus({
   const capabilities = CAPABILITY_KEYS.map((cap) => {
     const def = CAPABILITIES[cap];
     const node = cfg.capabilities?.[cap] || {};
-    const globalOn = node.enabled === true;
+    const globalOn = node.enabled !== false;
     const platforms = def.platforms.map((platform) => {
       const verdict = mayRun({ capability: cap, platform, data: cfg });
       return {
         platform,
-        enabled: !!(node.platforms && node.platforms[platform] === true),
-        consent: !!(cfg.consent && cfg.consent[platform] === true),
+        enabled: node.platforms?.[platform] !== false,
         allowed: verdict.allowed,
       };
     });
@@ -395,20 +412,17 @@ export function automationStatus({
     exists: loaded.exists,
     valid: loaded.valid,
     errors: loaded.errors,
-    mode: effectiveAutomationMode(cfg),
+    readError: loaded.readError || null,
     submit,
     liveCount,
     capabilities,
-    consent: Object.fromEntries(
-      PLATFORMS.map((p) => [p, !!(cfg.consent && cfg.consent[p] === true)])
-    ),
     session,
   };
 }
 
 // ---------------------------------------------------------------------------
 // ensureAutomationFile — scaffold candidate/automation.yml from the template on
-// first write (opt-in: the first `enable`/`consent` creates it).
+// first write (the first `enable`/`disable` creates it).
 // ---------------------------------------------------------------------------
 
 export function ensureAutomationFile({ root = DEFAULT_ROOT, env = process.env } = {}) {
@@ -422,20 +436,12 @@ export function ensureAutomationFile({ root = DEFAULT_ROOT, env = process.env } 
 
 // ---------------------------------------------------------------------------
 // resolveEditPath — map an edit intent to the dotted YAML path + human label.
-// kind: "consent" | "capability" | "platform" | "session" | "mode" | "submit".
+// kind: "capability" | "platform" | "session" | "submit".
 // ---------------------------------------------------------------------------
 
 export function resolveEditPath({ kind, capability, platform }) {
-  if (kind === "consent") {
-    if (!isPlatform(platform))
-      throw new Error(`unknown platform "${platform}". Known: ${PLATFORMS.join(", ")}`);
-    return { parts: ["consent", platform], label: `consent for ${platform}` };
-  }
   if (kind === "session") {
     return { parts: ["session", "provider"], label: "session browser provider" };
-  }
-  if (kind === "mode") {
-    return { parts: ["setup_mode"], label: "automation setup mode" };
   }
   if (kind === "submit") {
     return { parts: ["submit"], label: "final submit mode" };
@@ -494,20 +500,15 @@ export function planAutomationEdit({
   };
 }
 
-function scaffoldAutomationPath(text, { kind, capability, platform }) {
+function scaffoldAutomationPath(text, { kind, capability }) {
   let next = text;
-  if (kind === "consent") {
-    next = ensureMappingBlock(next, [], "consent");
-    next = ensureMappingScalar(next, ["consent"], platform, false);
-    return next;
-  }
   if (kind === "capability" || kind === "platform") {
     next = ensureMappingBlock(next, [], "capabilities");
     next = ensureCapabilityBlock(next, capability);
-    next = ensureMappingScalar(next, ["capabilities", capability], "enabled", false);
+    next = ensureMappingScalar(next, ["capabilities", capability], "enabled", true);
     next = ensureMappingBlock(next, ["capabilities", capability], "platforms");
     for (const p of CAPABILITIES[capability].platforms) {
-      next = ensureMappingScalar(next, ["capabilities", capability, "platforms"], p, false);
+      next = ensureMappingScalar(next, ["capabilities", capability, "platforms"], p, true);
     }
   }
   return next;
@@ -525,15 +526,15 @@ function ensureCapabilityBlock(text, capability) {
   const platformIndent = childIndent + 4;
   const block = [
     `${" ".repeat(childIndent)}${capability}:`,
-    `${" ".repeat(childIndent + 2)}enabled: false`,
+    `${" ".repeat(childIndent + 2)}enabled: true`,
     `${" ".repeat(childIndent + 2)}platforms:`,
-    ...CAPABILITIES[capability].platforms.map((p) => `${" ".repeat(platformIndent)}${p}: false`),
+    ...CAPABILITIES[capability].platforms.map((p) => `${" ".repeat(platformIndent)}${p}: true`),
   ];
   lines.splice(insertAt, 0, ...block);
   return lines.join("\n");
 }
 
-// Scaffold a top-level scalar key (e.g. `setup_mode`) that predates this field
+// Scaffold a top-level scalar key (e.g. `submit`) that predates this field
 // on an older automation.yml. No-op if the key already exists.
 function ensureTopLevelScalar(text, key, defaultValue) {
   const lines = text.split("\n");
@@ -606,6 +607,41 @@ function isSkippable(line) {
 }
 
 // ---------------------------------------------------------------------------
+// migrateLegacyAutomationText: the legacy-file write-path half of
+// normalizeAutomationConfig. A candidate/automation.yml without the
+// `capabilities_default: on` marker holds off values from the old default, so the
+// next write starts from the on-by-default template instead and carries over only
+// the doc's submit and session choices. Text that already has the marker is
+// returned untouched (comments and explicit false values preserved).
+// ---------------------------------------------------------------------------
+
+export function migrateLegacyAutomationText(currentText, templateText) {
+  let doc = null;
+  try {
+    doc = parseYaml(currentText);
+  } catch {
+    return currentText;
+  }
+  // An empty or comments-only file parses to null: an empty legacy document.
+  if (doc == null) doc = {};
+  if (typeof doc !== "object" || doc.capabilities_default === "on") return currentText;
+  let next = templateText;
+  const carry = [];
+  if (doc.submit === "auto" || doc.submit === "manual") carry.push([["submit"], doc.submit]);
+  if (typeof doc.session?.provider === "string") {
+    carry.push([["session", "provider"], doc.session.provider]);
+  }
+  if (typeof doc.session?.profile_root === "string") {
+    carry.push([["session", "profile_root"], doc.session.profile_root]);
+  }
+  for (const [parts, value] of carry) {
+    const patch = setScalar(next, parts, value);
+    if (patch.ok) next = patch.text;
+  }
+  return next;
+}
+
+// ---------------------------------------------------------------------------
 // planSessionEdit — pure (no fs): compute the comment-preserving next text for
 // the session-browser provider (a STRING, not a boolean — so it can't reuse
 // planAutomationEdit). The provider must be one the substrate knows about. The
@@ -630,41 +666,6 @@ export function planSessionEdit({ provider, currentText, schema = null }) {
     path: parts.join("."),
     label,
     value: provider,
-    previous: patch.previous,
-    changed: patch.changed,
-    valid: validation.valid,
-    errors: validation.errors,
-    nextText: patch.text,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// planModeEdit — pure (no fs): compute the comment-preserving next text for the
-// coarse setup_mode gate (a STRING enum, not a boolean). mayRun() ANDs
-// setup_mode === "advanced" in alongside the granular capability/platform/
-// consent switches: `basic` keeps every external capability hard-off no matter
-// what the granular switches say, so this is the fourth term the documented
-// consent/enable recipe (AGENTS.md → Browser Automation Contract) needs a real
-// CLI verb for. See `automationModePatch` above for the coarser reset shape
-// used elsewhere; this is the line-level edit the CLI's dry-run/--write
-// pattern needs.
-// ---------------------------------------------------------------------------
-
-export function planModeEdit({ mode, currentText, schema = null }) {
-  if (mode !== "basic" && mode !== "advanced") {
-    return { ok: false, error: 'automation mode must be "basic" or "advanced"' };
-  }
-  const { parts, label } = resolveEditPath({ kind: "mode" });
-  const scaffoldedText = ensureTopLevelScalar(currentText, "setup_mode", "basic");
-  const patch = setScalar(scaffoldedText, parts, mode);
-  if (!patch.ok) return { ok: false, error: patch.error };
-
-  const validation = patch.changed ? validateText(patch.text, schema) : { valid: true, errors: [] };
-  return {
-    ok: true,
-    path: parts.join("."),
-    label,
-    value: mode,
     previous: patch.previous,
     changed: patch.changed,
     valid: validation.valid,

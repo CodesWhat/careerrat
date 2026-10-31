@@ -8,6 +8,7 @@ import {
   automationStatus,
   ensureAutomationFile,
   loadAutomation,
+  migrateLegacyAutomationText,
   planSessionEdit,
 } from "../core/automation/consent.mjs";
 import { PROVIDERS } from "../core/automation/session.mjs";
@@ -49,7 +50,10 @@ export function setAutomationSessionProvider({ repoRoot, env = process.env, prov
   const templatePath = join(repoRoot, AUTOMATION_TEMPLATE);
   const schemaPath = join(repoRoot, AUTOMATION_SCHEMA);
   const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
-  const baseText = readFileSync(existsSync(candidatePath) ? candidatePath : templatePath, "utf8");
+  const templateText = readFileSync(templatePath, "utf8");
+  const baseText = existsSync(candidatePath)
+    ? migrateLegacyAutomationText(readFileSync(candidatePath, "utf8"), templateText)
+    : templateText;
   let plan = planSessionEdit({ provider, currentText: baseText, schema });
   if (!plan.ok) throw routeError(plan.error, "AUTOMATION_PROVIDER_INVALID");
   if (!plan.valid) {
@@ -62,7 +66,10 @@ export function setAutomationSessionProvider({ repoRoot, env = process.env, prov
   }
   if (plan.changed) {
     ensureAutomationFile({ root: repoRoot, env });
-    const currentText = readFileSync(candidatePath, "utf8");
+    const currentText = migrateLegacyAutomationText(
+      readFileSync(candidatePath, "utf8"),
+      templateText
+    );
     if (currentText !== baseText) {
       plan = planSessionEdit({ provider, currentText, schema });
       if (!plan.ok || !plan.valid) {

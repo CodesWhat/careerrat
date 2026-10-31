@@ -146,6 +146,25 @@ careerrat start claude
 
 Everything under `CAREERRAT_HOME` is gitignored and never touches the repo tree.
 
+## Running CareerRat for more than one person
+
+Each person gets their own workspace under your data root, in
+`people/<name>/`. Their profile, evidence, tracker and exported documents never
+mix with anyone else's.
+
+```bash
+careerrat people add maria
+careerrat start --for maria
+careerrat people list
+```
+
+`--for <name>` works on every command, for example `careerrat --for maria doctor`.
+You can also set `CAREERRAT_PERSON=maria`. Documents for Maria export to
+`~/Documents/careerrat/maria/` under the default directory. An explicit
+`CAREERRAT_DOWNLOADS_DIR` is used as-is, so it is shared between people. If you
+override it, set a different value for each person. Without `--for`, you get
+your own workspace, exactly as before.
+
 ## Health check
 
 ```bash

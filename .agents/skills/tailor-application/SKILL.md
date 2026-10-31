@@ -180,8 +180,10 @@ from the JD:
 3. **Never fabricate.** A question whose truthful answer would require guessing a
    number/date/clearance/tool depth, revealing current compensation, or contradicting
    `honesty.yml` gets the literal marker `NEEDS YOU: <one-line reason>` as its body.
-   The placeholder lint (STEP 7) blocks on `NEEDS YOU`, so the packet cannot be
-   upload-ready until the user supplies the answer.
+   The marker is a flag on this one job, not a stop: keep building the rest of the
+   packet and tell the user which questions are waiting. The placeholder lint (STEP 7)
+   still blocks on `NEEDS YOU`, so the packet cannot be exported or marked upload-ready
+   until the user supplies the answer.
 4. **Persist durable answers.** When the user resolves a `NEEDS YOU` or confirms an
    answer to a recurring disclosure-style question, write it to
    `candidate/form-defaults.yml#screening_answers` (normalized question fragment →
@@ -206,6 +208,11 @@ node src/cli/lint-placeholders.mjs workspace/tailored/
 
 Fix every finding before continuing. The command exits 1 on any hit.
 
+The one exception is `NEEDS YOU`. That marker is a per-job flag, not a stop, so a
+`NEEDS YOU` finding does not halt the tracker stamp or the activity log below. Fix
+every other finding first. The artifact is still never marked upload-ready while the
+marker remains.
+
 Do not mark any artifact as upload-ready or build-ready until this exits 0.
 
 Then log the tailored artifacts to the Activity Pulse feed (the dashboard's live timeline — see
@@ -222,7 +229,7 @@ Treat these as invalid placeholders: `[Company]`, `[Role]`, `{candidate}`,
 template residue. (`NEEDS YOU` is the STEP 6 unanswered-question marker — resolving
 it with the user, not deleting it, is the fix.)
 
-**Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0,
+**Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0, or its only findings are `NEEDS YOU` markers,
 write the produced artifact paths back to the application row in a single
 `tracker.json` write before proceeding to STEP 8 or STEP 12:
 
@@ -318,10 +325,10 @@ If a violation is found, remove it and re-run STEP 7.
 If the user stated any new honesty boundary during this session (e.g. "never claim
 Terraform", "remove that certification claim", "add Kubernetes to do-not-claim"):
 
-- **Write-and-report** for unambiguous, low-blast-radius additions (one new tool to
-  do_not_claim, one claim to forbid): run `careerrat gate do-not-claim "<tool>" --write`
+- **Write-and-report** for additions that tighten a boundary (one new tool to
+  do_not_claim, one claim to forbid), applied directly and logged with an Undo: run `careerrat gate do-not-claim "<tool>" --write`
   or `careerrat gate do-not-fabricate "<claim>" --write`, then echo the CLI confirmation.
-- **Confirm-first** for consequential changes (removing a confirmed tool, broad
+- **Confirm-first** for anything that loosens a boundary (removing a confirmed tool, broad
   claim rewrites): propose the exact candidate-config change, get a yes, then write
   through the owning DB-aware command.
 

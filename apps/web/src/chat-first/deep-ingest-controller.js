@@ -420,6 +420,17 @@ function proposalTitle(row, summary) {
   return typeof title === "string" && title.trim() ? title.trim() : firstWords(summary);
 }
 
+function savedEvidenceIds(row) {
+  const evidence = row?.output?.evidence;
+  return [...list(evidence?.insertedIds), ...list(evidence?.identicalIds)].filter(Boolean);
+}
+
+function savedLaneRowIds(row) {
+  return list(row?.output?.rows)
+    .map((item) => item?.id)
+    .filter(Boolean);
+}
+
 function proposalQuote(row) {
   const quote = row?.proposal?.supportingQuote;
   return typeof quote === "string" ? quote : "";
@@ -489,6 +500,7 @@ export function buildDeepIngestReview(state) {
       counts: { sources: 0, proposals: 0, reviewQueue: 0, confirmed: 0, openGaps: 0 },
       sources: [],
       proposals: [],
+      applied: [],
     };
   }
   const allProposals = list(state.proposals);
@@ -504,11 +516,38 @@ export function buildDeepIngestReview(state) {
       title: proposalTitle(row, summary),
       summary,
       supportingQuote: proposalQuote(row),
+      heldReason: row?.autoApply?.status === "held" ? row.autoApply.reasons?.[0] || null : null,
     };
   });
+  const { evidence: _evidenceProposals, evidenceClaimIds, ...laneRows } = state.confirmed || {};
+  const liveEvidenceIds = new Set(list(evidenceClaimIds));
+  const liveRowIds = new Set(
+    Object.values(laneRows).flatMap((rows) => list(rows).map((item) => item?.id))
+  );
+  const appliedRows = allProposals
+    .filter((row) => row?.status === "confirmed" && row?.decisionSource === "automatic")
+    .filter((row) => {
+      // An Undo removes the saved rows but leaves the proposal confirmed, so a
+      // proposal whose recorded rows are all gone no longer counts as saved.
+      const evidence = savedEvidenceIds(row);
+      const rows = savedLaneRowIds(row);
+      if (!evidence.length && !rows.length) return true;
+      return (
+        evidence.some((id) => liveEvidenceIds.has(id)) || rows.some((id) => liveRowIds.has(id))
+      );
+    })
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  const applied = appliedRows.map((row) => ({
+    id: row.id,
+    lane: row.lane,
+    title: proposalTitle(row, proposalSummary(row)),
+  }));
   const sources = list(state.sources).map((source) => {
+    // A source whose findings saved on their own has been analyzed too.
     const hasProposals = allProposals.some(
-      (row) => row?.sourceId === source?.id && isReviewable(row)
+      (row) =>
+        row?.sourceId === source?.id &&
+        (isReviewable(row) || (row?.status === "confirmed" && row?.decisionSource === "automatic"))
     );
     const needsRecovery = ["failed", "manual_fallback"].includes(source?.status);
     return {
@@ -539,6 +578,7 @@ export function buildDeepIngestReview(state) {
     counts,
     sources,
     proposals: cards,
+    applied,
   };
 }
 

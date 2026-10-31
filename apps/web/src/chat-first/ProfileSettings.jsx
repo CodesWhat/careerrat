@@ -213,6 +213,7 @@ function SettingsView({
   aiPreferencesBusy = false,
   aiPreferencesStatus = "",
   permissions = [],
+  permissionsReadError = null,
   sources = {},
   publicSyncPreference = { enabled: true, source: "default", updatedAt: null },
   publicSyncBusy = false,
@@ -261,19 +262,22 @@ function SettingsView({
         onChange={onAiPreferenceChange}
       />
       <article className="cf-settings__card">
-        <div className="cf-settings__eyebrow">WHAT {agentName.toUpperCase()} MAY DO ON HIS OWN</div>
+        <div className="cf-settings__eyebrow">WHAT {agentName.toUpperCase()} CAN DO</div>
+        {permissionsReadError ? (
+          <p className="cf-settings__note" role="alert">
+            CareerRat can't read your automation settings, so these are unavailable until that's
+            fixed.
+          </p>
+        ) : null}
         {safeArray(permissions).map((permission) => (
           <div key={permission.id} className="cf-settings__permission">
             <div>
               <strong>{permission.name}</strong>
               <span>{permission.description || ""}</span>
-              {permission.providerScope ? (
-                <span className="cf-settings__permission-scope">{permission.providerScope}</span>
-              ) : null}
             </div>
             {permission.mutable === false ? (
               <span className="cf-settings__fixed-capability">
-                {permission.statusLabel || "Always on"}
+                {permission.statusLabel || "Unavailable"}
               </span>
             ) : (
               <button
@@ -290,7 +294,8 @@ function SettingsView({
           </div>
         ))}
         <p className="cf-settings__note">
-          Submitting an application always gates back to you. That one isn't a setting.
+          Everything here is on unless you turn it off. {agentName} stops at captchas and sign-in
+          checks, and only reads your email.
         </p>
       </article>
       <article className="cf-settings__card">
@@ -995,6 +1000,7 @@ export function ProfileSettings({
   aiPreferencesStatus = "",
   browser = {},
   permissions = [],
+  permissionsReadError = null,
   sources = {},
   publicSyncPreference = { enabled: true, source: "default", updatedAt: null },
   publicSyncBusy = false,
@@ -1119,6 +1125,7 @@ export function ProfileSettings({
               aiPreferencesBusy,
               aiPreferencesStatus,
               permissions,
+              permissionsReadError,
               sources,
               publicSyncPreference,
               publicSyncBusy,

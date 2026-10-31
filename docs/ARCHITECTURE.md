@@ -34,14 +34,14 @@ Routes are grouped below by cluster.
 
 - New workspace or incomplete profile → `ingest-profile`
 - "Scan my projects folder / repo" → `ingest-profile` (projects-scan mode)
-- "Sync / import email, pull recruiter replies" (Apple Mail or opted-in Gmail/Outlook webmail) → `ingest-mail`
-- "Sync / check LinkedIn or Wellfound messages/DMs" (opt-in browser) → `ingest-messages`
+- "Sync / import email, pull recruiter replies" (Apple Mail or Gmail/Outlook webmail) → `ingest-mail`
+- "Sync / check LinkedIn or Wellfound messages/DMs" (browser, on by default) → `ingest-messages`
 
 ### Apply Cycle
 
 - "Apply", "submit", or a JD URL with apply intent → `apply-job`
   (`apply-job` must run or verify `evaluate-job` as step zero; LinkedIn Easy Apply
-  postings can use opt-in authenticated form preparation gated by the
+  postings can use authenticated form preparation, switchable with the
   `authenticated_apply_preparation` capability; final submission follows `submit` in `automation.yml`: auto by default, manual to stop for the user)
 - "Gate", "should I apply", or a JD URL without apply intent → `evaluate-job`
 - "Find jobs", "source", "search", "refresh queue" → `search-jobs`
@@ -53,10 +53,11 @@ Routes are grouped below by cluster.
   artifact during a full tailor/apply run instead)
 - "How do I close this fit gap", "what should I do about this review" →
   `coach-gaps` (only fires on an `evaluate-job` verdict already at
-  `gate: review` with named `fitRisks`; explicit-click only, never auto-fires)
+  `gate: review` with named `fitRisks`; runs on its own when the verdict lands, once
+  per evaluation)
 - "Optimize / review my LinkedIn profile", make it read for targeted roles →
   `optimize-linkedin` (read-only before→after diff by default; write-back is a
-  separate opt-in, confirm-first per field)
+  separate switch, confirm-first per field)
 
 ### Research Loop
 
@@ -64,7 +65,7 @@ Routes are grouped below by cluster.
 - "What's market comp", "benchmark my salary ask" → `research-comp`
 - "Find more boards", "what sources should I add", stale queue → `research-boards`
 - "How risky / stable / healthy is this company", factor company risk into a
-  role → `company-health` (cost-gated; auto-fires at the interview stage by
+  role → `company-health` (runs on its own at the interview stage by
   default; internal signal only, never enters an outbound artifact)
 - "Find companies likely to be hiring my target roles" → `discover-companies`
   (resolves, validates, and dedupes high-confidence public ATS boards; review
@@ -81,9 +82,9 @@ Routes are grouped below by cluster.
   double-booking avoidance, and calendar-ready holds; non-scheduling threads
   hand back to `email-comms`)
 - Write a tracked interview, assessment, follow-up, or deadline to a real
-  calendar → `calendar-sync` (opt-in, confirm-first)
+  calendar → `calendar-sync` (confirm-first)
 - Find likely recruiters, hiring-team members, or warm contacts for tracked
-  companies → `relationship-sourcing` (opt-in, session browser;
+  companies → `relationship-sourcing` (session browser;
   candidate-reviewed leads are captured into Network)
 
 ### Interview & Story Bank
@@ -95,7 +96,7 @@ Routes are grouped below by cluster.
 
 - Rejection, offer, status change, outcome update → `track-outcomes`
 - "Check my statuses", "sync my pipeline", poll ATS dashboards → `sync-status`
-  (opt-in browser automation; applies verified advances atomically and leaves
+  (browser automation; applies verified advances atomically and leaves
   regressions or low-confidence labels for review)
 - "Why am I getting filtered", strategy review, re-rank, or when outcome
   thresholds trip → `reevaluate-strategy`

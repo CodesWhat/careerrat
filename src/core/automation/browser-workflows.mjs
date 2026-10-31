@@ -45,7 +45,12 @@ const LINKEDIN_PROPOSAL_SCHEMA = {
           current: { type: "string", maxLength: 4_000 },
           proposed: { type: "string", minLength: 1, maxLength: 4_000 },
           rationale: { type: "string", minLength: 1, maxLength: 500 },
-          evidenceRef: { type: "string", minLength: 1, maxLength: 240 },
+          evidenceRef: {
+            type: "string",
+            minLength: 1,
+            maxLength: 240,
+            description: "The id of one supplied evidence claim that backs this suggestion.",
+          },
         },
       },
     },
@@ -64,14 +69,31 @@ function digest(value) {
   return createHash("sha256").update(String(value)).digest("hex").slice(0, 18);
 }
 
+// `details.turnedOff` lists platforms skipped because the operator turned the
+// capability or that platform off; the summary says so, so a skip is never silent.
 function workflowResult(skill, state, details = {}) {
+  const summary = details.summary || "Workflow updated.";
+  const turnedOff = Array.isArray(details.turnedOff) ? details.turnedOff : [];
   return {
     kind: "browser_workflow_result",
     skill,
     state,
     title: details.title || skill,
-    summary: details.summary || "Workflow updated.",
     ...details,
+    summary: [
+      summary,
+      turnedOff.length ? `Turned off, so skipped: ${turnedOff.join(", ")}.` : "",
+      details.settingsError ? `Skipped, settings unreadable: ${details.settingsError}.` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+  };
+}
+
+function turnedOffDetails(turnedOff, settingsError = null) {
+  return {
+    ...(turnedOff.length ? { turnedOff } : {}),
+    ...(settingsError ? { settingsError } : {}),
   };
 }
 
@@ -163,8 +185,15 @@ async function readWithOwnedSession({ createSessionImpl, base, platform, read })
   }
 }
 
+// A denial because the settings file can't be read is not "turned off": callers
+// report it separately via `readError`.
 function allowed(capability, platform, repoRoot, env) {
-  return mayRun({ capability, platform, root: repoRoot, env }).allowed;
+  const verdict = mayRun({ capability, platform, root: repoRoot, env });
+  return {
+    allowed: verdict.allowed,
+    readError: verdict.checks?.readable === false,
+    reasons: verdict.reasons,
+  };
 }
 
 function sourceLastRun(sources, id) {
@@ -187,9 +216,16 @@ export async function ingestWebmailInApp({
 } = {}) {
   const completedAt = now().toISOString();
   const results = [];
+  const turnedOff = [];
+  let settingsError = null;
   let captured = 0;
   for (const platform of ["gmail", "outlook"]) {
-    if (!allowed("mail_access", platform, repoRoot, env)) continue;
+    const verdict = allowed("mail_access", platform, repoRoot, env);
+    if (!verdict.allowed) {
+      if (verdict.readError) settingsError = verdict.reasons[0];
+      else turnedOff.push(platform);
+      continue;
+    }
     const sourceId = `${platform}-webmail`;
     const read = await readWithOwnedSession({
       createSessionImpl,
@@ -265,6 +301,7 @@ export async function ingestWebmailInApp({
       platform: result.platform,
       ...result.blocker,
     })),
+    ...turnedOffDetails(turnedOff, settingsError),
     at: completedAt,
   });
 }
@@ -283,9 +320,16 @@ export async function ingestPlatformMessagesInApp({
 } = {}) {
   const completedAt = now().toISOString();
   const results = [];
+  const turnedOff = [];
+  let settingsError = null;
   let captured = 0;
   for (const platform of ["linkedin", "wellfound"]) {
-    if (!allowed("messaging", platform, repoRoot, env)) continue;
+    const verdict = allowed("messaging", platform, repoRoot, env);
+    if (!verdict.allowed) {
+      if (verdict.readError) settingsError = verdict.reasons[0];
+      else turnedOff.push(platform);
+      continue;
+    }
     const sourceId = `${platform}-messages`;
     const read = await readWithOwnedSession({
       createSessionImpl,
@@ -360,6 +404,7 @@ export async function ingestPlatformMessagesInApp({
       platform: result.platform,
       ...result.blocker,
     })),
+    ...turnedOffDetails(turnedOff, settingsError),
     at: completedAt,
   });
 }
@@ -379,9 +424,16 @@ export async function sourceRelationshipsInApp({
 } = {}) {
   const foundAt = now().toISOString();
   const results = [];
+  const turnedOff = [];
+  let settingsError = null;
   const leads = [];
   for (const platform of ["linkedin", "wellfound"]) {
-    if (!allowed("relationship_sourcing", platform, repoRoot, env)) continue;
+    const verdict = allowed("relationship_sourcing", platform, repoRoot, env);
+    if (!verdict.allowed) {
+      if (verdict.readError) settingsError = verdict.reasons[0];
+      else turnedOff.push(platform);
+      continue;
+    }
     const read = await readWithOwnedSession({
       createSessionImpl,
       base: { repoRoot, env },
@@ -433,6 +485,7 @@ export async function sourceRelationshipsInApp({
       platform: result.platform,
       ...result.blocker,
     })),
+    ...turnedOffDetails(turnedOff, settingsError),
     at: foundAt,
   });
 }
@@ -468,7 +521,7 @@ async function defaultLinkedinProposals({
     aiOperation: executionPlan ? undefined : "research.web",
     executionPlan,
     system:
-      "Draft honest LinkedIn profile improvements. Use only supplied candidate evidence. Return JSON matching the schema. Never invent experience or compensation.",
+      "Draft honest LinkedIn profile improvements. Use only supplied candidate evidence. Each surface's evidenceRef must be the id of one supplied evidence claim (candidateContext.evidence.claims[].id) that backs it; never invent an id or cite free text. Return JSON matching the schema. Never invent experience or compensation.",
     messages: [
       {
         role: "user",
@@ -500,17 +553,21 @@ export async function optimizeLinkedinInApp({
   saveBatch = linkedinProposalBatchPut,
 } = {}) {
   const at = now().toISOString();
-  if (!allowed("profile_optimize", "linkedin", repoRoot, env)) {
+  const verdict = mayRun({
+    capability: "profile_optimize",
+    platform: "linkedin",
+    root: repoRoot,
+    env,
+  });
+  if (!verdict.allowed) {
+    const message =
+      verdict.checks?.readable === false
+        ? `LinkedIn profile review is blocked: ${verdict.reasons[0]}.`
+        : `LinkedIn profile review is turned off: ${verdict.reasons.join("; ")}. You can also ask me to turn it on.`;
     return workflowResult("optimize-linkedin", "needs-user", {
       title: "LinkedIn profile review",
-      summary: "LinkedIn profile review consent is required.",
-      blockers: [
-        {
-          code: "CONSENT_REQUIRED",
-          message:
-            "Return to CareerRat and run LinkedIn profile review again. The permission control will appear there.",
-        },
-      ],
+      summary: message,
+      blockers: [{ code: "CAPABILITY_OFF", message }],
       at,
     });
   }
@@ -553,16 +610,36 @@ export async function optimizeLinkedinInApp({
       at,
     });
   }
+  let knownEvidenceIds = [];
+  try {
+    // candidateConfigGet returns the whole config; the claims sit under .evidence.
+    const config = candidateConfigGet({ repoRoot, env, name: "evidence" });
+    const claims = config?.evidence?.claims || config?.claims || [];
+    knownEvidenceIds = claims.map((claim) => claim?.id).filter(Boolean);
+  } catch {
+    knownEvidenceIds = [];
+  }
   const saved = saveBatch({
     repoRoot,
     env,
     batch: { surfaces: proposals },
+    autoApprove: true,
+    knownEvidenceIds,
   });
+  const staged = saved.staged || [];
+  const held = saved.held || [];
+  const plural = (n) => `suggestion${n === 1 ? "" : "s"}`;
   return workflowResult("optimize-linkedin", "completed", {
     title: "LinkedIn suggestions ready",
-    summary: `${proposals.length} profile suggestion${proposals.length === 1 ? "" : "s"} ready for review. No profile edits were applied.`,
+    summary: `${staged.length} profile ${plural(staged.length)} staged for your profile. Nothing was written to LinkedIn.${
+      held.length
+        ? ` ${held.length} ${plural(held.length)} left for you to review (${held[0].reason}).`
+        : ""
+    }`,
     batchId: saved.id,
     proposed: proposals.length,
+    staged,
+    held,
     at,
   });
 }
@@ -596,6 +673,8 @@ export async function syncStatusesInApp({
 } = {}) {
   const at = now().toISOString();
   const results = [];
+  const turnedOff = new Set();
+  let settingsError = null;
   for (const application of applications) {
     const platform = statusPlatform(application);
     const url =
@@ -615,7 +694,12 @@ export async function syncStatusesInApp({
       });
       continue;
     }
-    if (!allowed("status_polling", platform, repoRoot, env)) continue;
+    const verdict = allowed("status_polling", platform, repoRoot, env);
+    if (!verdict.allowed) {
+      if (verdict.readError) settingsError = verdict.reasons[0];
+      else turnedOff.add(platform);
+      continue;
+    }
     const read = await readWithOwnedSession({
       createSessionImpl,
       base: { repoRoot, env },
@@ -699,6 +783,7 @@ export async function syncStatusesInApp({
         applicationId: result.applicationId,
         ...result.blocker,
       })),
+      ...turnedOffDetails([...turnedOff], settingsError),
       at,
     }
   );

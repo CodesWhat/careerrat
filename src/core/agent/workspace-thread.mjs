@@ -61,6 +61,7 @@ export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "strategy.stamp": ["workspace"],
   "settings.explain": ["workspace"],
   "settings.apply": ["workspace"],
+  "knowledge.revert": ["workspace"],
   "search.run": ["workspace"],
   "sourced.promote": ["sourced"],
   "sourced.skip": ["sourced"],
@@ -510,6 +511,7 @@ function intentText(intent) {
     "strategy.stamp": "Finish this strategy review",
     "settings.explain": "Show my settings",
     "settings.apply": "Apply this settings change",
+    "knowledge.revert": "Undo this change",
     "search.run": "Search for qualified jobs",
     "sourced.promote": "Promote this qualified role",
     "sourced.skip": "Skip this role",
@@ -547,6 +549,7 @@ function intentText(intent) {
   if (intent.type === "job.prepare-submit" && intent.input?.resumeSession === true) {
     return "Resume supervised preparation.";
   }
+  if (intent.input?.auto === true) return `Automatic: ${descriptions[intent.type]}.`;
   return `${descriptions[intent.type]}.`;
 }
 

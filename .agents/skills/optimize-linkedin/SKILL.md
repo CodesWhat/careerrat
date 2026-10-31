@@ -1,6 +1,6 @@
 ---
 name: optimize-linkedin
-description: Read the candidate's LinkedIn profile through the session browser, diff it against their targeting + evidence, and propose honest, evidence-backed rewrites of the headline / About / experience / skills / Featured — then, with a separate opt-in, write the approved edits back confirm-first per field. Dry-run preview is the default and always the first move. Opt-in, user-initiated, local-only. Capabilities = profile_optimize (read+suggest), profile_apply (write-back); platform = linkedin.
+description: Read the candidate's LinkedIn profile through the session browser, diff it against their targeting + evidence, and propose honest, evidence-backed rewrites of the headline / About / experience / skills / Featured, then write the approved edits back confirm-first per field. Dry-run preview is the default and always the first move. User-initiated, local-only. Capabilities = profile_optimize (read+suggest), profile_apply (write-back); platform = linkedin.
 ---
 
 # optimize-linkedin
@@ -8,32 +8,32 @@ description: Read the candidate's LinkedIn profile through the session browser, 
 A LinkedIn profile pass driven through the session browser. It reads the candidate's
 live profile, diffs it against their own truth bank (`targeting.yml` + `evidence.yml`),
 and proposes honest, evidence-backed rewrites so the profile reads for the roles they
-actually want. With a second, separate opt-in it can write the approved edits back.
+actually want. It can then write the approved edits back, one confirmed field at a time.
 
-**Two separately-gated capabilities on the `linkedin` platform, both defaults OFF:**
+**Two separately-switched capabilities on the `linkedin` platform, both on by default:**
 
 - **`profile_optimize` (read + suggest)** — reads the profile and produces a full
   before→after diff. Read-only. Never touches the live profile.
 - **`profile_apply` (write the approved edits)** — applies the approved rewrites in the
   live profile through the session browser, **confirm-first PER FIELD**.
 
-Reading/suggesting and writing carry different ToS exposure and intent, so they are
-independently gated through the same `mayRun()` predicate; turning on suggestions
-never implies write-back. Both halt on captcha / 2FA / login-wall.
+Reading/suggesting and writing carry different intent, so they have independent
+switches checked through the same `mayRun()`; the write-back switch never changes
+what the per-field confirmation in STEP 5 requires. Both halt on captcha / 2FA / login-wall.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section. Bare `candidate/`, `workspace/`, `config/`, and `.internal/` paths below are symbolic; resolve them per AGENTS.md's Path Resolution rule.
 
 **Dry-run preview is the default and always the first move.** The skill always produces
 the full read-only before→after set first — everything it would flag and change, nothing
 touched — so the candidate sees the whole picture before a single field is written.
-Applying is a deliberate opt-in second step, per field. This is the same dry-run-by-default
+Applying is a deliberate second step, confirmed per field. This is the same dry-run-by-default
 posture as `apply-job`'s `authenticated_apply_preparation`: preview the diff, then write. It also means the
 skill runs as a pure read-only audit even when `profile_apply` is off.
 
-## STEP 0 — CONSENT GATE (hard stop)
+## STEP 0: Capability check
 
-Editing a public profile is modifying public-facing content. Never open a browser or
-touch the profile until consent is confirmed.
+Editing a public profile is modifying public-facing content, so STEP 5 keeps its
+per-field confirmation. The capability check below only says whether each part is on.
 
 Run:
 
@@ -42,38 +42,27 @@ careerrat automation status --json
 ```
 
 Inspect `capabilities.profile_optimize` and `capabilities.profile_apply` for platform
-`linkedin`. For each, `allowed: true` means three switches hold simultaneously: the
-capability's global switch is on, `linkedin` is on for that capability, and `linkedin`
-ToS consent is recorded. And either automation is in the "advanced" setup mode or the
-capability has a contextual scoped grant for `linkedin`. This is the predicate from
-`mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose.
+`linkedin`. For each, `allowed: true` means neither the capability's switch nor
+`linkedin`'s switch is turned off. This is the verdict from `mayRun()` in
+`src/core/automation/consent.mjs`; never re-derive it in prose. Both are on by default.
 
 Resolve the run mode from the two verdicts:
 
 - **`profile_optimize` allowed** → run the read + suggest pass (STEPS 1–4). This is the
   whole skill for most users.
 - **`profile_apply` ALSO allowed** → after the user approves specific fields in STEP 4,
-  you may write those fields back (STEP 5). `profile_apply` allowed but `profile_optimize`
-  not is not a valid run — you must read and propose before you can apply.
+  you may write those fields back (STEP 5, confirmed per field). `profile_apply` allowed
+  but `profile_optimize` not is not a valid run, you must read and propose before you
+  can apply.
 - **Neither allowed** → you can still run the **lean / no-browser fix-doc path** (see
-  below), which needs no consent because it drives no logged-in session. For the
-  browser-driven pass, explain how to opt in, then stop:
+  below), which drives no logged-in session. For the browser-driven pass, say it is
+  turned off (if `readError` is set, say the settings file can't be read and name it),
+  give the commands, and skip it:
 
-  1. `careerrat automation mode advanced --write`
-  2. Read LinkedIn's terms yourself to confirm automated profile reads (and, for
-     write-back, automated edits) are acceptable to you.
-  3. Record consent: `careerrat automation consent linkedin --write`
-  4. Enable read+suggest: `careerrat automation enable profile_optimize --write` then
-     `careerrat automation enable profile_optimize linkedin --write`
-  5. Only if you also want write-back: `careerrat automation enable profile_apply --write`
-     then `careerrat automation enable profile_apply linkedin --write`
-  6. Verify: `careerrat automation status --json`
-
-State clearly: both capabilities are OFF by default; enabling either is a deliberate
-choice, and write-back is a separate switch from suggestions. The user reads the ToS
-themselves; CareerRat records the decision but does not make it. A contextual scoped
-grant given in the app is an alternative to step 1: it authorizes the capability for
-`linkedin` without switching to advanced mode.
+  - Read + suggest: `careerrat automation enable profile_optimize --write` then
+    `careerrat automation enable profile_optimize linkedin --write`
+  - Write-back: `careerrat automation enable profile_apply --write` then
+    `careerrat automation enable profile_apply linkedin --write`
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
 
@@ -115,9 +104,9 @@ and ask the user to complete it. Never bypass or automate around an auth challen
 Save any screenshot or scraped fragment under `workspace/` only.
 
 > **Lean / no-browser fix-doc path.** If no session browser is configured, the user wants
-> suggest-only, or consent is off, skip the live session entirely. Work from a read-only
+> suggest-only, or the capability is turned off, skip the live session entirely. Work from a read-only
 > source instead — a Layer-1 `WebFetch` of the public profile, or a profile the user
-> pastes in — and produce the same before→after document (STEP 4). No browser, no consent
+> pastes in, and produce the same before→after document (STEP 4). No browser
 > needed, no write-back. This is the default tier and a valid complete run on its own.
 
 ## STEP 3 — READ THE CURRENT PROFILE SURFACES (capture verbatim)
@@ -210,7 +199,7 @@ This closes the Artifact Contract's two-places rule: the Documents doc plus this
 on-record batch.
 
 **If `profile_apply` is off, you are done here** — the document plus the recorded batch
-is the deliverable. The user reviews and approves fields in the app or applies edits by
+is the deliverable. The user reviews the recorded suggestions in the app or applies edits by
 hand. Do not push to write-back.
 
 ## STEP 5 — APPLY THE APPROVED EDITS (only if `profile_apply` is allowed)
@@ -220,9 +209,10 @@ is **confirm-first PER FIELD, never bulk-auto**: show the before→after for one
 get an explicit yes, write that one field, verify it, then move to the next. Nothing is
 written silently.
 
-If the candidate pre-approved fields in the Ask workspace, read the batch first
-(`careerrat data linkedin-proposals latest`) and take its approved surfaces as the
-work-list — but the in-app approval supplies **what** to apply, never permission to skip
+If the in-app pass already staged fields, read the batch first
+(`careerrat data linkedin-proposals latest --status reviewed`, or the default pending
+when some are held) and take its approved surfaces as the
+work-list. Staging supplies **what** to apply, never permission to skip
 the live confirmation. Still show each before→after and get a live yes here before
 writing that field, exactly as above.
 
@@ -299,16 +289,15 @@ changes. The point is an honest profile that reads for the target roles, not a l
 
 ## RULES
 
-- **Opt-in, OFF by default, two separate gates.** Run a browser pass only where
+- **On by default, two separate switches.** Run a browser pass only where
   `careerrat automation status --json` shows the capability `allowed: true` for
-  `linkedin`. `profile_optimize` gates reading + suggesting; `profile_apply` separately
-  gates write-back. The `allowed` field encodes the predicate (global switch · platform
-  switch · ToS consent, all on, and either advanced setup mode or a contextual scoped
-  grant for that platform) from `mayRun()` in `src/core/automation/consent.mjs`; never
-  re-derive the predicate in prose. Suggestions on never implies write-back.
+  `linkedin`. `profile_optimize` covers reading + suggesting; `profile_apply` separately
+  covers write-back. The `allowed` field is the `mayRun()` verdict from
+  `src/core/automation/consent.mjs` (neither switch is turned off); never re-derive it
+  in prose. If a switch is off, say so with the enable command and skip that part.
 
 - **Dry-run preview is the default and the first move.** Always produce the full read-only
-  before→after set before writing anything. Applying is a deliberate, per-field opt-in
+  before→after set before writing anything. Applying is a deliberate, per-field
   second step. The skill is a complete read-only audit on its own.
 
 - **Confirm-first per field on write.** Editing a public profile = modifying public-facing
@@ -368,24 +357,26 @@ changes. The point is an honest profile that reads for the target roles, not a l
 ## In-app and terminal paths
 
 CareerRat's in-app path reads the candidate's LinkedIn profile through its owned
-browser workflow after `profile_optimize` permission passes, then creates a
+browser workflow unless `profile_optimize` is turned off, then creates a
 bounded, evidence-grounded proposal batch for review. A terminal or
 external-agent run still follows STEP 0 onward exactly as written.
 
 - **Requesting a profile pass** (`linkedin.optimize-request`). "Optimize my
-  LinkedIn" offers an "Optimize LinkedIn profile" chip. Without
-  `profile_optimize`, the handler opens the contextual permission control and
-  leaves any existing proposal batch visible. When reading is allowed, it runs
+  LinkedIn" offers an "Optimize LinkedIn profile" chip. With
+  `profile_optimize` turned off, the handler says so, offers a "Turn it on" action,
+  and leaves any existing proposal batch visible. When reading is allowed, it runs
   the native profile pass and renders the returned proposal batch for review.
   Pasted profile text remains available on the terminal or external-agent path.
-- **Reviewing suggestions** (`linkedin.proposal-decide`). The batch recorded by
-  STEP 4 renders as per-surface before-and-after cards with Approve and Reject
-  buttons. Deciding is ungated: approving stages a field locally and never
-  writes to LinkedIn. A stale click (the batch changed underneath) refuses;
-  fresh decisions re-render the card. Once every surface is decided the batch
-  is reviewed.
-- **Write boundary.** Approving a suggestion in the app stages it locally; no
-  live LinkedIn field changes on approval. Applying approved edits live remains
-  behind the separate `profile_apply` permission and a per-field confirmation on
+- **Staged suggestions** (`linkedin.proposal-decide`). The in-app pass stages every
+  suggestion that passes the checks on its own and saves it with an Undo. Each one
+  shows as "Staged for your profile". A suggestion with a placeholder to fill in, or
+  no evidence behind it, stays undecided for you to approve or reject. Undo returns
+  a staged suggestion to undecided, and it refuses once the field was written to
+  LinkedIn. A stale click (the batch changed underneath) refuses. Once every
+  suggestion is decided the batch is reviewed, so read it with
+  `linkedin-proposals latest --status reviewed` as well as the default pending.
+- **Write boundary.** Staging a suggestion in the app is local and automatic; no
+  live LinkedIn field changes when it is staged. Applying approved edits live remains
+  behind the separate `profile_apply` switch and a per-field confirmation on
   the terminal or external-agent STEP 5 path. STEP 6 verifies the live result and
   marks only verified fields applied so the card stays honest.

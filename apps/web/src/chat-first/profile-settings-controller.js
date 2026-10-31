@@ -125,23 +125,44 @@ const VOLUNTARY_FORM_POLICY_OPTIONS = [
   },
 ];
 
-const PERMISSION_PLATFORMS = Object.freeze({
-  authenticated_apply_preparation: [
-    "greenhouse",
-    "lever",
-    "ashby",
-    "workable",
-    "smartrecruiters",
-    "linkedin",
-    "external_ats",
-  ],
-  mail_access: ["gmail", "outlook", "webmail"],
-});
-
-const PERMISSION_PROVIDER_SCOPES = Object.freeze({
-  authenticated_apply_preparation:
-    "Turning this on records consent for Greenhouse, Lever, Ashby, Workable, SmartRecruiters, LinkedIn, and external ATS sites.",
-  mail_access: "Turning this on records consent for Gmail, Outlook, and webmail.",
+// Plain-words names for each on/off switch, in the order Settings lists them.
+const CAPABILITY_COPY = Object.freeze({
+  authenticated_apply_preparation: {
+    name: "Prepare application forms",
+    description: "opens and fills application forms in your signed-in browser",
+  },
+  mail_access: {
+    name: "Read job-search email",
+    description: "reads recruiting updates and verification codes from connected mail",
+  },
+  status_polling: {
+    name: "Check application status",
+    description: "reads application status from job portals you're signed in to",
+  },
+  messaging: {
+    name: "Read recruiter messages",
+    description: "reads messages on LinkedIn and Wellfound",
+  },
+  profile_optimize: {
+    name: "Review your LinkedIn profile",
+    description: "reads your profile and suggests honest rewrites",
+  },
+  profile_apply: {
+    name: "Update your LinkedIn profile",
+    description: "writes the edits you approve back to LinkedIn",
+  },
+  relationship_sourcing: {
+    name: "Find people to contact",
+    description: "looks for recruiters and hiring-team members for you to review",
+  },
+  calendar_sync: {
+    name: "Add interviews to your calendar",
+    description: "writes confirmed interviews to your calendar",
+  },
+  calendar_read: {
+    name: "Check your calendar",
+    description: "reads when you're free so interviews fit around your schedule",
+  },
 });
 
 function cadenceLabel(value) {
@@ -176,9 +197,11 @@ function selectedRuntime(runtimes) {
   return choices.find((runtime) => runtime?.id === runtimes?.selectedId) || null;
 }
 
-function capabilityEnabled(automation, id, fallback = false) {
+// Capabilities are on unless switched off. Unreadable settings fail closed.
+function capabilityEnabled(automation, id) {
+  if (automation?.readError) return false;
   const row = list(automation?.capabilities).find((item) => item?.capability === id);
-  return row ? row.enabled === true : fallback;
+  return row ? row.enabled !== false : true;
 }
 
 function browserModel(automation) {
@@ -500,10 +523,7 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
       source: publicSyncPreference.source || "default",
       updatedAt: publicSyncPreference.updatedAt || null,
     },
-    permissionState: ["authenticated_apply_preparation", "mail_access"].map((id) => ({
-      id,
-      enabled: capabilityEnabled(automation, id),
-    })),
+    permissionsReadError: automation?.readError ? String(automation.readError) : null,
     permissions: [
       {
         id: "draft_documents",
@@ -513,22 +533,14 @@ export function buildProfileSettingsModel({ onboard, runtimes, automation, sourc
         mutable: false,
         statusLabel: "Always on",
       },
-      {
-        id: "authenticated_apply_preparation",
-        name: "Prepare application forms",
-        description: `${agentName} fills authenticated forms, you press every submit`,
-        providerScope: PERMISSION_PROVIDER_SCOPES.authenticated_apply_preparation,
-        enabled: capabilityEnabled(automation, "authenticated_apply_preparation"),
-        mutable: true,
-      },
-      {
-        id: "mail_access",
-        name: "Read job-search email",
-        description: "reads recruiting updates and verification codes from connected mail",
-        providerScope: PERMISSION_PROVIDER_SCOPES.mail_access,
-        enabled: capabilityEnabled(automation, "mail_access"),
-        mutable: true,
-      },
+      ...Object.entries(CAPABILITY_COPY).map(([id, copy]) => ({
+        id,
+        name: copy.name,
+        description: copy.description,
+        enabled: capabilityEnabled(automation, id),
+        mutable: !automation?.readError,
+        ...(automation?.readError ? { statusLabel: "Unavailable" } : {}),
+      })),
     ],
     sources: {
       scannedCount: sourceRows.filter((source) => Boolean(source?.lastRunAt)).length,
@@ -695,33 +707,7 @@ export function profileSectionSavePlan(
   throw new Error("That profile section is not editable here.");
 }
 
-export function permissionPatch(id, enabled, currentPermissions = []) {
-  if (!Object.hasOwn(PERMISSION_PLATFORMS, id)) return null;
-  const value = Boolean(enabled);
-  const platforms = PERMISSION_PLATFORMS[id] || [];
-  const providerState = Object.fromEntries(platforms.map((platform) => [platform, value]));
-  const consentState = Object.fromEntries(
-    platforms.map((platform) => [
-      platform,
-      value ||
-        list(currentPermissions).some((permission) => {
-          const permissionId = permission?.id || permission?.capability;
-          return (
-            permissionId !== id &&
-            permission?.enabled === true &&
-            list(PERMISSION_PLATFORMS[permissionId]).includes(platform)
-          );
-        }),
-    ])
-  );
-  return {
-    setup_mode: "advanced",
-    ...(platforms.length ? { consent: consentState } : {}),
-    capabilities: {
-      [id]: {
-        enabled: value,
-        ...(platforms.length ? { platforms: { ...providerState } } : {}),
-      },
-    },
-  };
+export function permissionPatch(id, enabled) {
+  if (!Object.hasOwn(CAPABILITY_COPY, id)) return null;
+  return { capabilities: { [id]: { enabled: Boolean(enabled) } } };
 }

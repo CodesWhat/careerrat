@@ -355,13 +355,13 @@ If `reevaluation.due` is `false` but `advanced.byFamily` shows a strong concentr
 
 If the user states any new constraint during the outcome flow ("never apply to X again", "add this as a cut signal", "cap this company at 1 app"), persist it through the owning DB-aware command immediately:
 
-- Exclusion → `careerrat gate exclude-company "<Company>" --write --confirm`
+- Exclusion → `careerrat gate exclude-company "<Company>" --write`
 - Cut signal → `careerrat gate cut-signal "<signal>" --write`
 - Keep signal → `careerrat gate keep-signal "<signal>" --write`
-- Per-company cap or cooldown → after confirmation, write `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
-- Comp floor or anchor change → `careerrat gate comp-floor <N> --write --confirm` or `careerrat gate comp-target <N> --write --confirm`
+- Per-company cap or cooldown → write `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`. It applies directly and is logged with an Undo.
+- Comp floor or anchor change → `careerrat gate comp-floor <N> --write` or `careerrat gate comp-target <N> --write`. Raising one, or setting it for the first time, writes directly. Lowering or clearing one needs the user's yes first, then add `--confirm`.
 
-**Friction rule:** write-and-report for unambiguous, low-blast-radius changes (one clear cut signal). Confirm-first for consequential changes (broad exclusion, comp floor drop, large re-rank). After writing, echo the CLI confirmation.
+**Friction rule:** knowledge and targeting writes (signals, exclusions, caps, re-ranks) apply directly through the same writers and are logged with an Undo. Confirm-first stays for lowering a comp floor or target, loosening an honesty boundary, and any strategy change backed by fewer than 3 data points (log it as a suggestion). After writing, echo the CLI confirmation.
 
 A stated gate must never live only in chat. Do not hardcode it into skill prose.
 

@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
-
 import {
   createWorkspaceOperationKinds,
   mountWorkspaceAgentRoutes,
 } from "../src/cli/workspace-agent-route.mjs";
+import { buildKnowledgeWriteEntry } from "../src/core/agent/knowledge-write-log.mjs";
 import {
   captureWorkspaceIntake,
   createWorkspaceAgentRuntime,
@@ -30,12 +30,18 @@ import {
   workspaceThreadOpen,
   workspaceThreadRead,
 } from "../src/core/agent/workspace-thread.mjs";
-import { CAPABILITY_KEYS, mayRun } from "../src/core/automation/consent.mjs";
+import {
+  CAPABILITIES,
+  CAPABILITY_KEYS,
+  mayRun,
+  normalizeAutomationConfig,
+} from "../src/core/automation/consent.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import {
   appPersistEvaluation,
   appRegisterPacketQuestionCapture,
+  appSetFields,
   appUpsert,
 } from "../src/core/db/verbs/app.mjs";
 import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
@@ -51,6 +57,7 @@ import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
 import {
   linkedinProposalBatchGet,
   linkedinProposalBatchPut,
+  linkedinProposalDecide,
 } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
@@ -62,8 +69,10 @@ import {
 } from "../src/core/db/verbs/sourcing-runs.mjs";
 import { buildCompanySeedContext } from "../src/core/discovery/company-context.mjs";
 import { companyDiscoveryFingerprint } from "../src/core/discovery/company-discovery-cadence.mjs";
+import { draftPacketAnswers } from "../src/core/packet/answers.mjs";
 import { draftOneOffScreeningAnswers } from "../src/core/packet/one-off-answer.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { slugifyClaimId } from "../src/core/profile/evidence-writer.mjs";
 import {
   readResearch,
   researchRelPath,
@@ -76,10 +85,35 @@ const cleanupRoots = [];
 let missionFixtureSequence = 0;
 let workspaceRequestSequence = 0;
 
+// Capabilities are on by default. The permission-prompt tests here (72b-2 owns
+// reworking them) need the prompt path to fire, so this fixture starts every
+// capability and platform explicitly off. Tests that grant one then work as before.
+const ALL_OFF_CAPABILITIES = Object.fromEntries(
+  Object.entries(CAPABILITIES).map(([cap, def]) => [
+    cap,
+    {
+      enabled: false,
+      platforms: Object.fromEntries(def.platforms.map((platform) => [platform, false])),
+    },
+  ])
+);
+// What the stored automation doc reads as right after the fixture patch, for the
+// "nothing was granted" assertions that used to compare against {}.
+const ALL_OFF_AUTOMATION = normalizeAutomationConfig({
+  capabilities_default: "on",
+  capabilities: ALL_OFF_CAPABILITIES,
+});
+
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-"));
   cleanupRoots.push(repoRoot);
   openDb({ repoRoot, env: {} });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: { capabilities: structuredClone(ALL_OFF_CAPABILITIES) },
+  });
   return repoRoot;
 }
 
@@ -1604,7 +1638,16 @@ test("coaching.plan persists a plan onto the application row and returns a coach
       fitRisks: ["No direct Kubernetes production experience on record"],
     },
   });
-  const plan = coachingPlanPayload();
+  const plan = coachingPlanPayload({
+    gaps: [
+      {
+        id: "no-direct-kubernetes-production-experience",
+        gapText: "No direct Kubernetes production experience on record",
+        suggestion: { kind: "no-close-path", draftClaim: null, rationale: "Nothing on record." },
+        status: "open",
+      },
+    ],
+  });
 
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -1624,6 +1667,7 @@ test("coaching.plan persists a plan onto the application row and returns a coach
   assert.equal(last.artifacts[0].applicationId, "app-coach");
   assert.deepEqual(last.artifacts[0].coachingPlan, plan);
   assert.match(last.text, /1 gap named/);
+  assert.match(last.text, /Still open/);
 
   const persisted = readApplication(repoRoot, "app-coach");
   assert.deepEqual(persisted.coachingPlan, plan);
@@ -1734,6 +1778,20 @@ test("coaching.evidence-save routes a confirmed draft through the evidence firew
     persisted.coachingPlan.gaps.find((g) => g.id === "no-direct-kubernetes-production-experience")
       .status,
     "closed"
+  );
+
+  // A save from an older thread records the same Undo coaching.plan does.
+  const entry = last.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(entry?.target, "evidence");
+  assert.equal(entry?.op, "add");
+  assert.equal(entry?.writer, "coaching.evidence-save");
+  const undo = last.metadata.nextActions.find(
+    (action) => action.intent?.type === "knowledge.revert"
+  );
+  assert.ok(undo, "the legacy save offers Undo");
+  assert.ok(
+    last.metadata.nextActions.some((action) => action.intent?.type === "job.evaluate"),
+    "the fit follow-up stays"
   );
 });
 
@@ -1903,7 +1961,7 @@ test("coaching.evidence-save ignores an input.draftClaim override and persists o
   );
 });
 
-test("coaching.evidence-save throws COACHING_GAP_NOT_OPEN instead of silently re-writing a closed gap", async () => {
+test("coaching.evidence-save on an already closed gap answers Already saved and never re-writes", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {
     id: "app-coach",
@@ -1929,18 +1987,16 @@ test("coaching.evidence-save throws COACHING_GAP_NOT_OPEN instead of silently re
     }),
   });
 
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "coaching.evidence-save",
-        entity: { type: "application", id: "app-coach" },
-        input: { gapId: "no-direct-kubernetes-production-experience" },
-      },
-    }),
-    (error) => error.code === "COACHING_GAP_NOT_OPEN"
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.evidence-save",
+      entity: { type: "application", id: "app-coach" },
+      input: { gapId: "no-direct-kubernetes-production-experience" },
+    },
+  });
+  assert.equal(result.messages.at(-1).text, "Already saved.");
 
   const persistedClaims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
   assert.equal(persistedClaims.length, 0, "a closed gap must never re-write the evidence bank");
@@ -1992,6 +2048,337 @@ test("coaching.evidence-save reports a duplicate claim as already saved and stil
     "closed",
     "a duplicate is still a resolved gap"
   );
+});
+
+function planWithDrafts(extraGaps = []) {
+  return coachingPlanPayload({
+    gaps: [coachingPlanPayload().gaps[0], ...extraGaps],
+  });
+}
+
+function seedCoachApp(repoRoot) {
+  seedApplication(repoRoot, {
+    id: "app-coach",
+    company: "Acme Platform",
+    role: "Platform Engineer",
+    evaluation: currentEvaluationForPlan(),
+  });
+}
+
+function runCoachingPlan(repoRoot, plan) {
+  return executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: { type: "coaching.plan", entity: { type: "application", id: "app-coach" } },
+    buildCoachingPlanImpl: async () => ({ status: 200, body: { ok: true, data: plan } }),
+  });
+}
+
+function gapOf(repoRoot, id = "no-direct-kubernetes-production-experience") {
+  return readApplication(repoRoot, "app-coach").coachingPlan.gaps.find((g) => g.id === id);
+}
+
+const REFUSED_GAP = {
+  id: "no-oncall-history",
+  gapText: "No on-call history on record",
+  suggestion: {
+    kind: "evidence-claim",
+    draftClaim: {
+      claim: "Carried the pager for [Company] services.",
+      evidence: "Source: resume.",
+    },
+    rationale: "Thin.",
+  },
+  status: "open",
+};
+
+const NO_DRAFT_GAP = {
+  id: "no-ml-background",
+  gapText: "No machine learning background on record",
+  suggestion: { kind: "no-close-path", draftClaim: null, rationale: "Nothing on record." },
+  status: "open",
+};
+
+test("coaching.plan auto-saves open gaps that have a draft, closes them, and logs each claim with an Undo in the job thread", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts[0].kind, "coaching_plan");
+  assert.equal(last.artifacts[0].coachingPlan.gaps[0].status, "closed");
+  assert.equal(last.entity.type, "application");
+  assert.equal(last.entity.id, "app-coach");
+  assert.match(last.text, /Saved "Ran production platform tooling/);
+
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(claims.filter((c) => /production platform tooling/i.test(c.claim)).length, 1);
+  assert.equal(gapOf(repoRoot).status, "closed");
+
+  const entry = last.artifacts[1];
+  assert.equal(entry.kind, "knowledge_write");
+  assert.equal(entry.target, "evidence");
+  assert.equal(entry.op, "add");
+  assert.match(entry.after.claim, /production platform tooling/i);
+  assert.deepEqual(entry.source, {
+    kind: "coaching",
+    applicationId: "app-coach",
+    gapId: "no-direct-kubernetes-production-experience",
+  });
+  const undo = last.metadata.nextActions[0];
+  assert.equal(undo.intent.type, "knowledge.revert");
+  assert.deepEqual(undo.intent.input, { messageId: last.id, index: 1 });
+  assert.equal(
+    last.metadata.nextActions.at(-1).intent.type,
+    "job.evaluate",
+    "a plan that closed a gap offers the fit check"
+  );
+});
+
+test("coaching.plan leaves a firewall-refused draft unsaved with its gap open and says why, and leaves no-draft gaps open", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts([REFUSED_GAP, NO_DRAFT_GAP]));
+
+  const last = result.messages.at(-1);
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(claims.length, 1, "only the clean draft reaches the evidence bank");
+  assert.equal(gapOf(repoRoot).status, "closed");
+  assert.equal(gapOf(repoRoot, "no-oncall-history").status, "open");
+  assert.equal(gapOf(repoRoot, "no-ml-background").status, "open");
+  assert.match(last.text, /Didn't save a draft for "No on-call history on record"/);
+  assert.match(last.text, /Still open: "No machine learning background on record"/);
+  assert.equal(
+    last.artifacts.filter((a) => a.kind === "knowledge_write").length,
+    1,
+    "refused and no-draft gaps log nothing"
+  );
+});
+
+test("Undo of a coaching evidence add removes the claim and reopens its gap", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  const note = result.messages.at(-1);
+  assert.equal(note.metadata.state, "reverted");
+  assert.match(note.text, /coaching gap is open again/i);
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(claims.length, 0);
+  const gap = gapOf(repoRoot);
+  assert.equal(gap.status, "open");
+  assert.equal(gap.savedClaimId, undefined);
+});
+
+test("Undo of a coaching evidence add is refused when the claim is cited, and the gap stays closed", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+  const db = openDb({ repoRoot, env: {} });
+  db.prepare("INSERT INTO deep_ingest_story_bank (id, data) VALUES (?, ?)").run(
+    "story-cites",
+    JSON.stringify({ id: "story-cites", status: "confirmed", evidence_ids: [last.artifacts[1].id] })
+  );
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  assert.equal(result.messages.at(-1).metadata.state, "refused");
+  assert.equal(result.messages.at(-1).metadata.reason, "in-use");
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 1);
+  assert.equal(gapOf(repoRoot).status, "closed");
+});
+
+test("coaching.evidence-save on a gap the plan auto-saved says Already saved and does not duplicate", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "coaching.evidence-save",
+      entity: { type: "application", id: "app-coach" },
+      input: { gapId: "no-direct-kubernetes-production-experience" },
+    },
+  });
+
+  assert.equal(result.messages.at(-1).text, "Already saved.");
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || [];
+  assert.equal(claims.length, 1);
+});
+
+test("Undo of a coaching evidence add still removes the claim but leaves a gap a newer plan replaced", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+  // A newer plan replaced the stored one: same gap id, no savedClaimId.
+  appSetFields({
+    repoRoot,
+    env: {},
+    id: "app-coach",
+    patch: {
+      coachingPlan: coachingPlanPayload({
+        gaps: [NO_DRAFT_GAP].map((g) => ({
+          ...g,
+          id: "no-direct-kubernetes-production-experience",
+        })),
+      }),
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  assert.match(result.messages.at(-1).text, /changed since/i);
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
+  assert.equal(gapOf(repoRoot).status, "open");
+});
+
+const DRAFT_K8S = coachingPlanPayload().gaps[0].suggestion.draftClaim;
+
+test("coaching.plan rerun with an identical draft closes the gap as covered, with no new Undo and the original kept", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  await runCoachingPlan(repoRoot, planWithDrafts());
+  const before = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
+  assert.equal(
+    (last.metadata.nextActions || []).filter((x) => x.intent?.type === "knowledge.revert").length,
+    0
+  );
+  assert.match(last.text, /already in your evidence bank/);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).evidence.claims, before);
+  assert.equal(gapOf(repoRoot).status, "closed");
+  assert.equal(gapOf(repoRoot).savedClaimId, undefined);
+});
+
+test("coaching.plan refuses a same-id draft that differs from the saved claim, leaves the original, and keeps the gap open", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const original = {
+    id: slugifyClaimId(DRAFT_K8S.claim),
+    ...DRAFT_K8S,
+    evidence: "Source: a different doc.",
+  };
+  candidateEvidenceMerge({ repoRoot, env: {}, claims: [original] });
+
+  const result = await runCoachingPlan(repoRoot, planWithDrafts());
+
+  const last = result.messages.at(-1);
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].evidence, "Source: a different doc.");
+  assert.equal(gapOf(repoRoot).status, "open");
+  assert.match(last.text, /A saved claim already uses this wording, so CareerRat left it alone\./);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
+});
+
+const SECOND_SAME_DRAFT_GAP = {
+  id: "no-platform-scope",
+  gapText: "No platform scope on record",
+  suggestion: { kind: "evidence-claim", draftClaim: { ...DRAFT_K8S }, rationale: "Same." },
+  status: "open",
+};
+
+test("two gaps with the same draft save once with one Undo, close both, and Undo reopens both", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts([SECOND_SAME_DRAFT_GAP]));
+
+  const last = planned.messages.at(-1);
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence.claims || []).length, 1);
+  assert.equal(last.artifacts.filter((a) => a.kind === "knowledge_write").length, 1);
+  assert.equal(
+    last.metadata.nextActions.filter((x) => x.intent?.type === "knowledge.revert").length,
+    1
+  );
+  const claimId = last.artifacts[1].id;
+  assert.equal(gapOf(repoRoot).status, "closed");
+  assert.equal(gapOf(repoRoot).savedClaimId, claimId);
+  assert.equal(gapOf(repoRoot, "no-platform-scope").status, "closed");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").savedClaimId, claimId);
+
+  const undone = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+  });
+
+  assert.equal(undone.messages.at(-1).metadata.state, "reverted");
+  assert.equal(gapOf(repoRoot).status, "open");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").status, "open");
+  assert.equal(gapOf(repoRoot, "no-platform-scope").savedClaimId, undefined);
+});
+
+test("Undo still records the claim removal and reports the gap reopened when the export fails after the commit", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+    appSetFieldsImpl: (args) => {
+      appSetFields(args);
+      throw Object.assign(new Error("export failed"), { committed: true });
+    },
+  });
+
+  const note = result.messages.at(-1);
+  assert.equal(note.metadata.state, "reverted");
+  assert.match(note.text, /coaching gap is open again/i);
+  assert.equal(note.artifacts[0].kind, "knowledge_write");
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
+  assert.equal(gapOf(repoRoot).status, "open");
+});
+
+test("Undo still records the claim removal and says the gap stayed closed when the reopen fails without committing", async () => {
+  const repoRoot = tempRepo();
+  seedCoachApp(repoRoot);
+  const planned = await runCoachingPlan(repoRoot, planWithDrafts());
+  const last = planned.messages.at(-1);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: last.metadata.nextActions[0].intent,
+    appSetFieldsImpl: () => {
+      throw new Error("db locked");
+    },
+  });
+
+  const note = result.messages.at(-1);
+  assert.equal(note.metadata.state, "reverted");
+  assert.match(note.text, /gap stayed closed/i);
+  assert.equal(note.artifacts[0].kind, "knowledge_write");
+  assert.equal((candidateConfigGet({ repoRoot, env: {} }).evidence?.claims || []).length, 0);
+  assert.equal(gapOf(repoRoot).status, "closed");
 });
 
 // ---------------------------------------------------------------------------
@@ -2099,7 +2486,7 @@ test("strategy.review preserves its frozen plan and cancellation signal at the r
   assert.equal(reviewInput.signal, controller.signal);
 });
 
-test("strategy.review returns only a 'Finish review' nextAction once drafted, and passes force through to the impl", async () => {
+test("strategy.review keeps a thin-evidence recommendation as a suggestion with Apply and Finish review, and passes force through", async () => {
   const repoRoot = tempRepo();
   const calls = [];
 
@@ -2126,7 +2513,7 @@ test("strategy.review returns only a 'Finish review' nextAction once drafted, an
             type: "cut-signal",
             title: "Cut on-call roles",
             rationale: "Every on-call-tagged role was rejected.",
-            evidenceCount: 4,
+            evidenceCount: 2,
             proposal: { signal: "on-call-rotation" },
           },
         ],
@@ -2138,11 +2525,20 @@ test("strategy.review returns only a 'Finish review' nextAction once drafted, an
   const last = result.messages.at(-1);
   assert.equal(
     last.text,
-    "5 new rejections cluster around on-call roles. Review the findings and recommendations, then finish the review."
+    "5 new rejections cluster around on-call roles. Suggested, not applied: Cut on-call roles (Only 2 data points behind it, so it stays a suggestion until you apply it.). Review the rest, then finish the review."
   );
+  assert.equal(last.artifacts[0].recommendations[0].status, "suggested");
   assert.equal(last.artifacts[0].recommendations.length, 1);
   assert.equal(last.metadata.state, "drafted");
-  assert.deepEqual(last.metadata.nextActions, [
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).targeting?.cut_signals?.includes(
+      "on-call-rotation"
+    ) ?? false,
+    false
+  );
+  assert.equal(last.metadata.nextActions[0].label, "Apply: Cut on-call roles");
+  assert.equal(last.metadata.nextActions[0].intent.type, "strategy.apply");
+  assert.deepEqual(last.metadata.nextActions.slice(1), [
     {
       label: "Finish review",
       intent: {
@@ -2689,7 +3085,7 @@ test("Yes enables the resolved login source and opens its exact saved URL withou
   assert.equal(opened[0].platform, "linkedin");
   assert.equal(opened[0].url, sourceUrl);
   assert.equal(opened[0].source.label, "LinkedIn search");
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
   assert.equal(result.messages.at(-1).text, "LinkedIn is open for sign-in.");
   assert.equal(result.messages.at(-1).metadata.state, "needs-user");
 });
@@ -2730,7 +3126,7 @@ test("Yes opens any configured login source without a hardcoded job-site allowli
   assert.equal(opened.length, 1);
   assert.equal(opened[0].platform, "jobs.example.com");
   assert.equal(opened[0].url, sourceUrl);
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
   assert.equal(
     result.messages.at(-1).text,
     "Example Jobs is open and ready. I’m continuing the search now."
@@ -2901,7 +3297,7 @@ test("Yes fails closed when the browser-session handoff is unavailable", async (
   );
 
   assert.deepEqual(enabled, [true, false]);
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
 test("No keeps the authenticated source disabled and continues the rest of the search", async () => {
@@ -2963,7 +3359,7 @@ test("No keeps the authenticated source disabled and continues the rest of the s
     "Skipped Indeed. I’m continuing with your other sources."
   );
   assert.equal(result.messages.at(-1).metadata.state, "running");
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
 test("No settles honestly when the login source was the only source available", async () => {
@@ -7590,7 +7986,7 @@ test("natural recruiter requests refuse ambiguous threads without drafting", asy
   assert.ok(actions.every((action) => action.primary === false));
 });
 
-test("one-off screening questions draft inside Ask and offer confirmed durable reuse", async () => {
+test("one-off screening questions draft inside Ask and save reusable answers with an Undo", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
   const calls = [];
@@ -7651,19 +8047,79 @@ test("one-off screening questions draft inside Ask and offer confirmed durable r
       },
     },
     {
-      label: "Save for future applications",
+      label: "Undo Saved answer",
       intent: {
-        type: "screening.answer-save",
-        entity: { type: "candidate", id: "candidate" },
-        input: {
-          question: "Will you now or later require sponsorship?",
-          key: "will you now or later require sponsorship",
-          answer: "I do not require employment sponsorship.",
-        },
+        type: "knowledge.revert",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { messageId: message.id, index: 1 },
       },
     },
   ]);
+  // The reusable answer saved as it was drafted, logged, and Undo takes it back.
+  const saved = message.artifacts[1];
+  assert.equal(saved.kind, "knowledge_write");
+  assert.equal(saved.target, "candidate_config:form-defaults");
+  assert.equal(saved.path, "screening_answers.will you now or later require sponsorship");
+  assert.equal(saved.revertible, true);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} })["form-defaults"].screening_answers[
+      "will you now or later require sponsorship"
+    ],
+    "I do not require employment sponsorship."
+  );
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: message.metadata.nextActions[1].intent,
+  });
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} })["form-defaults"]?.screening_answers?.[
+      "will you now or later require sponsorship"
+    ],
+    undefined
+  );
   assert.match(message.text, /review this answer/i);
+});
+
+test("job-specific screening answers are not saved as reusable defaults", async () => {
+  const repoRoot = tempRepo();
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { questionText: "Why do you want to work at Temporal Labs?" },
+    },
+    answerScreeningQuestionsImpl: async () => ({
+      applicationId: null,
+      answers: [
+        {
+          questionId: "q-why",
+          key: "why do you want to work at temporal labs",
+          question: "Why do you want to work at Temporal Labs?",
+          answer: "I like durable execution.",
+          source: "ai",
+          durable: true,
+          uploadReady: true,
+          confirmationRequired: false,
+        },
+      ],
+      excluded: [],
+      needsUser: false,
+      artifactPath: null,
+      ai: { used: true },
+    }),
+  });
+  const message = result.messages.at(-1);
+  assert.equal(message.artifacts.filter((a) => a.kind === "knowledge_write").length, 0);
+  assert.equal(message.metadata.nextActions, undefined);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} })["form-defaults"]?.screening_answers?.[
+      "why do you want to work at temporal labs"
+    ],
+    undefined
+  );
 });
 
 test("real one-off answer chain groups exact packet confirmations into one bounded action", async () => {
@@ -7904,16 +8360,107 @@ test("free-form job chat durably confirms exact user-supplied screening pairs in
   assert.equal(confirmation.kind, "action_result");
   assert.equal(confirmation.metadata.persisted, true);
   assert.equal(confirmation.metadata.uploadReady, true);
-  assert.deepEqual(confirmation.metadata.nextActions, [
-    {
-      label: "Resume supervised apply",
-      intent: {
-        type: "job.prepare-submit",
-        entity: { type: "application", id: "app-temporal" },
-        input: { resumeSession: true },
-      },
+  assert.deepEqual(confirmation.metadata.nextActions[0], {
+    label: "Resume supervised apply",
+    intent: {
+      type: "job.prepare-submit",
+      entity: { type: "application", id: "app-temporal" },
+      input: { resumeSession: true },
     },
+  });
+  // The two durable questions (sponsorship, start date) also save to
+  // form-defaults with an Undo each; the job-specific ones stay on the job.
+  assert.equal(confirmation.metadata.nextActions.length, 3);
+  const savedAnswers = candidateConfigGet({ repoRoot, env: {} })["form-defaults"].screening_answers;
+  assert.deepEqual(Object.keys(savedAnswers).sort(), [
+    "when can you start",
+    "will you require sponsorship",
   ]);
+});
+
+test("answering a durable question saves it for every job, a job-specific one stays on its job", async () => {
+  const repoRoot = tempRepo();
+  const answerPath = "workspace/tailored/needs-answer-answers.md";
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(join(repoRoot, answerPath), "# Application answers\n", "utf8");
+  const resumePdfPath = seedResumePdfArtifact(repoRoot, "tailored/needs-answer-resume.pdf");
+  const gap = (questionId, question) => ({
+    kind: "answers",
+    code: "ANSWER_CONFIRMATION_REQUIRED",
+    questionId,
+    message: `Answer “${question}”.`,
+  });
+  const sponsorship = "Will you now or later require sponsorship?";
+  const whyHere = "Why do you want to work here?";
+  seedApplication(repoRoot, {
+    company: "Curri",
+    role: "Senior Software Engineer",
+    status: "reviewed-hold",
+    evaluation: { gate: "keep", fitScore: 87 },
+    artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
+    packetManifest: {
+      applicationId: "app-temporal",
+      generatedAt: "2026-08-24T18:40:48.594Z",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 2,
+      gaps: [gap("q-sponsorship", sponsorship), gap("q-why", whyHere)],
+      artifacts: { answersSource: answerPath, resumePdf: resumePdfPath },
+    },
+  });
+  const { chatFirstStateGet } = await import("../src/core/db/verbs/chat-first.mjs");
+  const openQuestions = () =>
+    chatFirstStateGet({ repoRoot, env: {} })
+      .needsYou.filter((item) => item.kind === "needs-answer")
+      .flatMap((item) => item.questions.map((need) => need.question));
+  assert.deepEqual(openQuestions(), [sponsorship, whyHere]);
+
+  const confirm = (questionId, question, answer) =>
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: { questionId, question, answer },
+      },
+    });
+
+  // Job-specific: clears the flag for that question, never touches form-defaults.
+  const jobSpecific = await confirm("q-why", whyHere, "I want to improve construction logistics.");
+  assert.deepEqual(openQuestions(), [sponsorship]);
+  assert.deepEqual(
+    candidateConfigGet({ repoRoot, env: {} })["form-defaults"]?.screening_answers ?? {},
+    {}
+  );
+  assert.doesNotMatch(jobSpecific.messages.at(-1).text, /for future applications/);
+
+  // Durable: clears the flag and saves to screening_answers with an Undo.
+  const durable = await confirm("q-sponsorship", sponsorship, "I do not require sponsorship.");
+  assert.deepEqual(openQuestions(), []);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} })["form-defaults"].screening_answers, {
+    "will you now or later require sponsorship": "I do not require sponsorship.",
+  });
+  const last = durable.messages.at(-1);
+  assert.match(last.text, /Saved this answer for future applications/);
+  assert.equal(
+    last.metadata.nextActions.some((action) => action.intent?.type === "knowledge.revert"),
+    true
+  );
+
+  // A second job with the same question is answered without asking again.
+  const drafted = await draftPacketAnswers({
+    repoRoot,
+    env: {},
+    context: { profile: {}, honesty: {}, application: {} },
+    questions: {
+      answerable: [{ id: "q-other", label: sponsorship, type: "text", required: true }],
+      excluded: [],
+    },
+  });
+  assert.equal(drafted.answers[0].answer, "I do not require sponsorship.");
+  assert.equal(drafted.answers[0].uploadReady, true);
+  assert.equal(drafted.answers[0].source, "screening_answers");
 });
 
 test("free-form screening auto-confirm persists the entire multiline answer", async () => {
@@ -8142,7 +8689,55 @@ test("one-off screening questions reuse saved profile disclosures without requir
   assert.equal(answer.durable, true);
   assert.match(answer.answer, /do not require sponsorship/i);
   assert.equal(message.metadata.ai.used, false);
-  assert.equal(message.metadata.nextActions[0].intent.type, "screening.answer-save");
+  assert.equal(message.metadata.nextActions[0].intent.type, "knowledge.revert");
+});
+
+test("a screening save that fails mid-batch still logs the answers that saved, with an Undo", async () => {
+  const repoRoot = tempRepo();
+  let calls = 0;
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { questionText: "Two questions" },
+    },
+    answerScreeningQuestionsImpl: async () => ({
+      answers: ["first", "second"].map((key) => ({
+        question: `Question ${key}`,
+        key,
+        answer: `Answer ${key}`,
+        durable: true,
+        uploadReady: true,
+      })),
+      ai: { used: false },
+    }),
+    saveScreeningAnswerImpl: ({ key, answer }) => {
+      calls += 1;
+      if (calls === 2) throw new Error("disk full");
+      candidateConfigPatch({
+        repoRoot,
+        env: {},
+        name: "form-defaults",
+        patch: { screening_answers: { [key]: answer } },
+      });
+      return { key, answer, persisted: true };
+    },
+  });
+
+  const message = result.messages.at(-1);
+  const entries = message.artifacts.filter((artifact) => artifact.kind === "knowledge_write");
+  assert.deepEqual(
+    entries.map((entry) => entry.path),
+    ["screening_answers.first"]
+  );
+  assert.equal(
+    message.metadata.nextActions.filter((action) => action.intent.type === "knowledge.revert")
+      .length,
+    1
+  );
+  assert.match(message.text, /disk full/);
 });
 
 test("confirmed reusable screening answers persist through the owning candidate settings writer", async () => {
@@ -8178,6 +8773,45 @@ test("confirmed reusable screening answers persist through the owning candidate 
   assert.equal(message.metadata.persisted, true);
   assert.equal(message.metadata.nextActions, undefined);
   assert.match(message.text, /future applications/i);
+});
+
+test("a confirmed answer naming the company stays on the application while a plain durable one saves", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { company: "Acme", role: "Robotics Engineer" });
+  const saved = [];
+  const confirm = async ({ question, answer }) => ({
+    applicationId: "app-temporal",
+    answers: [{ question, answer, key: question.toLowerCase() }],
+    packetManifest: { uploadReady: true, gaps: [] },
+  });
+  const run = (question, answer) =>
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "screening.answer-confirm",
+        entity: { type: "application", id: "app-temporal" },
+        input: { questionId: "q1", question, answer },
+      },
+      confirmScreeningAnswerImpl: confirm,
+      saveScreeningAnswerImpl: (input) => {
+        saved.push(input.answer);
+        return { key: input.key, answer: input.answer, persisted: true };
+      },
+    });
+
+  await run(
+    "Why do you want to relocate for this role?",
+    "I want to join Acme's robotics team in Boston."
+  );
+  await run("Do you have a reason to relocate?", "Yes, the team at ACME is why.");
+  await run("Would you work with the team?", "Happy to work on your team in person.");
+  await run("Why do you want to work at this company?", "I like building tools for people.");
+  await run("Why do you want to work here?", "The mission fits what I care about.");
+  assert.deepEqual(saved, []);
+
+  await run("Are you authorized to work in the US?", "Yes, I'm authorized to work in the US.");
+  assert.deepEqual(saved, ["Yes, I'm authorized to work in the US."]);
 });
 
 test("confirming a job-specific screening answer clears its packet gap and unblocks resume", async () => {
@@ -8696,7 +9330,67 @@ test("Apply on site keeps an active supervised browser session without treating 
   assert.match(last.text, /not marked Applied/i);
 });
 
-test("permission-blocked preparation offers a fresh retry instead of a missing session return", async () => {
+test("capability-off preparation says it is turned off and offers Turn it on instead of a missing session return", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(
+    repoRoot,
+    preparedPacketOverrides(repoRoot, {
+      evaluation: { gate: "keep", fitScore: 92 },
+      packetManifest: {
+        applicationId: "app-temporal",
+        generatedAt: "2026-08-27T12:00:00.000Z",
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [
+          {
+            kind: "answers",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "internal packet diagnostic",
+          },
+        ],
+        artifacts: {},
+      },
+    })
+  );
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-submit",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "blocked",
+      code: "CAPABILITY_OFF",
+      platform: "linkedin",
+      reason:
+        "Application preparation is turned off for LinkedIn. Turn it on with `careerrat automation enable authenticated_apply_preparation --write`, or ask me to turn it on.",
+      session: { provider: "orca", blockers: ["capability off"] },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "blocked");
+  assert.equal(last.metadata.nextActions[0].label, "Turn it on");
+  assert.equal(last.metadata.nextActions[0].intent.type, "settings.apply");
+  assert.deepEqual(last.metadata.nextActions[0].intent.input.change, {
+    kind: "automation",
+    op: "capability",
+    capability: "authenticated_apply_preparation",
+    enabled: true,
+    platforms: ["linkedin"],
+  });
+  assert.equal(last.metadata.nextActions[1].label, "I applied");
+  assert.match(last.text, /Authenticated apply preparation is turned off for linkedin/i);
+  assert.match(last.text, /careerrat automation enable authenticated_apply_preparation/);
+  assert.doesNotMatch(last.text, /permission|consent|allow/i);
+  assert.doesNotMatch(last.text, /prepared browser session/i);
+});
+
+test("a persisted APPLICATION_PREPARATION_PERMISSION_REQUIRED result still reads as capability off", async () => {
   const repoRoot = tempRepo();
   seedApplication(
     repoRoot,
@@ -8739,17 +9433,9 @@ test("permission-blocked preparation offers a fresh retry instead of a missing s
 
   const last = result.messages.at(-1);
   assert.equal(last.metadata.state, "blocked");
-  assert.equal(last.metadata.nextActions[0].label, "Allow form preparation");
-  assert.equal(last.metadata.nextActions[0].intent.type, "settings.apply");
-  assert.deepEqual(last.metadata.nextActions[0].intent.input.change, {
-    kind: "automation",
-    op: "contextual-permission",
-    permission: "application-preparation",
-  });
-  assert.match(last.text, /CareerRat submits once everything is filled and checked/i);
-  assert.match(last.text, /type “Allow form preparation”/i);
-  assert.doesNotMatch(last.text, /settings/i);
-  assert.doesNotMatch(last.text, /prepared browser session/i);
+  assert.equal(last.metadata.nextActions[0].label, "Turn it on");
+  assert.match(last.text, /turned off/i);
+  assert.equal(last.metadata.capabilityOff.reason, last.text);
 });
 
 test("job.apply refuses a resumeSession request when the application has no passing gate verdict on record", async () => {
@@ -9214,7 +9900,7 @@ test("settings.explain never leaks current_base and surfaces the other comp fiel
   assert.equal(artifact.gates.comp_expected, 160000);
 });
 
-test("settings.explain scopes to the requested domain and reads absent automation capabilities as false", async () => {
+test("settings.explain scopes to the requested domain and shows on/off per capability with no consent or setup mode", async () => {
   const repoRoot = tempRepo();
   // A minimal stored automation doc that predates several capabilities —
   // only authenticated_apply_preparation is present.
@@ -9254,6 +9940,13 @@ test("settings.explain scopes to the requested domain and reads absent automatio
   assert.ok(allArtifact.modes);
   assert.ok(allArtifact.automation);
   assert.ok(allArtifact.gates);
+  assert.equal(allArtifact.automation.read_error, null);
+  assert.equal(Object.hasOwn(allArtifact.automation, "setup_mode"), false);
+  for (const cap of allArtifact.automation.capabilities) {
+    for (const platform of cap.platforms) {
+      assert.equal(Object.hasOwn(platform, "consent"), false);
+    }
+  }
 
   const statusPolling = allArtifact.automation.capabilities.find(
     (cap) => cap.key === "status_polling"
@@ -9713,7 +10406,7 @@ test("settings.apply cannot grant a source login as a global automation capabili
       return true;
     }
   );
-  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, {});
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
 test("settings.apply automation: capability disable is allowed even for a high-tier capability", async () => {
@@ -9743,27 +10436,26 @@ test("settings.apply automation: capability disable is allowed even for a high-t
   );
 });
 
-test("settings.apply automation: raw consent changes are unsupported from Ask", async () => {
+test("settings.apply automation: consent is retired and succeeds without writing", async () => {
   const repoRoot = tempRepo();
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "settings.apply",
-        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: { change: { kind: "automation", op: "consent" } },
-      },
-    }),
-    (error) => {
-      assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
-      assert.equal(error.details.reason, "consent");
-      return true;
-    }
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "automation", op: "consent" } },
+    },
+  });
+  assert.equal(settingsArtifact(result).changed, false);
+  assert.match(
+    result.messages.at(-1).text,
+    /Consent and setup mode were retired; capabilities are on unless turned off\./
   );
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
-test("settings.apply automation: contextual application permission writes the reviewed site set and is replay-safe", async () => {
+test("settings.apply automation: an old application-preparation button turns the capability and its sites on and is replay-safe", async () => {
   const repoRoot = tempRepo();
   const intent = {
     type: "settings.apply",
@@ -9781,8 +10473,9 @@ test("settings.apply automation: contextual application permission writes the re
   const replay = await executeWorkspaceIntent({ repoRoot, env: {}, intent });
   const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
 
-  assert.notEqual(automation.setup_mode, "advanced");
   assert.equal(automation.capabilities.authenticated_apply_preparation.enabled, true);
+  assert.equal(Object.hasOwn(automation, "consent"), false);
+  assert.equal(Object.hasOwn(automation, "setup_mode"), false);
   for (const platform of [
     "greenhouse",
     "lever",
@@ -9792,7 +10485,6 @@ test("settings.apply automation: contextual application permission writes the re
     "linkedin",
     "external_ats",
   ]) {
-    assert.equal(automation.consent[platform], true, platform);
     assert.equal(
       automation.capabilities.authenticated_apply_preparation.platforms[platform],
       true,
@@ -9801,23 +10493,12 @@ test("settings.apply automation: contextual application permission writes the re
   }
   assert.notEqual(settingsArtifact(first).changed, false);
   assert.equal(settingsArtifact(replay).changed, false);
-  assert.match(replay.messages.at(-1).text, /already allowed/i);
+  assert.match(replay.messages.at(-1).text, /already on/i);
 });
 
 test("a narrow contextual calendar grant cannot activate a dormant relationship capability", async () => {
+  // tempRepo() already leaves relationship_sourcing explicitly off.
   const repoRoot = tempRepo();
-  candidateConfigPatch({
-    repoRoot,
-    env: {},
-    name: "automation",
-    patch: {
-      setup_mode: "basic",
-      consent: { linkedin: true },
-      capabilities: {
-        relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
-      },
-    },
-  });
 
   await executeWorkspaceIntent({
     repoRoot,
@@ -9836,9 +10517,8 @@ test("a narrow contextual calendar grant cannot activate a dormant relationship 
   });
 
   const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
-  assert.equal(automation.setup_mode, "basic");
-  assert.equal(automation.capabilities.relationship_sourcing.enabled, true);
-  assert.equal(automation.capabilities.relationship_sourcing.platforms.linkedin, true);
+  assert.equal(automation.capabilities.relationship_sourcing.enabled, false);
+  assert.equal(automation.capabilities.relationship_sourcing.platforms.linkedin, false);
   assert.equal(
     mayRun({
       capability: "relationship_sourcing",
@@ -9853,7 +10533,7 @@ test("a narrow contextual calendar grant cannot activate a dormant relationship 
   );
 });
 
-test("the email-check contextual grant stores Gmail and Outlook only", async () => {
+test("the old email-check button turns Gmail and Outlook on and leaves other webmail off", async () => {
   const repoRoot = tempRepo();
   await executeWorkspaceIntent({
     repoRoot,
@@ -9881,7 +10561,6 @@ test("the email-check contextual grant stores Gmail and Outlook only", async () 
     ),
     { gmail: true, outlook: true, webmail: false }
   );
-  assert.notEqual(automation.consent.webmail, true);
   assert.notEqual(automation.capabilities.mail_access.platforms.webmail, true);
 });
 
@@ -9907,7 +10586,7 @@ test("settings.apply automation: an unknown contextual permission fails closed",
   );
 });
 
-test("permission text only mutates on a direct allow command and leaves questions for Paul", () => {
+test("old typed Allow commands turn the capability on, and questions leave Paul to answer", () => {
   const repoRoot = tempRepo();
   for (const [text, permission] of [
     ["Allow form preparation", "application-preparation"],
@@ -9936,74 +10615,103 @@ test("permission text only mutates on a direct allow command and leaves question
   }
 });
 
-test("settings.apply automation: enabling a high-tier capability is unsupported from Ask", async () => {
+test("typed turn on <capability> previews an enable for every capability, not only status polling", () => {
   const repoRoot = tempRepo();
-  await assert.rejects(
-    executeWorkspaceIntent({
+  for (const [text, capability] of [
+    ["Turn on apply preparation", "authenticated_apply_preparation"],
+    ["Turn on relationship sourcing", "relationship_sourcing"],
+    ["turn on mail access", "mail_access"],
+    ["Turn on calendar sync", "calendar_sync"],
+  ]) {
+    const action = previewWorkspaceIntent({ repoRoot, env: {}, text }).action;
+    assert.deepEqual(
+      action.intent.input.change,
+      { kind: "automation", op: "capability", capability, enabled: true },
+      text
+    );
+  }
+  const platform = previewWorkspaceIntent({
+    repoRoot,
+    env: {},
+    text: "Turn on apply preparation on linkedin",
+  }).action;
+  assert.deepEqual(platform.intent.input.change, {
+    kind: "automation",
+    op: "platform",
+    capability: "authenticated_apply_preparation",
+    platform: "linkedin",
+    enabled: true,
+  });
+});
+
+test("settings.apply automation: any capability can be turned on from Ask", async () => {
+  const repoRoot = tempRepo();
+  for (const capability of CAPABILITY_KEYS) {
+    const result = await executeWorkspaceIntent({
       repoRoot,
       env: {},
       intent: {
         type: "settings.apply",
         entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {
-          change: {
-            kind: "automation",
-            op: "capability",
-            capability: "authenticated_apply_preparation",
-            enabled: true,
-          },
-        },
+        input: { change: { kind: "automation", op: "capability", capability, enabled: true } },
       },
-    }),
-    (error) => {
-      assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
-      assert.equal(error.details.reason, "capability-tier");
-      assert.equal(error.details.capability, "authenticated_apply_preparation");
-      return true;
-    }
-  );
+    });
+    assert.equal(settingsArtifact(result).to, true, capability);
+  }
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+  for (const capability of CAPABILITY_KEYS) {
+    assert.equal(automation.capabilities[capability].enabled, true, capability);
+  }
+  // A platform switch is separate: capability-level enable leaves it as it was.
+  assert.equal(automation.capabilities.authenticated_apply_preparation.platforms.linkedin, false);
 });
 
-test("settings.apply automation: the value/enabled flag aliases agree — value: true both passes the gate and persists as enabled", async () => {
+test("settings.apply automation: a platform can be turned on from Ask for any capability", async () => {
   const repoRoot = tempRepo();
-
-  // A REST caller sending the flag as `value` instead of `enabled` must not
-  // pass the tier gate as an enable and then persist a disable.
-  const applied = await executeWorkspaceIntent({
+  const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
     intent: {
       type: "settings.apply",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: {
-        change: { kind: "automation", op: "capability", capability: "status_polling", value: true },
+        change: {
+          kind: "automation",
+          op: "platform",
+          capability: "authenticated_apply_preparation",
+          platform: "linkedin",
+          enabled: true,
+        },
       },
     },
   });
-  assert.equal(settingsArtifact(applied).to, true);
-  const doc = candidateConfigGet({ repoRoot, env: {} }).automation;
-  assert.equal(doc.capabilities.status_polling.enabled, true);
+  assert.equal(settingsArtifact(result).to, true);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).automation.capabilities
+      .authenticated_apply_preparation.platforms.linkedin,
+    true
+  );
+});
 
-  // And the alias is tier-gated exactly like `enabled`.
-  await assert.rejects(
-    executeWorkspaceIntent({
+test("settings.apply automation: the value/enabled flag aliases agree, value: true persists as enabled", async () => {
+  const repoRoot = tempRepo();
+
+  // A REST caller sending the flag as `value` instead of `enabled` must not
+  // be read as an enable and then persist a disable.
+  for (const capability of ["status_polling", "authenticated_apply_preparation"]) {
+    const applied = await executeWorkspaceIntent({
       repoRoot,
       env: {},
       intent: {
         type: "settings.apply",
         entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-        input: {
-          change: {
-            kind: "automation",
-            op: "capability",
-            capability: "authenticated_apply_preparation",
-            value: true,
-          },
-        },
+        input: { change: { kind: "automation", op: "capability", capability, value: true } },
       },
-    }),
-    (error) => error.code === "SETTINGS_CHANGE_UNSUPPORTED"
-  );
+    });
+    assert.equal(settingsArtifact(applied).to, true, capability);
+    const doc = candidateConfigGet({ repoRoot, env: {} }).automation;
+    assert.equal(doc.capabilities[capability].enabled, true, capability);
+  }
 });
 
 test("settings.apply automation: an unknown capability is invalid and lists the known options", async () => {
@@ -10033,7 +10741,7 @@ test("settings.apply automation: an unknown capability is invalid and lists the 
   );
 });
 
-test("settings.apply automation: setup_mode round-trips to advanced from a basic default", async () => {
+test("settings.apply automation: setup_mode is retired and succeeds without writing", async () => {
   const repoRoot = tempRepo();
 
   const result = await executeWorkspaceIntent({
@@ -10046,34 +10754,9 @@ test("settings.apply automation: setup_mode round-trips to advanced from a basic
     },
   });
   const artifact = settingsArtifact(result);
-  assert.equal(artifact.field, "setup_mode");
-  assert.equal(artifact.from, "basic");
-  assert.equal(artifact.to, "advanced");
-  assert.equal(candidateConfigGet({ repoRoot, env: {} }).automation.setup_mode, "advanced");
-});
-
-test("settings.apply writes exactly one action_result thread message and one activity event", async () => {
-  const repoRoot = tempRepo();
-  const db = openDb({ repoRoot, env: {} });
-  const before = workspaceThreadRead({ repoRoot, env: {} }).messages.length;
-  const activityBefore = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n;
-
-  await executeWorkspaceIntent({
-    repoRoot,
-    env: {},
-    intent: {
-      type: "settings.apply",
-      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { change: { kind: "mode", field: "usage_mode", value: "full" } },
-    },
-  });
-
-  const after = workspaceThreadRead({ repoRoot, env: {} });
-  assert.equal(after.messages.length, before + 2, "one intent message + one action_result message");
-  const actionResults = after.messages.filter((message) => message.kind === "action_result");
-  assert.equal(actionResults.length, 1);
-  const activityAfter = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n;
-  assert.equal(activityAfter, activityBefore + 1);
+  assert.equal(artifact.changed, false);
+  assert.match(artifact.summary, /retired/i);
+  assert.deepEqual(candidateConfigGet({ repoRoot, env: {} }).automation, ALL_OFF_AUTOMATION);
 });
 
 // ---------------------------------------------------------------------------
@@ -10116,7 +10799,7 @@ test("calendar.record-write rejects a missing or unknown provider with CALENDAR_
   );
 });
 
-test("calendar.record-write offers provider-specific permission in place and never appends a row when denied", async () => {
+test("calendar.record-write says calendar sync is turned off for that provider and never appends a row when denied", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { nextInterviewAt: "2030-09-02T18:00:00.000Z" });
 
@@ -10134,12 +10817,18 @@ test("calendar.record-write offers provider-specific permission in place and nev
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /add this event to Google Calendar/i);
-  assert.doesNotMatch(message.text, /settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /Calendar provider sync is turned off for google calendar/i);
+  assert.match(message.text, /careerrat automation enable calendar_sync google_calendar --write/);
+  assert.doesNotMatch(message.text, /permission|consent/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "google-calendar-write",
+    op: "capability",
+    capability: "calendar_sync",
+    enabled: true,
+    platforms: ["google_calendar"],
   });
 
   const db = openDb({ repoRoot, env: {} });
@@ -10180,11 +10869,9 @@ test("calendar.record-write: automated provenance succeeds once calendar_sync co
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         calendar_sync: { enabled: true, platforms: { google_calendar: true } },
       },
-      consent: { google_calendar: true },
     },
   });
 
@@ -10536,7 +11223,7 @@ test("relationship.record-lead: an unrecognized type falls back to Contact and a
   assert.equal(artifact.platform, "linkedin");
 });
 
-test("relationship.source-request: zero consent offers LinkedIn and Wellfound permission in place", async () => {
+test("relationship.source-request: capability off says so and offers Turn it on", async () => {
   const repoRoot = tempRepo();
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -10548,15 +11235,19 @@ test("relationship.source-request: zero consent offers LinkedIn and Wellfound pe
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /LinkedIn and Wellfound/i);
-  assert.match(message.text, /find recruiters and hiring-team contacts/i);
-  assert.equal(message.metadata.nextActions[0].label, "Allow relationship sourcing");
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /Relationship sourcing is turned off for linkedin, wellfound/i);
+  assert.match(message.text, /careerrat automation enable relationship_sourcing --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "relationship-sourcing",
+    op: "capability",
+    capability: "relationship_sourcing",
+    enabled: true,
+    platforms: ["linkedin", "wellfound"],
   });
-  assert.doesNotMatch(message.text, /settings/i);
 });
 
 test("relationship.source-request: partial platform consent produces a per-platform receipt and records the sourcing CTA exactly once", async () => {
@@ -10568,11 +11259,9 @@ test("relationship.source-request: partial platform consent produces a per-platf
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
       },
-      consent: { linkedin: true },
     },
   });
 
@@ -10645,11 +11334,9 @@ test("relationship.source-request: a landed relationship lead flips the sourcing
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         relationship_sourcing: { enabled: true, platforms: { linkedin: true } },
       },
-      consent: { linkedin: true },
     },
   });
 
@@ -10690,11 +11377,9 @@ test("relationship.source-request: an empty company throws RELATIONSHIP_SOURCING
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         relationship_sourcing: { enabled: true, platforms: { linkedin: true, wellfound: true } },
       },
-      consent: { linkedin: true, wellfound: true },
     },
   });
 
@@ -11039,6 +11724,20 @@ test("workspace intake route sends paste and link captures through the same seri
   assert.equal(response.body.data.intake.id, "intake-link-1");
 });
 
+test("workspace route maps an invalid knowledge undo to 400", async () => {
+  const repoRoot = tempRepo();
+  const invalid = new Error("CareerRat couldn't find that change to undo.");
+  invalid.code = "KNOWLEDGE_REVERT_INVALID";
+  const routes = mountDirect(repoRoot, undefined, undefined, async () => {
+    throw invalid;
+  });
+  const response = await callDirect(routes, "POST", "/api/workspace/intake", {
+    text: "Temporal Labs is hiring an Applied AI Engineer.",
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.body.code, "KNOWLEDGE_REVERT_INVALID");
+});
+
 test("workspace intake route returns 400 for an invalid requested action", async () => {
   const repoRoot = tempRepo();
   const invalidAction = new Error('requestedAction must be "evaluate", "prepare", or "tailor"');
@@ -11280,19 +11979,17 @@ function grantStatusPolling(repoRoot, platforms) {
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         status_polling: {
           enabled: true,
           platforms: Object.fromEntries(platforms.map((p) => [p, true])),
         },
       },
-      consent: Object.fromEntries(platforms.map((p) => [p, true])),
     },
   });
 }
 
-test("status.sync-request: zero consent offers ATS status permission in place", async () => {
+test("status.sync-request: capability off says so and offers Turn it on", async () => {
   const repoRoot = tempRepo();
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -11304,14 +12001,23 @@ test("status.sync-request: zero consent offers ATS status permission in place", 
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /Greenhouse, Workday, Ashby, and Lever/i);
-  assert.match(message.text, /application status/i);
-  assert.doesNotMatch(message.text, /LinkedIn|Indeed|settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(
+    message.text,
+    /Portal status polling is turned off for greenhouse, workday, ashby, lever/i
+  );
+  assert.match(message.text, /careerrat automation enable status_polling --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "status-checks",
+    op: "capability",
+    capability: "status_polling",
+    enabled: true,
+    platforms: ["greenhouse", "workday", "ashby", "lever"],
   });
+  assert.doesNotMatch(message.text, /LinkedIn|Indeed/i);
 });
 
 test("status portal connection is a typed in-app action that saves the dashboard URL on one application", async () => {
@@ -11726,14 +12432,12 @@ function grantMailAccess(repoRoot, platforms) {
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         mail_access: {
           enabled: true,
           platforms: Object.fromEntries(platforms.map((p) => [p, true])),
         },
       },
-      consent: Object.fromEntries(platforms.map((p) => [p, true])),
     },
   });
 }
@@ -11942,7 +12646,7 @@ test("mail.sync-request: zero mail_access grant on darwin still returns the card
   assert.equal(byId["outlook-webmail"].allowed, false);
 });
 
-test("mail.sync-request: zero webmail grant offers Gmail and Outlook permission in place", async () => {
+test("mail.sync-request: webmail capability off says so and offers Turn it on", async () => {
   const repoRoot = tempRepo();
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -11955,13 +12659,18 @@ test("mail.sync-request: zero webmail grant offers Gmail and Outlook permission 
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /Gmail and Outlook/i);
-  assert.match(message.text, /recruiting email/i);
-  assert.doesNotMatch(message.text, /settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /Session webmail access is turned off for gmail, outlook/i);
+  assert.match(message.text, /careerrat automation enable mail_access --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "mail-checks",
+    op: "capability",
+    capability: "mail_access",
+    enabled: true,
+    platforms: ["gmail", "outlook"],
   });
 });
 
@@ -12035,14 +12744,12 @@ function grantMessaging(repoRoot, platforms) {
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities: {
         messaging: {
           enabled: true,
           platforms: Object.fromEntries(platforms.map((p) => [p, true])),
         },
       },
-      consent: Object.fromEntries(platforms.map((p) => [p, true])),
     },
   });
 }
@@ -12132,7 +12839,7 @@ test("messages.sync-request: linkedin grant returns a messages_sync_handoff arti
   assert.equal(result.messages.at(-1).artifacts[1].kind, "browser_workflow_result");
 });
 
-test("messages.sync-request: zero consent offers LinkedIn and Wellfound message permission", async () => {
+test("messages.sync-request: capability off says so and offers Turn it on", async () => {
   const repoRoot = tempRepo();
   const result = await executeWorkspaceIntent({
     repoRoot,
@@ -12144,14 +12851,42 @@ test("messages.sync-request: zero consent offers LinkedIn and Wellfound message 
     },
   });
   const message = result.messages.at(-1);
-  assert.match(message.text, /LinkedIn and Wellfound/i);
-  assert.match(message.text, /recruiting messages/i);
-  assert.doesNotMatch(message.text, /settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /In-platform messaging is turned off for linkedin, wellfound/i);
+  assert.match(message.text, /careerrat automation enable messaging --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "message-checks",
+    op: "capability",
+    capability: "messaging",
+    enabled: true,
+    platforms: ["linkedin", "wellfound"],
   });
+});
+
+test("default (on) automation: sync and sourcing requests proceed with no capability-off note", async () => {
+  // No fixture patch: a fresh workspace has every capability on by default.
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-"));
+  cleanupRoots.push(repoRoot);
+  openDb({ repoRoot, env: {} });
+
+  for (const [type, input] of [
+    ["messages.sync-request", {}],
+    ["status.sync-request", {}],
+    ["relationship.source-request", { company: "Acme" }],
+  ]) {
+    const result = await executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      hostPlatform: "linux",
+      intent: { type, entity: { type: "workspace", id: WORKSPACE_THREAD_ID }, input },
+    });
+    const message = result.messages.at(-1);
+    assert.notEqual(message.metadata.state, "capability-off", type);
+    assert.doesNotMatch(message.text, /turned off|permission/i, type);
+  }
 });
 
 test("messages.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {
@@ -12195,9 +12930,7 @@ function grantLinkedinOptimize(repoRoot, capabilities) {
     env: {},
     name: "automation",
     patch: {
-      setup_mode: "advanced",
       capabilities,
-      consent: { linkedin: true },
     },
   });
 }
@@ -12318,7 +13051,7 @@ test("linkedin.optimize-request: a pending batch surfaces its summary in the han
   );
 });
 
-test("linkedin.optimize-request: zero consent still succeeds, never refuses, both capabilities disallowed", async () => {
+test("linkedin.optimize-request: capability off still renders the handoff card and says it is turned off", async () => {
   const repoRoot = tempRepo();
 
   const result = await executeWorkspaceIntent({
@@ -12337,12 +13070,18 @@ test("linkedin.optimize-request: zero consent still succeeds, never refuses, bot
   assert.equal(byKey.profile_apply.allowed, false);
   assert.equal(artifact.batch, null);
   const message = result.messages.at(-1);
-  assert.match(message.text, /read your LinkedIn profile/i);
-  assert.doesNotMatch(message.text, /settings/i);
+  assert.equal(message.metadata.state, "capability-off");
+  assert.match(message.text, /LinkedIn profile optimize is turned off for linkedin/i);
+  assert.match(message.text, /careerrat automation enable profile_optimize --write/);
+  assert.doesNotMatch(message.text, /permission|consent|settings/i);
+  assert.equal(message.metadata.nextActions.length, 1);
+  assert.equal(message.metadata.nextActions[0].label, "Turn it on");
   assert.deepEqual(message.metadata.nextActions[0].intent.input.change, {
     kind: "automation",
-    op: "contextual-permission",
-    permission: "linkedin-profile-review",
+    op: "capability",
+    capability: "profile_optimize",
+    enabled: true,
+    platforms: ["linkedin"],
   });
 });
 
@@ -12368,6 +13107,119 @@ test("linkedin.optimize-request: pure read — application and communication row
 
   assert.deepEqual(readApplication(repoRoot, app.id), appBefore);
   assert.deepEqual(readCommunication(repoRoot, comm.id), commBefore);
+});
+
+// In-app staging: the run saves the batch with autoApprove, the action result
+// carries one knowledge_write entry per staged surface plus a knowledge.revert
+// next action for each.
+async function runLinkedinStaging(repoRoot) {
+  grantLinkedinOptimize(repoRoot, {
+    profile_optimize: { enabled: true, platforms: { linkedin: true } },
+  });
+  return executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    runLinkedinOptimizeImpl: async () => {
+      const saved = linkedinProposalBatchPut({
+        repoRoot,
+        env: {},
+        autoApprove: true,
+        knownEvidenceIds: ["evidence/ai-projects.md"],
+        batch: {
+          surfaces: [
+            {
+              surfaceId: "headline",
+              surface: "Headline",
+              current: "Software Engineer",
+              proposed: "Applied AI Engineer | LLM Systems",
+              rationale: "Matches your targeting focus.",
+              evidenceRef: "evidence/ai-projects.md",
+            },
+            {
+              surfaceId: "about",
+              surface: "About",
+              current: "I build software.",
+              proposed: "Add [your top project] here",
+              rationale: "Reflects recent evidence entries.",
+              evidenceRef: "evidence/ai-projects.md",
+            },
+          ],
+        },
+      });
+      return {
+        kind: "browser_workflow_result",
+        skill: "optimize-linkedin",
+        state: "completed",
+        summary: "1 profile suggestion staged for your profile.",
+        batchId: saved.id,
+        staged: saved.staged,
+        held: saved.held,
+      };
+    },
+    intent: {
+      type: "linkedin.optimize-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+}
+
+test("linkedin.optimize-request: staged surfaces log a knowledge_write entry with a knowledge.revert Undo, and the proposals card shows them approved", async () => {
+  const repoRoot = tempRepo();
+  const result = await runLinkedinStaging(repoRoot);
+  const last = result.messages.at(-1);
+  const entries = last.artifacts.filter((a) => a.kind === "knowledge_write");
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].target, "linkedin:proposal");
+  assert.equal(entries[0].id, "headline");
+  assert.equal(entries[0].revertible, true);
+  const undo = last.metadata.nextActions.filter((a) => a.intent.type === "knowledge.revert");
+  assert.equal(undo.length, 1);
+  assert.equal(last.artifacts[undo[0].intent.input.index], entries[0]);
+  assert.equal(undo[0].intent.input.messageId, last.id);
+  const proposals = last.artifacts.find((a) => a.kind === "linkedin_profile_proposals");
+  assert.equal(proposals.surfaces[0].decision.source, "automatic");
+  assert.equal(proposals.surfaces[1].decision, null);
+});
+
+test("knowledge.revert: undoing a staged LinkedIn surface returns it to undecided, and a second undo is refused", async () => {
+  const repoRoot = tempRepo();
+  const result = await runLinkedinStaging(repoRoot);
+  const last = result.messages.at(-1);
+  const undo = last.metadata.nextActions.find((a) => a.intent.type === "knowledge.revert").intent;
+  const batchId = last.artifacts.find((a) => a.kind === "linkedin_profile_proposals").batchId;
+
+  const first = await executeWorkspaceIntent({ repoRoot, env: {}, intent: undo });
+  assert.equal(first.messages.at(-1).metadata.state, "reverted");
+  const stored = linkedinProposalBatchGet({ repoRoot, env: {}, id: batchId });
+  assert.equal(stored.surfaces[0].decision, null);
+  assert.equal(stored.status, "pending");
+
+  const second = await executeWorkspaceIntent({ repoRoot, env: {}, intent: undo });
+  assert.equal(second.messages.at(-1).metadata.state, "refused");
+  assert.equal(second.messages.at(-1).metadata.reason, "already-reverted");
+});
+
+test("knowledge.revert: a staged LinkedIn surface already applied is refused and stays applied", async () => {
+  const repoRoot = tempRepo();
+  const result = await runLinkedinStaging(repoRoot);
+  const last = result.messages.at(-1);
+  const undo = last.metadata.nextActions.find((a) => a.intent.type === "knowledge.revert").intent;
+  const batch = last.artifacts.find((a) => a.kind === "linkedin_profile_proposals");
+  linkedinProposalDecide({
+    repoRoot,
+    env: {},
+    batchId: batch.batchId,
+    surfaceId: "headline",
+    action: "applied",
+    version: batch.version,
+  });
+
+  const refused = await executeWorkspaceIntent({ repoRoot, env: {}, intent: undo });
+  assert.equal(refused.messages.at(-1).metadata.state, "refused");
+  assert.equal(refused.messages.at(-1).metadata.reason, "applied");
+  const stored = linkedinProposalBatchGet({ repoRoot, env: {}, id: batch.batchId });
+  assert.equal(stored.surfaces[0].decision.action, "applied");
 });
 
 test("linkedin.proposal-decide: approve records the decision and leaves metadata.state needs-review while a surface remains undecided", async () => {
@@ -12521,4 +13373,415 @@ test("every offered workspace intent persists natural user copy instead of undef
     assert.doesNotMatch(message.text, /undefined|qa-|\b(?:application|workspace|communication):/i);
     assert.match(message.text, /^[A-Z].+\.$/);
   }
+});
+
+// knowledge.revert and the settings.apply knowledge-write log
+async function applySetting(repoRoot, change) {
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change },
+    },
+  });
+  return workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+}
+
+async function revertEntry(repoRoot, message, index = 1, extra = {}) {
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "knowledge.revert",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { messageId: message.id, index, ...extra },
+    },
+  });
+  return workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+}
+
+function fitFloorChange(value) {
+  return { kind: "profile", section: "fit-floor", value };
+}
+
+test("settings.apply logs a knowledge_write entry per changed path with an Undo action", async () => {
+  const repoRoot = tempRepo();
+  const message = await applySetting(repoRoot, fitFloorChange(70));
+  const entry = message.artifacts[1];
+  assert.equal(entry.kind, "knowledge_write");
+  assert.equal(entry.target, "candidate_config:targeting");
+  assert.equal(entry.path, "fit_bands.fit_floor");
+  assert.equal(entry.after, 70);
+  assert.equal(entry.writer, "settings.apply");
+  assert.equal(entry.revertible, true);
+  assert.equal(entry.source.kind, "settings.apply");
+  const undo = message.metadata.nextActions[0];
+  assert.equal(undo.intent.type, "knowledge.revert");
+  assert.deepEqual(undo.intent.input, { messageId: message.id, index: 1 });
+
+  // A write that changes nothing logs nothing.
+  const same = await applySetting(repoRoot, fitFloorChange(70));
+  assert.equal(same.artifacts.filter((artifact) => artifact.kind === "knowledge_write").length, 0);
+});
+
+test("settings.apply logs automation capability toggles", async () => {
+  const repoRoot = tempRepo();
+  const capability = CAPABILITY_KEYS[0];
+  const message = await applySetting(repoRoot, {
+    kind: "automation",
+    op: "capability",
+    capability,
+    enabled: true,
+  });
+  const entry = message.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(entry.target, "candidate_config:automation");
+  assert.equal(entry.path, `capabilities.${capability}.enabled`);
+  assert.equal(entry.after, true);
+});
+
+test("knowledge.revert restores a scalar config value and logs the undo", async () => {
+  const repoRoot = tempRepo();
+  await applySetting(repoRoot, fitFloorChange(70));
+  const second = await applySetting(repoRoot, fitFloorChange(80));
+  const undone = await revertEntry(repoRoot, second);
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
+  assert.match(undone.text, /^Undid: Minimum fit\.$/);
+  const inverse = undone.artifacts[0];
+  assert.equal(inverse.before, 80);
+  assert.equal(inverse.after, 70);
+  assert.deepEqual(inverse.revertOf, { messageId: second.id, index: 1 });
+});
+
+test("knowledge.revert unsets a path that was absent before the write", async () => {
+  const repoRoot = tempRepo();
+  const before = candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands || {};
+  assert.equal(before.fit_floor, undefined);
+  const message = await applySetting(repoRoot, fitFloorChange(65));
+  assert.equal(message.artifacts[1].beforeAbsent, true);
+  await revertEntry(repoRoot, message);
+  const bands = candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands || {};
+  assert.equal(Object.hasOwn(bands, "fit_floor"), false);
+});
+
+test("knowledge.revert refuses when the value changed again since", async () => {
+  const repoRoot = tempRepo();
+  const first = await applySetting(repoRoot, fitFloorChange(70));
+  await applySetting(repoRoot, fitFloorChange(80));
+  const note = await revertEntry(repoRoot, first);
+  assert.equal(note.text, "This changed again since, so CareerRat didn't undo it.");
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 80);
+});
+
+test("knowledge.revert refuses a double undo", async () => {
+  const repoRoot = tempRepo();
+  await applySetting(repoRoot, fitFloorChange(70));
+  const second = await applySetting(repoRoot, fitFloorChange(80));
+  await revertEntry(repoRoot, second);
+  const again = await revertEntry(repoRoot, second);
+  assert.equal(again.text, "This was already undone.");
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
+});
+
+test("knowledge.revert trusts only the stored entry, never client before/after", async () => {
+  const repoRoot = tempRepo();
+  await applySetting(repoRoot, fitFloorChange(70));
+  const second = await applySetting(repoRoot, fitFloorChange(80));
+  await revertEntry(repoRoot, second, 1, {
+    before: 5,
+    after: 80,
+    entry: { ...second.artifacts[1], before: 5 },
+  });
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "knowledge.revert",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { messageId: "nope", index: 1, before: 1, after: 2 },
+      },
+    }),
+    (error) => error.code === "KNOWLEDGE_REVERT_INVALID"
+  );
+});
+
+function storeEntry(repoRoot, entry) {
+  return workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "assistant",
+    kind: "action_result",
+    text: "Saved.",
+    artifacts: [{ kind: "note" }, entry],
+  }).message;
+}
+
+test("knowledge.revert removes an added evidence claim and keeps the entry when it is cited", async () => {
+  const repoRoot = tempRepo();
+  const claim = { id: "undo-001", claim: "Shipped the billing rewrite.", evidence: "Resume" };
+  candidateEvidenceMerge({ repoRoot, env: {}, claims: [claim] });
+  const stored = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "undo-001"
+  );
+  const message = storeEntry(
+    repoRoot,
+    buildKnowledgeWriteEntry({
+      target: "evidence",
+      op: "add",
+      id: "undo-001",
+      before: undefined,
+      after: stored,
+      source: { kind: "test" },
+      writer: "test",
+      label: "Evidence claim",
+    })
+  );
+  await revertEntry(repoRoot, message);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).evidence.claims.some(
+      (item) => item.id === "undo-001"
+    ),
+    false
+  );
+
+  const citedClaim = { id: "undo-002", claim: "Cut p99 latency in half.", evidence: "Resume" };
+  candidateEvidenceMerge({ repoRoot, env: {}, claims: [citedClaim] });
+  const citedStored = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "undo-002"
+  );
+  const db = openDb({ repoRoot, env: {} });
+  db.prepare("INSERT INTO deep_ingest_story_bank (id, data) VALUES (?, ?)").run(
+    "story-cites",
+    JSON.stringify({ id: "story-cites", status: "confirmed", evidence_ids: ["undo-002"] })
+  );
+  const citedMessage = storeEntry(
+    repoRoot,
+    buildKnowledgeWriteEntry({
+      target: "evidence",
+      op: "add",
+      id: "undo-002",
+      before: undefined,
+      after: citedStored,
+      source: { kind: "test" },
+      writer: "test",
+    })
+  );
+  const note = await revertEntry(repoRoot, citedMessage);
+  assert.equal(note.text, "Other work cites this claim now, so it can't be removed.");
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).evidence.claims.some(
+      (item) => item.id === "undo-002"
+    ),
+    true
+  );
+});
+
+test("knowledge.revert puts a replaced evidence claim back through the firewall", async () => {
+  const repoRoot = tempRepo();
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "swap-001", claim: "Led the platform team.", evidence: "Resume" }],
+  });
+  const prior = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "swap-001"
+  );
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "swap-001", claim: "Led the platform and data teams.", evidence: "Resume" }],
+  });
+  const current = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "swap-001"
+  );
+  const message = storeEntry(
+    repoRoot,
+    buildKnowledgeWriteEntry({
+      target: "evidence",
+      op: "replace",
+      id: "swap-001",
+      before: prior,
+      after: current,
+      source: { kind: "test" },
+      writer: "test",
+    })
+  );
+  await revertEntry(repoRoot, message);
+  const restored = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "swap-001"
+  );
+  assert.equal(restored.claim, "Led the platform team.");
+});
+
+test("knowledge.revert refuses an evidence undo when another claim took the text", async () => {
+  const repoRoot = tempRepo();
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "dup-x", claim: "Led the platform team.", evidence: "Resume" }],
+  });
+  const prior = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "dup-x"
+  );
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "dup-x", claim: "Led the platform and data teams.", evidence: "Resume" }],
+  });
+  const current = candidateConfigGet({ repoRoot, env: {} }).evidence.claims.find(
+    (item) => item.id === "dup-x"
+  );
+  candidateEvidenceMerge({
+    repoRoot,
+    env: {},
+    claims: [{ id: "dup-y", claim: "Led the platform team.", evidence: "Resume" }],
+  });
+  const message = storeEntry(
+    repoRoot,
+    buildKnowledgeWriteEntry({
+      target: "evidence",
+      op: "replace",
+      id: "dup-x",
+      before: prior,
+      after: current,
+      source: { kind: "test" },
+      writer: "test",
+    })
+  );
+  const note = await revertEntry(repoRoot, message);
+  assert.equal(note.text, "Another claim already has that text, so CareerRat couldn't restore it.");
+  const claims = candidateConfigGet({ repoRoot, env: {} }).evidence.claims;
+  assert.equal(
+    claims.find((item) => item.id === "dup-x").claim,
+    "Led the platform and data teams."
+  );
+  // Nothing was recorded as undone, so Undo is still available.
+  const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
+  assert.equal(
+    messages.some((item) =>
+      (item.artifacts || []).some((artifact) => artifact?.revertOf?.messageId === message.id)
+    ),
+    false
+  );
+});
+
+test("settings.apply logs a legacy automation capability turned off from its effective on state", async () => {
+  const repoRoot = tempRepo();
+  const capability = CAPABILITY_KEYS[0];
+  // A legacy doc: no capabilities_default marker, so the stored false is ignored
+  // and the capability is effectively on.
+  openDb({ repoRoot, env: {} })
+    .prepare("UPDATE candidate_automation SET data = ? WHERE id = 1")
+    .run(JSON.stringify({ capabilities: { [capability]: { enabled: false } } }));
+  assert.equal(
+    normalizeAutomationConfig(candidateConfigGet({ repoRoot, env: {} }).automation).capabilities[
+      capability
+    ].enabled,
+    true
+  );
+  const message = await applySetting(repoRoot, {
+    kind: "automation",
+    op: "capability",
+    capability,
+    enabled: false,
+  });
+  const entries = message.artifacts.filter((artifact) => artifact.kind === "knowledge_write");
+  const entry = entries.find((item) => item.path === `capabilities.${capability}.enabled`);
+  assert.ok(entry, "expected one entry for the capability switch");
+  assert.equal(entry.before, true);
+  assert.equal(entry.after, false);
+  assert.equal(entry.revertible, true);
+  await revertEntry(repoRoot, message, message.artifacts.indexOf(entry));
+  const restored = normalizeAutomationConfig(candidateConfigGet({ repoRoot, env: {} }).automation);
+  assert.equal(restored.capabilities[capability].enabled, true);
+});
+
+test("knowledge.revert restores mode_preferences_confirmed with a location mode", async () => {
+  const repoRoot = tempRepo();
+  const flagBefore = candidateConfigGet({ repoRoot, env: {} }).profile?.location
+    ?.mode_preferences_confirmed;
+  assert.notEqual(flagBefore, true);
+  const current = candidateConfigGet({ repoRoot, env: {} }).profile?.location?.remote === true;
+  const message = await applySetting(repoRoot, {
+    kind: "profile",
+    section: "location-mode",
+    field: "remote",
+    value: !current,
+  });
+  const entries = message.artifacts.filter((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(entries.length, 1);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).profile.location.mode_preferences_confirmed,
+    true
+  );
+  await revertEntry(repoRoot, message, message.artifacts.indexOf(entries[0]));
+  const location = candidateConfigGet({ repoRoot, env: {} }).profile.location || {};
+  assert.equal(location.remote === true, current);
+  assert.notEqual(location.mode_preferences_confirmed, true);
+  assert.equal(location.mode_preferences_confirmed, flagBefore);
+});
+
+test("knowledge.revert undoes a deep-ingest lane row add and replace", async () => {
+  const repoRoot = tempRepo();
+  const added = await applySetting(repoRoot, {
+    kind: "profile",
+    section: "writing-style",
+    value: "Plain and direct.",
+  });
+  const addEntry = added.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(addEntry.op, "add");
+  const replaced = await applySetting(repoRoot, {
+    kind: "profile",
+    section: "writing-style",
+    value: "Warm and brief.",
+  });
+  const replaceEntry = replaced.artifacts.find((artifact) => artifact.kind === "knowledge_write");
+  assert.equal(replaceEntry.op, "replace");
+  assert.equal(replaceEntry.path, "summary");
+  const replaceIndex = replaced.artifacts.indexOf(replaceEntry);
+  await revertEntry(repoRoot, replaced, replaceIndex);
+  const rows = () =>
+    openDb({ repoRoot, env: {} })
+      .prepare("SELECT data FROM deep_ingest_writing_voice")
+      .all()
+      .map((row) => JSON.parse(row.data));
+  assert.equal(rows()[0].summary, "Plain and direct.");
+
+  // The first write's row now differs (summary changed twice), so its undo is stale.
+  const stale = await revertEntry(repoRoot, added, added.artifacts.indexOf(addEntry));
+  assert.equal(stale.text, "This changed again since, so CareerRat didn't undo it.");
+});
+
+// Loosening changes keep their confirm-first step; everything else applies and logs.
+test("settings.apply asks first when a gate lowers the pay floor, then applies once confirmed", async () => {
+  const repoRoot = tempRepo();
+  const floor = () => candidateConfigGet({ repoRoot, env: {} }).profile.compensation.minimum_base;
+
+  // First-time value and a raise apply directly.
+  await applySetting(repoRoot, { kind: "gate", type: "comp-floor", value: 150000 });
+  assert.equal(floor(), 150000);
+  await applySetting(repoRoot, { kind: "gate", type: "comp-floor", value: 160000 });
+  assert.equal(floor(), 160000);
+
+  const asked = await applySetting(repoRoot, { kind: "gate", type: "comp-floor", value: 120000 });
+  assert.equal(asked.metadata.state, "needs-confirmation");
+  assert.match(asked.text, /Lowers your minimum base pay\. Confirm/);
+  assert.equal(asked.text.includes("120000"), false);
+  assert.equal(floor(), 160000);
+  const [confirm] = asked.metadata.nextActions;
+  assert.equal(confirm.intent.type, "settings.apply");
+  assert.equal(confirm.intent.input.confirmed, true);
+  assert.deepEqual(confirm.intent.input.change, {
+    kind: "gate",
+    type: "comp-floor",
+    value: 120000,
+  });
+
+  await executeWorkspaceIntent({ repoRoot, env: {}, intent: confirm.intent });
+  assert.equal(floor(), 120000);
+  const applied = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+  assert.ok(applied.artifacts.some((artifact) => artifact.kind === "knowledge_write"));
 });

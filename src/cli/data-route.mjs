@@ -87,7 +87,7 @@ async function readBody(req) {
   return readJsonBodyCapped(req, MAX_BODY_BYTES);
 }
 
-export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
+export function mountDataRoutes({ addRoute, repoRoot, env = process.env, workspaceAgentRuntime }) {
   const pathCtx = { repoRoot, env };
 
   function withDb(res, fn) {
@@ -253,7 +253,12 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
   addRoute("POST", "/api/data/app/status", async (req, res) => {
     await withBodyVerb(req, res, (body) => {
       if (!body?.id || !body?.to) throw badRequest("body.id and body.to are required");
-      return appSetStatus({ ...pathCtx, ...body });
+      // A status change can make a company-health check due; the runtime
+      // runs it detached after this write commits (never blocks or fails it).
+      const before = workspaceAgentRuntime?.snapshotApplicationState?.();
+      const result = appSetStatus({ ...pathCtx, ...body });
+      workspaceAgentRuntime?.afterApplicationWrite?.(before);
+      return result;
     });
   });
 
