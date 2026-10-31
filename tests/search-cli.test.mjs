@@ -9,6 +9,7 @@ import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { candidateSetupInitialize } from "../src/core/db/verbs/candidate.mjs";
 import { sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { sourcingRunGet, sourcingRunStart } from "../src/core/db/verbs/sourcing-runs.mjs";
+import { stopTerminalSessionSearches } from "../src/core/search/terminal-search-worker.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 function fixture(t) {
@@ -59,31 +60,35 @@ test("search requires explicit database setup and rejects unknown options", (t) 
   assert.equal(existsSync(join(ctx.env.CAREERRAT_HOME, "db")), false);
 });
 
-test("search continues after the launching CLI exits and leaves a complete result artifact", {
-  timeout: 15000,
-}, async (t) => {
-  const ctx = fixture(t);
-  candidateSetupInitialize(ctx);
-  sourceConfigPut({
-    ...ctx,
-    name: "search-sources",
-    data: {
-      searches: [
-        {
-          provider: "Custom RSS",
-          source_type: "rss",
-          rssUrl: "https://93.184.216.34/synthetic.xml",
-          enabled: true,
-        },
-      ],
-    },
-  });
-  const release = join(ctx.env.CAREERRAT_HOME, "release-search");
-  const fetchStarted = join(ctx.env.CAREERRAT_HOME, "fetch-started");
-  const preload = join(ctx.env.CAREERRAT_HOME, "synthetic-fetch.mjs");
-  writeFileSync(
-    preload,
-    `
+for (const cancel of [false, true])
+  test(cancel
+    ? "terminal session shutdown stops its actual detached scanner"
+    : "search continues after the launching CLI exits and leaves a complete result artifact", {
+    timeout: 15000,
+  }, async (t) => {
+    const ctx = fixture(t);
+    if (cancel) ctx.env.CAREERRAT_TUI_SESSION = "session-cancel-proof";
+    candidateSetupInitialize(ctx);
+    sourceConfigPut({
+      ...ctx,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "Custom RSS",
+            source_type: "rss",
+            rssUrl: "https://93.184.216.34/synthetic.xml",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const release = join(ctx.env.CAREERRAT_HOME, "release-search");
+    const fetchStarted = join(ctx.env.CAREERRAT_HOME, "fetch-started");
+    const preload = join(ctx.env.CAREERRAT_HOME, "synthetic-fetch.mjs");
+    writeFileSync(
+      preload,
+      `
     import { existsSync, writeFileSync } from "node:fs";
     globalThis.fetch = async () => {
       writeFileSync(${JSON.stringify(fetchStarted)}, "yes");
@@ -93,36 +98,45 @@ test("search continues after the launching CLI exits and leaves a complete resul
       return new Response('<rss version="2.0"><channel></channel></rss>', { headers: { "content-type": "application/rss+xml" } });
     };
   `
-  );
-  ctx.env.NODE_OPTIONS = `--import=${pathToFileURL(preload).href}`;
-  const receipt = JSON.parse(cli(ctx, ["start", "--json"]));
-  t.after(() => {
-    try {
-      process.kill(receipt.workerPid, "SIGKILL");
-    } catch (error) {
-      if (error.code !== "ESRCH") throw error;
+    );
+    ctx.env.NODE_OPTIONS = `--import=${pathToFileURL(preload).href}`;
+    const receipt = JSON.parse(cli(ctx, ["start", "--json"]));
+    t.after(() => {
+      try {
+        process.kill(receipt.workerPid, "SIGKILL");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    });
+    assert.equal(receipt.detached, true);
+    assert.equal(receipt.run.status, "running");
+    for (let attempt = 0; attempt < 100 && !existsSync(fetchStarted); attempt++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      existsSync(fetchStarted),
+      true,
+      "the worker must actually scan the held-open source"
+    );
+    process.kill(receipt.workerPid, 0);
+    if (cancel) {
+      await stopTerminalSessionSearches({ ...ctx, sessionId: "session-cancel-proof" });
+      assert.equal(
+        sourcingRunGet({ ...ctx, id: receipt.run.id }).run.error.code,
+        "SEARCH_CANCELLED"
+      );
+      assert.throws(() => process.kill(receipt.workerPid, 0), { code: "ESRCH" });
+      return;
     }
+    writeFileSync(release, "continue");
+    let result;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      result = sourcingRunGet({ ...ctx, id: receipt.run.id }).run;
+      if (result.status !== "running" && existsSync(receipt.handoffPath)) break;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    assert.equal(result.status, "completed");
+    const { readFileSync } = await import("node:fs");
+    const handoff = JSON.parse(readFileSync(receipt.handoffPath, "utf8"));
+    assert.ok(handoff.resultPath);
+    assert.ok(Array.isArray(JSON.parse(readFileSync(handoff.resultPath, "utf8")).offers));
   });
-  assert.equal(receipt.detached, true);
-  assert.equal(receipt.run.status, "running");
-  for (let attempt = 0; attempt < 100 && !existsSync(fetchStarted); attempt++)
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(
-    existsSync(fetchStarted),
-    true,
-    "the worker must actually scan the held-open source"
-  );
-  process.kill(receipt.workerPid, 0);
-  writeFileSync(release, "continue");
-  let result;
-  for (let attempt = 0; attempt < 200; attempt++) {
-    result = sourcingRunGet({ ...ctx, id: receipt.run.id }).run;
-    if (result.status !== "running" && existsSync(receipt.handoffPath)) break;
-    await new Promise((resolve) => setTimeout(resolve, 40));
-  }
-  assert.equal(result.status, "completed");
-  const { readFileSync } = await import("node:fs");
-  const handoff = JSON.parse(readFileSync(receipt.handoffPath, "utf8"));
-  assert.ok(handoff.resultPath);
-  assert.ok(Array.isArray(JSON.parse(readFileSync(handoff.resultPath, "utf8")).offers));
-});

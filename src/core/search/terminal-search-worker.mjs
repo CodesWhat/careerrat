@@ -2,6 +2,7 @@ import { fork } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { dbExists, requireDb } from "../db/connection.mjs";
 import {
   sourcingRunComplete,
   sourcingRunFail,
@@ -186,19 +187,23 @@ export async function launchTerminalSearchWorker({ repoRoot, env = process.env, 
   const { run } = sourcingRunGet({ ...ctx, id: runId });
   if (!["manual-search", "first-search"].includes(run.purpose))
     throw new Error("Terminal scanner workers require a deterministic sourcing run");
+  let child;
   try {
-    const child = fork(
-      new URL("../../cli/search.mjs", import.meta.url),
-      ["_worker", "--id", runId],
-      {
-        cwd: repoRoot,
-        env,
-        detached: true,
-        windowsHide: true,
-        execArgv: [],
-        stdio: ["ignore", "ignore", "ignore", "ipc"],
-      }
-    );
+    if (env.CAREERRAT_TUI_SESSION)
+      sourcingRunProgress({
+        ...ctx,
+        id: runId,
+        progress: { ownerSession: env.CAREERRAT_TUI_SESSION },
+      });
+    child = fork(new URL("../../cli/search.mjs", import.meta.url), ["_worker", "--id", runId], {
+      cwd: repoRoot,
+      env,
+      detached: true,
+      windowsHide: true,
+      execArgv: [],
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+    });
+    sourcingRunProgress({ ...ctx, id: runId, progress: { workerPid: child.pid } });
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => finish(new Error("Search worker did not acknowledge startup")),
@@ -240,6 +245,10 @@ export async function launchTerminalSearchWorker({ repoRoot, env = process.env, 
       child.on("message", onMessage);
     });
   } catch (error) {
+    if (child) {
+      if (child.connected) child.disconnect();
+      child.kill("SIGKILL");
+    }
     const current = sourcingRunGet({ ...ctx, id: runId }).run;
     if (current.status === "running") {
       const failed = sourcingRunFail({
@@ -251,4 +260,36 @@ export async function launchTerminalSearchWorker({ repoRoot, env = process.env, 
     }
     throw error;
   }
+}
+
+export async function stopTerminalSessionSearches({ repoRoot, env = process.env, sessionId } = {}) {
+  const ctx = { repoRoot, env };
+  if (!sessionId || !dbExists(ctx)) return { stopped: [] };
+  const runs = requireDb(ctx)
+    .prepare("SELECT data FROM sourcing_runs WHERE status = 'running'")
+    .all()
+    .map((row) => JSON.parse(row.data))
+    .filter((run) => run.progress?.ownerSession === sessionId);
+  for (const run of runs) cancelTerminalSearch({ ...ctx, id: run.id });
+  const pending = new Set(
+    runs.map((run) => run.progress?.workerPid).filter((pid) => Number.isSafeInteger(pid) && pid > 0)
+  );
+  const deadline = Date.now() + 3000;
+  while (pending.size) {
+    for (const pid of pending) {
+      try {
+        process.kill(pid, 0);
+      } catch (error) {
+        if (error.code === "ESRCH") pending.delete(pid);
+        else throw error;
+      }
+    }
+    if (!pending.size) break;
+    if (Date.now() >= deadline)
+      throw new Error(
+        "Search cancellation was saved, but a terminal worker did not exit within its shutdown deadline"
+      );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return { stopped: runs.map((run) => run.id) };
 }

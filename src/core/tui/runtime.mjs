@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, watch } from "node:fs";
 import { dirname } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { dbFilePath } from "../db/connection.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
 import { captureTuiPaste } from "./intake.mjs";
 import { readJobs } from "./jobs.mjs";
 import {
@@ -22,6 +24,7 @@ export async function runTerminalWorkspace({
   if (!input.isTTY || !output.isTTY)
     throw new Error("Interactive TUI requires a terminal; use careerrat tui --json for saved jobs");
   const ctx = { repoRoot, env };
+  const sessionId = randomUUID();
   let data = readJobs(ctx);
   let state = createWorkspaceState(data);
   let pane = null;
@@ -197,7 +200,7 @@ export async function runTerminalWorkspace({
           command: agent.command,
           args: agent.args || [],
           cwd: repoRoot,
-          env: { ...env, CAREERRAT_SURFACE: "tui" },
+          env: { ...env, CAREERRAT_SURFACE: "tui", CAREERRAT_TUI_SESSION: sessionId },
           cols: layout.agent.cols,
           rows: layout.agent.rows,
           onChange: scheduleRender,
@@ -233,13 +236,17 @@ export async function runTerminalWorkspace({
     try {
       await pane?.dispose();
     } finally {
-      for (const listener of input.listeners("data"))
-        if (!originalDataListeners.has(listener)) input.off("data", listener);
-      for (const listener of input.listeners("newListener"))
-        if (!originalNewListeners.has(listener)) input.off("newListener", listener);
-      input.setRawMode(wasRaw);
-      if (wasFlowing !== true) input.pause();
-      output.write("\x1b[0m\x1b[?2026l\x1b[?2004l\x1b[?7h\x1b[?25h\x1b[?1049l");
+      try {
+        await stopTerminalSessionSearches({ ...ctx, sessionId });
+      } finally {
+        for (const listener of input.listeners("data"))
+          if (!originalDataListeners.has(listener)) input.off("data", listener);
+        for (const listener of input.listeners("newListener"))
+          if (!originalNewListeners.has(listener)) input.off("newListener", listener);
+        input.setRawMode(wasRaw);
+        if (wasFlowing !== true) input.pause();
+        output.write("\x1b[0m\x1b[?2026l\x1b[?2004l\x1b[?7h\x1b[?25h\x1b[?1049l");
+      }
     }
   }
 }

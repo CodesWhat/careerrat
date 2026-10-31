@@ -8,6 +8,9 @@ import { fileURLToPath } from "node:url";
 import headless from "@xterm/headless";
 import pty from "node-pty";
 import { killProcessTreeByPid } from "../src/core/ai/runtime-process.mjs";
+import { closeAll } from "../src/core/db/connection.mjs";
+import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { sourcingRunLatest } from "../src/core/db/verbs/sourcing-runs.mjs";
 import { preparePtyHelpers } from "../src/core/tui/prepare.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -126,13 +129,28 @@ test("real terminal can browse, filter and quit without launching an agent", {
   assert.ok(raw.includes("\x1b[?25h"));
 });
 
-test("native pane and saved jobs coexist, shortcuts don't submit, and quitting stops the child", {
-  timeout: 15000,
-}, async (t) => {
-  const env = fixture(t);
-  preparePtyHelpers();
-  const terminal = new headless.Terminal({ cols: 120, rows: 36, allowProposedApi: true });
-  const agentProgram = `
+for (const ownsSearch of [false, true])
+  test(ownsSearch
+    ? "closing the real terminal cancels search state owned by its native agent session"
+    : "native pane and saved jobs coexist, shortcuts don't submit, and quitting stops the child", {
+    timeout: 15000,
+  }, async (t) => {
+    const env = fixture(t);
+    if (ownsSearch) {
+      importFromTracker({ repoRoot: root, env, sourceDir: join(env.CAREERRAT_HOME, "workspace") });
+      t.after(closeAll);
+    }
+    const searchModule = new URL("../src/core/db/verbs/sourcing-runs.mjs", import.meta.url).href;
+    const setupSearch = ownsSearch
+      ? `const api=await import(${JSON.stringify(searchModule)});
+    const ctx={repoRoot:${JSON.stringify(root)},env:process.env};
+    const {run}=api.sourcingRunStart({...ctx,purpose:'manual-search'});
+    api.sourcingRunProgress({...ctx,id:run.id,progress:{ownerSession:process.env.CAREERRAT_TUI_SESSION}});`
+      : "";
+    preparePtyHelpers();
+    const terminal = new headless.Terminal({ cols: 120, rows: 36, allowProposedApi: true });
+    const agentProgram = `
+    (async()=>{${setupSearch}
     process.stdin.setRawMode(true);process.stdin.resume();
     process.stdout.write('\\x1b[?2004hAGENT_READY PID:'+process.pid+' SURFACE:'+process.env.CAREERRAT_SURFACE+'\\r\\n');
     let buffer='';
@@ -144,72 +162,78 @@ test("native pane and saved jobs coexist, shortcuts don't submit, and quitting s
         buffer='';
       }
     });
+    })();
   `;
-  const runtimeUrl = new URL("../src/core/tui/runtime.mjs", import.meta.url).href;
-  const driver = `import {runTerminalWorkspace} from ${JSON.stringify(runtimeUrl)};
+    const runtimeUrl = new URL("../src/core/tui/runtime.mjs", import.meta.url).href;
+    const driver = `import {runTerminalWorkspace} from ${JSON.stringify(runtimeUrl)};
     process.exitCode=await runTerminalWorkspace({repoRoot:${JSON.stringify(root)},env:process.env,agent:{command:process.execPath,args:['-e',${JSON.stringify(agentProgram)}]}});`;
-  let child;
-  let exited = false;
-  let stage = 0;
-  let snapshot = "";
-  let agentPid;
-  let rejectRun;
-  const done = new Promise((resolve, reject) => {
-    rejectRun = reject;
-    child = pty.spawn(process.execPath, ["--input-type=module", "-e", driver], {
-      cwd: root,
-      env,
-      cols: 120,
-      rows: 36,
-      name: "xterm-256color",
+    let child;
+    let exited = false;
+    let stage = 0;
+    let snapshot = "";
+    let agentPid;
+    let rejectRun;
+    const done = new Promise((resolve, reject) => {
+      rejectRun = reject;
+      child = pty.spawn(process.execPath, ["--input-type=module", "-e", driver], {
+        cwd: root,
+        env,
+        cols: 120,
+        rows: 36,
+        name: "xterm-256color",
+      });
+      child.onData((data) =>
+        terminal.write(data, () => {
+          snapshot = Array.from({ length: terminal.rows }, (_, index) =>
+            terminal.buffer.active
+              .getLine(terminal.buffer.active.baseY + index)
+              ?.translateToString(true)
+          ).join("\n");
+          agentPid ||= Number(snapshot.match(/AGENT_READY PID:(\d+)/)?.[1]);
+          if (
+            stage === 0 &&
+            snapshot.includes("AGENT_READY") &&
+            snapshot.includes("SURFACE:tui") &&
+            snapshot.includes("Northstar")
+          ) {
+            agentPid = Number(snapshot.match(/AGENT_READY PID:(\d+)/)?.[1]);
+            stage = 1;
+            child.write("\x1b[17~hello\r");
+          }
+          if (stage === 1 && snapshot.includes("GOT_HELLO")) {
+            assert.match(snapshot, /Northstar/);
+            stage = 2;
+            child.write("\x1b[17~3");
+          }
+          if (stage === 2 && snapshot.includes("REQUEST_INSERTED:true AUTO_SUBMIT:false")) {
+            stage = 3;
+            child.write("\x11");
+          }
+        })
+      );
+      child.onExit(({ exitCode }) => {
+        exited = true;
+        if (stage === 3 && exitCode === 0) resolve();
+        else reject(new Error(`Native workspace exited early: ${exitCode}, ${stage}\n${snapshot}`));
+      });
     });
-    child.onData((data) =>
-      terminal.write(data, () => {
-        snapshot = Array.from({ length: terminal.rows }, (_, index) =>
-          terminal.buffer.active
-            .getLine(terminal.buffer.active.baseY + index)
-            ?.translateToString(true)
-        ).join("\n");
-        agentPid ||= Number(snapshot.match(/AGENT_READY PID:(\d+)/)?.[1]);
-        if (
-          stage === 0 &&
-          snapshot.includes("AGENT_READY") &&
-          snapshot.includes("SURFACE:tui") &&
-          snapshot.includes("Northstar")
-        ) {
-          agentPid = Number(snapshot.match(/AGENT_READY PID:(\d+)/)?.[1]);
-          stage = 1;
-          child.write("\x1b[17~hello\r");
-        }
-        if (stage === 1 && snapshot.includes("GOT_HELLO")) {
-          assert.match(snapshot, /Northstar/);
-          stage = 2;
-          child.write("\x1b[17~3");
-        }
-        if (stage === 2 && snapshot.includes("REQUEST_INSERTED:true AUTO_SUBMIT:false")) {
-          stage = 3;
-          child.write("\x11");
-        }
-      })
+    const timer = setTimeout(
+      () => rejectRun(new Error(`Native workspace proof timed out at ${stage}\n${snapshot}`)),
+      10000
     );
-    child.onExit(({ exitCode }) => {
-      exited = true;
-      if (stage === 3 && exitCode === 0) resolve();
-      else reject(new Error(`Native workspace exited early: ${exitCode}, ${stage}\n${snapshot}`));
+    t.after(async () => {
+      clearTimeout(timer);
+      await stopTestTerminal(child, () => exited, terminal, [agentPid]);
     });
+    await done;
+    assert.ok(agentPid > 0);
+    assert.throws(() => process.kill(agentPid, 0), { code: "ESRCH" });
+    if (ownsSearch)
+      assert.equal(
+        sourcingRunLatest({ repoRoot: root, env, purpose: "manual-search" }).run.error.code,
+        "SEARCH_CANCELLED"
+      );
   });
-  const timer = setTimeout(
-    () => rejectRun(new Error(`Native workspace proof timed out at ${stage}\n${snapshot}`)),
-    10000
-  );
-  t.after(async () => {
-    clearTimeout(timer);
-    await stopTestTerminal(child, () => exited, terminal, [agentPid]);
-  });
-  await done;
-  assert.ok(agentPid > 0);
-  assert.throws(() => process.kill(agentPid, 0), { code: "ESRCH" });
-});
 
 for (const captureFails of [false, true]) {
   test(captureFails

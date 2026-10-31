@@ -8,6 +8,7 @@ import {
   sourcingRunComplete,
   sourcingRunFail,
   sourcingRunGet,
+  sourcingRunProgress,
   sourcingRunStart,
 } from "../src/core/db/verbs/sourcing-runs.mjs";
 
@@ -104,7 +105,12 @@ test("a detached worker acknowledges its run and exits after a real empty-source
 }, async (t) => {
   assert.equal(typeof api.launchTerminalSearchWorker, "function");
   const ctx = fixture(t);
+  ctx.env.CAREERRAT_TUI_SESSION = "session-proof";
   const receipt = await api.launchTerminalSearchWorker(ctx);
+  assert.equal(
+    sourcingRunGet({ ...ctx, id: ctx.runId }).run.progress.ownerSession,
+    "session-proof"
+  );
   assert.equal(receipt.run.id, ctx.runId);
   assert.equal(receipt.detached, true);
   let result;
@@ -160,4 +166,32 @@ test("failed worker startup settles its run and leaves a failure receipt", async
   const result = api.terminalSearchStatus({ ...ctx, id: ctx.runId });
   assert.equal(result.run.error.code, "SEARCH_WORKER_START_FAILED");
   assert.ok(result.handoffPath);
+});
+
+test("closing a terminal session cancels only its owned searches", async (t) => {
+  assert.equal(typeof api.stopTerminalSessionSearches, "function");
+  const ctx = fixture(t);
+  sourcingRunProgress({ ...ctx, id: ctx.runId, progress: { ownerSession: "session-a" } });
+  const other = sourcingRunStart({ ...ctx, purpose: "first-search" }).run;
+  sourcingRunProgress({ ...ctx, id: other.id, progress: { ownerSession: "session-b" } });
+  const standalone = sourcingRunStart({ ...ctx, purpose: "ai-web-search" }).run;
+  const result = await api.stopTerminalSessionSearches({ ...ctx, sessionId: "session-a" });
+  assert.deepEqual(result.stopped, [ctx.runId]);
+  assert.equal(sourcingRunGet({ ...ctx, id: ctx.runId }).run.error.code, "SEARCH_CANCELLED");
+  assert.equal(sourcingRunGet({ ...ctx, id: other.id }).run.status, "running");
+  assert.equal(sourcingRunGet({ ...ctx, id: standalone.id }).run.status, "running");
+});
+test("terminal shutdown does not create a database in a legacy workspace", async (t) => {
+  assert.equal(typeof api.stopTerminalSessionSearches, "function");
+  const home = mkdtempSync(join(tmpdir(), "careerrat-session-stop-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  assert.deepEqual(
+    await api.stopTerminalSessionSearches({
+      repoRoot: home,
+      env: { CAREERRAT_HOME: home },
+      sessionId: "session-a",
+    }),
+    { stopped: [] }
+  );
+  assert.equal(existsSync(join(home, "db")), false);
 });
