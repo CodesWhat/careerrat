@@ -61,6 +61,7 @@ export {
   deepIngestPromptDismiss,
   deepIngestThreadOpen,
   ensureJobThreadInDb,
+  jobThreadGet,
   jobThreadMessageAppend,
   jobThreadSetArchived,
   jobThreadSetPinned,

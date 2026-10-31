@@ -360,6 +360,24 @@ contract — there is no code interceptor for them, by design.
 
 ### Data Write Contract (DB workspaces)
 
+**Durable CLI handoff.** Before continuing work on an application, read its saved
+history with `careerrat data thread read <application-id> --json`. After a skill
+changes that application's state, creates an artifact, or learns a decision the
+next session needs, append a concise result with `careerrat data thread append
+<application-id> --data-file <message.json> --json`. The message contains
+`role: "assistant"`, `text`, optional `artifacts` and `metadata`, and a stable
+`id` for retries. Record what actually happened and what remains, with paths to
+long documents. A thread message records history; it doesn't change application
+status or replace the canonical data verb.
+
+Use `workspace` instead of an application ID for a search-wide result. These
+commands require an existing DB and honor the selected person's data root. Read
+`careerrat data changes list --json` to inspect recorded knowledge changes;
+`careerrat data changes undo <message-id> <artifact-index> --json` uses the saved
+entry's before/after values and refuses stale or already-undone changes. These
+commands don't start an AI runtime. Keep legacy workspaces on the contract above;
+don't initialize a DB merely to record history.
+
 Mode detection: run `careerrat data status`. **Exit 0 (a database exists at
 `db/careerrat.db` under the data root, see Path Resolution)**: every
 tracker-visible mutation goes through `careerrat data <verb>`; never hand-edit
