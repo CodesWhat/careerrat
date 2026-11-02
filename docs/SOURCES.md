@@ -208,7 +208,7 @@ The sweep scans employer boards you did not track, looking for roles that match 
 It reads a list you provide at `config/ats-sweep-slugs.json` or `config/ats-sweep-slugs.txt` in the
 workspace. Without that file nothing runs.
 
-```
+```text
 # config/ats-sweep-slugs.txt: one provider:slug per line
 greenhouse:acme
 lever:globex
