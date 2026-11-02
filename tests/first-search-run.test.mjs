@@ -1247,7 +1247,7 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.status, "completed");
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
-  assert.equal(latest.run.summary.deterministicSources.attempted, 6);
+  assert.equal(latest.run.summary.deterministicSources.attempted, 8);
 });
 
 test("the shared worker can own deterministic terminal settlement", async () => {

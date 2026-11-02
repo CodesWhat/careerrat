@@ -196,7 +196,7 @@ function runWriteConfig() {
     const targeting = config.targeting;
 
     const wrote = exportCandidateCompatibilityFiles(config);
-    const generated = buildSearchSources(targeting, profile);
+    const generated = buildSearchSources(targeting, profile, { env: process.env });
     const existing = sourceConfigGet({ ...pathCtx, name: "search-sources" });
     const {
       merged: sources,
@@ -249,7 +249,7 @@ function runWriteConfig() {
     return 1;
   }
 
-  const generated = buildSearchSources(targeting, profile);
+  const generated = buildSearchSources(targeting, profile, { env: process.env });
   const searchConfigPath = userPath(pathCtx, "config/search-sources.yml");
   let existingFile = null;
   if (existsSync(searchConfigPath)) {

@@ -1096,7 +1096,9 @@ export function healSearchSourceConfig({ repoRoot, env = process.env, config = n
     };
   }
 
-  const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
+  const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile, {
+    env: process.env,
+  });
   const merged = mergeSearchSources(current.data, generated);
   const after = countDeterministicSources({
     searchSources: merged,
@@ -1141,7 +1143,9 @@ export function prepareDeterministicSearchSources({
   const previousGeneratedTitleFilter = generatedTitleFilterState(current.data);
   const previousGeneratedLocationFilter = generatedLocationFilterState(current.data);
   if (hasConfiguredTargetTitles(candidateConfig)) {
-    const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
+    const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile, {
+      env: process.env,
+    });
     const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
     sources = sourceConfigPut({
       ...pathCtx,

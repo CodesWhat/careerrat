@@ -1,0 +1,52 @@
+{
+  "LanguageCode": "EN",
+  "SearchParameters": { "Keyword": "program analyst" },
+  "SearchResult": {
+    "SearchResultCount": 3,
+    "SearchResultCountAll": 3,
+    "SearchResultItems": [
+      {
+        "MatchedObjectId": "800000001",
+        "MatchedObjectDescriptor": {
+          "PositionTitle": "Program Analyst",
+          "PositionURI": "https://www.usajobs.gov/job/800000001",
+          "ApplyURI": ["https://www.usajobs.gov/job/800000001"],
+          "PositionLocationDisplay": "Washington, District of Columbia",
+          "OrganizationName": "Example Bureau",
+          "DepartmentName": "Example Department",
+          "PublicationStartDate": "2026-10-20T00:00:00.0000",
+          "QualificationSummary": "Two years of analytical experience.",
+          "PositionRemuneration": [
+            {
+              "MinimumRange": "88621.0",
+              "MaximumRange": "115208.0",
+              "RateIntervalCode": "Per Year"
+            }
+          ],
+          "UserArea": {
+            "Details": { "JobSummary": "Analyze program performance and report to leadership." }
+          }
+        }
+      },
+      {
+        "MatchedObjectId": "800000002",
+        "MatchedObjectDescriptor": {
+          "PositionTitle": "Management Analyst",
+          "PositionURI": "https://www.usajobs.gov/job/800000002",
+          "PositionLocationDisplay": "Multiple Locations",
+          "DepartmentName": "Example Department",
+          "PositionRemuneration": [],
+          "UserArea": { "Details": {} }
+        }
+      },
+      {
+        "MatchedObjectId": "800000003",
+        "MatchedObjectDescriptor": {
+          "PositionTitle": "Row Without A Link",
+          "PositionURI": "",
+          "PositionLocationDisplay": "Anywhere"
+        }
+      }
+    ]
+  }
+}

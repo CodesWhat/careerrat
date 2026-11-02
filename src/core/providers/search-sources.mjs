@@ -1,7 +1,9 @@
 import { validate } from "../profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../profile/yaml.mjs";
-import { inferCareerOpsProvider, isCareerOpsProviderSupported } from "./career-ops-registry.mjs";
+import { inferProvider } from "../scoring/sourced-scanner.mjs";
+import { isCareerOpsProviderSupported } from "./career-ops-registry.mjs";
 import { parseHiringCafeSearchState, resolveRecencyWindow } from "./hiringcafe.mjs";
+import { isKeyedProvider } from "./keyed-credentials.mjs";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -198,12 +200,13 @@ export function addSearchFromQuery(
 
 export function addProviderSource(
   config,
-  { provider, label, query, url, enabled = true, safetyMinutes = 30 } = {}
+  { provider, label, query, url, country, location, enabled = true, safetyMinutes = 30 } = {}
 ) {
   const providerId = String(provider || "")
     .trim()
     .toLowerCase();
-  if (!isCareerOpsProviderSupported(providerId)) {
+  const keyed = isKeyedProvider(providerId);
+  if (!keyed && !isCareerOpsProviderSupported(providerId)) {
     throw new Error(`addProviderSource: unsupported provider: ${provider || "(missing)"}`);
   }
 
@@ -238,6 +241,24 @@ export function addProviderSource(
     recency: { mode: "since-last-run", safetyMinutes },
   };
   if (normalizedUrl && normalizedQuery) entry.query = normalizedQuery;
+  if (keyed) {
+    // Keyed APIs search by keyword, so a pasted URL means nothing to them.
+    if (!normalizedQuery) {
+      throw new Error(`addProviderSource: ${providerId} needs a --query (a job title or keyword)`);
+    }
+    entry.source_type = "board";
+    delete entry.url;
+    delete entry.name;
+    entry.query = normalizedQuery;
+    const normalizedCountry = typeof country === "string" ? country.trim().toLowerCase() : "";
+    if (providerId === "adzuna") {
+      if (!normalizedCountry) {
+        throw new Error("addProviderSource: adzuna needs a --country (for example us, gb, ca)");
+      }
+      entry.country = normalizedCountry;
+    }
+    if (typeof location === "string" && location.trim()) entry.location = location.trim();
+  }
 
   return { ...config, searches: [...(config.searches ?? []), entry] };
 }
@@ -354,6 +375,23 @@ export function addSearchFromUrl(
     return { ...config, searches: [...(config.searches ?? []), entry] };
   }
 
+  // A company board on a supported ATS is read directly from its public API, so
+  // it wins over a caller asking for the browser or a url-query for the same URL.
+  // Only a host no adapter recognizes falls through to a browser source.
+  const deterministicProvider = inferProvider({ careers_url: pastedUrl });
+  if (deterministicProvider) {
+    const sourceLabel = label || parsed.hostname;
+    const entry = {
+      provider: deterministicProvider,
+      source_type: "ats",
+      label: sourceLabel,
+      name: sourceLabel,
+      url: pastedUrl,
+      enabled,
+    };
+    return { ...config, searches: [...(config.searches ?? []), entry] };
+  }
+
   if (sourceType === "url-query" || sourceType === "browser") {
     const identity =
       sourceType === "browser"
@@ -367,20 +405,6 @@ export function addSearchFromUrl(
       url: pastedUrl,
       enabled,
       recency: { mode: "since-last-run", safetyMinutes: 30 },
-    };
-    return { ...config, searches: [...(config.searches ?? []), entry] };
-  }
-
-  const deterministicProvider = inferCareerOpsProvider({ careers_url: pastedUrl });
-  if (deterministicProvider) {
-    const sourceLabel = label || parsed.hostname;
-    const entry = {
-      provider: deterministicProvider,
-      source_type: "ats",
-      label: sourceLabel,
-      name: sourceLabel,
-      url: pastedUrl,
-      enabled,
     };
     return { ...config, searches: [...(config.searches ?? []), entry] };
   }
