@@ -197,16 +197,28 @@ test("terminal shutdown does not create a database in a legacy workspace", async
   assert.equal(existsSync(join(home, "db")), false);
 });
 
-function spawnStubbornWorker(t, { ignoreTerm }) {
+async function spawnStubbornWorker(t, { ignoreTerm }) {
+  const handler = ignoreTerm ? "process.on('SIGTERM',()=>{});" : "";
   const child = spawn(
     process.execPath,
-    ["-e", (ignoreTerm ? "process.on('SIGTERM',()=>{});" : "") + "setInterval(()=>{},1000)"],
-    { detached: true, stdio: "ignore" }
+    ["-e", `${handler}process.stdout.write('ready');setInterval(()=>{},1000)`],
+    { detached: true, stdio: ["ignore", "pipe", "ignore"] }
   );
   t.after(() => {
     try {
       process.kill(-child.pid, "SIGKILL");
     } catch {}
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("stub worker never became ready")), 10000);
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`stub worker exited early (${code})`)));
+    child.stdout.once("data", () => {
+      clearTimeout(timer);
+      child.removeAllListeners("exit");
+      child.stdout.destroy();
+      resolve();
+    });
   });
   return child;
 }
@@ -230,8 +242,7 @@ test("shutdown escalates to SIGTERM for a worker that outlives the deadline", {
   skip: process.platform === "win32",
 }, async (t) => {
   const ctx = fixture(t);
-  const child = spawnStubbornWorker(t, { ignoreTerm: false });
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  const child = await spawnStubbornWorker(t, { ignoreTerm: false });
   ownedBy(ctx, child.pid);
   await api.stopTerminalSessionSearches({
     ...ctx,
@@ -246,8 +257,7 @@ test("shutdown escalates to SIGKILL when a worker ignores SIGTERM", {
   skip: process.platform === "win32",
 }, async (t) => {
   const ctx = fixture(t);
-  const child = spawnStubbornWorker(t, { ignoreTerm: true });
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  const child = await spawnStubbornWorker(t, { ignoreTerm: true });
   ownedBy(ctx, child.pid);
   await api.stopTerminalSessionSearches({
     ...ctx,
@@ -262,8 +272,7 @@ test("EPERM on the liveness check does not abort shutdown of other workers", {
   skip: process.platform === "win32",
 }, async (t) => {
   const ctx = fixture(t);
-  const child = spawnStubbornWorker(t, { ignoreTerm: false });
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  const child = await spawnStubbornWorker(t, { ignoreTerm: false });
   ownedBy(ctx, child.pid);
   const other = sourcingRunStart({ ...ctx, purpose: "first-search" }).run;
   const foreign = 4194001;
