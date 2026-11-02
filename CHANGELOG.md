@@ -28,6 +28,15 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- Search can use USAJobs and Adzuna when their free API keys are set, and new
+  searches also include Himalayas, Jobicy and, for tech roles, Hacker News "Who is
+  hiring". A missing key is reported on that source instead of returning nothing.
+- A job board that comes back not found on two runs in a row is skipped until a
+  14-day re-check. `scan:sourced --recheck-dead` checks them right away, and each
+  run lists dead sources with the next step.
+- `check:jobs` asks Greenhouse, Lever, Ashby, Workable and SmartRecruiters directly
+  whether a saved job is still open, and lists jobs closed since the last check. A
+  job is only marked closed when the board says it's gone.
 - `careerrat data backup` and `careerrat data restore` save and bring back the
   database. A restore saves your current database first and needs `--yes`.
 - CLI commands read and append durable job or workspace history, list recorded
