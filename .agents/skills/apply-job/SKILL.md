@@ -155,7 +155,7 @@ a field, not by evaluating script that submits the form. Submitting goes through
 one command, which reads the live form in the session browser, runs CareerRat's
 submit checks, and presses Submit only when they all pass:
 
-```
+```bash
 careerrat apply submit <application-id> --page <session-browser-page-id> --json
 ```
 
