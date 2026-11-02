@@ -149,27 +149,47 @@ After building, eyeball the output: page count reasonable, fonts render, no non-
 
 ## STEP 6: Submission
 
-Fill the form completely. What happens next depends on the submit mode (`auto` or
-`manual`; absent means `auto`). `careerrat automation status` shows it.
+Fill the form completely, then stop. **You never click the final Submit control
+yourself, in any submit mode, on any site.** Not with a click, not with Enter in
+a field, not by evaluating script that submits the form. Submitting goes through
+one command, which reads the live form in the session browser, runs CareerRat's
+submit checks, and presses Submit only when they all pass:
 
-- **`submit: auto` (default).** In the browser app, CareerRat presses the final Submit control itself,
-  once, only when every required field is answered, every required upload is
-  attached, exactly one positively labelled submit control exists, and the
-  evaluate gate is KEEP or a user-approved REVIEW. It then waits for a
-  confirmation page. If the page is seen, record Applied. If not, the outcome is
-  `submitted-unverified`. That is recorded on the operation result, not as an
-  application status: keep the application's current status, set `statusNote` (that
-  it was submitted automatically with no confirmation page seen) and `nextAction`
-  (check the site, then record it as Applied if it went through), never retry the
-  click, and never pass `submitted-unverified` to `app set-status`. When auto
-  declines to click, say why and hand the form over. These checks are enforced by
-  the browser app's apply driver only. When you drive the browser yourself (the
-  terminal app), nothing enforces them for you: check every one before you press
-  Submit, and stop and say why if any fails.
-- **`submit: manual`** (set with `careerrat automation submit manual --write`). Stop
-  at the final submit control. Show a summary of what will be submitted and return or
-  focus the retained supervised browser page. The user presses Submit themselves,
-  then reports back.
+```
+careerrat apply submit <application-id> --page <session-browser-page-id> --json
+```
+
+`--page` is the page id of the tab you filled (the one `orca tab create` returned).
+Run it once the form is filled and every upload is attached. Read the JSON:
+
+- `state: "submitted"`: the site showed a confirmation page. Go to STEP 9 and record Applied.
+- `state: "submitted-unverified"`: Submit was pressed and no confirmation page was seen. Keep the
+  application's current status (the command already set `statusNote` and `nextAction`), never run
+  the command or click again, and never pass `submitted-unverified` to `app set-status`. Tell the
+  user to check the site.
+- `state: "refused"` (exit 1): nothing was pressed. `reasons[]` names each failed check by `code`
+  with a plain `message` and, where relevant, the `items` (field or upload labels) that are
+  missing. The command has already set the job to `manual-apply` with a note of what's missing.
+  Do **not** work around the refusal, do not click Submit, and do not re-run the command hoping
+  it passes without changing the form. Tell the user what's missing, return or focus the retained
+  supervised browser page, and let them finish and press Submit themselves. You may fix a refusal
+  that is yours to fix (a blank required field you can truthfully answer, an upload not yet
+  attached) and run the command again, once.
+
+The checks the command runs (the same ones the browser app's apply driver enforces): the submit
+mode is `auto` (`careerrat automation status`; `submit: manual` is set with
+`careerrat automation submit manual --write` and always refuses, so the person presses Submit),
+the posting is not on LinkedIn (never auto-submitted), Submit was not already pressed once, the
+evaluate gate is KEEP or a user-approved REVIEW, no `NEEDS YOU` answer is open, the page is the
+posting's own site or a known ATS, no captcha, verification-code, attestation or other human
+step is showing, no required field is blank, every required upload is attached, and exactly one
+positively labelled submit-application control exists. Only the Orca session browser can be
+reached from the command; with any other provider it refuses with `SESSION_UNREACHABLE` and the
+person submits.
+
+`submit: manual` means the same thing for you as a refusal: show a summary of what will be
+submitted, return or focus the retained supervised browser page, and let the user press Submit
+themselves, then report back.
 
 Either way, never treat an executor's claim of submission as permission to mark
 the application Applied. Only a seen confirmation page or the user's report does that.
@@ -290,7 +310,7 @@ Nothing is recorded as applied until the person says so. When they do, record it
 
 ## STEP 8 — Verify
 
-After Submit (CareerRat's click in auto mode, or the user's report in manual mode), read the retained supervised browser page
+After Submit (the `careerrat apply submit` click, or the user's report after a refusal or in manual mode), read the retained supervised browser page
 and confirm the application advanced past the submit step. Never open the posting
 in a new profile for this verification, and never click Submit as part of checking:
 
