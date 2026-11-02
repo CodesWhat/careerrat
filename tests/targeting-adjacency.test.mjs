@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  ADJACENCY_BOTH_NEXT_ACTION,
   ADJACENCY_NEXT_ACTION,
   adjacencyNote,
+  COMMUTE_CITIES_NEXT_ACTION,
   targetingAdjacencyGaps,
 } from "../src/core/profile/targeting-adjacency.mjs";
 
@@ -62,5 +64,28 @@ describe("adjacencyNote", () => {
     assert.match(note, /run search setup to add related titles/);
     assert.ok(!note.includes("\n"));
     assert.equal(adjacencyNote({ role_buckets: [] }, HYBRID), null);
+  });
+
+  it("names only the gap that exists", () => {
+    const full = { ...PRIMARY_ONLY, role_families: [{ name: "n", patterns: ["nurse"] }] };
+    const citiesOnly = targetingAdjacencyGaps(full, HYBRID);
+    assert.equal(citiesOnly.nextAction, COMMUTE_CITIES_NEXT_ACTION);
+    const citiesNote = adjacencyNote(full, HYBRID);
+    assert.match(citiesNote, /no commute cities/);
+    assert.doesNotMatch(citiesNote, /related titles|Related roles/);
+    assert.match(citiesNote, /nearby towns may be missed/);
+
+    const titlesNote = adjacencyNote(PRIMARY_ONLY, REMOTE);
+    assert.match(titlesNote, /Related roles may be missed/);
+    assert.doesNotMatch(titlesNote, /nearby towns|commute/);
+
+    assert.equal(
+      targetingAdjacencyGaps(PRIMARY_ONLY, HYBRID).nextAction,
+      ADJACENCY_BOTH_NEXT_ACTION
+    );
+    assert.match(
+      adjacencyNote(PRIMARY_ONLY, HYBRID),
+      /Related roles and nearby towns may be missed/
+    );
   });
 });
