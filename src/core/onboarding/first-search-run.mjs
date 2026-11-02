@@ -21,6 +21,7 @@ import {
   isBoardProviderSupported,
   isCompanyProviderSupported,
 } from "../scoring/sourced-scanner.mjs";
+import { summarizeSearchHealth } from "../search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../search/source-login-preflight.mjs";
 import { createSearchExecutionId } from "../search/unified-job-search.mjs";
 
@@ -890,6 +891,7 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     rejectionSamples: clone(summary.rejectionSamples || {}),
     errorCount: errors.length,
     errors: clone(errors),
+    health: summarizeSearchHealth({ errors, attemptedSources: deterministicSources.attempted }),
     loginRequests: clone(loginRequests),
     sourceCoverage: clone(Array.isArray(summary.sourceCoverage) ? summary.sourceCoverage : []),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,

@@ -111,6 +111,12 @@ completion. On completion, read the handoff and its complete `resultPath` JSON,
 including all `offers[]`; don't substitute the bounded TUI summary for the result.
 If the user cancels, use `careerrat search cancel --id <run-id> --json` and retain
 any saved partial results. Source errors and login requests need honest follow-up.
+Status and the saved handoff carry a `health` block (`ok`, `degraded` or `failed`)
+with failed and skipped source counts and the error reasons grouped by count. A
+`completed` run with `degraded` or `failed` health is not a success: say so in plain
+words, give the counts and the top reasons, and then work from the partial results.
+Sources skipped because they need a browser are counted apart from errors; mention
+them, but they don't mean the network is broken.
 Don't start a second foreground scan while the same worker is active. Additional
 agent-led search and AI Web Search still follow this skill's owning sections.
 The commands below remain the legacy/foreground entry, with no implicit migration.
