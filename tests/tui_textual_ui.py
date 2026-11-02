@@ -216,6 +216,74 @@ closeAll();
                     os.kill(pid, 0)
             self.assertEqual(app.errors, [])
 
+    def test_key_map_covers_newlines_modifiers_and_function_keys(self):
+        table = {
+            ("shift+enter", None): "\n",
+            ("ctrl+j", "\n"): "\n",
+            ("alt+enter", None): "\x1b\r",
+            ("enter", "\r"): "\r",
+            ("ctrl+c", None): "\x03",
+            ("ctrl+space", None): "\x00",
+            ("up", None): "\x1b[A",
+            ("ctrl+left", None): "\x1b[1;5D",
+            ("shift+right", None): "\x1b[1;2C",
+            ("ctrl+shift+up", None): "\x1b[1;6A",
+            ("pageup", None): "\x1b[5~",
+            ("ctrl+delete", None): "\x1b[3;5~",
+            ("delete", None): "\x1b[3~",
+            ("insert", None): "\x1b[2~",
+            ("f1", None): "\x1bOP",
+            ("f5", None): "\x1b[15~",
+            ("shift+f5", None): "\x1b[15;2~",
+            ("shift+f1", None): "\x1b[1;2P",
+            ("alt+backspace", None): "\x1b\x7f",
+            ("alt+b", "b"): "\x1bb",
+            ("shift+tab", None): "\x1b[Z",
+            ("a", "a"): "a",
+            ("é", "é"): "é",
+        }
+        for (key, character), expected in table.items():
+            self.assertEqual(MODULE.key_bytes(key, character), expected, key)
+        self.assertIsNone(MODULE.key_bytes("shift+f13x", None))
+
+    async def test_newline_and_modified_keys_reach_the_native_agent(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-keys-") as folder:
+            home = Path(folder)
+            executable = home / "codex"
+            executable.write_text(
+                f"#!{shutil.which('node')}\n"
+                "import fs from 'node:fs';\n"
+                "process.stdin.setRawMode(true);process.stdin.resume();process.stdout.write('KEYS_READY');\n"
+                "process.stdin.on('data',b=>fs.appendFileSync(process.env.CAREERRAT_HOME+'/keys.log',b.toString('hex')+'\\n'));\n"
+            )
+            executable.chmod(0o700)
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "KEYS_READY" in pane.render().plain)
+                await pilot.press("f6")
+                log = home / "keys.log"
+                for key, expected in [
+                    ("shift+enter", "0a"),
+                    ("ctrl+j", "0a"),
+                    ("alt+enter", "1b0d"),
+                    ("ctrl+left", "1b5b313b3544"),
+                    ("f5", "1b5b31357e"),
+                ]:
+                    before = len(log.read_text().split()) if log.exists() else 0
+                    await pilot.press(key)
+                    await until(lambda: log.exists() and len(log.read_text().split()) > before)
+                    self.assertEqual(log.read_text().split()[-1], expected, key)
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
     async def test_saved_jobs_clicks_requests_context_and_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-ui-") as folder:
             home = Path(folder)

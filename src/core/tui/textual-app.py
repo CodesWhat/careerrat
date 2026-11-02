@@ -45,16 +45,66 @@ KEYS = {
     "tab": "\t",
     "shift+tab": "\x1b[Z",
     "escape": "\x1b",
-    "up": "\x1b[A",
-    "down": "\x1b[B",
-    "right": "\x1b[C",
-    "left": "\x1b[D",
-    "home": "\x1b[H",
-    "end": "\x1b[F",
-    "delete": "\x1b[3~",
-    "pageup": "\x1b[5~",
-    "pagedown": "\x1b[6~",
+    "space": " ",
 }
+# A newline that doesn't submit. Shift+Enter only reaches us in terminals that
+# report it (Kitty keyboard protocol); the agents read a bare line feed
+# (Ctrl+J) as "insert a newline" in every terminal.
+NEWLINE_KEYS = {"shift+enter", "ctrl+enter", "ctrl+j", "newline"}
+CURSOR_KEYS = {"up": "A", "down": "B", "right": "C", "left": "D", "home": "H", "end": "F"}
+TILDE_KEYS = {"insert": 2, "delete": 3, "pageup": 5, "pagedown": 6}
+FUNCTION_KEYS = {
+    "f1": "\x1bOP",
+    "f2": "\x1bOQ",
+    "f3": "\x1bOR",
+    "f4": "\x1bOS",
+    **{
+        f"f{number}": f"\x1b[{code}~"
+        for number, code in zip(
+            range(5, 13), (15, 17, 18, 19, 20, 21, 23, 24)
+        )
+    },
+}
+# xterm's modifier parameter: 1 + shift(1) + alt(2) + ctrl(4).
+MODIFIER_BITS = {"shift": 1, "alt": 2, "meta": 2, "ctrl": 4}
+
+
+def key_bytes(key, character=None):
+    """What the native agent should receive for a Textual key, or None."""
+    if key in NEWLINE_KEYS:
+        return "\n"
+    if key in KEYS:
+        return KEYS[key]
+    *held, base = key.split("+") if key != "+" else ["+"]
+    if any(name not in MODIFIER_BITS for name in held):
+        return character
+    modifier = 1 + sum(MODIFIER_BITS[name] for name in set(held))
+    if held == ["alt"] and base == "enter":
+        return "\x1b\r"
+    if base in CURSOR_KEYS:
+        final = CURSOR_KEYS[base]
+        return f"\x1b[1;{modifier}{final}" if held else f"\x1b[{final}"
+    if base in TILDE_KEYS:
+        code = TILDE_KEYS[base]
+        return f"\x1b[{code};{modifier}~" if held else f"\x1b[{code}~"
+    if base in FUNCTION_KEYS:
+        sequence = FUNCTION_KEYS[base]
+        if not held:
+            return sequence
+        if sequence.startswith("\x1bO"):
+            return f"\x1b[1;{modifier}{sequence[-1]}"
+        return sequence[:-1] + f";{modifier}~"
+    if held == ["ctrl"] and len(base) == 1 and base.isalpha():
+        return chr(ord(base.upper()) - 64)
+    if held == ["ctrl"] and base in ("space", "at", "@"):
+        return "\x00"
+    if held == ["ctrl"] and base in "[]\\^_" and len(base) == 1:
+        return chr(ord(base) - 64)
+    if held == ["alt"] and base == "backspace":
+        return "\x1b\x7f"
+    if held == ["alt"] and character and character.isprintable():
+        return "\x1b" + character
+    return character
 
 
 async def read_event_line(reader):
@@ -328,11 +378,7 @@ class NativePane(Widget):
         self.place_cursor()
 
     async def on_key(self, event: events.Key):
-        data = KEYS.get(event.key)
-        if data is None and event.key.startswith("ctrl+") and len(event.key) == 6:
-            data = chr(ord(event.key[-1].upper()) - 64)
-        if data is None:
-            data = event.character
+        data = key_bytes(event.key, event.character)
         if data is not None:
             await self.app.send({"op": "input", "data": data})
         event.stop()
