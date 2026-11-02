@@ -83,6 +83,11 @@ const STAGE_RULES = [
 
 const TERMINAL_STAGES = new Set(["rejected", "withdrawn"]);
 
+/** True for a closed-out stage id (rejected, withdrawn). */
+export function isTerminalStage(stageId) {
+  return TERMINAL_STAGES.has(stageId);
+}
+
 /**
  * Merge the canonical STAGE_LADDER with caller-supplied custom stages.
  * A custom stage with an existing id overrides that rung; a new id mints one.

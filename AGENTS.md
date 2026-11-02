@@ -256,7 +256,8 @@ agent-led research still uses those skills.
 **Terminal file intake.** Textual Add context saves pasted text, URLs and
 dropped file paths before generating a request for the native agent. Ordinary
 paste while agent chat has focus remains native terminal input; do not assume it
-created an intake receipt. If that input supplies a document or facts to retain,
+created an intake receipt. Paste anywhere else in the Textual app opens Add context
+pre-filled and sends nothing until the user saves. If that input supplies a document or facts to retain,
 the owning skill must capture and persist it before reporting ingestion complete. Files have a private original copy,
 a receipt and, for text/Markdown, DOCX or email, shared local text extraction.
 Read the extracted text when available. PDFs/images retain their originals with
@@ -663,10 +664,10 @@ Rules for intake:
 ## Intent Routing
 
 - If the user says "apply", "apply to this", "submit", "fill this application",
-  or gives a JD URL with application intent: use `apply-job`. LinkedIn Easy Apply
-  postings can use authenticated form preparation in `apply-job` (STEP 7b);
-  this requires `careerrat automation status` to show
-  `authenticated_apply_preparation` allowed for `linkedin`.
+  or gives a JD URL with application intent: use `apply-job`. LinkedIn postings are
+  never applied to through LinkedIn (its User Agreement bans automation): `apply-job`
+  STEP 7b applies at the employer's own link when there is one, and otherwise opens
+  the LinkedIn page, makes no clicks, and waits for the person to say they applied.
 - If the user says "find jobs", "search", "source", "scan", "refresh",
   "HiringCafe", or asks for a queue: use `search-jobs`.
 - If the user says "research this company", "tell me about", "what do you know
@@ -1475,9 +1476,10 @@ tracker status transitions; DB mode writes via `careerrat data`, legacy mode wri
 `messaging` — **shipped as the `ingest-messages` skill** (the browser analog of
 `ingest-mail`: reads LinkedIn/Wellfound DMs
 into `communications[]` as a read-only capability, with reply drafts going to
-`email-comms`); and `authenticated_apply_preparation` — **shipped as supervised LinkedIn Easy Apply
-preparation in `apply-job` STEP 7b** (fill and advance the modal, follow the `submit` setting at
-the final Submit, and halt on captcha/2FA/limit). All four M12 phases
+`email-comms`); and `authenticated_apply_preparation` — **shipped as supervised employer-form preparation in
+`apply-job`** (fill and advance the form, follow the `submit` setting at the final Submit, and
+halt on captcha/2FA/limit). It does not cover LinkedIn: CareerRat never applies through a
+LinkedIn session, and an old `platforms.linkedin` value is ignored (`apply-job` STEP 7b). All four M12 phases
 are now shipped. `doctor` reports the configured/live automation state.
 
 **M13 — LinkedIn profile optimizer (Phase 5).** Two further capabilities on the `linkedin`

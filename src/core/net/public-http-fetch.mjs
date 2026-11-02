@@ -1,11 +1,23 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 
 const DEFAULT_PUBLIC_FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_PUBLIC_FETCH_MAX_BYTES = 1024 * 1024;
 const DEFAULT_MAX_REDIRECTS = 4;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+// The pinned dispatcher is an npm undici Agent. Node's built-in fetch bundles
+// its own (older) undici, and the two disagree on the dispatcher handler API,
+// so handing one to the other fails every request with UND_ERR_INVALID_ARG.
+// The pinned dispatcher therefore only ever pairs with undici's own fetch.
+// Callers that default their fetchImpl to Node's own global fetch get the
+// paired one here. Anything else is an injected fetch and is kept, including
+// a global fetch the process replaced (a stub is not named "fetch").
+export function resolvePublicFetch(fetchImpl) {
+  const isNodeFetch = fetchImpl === globalThis.fetch && fetchImpl?.name === "fetch";
+  return fetchImpl === undefined || isNodeFetch ? undiciFetch : fetchImpl;
+}
 
 // WHATWG fetch's "request-body-header name" list: headers that describe the
 // body being sent, so they must not survive a redirect hop that drops the
@@ -154,7 +166,7 @@ export async function resolvePublicHttpTarget(
 export async function fetchPublicHttpText(
   rawUrl,
   {
-    fetchImpl = fetch,
+    fetchImpl: injectedFetch,
     resolveHost = resolvePublicHost,
     dispatcherFactory = createPinnedDispatcher,
     timeoutMs = DEFAULT_PUBLIC_FETCH_TIMEOUT_MS,
@@ -165,6 +177,7 @@ export async function fetchPublicHttpText(
     allowedHosts,
   } = {}
 ) {
+  const fetchImpl = resolvePublicFetch(injectedFetch);
   // allowedHosts is a caller-scoped allowlist (e.g. a plugin's
   // manifest.fetchHosts) and is checked from the URL's own hostname alone,
   // BEFORE resolvePublicHttpTarget ever runs — that function is what issues
@@ -378,12 +391,13 @@ export async function guardedFetch(
   rawUrl,
   init = {},
   {
-    fetchImpl = fetch,
+    fetchImpl: injectedFetch,
     resolveHost = resolvePublicHost,
     dispatcherFactory = createPinnedDispatcher,
     maxRedirects = DEFAULT_MAX_REDIRECTS,
   } = {}
 ) {
+  const fetchImpl = resolvePublicFetch(injectedFetch);
   // guardedFetch has no timeoutMs of its own. The caller's own deadline is
   // whatever AbortController/signal it puts on init (see career-ops-registry's
   // request(), which drives one abort per outbound provider call). Racing DNS
@@ -540,7 +554,7 @@ function redirectTarget(response, currentUrl) {
   }
 }
 
-function createPinnedDispatcher({ addresses }) {
+export function createPinnedDispatcher({ addresses }) {
   const approved = normalizeAddresses(addresses);
   return new Agent({
     connect: {

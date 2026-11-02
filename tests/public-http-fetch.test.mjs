@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { test } from "node:test";
+import { gzipSync } from "node:zlib";
 
 import {
+  createPinnedDispatcher,
   fetchPublicHttpText,
   guardedFetch,
   validatePublicHttpUrl,
@@ -561,4 +564,81 @@ test("fetchPublicHttpText allowedHosts rejects a blocked redirect target with ze
   // Only the initial (allowed) hop resolves; the blocked redirect target
   // never reaches resolveHost.
   assert.deepEqual(resolveCallsByHost, ["allowed.example"]);
+});
+
+// Real default fetch path, real socket, real pinned npm-undici Agent. Only the
+// DNS answer and the pin target are swapped so the call can reach loopback:
+// resolveHost returns a public address (so every SSRF check runs for real) and
+// the dispatcher factory pins the actual connection to the local server. With
+// the global fetch paired to the npm Agent this threw UND_ERR_INVALID_ARG.
+async function withLocalServer(handler, run) {
+  const server = createServer(handler);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  const loopback = {
+    resolveHost: async () => PUBLIC_ADDRESSES,
+    dispatcherFactory: ({ hostname }) =>
+      createPinnedDispatcher({ hostname, addresses: [{ address: "127.0.0.1", family: 4 }] }),
+  };
+  try {
+    await run({ port, loopback });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("fetchPublicHttpText works with its default fetch and pinned dispatcher", async () => {
+  const body = JSON.stringify({ jobs: ["a".repeat(2000)] });
+  await withLocalServer(
+    (req, res) => {
+      if (req.url === "/gz") {
+        res.writeHead(200, { "content-type": "application/json", "content-encoding": "gzip" });
+        res.end(gzipSync(body));
+      } else if (req.url === "/moved") {
+        res.writeHead(302, { location: `http://${req.headers.host}/gz` });
+        res.end();
+      } else {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(body);
+      }
+    },
+    async ({ port, loopback }) => {
+      const plain = await fetchPublicHttpText(`http://fixture.example:${port}/plain`, loopback);
+      assert.equal(plain.ok, true);
+      assert.equal(plain.status, 200);
+      assert.equal(plain.rawText, body);
+
+      const gz = await fetchPublicHttpText(`http://fixture.example:${port}/gz`, loopback);
+      assert.equal(gz.ok, true);
+      assert.equal(gz.rawText, body);
+
+      const hop = await fetchPublicHttpText(`http://fixture.example:${port}/moved`, loopback);
+      assert.equal(hop.ok, true);
+      assert.equal(hop.rawText, body);
+
+      const capped = await fetchPublicHttpText(`http://fixture.example:${port}/plain`, {
+        ...loopback,
+        maxBytes: 100,
+      });
+      assert.equal(capped.ok, false);
+      assert.equal(capped.code, "response_too_large");
+    }
+  );
+});
+
+test("guardedFetch works with its default fetch and pinned dispatcher", async () => {
+  await withLocalServer(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("hello");
+    },
+    async ({ port, loopback }) => {
+      for (const init of [{}, { redirect: "manual" }]) {
+        const guarded = await guardedFetch(`http://fixture.example:${port}/`, init, loopback);
+        assert.equal(guarded.ok, true);
+        assert.equal(await guarded.response.text(), "hello");
+        await guarded.close();
+      }
+    }
+  );
 });

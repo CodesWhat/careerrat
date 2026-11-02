@@ -6,6 +6,7 @@ import { CHAT_ANSWER_MODE_GUIDANCE, parseChatAnswerMode } from "../ai/chat-answe
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { hostnameToPortal, REQUIRED_FIELDS_UNANSWERED } from "../apply/form-fill.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
+import { isLinkedInUrl, resolveEmployerApplyLink } from "../apply/linkedin-link.mjs";
 import {
   automationStatus,
   CAPABILITIES,
@@ -9198,9 +9199,43 @@ async function executeWorkspaceIntentCore({
 
     const prepareSubmit = normalized.type === "job.prepare-submit";
     const resumeApplicationSession = prepareSubmit || input.resumeSession === true;
-    const postingUrl = safeExternalHttpUrl(
+    let postingUrl = safeExternalHttpUrl(
       application.link || application.url || application.sourceUrl
     );
+    // LinkedIn postings are applied to on the employer's own link. CareerRat
+    // never applies through a LinkedIn session, so a LinkedIn link with no
+    // employer link behind it waits for the person (see the branch below).
+    let linkedinWaitUrl = null;
+    if (postingUrl && isLinkedInUrl(postingUrl)) {
+      const { employerUrl } = await resolveEmployerApplyLink({
+        application,
+        linkedinUrl: postingUrl,
+        resolveJobUrlImpl,
+        signal,
+      });
+      if (employerUrl) {
+        appSetFields({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+          patch: {
+            link: employerUrl,
+            sourceMeta: {
+              ...(application.sourceMeta || {}),
+              linkedinUrl: postingUrl,
+            },
+          },
+        });
+        application = applicationForIntent({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+        });
+        postingUrl = employerUrl;
+      } else {
+        linkedinWaitUrl = postingUrl;
+      }
+    }
     if (!postingUrl) {
       return appendActionResult({
         repoRoot,
@@ -9484,6 +9519,90 @@ async function executeWorkspaceIntentCore({
     const applySafetyBlockReason = resumeApplicationSession
       ? applicationApplySafetyBlockReason({ repoRoot, env, application })
       : null;
+    if (linkedinWaitUrl && !applySafetyBlockReason) {
+      // No employer link and nothing to click for the person: open the page,
+      // touch nothing in it, and wait. Nothing is recorded as applied.
+      let opened = false;
+      if (typeof applyJobImpl === "function") {
+        const waiting = await applyJobImpl({
+          repoRoot,
+          env,
+          applicationId: normalized.entity.id,
+          application,
+          postingUrl: linkedinWaitUrl,
+          questionCapture,
+          input: { ...input, prepareOnly: true, submitMode: "manual" },
+          prepareOnly: true,
+          submitMode: "manual",
+          signal,
+        });
+        opened = waiting?.state === "waiting-on-person" && waiting?.available !== false;
+      }
+      const waitingNote = "Waiting on you: apply on LinkedIn, then tell CareerRat you applied.";
+      const alreadyPast = new Set([
+        "applied",
+        "awaiting",
+        "interview",
+        "offer",
+        "rejected",
+        "withdrawn",
+      ]);
+      if (!alreadyPast.has(String(application.status || "").toLowerCase())) {
+        appSetStatus({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+          to: "manual-apply",
+          note: waitingNote,
+        });
+      }
+      appSetFields({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        patch: {
+          statusNote: waitingNote,
+          nextAction: "Apply on LinkedIn, then tell me when you've applied",
+        },
+      });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `${
+          opened
+            ? "CareerRat opened the LinkedIn job page and made no clicks."
+            : "Open the job on LinkedIn to apply."
+        } LinkedIn doesn't allow apps to apply for you and there's no employer link on this job, so it's waiting on you. It was not marked Applied.`,
+        artifacts: [
+          {
+            kind: "application_handoff",
+            title: `${applicationLabel(application)}: LinkedIn job`,
+            applicationId: normalized.entity.id,
+            url: linkedinWaitUrl,
+            submissionVerified: false,
+            questionCapture,
+            executorAvailable: opened,
+          },
+        ],
+        metadata: {
+          state: "waiting-on-person",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          nextActions: [
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+          ],
+        },
+        now,
+      });
+    }
     if (typeof applyJobImpl !== "function" && (!prepareSubmit || !applySafetyBlockReason)) {
       return appendActionResult({
         repoRoot,

@@ -409,7 +409,7 @@ skills:
       - "ARCH-01"
       - "ARCH-02"
     deterministic:
-      - step: "Resolve form fields, portal recipes, submit guards, confirmation checks, and Easy Apply helpers."
+      - step: "Resolve form fields, portal recipes, submit guards, and confirmation checks."
         owner: "src/core/apply/form-fill.mjs"
         owner_type: "existing_ts_module"
         decisions:

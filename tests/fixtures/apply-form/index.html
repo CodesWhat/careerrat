@@ -116,6 +116,13 @@
           status.textContent = status.textContent ? `${status.textContent} | ${text}` : text;
         }
 
+        // Makes an accidental submit (Enter pressed inside a field) observable
+        // in the page text instead of navigating away.
+        document.getElementById("application-form").addEventListener("submit", (event) => {
+          event.preventDefault();
+          appendStatus("FORM SUBMITTED");
+        });
+
         document.getElementById("work-authorization").addEventListener("change", (event) => {
           appendStatus(`Work authorization selected: ${event.target.value}`);
         });

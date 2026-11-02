@@ -16,7 +16,8 @@ import {
   candidateSetupInitialize,
 } from "../src/core/db/verbs/candidate.mjs";
 import { jobThreadMessageAppend } from "../src/core/db/verbs/chat-first.mjs";
-import { readJobs } from "../src/core/tui/jobs.mjs";
+import { capWorkspaceMessages, readJobs } from "../src/core/tui/jobs.mjs";
+import { createTextualSession } from "../src/core/tui/textual-session.mjs";
 
 const api = await import("../src/core/tui/history.mjs").catch((error) => {
   if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
@@ -121,4 +122,38 @@ test("sourced-job context stays durable without promoting the job to an applicat
   assert.equal(job.kind, "sourced");
   assert.equal(job.thread, null);
   assert.equal(job.contextMessages[0].text, "Saved the original JD and fit questions.");
+});
+test("snapshots send only the newest workspace messages and keep every change", async (t) => {
+  const ctx = fixture(t);
+  for (let i = 0; i < 30; i++)
+    workspaceMessageAppend({ ...ctx, role: "assistant", kind: "action_result", text: `msg ${i}` });
+  const data = readJobs(ctx);
+  const capped = capWorkspaceMessages(data.workspaceMessages, { limit: 10 });
+  assert.equal(capped.total, 31);
+  assert.equal(capped.messages.length, 10);
+  assert.equal(capped.messages.at(-1).text, "msg 29");
+  assert.equal(capWorkspaceMessages(data.workspaceMessages, { bytes: 1 }).messages.length, 0);
+  assert.equal(capWorkspaceMessages(null).total, 0);
+
+  const events = [];
+  const session = await createTextualSession({
+    ...ctx,
+    agent: null,
+    emit: (event) => events.push(event),
+  });
+  t.after(() => session.close());
+  const view = events.findLast((event) => event.type === "workspace").view;
+  assert.equal(view.workspaceMessages.length, 31);
+  assert.equal(view.workspaceMessagesTotal, 31);
+  assert.equal(view.changes.length, 1);
+  const big = "x".repeat(50000);
+  for (let i = 0; i < 60; i++)
+    workspaceMessageAppend({ ...ctx, role: "assistant", kind: "action_result", text: big });
+  await session.dispatch({ op: "refresh" });
+  const later = events.findLast((event) => event.type === "workspace").view;
+  assert.ok(later.workspaceMessages.length < 60);
+  assert.equal(later.workspaceMessagesTotal, 91);
+  assert.equal(later.changes.length, 1);
+  assert.equal(readJobs(ctx).workspaceMessages.length, 91);
+  assert.ok(Buffer.byteLength(JSON.stringify(later)) < 4 * 1024 * 1024);
 });

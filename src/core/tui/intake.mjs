@@ -175,10 +175,26 @@ async function captureFile(ctx, source, selectedId) {
   return item;
 }
 
-export async function captureTuiContext({ repoRoot, env = process.env, text, selectedId } = {}) {
-  if (typeof text !== "string" || !text.trim()) throw new TypeError("Pasted context is empty");
+export function listDroppedFiles({ repoRoot, env = process.env, text } = {}) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  const paths = droppedPaths(text, { repoRoot, env });
+  return paths ? [...new Set(paths)].map((path) => ({ path, name: basename(path) })) : null;
+}
+
+export async function captureTuiContext({
+  repoRoot,
+  env = process.env,
+  text,
+  files,
+  selectedId,
+} = {}) {
   const ctx = { repoRoot, env };
-  const paths = droppedPaths(text, ctx);
+  if (files !== undefined) {
+    if (!Array.isArray(files) || !files.length || files.some((file) => typeof file !== "string"))
+      throw new TypeError("Attached files must be a non-empty list of paths");
+  } else if (typeof text !== "string" || !text.trim())
+    throw new TypeError("Pasted context is empty");
+  const paths = files ?? droppedPaths(text, ctx);
   if (!paths) return captureTuiPaste({ ...ctx, text, selectedId });
   const items = [];
   const errors = [];

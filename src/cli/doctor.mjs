@@ -1,14 +1,8 @@
 #!/usr/bin/env node
-// Node version guard — same minimum as bin/careerrat.mjs.
-{
-  const major = parseInt(process.versions.node.split(".")[0], 10);
-  if (major < 18) {
-    process.stderr.write(
-      `careerrat requires Node.js >= 18 (you have ${process.versions.node}). Please upgrade.\n`
-    );
-    process.exit(1);
-  }
-}
+// Node version guard, same floor as bin/careerrat.mjs.
+import { requirePatchedNode } from "../core/runtime/node-floor.mjs";
+
+requirePatchedNode();
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

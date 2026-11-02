@@ -5,7 +5,7 @@
 # container or build a separate image with:
 #   RUN npm ci --include=dev && npx playwright install --with-deps chromium
 
-FROM node:24-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df
+FROM node:24-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 #checkov:skip=CKV_DOCKER_2:This is a one-shot CLI image with no long-running service to probe.
 
 LABEL org.opencontainers.image.title="careerrat" \

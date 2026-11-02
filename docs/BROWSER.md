@@ -89,8 +89,8 @@ webmail access, can be switched off. They are
 
 The authenticated capabilities are live and each has an off-switch: `status_polling`
 (**`sync-status`** skill), `messaging` (**`ingest-messages`** skill), and
-`authenticated_apply_preparation` (**supervised LinkedIn Easy Apply preparation**,
-which follows the `submit` setting at the final Submit),
+`authenticated_apply_preparation` (**supervised employer-form preparation**, which
+follows the `submit` setting at the final Submit; never LinkedIn, where the person applies),
 `profile_optimize` / `profile_apply` (**`optimize-linkedin`**), and `mail_access`
 (generic `webmail` for one recent verification-code message; Gmail/Outlook for
 verification-code reads and `ingest-mail` webmail reads).
