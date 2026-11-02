@@ -63,7 +63,8 @@ import {
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
 import {
-  SEARCH_SKIP_BROWSER_REASON,
+  SEARCH_NOT_SEARCHABLE_BROWSER_REASON,
+  SEARCH_NOT_SEARCHABLE_LOGIN_REASON,
   summarizeSearchHealth,
 } from "../src/core/search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
@@ -576,7 +577,22 @@ export async function runSourcedScan({
       scanned.errors.push({ company: "search-sources.yml", error: error.message });
     }
   }
-  const sourceTasks = searchSourceTasks(searchSources);
+  // Browser-backed sources can't run without a capture implementation (the
+  // terminal has none). Drop them before the run so the attempted set is the
+  // runnable set: no stub results, no per-source error rows.
+  const allSourceTasks = searchSourceTasks(searchSources);
+  const canCaptureBrowser = typeof captureBrowserSourceImpl === "function";
+  const sourceTasks = allSourceTasks.filter((task) => task.kind !== "browser" || canCaptureBrowser);
+  const notSearchableSources = allSourceTasks
+    .filter((task) => task.kind === "browser" && !canCaptureBrowser)
+    .map((task) => ({
+      label: task.source.label || task.source.provider || "Browser source",
+      reason:
+        task.source.auth === true
+          ? SEARCH_NOT_SEARCHABLE_LOGIN_REASON
+          : SEARCH_NOT_SEARCHABLE_BROWSER_REASON,
+    }));
+  const notSearchable = { count: notSearchableSources.length, sources: notSearchableSources };
   const totalSources = companies.length + sourceTasks.length;
   scanned.loginRequests.push(...pendingSourceLoginRequests(searchSources));
   let completedSources = 0;
@@ -671,19 +687,7 @@ export async function runSourcedScan({
           ? await scanSearchSources(singleton, { fetchImpl: fetchForRun, resolveHost })
           : task.kind === "board"
             ? await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost })
-            : typeof captureBrowserSourceImpl === "function"
-              ? await captureBrowserSourceImpl(task.captureSource || task.source)
-              : {
-                  offers: [],
-                  errors: [
-                    {
-                      company: task.source.label || task.source.provider || "Browser source",
-                      error: SEARCH_SKIP_BROWSER_REASON,
-                      skipped: true,
-                    },
-                  ],
-                  needsLogin: null,
-                };
+            : await captureBrowserSourceImpl(task.captureSource || task.source);
       ensureActive();
       await reportBatch(result, {
         kind: task.kind,
@@ -960,7 +964,9 @@ export async function runSourcedScan({
       errors: scanned.errors,
       warnings: scanned.warnings,
       attemptedSources: scanned.sourceCoverage?.length,
+      notSearchable,
     }),
+    notSearchable,
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
     coldFamilies,
@@ -1035,6 +1041,14 @@ export function printSummary(summary, offers, cfg, limit) {
           : ""
       }`
     );
+  }
+  if (summary.notSearchable?.count > 0) {
+    console.log(`Not searchable from the terminal (${summary.notSearchable.count}):`);
+    const byReason = new Map();
+    for (const { label, reason } of summary.notSearchable.sources) {
+      byReason.set(reason, [...(byReason.get(reason) || []), label]);
+    }
+    for (const [reason, labels] of byReason) console.log(`- ${reason} ${labels.join(", ")}`);
   }
   if (summary.errors.length > 0) {
     console.log("Errors:");

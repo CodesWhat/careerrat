@@ -3126,3 +3126,108 @@ test("a scan where every source fetch fails reports failed health, not a clean e
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
+
+test("browser-only and login-backed sources are left out of a terminal scan, not errored", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          ...searchSourcesFixture().searches,
+          {
+            provider: "hiringcafe",
+            source_type: "browser",
+            label: "Browser only board",
+            url: "https://hiring.cafe/?q=bar",
+            enabled: true,
+          },
+          {
+            provider: "linkedin",
+            platform: "linkedin",
+            source_type: "browser",
+            auth: true,
+            label: "LinkedIn NYC",
+            url: "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () =>
+        new Response("<rss><channel></channel></rss>", {
+          status: 200,
+          headers: { "content-type": "application/rss+xml" },
+        }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: false,
+    });
+    assert.equal(summary.attemptedSources, 1);
+    assert.equal(summary.sourceCoverage.length, 1);
+    assert.equal(summary.errors.length, 0);
+    assert.equal(summary.notSearchable.count, 2);
+    assert.deepEqual(summary.notSearchable.sources.map((s) => s.label).sort(), [
+      "Browser only board",
+      "LinkedIn NYC",
+    ]);
+    assert.notEqual(
+      summary.notSearchable.sources[0].reason,
+      summary.notSearchable.sources[1].reason
+    );
+    assert.equal(summary.health.attempted, 1);
+    assert.equal(summary.health.readable, 1);
+    assert.equal(summary.health.failed, 0);
+    assert.equal(summary.health.notSearchable, 2);
+    assert.equal(summary.health.status, "ok");
+
+    const lines = [];
+    const log = console.log;
+    console.log = (line) => lines.push(String(line));
+    try {
+      printSummary(summary, summary.offers, {}, 5);
+    } finally {
+      console.log = log;
+    }
+    const out = lines.join("\n");
+    assert.match(out, /Not searchable from the terminal \(2\)/);
+    assert.equal(out.match(/LinkedIn NYC/g).length, 1);
+    assert.doesNotMatch(out, /Errors:/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a scan where every source is non-runnable says so instead of reading as success", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "hiringcafe",
+            source_type: "browser",
+            label: "Browser only board",
+            url: "https://hiring.cafe/?q=bar",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const summary = await runSourcedScan({ repoRoot, write: false });
+    assert.equal(summary.attemptedSources, 0);
+    assert.equal(summary.errors.length, 0);
+    assert.equal(summary.health.status, "failed");
+    assert.match(summary.health.message, /None of the 1 sources can be searched from the terminal/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
