@@ -14,7 +14,15 @@ import { readJobs } from "../src/core/tui/jobs.mjs";
 const root = fileURLToPath(new URL("..", import.meta.url));
 function fixture(t) {
   const home = mkdtempSync(join(tmpdir(), "careerrat-cli-settings-history-"));
-  const ctx = { repoRoot: root, env: { CAREERRAT_HOME: home, HOME: home, PATH: process.env.PATH } };
+  const ctx = {
+    repoRoot: root,
+    env: {
+      CAREERRAT_HOME: home,
+      HOME: home,
+      PATH: process.env.PATH,
+      CAREERRAT_NO_UPDATE_CHECK: "1",
+    },
+  };
   candidateSetupInitialize(ctx);
   t.after(() => {
     closeAll();

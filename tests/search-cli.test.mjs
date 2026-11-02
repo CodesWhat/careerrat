@@ -18,7 +18,15 @@ function fixture(t) {
     closeAll();
     rmSync(home, { recursive: true, force: true });
   });
-  return { repoRoot: root, env: { CAREERRAT_HOME: home, PATH: process.env.PATH, HOME: home } };
+  return {
+    repoRoot: root,
+    env: {
+      CAREERRAT_HOME: home,
+      PATH: process.env.PATH,
+      HOME: home,
+      CAREERRAT_NO_UPDATE_CHECK: "1",
+    },
+  };
 }
 function cli(ctx, args) {
   return execFileSync(process.execPath, [join(root, "bin/careerrat.mjs"), "search", ...args], {

@@ -13,11 +13,19 @@ import { readJobs } from "../src/core/tui/jobs.mjs";
 const root = join(import.meta.dirname, "..");
 function fixture(t) {
   const home = mkdtempSync(join(tmpdir(), "careerrat-evidence-history-"));
-  const ctx = { repoRoot: root, env: { CAREERRAT_HOME: home, HOME: home, PATH: process.env.PATH } };
+  const ctx = {
+    repoRoot: root,
+    env: {
+      CAREERRAT_HOME: home,
+      HOME: home,
+      PATH: process.env.PATH,
+      CAREERRAT_NO_UPDATE_CHECK: "1",
+    },
+  };
   candidateSetupInitialize(ctx);
   t.after(() => {
     closeAll();
-    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    rmSync(home, { recursive: true, force: true });
   });
   return ctx;
 }

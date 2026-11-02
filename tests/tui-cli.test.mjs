@@ -46,7 +46,12 @@ function fixture(t) {
     })
   );
   t.after(() => rmSync(home, { recursive: true, force: true }));
-  return { CAREERRAT_HOME: home, HOME: home, PATH: process.env.PATH };
+  return {
+    CAREERRAT_HOME: home,
+    HOME: home,
+    PATH: process.env.PATH,
+    CAREERRAT_NO_UPDATE_CHECK: "1",
+  };
 }
 
 test("tui JSON reads saved jobs without a terminal, agent or browser server", (t) => {
