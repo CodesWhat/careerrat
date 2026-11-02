@@ -55,7 +55,9 @@ export function assessScanDemotion(offer, { targeting, now = Date.now(), history
   let points = 0;
   const reasons = [];
   const signals = [];
-  for (const signal of verdict.signals) {
+  // One soft signal on its own is not conclusive (legitimacy.mjs says so), so
+  // only a "suspect" verdict turns its signals into rank points.
+  for (const signal of verdict.verdict === "suspect" ? verdict.signals : []) {
     // thin-jd on a partial or absent body says nothing about the employer.
     if (signal.id === "thin-jd" && (offer.bodyPartial === true || !offer.bodyText)) continue;
     points += signal.severity === "strong" ? DEMOTION_POINTS.strong : DEMOTION_POINTS.mild;
