@@ -98,6 +98,7 @@ const CLIS = {
   people: "src/cli/people.mjs",
   roundup: "src/cli/roundup.mjs",
   data: "src/cli/data.mjs",
+  comm: "src/cli/data.mjs", // shorthand: `careerrat comm ...` is `careerrat data comm ...`
   modes: "src/cli/modes.mjs",
   automation: "src/cli/automation.mjs",
   activity: "src/cli/activity.mjs",
@@ -191,8 +192,7 @@ if (command === "start") {
     }
   );
 } else {
-  // `careerrat comm ...` is shorthand for `careerrat data comm ...`.
-  const cli = command === "comm" ? CLIS.data : CLIS[command];
+  const cli = CLIS[command];
   if (!cli) {
     console.error(`Unknown command: ${command}`);
     printHelp();
