@@ -574,6 +574,13 @@ export function sourcedPromote({ repoRoot, env, id, appRow } = {}) {
       ...(appRow || {}),
     };
     newApp.id = appRow?.id || sourced.id;
+    if (getRow(db, "applications", newApp.id)) {
+      const error = new Error(
+        `application "${newApp.id}" already exists. Promoting would overwrite it. Pick a different id in --data.`
+      );
+      error.code = "APPLICATION_EXISTS";
+      throw error;
+    }
     if (newApp.note) newApp.note = applicationNote(newApp.note);
 
     putRow(db, "applications", newApp.id, newApp);

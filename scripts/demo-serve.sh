@@ -14,7 +14,7 @@ export CAREERRAT_HOME="$PWD/.demo-home"   # isolated — never your default work
 export CAREERRAT_DEV_PORT=7788            # read by BOTH the backend and vite's proxy
 
 echo "→ Seeding demo into $CAREERRAT_HOME (isolated, safe) ..."
-node src/cli/data.mjs init --demo
+node src/cli/data.mjs init --demo --force
 
 # clear any stale demo backend so a re-run doesn't hit EADDRINUSE on 7788
 lsof -nP -tiTCP:7788 -sTCP:LISTEN 2>/dev/null | xargs -r kill 2>/dev/null || true

@@ -77,6 +77,14 @@ export function runMigrations(db, migrations = ALL_MIGRATIONS) {
   assertSequential(migrations);
 
   const from = readUserVersion(db);
+  const latest = migrations.length ? migrations[migrations.length - 1].id : 0;
+  if (from > latest && !process.env.CAREERRAT_ALLOW_NEWER_DB) {
+    throw new Error(
+      `this database was written by a newer CareerRat (schema ${from}, this build knows up to ${latest}). ` +
+        "Update CareerRat before opening it, or an older build could damage it. " +
+        "Set CAREERRAT_ALLOW_NEWER_DB=1 to open it anyway."
+    );
+  }
   const pending = migrations.filter((migration) => migration.id > from);
   const applied = [];
 

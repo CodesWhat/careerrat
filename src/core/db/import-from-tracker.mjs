@@ -331,7 +331,21 @@ function importLegacySourceConfigs(pathCtx) {
 // <sourceDir||workspace>/tracker.json (+ activity.jsonl if present) and
 // upserts every row into the db. Idempotent: running it twice against the
 // same source produces an identical db.
-export function importFromTracker({ repoRoot, env, sourceDir, rebaseToday } = {}) {
+// True once the database holds a candidate profile or targeting: from then on
+// the database is the source of truth and the old candidate/*.yml files are stale.
+function dbHasCandidateSetup(db) {
+  return ["candidate_profile", "candidate_targeting"].some(
+    (table) => db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined
+  );
+}
+
+export function importFromTracker({
+  repoRoot,
+  env,
+  sourceDir,
+  rebaseToday,
+  forceCandidate = false,
+} = {}) {
   const pathCtx = { repoRoot, env };
   const trackerPath = sourceDir
     ? join(sourceDir, "tracker.json")
@@ -368,6 +382,8 @@ export function importFromTracker({ repoRoot, env, sourceDir, rebaseToday } = {}
   );
 
   const db = openDb({ repoRoot, env });
+  // Decide before the tracker rows land; importing them does not touch candidate tables.
+  const keepDbCandidate = !forceCandidate && dbHasCandidateSetup(db);
 
   const counts = withTransaction(db, () => {
     const appCount = importApplications(db, applications);
@@ -385,7 +401,14 @@ export function importFromTracker({ repoRoot, env, sourceDir, rebaseToday } = {}
   });
 
   const warnings = [];
-  counts.candidate = importLegacyCandidateSetup(pathCtx, warnings);
+  if (keepDbCandidate) {
+    counts.candidate = null;
+    warnings.push(
+      "Kept your saved candidate settings and evidence. The old candidate/*.yml files are out of date, so they were not imported. Use --force-candidate to import them over your settings."
+    );
+  } else {
+    counts.candidate = importLegacyCandidateSetup(pathCtx, warnings);
+  }
   counts.sourceConfigs = importLegacySourceConfigs(pathCtx);
 
   return { ok: true, sourcePath: trackerPath, activityPath, counts, warnings };

@@ -125,12 +125,12 @@ test("CLI lists stored changes and undoes by reference, refusing stale and repea
   assert.equal(changes.changes[0].at, second.createdAt);
   assert.equal(changes.changes[1].at, first.createdAt);
   assert.equal(changes.changes[0].entry.after, 80);
-  cli(repoRoot, ["changes", "undo", first.id, "1"]);
+  cli(repoRoot, ["changes", "undo", first.id, "1"], { ok: false });
   assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 80);
   cli(repoRoot, ["changes", "undo", second.id, "1"]);
   assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
   assert.equal(cli(repoRoot, ["changes", "list"]).changes[0].reverted, true);
-  cli(repoRoot, ["changes", "undo", second.id, "1"]);
+  cli(repoRoot, ["changes", "undo", second.id, "1"], { ok: false });
   assert.equal(candidateConfigGet({ repoRoot, env: {} }).targeting.fit_bands.fit_floor, 70);
   for (const index of ["-1", "1junk", "1.5"]) {
     assert.equal(cli(repoRoot, ["changes", "undo", second.id, index], { ok: false }).ok, false);

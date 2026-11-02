@@ -8,6 +8,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- `careerrat data backup` and `careerrat data restore` save and bring back the
+  database. A restore saves your current database first and needs `--yes`.
 - CLI commands read and append durable job or workspace history, list recorded
   knowledge changes, and undo them through the existing stale-write checks.
 - `careerrat tui` opens a clickable Textual workspace beside native Claude or
@@ -42,6 +44,21 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- `data init --demo` now refuses to run over a workspace that already has data
+  (use `--force` to override), so sample jobs can't replace your profile.
+- `data import` keeps the candidate settings already saved in the database
+  instead of reverting them to old YAML files (`--force-candidate` overrides).
+- A database written by a newer CareerRat is refused instead of silently opened.
+- `data app set-status`, `schedule-interview` and `--follow-up-due` reject
+  unknown statuses and invalid dates. `data app upsert` and `sourced promote`
+  refuse to overwrite an existing application (`--replace` is explicit).
+- `evidence add --write` says so and exits 1 when the claim was a duplicate.
+  `data changes undo` exits 1 when the undo is refused. `data candidate patch`
+  errors name the bad field.
+- `activity backfill` writes to the database, and `activity prune` says it
+  can't run on a database workspace instead of trimming a generated file.
+- Help text for `automation` and `tracker` no longer says defaults are off or
+  that copying a snapshot back restores a database workspace.
 - Incomplete resume extractions fail clearly and can be retried instead of
   silently saving a title without the source resume's experience.
 - Workspace import accepts YAML flow collections and migrates retired settings.

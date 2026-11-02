@@ -864,10 +864,10 @@ Commands:
   tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat start')
   tracker-dev  Serve the live local app without launching an agent
   people      List or add people, one workspace each (run any command for them with --for)
-  data        sqlite-backed data layer: status/init/import/export/verify + per-domain verbs (M6)
+  data        sqlite-backed data layer: status/init/import/export/verify/backup/restore + per-domain verbs (M6)
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)
   modes       Show/change optional usage and application modes
-  automation  Show/toggle opt-in browser-automation config (defaults OFF)
+  automation  Show/toggle browser-automation config (everything defaults ON, including auto-submit)
   research    Read/record web-research artifacts
   health      Record the company-health skill's role-scoped companyHealth rating
   gate        Safely update gate data such as comp floors and exclusions

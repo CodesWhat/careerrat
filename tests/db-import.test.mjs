@@ -323,7 +323,8 @@ test("importFromTracker migrates legacy candidate YAML into canonical SQLite set
   );
 
   const second = importFromTracker({ repoRoot, sourceDir });
-  assert.equal(second.counts.candidate["source-resume"], false);
+  assert.equal(second.counts.candidate, null, "re-import must not re-read the stale YAML");
+  assert.match(second.warnings.join(" "), /Kept your saved candidate settings/);
   assert.equal(
     candidateArtifactGet({ repoRoot, id: "source-resume" }).savedAt,
     sourceResumeArtifact.savedAt,
