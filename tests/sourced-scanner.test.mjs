@@ -1525,7 +1525,7 @@ test("adjacent engineering titles are shown below exact matches in every mode wh
       {
         name: "Design systems",
         priority: "secondary",
-        titles: ["Staff Software Engineer, Design Systems"],
+        titles: ["Staff UI Engineer", "Staff Software Engineer, Design Systems"],
       },
     ],
     keep_signals: ["accessibility systems"],
@@ -1544,7 +1544,7 @@ test("adjacent engineering titles are shown below exact matches in every mode wh
   });
   for (const application_mode of ["balanced", "high-volume"]) {
     const config = {
-      targeting: { role_buckets: [{ titles: ["Staff Frontend Engineer"] }] },
+      targeting,
       modes: { application_mode },
       profile: { location: { home: "New York, NY", remote: true } },
     };
