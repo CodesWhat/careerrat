@@ -97,3 +97,44 @@ export function searchRunHealth(run) {
   if (!run?.summary || typeof run.summary !== "object") return null;
   return run.summary.health || summarizeSearchHealth(run.summary);
 }
+
+// A source whose URL answers 404, or whose ATS says the board doesn't exist, is
+// gone, not flaky. It stays an error row, and is also listed apart with its URL
+// and what to do about it. Nothing is stored here; a later slice remembers dead
+// boards between runs.
+export const DEAD_SOURCE_ACTION = "Remove it or re-resolve it.";
+
+const DEAD_SOURCE_PATTERN =
+  /\bHTTP 404\b|\breturned 404\b|\b(?:board|company|tenant|site|account)\b[^.]{0,40}\b(?:was not found|wasn't found|not found|does not exist|doesn't exist|no longer exists)\b/i;
+
+export function isDeadSourceError(error) {
+  const text = typeof error === "string" ? error : error?.error || error?.message || "";
+  return DEAD_SOURCE_PATTERN.test(String(text));
+}
+
+/**
+ * @param {Array<{ label: string, url?: string, kind?: string, errors?: Array }>} results
+ *   one entry per scanned source with the errors that source produced
+ * @returns {{ count: number, sources: Array<{label: string, kind: string, url: string, reason: string, action: string}> }}
+ */
+export function summarizeDeadSources(results = []) {
+  const sources = [];
+  const seen = new Set();
+  for (const result of results) {
+    const dead = (result?.errors || []).find(isDeadSourceError);
+    if (!dead) continue;
+    const label = String(result.label || "source");
+    const url = String(result.url || "");
+    const key = `${label}|${url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sources.push({
+      label,
+      kind: result.kind || "source",
+      url,
+      reason: reasonText(dead),
+      action: DEAD_SOURCE_ACTION,
+    });
+  }
+  return { count: sources.length, sources };
+}

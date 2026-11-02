@@ -67,6 +67,7 @@ import { planDeadBoardSkips, recordDeadBoardOutcome } from "../src/core/search/d
 import {
   SEARCH_NOT_SEARCHABLE_BROWSER_REASON,
   SEARCH_NOT_SEARCHABLE_LOGIN_REASON,
+  summarizeDeadSources,
   summarizeSearchHealth,
 } from "../src/core/search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
@@ -930,6 +931,21 @@ export async function runSourcedScan({
   ).length;
   const titleRelevanceCount = filtered.filteredTitle.length - titleBlockerCount;
 
+  const deadSources = summarizeDeadSources([
+    ...companyResults.map(({ company, result }) => ({
+      kind: "company",
+      label: company.name,
+      url: company.careers_url || company.careersUrl || company.url || "",
+      errors: result.errors,
+    })),
+    ...searchSourceResults.map(({ task, result }) => ({
+      kind: "source",
+      label: task.source.label || task.source.provider || task.kind,
+      url: task.captureSource?.url || task.source.url || task.source.rssUrl || "",
+      errors: result.errors,
+    })),
+  ]);
+
   const summary = {
     scanned: scanned.offers.length,
     new: outputOffers.length,
@@ -1003,6 +1019,7 @@ export async function runSourcedScan({
     }),
     notSearchable,
     deadBoards: { skipped: deadPlan.skipped },
+    deadSources,
     adjacencyNote: adjacencyNote(candidateConfig.targeting, candidateConfig.profile),
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
@@ -1095,6 +1112,12 @@ export function printSummary(summary, offers, cfg, limit) {
       `Skipped ${summary.deadBoards.skipped.length} dead board(s) (404 on 2 runs): ${names}. ` +
         "Re-check: edit the source, run with --recheck-dead, or wait for the automatic 14-day re-check."
     );
+  }
+  if (summary.deadSources?.count > 0) {
+    console.log(`Dead sources (${summary.deadSources.count}):`);
+    for (const { label, url, action } of summary.deadSources.sources) {
+      console.log(`- ${label}${url ? ` (${url})` : ""}: not found (404). ${action}`);
+    }
   }
   if (summary.errors.length > 0) {
     console.log("Errors:");
