@@ -179,11 +179,17 @@ test("two people and the default stay isolated: DB, files, search runs, browser 
     const docRoot =
       key === "default"
         ? join(home, "Documents", "careerrat")
-        : join(home, "Documents", "careerrat", key);
+        : join(home, "Documents", "careerrat", "_people", key);
     assert.ok(existsSync(join(docRoot, `${key}-corp`)), `${key} documents`);
   }
-  assert.equal(existsSync(join(home, "Documents", "careerrat", "alice", "bob-corp")), false);
-  assert.equal(existsSync(join(home, "Documents", "careerrat", "bob", "alice-corp")), false);
+  assert.equal(
+    existsSync(join(home, "Documents", "careerrat", "_people", "alice", "bob-corp")),
+    false
+  );
+  assert.equal(
+    existsSync(join(home, "Documents", "careerrat", "_people", "bob", "alice-corp")),
+    false
+  );
 });
 
 test("adding a person, by command or by --new, records an authorization note in their data", (t) => {
@@ -236,9 +242,9 @@ test("people remove --purge needs --yes, backs up first, and removes root, brows
       join(base, "people", name, "board-profiles", "linkedin", "cookies.txt"),
       `${name}-cookie`
     );
-    mkdirSync(join(home, "Documents", "careerrat", name, "Acme"), { recursive: true });
+    mkdirSync(join(home, "Documents", "careerrat", "_people", name, "Acme"), { recursive: true });
     writeFileSync(
-      join(home, "Documents", "careerrat", name, "Acme", "resume.txt"),
+      join(home, "Documents", "careerrat", "_people", name, "Acme", "resume.txt"),
       `${name}-resume`
     );
   }
@@ -249,7 +255,7 @@ test("people remove --purge needs --yes, backs up first, and removes root, brows
   assert.notEqual(noYes.status, 0);
   assert.match(noYes.stderr, /without --yes/);
   assert.ok(existsSync(join(base, "people", "alice")));
-  assert.ok(existsSync(join(home, "Documents", "careerrat", "alice")));
+  assert.ok(existsSync(join(home, "Documents", "careerrat", "_people", "alice")));
 
   const missing = run(["people", "remove", "nobody", "--purge", "--yes"]);
   assert.notEqual(missing.status, 0);
@@ -258,7 +264,7 @@ test("people remove --purge needs --yes, backs up first, and removes root, brows
   assert.equal(purged.status, 0, purged.stderr);
   const result = JSON.parse(purged.stdout);
   assert.equal(existsSync(join(base, "people", "alice")), false);
-  assert.equal(existsSync(join(home, "Documents", "careerrat", "alice")), false);
+  assert.equal(existsSync(join(home, "Documents", "careerrat", "_people", "alice")), false);
   assert.ok(result.backup.startsWith(join(base, "people-backups", "alice-")));
   assert.equal(
     readFileSync(
@@ -275,7 +281,9 @@ test("people remove --purge needs --yes, backs up first, and removes root, brows
 
   // bob is untouched, and the backup folder is not mistaken for a person.
   assert.ok(existsSync(join(base, "people", "bob", "board-profiles", "linkedin", "cookies.txt")));
-  assert.ok(existsSync(join(home, "Documents", "careerrat", "bob", "Acme", "resume.txt")));
+  assert.ok(
+    existsSync(join(home, "Documents", "careerrat", "_people", "bob", "Acme", "resume.txt"))
+  );
   assert.deepEqual(
     JSON.parse(run(["people", "list", "--json"]).stdout).people.map((p) => p.name),
     ["bob"]
@@ -346,4 +354,68 @@ test("a background search for someone without their own key warns first and stil
   // The owner's own workspace never gets the warning.
   const owner = run(["search", "start"]);
   assert.doesNotMatch(owner.stderr, /has no AI key of their own/);
+});
+
+test("a purge leaves an owner company folder with the same name as the person alone", (t) => {
+  const { base, home, run } = sandbox(t);
+  const careerrat = join(home, "Documents", "careerrat");
+  const ownerAcme = join(careerrat, "acme", "job-1");
+  mkdirSync(ownerAcme, { recursive: true });
+  writeFileSync(join(ownerAcme, "resume.txt"), "owner-resume");
+  assert.equal(run(["people", "add", "acme"]).status, 0);
+  const personDocs = join(careerrat, "_people", "acme", "Corp", "job-2");
+  mkdirSync(personDocs, { recursive: true });
+  writeFileSync(join(personDocs, "resume.txt"), "person-resume");
+
+  const purged = run(["people", "remove", "acme", "--purge", "--yes", "--json"]);
+  assert.equal(purged.status, 0, purged.stderr);
+  assert.equal(existsSync(join(careerrat, "_people", "acme")), false);
+  assert.equal(readFileSync(join(ownerAcme, "resume.txt"), "utf8"), "owner-resume");
+  const backup = JSON.parse(purged.stdout).backup;
+  assert.equal(
+    readFileSync(join(backup, "documents", "Corp", "job-2", "resume.txt"), "utf8"),
+    "person-resume"
+  );
+  assert.equal(existsSync(join(backup, "documents", "job-1")), false);
+  assert.equal(existsSync(join(base, "people", "acme")), false);
+});
+
+test("an old person documents folder moves into the namespace only when it is unambiguously theirs", (t) => {
+  const { base, home, run } = sandbox(t);
+  const careerrat = join(home, "Documents", "careerrat");
+  const old = (name) => join(careerrat, name, "Corp", "job-x");
+
+  // alice: added through `people add`, no owner company named alice. Moves.
+  run(["people", "add", "alice"]);
+  mkdirSync(old("alice"), { recursive: true });
+  writeFileSync(join(old("alice"), "resume.txt"), "alice-resume");
+  const moved = run(["--for", "alice", "doctor", "--json"]);
+  assert.match(moved.stderr, /Moved .*alice/);
+  assert.equal(existsSync(join(careerrat, "alice")), false);
+  assert.equal(
+    readFileSync(join(careerrat, "_people", "alice", "Corp", "job-x", "resume.txt"), "utf8"),
+    "alice-resume"
+  );
+
+  // acme: the owner has a company called Acme, so the old folder is ambiguous and stays.
+  assert.equal(run(["data", "init"]).status, 0);
+  appUpsert({
+    repoRoot: REPO_ROOT,
+    env: { CAREERRAT_HOME: base },
+    row: { id: "owner-role", company: "Acme", role: "Engineer", status: "interested" },
+  });
+  run(["people", "add", "acme"]);
+  mkdirSync(old("acme"), { recursive: true });
+  writeFileSync(join(old("acme"), "resume.txt"), "ambiguous");
+  const kept = run(["--for", "acme", "doctor", "--json"]);
+  assert.match(kept.stderr, /Left .*acme.* where it is/);
+  assert.equal(readFileSync(join(old("acme"), "resume.txt"), "utf8"), "ambiguous");
+  assert.equal(existsSync(join(careerrat, "_people", "acme")), false);
+
+  // carol: a folder with no authorization record behind it is never moved.
+  mkdirSync(join(base, "people", "carol"), { recursive: true });
+  mkdirSync(old("carol"), { recursive: true });
+  const noRecord = run(["--for", "carol", "doctor", "--json"]);
+  assert.match(noRecord.stderr, /no authorization record/);
+  assert.equal(existsSync(old("carol")), true);
 });

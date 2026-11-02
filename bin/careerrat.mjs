@@ -53,6 +53,7 @@ import {
 } from "../src/core/paths/workspace.mjs";
 import { borrowedAiWarning } from "../src/core/people/ai-route.mjs";
 import { authorizationPath, recordAuthorization } from "../src/core/people/authorization.mjs";
+import { migratePersonDocuments } from "../src/core/people/documents-migration.mjs";
 import {
   classifyLocalAppRuntime,
   commandMatchesTrackerScript,
@@ -250,6 +251,25 @@ function applyPersonSelection() {
     process.exit(1);
   }
   if (env) Object.assign(process.env, env);
+  if (env) {
+    // Move a pre-namespace documents folder into the person namespace when it's
+    // unambiguously theirs; otherwise leave it alone and say so.
+    try {
+      const moved = migratePersonDocuments({
+        repoRoot: root,
+        base: env.CAREERRAT_PEOPLE_BASE,
+        name: env.CAREERRAT_PERSON,
+      });
+      if (moved.status === "moved") console.error(`Moved ${moved.from} to ${moved.to}`);
+      else if (moved.status === "skipped") {
+        console.error(
+          `Left ${moved.from} where it is (${moved.reason}). Move it by hand if it's theirs.`
+        );
+      }
+    } catch (error) {
+      console.error(`Could not check the old documents folder: ${error.message}`);
+    }
+  }
   if (env && createPerson) {
     // --new made the workspace: leave the same authorization note `people add` does.
     const base = env.CAREERRAT_PEOPLE_BASE;

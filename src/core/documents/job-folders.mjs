@@ -7,7 +7,7 @@ const ARCHIVED_STATUSES = new Set(["rejected", "withdrawn", "cut", "closed"]);
 
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
-function safeCompanySegment(value) {
+export function safeCompanySegment(value) {
   const cleaned = String(value ?? "")
     // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are invalid in Windows path segments
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
@@ -18,8 +18,19 @@ function safeCompanySegment(value) {
   return WINDOWS_RESERVED_NAME.test(stem) ? `_${cleaned}` : cleaned;
 }
 
+// The folder under ~/Documents/careerrat that holds every person's documents. The
+// owner's own company folders sit directly in ~/Documents/careerrat, and a company
+// would have to be literally named "_people" to meet it, so a person named like one of
+// the owner's companies no longer shares a folder with it.
+export const PEOPLE_DOCUMENTS_DIR = "_people";
+
 // Where one person's generated documents live (unless a downloads directory is set).
 export function personDocumentsRoot(person) {
+  return join(homedir(), "Documents", "careerrat", PEOPLE_DOCUMENTS_DIR, person);
+}
+
+// The pre-namespace location, where a person's folder sat beside the owner's companies.
+export function legacyPersonDocumentsRoot(person) {
   return join(homedir(), "Documents", "careerrat", person);
 }
 
