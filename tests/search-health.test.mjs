@@ -88,3 +88,19 @@ test("provider warnings make an otherwise clean run degraded", () => {
   assert.match(warned.message, /incomplete/);
   assert.equal(warned.warningReasons[0].reason, "workday: Acme truncated at 10 pages");
 });
+
+test("non-searchable sources are not in the ratios", () => {
+  const health = summarizeSearchHealth({
+    attemptedSources: 10,
+    errors: fail("boom", 1),
+    notSearchable: { count: 44, sources: Array.from({ length: 44 }, () => ({})) },
+  });
+  assert.equal(health.readable, 10);
+  assert.equal(health.failed, 1);
+  assert.equal(health.notSearchable, 44);
+  assert.equal(health.status, "degraded");
+  assert.equal(health.failedShare, 0.1);
+  const none = summarizeSearchHealth({ attemptedSources: 0, notSearchable: { count: 3 } });
+  assert.equal(none.status, "failed");
+  assert.match(none.message, /None of the 3 sources can be searched from the terminal/);
+});

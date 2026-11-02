@@ -94,6 +94,7 @@ const CLIS = {
   activity: "src/cli/activity.mjs",
   research: "src/cli/research.mjs",
   health: "src/cli/health.mjs",
+  apply: "src/cli/apply.mjs",
   stories: "src/cli/stories.mjs",
   "strategy-review": "src/cli/strategy-review.mjs",
   analytics: "src/cli/analytics.mjs",
@@ -870,6 +871,7 @@ Commands:
   automation  Show/toggle browser-automation config (everything defaults ON, including auto-submit)
   research    Read/record web-research artifacts
   health      Record the company-health skill's role-scoped companyHealth rating
+  apply       Submit gate for agent-filled forms: checks the live form, presses Submit only if it passes
   gate        Safely update gate data such as comp floors and exclusions
   plugins     List/verify the bundled plugin layer (read-only; --help for options)
   learnings   Read/append per-role-family learnings

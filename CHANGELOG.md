@@ -14,6 +14,9 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Search now shows titles close to your target (like "Staff UI Engineer" when you
+  target "Staff Frontend Engineer") instead of dropping them. They rank below exact
+  matches, and wrong-seniority or excluded titles are still cut.
 - Typing a dropdown answer that contains a line break no longer risks pressing
   Enter and submitting the application form early. Line breaks become a space.
 

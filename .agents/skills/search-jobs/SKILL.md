@@ -115,8 +115,12 @@ Status and the saved handoff carry a `health` block (`ok`, `degraded` or `failed
 with failed and skipped source counts and the error reasons grouped by count. A
 `completed` run with `degraded` or `failed` health is not a success: say so in plain
 words, give the counts and the top reasons, and then work from the partial results.
-Sources skipped because they need a browser are counted apart from errors; mention
-them, but they don't mean the network is broken.
+Sources that can't run in the terminal (browser-only, or login-backed with no session)
+are left out before the run, so they never produce error rows or count toward the
+failed share. The summary carries `notSearchable` (`count` plus `sources[]` with a
+label and reason), and `health.notSearchable` has the count. List them once as "not
+searchable from the terminal" with the reason; they don't mean the network is broken.
+If every source was non-runnable, health is `failed` and says nothing was searched.
 Don't start a second foreground scan while the same worker is active. Additional
 agent-led search and AI Web Search still follow this skill's owning sections.
 The commands below remain the legacy/foreground entry, with no implicit migration.

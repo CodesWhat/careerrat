@@ -12,6 +12,14 @@ export const SEARCH_HEALTH_FAILED_SHARE = 0.5;
 export const SEARCH_SKIP_BROWSER_REASON =
   "Skipped: this source needs a browser, and terminal searches don't use one.";
 
+// Sources that can't run in a terminal search (browser-only, or login-backed
+// with no session). They are left out of the attempted set before the run, so
+// they never count toward the failed share.
+export const SEARCH_NOT_SEARCHABLE_BROWSER_REASON =
+  "Needs the browser, which terminal searches don't use.";
+export const SEARCH_NOT_SEARCHABLE_LOGIN_REASON =
+  "Needs a logged-in session, which terminal searches don't have.";
+
 const MAX_REASON_LENGTH = 120;
 const MAX_REASON_GROUPS = 10;
 
@@ -38,13 +46,16 @@ export function summarizeSearchHealth(summary = {}) {
   const errors = Array.isArray(summary?.errors) ? summary.errors : [];
   const skippedErrors = errors.filter((entry) => entry?.skipped === true);
   const failedErrors = errors.filter((entry) => entry?.skipped !== true);
+  const notSearchable = Array.isArray(summary?.notSearchable?.sources)
+    ? summary.notSearchable.sources.length
+    : Math.max(0, Number(summary?.notSearchable?.count) || 0);
   const warnings = Array.isArray(summary?.warnings) ? summary.warnings : [];
   const attempted = Math.max(0, Number(summary?.attemptedSources ?? summary?.attempted) || 0);
   const skipped = skippedErrors.length;
   const failed = failedErrors.length;
   const readable = Math.max(attempted - skipped, failed);
   const failedShare = readable > 0 ? Math.min(1, failed / readable) : 0;
-  const nothingRead = readable === 0 ? skipped > 0 : failed >= readable;
+  const nothingRead = readable === 0 ? skipped > 0 || notSearchable > 0 : failed >= readable;
 
   let status = "ok";
   if (nothingRead || failedShare >= SEARCH_HEALTH_FAILED_SHARE) status = "failed";
@@ -55,7 +66,9 @@ export function summarizeSearchHealth(summary = {}) {
 
   const skippedNote = skipped ? `, ${skipped} skipped (need a browser)` : "";
   let message;
-  if (readable === 0 && skipped === 0) message = "No sources were scanned";
+  if (readable === 0 && skipped === 0 && notSearchable > 0) {
+    message = `None of the ${notSearchable} sources can be searched from the terminal, so nothing was searched`;
+  } else if (readable === 0 && skipped === 0) message = "No sources were scanned";
   else if (readable === 0) message = `No source could be read${skippedNote}`;
   else if (failed === 0 && warnings.length === 0) {
     message = `All ${readable} sources read${skippedNote}`;
@@ -70,6 +83,7 @@ export function summarizeSearchHealth(summary = {}) {
     readable,
     failed,
     skipped,
+    notSearchable,
     warningCount: warnings.length,
     warningReasons: groupReasons(warnings.map(reasonText)),
     failedShare: Math.round(failedShare * 1000) / 1000,
