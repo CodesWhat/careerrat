@@ -113,6 +113,39 @@ test("Textual context capture uses the durable owner before generating its reque
   assert.match(events.find((event) => event.type === "request").text, /saved|context|intake/i);
 });
 
+test("Textual capture reports failure with its id and sends no request", async (t) => {
+  const { events, session, home } = await fixture(t);
+  const missing = join(home, "gone", "notes.txt");
+  await session.dispatch({ op: "capture", id: 7, text: `'${missing}'` });
+  const failure = events.find((event) => event.type === "capture-error");
+  assert.equal(failure.id, 7);
+  assert.ok(failure.message);
+  assert.equal(
+    events.some((event) => event.type === "context" || event.type === "request"),
+    false
+  );
+});
+
+test("Textual inspect lists dropped files and saves nothing; attached files capture before the request", async (t) => {
+  const { events, session, home } = await fixture(t);
+  const source = join(home, "my offer.txt");
+  writeFileSync(source, "Synthetic offer");
+  await session.dispatch({ op: "inspect", id: 1, text: `'${source}'` });
+  await session.dispatch({ op: "inspect", id: 2, text: "plain recruiter note" });
+  const previews = events.filter((event) => event.type === "intake-preview");
+  assert.deepEqual(previews[0].files, [{ path: source, name: "my offer.txt" }]);
+  assert.equal(previews[1].files, null);
+  assert.equal(
+    events.some((event) => event.type === "request"),
+    false
+  );
+  await session.dispatch({ op: "capture", id: 3, files: [source] });
+  const order = events.map((event) => event.type);
+  assert.ok(order.indexOf("context") !== -1 && order.indexOf("context") < order.indexOf("request"));
+  assert.equal(events.find((event) => event.type === "context").id, 3);
+  await assert.rejects(session.dispatch({ op: "inspect", text: 5 }), /text/i);
+});
+
 test("Textual opens the saved JD through the existing guarded artifact reader", async (t) => {
   const { session, events, home, path, tracker } = await fixture(t);
   mkdirSync(join(home, "workspace/jobs"));

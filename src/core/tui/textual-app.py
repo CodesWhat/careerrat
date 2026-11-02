@@ -92,13 +92,33 @@ class NativePane(Widget):
         await self.app.resize_agent()
 
 
+class RemoveFile(Button):
+    def __init__(self, index, name):
+        super().__init__("Remove", id=f"remove-file-{index}", classes="remove-file")
+        self.index = index
+        self.tooltip = f"Remove {name}"
+
+
 class ContextCapture(ModalScreen):
+    BINDINGS = [Binding("ctrl+s", "save", "Save context", priority=True)]
     CSS = """
     ContextCapture { align: center middle; background: $background 70%; }
     #capture-dialog { width: 85%; height: 70%; padding: 1 2; border: round $accent; background: $surface; }
+    #attachments { height: auto; max-height: 12; overflow-y: auto; }
+    .attachment { height: 3; }
+    .attachment Static { width: 1fr; padding: 1 1; }
+    .remove-file { min-width: 10; }
     #context-text { height: 1fr; margin: 1 0; }
+    #capture-error { height: auto; color: $error; }
     #capture-buttons { height: 3; }
     """
+
+    def __init__(self, prefill=""):
+        super().__init__()
+        self.prefill = prefill
+        self.files = []
+        self.waiting = False
+        self.request_id = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="capture-dialog"):
@@ -106,18 +126,87 @@ class ContextCapture(ModalScreen):
                 "Add context: paste a JD, transcript, notes or a local file path.\nCareerRat saves a private copy before asking the agent to use it.",
                 markup=False,
             )
+            yield Vertical(id="attachments")
             yield TextArea(id="context-text")
+            yield Static("", id="capture-error", markup=False)
             with Horizontal(id="capture-buttons"):
                 yield Button("Save context", id="save-context", variant="primary")
                 yield Button("Cancel", id="cancel-context")
 
+    async def on_mount(self):
+        self.query_one("#attachments").display = False
+        if not self.prefill:
+            self.query_one(TextArea).focus()
+            return
+        self.query_one(TextArea).load_text(self.prefill)
+        self.set_waiting(True)
+        self.request_id = self.app.next_request_id()
+        await self.app.send(
+            {"op": "inspect", "id": self.request_id, "text": self.prefill}
+        )
+
+    def set_waiting(self, waiting):
+        self.waiting = waiting
+        self.query_one("#save-context", Button).disabled = waiting
+        for button in self.query(RemoveFile):
+            button.disabled = waiting
+
+    async def show_preview(self, files):
+        self.request_id = None
+        self.set_waiting(False)
+        if files:
+            self.files = list(files)
+            self.query_one(TextArea).load_text("")
+            await self.refresh_attachments()
+        self.query_one(TextArea).focus()
+
+    async def refresh_attachments(self):
+        box = self.query_one("#attachments")
+        await box.remove_children()
+        self.query_one(TextArea).display = not self.files
+        box.display = bool(self.files)
+        for index, item in enumerate(self.files):
+            await box.mount(
+                Horizontal(
+                    Static(item["name"], markup=False),
+                    RemoveFile(index, item["name"]),
+                    classes="attachment",
+                )
+            )
+
+    def fail(self, message):
+        self.request_id = None
+        self.set_waiting(False)
+        self.query_one("#capture-error", Static).update(
+            f"Not saved: {message}\nYour text and files are still here. Fix it and try again."
+        )
+
+    async def action_save(self):
+        if self.waiting:
+            return
+        value = self.query_one(TextArea).text
+        if self.files:
+            message = {"files": [item["path"] for item in self.files]}
+        elif value.strip():
+            message = {"text": value}
+        else:
+            return
+        self.request_id = self.app.next_request_id()
+        self.query_one("#capture-error", Static).update("")
+        self.set_waiting(True)
+        await self.app.send({"op": "capture", "id": self.request_id, **message})
+
     async def on_button_pressed(self, event):
-        if event.button.id == "save-context":
-            value = self.query_one(TextArea).text
-            if not value.strip():
-                return
-            await self.app.send({"op": "capture", "text": value})
-        self.dismiss()
+        event.stop()
+        button = event.button
+        if isinstance(button, RemoveFile):
+            if not self.waiting and 0 <= button.index < len(self.files):
+                del self.files[button.index]
+                await self.refresh_attachments()
+        elif button.id == "save-context":
+            await self.action_save()
+        elif button.id == "cancel-context":
+            self.dismiss()
 
 
 class JobDocument(ModalScreen):
@@ -189,6 +278,7 @@ class CareerRatApp(App):
         self.job_ids = []
         self.table_signature = None
         self.theme = "nord"
+        self.request_counter = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -284,6 +374,27 @@ class CareerRatApp(App):
         await self.resize_agent()
         self.query_one("#jobs").focus()
 
+    def next_request_id(self):
+        self.request_counter += 1
+        return self.request_counter
+
+    def capture_modal(self, request_id):
+        screen = self.screen
+        if (
+            isinstance(screen, ContextCapture)
+            and request_id is not None
+            and screen.request_id == request_id
+        ):
+            return screen
+        return None
+
+    async def on_paste(self, event: events.Paste):
+        # Native agent and text inputs stop their own paste; anything else lands here.
+        if len(self.screen_stack) > 1 or not event.text.strip():
+            return
+        event.stop()
+        self.push_screen(ContextCapture(prefill=event.text))
+
     async def send(self, message):
         if self.proc and self.proc.returncode is None:
             try:
@@ -356,8 +467,26 @@ class CareerRatApp(App):
                 self.query_one(NativePane).focus()
         elif kind == "document":
             self.push_screen(JobDocument(value))
+        elif kind == "intake-preview":
+            modal = self.capture_modal(value.get("id"))
+            if modal:
+                await modal.show_preview(value.get("files"))
+        elif kind == "capture-error":
+            modal = self.capture_modal(value.get("id"))
+            if modal:
+                modal.fail(value["message"])
+            else:
+                self.show_message("Context was not saved: " + value["message"])
         elif kind == "context":
-            self.show_message("Context saved: " + value["path"])
+            modal = self.capture_modal(value.get("id"))
+            if modal:
+                modal.dismiss()
+            skipped = len(value.get("errors") or [])
+            self.show_message(
+                "Context saved: "
+                + value["path"]
+                + (f" ({skipped} file(s) could not be saved)" if skipped else "")
+            )
         elif kind == "agent-exited":
             self.show_message(
                 f"Agent exited ({value['exitCode']}). Saved jobs remain available."

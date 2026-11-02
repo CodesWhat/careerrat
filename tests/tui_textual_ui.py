@@ -333,6 +333,204 @@ closeAll();
                 os.kill(bridge_pid, 0)
             self.assertEqual(app.errors, [])
 
+    def fake_agent(self, home):
+        executable = home / "codex"
+        executable.write_text(
+            f"#!{shutil.which('node')}\n"
+            "import fs from 'node:fs';import path from 'node:path';\n"
+            "const home=process.env.CAREERRAT_HOME;\n"
+            "process.stdin.setRawMode(true);process.stdin.resume();process.stdout.write('\\x1b[?2004hAGENT_READY');\n"
+            "process.stdin.on('data',b=>{const dir=path.join(home,'workspace/intake/uploads');"
+            "const saved=fs.existsSync(dir)?fs.readdirSync(dir).map(n=>({n,body:fs.readFileSync(path.join(dir,n),'utf8')})):[];"
+            "fs.appendFileSync(home+'/agent.log',JSON.stringify({data:b.toString(),saved})+'\\n');});\n"
+        )
+        executable.chmod(0o700)
+
+    def agent_log(self, home):
+        log = home / "agent.log"
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+    async def test_failed_capture_keeps_text_and_blocks_double_submit(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-fail-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            missing = str(Path(folder) / "gone" / "notes.txt")
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.click("#context")
+                await pilot.pause()
+                modal = app.screen
+                self.assertIsInstance(modal, MODULE.ContextCapture)
+                modal.query_one("#context-text").load_text(f"'{missing}'")
+                await modal.action_save()
+                self.assertTrue(modal.waiting)
+                self.assertTrue(modal.query_one("#save-context", Button).disabled)
+                await modal.action_save()
+                await until(
+                    lambda: "Not saved" in str(modal.query_one("#capture-error").render())
+                )
+                self.assertIs(app.screen, modal)
+                self.assertEqual(modal.query_one("#context-text").text, f"'{missing}'")
+                self.assertEqual(app.request_counter, 1)
+                self.assertFalse(modal.waiting)
+                self.assertEqual(app.query_one("#request", Input).value, "")
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_paste_on_jobs_opens_prefilled_modal_and_never_reaches_agent(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-paste-") as folder:
+            home = Path(folder)
+            (home / "workspace").mkdir()
+            self.fake_agent(home)
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "AGENT_READY" in pane.render().plain)
+                app.query_one("#jobs").focus()
+                app.post_message(events.Paste("Synthetic recruiter note"))
+                await until(lambda: isinstance(app.screen, MODULE.ContextCapture))
+                await until(lambda: not app.screen.waiting)
+                self.assertEqual(
+                    app.screen.query_one("#context-text").text, "Synthetic recruiter note"
+                )
+                await pilot.pause(0.3)
+                self.assertEqual(self.agent_log(home), [])
+                self.assertFalse((home / "workspace/intake").exists())
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_pasted_file_path_lists_attachment_and_remove_saves_nothing(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-attach-") as folder:
+            home = Path(folder)
+            (home / "workspace").mkdir()
+            sources = home / "my files"
+            sources.mkdir()
+            first, second = sources / "offer one.txt", sources / "notes two.md"
+            first.write_text("Synthetic offer")
+            second.write_text("Synthetic notes")
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                app.post_message(events.Paste(f"'{first}' '{second}'"))
+                await until(
+                    lambda: isinstance(app.screen, MODULE.ContextCapture)
+                    and len(app.screen.files) == 2
+                )
+                modal = app.screen
+                await until(lambda: len(modal.query(MODULE.RemoveFile)) == 2)
+                self.assertEqual(
+                    [item["name"] for item in modal.files], ["offer one.txt", "notes two.md"]
+                )
+                self.assertFalse(modal.query_one("#context-text").display)
+                await pilot.click("#remove-file-0")
+                await until(lambda: len(modal.query(MODULE.RemoveFile)) == 1)
+                self.assertEqual([item["name"] for item in modal.files], ["notes two.md"])
+                await pilot.click("#remove-file-0")
+                await until(lambda: not modal.files)
+                self.assertTrue(modal.query_one("#context-text").display)
+                self.assertFalse((home / "workspace/intake").exists())
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    @unittest.skipIf(
+        sys.platform == "win32", "Unix outer-PTY proof; Windows acceptance is separate"
+    )
+    async def test_outer_terminal_dropped_path_is_saved_before_agent_gets_request(self):
+        import pty
+
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-drop-") as folder:
+            home = Path(folder)
+            (home / "workspace").mkdir()
+            self.fake_agent(home)
+            source = home / "dropped offer.txt"
+            source.write_text("Synthetic offer letter body")
+            env = {
+                **os.environ,
+                "CAREERRAT_HOME": folder,
+                "PATH": folder + os.pathsep + os.environ["PATH"],
+                "TERM": "xterm-256color",
+            }
+            terminal_fd, application_fd = pty.openpty()
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                str(ROOT / "src/core/tui/textual-app.py"),
+                "--agent",
+                "codex",
+                env=env,
+                stdin=application_fd,
+                stdout=application_fd,
+                stderr=application_fd,
+                start_new_session=True,
+            )
+            os.close(application_fd)
+            os.set_blocking(terminal_fd, False)
+            output = b""
+
+            async def read_until(check, limit=15):
+                nonlocal output
+                async with asyncio.timeout(limit):
+                    while not check():
+                        try:
+                            output += os.read(terminal_fd, 65536)
+                        except BlockingIOError:
+                            await asyncio.sleep(0.03)
+                        except OSError:
+                            return
+
+            try:
+                await read_until(lambda: b"AGENT_READY" in output)
+                await asyncio.sleep(0.5)
+                os.write(terminal_fd, f"\x1b[200~'{source}'\x1b[201~".encode())
+                await read_until(lambda: b"dropped offer.txt" in output)
+                self.assertEqual(self.agent_log(home), [])
+                os.write(terminal_fd, b"\x13")
+                async with asyncio.timeout(15):
+                    while not self.agent_log(home):
+                        try:
+                            output += os.read(terminal_fd, 65536)
+                        except BlockingIOError:
+                            pass
+                        await asyncio.sleep(0.05)
+                received = self.agent_log(home)[0]
+                self.assertIn("Read these saved context files", received["data"])
+                self.assertFalse(received["data"].endswith("\r"))
+                self.assertEqual(
+                    sorted(
+                        item["body"]
+                        for item in received["saved"]
+                        if item["n"].endswith(".txt")
+                    ),
+                    ["Synthetic offer letter body"] * 2,
+                )
+                self.assertTrue(
+                    any(item["n"].endswith(".json") for item in received["saved"])
+                )
+                os.write(terminal_fd, b"\x11")
+                async with asyncio.timeout(10):
+                    while process.returncode is None:
+                        try:
+                            output += os.read(terminal_fd, 65536)
+                        except (BlockingIOError, OSError):
+                            pass
+                        await asyncio.sleep(0.03)
+                self.assertEqual(process.returncode, 0, output.decode(errors="replace"))
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+                os.close(terminal_fd)
+
     async def test_details_tolerate_nulls_and_history_stays_with_the_job(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-null-") as folder:
             (Path(folder) / "workspace").mkdir()

@@ -6,7 +6,7 @@ import { readSavedJobDescription } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
 import { applyTuiUndo } from "./history.mjs";
-import { captureTuiContext } from "./intake.mjs";
+import { captureTuiContext, listDroppedFiles } from "./intake.mjs";
 import { readJobs, viewJobs } from "./jobs.mjs";
 import { createWorkspaceState, refreshWorkspace, workspaceKey } from "./workspace.mjs";
 
@@ -137,13 +137,31 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
         if (next.effect?.type === "agent-request") request(next.effect.text);
         break;
       }
+      case "inspect": {
+        if (typeof message.text !== "string") throw new TypeError("Pasted context must be text");
+        let files = null;
+        try {
+          files = listDroppedFiles({ ...ctx, text: message.text });
+        } catch {
+          files = null;
+        }
+        send({ type: "intake-preview", id: message.id ?? null, files });
+        break;
+      }
       case "capture": {
-        const captured = await captureTuiContext({
-          ...ctx,
-          text: message.text,
-          selectedId: state.selectedId,
-        });
-        send({ type: "context", ...captured });
+        let captured;
+        try {
+          captured = await captureTuiContext({
+            ...ctx,
+            text: message.text,
+            files: message.files,
+            selectedId: state.selectedId,
+          });
+        } catch (error) {
+          send({ type: "capture-error", id: message.id ?? null, message: error.message });
+          break;
+        }
+        send({ type: "context", id: message.id ?? null, ...captured });
         if (!closing) request(captured.request);
         break;
       }
