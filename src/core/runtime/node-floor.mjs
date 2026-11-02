@@ -54,6 +54,9 @@ export function checkNodeVersion(version = process.versions.node) {
 
 /** Print the upgrade text and exit 1 when the running Node is unpatched. */
 export function requirePatchedNode() {
+  // Electron bundles its own Node, which a user can't upgrade. The desktop build
+  // takes its fixes from Electron releases and is being retired.
+  if (process.versions.electron) return;
   const result = checkNodeVersion();
   if (!result.ok) {
     process.stderr.write(`careerrat: ${result.message}\n`);

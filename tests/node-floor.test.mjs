@@ -33,3 +33,12 @@ test("old and unreadable versions are refused", () => {
   assert.equal(checkNodeVersion("22.23.4").ok, false);
   assert.equal(checkNodeVersion("nonsense").ok, false);
 });
+
+test("the guard leaves Electron's bundled Node alone", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const script = `Object.defineProperty(process.versions,"node",{value:"24.22.0"});Object.defineProperty(process.versions,"electron",{value:"40.0.0"});const {requirePatchedNode}=await import(${JSON.stringify(new URL("../src/core/runtime/node-floor.mjs", import.meta.url).href)});requirePatchedNode();console.log("ran");`;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+  });
+  assert.match(result.stdout, /ran/, result.stderr);
+});
