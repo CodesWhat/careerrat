@@ -170,13 +170,15 @@ test("non-tech pre-fix generated boards heal to one enabled canonical row each a
   putPreFixSearchSources(repoRoot);
 
   const first = healSearchSourceConfig({ repoRoot, env: {} });
-  assert.equal(first.deterministicSources.attempted, 7);
+  assert.equal(first.deterministicSources.attempted, 9);
   assert.equal(first.deterministicSources.rss, 0);
-  assert.equal(first.deterministicSources.boards, 4);
+  assert.equal(first.deterministicSources.boards, 6);
   assert.equal(first.deterministicSources.browser, 3);
   assert.deepEqual(
     first.searchSources.searches
-      .filter((source) => ["remoteok", "remotive", "workingnomads"].includes(source.provider))
+      .filter((source) =>
+        ["remoteok", "remotive", "workingnomads", "himalayas", "jobicy"].includes(source.provider)
+      )
       .map(({ provider, url, enabled, enabled_reason }) => ({
         provider,
         url,
@@ -202,6 +204,18 @@ test("non-tech pre-fix generated boards heal to one enabled canonical row each a
         enabled: true,
         enabled_reason: "domain-gate",
       },
+      {
+        provider: "himalayas",
+        url: "https://himalayas.app/jobs/api?limit=50",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+      {
+        provider: "jobicy",
+        url: "https://jobicy.com/api/v2/remote-jobs?count=50",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
     ]
   );
   assert.equal(
@@ -220,7 +234,7 @@ test("non-tech pre-fix generated boards heal to one enabled canonical row each a
   const updatedAfterFirst = sourceConfigUpdatedAt(repoRoot);
   const second = healSearchSourceConfig({ repoRoot, env: {} });
   assert.equal(second.healed, false);
-  assert.equal(second.deterministicSources.attempted, 7);
+  assert.equal(second.deterministicSources.attempted, 9);
   assert.deepEqual(second.searchSources, storedAfterFirst);
   assert.equal(sourceConfigUpdatedAt(repoRoot), updatedAfterFirst);
 });

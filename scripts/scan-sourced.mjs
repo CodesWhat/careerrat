@@ -63,9 +63,11 @@ import {
   scanSearchSources,
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
+import { planDeadBoardSkips, recordDeadBoardOutcome } from "../src/core/search/dead-boards.mjs";
 import {
   SEARCH_NOT_SEARCHABLE_BROWSER_REASON,
   SEARCH_NOT_SEARCHABLE_LOGIN_REASON,
+  summarizeDeadSources,
   summarizeSearchHealth,
 } from "../src/core/search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
@@ -526,6 +528,7 @@ export async function runSourcedScan({
   writeGuard,
   hydrateOfferImpl = hydratePartialOffer,
   captureBrowserSourceImpl,
+  recheckDead = false,
   signal,
 } = {}) {
   const ensureActive = () => {
@@ -569,7 +572,7 @@ export async function runSourcedScan({
   );
   const perCompanyCap =
     Number.isInteger(configuredCompanyCap) && configuredCompanyCap > 0 ? configuredCompanyCap : 5;
-  const companies = enabledCompanies(config, companyFilter);
+  let companies = enabledCompanies(config, companyFilter);
   let searchSources = null;
   if (!companyFilter && !standaloneConfigMode) {
     try {
@@ -583,7 +586,21 @@ export async function runSourcedScan({
   // runnable set: no stub results, no per-source error rows.
   const allSourceTasks = searchSourceTasks(searchSources);
   const canCaptureBrowser = typeof captureBrowserSourceImpl === "function";
-  const sourceTasks = allSourceTasks.filter((task) => task.kind !== "browser" || canCaptureBrowser);
+  let sourceTasks = allSourceTasks.filter((task) => task.kind !== "browser" || canCaptureBrowser);
+  // Boards that answered 404/410 on 2 runs in a row sit out until their 14-day
+  // re-check (or until the source is edited). An explicit --company or
+  // --recheck-dead probes everything.
+  const deadPlan = planDeadBoardSkips({
+    pathCtx,
+    companies,
+    tasks: sourceTasks,
+    allCompanies: config.tracked_companies || [],
+    allSources: searchSources?.[searchListKey(searchSources)] || [],
+    bypass: Boolean(companyFilter) || recheckDead,
+    prune: write && !standaloneConfigMode && !companyFilter,
+  });
+  companies = deadPlan.companies;
+  sourceTasks = deadPlan.tasks;
   const notSearchableSources = allSourceTasks
     .filter((task) => task.kind === "browser" && !canCaptureBrowser)
     .map((task) => ({
@@ -653,7 +670,16 @@ export async function runSourcedScan({
     SOURCE_SCAN_CONCURRENCY
   );
   for (const { company, result } of companyResults) {
-    if (write && !standaloneConfigMode) recordBoardHealth({ pathCtx, company, result });
+    if (write && !standaloneConfigMode) {
+      recordBoardHealth({ pathCtx, company, result });
+      recordDeadBoardOutcome({
+        pathCtx,
+        key: deadPlan.companyKey(company),
+        kind: "company",
+        label: company.name,
+        result,
+      });
+    }
     acceptBatch(result);
     scanned.sourceCoverage.push(
       sourceCoverageReceipt({
@@ -699,6 +725,15 @@ export async function runSourcedScan({
     SOURCE_SCAN_CONCURRENCY
   );
   for (const { task, result } of searchSourceResults) {
+    if (write && !standaloneConfigMode && ["rss", "board"].includes(task.kind)) {
+      recordDeadBoardOutcome({
+        pathCtx,
+        key: deadPlan.taskKey(task),
+        kind: task.kind,
+        label: task.source.label || task.source.provider || task.kind,
+        result,
+      });
+    }
     acceptBatch(result);
     scanned.sourceCoverage.push(
       sourceCoverageReceipt({
@@ -896,6 +931,21 @@ export async function runSourcedScan({
   ).length;
   const titleRelevanceCount = filtered.filteredTitle.length - titleBlockerCount;
 
+  const deadSources = summarizeDeadSources([
+    ...companyResults.map(({ company, result }) => ({
+      kind: "company",
+      label: company.name,
+      url: company.careers_url || company.careersUrl || company.url || "",
+      errors: result.errors,
+    })),
+    ...searchSourceResults.map(({ task, result }) => ({
+      kind: "source",
+      label: task.source.label || task.source.provider || task.kind,
+      url: task.captureSource?.url || task.source.url || task.source.rssUrl || "",
+      errors: result.errors,
+    })),
+  ]);
+
   const summary = {
     scanned: scanned.offers.length,
     new: outputOffers.length,
@@ -968,6 +1018,8 @@ export async function runSourcedScan({
       notSearchable,
     }),
     notSearchable,
+    deadBoards: { skipped: deadPlan.skipped },
+    deadSources,
     adjacencyNote: adjacencyNote(candidateConfig.targeting, candidateConfig.profile),
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
@@ -996,6 +1048,7 @@ const CLI_OPTIONS = new Set([
   "--verify",
   "--summary",
   "--limit",
+  "--recheck-dead",
 ]);
 
 function assertKnownOptions(args) {
@@ -1053,6 +1106,19 @@ export function printSummary(summary, offers, cfg, limit) {
     }
     for (const [reason, labels] of byReason) console.log(`- ${reason} ${labels.join(", ")}`);
   }
+  if (summary.deadBoards?.skipped?.length > 0) {
+    const names = summary.deadBoards.skipped.map((board) => board.label).join(", ");
+    console.log(
+      `Skipped ${summary.deadBoards.skipped.length} dead board(s) (404 on 2 runs): ${names}. ` +
+        "Re-check: edit the source, run with --recheck-dead, or wait for the automatic 14-day re-check."
+    );
+  }
+  if (summary.deadSources?.count > 0) {
+    console.log(`Dead sources (${summary.deadSources.count}):`);
+    for (const { label, url, action } of summary.deadSources.sources) {
+      console.log(`- ${label}${url ? ` (${url})` : ""}: not found (404). ${action}`);
+    }
+  }
   if (summary.errors.length > 0) {
     console.log("Errors:");
     for (const error of summary.errors) console.log(`- ${error.company}: ${error.error}`);
@@ -1082,6 +1148,7 @@ async function main() {
   const write = args.includes("--write");
   const verify = args.includes("--verify");
   const summaryOnly = args.includes("--summary");
+  const recheckDead = args.includes("--recheck-dead");
   const limit = Number(valueAfter(args, "--limit") || 0);
 
   const summary = await runSourcedScan({
@@ -1092,6 +1159,7 @@ async function main() {
     write,
     verify,
     limit,
+    recheckDead,
   });
 
   // A batch with JD artifact-write failures used to exit 0 in both output

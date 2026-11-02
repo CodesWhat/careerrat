@@ -4,6 +4,22 @@
 // use this to say so out loud.
 
 export const ADJACENCY_NEXT_ACTION = "run search setup to add related titles";
+export const COMMUTE_CITIES_NEXT_ACTION = "add the cities you'd commute to in your profile";
+export const ADJACENCY_BOTH_NEXT_ACTION =
+  "run search setup to add related titles, and add the cities you'd commute to in your profile";
+
+function nextActionFor({ missingAdjacentTitles, missingCommuteCities }) {
+  if (missingAdjacentTitles && missingCommuteCities) return ADJACENCY_BOTH_NEXT_ACTION;
+  if (missingCommuteCities) return COMMUTE_CITIES_NEXT_ACTION;
+  if (missingAdjacentTitles) return ADJACENCY_NEXT_ACTION;
+  return null;
+}
+
+function missedText({ missingAdjacentTitles, missingCommuteCities }) {
+  if (missingAdjacentTitles && missingCommuteCities) return "Related roles and nearby towns";
+  if (missingCommuteCities) return "Jobs in nearby towns";
+  return "Related roles";
+}
 
 function hasTitles(bucket) {
   return (
@@ -64,13 +80,13 @@ export function targetingAdjacencyGaps(targeting, profile) {
     missingAdjacentTitles,
     missingCommuteCities,
     gaps,
-    nextAction: gaps.length > 0 ? ADJACENCY_NEXT_ACTION : null,
+    nextAction: nextActionFor({ missingAdjacentTitles, missingCommuteCities }),
   };
 }
 
 // One line for the scan summary, or null when the config is fine.
 export function adjacencyNote(targeting, profile) {
-  const { gaps } = targetingAdjacencyGaps(targeting, profile);
-  if (gaps.length === 0) return null;
-  return `Ran without adjacency config: ${gaps.join("; ")}. Related roles and nearby towns may be missed; ${ADJACENCY_NEXT_ACTION}.`;
+  const result = targetingAdjacencyGaps(targeting, profile);
+  if (result.gaps.length === 0) return null;
+  return `Ran without adjacency config: ${result.gaps.join("; ")}. ${missedText(result)} may be missed; ${result.nextAction}.`;
 }

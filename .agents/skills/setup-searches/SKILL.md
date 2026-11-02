@@ -61,6 +61,15 @@ careerrat searches --add-provider "<provider>" --query "<title or keyword>" [--l
 careerrat searches --add-provider "<provider>" --url "<branded board URL>" [--label "<label>"]
 ```
 
+Public boards that need no key and work for any field: `remotive`, `remoteok`, `workingnomads`, `himalayas`, `jobicy`, `arbeitnow`, and `themuse` (paged, so add it by hand with a query). `hackernews` reads the monthly "Who is hiring" thread and suits tech roles. Keyed sources read a key from the environment (USAJobs is free; Adzuna is paid after 25 trial calls):
+
+```bash
+careerrat searches --add-provider "usajobs" --query "<title or keyword>" [--location "<place>"]
+careerrat searches --add-provider "adzuna" --query "<title or keyword>" --country "<us|gb|ca|au|de|fr|...>" [--location "<place>"]
+```
+
+`careerrat searches --from-targeting` seeds them only when the key is already set. `careerrat searches --providers` shows which keys are set and where to sign up. A keyed source with no key fails loudly in the scan summary; it never returns an empty list quietly.
+
 **(b) Import a pasted board URL** — when the user pastes a URL from any job board:
 
 ```
@@ -73,6 +82,7 @@ For `jobs.lever.co` or `api.lever.co` URLs: routed to provider `Lever`, `source_
 For any URL recognized by the pinned Career Ops registry: routed to its deterministic provider with `source_type: ats`.
 For an unrecognized branded host whose adapter is known: use `--add-provider <id> --url <url>` instead of importing it as a browser source.
 For other hosts: the entry becomes `source_type: browser`.
+A company board URL on a supported ATS (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee, Workday and the rest of the registry) always becomes a direct `ats` source, even when a caller asked for a browser source. Browser sources and login-backed sites (LinkedIn, Indeed, Glassdoor, Wellfound) can't be searched from the terminal, so when one of them lists an employer, look for that employer's own ATS board and add it with `--add-url` or `--add-provider <id> --url <board URL>` instead.
 
 Do not assume HiringCafe is the only importable provider. Any board URL a user pastes can be imported — label it clearly.
 

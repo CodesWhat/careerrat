@@ -7,6 +7,7 @@ import { userPath } from "../paths/workspace.mjs";
 import { assessCompensationFloors } from "../profile/compensation.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
 import { relativeSeniority } from "../profile/seniority.mjs";
+import { fetchAdzuna } from "../providers/adzuna.mjs";
 import {
   fetchCareerOpsProvider,
   inferCareerOpsProvider,
@@ -22,6 +23,7 @@ import {
 import { fetchRemoteOk } from "../providers/remoteok.mjs";
 import { fetchRemotive } from "../providers/remotive.mjs";
 import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
+import { fetchUsaJobs } from "../providers/usajobs.mjs";
 import { fetchWorkingNomads } from "../providers/workingnomads.mjs";
 import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
 import { normalizeCompanyRoleKey, normalizeTextKey } from "../tracker/tracker-data.mjs";
@@ -47,6 +49,10 @@ const BOARD_PROVIDERS = {
   remoteok: (entry, { fetchImpl }) => fetchRemoteOk(entry, fetchImpl),
   remotive: (entry, { fetchImpl }) => fetchRemotive(entry, fetchImpl),
   workingnomads: (entry, { fetchImpl }) => fetchWorkingNomads(entry, fetchImpl),
+  // Keyed APIs: credentials come from the environment (keyed-credentials.mjs);
+  // a missing key is a named error on the source, never an empty result.
+  usajobs: fetchUsaJobs,
+  adzuna: fetchAdzuna,
   culinaryagents: fetchCulinaryAgents,
   oysterlink: fetchOysterLink,
   hcareers: fetchHcareers,

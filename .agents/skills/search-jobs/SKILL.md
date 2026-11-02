@@ -123,6 +123,17 @@ failed share. The summary carries `notSearchable` (`count` plus `sources[]` with
 label and reason), and `health.notSearchable` has the count. List them once as "not
 searchable from the terminal" with the reason; they don't mean the network is broken.
 If every source was non-runnable, health is `failed` and says nothing was searched.
+A source whose URL answers 404, or whose board an ATS says doesn't exist, is dead. The
+summary carries `deadSources` (`count` plus `sources[]` with `label`, `kind`, `url`, `reason`
+and `action`), and the terminal summary lists them under "Dead sources". They stay in
+`errors[]` too. Tell the user which ones and the next step: remove the source, or re-resolve
+the company's board. Nothing remembers a dead source between runs yet, so it will show up
+again until it's removed.
+Sources that need a free API key (USAJobs: `USAJOBS_API_KEY` and `USAJOBS_USER_AGENT`;
+Adzuna: `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`) read it from the environment CareerRat runs in.
+With the key missing, that source's error row names the variables and the signup page. Say
+so plainly and point the user at `careerrat searches --providers`, which shows which keys are
+set. Don't treat it as a network failure and don't ask the user to paste a key into chat.
 Don't start a second foreground scan while the same worker is active. Additional
 agent-led search and AI Web Search still follow this skill's owning sections.
 The commands below remain the legacy/foreground entry, with no implicit migration.

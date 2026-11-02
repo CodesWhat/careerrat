@@ -66,12 +66,16 @@ test("hospitality source generation scans relevant local roles without making Ar
   );
   assert.deepEqual(
     config.searches
-      .filter((source) => ["remoteok", "remotive", "workingnomads"].includes(source.provider))
+      .filter((source) =>
+        ["remoteok", "remotive", "workingnomads", "himalayas", "jobicy"].includes(source.provider)
+      )
       .map(({ provider, enabled }) => ({ provider, enabled })),
     [
       { provider: "remoteok", enabled: true },
       { provider: "remotive", enabled: true },
       { provider: "workingnomads", enabled: true },
+      { provider: "himalayas", enabled: true },
+      { provider: "jobicy", enabled: true },
     ]
   );
   assert.equal(
@@ -252,8 +256,10 @@ test("hospitality source generation normalizes common New York location forms", 
       [
         "culinaryagents",
         "hcareers",
+        "himalayas",
         "hospitalityonline",
         "ihirehospitality",
+        "jobicy",
         "oysterlink",
         "remoteok",
         "remotive",

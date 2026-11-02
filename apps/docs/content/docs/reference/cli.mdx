@@ -84,8 +84,8 @@ developing from a source checkout or running lower-level maintenance tools.
 | `capture:search-sources` | Bulk-capture board listing pages |
 | `capture:board` | Capture a single board page |
 | `analyze:outcomes` | Read outcome analytics from tracker |
-| `check:jobs` | Check liveness of sourced job links |
-| `scan:sourced` | Scan configured sourced rows |
+| `check:jobs` | Check whether saved job links are still open, using the job board's own API first, and list jobs closed since the last check |
+| `scan:sourced` | Scan configured sources. Boards that return not found on two runs in a row are skipped until a 14-day re-check; `--recheck-dead` checks them now |
 | `delta:sourced` | Show sourced-row deltas |
 | `calibrate:style` | Build writing-style calibration artifacts |
 

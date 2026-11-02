@@ -1,3 +1,5 @@
+import { ADZUNA_COUNTRIES } from "../providers/adzuna.mjs";
+import { hasCredentials } from "../providers/keyed-credentials.mjs";
 import { CAREER_OPS_PUBLIC_PROVIDER_IDS } from "../providers/provider-parity.mjs";
 import { buildWellfoundUrl } from "../providers/wellfound.mjs";
 import { titlesBelowTarget } from "./seniority.mjs";
@@ -350,6 +352,42 @@ function boundedHospitalityTitles(roleBuckets, { inferred } = {}) {
   return queries;
 }
 
+// Adzuna searches one market per request, so its source needs the candidate's
+// home country as Adzuna's two-letter code. Anything outside Adzuna's markets,
+// or a home that names no country, gets no Adzuna source.
+const ADZUNA_COUNTRY_BY_NAME = {
+  Australia: "au",
+  Brazil: "br",
+  Canada: "ca",
+  France: "fr",
+  Germany: "de",
+  India: "in",
+  Italy: "it",
+  Mexico: "mx",
+  Netherlands: "nl",
+  "New Zealand": "nz",
+  Poland: "pl",
+  Singapore: "sg",
+  "South Africa": "za",
+  Spain: "es",
+  Switzerland: "ch",
+  "United Kingdom": "gb",
+  "United States": "us",
+};
+
+function adzunaCountryForHome(home) {
+  const text = String(home || "").trim();
+  if (!text) return null;
+  for (const country of COUNTRY_DEFINITIONS) {
+    const code = ADZUNA_COUNTRY_BY_NAME[country.name];
+    if (!code || !ADZUNA_COUNTRIES.includes(code)) continue;
+    if ([country.name, ...country.aliases].some((term) => containsGeoTerm(text, term))) {
+      return code;
+    }
+  }
+  return hasUsState(text) ? "us" : null;
+}
+
 function slugify(value) {
   return String(value || "")
     .toLowerCase()
@@ -399,6 +437,8 @@ function generatedRecency(targeting) {
  *
  * @param {object} targeting - CareerRat targeting config (role_buckets, keep_signals, cut_signals, …)
  * @param {object} profile   - CareerRat candidate profile (candidate, compensation, location, …)
+ * @param {{ env?: Record<string, string|undefined> }} [options] - environment to read API keys from
+ *   (callers pass process.env); USAJobs and Adzuna sources are seeded only when their key is set.
  * @returns {object}
  */
 function searchIdentity(search) {
@@ -434,7 +474,7 @@ export function mergeGeneratedSearchSources(existing, generated) {
   };
 }
 
-export function buildSearchSources(targeting, profile) {
+export function buildSearchSources(targeting, profile, { env = {} } = {}) {
   // --- title_filter ---
   const seenTitles = new Set();
   const positiveTitles = [];
@@ -638,6 +678,12 @@ export function buildSearchSources(targeting, profile) {
       label: "Working Nomads",
       url: "https://www.workingnomads.com/api/exposed_jobs/",
     },
+    { provider: "himalayas", label: "Himalayas", url: "https://himalayas.app/jobs/api?limit=50" },
+    {
+      provider: "jobicy",
+      label: "Jobicy",
+      url: "https://jobicy.com/api/v2/remote-jobs?count=50",
+    },
   ];
   for (const board of boardAggregators) {
     searches.push({
@@ -648,6 +694,51 @@ export function buildSearchSources(targeting, profile) {
       enabled: true,
       enabled_reason: "domain-gate",
     });
+  }
+
+  // Hacker News "Who is hiring" is a tech-community thread, so it follows the
+  // same tech gate as the other tech-only sources.
+  if (techDomain) {
+    searches.push({
+      provider: "hackernews",
+      source_type: "board",
+      label: "Hacker News: Who is hiring",
+      ...(positiveTitles[0] ? { query: positiveTitles[0] } : {}),
+      url: "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring",
+      enabled: true,
+      enabled_reason: "targeting",
+    });
+  }
+
+  // Keyed APIs (free key, read from the environment). Seeded only when the key
+  // is already set, so a fresh setup never creates a source that can only fail.
+  // Without a key, `careerrat searches --add-provider usajobs|adzuna` adds one
+  // and the scan names the missing variables.
+  const keyedQuery = positiveTitles[0] ?? "";
+  if (keyedQuery) {
+    const allowsUnitedStates = location_filter.allow.includes("United States");
+    if (allowsUnitedStates && hasCredentials("usajobs", env)) {
+      searches.push({
+        provider: "usajobs",
+        source_type: "board",
+        label: "USAJobs",
+        query: keyedQuery,
+        enabled: true,
+        enabled_reason: "credentials",
+      });
+    }
+    const adzunaCountry = adzunaCountryForHome(loc.home);
+    if (adzunaCountry && hasCredentials("adzuna", env)) {
+      searches.push({
+        provider: "adzuna",
+        source_type: "board",
+        label: "Adzuna",
+        query: keyedQuery,
+        country: adzunaCountry,
+        enabled: true,
+        enabled_reason: "credentials",
+      });
+    }
   }
 
   // Every search-ready candidate needs at least one runnable public source,
@@ -683,7 +774,16 @@ export function buildSearchSources(targeting, profile) {
       "Google Jobs",
     ],
     ats: ["Ashby", "Greenhouse", "Lever", "Workable", "SmartRecruiters", "Recruitee", "Workday"],
-    remote_boards: ["RemoteOK", "Jobicy", "Working Nomads", "We Work Remotely", "Remotive"],
+    remote_boards: [
+      "RemoteOK",
+      "Himalayas",
+      "Jobicy",
+      "Working Nomads",
+      "We Work Remotely",
+      "Remotive",
+    ],
+    keyed_apis: ["USAJobs", "Adzuna"],
+    other_public_boards: ["The Muse", "Hacker News: Who is hiring"],
     deterministic_providers: [...CAREER_OPS_PUBLIC_PROVIDER_IDS],
   };
 

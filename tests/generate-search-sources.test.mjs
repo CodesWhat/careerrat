@@ -58,7 +58,13 @@ const profile = {
   },
 };
 
-const BROAD_REMOTE_BOARD_PROVIDERS = ["remoteok", "remotive", "workingnomads"];
+const BROAD_REMOTE_BOARD_PROVIDERS = [
+  "remoteok",
+  "remotive",
+  "workingnomads",
+  "himalayas",
+  "jobicy",
+];
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -345,6 +351,24 @@ test("buildSearchSources: seeds broad public fallback plus tech boards for tech"
         enabled_reason: "domain-gate",
       },
       {
+        provider: "himalayas",
+        source_type: "board",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+      {
+        provider: "jobicy",
+        source_type: "board",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+      {
+        provider: "hackernews",
+        source_type: "board",
+        enabled: true,
+        enabled_reason: "targeting",
+      },
+      {
         provider: "arbeitnow",
         source_type: "board",
         enabled: true,
@@ -395,6 +419,8 @@ test("buildSearchSources: keeps broad remote boards enabled and runs a public fa
       { provider: "remoteok", source_type: "board", enabled: true },
       { provider: "remotive", source_type: "board", enabled: true },
       { provider: "workingnomads", source_type: "board", enabled: true },
+      { provider: "himalayas", source_type: "board", enabled: true },
+      { provider: "jobicy", source_type: "board", enabled: true },
       { provider: "arbeitnow", source_type: "board", enabled: true },
     ]
   );
