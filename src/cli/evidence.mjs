@@ -22,8 +22,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mergeRecordedCandidateEvidence } from "../core/agent/recorded-evidence-write.mjs";
 import { dbExists } from "../core/db/connection.mjs";
-import { candidateEvidenceMerge } from "../core/db/verbs.mjs";
 import { displayPath } from "../core/paths/workspace.mjs";
 import {
   computeEvidenceWrite,
@@ -216,7 +216,11 @@ function cmdAdd() {
   }
 
   if (dbExists({ repoRoot: opts.root })) {
-    const written = candidateEvidenceMerge({ repoRoot: opts.root, claims: [plan.claim] });
+    const written = mergeRecordedCandidateEvidence({
+      repoRoot: opts.root,
+      claims: [plan.claim],
+      writer: "evidence add",
+    });
     if (opts.json)
       console.log(
         JSON.stringify(

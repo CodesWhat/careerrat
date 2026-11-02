@@ -24,7 +24,7 @@ import { existsSync, readFileSync } from "node:fs";
 // comment-preserving in legacy mode; an invalid change is refused.
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { patchRecordedCandidateConfig } from "../core/agent/recorded-config-write.mjs";
 import {
   AUTOMATION_FILE,
   AUTOMATION_SCHEMA,
@@ -51,7 +51,6 @@ import {
   PROVIDERS,
   resolveSession,
 } from "../core/automation/session.mjs";
-import { candidateConfigPatch } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { candidateConfigSource } from "../core/profile/config-store.mjs";
 
@@ -451,7 +450,14 @@ function handleSubmit(submit) {
       process.exit(0);
     }
     try {
-      candidateConfigPatch({ repoRoot: opts.root, name: "automation", patch: { submit } });
+      const saved = patchRecordedCandidateConfig({
+        repoRoot: opts.root,
+        name: "automation",
+        patch: { submit },
+        writes: [{ path: result.path, label: result.label }],
+        writer: "automation.submit",
+      });
+      result.history = saved.history;
     } catch (err) {
       if (opts.json) {
         console.log(
@@ -601,7 +607,14 @@ function handleDbAutomationEdit({ command, kind, capability, platform, value }) 
   }
 
   try {
-    candidateConfigPatch({ repoRoot: opts.root, name: "automation", patch: nextData });
+    const saved = patchRecordedCandidateConfig({
+      repoRoot: opts.root,
+      name: "automation",
+      patch: nextData,
+      writes: [{ path: result.path, label: result.label }],
+      writer: `automation.${result.command}`,
+    });
+    result.history = saved.history;
   } catch (err) {
     if (opts.json) {
       console.log(
@@ -671,7 +684,14 @@ function handleDbSession(provider) {
   }
 
   try {
-    candidateConfigPatch({ repoRoot: opts.root, name: "automation", patch: nextData });
+    const saved = patchRecordedCandidateConfig({
+      repoRoot: opts.root,
+      name: "automation",
+      patch: nextData,
+      writes: [{ path: result.path, label: result.label }],
+      writer: `automation.${result.command}`,
+    });
+    result.history = saved.history;
   } catch (err) {
     if (opts.json) {
       console.log(
