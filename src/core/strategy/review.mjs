@@ -734,7 +734,8 @@ export function restoreRerankRows({ repoRoot, env, before, after }) {
     const note = "Undid a strategy review re-rank.";
     if (prior.status !== expected.status) {
       const to = prior.status || "sourced";
-      if (table === "applications") appSetStatus({ repoRoot, env, id: prior.id, to, note });
+      if (table === "applications")
+        appSetStatus({ repoRoot, env, id: prior.id, to, note, restore: true });
       else sourcedSetStatus({ repoRoot, env, id: prior.id, to, note });
     }
     if (prior.priority !== expected.priority) {

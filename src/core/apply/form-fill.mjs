@@ -845,20 +845,33 @@ function genericMatch(normalized) {
     return "full_name";
   }
   if (normalized.includes("email")) return "email";
-  if (normalized.includes("phone")) return "phone";
+  // "Phone extension" / "Phone type" are different questions from the number.
+  if (/\bphone\b/.test(normalized) && !/\b(?:extension|ext|type|country|code)\b/.test(normalized)) {
+    return "phone";
+  }
   // "relocation" contains the substring "location" but is a screening
   // preference, not the candidate's current city. Leave it for
   // resolveScreeningAnswer instead of filling the home address here.
   if (normalized.includes("relocat")) return null;
-  if (/(^| )location( |$)/.test(normalized) || normalized === "city") return "location";
+  // "Location of your current office" or "Company location" asks about somewhere
+  // else, not the candidate's home city.
+  if (
+    (/(^| )location( |$)/.test(normalized) &&
+      !/\blocation of\b|\b(?:office|company|employer|team|job|role) location\b/.test(normalized)) ||
+    normalized === "city"
+  ) {
+    return "location";
+  }
   if (normalized.includes("linkedin")) return "linkedin";
   if (normalized.includes("github")) return "github";
   if (
     normalized.includes("portfolio") ||
     normalized.includes("personal website") ||
-    (normalized.includes("website") &&
+    (/\bwebsite\b/.test(normalized) &&
       !normalized.includes("linkedin") &&
-      !normalized.includes("github"))
+      !normalized.includes("github") &&
+      // "Company website" is the employer's site, not the candidate's.
+      !/\b(?:company|employer|organization|organisation|business|current)\b/.test(normalized))
   ) {
     return "portfolio";
   }
@@ -888,7 +901,9 @@ function genericMatch(normalized) {
   ) {
     return "current_title";
   }
-  if (normalized.includes("source") || normalized.includes("how did you hear")) {
+  // "open source" and "source code" are about the work, not how they found the job.
+  const withoutWorkSource = normalized.replace(/\bopen source\b|\bsource (?:code|control)\b/g, " ");
+  if (/\bsource\b/.test(withoutWorkSource) || normalized.includes("how did you hear")) {
     return "source";
   }
   if (
@@ -1376,10 +1391,15 @@ const CONFIRMATION_URL_SEGMENTS = [
 /**
  * Detect a post-submit confirmation page.
  *
- * @param {{ pageText?: string, currentUrl?: string, refs?: Record<string, object> }} opts
+ * @param {{ pageText?: string, currentUrl?: string, refs?: Record<string, object>, allowProse?: boolean }} opts
  * @returns {{ submitted: boolean, signal: string|null }}
  */
-export function confirmationCheck({ pageText = "", currentUrl, refs = {} } = {}) {
+export function confirmationCheck({
+  pageText = "",
+  currentUrl,
+  refs = {},
+  allowProse = true,
+} = {}) {
   const activeApplication = Object.values(refs || {}).some((entry) => {
     if (entry?.disabled === true) return false;
     if (entry?.fileInput === true) {
@@ -1424,6 +1444,10 @@ export function confirmationCheck({ pageText = "", currentUrl, refs = {} } = {})
       }
     }
   }
+
+  // Callers that haven't seen the form yet pass allowProse: false so a sentence
+  // of ordinary page text can't pass for a receipt.
+  if (!allowProse) return { submitted: false, signal: null };
 
   // Receipt statements must stand on their own, rather than occur inside
   // quoted examples or instructions describing what a future submit will show.

@@ -156,13 +156,26 @@ export function classifyStage(status, customStages) {
  * a label matching no rule is worth surfacing as a likely typo.
  *
  * @param {string} status raw status text
+ * @param {Array} [customStages] optional custom stage defs (tracker.stages)
  * @returns {boolean}
  */
-export function isKnownStatusLabel(status) {
+export function isKnownStatusLabel(status, customStages) {
   const s = String(status == null ? "" : status)
     .toLowerCase()
     .trim();
   if (!s) return false;
+  if (Array.isArray(customStages)) {
+    for (const c of customStages) {
+      if (!c?.id) continue;
+      const pats = Array.isArray(c.patterns) ? c.patterns : [];
+      if (
+        s === String(c.id).toLowerCase() ||
+        pats.some((p) => s.includes(String(p).toLowerCase()))
+      ) {
+        return true;
+      }
+    }
+  }
   return STAGE_RULES.some(([, subs]) => subs.some((sub) => s.includes(sub)));
 }
 

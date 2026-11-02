@@ -37,6 +37,11 @@ const EXECUTOR_FACTORIES = {
 function browserFailureReason(provider, error) {
   const providerLabel = PROVIDERS[provider]?.label || provider;
   const detail = String(error?.message || "browser command failed").slice(0, 300);
+  // Playwright's own message for a missing browser includes a path, so the
+  // generic fallback below would hide the one thing that fixes it.
+  if (/executable doesn't exist|npx playwright install/i.test(detail)) {
+    return `The ${providerLabel} can't start because its browser isn't installed yet. Run: npx playwright install chromium`;
+  }
   const exposesInternals =
     /command failed|careerrat automation|authenticated_[a-z_]+|(?:^|\s)--[a-z]|(?:^|\s)@[a-z0-9]|(?:^|\s)spawn\s|node_modules|\/[A-Za-z0-9._-]+\/[A-Za-z0-9._/-]+/i.test(
       detail

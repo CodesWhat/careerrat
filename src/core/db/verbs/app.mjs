@@ -235,6 +235,19 @@ function reconcileSubmitGates(db, application) {
   });
 }
 
+const STAGES_THAT_IMPLY_APPLIED = new Set([
+  "applied",
+  "screen",
+  "interview",
+  "final",
+  "offer",
+  "accepted",
+]);
+
+// Outcome words that look like a status to the stage matcher ("submitted-unverified"
+// contains "submitted") but are only ever a result of one run, never a status.
+const NOT_A_STATUS = /unverified/i;
+
 function applyStatusUpdate(app, { to, note, round, appliedAt, followUpDueAt, clearInterview, at }) {
   const from = app.status;
   const wasInterview = classifyStage(from).id === "interview";
@@ -253,6 +266,11 @@ function applyStatusUpdate(app, { to, note, round, appliedAt, followUpDueAt, cle
     updated.conversations = conversations;
   }
   if (appliedAt != null) updated.appliedAt = String(appliedAt);
+  // Moving to a status that means "sent" stamps the date, or the follow-up
+  // reminders that count days since applying never fire for this row.
+  if (appliedAt == null && !app.appliedAt && STAGES_THAT_IMPLY_APPLIED.has(classifyStage(to).id)) {
+    updated.appliedAt = at || nowIso();
+  }
   if (to === "applied") {
     updated.nextAction = null;
     updated.nextActionDue = null;
@@ -273,6 +291,7 @@ export function appSetStatus({
   appliedAt,
   followUpDueAt,
   clearInterview,
+  restore = false,
 } = {}) {
   if (!to) throw new Error("appSetStatus: to is required");
   if (appliedAt != null && Number.isNaN(Date.parse(appliedAt))) {
@@ -281,6 +300,20 @@ export function appSetStatus({
     throw error;
   }
   return runApplicationOutcome({ repoRoot, env }, id, (db) => {
+    // `restore` puts back a status the row already held (rerank undo), so the
+    // label is trusted. Anything else must be a known stage, including any
+    // custom stage configured in tracker.stages.
+    if (!restore) {
+      const stagesRow = db.prepare("SELECT data FROM kv WHERE key = 'stages'").get();
+      const customStages = stagesRow ? JSON.parse(stagesRow.data) : undefined;
+      if (!isKnownStatusLabel(to, customStages) || NOT_A_STATUS.test(String(to))) {
+        const error = new Error(
+          `appSetStatus: "${to}" is not a status CareerRat knows. Use one of: applied, manual-apply, awaiting, screen, interview, final, offer, accepted, rejected, withdrawn, reviewed-hold, or a stage from tracker.stages.`
+        );
+        error.code = "BAD_STATUS";
+        throw error;
+      }
+    }
     const app = requireApp(db, id);
     const { from, updated } = applyStatusUpdate(app, {
       to,

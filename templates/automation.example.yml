@@ -1,4 +1,6 @@
 # Browser automation — EXAMPLE (copy to candidate/automation.yml, which is gitignored).
+# Only used by a legacy file workspace. A workspace that keeps its settings in the
+# database ignores this file; use `careerrat automation ... --write` there.
 #
 # ON BY DEFAULT. Every capability below is on for every platform it applies to.
 # Set a capability's `enabled` or a single platform to false to turn it off; a

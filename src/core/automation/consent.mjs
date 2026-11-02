@@ -219,6 +219,9 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
       data: normalizeAutomationConfig(data),
       path: display,
       source,
+      // A leftover automation.yml has no effect here. Surfacing it keeps someone
+      // who set `submit: manual` in the file from believing it is in force.
+      ignoredFile: existsSync(path) ? display : null,
     };
   }
   if (!existsSync(path)) {
@@ -408,6 +411,7 @@ export function automationStatus({
     valid: loaded.valid,
     errors: loaded.errors,
     readError: loaded.readError || null,
+    ignoredFile: loaded.ignoredFile || null,
     submit,
     liveCount,
     capabilities,

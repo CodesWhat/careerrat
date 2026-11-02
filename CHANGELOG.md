@@ -40,6 +40,28 @@ All notable changes to CareerRat are documented here. This project follows
   applied. The `linkedin` apply setting is retired; older settings files that
   still have it load fine and are ignored.
 
+### Fixed
+
+- Applying no longer presses Submit with a required question or upload left
+  unanswered. Fields marked only with an asterisk, custom text boxes, fields with
+  no label, and upload buttons worded like "Upload your resume" are now counted.
+  A required upload CareerRat has no file for stops the run and is listed, and a
+  file the site didn't keep no longer counts as attached.
+- Essay questions that only mention words like "race conditions" or
+  "veteran-owned" are no longer skipped as self-identification questions, and a
+  required self-identification question now stops auto-submit instead of
+  vanishing.
+- Form filling no longer puts your phone number in "Phone extension", your
+  portfolio in "Company website", or your how-did-you-hear answer in "open
+  source" questions.
+- A job page that just mentions a submitted application is no longer recorded
+  as Applied. A confirmed submission is still reported if the confirmation
+  screenshot can't be saved, instead of saying the application never opened.
+- `data app set-status` rejects statuses CareerRat doesn't know (including
+  `submitted-unverified`) and records the applied date, so follow-up reminders
+  fire. `automation status` warns when a leftover `automation.yml` is being
+  ignored, and a missing browser now says to run `npx playwright install chromium`.
+
 ## [0.22.0] - 2026-10-31
 
 ### Added
