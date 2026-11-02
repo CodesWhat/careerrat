@@ -256,7 +256,8 @@ agent-led research still uses those skills.
 **Terminal file intake.** Textual Add context saves pasted text, URLs and
 dropped file paths before generating a request for the native agent. Ordinary
 paste while agent chat has focus remains native terminal input; do not assume it
-created an intake receipt. If that input supplies a document or facts to retain,
+created an intake receipt. Paste anywhere else in the Textual app opens Add context
+pre-filled and sends nothing until the user saves. If that input supplies a document or facts to retain,
 the owning skill must capture and persist it before reporting ingestion complete. Files have a private original copy,
 a receipt and, for text/Markdown, DOCX or email, shared local text extraction.
 Read the extracted text when available. PDFs/images retain their originals with
