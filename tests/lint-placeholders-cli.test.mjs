@@ -25,11 +25,29 @@ after(() => {
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 });
 
-test("a path that does not exist fails instead of reporting a clean draft", () => {
-  const result = lint(join(tmpdir(), "careerrat-lint-no-such-draft.md"));
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /path not found/);
+test("a path that does not exist is noted and skipped, not a failure", () => {
+  const missing = join(tmpdir(), "careerrat-lint-no-such-draft.md");
+  const result = lint(missing);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /does not exist, nothing to lint/);
   assert.doesNotMatch(result.stdout, /No unresolved placeholders/);
+});
+
+test("a missing path next to a real draft still lints the draft", () => {
+  const bad = draft("bad.md", "Dear [Hiring Manager],\n");
+  const result = lint(join(tmpdir(), "careerrat-lint-no-such-dir"), bad);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /does not exist/);
+  assert.match(result.stdout, /Hiring Manager/);
+});
+
+test("real bracketed content is not flagged, template brackets are", () => {
+  const ok = lint(draft("ok.md", "skills: [Python, SQL]\nSee [Appendix A] and [SQL] and [x].\n"));
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  for (const text of ["[Your Name]", "[NAME]", "[COMPANY NAME]", "[Insert date]", "[Company]"]) {
+    const bad = lint(draft("bad.md", `Hello ${text}\n`));
+    assert.equal(bad.status, 1, text);
+  }
 });
 
 test("bracketed fill-in tokens are caught, markdown links and checkboxes are not", () => {
