@@ -4,6 +4,7 @@ import { ensureInstalledRuntimeSelection } from "../core/ai/ensure-runtime-selec
 import { closeAll } from "../core/db/connection.mjs";
 import { sourcingRunLatest } from "../core/db/verbs/sourcing-runs.mjs";
 import { startManualSearchRun } from "../core/onboarding/first-search-run.mjs";
+import { borrowedAiWarning } from "../core/people/ai-route.mjs";
 import {
   cancelTerminalSearch,
   launchTerminalSearchWorker,
@@ -50,6 +51,10 @@ export async function main(args = process.argv.slice(2), env = process.env) {
   }
   if (command === "start") {
     if (id) throw new Error("start creates a new run; --id is for status or cancel");
+    // A background worker for someone else's workspace runs unattended, so say
+    // whose AI access it will use before it starts. stderr keeps --json clean.
+    const aiWarning = borrowedAiWarning(ctx);
+    if (aiWarning) console.error(aiWarning);
     const started = await startManualSearchRun(ctx);
     result = started.reused
       ? { ...terminalSearchStatus({ ...ctx, id: started.run.id }), reused: true }

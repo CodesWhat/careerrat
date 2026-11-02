@@ -51,6 +51,8 @@ import {
   strandedPackageDataDir,
   userPath,
 } from "../src/core/paths/workspace.mjs";
+import { borrowedAiWarning } from "../src/core/people/ai-route.mjs";
+import { authorizationPath, recordAuthorization } from "../src/core/people/authorization.mjs";
 import {
   classifyLocalAppRuntime,
   commandMatchesTrackerScript,
@@ -72,7 +74,11 @@ import { readVersion } from "../src/core/version.mjs";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const pathCtx = { repoRoot: root };
-const { args: cliArgs, person: forPerson } = extractForFlag(process.argv.slice(2));
+const {
+  args: cliArgs,
+  person: forPerson,
+  create: createPerson,
+} = extractForFlag(process.argv.slice(2));
 const [command, ...rest] = cliArgs;
 
 const CLIS = {
@@ -194,7 +200,8 @@ if (command === "start") {
 // ---------------------------------------------------------------------------
 
 // Pulls a global `--for <name>` (or `--for=<name>`) out of argv so no command
-// ever sees it. The last one wins.
+// ever sees it. The last one wins. With a person selected, `--new` is global too:
+// it creates that person's workspace if it doesn't exist yet, on any command.
 function extractForFlag(argv) {
   const args = [];
   let person = null;
@@ -218,7 +225,11 @@ function extractForFlag(argv) {
       args.push(arg);
     }
   }
-  return { args, person };
+  if (person === null && !String(process.env.CAREERRAT_PERSON || "").trim()) {
+    return { args, person, create: false };
+  }
+  const create = args.includes("--new");
+  return { args: args.filter((arg) => arg !== "--new"), person, create };
 }
 
 // `--for <name>` or an inherited CAREERRAT_PERSON points CAREERRAT_HOME at
@@ -232,13 +243,24 @@ function applyPersonSelection() {
       env: process.env,
       forName: forPerson,
       allowMissing: command === "people",
-      createMissing: command === "start" && rest.includes("--new"),
+      createMissing: createPerson,
     });
   } catch (err) {
     console.error(err.message);
     process.exit(1);
   }
   if (env) Object.assign(process.env, env);
+  if (env && createPerson) {
+    // --new made the workspace: leave the same authorization note `people add` does.
+    const base = env.CAREERRAT_PEOPLE_BASE;
+    const name = env.CAREERRAT_PERSON;
+    if (!existsSync(authorizationPath(base, name))) {
+      recordAuthorization({ base, name, env: process.env });
+      console.error(
+        `Created ${name}'s workspace. Record who authorized it: careerrat people add ${name} --authorized-by "<who>" --purpose "<what for>"`
+      );
+    }
+  }
 }
 
 function runInit(extra) {
@@ -295,6 +317,8 @@ async function runStart(extra) {
 
   const person = currentPerson(process.env);
   if (person) console.log(`• CareerRat for ${person}`);
+  const aiWarning = borrowedAiWarning({ repoRoot: root, env: process.env });
+  if (aiWarning) console.error(aiWarning);
   console.log(`• Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
 
   // 1) Scaffold workspace dirs (idempotent).
@@ -864,7 +888,7 @@ Commands:
   questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)
   tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat start')
   tracker-dev  Serve the live local app without launching an agent
-  people      List or add people, one workspace each (run any command for them with --for)
+  people      List, add or remove (--purge --yes) people, one workspace each (run any command for them with --for)
   data        sqlite-backed data layer: status/init/import/export/verify/backup/restore + per-domain verbs (M6)
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)
   modes       Show/change optional usage and application modes
@@ -895,11 +919,13 @@ start [ai]:
   --no-dashboard      terminal session only; detect a supported agent if unnamed
   --no-open           serve the local app without opening a browser tab
   --port <n>          local app port (default 7777)
-  --new               with --for, create that person's workspace first
 
 --for <name>:
   Works on every command. Runs it in that person's workspace
   (<data root>/people/<name>/). Create one with: careerrat people add <name>
+  --new               with --for, create that person's workspace first (any command)
+  careerrat doctor shows which AI route their work runs on; see "Running CareerRat for
+  someone else" in the docs.
 
 Run any command with --help for its own options.`);
 }

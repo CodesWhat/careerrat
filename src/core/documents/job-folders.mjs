@@ -18,6 +18,11 @@ function safeCompanySegment(value) {
   return WINDOWS_RESERVED_NAME.test(stem) ? `_${cleaned}` : cleaned;
 }
 
+// Where one person's generated documents live (unless a downloads directory is set).
+export function personDocumentsRoot(person) {
+  return join(homedir(), "Documents", "careerrat", person);
+}
+
 export function jobDocumentPaths({ application, env = process.env }) {
   if (!application?.id) throw new Error("A job id is required for its document folder");
   const companyName = safeCompanySegment(application.company || "unknown");
@@ -33,7 +38,7 @@ export function jobDocumentPaths({ application, env = process.env }) {
   const person = currentPerson(env);
   const root =
     String(env.CAREERRAT_DOWNLOADS_DIR || "").trim() ||
-    join(homedir(), "Documents", "careerrat", ...(person ? [person] : []));
+    (person ? personDocumentsRoot(person) : join(homedir(), "Documents", "careerrat"));
   const active = join(root, companyName, job);
   const archive = join(root, "_archive", companyName, job);
   const archived = ARCHIVED_STATUSES.has(

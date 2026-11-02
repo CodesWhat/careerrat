@@ -662,6 +662,10 @@ class CareerRatApp(App):
         yield Footer()
 
     async def on_mount(self):
+        person = (self.env.get("CAREERRAT_PERSON") or "").strip()
+        if person:
+            self.title = f"CareerRat · {person}"
+            self.sub_title = f"Workspace for {person}"
         loop = asyncio.get_running_loop()
         if sys.platform != "win32":
             for name in (signal.SIGTERM, signal.SIGHUP):

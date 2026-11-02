@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { currentPerson } from "../core/paths/people.mjs";
 import { readJobs, viewJobs } from "../core/tui/jobs.mjs";
 import { ensureTextualPython } from "../core/tui/python-runtime.mjs";
 import { runTextualWorkspace } from "../core/tui/textual-runtime.mjs";
@@ -32,7 +33,9 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     } else throw new Error(`Unknown TUI option: ${arg}`);
   }
   if (json) {
-    console.log(JSON.stringify(viewJobs(readJobs({ repoRoot, env }))));
+    console.log(
+      JSON.stringify({ ...viewJobs(readJobs({ repoRoot, env })), person: currentPerson(env) })
+    );
     return 0;
   }
   return runTextualWorkspace({
