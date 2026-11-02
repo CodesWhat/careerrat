@@ -11,6 +11,7 @@ const { Terminal } = headless;
 
 const SCROLLBACK_LINES = 5000;
 const WHEEL_LINES = 3;
+const CLIPBOARD_BYTE_LIMIT = 1024 * 1024;
 
 function cellStyle(cell) {
   const codes = [0];
@@ -71,6 +72,9 @@ export function createAgentPane({
   rows = 24,
   onChange = () => {},
   onExit = () => {},
+  onBell = () => {},
+  onTitle = () => {},
+  onClipboard = () => {},
 } = {}) {
   preparePtyHelpers();
   const terminal = new Terminal({
@@ -134,6 +138,32 @@ export function createAgentPane({
         return false;
       })
     );
+  subscriptions.push(
+    terminal.onBell(() => {
+      if (!disposed) onBell();
+    })
+  );
+  subscriptions.push(
+    terminal.onTitleChange((title) => {
+      if (!disposed) onTitle(title);
+    })
+  );
+  // OSC 52: the program asks to set the clipboard. Reads ("?") are never
+  // answered, so nothing the agent prints can pull the user's clipboard back.
+  subscriptions.push(
+    terminal.parser.registerOscHandler(52, (data) => {
+      const payload = data.slice(data.indexOf(";") + 1);
+      if (
+        !disposed &&
+        payload &&
+        payload !== "?" &&
+        payload.length <= Math.ceil((CLIPBOARD_BYTE_LIMIT * 4) / 3) + 4 &&
+        /^[A-Za-z0-9+/]+={0,2}$/.test(payload)
+      )
+        onClipboard(Buffer.from(payload, "base64").toString("utf8"));
+      return true;
+    })
+  );
   subscriptions.push(
     terminal.onData((data) => {
       if (!exited) child.write(data);

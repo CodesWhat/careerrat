@@ -334,6 +334,46 @@ closeAll();
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_agent_bell_title_and_clipboard_reach_the_outer_terminal(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-osc-") as folder:
+            home = Path(folder)
+            executable = home / "codex"
+            executable.write_text(
+                f"#!{shutil.which('node')}\n"
+                "process.stdin.resume();\n"
+                "process.stdout.write('\\x07\\x1b]2;Agent: plan\\x07"
+                "\\x1b]52;c;aGVsbG8gY2xpcGJvYXJk\\x07\\x1b]52;c;?\\x07\\x1b]52;c;%%%\\x07READY');\n"
+            )
+            executable.chmod(0o700)
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            bells, copies, writes = [], [], []
+            app.bell = lambda: bells.append(1)
+            app.copy_to_clipboard = lambda text: copies.append(text)
+            async with app.run_test(size=(160, 50)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "READY" in pane.render().plain)
+                await until(lambda: copies and app.sub_title == "Agent: plan")
+                self.assertEqual(copies, ["hello clipboard"])
+                self.assertEqual(len(bells), 1)
+                # Two bells inside a second are one bell.
+                app.ring_bell()
+                app.ring_bell()
+                self.assertEqual(len(bells), 1)
+                app.write_terminal = writes.append
+                app.set_agent_title("a\x1b]0;evil\x07 title")
+                self.assertEqual(app.sub_title, "a]0;evil title")
+                self.assertNotIn("\x1b]0;evil", writes[-1])
+                self.assertTrue(writes[-1].startswith("\x1b]2;CareerRat"))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
     async def test_saved_jobs_clicks_requests_context_and_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-ui-") as folder:
             home = Path(folder)

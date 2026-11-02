@@ -711,6 +711,7 @@ class CareerRatApp(App):
         super().__init__()
         self.line_limit = line_limit
         self.detail = None
+        self.last_bell = float("-inf")
         self.env = dict(os.environ if env is None else env)
         self.bridge_args = list(sys.argv[1:] if bridge_args is None else bridge_args)
         self.proc = None
@@ -810,6 +811,7 @@ class CareerRatApp(App):
         if sys.platform != "win32":
             for name in (signal.SIGTERM, signal.SIGHUP):
                 loop.add_signal_handler(name, self.exit)
+        self.write_terminal("\x1b[22;0t\x1b]2;CareerRat\x07")
         self.render_jobs()
         for select_id, options in {
             "status": [("Active", "active"), ("All statuses", "all")],
@@ -1011,6 +1013,12 @@ class CareerRatApp(App):
                 f"{behind} lines up · type or Shift+PageDown to return" if behind else ""
             )
             pane.place_cursor()
+        elif kind == "bell":
+            self.ring_bell()
+        elif kind == "title":
+            self.set_agent_title(value.get("title"))
+        elif kind == "clipboard":
+            self.copy_from_agent(value.get("text"))
         elif kind == "request":
             self.query_one("#request", Input).value = value["text"]
             note = value.get("notice")
@@ -1070,6 +1078,35 @@ class CareerRatApp(App):
         elif kind == "error":
             self.errors.append(value["message"])
             self.show_message(value["message"], hold=HOLD_SECONDS)
+
+    def ring_bell(self):
+        """The agent rang the bell: pass it to the outer terminal, at most once a second."""
+        now = time.monotonic()
+        if now - self.last_bell >= 1:
+            self.last_bell = now
+            self.bell()
+
+    def write_terminal(self, text):
+        driver = getattr(self, "_driver", None)
+        if driver is not None and not self.is_headless:
+            driver.write(text)
+            driver.flush()
+
+    def set_agent_title(self, title):
+        """Show the agent's window title in the header and the outer terminal's title."""
+        title = "".join(c for c in str(title or "") if c.isprintable())[:120].strip()
+        self.sub_title = title
+        self.write_terminal(f"\x1b]2;CareerRat{' · ' + title if title else ''}\x07")
+
+    def copy_from_agent(self, text):
+        """The agent asked to set the clipboard (OSC 52); send it to the outer terminal."""
+        if not isinstance(text, str) or not text:
+            return
+        self.copy_to_clipboard(text)
+        self.show_message(
+            f"The agent copied {len(text):,} characters to your clipboard.",
+            hold=HOLD_SECONDS,
+        )
 
     def render_jobs(self, force=False):
         """Fit the columns to the table's width and refill the rows."""
@@ -1385,6 +1422,7 @@ class CareerRatApp(App):
 
     async def on_unmount(self):
         self.stopping = True
+        self.write_terminal("\x1b[23;0t")
         if self.proc:
             await self.send({"op": "quit"})
             try:

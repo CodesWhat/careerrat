@@ -276,6 +276,9 @@ export async function createTextualSession({
             cols,
             rows,
             onChange: scheduleFrame,
+            onBell: () => send({ type: "bell" }),
+            onTitle: (title) => send({ type: "title", title }),
+            onClipboard: (text) => send({ type: "clipboard", text }),
             onExit: ({ exitCode }) => {
               exited = true;
               send({ type: "agent-exited", exitCode });
