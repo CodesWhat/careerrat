@@ -8,6 +8,7 @@ import re
 import shutil
 import signal
 import sys
+import time
 
 from rich.text import Text
 from textual import events
@@ -33,6 +34,7 @@ from textual.widgets import (
     TextArea,
 )
 
+HOLD_SECONDS = 12
 ROOT = Path(__file__).resolve().parents[3]
 KEYS = {
     "enter": "\r",
@@ -478,6 +480,48 @@ class JobDocument(ModalScreen):
         self.dismiss()
 
 
+class RequestText(ModalScreen):
+    """A request that has no agent to receive it: readable, selectable, copyable."""
+
+    CSS = """
+    RequestText { align: center middle; background: $background 70%; }
+    #request-dialog { width: 85%; height: 60%; padding: 1 2; border: round $accent; background: $surface; }
+    #request-body { height: 1fr; margin: 1 0; }
+    #request-buttons { height: 3; }
+    """
+    BINDINGS = [Binding("escape", "close", "Close")]
+
+    def __init__(self, text, reason):
+        super().__init__()
+        self.text = text
+        self.reason = reason
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="request-dialog"):
+            yield Static(
+                f"{self.reason}\nThis is the request CareerRat would have sent. Copy it into your own agent to run it.",
+                markup=False,
+            )
+            yield TextArea(self.text, read_only=True, id="request-body")
+            with Horizontal(id="request-buttons"):
+                yield Button("Copy request", id="copy-request", variant="primary")
+                yield Button("Close", id="close-request")
+
+    def on_mount(self):
+        self.query_one("#request-body", TextArea).focus()
+
+    def action_close(self):
+        self.dismiss()
+
+    def on_button_pressed(self, event):
+        event.stop()
+        if event.button.id == "copy-request":
+            self.app.copy_to_clipboard(self.text)
+            event.button.label = "Copied"
+        else:
+            self.dismiss()
+
+
 class CareerRatApp(App):
     TITLE = "CareerRat · Workspace"
     AUTO_FOCUS = "#jobs"
@@ -517,6 +561,8 @@ class CareerRatApp(App):
     #request { margin: 0 1; border: none; height: 1; background: $surface; padding: 0 1; }
     #request:focus { background: $accent-muted; }
     #message { height: 1; padding: 0 2; color: $text-muted; }
+    #agent-status { height: auto; padding: 0 2; color: $text; background: $warning-muted; display: none; }
+    #agent-status.shown { display: block; }
     """
 
     def __init__(self, env=None, bridge_args=None):
@@ -538,6 +584,9 @@ class CareerRatApp(App):
         self.column_key = None
         self.theme = "nord"
         self.request_counter = 0
+        self.held = ("", 0.0)
+        self.stderr_lines = []
+        self.bridge_code = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -608,6 +657,7 @@ class CareerRatApp(App):
             disabled=True,
             placeholder="Requests insert text only. Press Enter in the agent to run.",
         )
+        yield Static("", id="agent-status", markup=False)
         yield Static("Connecting to saved workspace…", id="message", markup=False)
         yield Footer()
 
@@ -725,13 +775,31 @@ class CareerRatApp(App):
                 line += f" · {health.get('status')}: {health.get('message')}"
         return f"{line} · {run['id']}"
 
-    def show_message(self, text):
+    def show_message(self, text, hold=0):
+        """Show a message; with hold, snapshots can't replace it for that many seconds."""
+        if hold:
+            self.held = (text, time.monotonic() + hold)
         self.query_one("#message", Static).update(text)
+
+    def show_status(self, text):
+        # The snapshot-driven line yields to a message someone still needs to read.
+        if time.monotonic() < self.held[1]:
+            return
+        self.show_message(text)
+
+    def show_agent_status(self, text):
+        """Agent trouble stays on screen in its own line until the app is closed."""
+        banner = self.query_one("#agent-status", Static)
+        banner.update(text)
+        banner.set_class(bool(text), "shown")
 
     async def read_errors(self):
         while line := await self.proc.stderr.readline():
-            if not self.stopping:
-                self.show_message(line.decode(errors="replace").strip())
+            text = line.decode(errors="replace").strip()
+            if text:
+                self.stderr_lines.append(text)
+            if not self.stopping and text:
+                self.show_message(text, hold=HOLD_SECONDS)
 
     async def read_events(self):
         try:
@@ -743,15 +811,33 @@ class CareerRatApp(App):
                 except Exception as error:
                     self.errors.append(str(error))
                     if not self.stopping:
-                        self.show_message(str(error))
-            if not self.stopping:
-                self.show_message(
-                    "Workspace connection closed. Quit and reopen to reconnect."
-                )
+                        self.show_message(str(error), hold=HOLD_SECONDS)
+            await self.bridge_closed()
         except (ValueError, OSError) as error:
             self.errors.append(str(error))
             if not self.stopping:
-                self.show_message(str(error))
+                self.show_message(str(error), hold=HOLD_SECONDS)
+
+    async def bridge_closed(self):
+        """The bridge ended. Say why, and fail the launch if it never got started."""
+        if self.stopping:
+            return
+        code = await self.proc.wait()
+        if self.stderr_reader:
+            await asyncio.gather(self.stderr_reader, return_exceptions=True)
+        reason = "\n".join(self.stderr_lines[-3:])
+        if code and self.snapshot is None:
+            self.exit(
+                return_code=code,
+                message=reason or f"The saved workspace could not be opened (exit {code}).",
+            )
+            return
+        self.bridge_code = code or 0
+        text = "Workspace connection closed. Quit and reopen to reconnect."
+        if code:
+            text = f"Workspace connection failed (exit {code}). {reason} Quit and reopen to reconnect."
+        self.show_agent_status(text)
+        self.show_message(text, hold=3600)
 
     async def handle_event(self, value):
         if self.stopping or not len(self.query("#jobs")):
@@ -762,7 +848,9 @@ class CareerRatApp(App):
         elif kind == "selection":
             self.apply_selection(value)
         elif kind == "notice":
-            self.show_message(value["message"])
+            self.show_message(value["message"], hold=HOLD_SECONDS)
+        elif kind == "agent-status":
+            self.show_agent_status(value["message"])
         elif kind == "frame":
             pane = self.query_one(NativePane)
             pane.frame = value
@@ -771,16 +859,20 @@ class CareerRatApp(App):
         elif kind == "request":
             self.query_one("#request", Input).value = value["text"]
             note = value.get("notice")
+            reason = value.get("reason") or "No agent is running."
             self.show_message(
                 (f"{note} " if note else "")
                 + (
                     "Request inserted. Review it and press Enter in the agent."
                     if value["inserted"]
-                    else "No running agent. The request is available below."
-                )
+                    else f"{reason} The request was not sent."
+                ),
+                hold=HOLD_SECONDS,
             )
             if value["inserted"]:
                 self.query_one(NativePane).focus()
+            else:
+                self.push_screen(RequestText(value["text"], reason))
         elif kind == "document":
             self.push_screen(JobDocument(value))
         elif kind == "intake-preview":
@@ -792,24 +884,37 @@ class CareerRatApp(App):
             if modal:
                 modal.fail(value["message"])
             else:
-                self.show_message("Context was not saved: " + value["message"])
+                self.show_message(
+                    "Context was not saved: " + value["message"], hold=HOLD_SECONDS
+                )
         elif kind == "context":
             modal = self.capture_modal(value.get("id"))
             if modal:
                 modal.dismiss()
             skipped = len(value.get("errors") or [])
+            unread = [
+                item.get("sourceName") or "a file"
+                for item in value.get("items") or []
+                if item.get("extraction") == "incomplete"
+            ]
             self.show_message(
-                "Context saved: "
-                + value["path"]
-                + (f" ({skipped} file(s) could not be saved)" if skipped else "")
+                (
+                    "Saved, but not read yet: " + ", ".join(unread)
+                    + ". The text couldn't be pulled out of it. Paste the text instead, or ask the agent to read it."
+                    if unread
+                    else "Context saved: " + value["path"]
+                )
+                + (f" ({skipped} file(s) could not be saved)" if skipped else ""),
+                hold=HOLD_SECONDS,
             )
         elif kind == "agent-exited":
-            self.show_message(
-                f"Agent exited ({value['exitCode']}). Saved jobs remain available."
+            self.show_agent_status(
+                f"The agent stopped (exit {value['exitCode']}). Saved jobs remain available. "
+                "Quit and reopen to start a new agent."
             )
         elif kind == "error":
             self.errors.append(value["message"])
-            self.show_message(value["message"])
+            self.show_message(value["message"], hold=HOLD_SECONDS)
 
     def render_jobs(self, force=False):
         """Fit the columns to the table's width and refill the rows."""
@@ -919,7 +1024,7 @@ class CareerRatApp(App):
         )
         self.query_one("#confirm-undo", Button).disabled = not bool(pending)
         run = next(iter(view.get("searchRuns", [])), None)
-        self.show_message(
+        self.show_status(
             state.get("message")
             or (
                 self.search_status_line(run)
@@ -1123,4 +1228,6 @@ class CareerRatApp(App):
 
 
 if __name__ == "__main__":
-    CareerRatApp().run()
+    app = CareerRatApp()
+    app.run()
+    sys.exit(app.return_code or app.bridge_code or 0)

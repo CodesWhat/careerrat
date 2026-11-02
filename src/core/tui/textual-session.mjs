@@ -11,7 +11,15 @@ import { captureTuiContext, listDroppedFiles } from "./intake.mjs";
 import { capWorkspaceMessages, readJobs, viewJobs } from "./jobs.mjs";
 import { createWorkspaceState, refreshWorkspace, workspaceKey } from "./workspace.mjs";
 
-export async function createTextualSession({ repoRoot, env = process.env, agent = null, emit }) {
+// agentIssue says why there is no agent when one was asked for or expected:
+// the TUI shows it in its own banner and names it when a request has nowhere to go.
+export async function createTextualSession({
+  repoRoot,
+  env = process.env,
+  agent = null,
+  agentIssue = null,
+  emit,
+}) {
   const ctx = { repoRoot, env };
   const sessionId = randomUUID();
   let data = readJobs(ctx);
@@ -26,19 +34,26 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
   let refreshing;
   let watched = "";
   let watchers = [];
+  let lastSnapshot = "";
 
   function send(event) {
     if (!closing) emit(event);
   }
-  function snapshot() {
+  // A refresh that finds nothing new sends nothing, so an idle workspace stays
+  // quiet and a status message isn't wiped by a snapshot identical to the last.
+  function snapshot({ force = true } = {}) {
     const view = viewJobs(data, state);
     currentView = view;
     const capped = capWorkspaceMessages(view.workspaceMessages);
-    send({
+    const event = {
       type: "workspace",
       view: { ...view, workspaceMessages: capped.messages, workspaceMessagesTotal: capped.total },
       state,
-    });
+    };
+    const key = JSON.stringify(event);
+    if (!force && key === lastSnapshot) return;
+    lastSnapshot = key;
+    send(event);
   }
   function frame() {
     drawing = null;
@@ -68,11 +83,14 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
     watched = key;
     for (const target of targets) {
       try {
-        const watcher = watch(target, () => {
-          if (closing || refreshing) return;
+        const watcher = watch(target, (_event, filename) => {
+          // Reading the database touches its -shm file. Counting that as a
+          // change makes every read trigger the next one. Real writes also
+          // touch the database or its -wal file, which still count.
+          if (closing || refreshing || String(filename ?? "").endsWith("-shm")) return;
           refreshing = setTimeout(() => {
             refreshing = null;
-            refresh();
+            refresh({ force: false });
           }, 40);
         });
         watcher.on("error", (error) => send({ type: "error", message: error.message }));
@@ -82,13 +100,13 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
       }
     }
   }
-  function refresh() {
+  function refresh({ force = true } = {}) {
     if (closing) return;
     try {
       data = readJobs(ctx);
       state = refreshWorkspace(data, state);
       watchTargets();
-      snapshot();
+      snapshot({ force });
     } catch (error) {
       send({ type: "error", message: `Saved data could not refresh: ${error.message}` });
     }
@@ -96,7 +114,14 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
   function request(text, notice) {
     const inserted = Boolean(pane && !exited);
     if (inserted) pane.paste(text);
-    send({ type: "request", text, inserted, notice: notice ?? null });
+    const reason = inserted
+      ? null
+      : exited
+        ? "The agent has exited."
+        : agent
+          ? "The agent is still starting."
+          : agentIssue || "No agent is running.";
+    send({ type: "request", text, inserted, notice: notice ?? null, reason });
   }
   function paneEnv() {
     let base = env;
@@ -241,7 +266,7 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
             onExit: ({ exitCode }) => {
               exited = true;
               send({ type: "agent-exited", exitCode });
-              refresh();
+              refresh({ force: false });
             },
           });
           send({ type: "agent-started", pid: pane.pid });
@@ -275,5 +300,6 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
   }
   watchTargets();
   snapshot();
+  if (agentIssue) send({ type: "agent-status", message: agentIssue });
   return { dispatch, refresh, close };
 }

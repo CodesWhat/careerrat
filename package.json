@@ -82,6 +82,7 @@
     "scripts/install-skills.mjs",
     "scripts/lib/live-search-receipts.mjs",
     "scripts/scan-sourced.mjs",
+    "scripts/update-check.mjs",
     "scripts/verify-live-search-receipts.mjs",
     "scripts/verify-tracker.mjs",
     "AGENTS.md",

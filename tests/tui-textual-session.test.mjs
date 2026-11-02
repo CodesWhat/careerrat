@@ -3,13 +3,15 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
+import { closeAll } from "../src/core/db/connection.mjs";
+import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 
 const api = await import("../src/core/tui/textual-session.mjs").catch((error) => {
   if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
   return {};
 });
 const root = join(import.meta.dirname, "..");
-async function fixture(t, agent = null, extraEnv = {}) {
+async function fixture(t, agent = null, extraEnv = {}, extraOptions = {}) {
   assert.equal(
     typeof api.createTextualSession,
     "function",
@@ -46,6 +48,7 @@ async function fixture(t, agent = null, extraEnv = {}) {
     repoRoot: root,
     env: { ...process.env, CAREERRAT_HOME: home, ...extraEnv },
     agent,
+    ...extraOptions,
     emit: (event) => events.push(event),
   });
   t.after(async () => {
@@ -286,4 +289,68 @@ test("the agent pane resolves careerrat to this checkout, not an earlier install
     .lines.join("");
   assert.match(text, new RegExp(`CLI\\[${version.replaceAll(".", "\\.")}\\]`));
   assert.doesNotMatch(text, /OLD-INSTALL/);
+});
+
+test("Textual opens a saved JD stored inline instead of as a file path", async (t) => {
+  const { session, events, path, tracker } = await fixture(t);
+  tracker.applications[0].artifacts = {
+    jd: "# Platform role\n\nOwn the platform and its services.\n\nRequirements\n- Go",
+  };
+  writeFileSync(path, JSON.stringify(tracker));
+  session.refresh();
+  await session.dispatch({ op: "document", id: "northstar" });
+  const { artifact } = events.find((event) => event.type === "document");
+  assert.match(artifact.markdown, /Own the platform/);
+  assert.equal(artifact.completeness, "complete");
+});
+
+test("a request with no agent says why and a missing agent is announced", async (t) => {
+  const { session, events } = await fixture(
+    t,
+    null,
+    {},
+    {
+      agentIssue: "Couldn't find codex on your PATH, so no agent started.",
+    }
+  );
+  assert.deepEqual(
+    events.find((event) => event.type === "agent-status"),
+    {
+      type: "agent-status",
+      message: "Couldn't find codex on your PATH, so no agent started.",
+    }
+  );
+  await session.dispatch({ op: "request", action: "search" });
+  const request = events.find((event) => event.type === "request");
+  assert.equal(request.inserted, false);
+  assert.match(request.reason, /Couldn't find codex/);
+  assert.match(request.text, /search-jobs/);
+});
+
+test("an idle database workspace doesn't keep re-reading and re-sending itself", async (t) => {
+  const { home, tracker } = await fixture(t);
+  const events = [];
+  importFromTracker({
+    repoRoot: root,
+    env: { ...process.env, CAREERRAT_HOME: home },
+    sourceDir: join(home, "workspace"),
+  });
+  closeAll();
+  const session = await api.createTextualSession({
+    repoRoot: root,
+    env: { ...process.env, CAREERRAT_HOME: home },
+    emit: (event) => events.push(event),
+  });
+  t.after(async () => {
+    await session.close();
+    closeAll();
+  });
+  // A real write is seen once...
+  assert.equal(tracker.applications.length, 2);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  // ...but reading the database must not cause more reads on its own.
+  assert.ok(
+    events.filter((event) => event.type === "workspace").length <= 3,
+    `idle workspace sent ${events.filter((event) => event.type === "workspace").length} snapshots`
+  );
 });

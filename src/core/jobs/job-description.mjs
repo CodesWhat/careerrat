@@ -46,6 +46,13 @@ function artifactPathValue(value) {
   return "";
 }
 
+// Older rows keep the job description text itself in artifacts.jd instead of a
+// path to a saved file. A path is one line; text with a line break is the body.
+function inlineJobDescription(storedValue) {
+  const text = typeof storedValue === "string" ? storedValue.trim() : "";
+  return /[\r\n]/.test(text) ? text : null;
+}
+
 function resolveSafeJobPath(workspaceDir, storedValue) {
   const storedPath = artifactPathValue(storedValue);
   if (!storedPath) throw makeError("No job description has been captured yet.", "JD_NOT_CAPTURED");
@@ -193,8 +200,11 @@ export function readSavedJobDescription({
   recordId = record.id,
 } = {}) {
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
-  const { full, storedPath } = resolveSafeJobPath(workspaceDir, record.artifacts?.jd);
-  const text = readFileSync(full, "utf8");
+  const inline = inlineJobDescription(record.artifacts?.jd);
+  const { full, storedPath } = inline
+    ? { full: null, storedPath: null }
+    : resolveSafeJobPath(workspaceDir, record.artifacts?.jd);
+  const text = inline ?? readFileSync(full, "utf8");
   const { frontmatter: rawFrontmatter, body: rawBody } = splitFrontmatter(text);
   const frontmatter = rawFrontmatter || {};
   const markdown = String(rawBody || text).trim();
