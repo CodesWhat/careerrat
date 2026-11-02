@@ -55,7 +55,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Structure guards (chat-first shell, CSS foundation, YAML, and release versions)
         run: node --test tests/static-dashboard-retirement.test.mjs tests/chat-first-foundation-style.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs
 
@@ -94,7 +94,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
@@ -179,7 +179,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
@@ -268,7 +268,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
@@ -343,7 +343,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
           package-manager-cache: false
       - name: Activate the repository-pinned npm release
         shell: bash
@@ -446,7 +446,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
           package-manager-cache: false
       - name: Activate the repository-pinned npm release
         run: |
@@ -587,7 +587,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Setup Qlty
         uses: qltysh/qlty-action/install@08a0a862c159eae9b9003081da6663d96efef637 # v2.3.0
       - name: Qlty check (changed files vs origin/main)
@@ -617,7 +617,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
