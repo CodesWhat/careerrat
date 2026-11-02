@@ -472,7 +472,7 @@ same canonical skills and local data.
 
 ### Any other platform (npm)
 
-Needs Node.js 24.15 or newer.
+Needs Node.js 24.22.1 or newer.
 
 ```bash
 npm install -g careerrat
