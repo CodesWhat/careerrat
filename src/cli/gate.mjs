@@ -24,7 +24,8 @@ import { existsSync, readFileSync } from "node:fs";
 // there. A change that would make the file schema-invalid is always refused.
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { candidateConfigGet, candidateConfigPatch } from "../core/db/verbs.mjs";
+import { patchRecordedCandidateConfig } from "../core/agent/recorded-config-write.mjs";
+import { candidateConfigGet } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { CANDIDATE_FILES } from "../core/profile/candidate-setup.mjs";
 import { candidateConfigSource } from "../core/profile/config-store.mjs";
@@ -264,7 +265,14 @@ function handleDbGate(route) {
   }
 
   try {
-    candidateConfigPatch({ ...pathCtx, name: route.file, patch: plan.patch });
+    const saved = patchRecordedCandidateConfig({
+      ...pathCtx,
+      name: route.file,
+      patch: plan.patch,
+      writes: [{ path: route.path, label: route.label || route.path }],
+      writer: `gate.${type}`,
+    });
+    result.history = saved.history;
   } catch (err) {
     if (opts.json) {
       console.log(

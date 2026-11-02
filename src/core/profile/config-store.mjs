@@ -72,18 +72,25 @@ const AGENT_PRIVATE_FORM_DEFAULT_FIELDS = new Set([
 ]);
 
 export function sanitizeCandidateConfigForAgent(config = {}) {
-  const formDefaults = config?.["form-defaults"];
-  if (!formDefaults || typeof formDefaults !== "object" || Array.isArray(formDefaults)) {
-    return { ...config };
+  const out = { ...config };
+  const compensation = config?.profile?.compensation;
+  if (compensation && typeof compensation === "object" && !Array.isArray(compensation)) {
+    out.profile = {
+      ...config.profile,
+      compensation: Object.fromEntries(
+        Object.entries(compensation).filter(([field]) => field !== "current_base")
+      ),
+    };
   }
-  return {
-    ...config,
-    "form-defaults": Object.fromEntries(
+  const formDefaults = config?.["form-defaults"];
+  if (formDefaults && typeof formDefaults === "object" && !Array.isArray(formDefaults)) {
+    out["form-defaults"] = Object.fromEntries(
       Object.entries(formDefaults).filter(
         ([field]) => !AGENT_PRIVATE_FORM_DEFAULT_FIELDS.has(field)
       )
-    ),
-  };
+    );
+  }
+  return out;
 }
 
 // Agent runtimes use this accessor instead of the canonical local-app view.

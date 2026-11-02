@@ -35,6 +35,23 @@ confirmation (candidate knowledge follows the exception below). An older install
 
 ### Candidate knowledge writes
 
+Terminal sessions can read durable history with `careerrat data thread read
+<application-id|workspace> --json` and append results with `careerrat data thread
+append <application-id|workspace> --data-file <message.json> --json`. A message
+has `role`, `text`, and optional `kind`, `id`, `metadata`, and `artifacts`.
+Repeated writes with the same message ID reuse the saved message; a conflicting
+message fails. Job reads return the complete ordered history, including older
+messages beyond the dashboard's recent-message window. These commands use the
+existing SQLite thread owners and don't run AI or change application status.
+
+`careerrat data changes list --json` lists saved knowledge-write entries with
+their message ID, artifact index, and undo state. `careerrat data changes undo
+<message-id> <artifact-index> --json` reads the original entry from storage and
+uses the same deterministic undo owner as the browser. A refusal appears in the
+returned thread's latest result and `operationResult`; it never overwrites newer
+knowledge. Listing changes doesn't create a log for a write that wasn't recorded.
+All commands honor the active person or `CAREERRAT_HOME` and fail without a DB.
+
 CareerRat runs in operator mode, so grounded changes to candidate knowledge
 apply directly instead of waiting for a confirmation. That covers evidence
 claims that pass `computeEvidenceWrite`, onboarding saves, and coaching drafts.

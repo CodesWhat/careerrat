@@ -8,9 +8,8 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { patchRecordedCandidateConfig } from "../core/agent/recorded-config-write.mjs";
 import { dbExists } from "../core/db/connection.mjs";
-import { candidateConfigPatch } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { atomicWriteFile } from "../core/profile/gate-writer.mjs";
 import {
@@ -134,7 +133,14 @@ if (dbExists(pathCtx)) {
     }
     process.exit(0);
   }
-  candidateConfigPatch({ ...pathCtx, name: "modes", patch: { [route.path]: value } });
+  const saved = patchRecordedCandidateConfig({
+    ...pathCtx,
+    name: "modes",
+    patch: { [route.path]: value },
+    writes: [{ path: route.path, label: route.label }],
+    writer: `modes.${type}`,
+  });
+  result.history = saved.history;
   result.written = true;
   if (opts.json) console.log(JSON.stringify(result, null, 2));
   else console.log(`Written to SQLite candidate modes: ${route.path}: ${value}`);

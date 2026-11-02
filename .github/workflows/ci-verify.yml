@@ -84,6 +84,9 @@ jobs:
             api.anthropic.com:443
             github.com:443
             jobs.lever.co:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            nodejs.org:443
             registry.npmjs.org:443
             wellfound.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -148,6 +151,11 @@ jobs:
         run: npm rebuild --ignore-scripts
       - name: Core test suite
         run: npm test
+      - name: Textual interface tests (isolated Python environment, no model calls)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/careerrat-textual"
+          "$RUNNER_TEMP/careerrat-textual/bin/python" -m pip install --require-hashes --only-binary=:all: -r src/core/tui/requirements.txt
+          "$RUNNER_TEMP/careerrat-textual/bin/python" tests/tui_textual_ui.py
       - name: Web UI test suite
         run: npm --workspace apps/web test
 
@@ -164,6 +172,7 @@ jobs:
           # (Stable baseline, 152 runs since the endpoint set last changed).
           allowed-endpoints: >
             github.com:443
+            nodejs.org:443
             registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -252,6 +261,7 @@ jobs:
           # stable baseline).
           allowed-endpoints: >
             github.com:443
+            nodejs.org:443
             registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -600,6 +610,7 @@ jobs:
           # baseline, 152 runs since the endpoint set last changed).
           allowed-endpoints: >
             github.com:443
+            nodejs.org:443
             registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

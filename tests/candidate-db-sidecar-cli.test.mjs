@@ -159,6 +159,70 @@ test("careerrat data candidate CLI hides and refuses voluntary self-identificati
   assert.equal(stored["form-defaults"].voluntary_self_identification.enabled, true);
 });
 
+test("candidate get hides stored current pay while preserving target pay and canonical data", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { current_base: 124321, minimum_base: 180000 } },
+  });
+  const visible = dataCli(repoRoot, ["candidate", "get"]);
+  assert.equal(visible.profile.compensation.minimum_base, 180000);
+  assert.equal(Object.hasOwn(visible.profile.compensation, "current_base"), false);
+  assert.doesNotMatch(JSON.stringify(visible), /124321/);
+  assert.equal(candidateConfigGet({ repoRoot }).profile.compensation.current_base, 124321);
+});
+
+test("candidate patch responses exclude private defaults and current pay already stored in the document", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  candidateConfigPatch({
+    repoRoot,
+    name: "form-defaults",
+    patch: {
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "leave_blank",
+        confirmed_at: "2026-08-26T12:00:00Z",
+        answers: {
+          "race ethnicity": {
+            value: "private patch answer",
+            confirmed_at: "2026-08-26T12:00:00Z",
+          },
+        },
+      },
+    },
+  });
+  const visible = dataCli(repoRoot, [
+    "candidate",
+    "patch",
+    "form-defaults",
+    "--data",
+    JSON.stringify({ expected_base: 190000 }),
+  ]);
+  assert.equal(visible.data.expected_base, 190000);
+  assert.doesNotMatch(JSON.stringify(visible), /124321|private patch answer/);
+  assert.equal(Object.hasOwn(visible.data, "voluntary_self_identification"), false);
+  const stored = candidateConfigGet({ repoRoot })["form-defaults"];
+  assert.equal(stored.voluntary_self_identification.enabled, true);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { current_base: 124321, minimum_base: 180000 } },
+  });
+  const profile = dataCli(repoRoot, [
+    "candidate",
+    "patch",
+    "profile",
+    "--data",
+    JSON.stringify({ compensation: { target_base: 200000 } }),
+  ]);
+  assert.equal(profile.data.compensation.target_base, 200000);
+  assert.equal(profile.data.compensation.minimum_base, 180000);
+  assert.doesNotMatch(JSON.stringify(profile), /124321/);
+});
+
 test("careerrat automation writes DB candidate automation in DB mode and does not scaffold YAML", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["candidate", "init"]);

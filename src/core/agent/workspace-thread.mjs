@@ -341,22 +341,34 @@ export function workspaceOnboardingHandoff({
   });
 }
 
-export function workspaceMessageAppend({
-  repoRoot,
-  env = process.env,
-  role,
-  kind = "text",
-  text,
-  intent,
-  entity,
-  artifacts,
-  error,
-  metadata,
-  choice,
-  now,
-  id,
-  operationAttempt,
-} = {}) {
+export function workspaceMessageAppend(options = {}) {
+  return appendWorkspaceMessage(options);
+}
+
+// The caller owns the transaction, so history can commit with its domain write.
+export function workspaceMessageAppendInDb(db, options = {}) {
+  return appendWorkspaceMessage(options, db);
+}
+
+function appendWorkspaceMessage(
+  {
+    repoRoot,
+    env = process.env,
+    role,
+    kind = "text",
+    text,
+    intent,
+    entity,
+    artifacts,
+    error,
+    metadata,
+    choice,
+    now,
+    id,
+    operationAttempt,
+  } = {},
+  dbOverride
+) {
   const cleanRole = String(role || "").trim();
   const cleanKind = String(kind || "").trim();
   if (!ROLE_VALUES.has(cleanRole))
@@ -368,12 +380,12 @@ export function workspaceMessageAppend({
     max: cleanKind === "intake" ? 1024 * 1024 : 50_000,
   });
   const at = dateIso(now);
-  const db = requireDb({ repoRoot, env });
+  const db = dbOverride || requireDb({ repoRoot, env });
   const messageId = String(id || randomUUID());
   const safeMetadata = jsonClone(metadata, "metadata");
   const safeChoice = jsonClone(choice, "choice reply");
 
-  const result = withTransaction(db, () => {
+  const append = () => {
     const thread = ensureThread(db, at);
     assertActiveOperation(db, operationAttempt);
     const existingRow = db
@@ -443,8 +455,8 @@ export function workspaceMessageAppend({
       WORKSPACE_THREAD_ID
     );
     return { thread: updatedThread, message };
-  });
-
+  };
+  const result = dbOverride ? append() : withTransaction(db, append);
   return { ok: true, ...result };
 }
 

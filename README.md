@@ -494,6 +494,25 @@ careerrat tracker       # write a recovery snapshot and summary
 careerrat tracker-dev   # serve the local browser workspace at localhost:7777
 ```
 
+### Textual workspace
+
+`careerrat tui` opens clickable saved jobs, details, requirement reports and
+history beside native agent chat. Use `--agent claude` or `--agent codex` to
+choose the agent, or `--no-agent` to browse saved jobs. F6 switches focus;
+Ctrl+Q closes the workspace and its agent.
+
+First launch needs Python 3.11 or newer with venv support. Linux also needs
+make and a C++ compiler for the native terminal dependency; its build fetches
+Node headers from nodejs.org. CareerRat installs
+hash-locked Textual dependencies in a private environment. `careerrat tui setup`
+prepares it ahead of time; `CAREERRAT_TUI_PYTHON` selects a Python interpreter.
+Your global Python packages and candidate data stay separate from that runtime.
+
+Search, Review and Apply insert a request into the agent. Review it and press
+Enter there to run it. Add context saves pasted documents or local files before
+generating its request. Read saved JD opens the captured posting locally.
+The browser `start` entry remains available while terminal acceptance continues.
+
 ### Build from source
 
 ```bash

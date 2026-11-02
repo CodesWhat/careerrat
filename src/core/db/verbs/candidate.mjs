@@ -636,8 +636,17 @@ function ensureSetupRows(db) {
   putSingletonIfMissing(db, "candidate_setup", DEFAULT_SETUP);
 }
 
-function completeCandidateConfigWrite(db, name, { data, setup }, { recordActivity = true } = {}) {
-  if (!recordActivity) return { data, setup, meta: null, event: null };
+function completeCandidateConfigWrite(
+  db,
+  name,
+  { data, setup },
+  { recordActivity = true, onWrite, before } = {}
+) {
+  const history = onWrite ? onWrite({ db, name, before, after: data }) : undefined;
+  if (history && typeof history.then === "function")
+    throw new TypeError("Candidate write hooks must be synchronous");
+  const recorded = onWrite ? { history } : {};
+  if (!recordActivity) return { data, setup, meta: null, event: null, ...recorded };
   const activity = CANDIDATE_ACTIVITY[name] || {
     title: "Candidate settings updated",
     operation: "candidate:settings-update",
@@ -650,7 +659,7 @@ function completeCandidateConfigWrite(db, name, { data, setup }, { recordActivit
     summary: activity.summary,
     tags: [`operation:${activity.operation}`],
   });
-  return { data, setup, meta, event };
+  return { data, setup, meta, event, ...recorded };
 }
 
 export function candidateSetupInitialize({ repoRoot, env } = {}) {
@@ -773,6 +782,7 @@ export function candidateConfigPatch({
   patch,
   unset,
   recordActivity = true,
+  onWrite,
 } = {}) {
   if (!SINGLETON_TABLES[name]) {
     const err = new Error(`unknown candidate config "${name}"`);
@@ -784,11 +794,18 @@ export function candidateConfigPatch({
     err.code = "BAD_REQUEST";
     throw err;
   }
+  if (onWrite !== undefined && typeof onWrite !== "function")
+    throw new TypeError("onWrite must be a synchronous function");
   const unsetList = normalizeUnsetList(unset);
 
   return runVerb(
     { repoRoot, env },
     (db) => {
+      const before = onWrite
+        ? name === "targeting"
+          ? readTargeting(db)
+          : readSingleton(db, SINGLETON_TABLES[name], DEFAULTS[name] || {})
+        : undefined;
       if (name === "targeting") {
         const current = unsetPaths(readTargeting(db), unsetList);
         const merged = deepMerge(current, patch);
@@ -805,7 +822,7 @@ export function candidateConfigPatch({
           db,
           name,
           { data: readTargeting(db), setup: refreshCandidateSetup(db) },
-          { recordActivity }
+          { recordActivity, onWrite, before }
         );
       }
 
@@ -821,7 +838,7 @@ export function candidateConfigPatch({
           db,
           name,
           { data: merged, setup: refreshCandidateSetup(db) },
-          { recordActivity }
+          { recordActivity, onWrite, before }
         );
       }
 
@@ -839,7 +856,7 @@ export function candidateConfigPatch({
         db,
         name,
         { data: merged, setup: refreshCandidateSetup(db) },
-        { recordActivity }
+        { recordActivity, onWrite, before }
       );
     },
     { requireExistingTracker: true }
@@ -952,7 +969,7 @@ function assertEvidenceClaimsUnused(db, claimIds) {
 
 // The merge itself, run inside a caller's open transaction so a caller that
 // needs more writes to commit or roll back with it (deep-ingest confirm) can.
-export function mergeEvidenceClaimsInDb(db, { claims, recordActivity = true } = {}) {
+export function mergeEvidenceClaimsInDb(db, { claims, recordActivity = true, onWrite } = {}) {
   const existing = readEvidence(db).claims;
   const seenClaims = new Map(
     existing.map((claim) => [String(claim.claim || "").trim(), String(claim.id || "")])
@@ -996,6 +1013,9 @@ export function mergeEvidenceClaimsInDb(db, { claims, recordActivity = true } = 
   }
   const evidence = readEvidence(db);
   assertValid("evidence", evidence);
+  const history = onWrite ? onWrite({ db, before: existing, after: evidence.claims }) : undefined;
+  if (history && typeof history.then === "function")
+    throw new TypeError("Evidence write hooks must be synchronous");
   const meta = added > 0 && recordActivity ? bumpMeta(db) : null;
   const event =
     added > 0 && recordActivity
@@ -1016,19 +1036,28 @@ export function mergeEvidenceClaimsInDb(db, { claims, recordActivity = true } = 
     setup: refreshCandidateSetup(db),
     meta,
     event,
+    ...(onWrite ? { history } : {}),
   };
 }
 
-export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity = true } = {}) {
+export function candidateEvidenceMerge({
+  repoRoot,
+  env,
+  claims,
+  recordActivity = true,
+  onWrite,
+} = {}) {
   if (!Array.isArray(claims)) {
     const err = new Error("claims must be an array");
     err.code = "BAD_REQUEST";
     throw err;
   }
   assertCleanEvidenceClaims(claims);
+  if (onWrite !== undefined && typeof onWrite !== "function")
+    throw new TypeError("onWrite must be a synchronous function");
   return runVerb(
     { repoRoot, env },
-    (db) => mergeEvidenceClaimsInDb(db, { claims, recordActivity }),
+    (db) => mergeEvidenceClaimsInDb(db, { claims, recordActivity, onWrite }),
     { requireExistingTracker: true }
   );
 }
