@@ -68,6 +68,7 @@ import {
   scanSearchSources,
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
+import { annotateTopResults } from "../src/core/search/ai-rerank.mjs";
 import { planDeadBoardSkips, recordDeadBoardOutcome } from "../src/core/search/dead-boards.mjs";
 import {
   SEARCH_NOT_SEARCHABLE_BROWSER_REASON,
@@ -536,6 +537,7 @@ export async function runSourcedScan({
   captureBrowserSourceImpl,
   recheckDead = false,
   hostThrottle,
+  rerankImpl = annotateTopResults,
   signal,
 } = {}) {
   const ensureActive = () => {
@@ -880,6 +882,22 @@ export async function runSourcedScan({
     filtered = { ...filtered, kept: checked, expired: dropped };
   }
 
+  // Opt-in AI rerank: annotates the top results, never filters or reorders them.
+  let aiRerank = null;
+  if (filtered.kept.length > 0) {
+    ensureActive();
+    const reranked = await rerankImpl({
+      kept: filtered.kept,
+      config: candidateConfig,
+      repoRoot,
+      env,
+      signal,
+    });
+    ensureActive();
+    if (reranked.aiRerank.status !== "disabled") aiRerank = reranked.aiRerank;
+    filtered = { ...filtered, kept: reranked.kept };
+  }
+
   if (write) ensureActive();
   const revalidatedExisting =
     write && !standaloneConfigMode
@@ -1063,6 +1081,7 @@ export async function runSourcedScan({
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
     ...(throttle ? { requestStats: throttle.stats() } : {}),
+    ...(aiRerank ? { aiRerank } : {}),
     coldFamilies,
     revalidatedExisting,
     offers: outputOffers,
@@ -1117,6 +1136,7 @@ export function printSummary(summary, offers, cfg, limit) {
       `Rate limited: ${stats.rateLimited} of ${stats.attempts} requests (${stats.rateLimitedPct}%), ${stats.retried} retried after backoff`
     );
   }
+  if (summary.aiRerank) console.log(`AI rerank: ${summary.aiRerank.message}`);
   console.log(`Scanned: ${summary.scanned}`);
   console.log(`New after filters/dedupe: ${summary.new}`);
   console.log(`Filtered by title: ${summary.filteredTitle}`);

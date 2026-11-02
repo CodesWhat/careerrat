@@ -101,6 +101,15 @@
             "saved_at": { "type": "string" }
           }
         },
+        "ai_rerank": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Opt-in. When enabled, the top results get an AI fit note and suggested order. Never filters or hides a result.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "top_n": { "type": "integer", "minimum": 1, "maximum": 50 }
+          }
+        },
         "ai_prompts": {
           "type": "array",
           "items": {

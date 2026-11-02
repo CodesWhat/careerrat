@@ -3297,3 +3297,42 @@ test("a 429 with Retry-After is retried inside the scan and reported in requestS
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
+
+test("the rerank hook annotates results without removing any and reports its status", async () => {
+  const repoRoot = tempRepo();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot, {
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    });
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify([
+          {
+            text: "Platform Engineer",
+            hostedUrl: "https://jobs.lever.co/acme/role-1",
+            categories: { location: "Remote - US" },
+            descriptionPlain: "Build reliable platform infrastructure and developer tooling.",
+          },
+        ]),
+        { status: 200 }
+      );
+    const baseline = await runSourcedScan({ repoRoot, configPath, write: false, fetchImpl });
+    assert.equal(baseline.aiRerank, undefined, "off by default: no AI status in the summary");
+    const summary = await runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      fetchImpl,
+      rerankImpl: async ({ kept }) => ({
+        kept: kept.map((offer) => ({ ...offer, aiNote: "Worth a look." })),
+        aiRerank: { status: "ok", message: "noted", annotated: kept.length, suggestedOrder: [] },
+      }),
+    });
+    assert.equal(summary.offers.length, baseline.offers.length);
+    assert.equal(summary.offers[0].aiNote, "Worth a look.");
+    assert.equal(summary.aiRerank.status, "ok");
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
