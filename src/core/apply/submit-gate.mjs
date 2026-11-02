@@ -28,20 +28,6 @@ import {
 import { employerApplyLink, isLinkedInUrl } from "./linkedin-link.mjs";
 import { createOrcaOps, runOrcaCommand } from "./orca-ops.mjs";
 
-export const REFUSAL_CODES = Object.freeze([
-  "MANUAL_SUBMIT_MODE",
-  "LINKEDIN_NEVER_AUTO_SUBMIT",
-  "ALREADY_SUBMITTED",
-  "GATE_NOT_CLEARED",
-  "ANSWER_NEEDED",
-  "SESSION_UNREACHABLE",
-  "UNTRUSTED_ORIGIN",
-  "HUMAN_CHALLENGE",
-  "REQUIRED_FIELDS_BLANK",
-  "UPLOAD_MISSING",
-  "NO_SUBMIT_BUTTON",
-]);
-
 const FIELD_ROLES = new Set([
   "textbox",
   "combobox",
