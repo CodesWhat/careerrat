@@ -127,7 +127,7 @@ test("set-status, schedule-interview and --follow-up-due reject junk values", (t
   json(ctx, ["data", "init"]);
   addApp(ctx);
   const status = json(ctx, ["data", "app", "set-status", "app-1", "bogus-status"], 1);
-  assert.match(status.error, /doesn't match any status/);
+  assert.match(status.error, /not a status CareerRat knows/);
   const due = json(
     ctx,
     ["data", "app", "set-status", "app-1", "interview", "--follow-up-due", "notadate"],

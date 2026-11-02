@@ -309,13 +309,6 @@ export function appSetStatus({
     error.code = "BAD_APPLIED_AT";
     throw error;
   }
-  if (!isKnownStatusLabel(to)) {
-    const error = new Error(
-      `appSetStatus: "${to}" doesn't match any status CareerRat recognizes (try applied, interview, offer, rejected, withdrawn)`
-    );
-    error.code = "BAD_STATUS";
-    throw error;
-  }
   if (followUpDueAt != null && Number.isNaN(Date.parse(followUpDueAt))) {
     const error = new Error("appSetStatus: followUpDueAt must be an ISO date or datetime");
     error.code = "BAD_FOLLOW_UP_DUE";
