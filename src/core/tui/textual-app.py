@@ -12,7 +12,7 @@ import time
 
 from rich.text import Text
 from textual import events
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
 from textual.geometry import Offset, Region
@@ -482,7 +482,10 @@ class RemoveFile(Button):
 
 
 class ContextCapture(ModalScreen):
-    BINDINGS = [Binding("ctrl+s", "save", "Save context", priority=True)]
+    BINDINGS = [
+        Binding("ctrl+s", "save", "Save context", priority=True),
+        Binding("escape", "close", "Cancel"),
+    ]
     CSS = """
     ContextCapture { align: center middle; background: $background 70%; }
     #capture-dialog { width: 85%; height: 70%; padding: 1 2; border: round $accent; background: $surface; }
@@ -563,6 +566,9 @@ class ContextCapture(ModalScreen):
             f"Not saved: {message}\nYour text and files are still here. Fix it and try again."
         )
 
+    def action_close(self):
+        self.dismiss()
+
     async def action_save(self):
         if self.waiting:
             return
@@ -592,6 +598,7 @@ class ContextCapture(ModalScreen):
 
 
 class JobDocument(ModalScreen):
+    BINDINGS = [Binding("escape", "close", "Close")]
     CSS = """
     JobDocument { align: center middle; background: $background 70%; }
     #document-dialog { width: 90%; height: 90%; padding: 1 2; border: round $accent; background: $surface; }
@@ -616,6 +623,9 @@ class JobDocument(ModalScreen):
                 id="jd-viewer",
             )
             yield Button("Close", id="close-document")
+
+    def action_close(self):
+        self.dismiss()
 
     def on_button_pressed(self, event):
         event.stop()
@@ -667,10 +677,20 @@ class RequestText(ModalScreen):
 class CareerRatApp(App):
     TITLE = "CareerRat · Workspace"
     AUTO_FOCUS = "#jobs"
-    ENABLE_COMMAND_PALETTE = False
+    # F1, because the agent keeps Ctrl+P for its own history.
+    COMMAND_PALETTE_BINDING = "f1"
     BINDINGS = [
         Binding("f6", "switch_focus", "Jobs / agent", priority=True),
         Binding("ctrl+q", "quit", "Quit", priority=True),
+        Binding("s", "request('search')", "Search jobs"),
+        Binding("v", "request('review')", "Review matches"),
+        Binding("a", "request('apply')", "Apply selected"),
+        Binding("c", "add_context", "Add context"),
+        Binding("f5", "refresh_jobs", "Refresh"),
+        Binding("t", "filter('status')", "Status", show=False),
+        Binding("y", "filter('currency')", "Currency", show=False),
+        Binding("b", "filter('basis')", "Pay basis", show=False),
+        Binding("o", "filter('order')", "Pay order", show=False),
     ]
     CSS = """
     #toolbar { height: auto; padding: 0 1; layout: vertical; }
@@ -1415,6 +1435,42 @@ class CareerRatApp(App):
                 "cancel-undo": "escape",
             }[name]
             await self.send({"op": "key", "name": key})
+
+    def check_action(self, action, parameters):
+        # Single letters belong to the agent and to text boxes; they only act
+        # from the jobs side, and never under a dialog.
+        if action in ("request", "add_context", "refresh_jobs", "filter"):
+            if len(self.screen_stack) > 1 or self.query_one(NativePane).has_focus:
+                return False
+            if action == "filter" and not self.query_one(f"#{parameters[0]}").display:
+                return False
+        return True
+
+    def get_system_commands(self, screen):
+        yield from super().get_system_commands(screen)
+        for label, help_text, callback in (
+            ("Search jobs", "Ask the agent to search for jobs", lambda: self.action_request("search")),
+            ("Review matches", "Ask the agent to review the shown jobs", lambda: self.action_request("review")),
+            ("Apply selected", "Ask the agent to apply to the selected job", lambda: self.action_request("apply")),
+            ("Add context", "Paste a JD, transcript or file path", self.action_add_context),
+            ("Refresh", "Read the saved workspace again", self.action_refresh_jobs),
+            ("Jobs / agent", "Move focus between the jobs table and the agent", self.action_switch_focus),
+        ):
+            yield SystemCommand(label, help_text, callback)
+
+    async def action_request(self, name):
+        await self.send({"op": "request", "action": name})
+
+    def action_add_context(self):
+        self.push_screen(ContextCapture())
+
+    async def action_refresh_jobs(self):
+        await self.send({"op": "refresh"})
+
+    def action_filter(self, name):
+        select = self.query_one(f"#{name}", Select)
+        select.focus()
+        select.action_show_overlay()
 
     def action_switch_focus(self):
         pane = self.query_one(NativePane)

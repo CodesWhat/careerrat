@@ -374,6 +374,32 @@ closeAll();
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_letters_go_to_the_agent_not_the_shortcuts_when_the_pane_has_focus(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-letters-") as folder:
+            home = Path(folder)
+            self.fake_agent(home)
+            (home / "workspace").mkdir()
+            (home / "workspace/tracker.json").write_text(
+                json.dumps({"applications": [{"id": "a", "company": "Alpha", "role": "Dev", "status": "applied"}]})
+            )
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            async with app.run_test(size=(160, 40)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "AGENT_READY" in pane.render().plain)
+                await pilot.press("f6", "s", "v")
+                await until(lambda: len(self.agent_log(home)) >= 1)
+                self.assertNotIsInstance(app.screen, MODULE.RequestText)
+                self.assertIn("s", "".join(item["data"] for item in self.agent_log(home)))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
     async def test_saved_jobs_clicks_requests_context_and_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-ui-") as folder:
             home = Path(folder)
@@ -1305,6 +1331,61 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     app.snapshot["state"]["selectedId"], app.selected_id
                 )
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_every_toolbar_action_has_a_key_escape_closes_dialogs_and_f1_opens_the_palette(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-keys-") as folder:
+            self.make_home(folder, self.synthetic_jobs())
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 40)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 2)
+                self.assertTrue(table.has_focus)
+                for key, name in (("s", "search"), ("v", "review"), ("a", "apply")):
+                    await pilot.press(key)
+                    await until(lambda: isinstance(app.screen, MODULE.RequestText))
+                    self.assertIn(
+                        "No agent", app.screen.reason, f"{key} did not send {name}"
+                    )
+                    await pilot.press("escape")
+                    await until(lambda: not isinstance(app.screen, MODULE.RequestText))
+                await pilot.press("c")
+                await until(lambda: isinstance(app.screen, MODULE.ContextCapture))
+                # Letters are text inside a dialog, not shortcuts.
+                await pilot.press("s", "a")
+                self.assertEqual(app.screen.query_one("#context-text").text, "sa")
+                await pilot.press("escape")
+                await until(lambda: not isinstance(app.screen, MODULE.ContextCapture))
+                await pilot.press("f5")
+                await pilot.pause()
+                self.assertEqual(app.errors, [])
+                for key, select_id in (
+                    ("t", "status"),
+                    ("b", "basis"),
+                    ("o", "order"),
+                ):
+                    await pilot.press(key)
+                    await until(lambda: app.query_one(f"#{select_id}", Select).expanded)
+                    await pilot.press("escape")
+                    await until(lambda: not app.query_one(f"#{select_id}", Select).expanded)
+                # The currency list only exists with more than one currency.
+                await pilot.press("y")
+                await pilot.pause()
+                self.assertFalse(app.query_one("#currency", Select).expanded)
+                await pilot.press("f1")
+                await until(lambda: type(app.screen).__name__ == "CommandPalette")
+                await pilot.press("escape")
+                await until(lambda: type(app.screen).__name__ != "CommandPalette")
+                await app.run_action("add_context")
+                await until(lambda: isinstance(app.screen, MODULE.ContextCapture))
+                await pilot.press("escape")
+                await until(lambda: not isinstance(app.screen, MODULE.ContextCapture))
+                commands = [item.title for item in app.get_system_commands(app.screen)]
+                for title in ("Search jobs", "Review matches", "Apply selected", "Add context", "Refresh"):
+                    self.assertIn(title, commands)
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
