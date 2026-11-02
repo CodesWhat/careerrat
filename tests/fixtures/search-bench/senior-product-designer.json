@@ -31,13 +31,39 @@
               "Lead Product Designer",
               "Principal Product Designer"
             ]
+          },
+          {
+            "rank": 5,
+            "titles": [
+              "Design Manager",
+              "Product Design Manager",
+              "Design Director",
+              "Director of Product Design",
+              "Head of Design",
+              "VP of Design"
+            ]
           }
-        ]
+        ],
+        "seniority_ceiling": 4
       },
       {
         "name": "Design Systems",
         "priority": "secondary",
         "titles": ["Senior Design Systems Designer"]
+      },
+      {
+        "name": "Adjacent Design Roles",
+        "priority": "secondary",
+        "titles": [
+          "UX Designer",
+          "Senior UX Designer",
+          "Interaction Designer",
+          "Senior Interaction Designer",
+          "Product Experience Designer",
+          "Senior Designer, Product",
+          "UX Researcher and Designer",
+          "Design Lead"
+        ]
       }
     ],
     "keep_signals": ["design systems", "user research", "prototyping", "B2B SaaS"],
@@ -57,7 +83,8 @@
       "home": "Chicago, IL",
       "remote": true,
       "hybrid": true,
-      "onsite": false
+      "onsite": false,
+      "commute_cities": ["Evanston, IL", "Oak Park, IL", "Schaumburg, IL"]
     },
     "authorization": {
       "work_authorized": true,

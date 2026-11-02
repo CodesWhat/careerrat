@@ -14,16 +14,77 @@
           "Staff Frontend Engineer",
           "Principal Frontend Engineer",
           "Staff Software Engineer, Frontend"
-        ]
+        ],
+        "seniority_ladder": [
+          {
+            "rank": 10,
+            "titles": [
+              "Junior Frontend Developer",
+              "Frontend Engineer Intern",
+              "Associate Frontend Engineer"
+            ]
+          },
+          {
+            "rank": 20,
+            "titles": ["Frontend Engineer", "Software Engineer, Frontend"]
+          },
+          {
+            "rank": 30,
+            "titles": ["Senior Frontend Engineer", "Senior Software Engineer, Frontend"]
+          },
+          {
+            "rank": 40,
+            "titles": [
+              "Staff Frontend Engineer",
+              "Principal Frontend Engineer",
+              "Lead Frontend Engineer",
+              "Staff Software Engineer, Frontend",
+              "Senior Staff Frontend Engineer"
+            ]
+          },
+          {
+            "rank": 50,
+            "titles": [
+              "Frontend Engineering Manager",
+              "Director of Frontend Engineering",
+              "VP of Engineering"
+            ]
+          }
+        ],
+        "seniority_ceiling": 40
       },
       {
-        "name": "Web Platform",
+        "name": "Web and UI Adjacent",
         "priority": "secondary",
-        "titles": ["Staff Web Platform Engineer", "Staff UI Engineer"]
+        "titles": [
+          "Staff Web Platform Engineer",
+          "Staff UI Engineer",
+          "Staff Design Engineer",
+          "Staff Web Engineer",
+          "Staff Software Engineer, Web",
+          "Frontend Architect",
+          "Staff Full Stack Engineer"
+        ]
       }
     ],
     "keep_signals": ["design systems", "web performance", "React", "TypeScript"],
-    "cut_signals": ["Sales Engineer", "Recruiter", "Developer Advocate"]
+    "cut_signals": ["Sales Engineer", "Recruiter", "Developer Advocate"],
+    "role_families": [
+      {
+        "name": "frontend",
+        "patterns": [
+          "frontend engineer",
+          "front-end engineer",
+          "frontend developer",
+          "software engineer, frontend",
+          "software engineer, front-end"
+        ]
+      },
+      {
+        "name": "web-platform",
+        "patterns": ["web platform", "ui engineer"]
+      }
+    ]
   },
   "profile": {
     "candidate": {
@@ -39,7 +100,8 @@
       "home": "Denver, CO",
       "remote": true,
       "hybrid": true,
-      "onsite": false
+      "onsite": false,
+      "commute_cities": ["Boulder, CO", "Aurora, CO", "Lakewood, CO"]
     },
     "authorization": {
       "work_authorized": true,

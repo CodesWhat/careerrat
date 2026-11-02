@@ -72,6 +72,11 @@
         "home_latitude": { "type": ["number", "null"], "minimum": -90, "maximum": 90 },
         "home_longitude": { "type": ["number", "null"], "minimum": -180, "maximum": 180 },
         "max_commute_days_per_week": { "type": ["integer", "null"], "minimum": 0, "maximum": 7 },
+        "commute_cities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Cities, suburbs and towns of the home metro that count as local for hybrid and on-site roles, written the way job boards write them (\"Aurora, CO\")."
+        },
         "relocation": { "type": "array", "items": { "type": "string" } },
         "travel_tolerance": { "type": "string" }
       }

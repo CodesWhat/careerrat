@@ -126,6 +126,13 @@ function targetRank(bucket, levels) {
   return ranks.length > 0 ? Math.min(...ranks) : null;
 }
 
+// Optional per-bucket ceiling: ranks strictly above it are too senior for this
+// candidate (the ladder lists them so they can be recognized and cut).
+function seniorityCeiling(bucket) {
+  const ceiling = bucket?.seniority_ceiling;
+  return Number.isInteger(ceiling) ? ceiling : null;
+}
+
 export function relativeSeniority(title, targeting = {}) {
   const decisions = [];
   for (const bucket of Array.isArray(targeting?.role_buckets) ? targeting.role_buckets : []) {
@@ -134,16 +141,23 @@ export function relativeSeniority(title, targeting = {}) {
     if (minimumRank == null) continue;
     const actualLevel = matchingLevel(title, levels);
     if (!actualLevel) continue;
+    const ceiling = seniorityCeiling(bucket);
     decisions.push({
       bucket: String(bucket?.name || ""),
       rank: actualLevel.rank,
       targetRank: minimumRank,
-      classification: actualLevel.rank < minimumRank ? "below-target" : "at-or-above-target",
+      classification:
+        actualLevel.rank < minimumRank
+          ? "below-target"
+          : ceiling != null && actualLevel.rank > ceiling
+            ? "above-target"
+            : "at-or-above-target",
     });
   }
 
   return (
     decisions.find((decision) => decision.classification === "at-or-above-target") ||
+    decisions.find((decision) => decision.classification === "above-target") ||
     decisions[0] || { classification: "unclassified" }
   );
 }

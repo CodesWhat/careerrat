@@ -19,6 +19,10 @@
           "notes": { "type": "string" },
           "fit_signals": { "type": "array", "items": { "type": "string" } },
           "down_signals": { "type": "array", "items": { "type": "string" } },
+          "seniority_ceiling": {
+            "type": "integer",
+            "description": "Optional. With a seniority_ladder, ranks strictly above this are too senior and are cut. Omit to cut nothing above the target."
+          },
           "seniority_ladder": {
             "type": "array",
             "minItems": 2,

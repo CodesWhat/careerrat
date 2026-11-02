@@ -10,12 +10,61 @@
       {
         "name": "Program Management",
         "priority": "primary",
-        "titles": ["Senior Program Manager", "Technical Program Manager", "Program Manager"]
+        "titles": ["Senior Program Manager", "Technical Program Manager", "Program Manager"],
+        "seniority_ladder": [
+          {
+            "rank": 10,
+            "titles": ["Associate Program Manager", "Program Coordinator", "Program Analyst"]
+          },
+          {
+            "rank": 20,
+            "titles": ["Program Manager"]
+          },
+          {
+            "rank": 30,
+            "titles": [
+              "Senior Program Manager",
+              "Technical Program Manager",
+              "Senior Technical Program Manager"
+            ]
+          },
+          {
+            "rank": 40,
+            "titles": [
+              "Director of Program Management",
+              "Program Director",
+              "Head of Program Management"
+            ]
+          },
+          {
+            "rank": 50,
+            "titles": ["VP of Program Management", "Vice President, Programs"]
+          }
+        ],
+        "seniority_ceiling": 30
       },
       {
         "name": "Operations",
         "priority": "secondary",
-        "titles": ["Operations Manager", "Senior Operations Manager"]
+        "titles": [
+          "Operations Manager",
+          "Senior Operations Manager",
+          "Business Operations Manager",
+          "Strategy and Operations Manager",
+          "Program Operations Manager"
+        ]
+      },
+      {
+        "name": "Delivery and Project Management",
+        "priority": "secondary",
+        "titles": [
+          "Project Manager",
+          "Senior Project Manager",
+          "Delivery Manager",
+          "Implementation Manager",
+          "Senior Implementation Manager",
+          "Chief of Staff"
+        ]
       }
     ],
     "keep_signals": [
@@ -24,7 +73,17 @@
       "process improvement",
       "stakeholder management"
     ],
-    "cut_signals": ["Sales", "Recruiter", "Account Executive"]
+    "cut_signals": ["Sales", "Recruiter", "Account Executive"],
+    "role_families": [
+      {
+        "name": "program-management",
+        "patterns": ["program manager", "program management", "technical program"]
+      },
+      {
+        "name": "operations",
+        "patterns": ["operations manager", "business operations"]
+      }
+    ]
   },
   "profile": {
     "candidate": {
@@ -40,7 +99,8 @@
       "home": "Atlanta, GA",
       "remote": true,
       "hybrid": true,
-      "onsite": false
+      "onsite": false,
+      "commute_cities": ["Decatur, GA", "Marietta, GA", "Sandy Springs, GA"]
     },
     "authorization": {
       "work_authorized": true,

@@ -26,7 +26,7 @@ import { fetchWorkingNomads } from "../providers/workingnomads.mjs";
 import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
 import { normalizeCompanyRoleKey, normalizeTextKey } from "../tracker/tracker-data.mjs";
 import { extractReqId, identityAliasAdditions, postingIdentityKeys } from "./sourced-identity.mjs";
-import { titleFunctionRelation } from "./title-functions.mjs";
+import { buildLaneSpec, laneMatch } from "./title-lanes.mjs";
 
 export { extractReqId } from "./sourced-identity.mjs";
 export { normalizeCompanyRoleKey };
@@ -127,11 +127,19 @@ export function buildTitleFilter(titleFilter = {}, targeting = {}) {
   const positive = normalizeKeywordList(titleFilter.positive);
   const negative = normalizeKeywordList(titleFilter.negative);
   const belowTarget = normalizeKeywordList(titleFilter.below_target);
+  // Secondary-bucket titles are adjacent: shown, ranked below the primary ones.
+  const spec = buildLaneSpec(targeting, positive);
+  const secondary = new Set(spec.adjacent.map((title) => title.toLowerCase()));
+  const primaryTerms = positive.filter((term) => !secondary.has(term));
+  const exactTerms = primaryTerms.length > 0 ? primaryTerms : positive;
+  const adjacentTerms =
+    primaryTerms.length > 0 ? positive.filter((term) => secondary.has(term)) : [];
   const classify = (title = "") => {
     const lower = title.toLowerCase();
     const standing = relativeSeniority(title, targeting);
     const rankedEligible = standing.classification === "at-or-above-target";
-    const rankedBelow = standing.classification === "below-target";
+    const rankedBelow =
+      standing.classification === "below-target" || standing.classification === "above-target";
     const blocked =
       negative.some((term) => keywordMatches(lower, term)) ||
       rankedBelow ||
@@ -139,7 +147,7 @@ export function buildTitleFilter(titleFilter = {}, targeting = {}) {
     const matched =
       positive.length === 0 ||
       rankedEligible ||
-      positive.some(
+      exactTerms.some(
         (term) => keywordMatches(lower, term) || boundedRoleTitleEquivalent(lower, term)
       );
     return {
@@ -149,7 +157,8 @@ export function buildTitleFilter(titleFilter = {}, targeting = {}) {
         !matched &&
         !blocked &&
         standing.classification === "unclassified" &&
-        positive.some((term) => adjacentRoleTitleEquivalent(lower, term)),
+        (adjacentTerms.some((term) => keywordMatches(lower, term)) ||
+          adjacentRoleTitleEquivalent(lower, spec)),
     };
   };
   const filter = (title = "") => classify(title).matched;
@@ -181,10 +190,6 @@ const TITLE_DOMAIN_FAMILIES = [
   ]),
   new Set(["finance", "financial", "fintech", "payment", "payments"]),
 ];
-const TITLE_ADJACENT_FAMILIES = [
-  new Set(["design", "front", "frontend", "ui"]),
-  ...TITLE_DOMAIN_FAMILIES,
-];
 const TITLE_SPECIALIZATION_FAMILIES = [
   new Set(["advocate"]),
   new Set(["gtm"]),
@@ -202,24 +207,6 @@ const TITLE_SENIORITY_GROUPS = [
   new Set(["staff", "principal", "lead", "architect"]),
   new Set(["senior", "sr"]),
 ];
-const TITLE_ADJACENCY_STOPWORDS = new Set([
-  "assistant",
-  "associate",
-  "chief",
-  "director",
-  "head",
-  "intern",
-  "junior",
-  "lead",
-  "manager",
-  "principal",
-  "senior",
-  "specialist",
-  "staff",
-  "the",
-  "vice",
-]);
-
 function titleSpecializationsCompatible(actual, target) {
   return TITLE_SPECIALIZATION_FAMILIES.every(
     (family) => hasAny(actual, family) === hasAny(target, family)
@@ -243,9 +230,6 @@ function hasAny(tokens, values) {
 
 function boundedRoleTitleEquivalent(actualTitle, targetTitle) {
   if (MANAGEMENT_TITLE_RE.test(actualTitle) !== MANAGEMENT_TITLE_RE.test(targetTitle)) return false;
-  // A different function lane ("Staff Backend Engineer" for a frontend target)
-  // is not the target even when the domain families overlap on "platform".
-  if (titleFunctionRelation(actualTitle, targetTitle).relation === "conflict") return false;
   const actual = titleTokens(actualTitle);
   const target = titleTokens(targetTitle);
   if (!hasAny(target, TITLE_ENGINEERING_KINDS) || !hasAny(actual, TITLE_ENGINEERING_KINDS)) {
@@ -279,48 +263,16 @@ function titleSeniorityCompatible(actual, target) {
   );
 }
 
-function adjacentRoleTitleEquivalent(actualTitle, targetTitle) {
-  const fn = titleFunctionRelation(actualTitle, targetTitle);
-  // A title in another function lane is wrong, not adjacent.
-  if (fn.relation === "conflict") return false;
-  if (
-    !fn.managerIsRole &&
-    MANAGEMENT_TITLE_RE.test(actualTitle) !== MANAGEMENT_TITLE_RE.test(targetTitle)
-  ) {
-    return false;
-  }
+// A title in the candidate's lane or a secondary bucket that is not itself a
+// target title. Lanes and adjacent titles come from the candidate's targeting
+// (see title-lanes.mjs); a different lane is not adjacent.
+function adjacentRoleTitleEquivalent(actualTitle, spec) {
   const actual = titleTokens(actualTitle);
-  const target = titleTokens(targetTitle);
-  if (!titleSeniorityCompatible(actual, target)) return false;
-
-  if (hasAny(target, TITLE_ENGINEERING_KINDS)) {
-    // "Frontend Architect" names the lane without an engineering noun.
-    if (!hasAny(actual, TITLE_ENGINEERING_KINDS) && fn.relation !== "shared") return false;
-    if (!titleSpecializationsCompatible(actual, target)) {
-      return false;
-    }
-    return true;
-  }
-
-  if (fn.relation === "shared") return true;
-  return [...target].some(
-    (value) =>
-      value.length >= 4 &&
-      !TITLE_ADJACENCY_STOPWORDS.has(value) &&
-      !TITLE_ENGINEERING_KINDS.has(value) &&
-      actual.has(value)
+  return (
+    laneMatch(actualTitle, spec, (source) =>
+      titleSeniorityCompatible(actual, titleTokens(source))
+    ) !== null
   );
-}
-
-function adjacentTitleFamiliesCompatible(actualTitle, targetTitle) {
-  const familyFor = (title) => {
-    const words = titleTokens(title);
-    return TITLE_ADJACENT_FAMILIES.findIndex((family) => hasAny(words, family));
-  };
-  const targetFamily = familyFor(targetTitle);
-  if (targetFamily < 0) return true;
-  const actualFamily = familyFor(actualTitle);
-  return actualFamily < 0 || actualFamily === targetFamily;
 }
 
 // The same words in another order or with extra filler ("Food and Beverage
@@ -343,30 +295,28 @@ function targetRoleTitleMatchKind(actualTitle, targetTitles, targeting) {
   if (targetTitles.length === 0) return "target";
   const standing = relativeSeniority(actualTitle, targeting);
   if (standing.classification === "at-or-above-target") return "target";
-  if (standing.classification === "below-target") return null;
+  if (standing.classification === "below-target" || standing.classification === "above-target") {
+    return null;
+  }
+  const spec = buildLaneSpec(targeting, targetTitles);
+  const secondary = new Set(spec.adjacent.map((title) => title.toLowerCase()));
   const actual = String(actualTitle || "").toLowerCase();
   let adjacent = false;
   for (const targetTitle of targetTitles) {
     const target = String(targetTitle || "").toLowerCase();
-    if (
+    if (secondary.has(target)) {
+      if (keywordMatches(actual, target) || reorderedTitleEquivalent(actual, target)) {
+        adjacent = true;
+      }
+    } else if (
       keywordMatches(actual, target) ||
       boundedRoleTitleEquivalent(actual, target) ||
       reorderedTitleEquivalent(actual, target)
     ) {
       return "target";
     }
-    const targetHasDomain = TITLE_DOMAIN_FAMILIES.some((family) =>
-      hasAny(titleTokens(target), family)
-    );
-    if (
-      !targetHasDomain &&
-      adjacentRoleTitleEquivalent(actual, target) &&
-      adjacentTitleFamiliesCompatible(actual, target)
-    ) {
-      adjacent = true;
-    }
   }
-  return adjacent ? "adjacent" : null;
+  return adjacent || adjacentRoleTitleEquivalent(actual, spec) ? "adjacent" : null;
 }
 
 function targetRoleTitleMatches(actualTitle, targetTitles, targeting) {
@@ -660,6 +610,9 @@ function seniorityEligibility(offer, config) {
   if (standing.classification === "below-target") {
     return { eligible: false, reason: "seniority-below-target" };
   }
+  if (standing.classification === "above-target") {
+    return { eligible: false, reason: "seniority-above-target" };
+  }
   if (standing.classification === "at-or-above-target") return { eligible: true };
   const targetsManagement = targets.some((target) => MANAGEMENT_TITLE_RE.test(target));
   if (MANAGEMENT_TITLE_RE.test(title) && !targetsManagement) {
@@ -727,7 +680,14 @@ function commuteEligibility(location, profileLocation) {
   const relocations = Array.isArray(profileLocation?.relocation)
     ? profileLocation.relocation.filter(Boolean)
     : [];
-  if (placeMatchesAllowed(location, [home, ...relocations])) return { eligible: true };
+  // Cities the candidate lists as part of their commute area (suburbs, towns
+  // of the metro) count as home.
+  const commuteCities = Array.isArray(profileLocation?.commute_cities)
+    ? profileLocation.commute_cities.filter(Boolean)
+    : [];
+  if (placeMatchesAllowed(location, [home, ...commuteCities, ...relocations])) {
+    return { eligible: true };
+  }
 
   const radius = Number(profileLocation?.commute_radius_miles);
   const homeCoordinates =

@@ -1519,10 +1519,21 @@ test("distinct Hireology requisitions survive even when their job facts match", 
 });
 
 test("adjacent engineering titles are shown below exact matches in every mode while blockers stay blocked", () => {
-  const titleFilter = buildTitleFilter({
-    positive: ["Staff Frontend Engineer"],
-    negative: ["Security", "Sales"],
-  });
+  const targeting = {
+    role_buckets: [
+      { name: "Frontend", priority: "primary", titles: ["Staff Frontend Engineer"] },
+      {
+        name: "Design systems",
+        priority: "secondary",
+        titles: ["Staff Software Engineer, Design Systems"],
+      },
+    ],
+    keep_signals: ["accessibility systems"],
+  };
+  const titleFilter = buildTitleFilter(
+    { positive: ["Staff Frontend Engineer"], negative: ["Security", "Sales"] },
+    targeting
+  );
   const makeOffer = (id, title) => ({
     company: "Acme",
     title,
@@ -1797,15 +1808,19 @@ test("dedupe recognizes one Ashby requisition across official URL variants", () 
 });
 
 test("adjacent non-engineering titles require a shared occupation and strong candidate evidence", () => {
-  const titleFilter = buildTitleFilter({
-    positive: ["Registered Nurse, ICU"],
-    negative: ["Travel Nurse"],
-  });
+  const targeting = {
+    role_buckets: [
+      { name: "ICU", priority: "primary", titles: ["Registered Nurse, ICU"] },
+      { name: "Advanced practice", priority: "secondary", titles: ["Clinical Nurse Specialist"] },
+    ],
+    keep_signals: ["bedside care"],
+  };
+  const titleFilter = buildTitleFilter(
+    { positive: ["Registered Nurse, ICU"], negative: ["Travel Nurse"] },
+    targeting
+  );
   const config = {
-    targeting: {
-      role_buckets: [{ titles: ["Registered Nurse, ICU"] }],
-      keep_signals: ["bedside care"],
-    },
+    targeting,
     profile: { location: { home: "Columbus, OH", remote: true } },
   };
   const makeOffer = (id, title) => ({
@@ -3802,7 +3817,14 @@ test("config-driven scorer: nursing offer with config scores differently than wi
 
 test("scoring: a title that is only adjacent to the target is scored lower and worded as adjacent", () => {
   const config = {
-    targeting: { role_buckets: [{ title: "Release Engineer" }], keep_signals: [], cut_signals: [] },
+    targeting: {
+      role_buckets: [
+        { title: "Release Engineer" },
+        { name: "Data", priority: "secondary", titles: ["Data Engineer"] },
+      ],
+      keep_signals: [],
+      cut_signals: [],
+    },
   };
   const offer = (title) => ({
     title,
@@ -3828,9 +3850,23 @@ const FRONTEND_TITLE_FILTER = {
   negative: ["Intern", "Recruiter"],
   below_target: [],
 };
+const FRONTEND_TARGETING = {
+  role_buckets: [
+    {
+      name: "Frontend",
+      priority: "primary",
+      titles: ["Staff Frontend Engineer", "Principal Frontend Engineer"],
+    },
+    {
+      name: "Web adjacent",
+      priority: "secondary",
+      titles: ["Staff Design Engineer", "Staff Software Engineer, Web", "Frontend Architect"],
+    },
+  ],
+};
 
-test("title filter treats equivalent seniority tiers and function synonyms as adjacent", () => {
-  const filter = buildTitleFilter(FRONTEND_TITLE_FILTER);
+test("title filter treats rank-equivalent lane titles and secondary-bucket titles as adjacent", () => {
+  const filter = buildTitleFilter(FRONTEND_TITLE_FILTER, FRONTEND_TARGETING);
   for (const title of [
     "Staff Design Engineer",
     "Principal Software Engineer, Web",
@@ -3843,12 +3879,17 @@ test("title filter treats equivalent seniority tiers and function synonyms as ad
   }
 });
 
-test("title filter rejects a different function even with matching seniority and noun", () => {
-  const filter = buildTitleFilter({
-    positive: ["Staff Frontend Engineer", "Staff Web Platform Engineer"],
-    negative: [],
-    below_target: [],
-  });
+test("title filter rejects a different lane even with matching seniority and noun", () => {
+  const targeting = {
+    role_buckets: [
+      { name: "Frontend", priority: "primary", titles: ["Staff Frontend Engineer"] },
+      { name: "Platform", priority: "secondary", titles: ["Staff Web Platform Engineer"] },
+    ],
+  };
+  const filter = buildTitleFilter(
+    { positive: ["Staff Frontend Engineer", "Staff Web Platform Engineer"], negative: [] },
+    targeting
+  );
   for (const title of [
     "Staff Backend Engineer",
     "Staff Data Engineer",
@@ -3860,44 +3901,120 @@ test("title filter rejects a different function even with matching seniority and
   }
 });
 
-test("title filter recognizes design and program-management function synonyms", () => {
-  const design = buildTitleFilter({
-    positive: ["Senior Product Designer"],
-    negative: [],
-  });
+test("adjacent titles come from the candidate's secondary buckets, not a built-in lexicon", () => {
+  const targeting = {
+    role_buckets: [
+      { name: "Design", priority: "primary", titles: ["Senior Product Designer"] },
+      {
+        name: "Design neighbours",
+        priority: "secondary",
+        titles: ["Senior UX Designer", "Senior Interaction Designer", "Design Lead"],
+      },
+    ],
+  };
+  const withBuckets = buildTitleFilter({ positive: ["Senior Product Designer"] }, targeting);
   for (const title of [
     "Senior UX Designer",
     "Senior Interaction Designer",
-    "Senior UX Researcher & Designer",
-    "Design Lead, Mobile Product",
+    "Design Lead, Mobile",
   ]) {
-    assert.equal(design.classify(title).adjacent, true, title);
+    assert.equal(withBuckets.classify(title).adjacent, true, title);
   }
-  assert.equal(design.classify("Senior Product Manager").adjacent, false);
-  assert.equal(design.classify("Senior Software Engineer").adjacent, false);
+  assert.equal(withBuckets.classify("Senior Product Manager").adjacent, false);
+  assert.equal(withBuckets.classify("Senior Software Engineer").adjacent, false);
 
-  const program = buildTitleFilter({
-    positive: ["Senior Program Manager", "Program Manager"],
-    negative: [],
-  });
-  for (const title of [
-    "Senior Project Manager",
-    "Delivery Manager",
-    "Senior Chief of Staff",
-    "Senior Implementation Manager",
-    "Program Operations Lead",
-  ]) {
-    assert.equal(program.classify(title).adjacent, true, title);
+  // The same titles with no secondary bucket are not guessed at.
+  const bare = buildTitleFilter({ positive: ["Senior Product Designer"] }, {});
+  for (const title of ["Senior UX Designer", "Senior Interaction Designer"]) {
+    assert.equal(bare.classify(title).adjacent, false, title);
   }
-  assert.equal(program.classify("Senior Accountant").adjacent, false);
-  assert.equal(program.classify("Senior Product Manager").adjacent, false);
+});
+
+test("a role_families pattern defines the lane when the candidate writes one", () => {
+  const targeting = {
+    role_buckets: [{ name: "Nursing", priority: "primary", titles: ["Registered Nurse ICU"] }],
+    role_families: [{ name: "nursing", patterns: ["registered nurse", "rn"] }],
+  };
+  const filter = buildTitleFilter({ positive: ["Registered Nurse ICU"] }, targeting);
+  assert.equal(filter.classify("Emergency Department RN").adjacent, true);
+  assert.equal(filter.classify("Registered Nurse, Med-Surg").adjacent, true);
+  assert.equal(filter.classify("Pharmacy Technician").adjacent, false);
+});
+
+test("the lane is the function phrase of the primary titles, with the tier noun dropped", () => {
+  const targeting = {
+    role_buckets: [
+      {
+        name: "Customer Success",
+        priority: "primary",
+        titles: ["Customer Success Manager", "Senior Customer Success Manager"],
+      },
+    ],
+  };
+  const filter = buildTitleFilter({ positive: targeting.role_buckets[0].titles }, targeting);
+  assert.equal(filter.classify("Customer Success Architect").adjacent, true);
+  assert.equal(filter.classify("Customer Success Manager II").matched, true);
+  assert.equal(filter.classify("Customer Support Specialist").adjacent, false);
+  assert.equal(filter.classify("Senior Account Executive").adjacent, false);
+});
+
+test("a ladder ceiling cuts ranks above the candidate's, and only when configured", () => {
+  const ladder = [
+    { rank: 10, titles: ["Staff Accountant"] },
+    { rank: 20, titles: ["Senior Accountant"] },
+    { rank: 30, titles: ["Accounting Manager", "Controller"] },
+  ];
+  const targeting = (extra) => ({
+    role_buckets: [
+      {
+        name: "Accounting",
+        priority: "primary",
+        titles: ["Senior Accountant"],
+        seniority_ladder: ladder,
+        ...extra,
+      },
+    ],
+  });
+  const capped = buildTitleFilter(
+    { positive: ["Senior Accountant"] },
+    targeting({ seniority_ceiling: 20 })
+  );
+  assert.equal(capped.classify("Controller").blocked, true);
+  assert.equal(capped.classify("Accounting Manager, Close").blocked, true);
+  assert.equal(capped.classify("Senior Accountant").matched, true);
+  assert.equal(capped.classify("Staff Accountant").blocked, true);
+
+  const open = buildTitleFilter({ positive: ["Senior Accountant"] }, targeting({}));
+  assert.equal(open.classify("Controller").blocked, false);
+});
+
+test("commute_cities count as home for onsite roles", () => {
+  const offer = {
+    title: "Registered Nurse",
+    company: "St. Brigid",
+    url: "https://jobs.example.test/rn",
+    location: "Aurora, CO",
+    bodyText: "On-site, 3x12 shifts.",
+  };
+  const run = (location) =>
+    filterAndDedupeOffers([offer], {
+      titleFilter: () => true,
+      config: { targeting: {}, profile: { location } },
+    });
+  const home = { home: "Denver, CO", remote: false, hybrid: false, onsite: true };
+  assert.equal(run(home).filteredLocation.length, 1);
+  assert.equal(run({ ...home, commute_cities: ["Aurora, CO", "Lakewood, CO"] }).kept.length, 1);
 });
 
 test("filterAndDedupeOffers keeps adjacent titles but ranks them below exact matches", () => {
+  const targeting = {
+    role_buckets: [
+      { name: "FE", priority: "primary", titles: ["Staff Frontend Engineer"] },
+      { name: "Web", priority: "secondary", titles: ["Frontend Architect"] },
+    ],
+  };
   const config = {
-    targeting: {
-      role_buckets: [{ name: "FE", titles: ["Staff Frontend Engineer"] }],
-    },
+    targeting,
     profile: {
       compensation: { minimum_base: 150000 },
       location: { remote: true },
@@ -3918,10 +4035,10 @@ test("filterAndDedupeOffers keeps adjacent titles but ranks them below exact mat
       offer("Staff Frontend Engineer", "Lumen", "$200,000 - $220,000"),
     ],
     {
-      titleFilter: buildTitleFilter({
-        positive: ["Staff Frontend Engineer"],
-        negative: [],
-      }),
+      titleFilter: buildTitleFilter(
+        { positive: ["Staff Frontend Engineer"], negative: [] },
+        targeting
+      ),
       config,
       perCompanyCap: 5,
     }

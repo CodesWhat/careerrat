@@ -220,7 +220,11 @@ function countryTerms(country) {
 function deriveLocationFilter(profile = {}) {
   const loc = profile.location ?? {};
   const worldwideRemote = loc.remote === true && loc.remote_scope === "worldwide";
-  const places = compactGeoValues([loc.home, ...(loc.relocation ?? [])]);
+  const places = compactGeoValues([
+    loc.home,
+    ...(loc.commute_cities ?? []),
+    ...(loc.relocation ?? []),
+  ]);
   const allowedCountries = new Set();
   const allowedRegions = new Set();
   const allowedLocalityAliases = new Set();

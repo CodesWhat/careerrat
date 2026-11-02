@@ -3,25 +3,25 @@
     "precisionAt10": 1,
     "ndcgAt10": 1,
     "goodRecall": 1,
-    "keptPrecision": 0.9375
+    "keptPrecision": 1
   },
   "candidates": {
     "operations-program-manager": {
       "precisionAt10": 1,
       "ndcgAt10": 1,
-      "keptPrecision": 0.9375,
+      "keptPrecision": 1,
       "goodRecall": 1
     },
     "senior-product-designer": {
       "precisionAt10": 1,
       "ndcgAt10": 1,
-      "keptPrecision": 0.9375,
+      "keptPrecision": 1,
       "goodRecall": 1
     },
     "staff-frontend-engineer": {
       "precisionAt10": 1,
       "ndcgAt10": 1,
-      "keptPrecision": 0.9375,
+      "keptPrecision": 1,
       "goodRecall": 1
     }
   }
