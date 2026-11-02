@@ -12,6 +12,13 @@ All notable changes to CareerRat are documented here. This project follows
   `careerrat` now refuses to start on an unpatched Node (older 24.x, any 25.x, or
   26.x before 26.12.1) and prints the upgrade step.
 
+### Added
+
+- Shared posting cache for multi-person setups. A board is fetched once, reused by other
+  people's scans inside a 6 hour window, and new postings are matched against every other
+  person's own targeting and saved to their workspace as `shared-cache`. The scan summary
+  lists "Also matched for" counts. Opt out per person or turn it off globally (docs/SOURCES.md).
+
 ### Fixed
 
 - Search now cuts generic wrong-seniority titles (VP, Chief, Head of, Director, intern,

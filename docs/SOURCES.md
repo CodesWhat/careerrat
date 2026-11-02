@@ -224,6 +224,31 @@ other dead board. Postings go through the same title, location and scoring filte
 Known gap: CareerRat ships no slug data and downloads none. Building the list (from a public ATS
 slug dataset you trust, or your own research) is on you, and company names are derived from the slug.
 
+## Shared posting cache (several people)
+
+When CareerRat runs for more than one person (`--for <name>`), a board is fetched once and every
+person is matched. Public posting data (company, title, location, comp text, body, posted date, URL)
+goes into `postings-cache.db` in the base data root, next to `people/`. Scores, fit, notes and
+anything from a person's profile never do.
+
+- **Reuse.** A source another person's scan fetched cleanly in the last 6 hours is read from the
+  cache instead of refetched. Dead-board memory and request throttling still apply to real fetches.
+  An explicit `--company` or `--recheck-dead` always fetches fresh.
+- **Cross-match.** Postings new to the cache are run through every other person's own targeting,
+  location, comp floor, exclusions and dedupe, and saved into their workspace with source
+  `shared-cache`, under their own presentation cap. A person with no workspace database or
+  unfinished setup is skipped with a note.
+- **Summary.** The scan summary reports `sharedCache` (sources reused or fetched, `alsoMatchedFor`
+  counts per person, skipped notes). `careerrat` prints "Also matched for: bob (3)".
+- **Settings.** Off for one person: `search_preferences.shared_cache.receive: false` in their
+  targeting. Off for everyone, or a different window: `shared-cache.json` in the base data root
+  (`{"enabled": false, "freshnessHours": 6}`), or `CAREERRAT_SHARED_CACHE=off` and
+  `CAREERRAT_SHARED_CACHE_HOURS`. With no people registered the cache does nothing.
+
+Known gaps: browser and login sources are never cached; the owner's own workspace (no `--for`) fills
+the cache but is not a cross-match target; cross-matched postings keep the cached body, so a
+partial description is not re-hydrated.
+
 ## Deterministic provider parity
 
 The curated table above is a starter menu, not the complete runtime inventory.

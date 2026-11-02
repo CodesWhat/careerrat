@@ -110,6 +110,14 @@
             "max_boards": { "type": "integer", "minimum": 1, "description": "Boards scanned per run; a longer list rotates daily. Defaults to 150." }
           }
         },
+        "shared_cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Shared public-posting cache. Set receive false to stop other people's scans from adding matching postings to this workspace. Default on.",
+          "properties": {
+            "receive": { "type": "boolean" }
+          }
+        },
         "ai_rerank": {
           "type": "object",
           "additionalProperties": false,
