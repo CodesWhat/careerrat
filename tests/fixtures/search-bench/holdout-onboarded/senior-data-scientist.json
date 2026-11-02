@@ -1,0 +1,524 @@
+{
+  "_meta": {
+    "purpose": "Synthetic senior data scientist candidate; Austin TX or remote US.",
+    "grades": "3 exact target, 2 adjacent or good, 1 stretch, 0 wrong. Duplicates of an already-listed posting are grade 0.",
+    "synthetic": true,
+    "holdout": true
+  },
+  "name": "senior-data-scientist",
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Data Science",
+        "priority": "primary",
+        "titles": ["Senior Data Scientist", "Data Scientist", "Lead Data Scientist"],
+        "seniority_ladder": [
+          {
+            "rank": 10,
+            "titles": [
+              "Data Analyst",
+              "Junior Data Scientist",
+              "Associate Data Scientist",
+              "Data Science Intern",
+              "Business Analyst",
+              "Business Intelligence Analyst"
+            ]
+          },
+          {
+            "rank": 20,
+            "titles": ["Data Scientist", "Data Scientist II", "Data Scientist III"]
+          },
+          {
+            "rank": 30,
+            "titles": [
+              "Senior Data Scientist",
+              "Sr. Data Scientist",
+              "Lead Data Scientist",
+              "Staff Data Scientist",
+              "Principal Data Scientist"
+            ]
+          },
+          {
+            "rank": 40,
+            "titles": [
+              "Data Science Manager",
+              "Manager, Data Science",
+              "Senior Data Science Manager",
+              "Engineering Manager",
+              "Analytics Manager"
+            ]
+          },
+          {
+            "rank": 50,
+            "titles": [
+              "Director of Data Science",
+              "Head of Data Science",
+              "VP of Data Science",
+              "Vice President, Data Science",
+              "Chief Data Officer",
+              "Chief Scientist"
+            ]
+          }
+        ],
+        "seniority_ceiling": 30
+      },
+      {
+        "name": "Applied ML",
+        "priority": "secondary",
+        "titles": [
+          "Machine Learning Scientist",
+          "Applied Scientist",
+          "Senior Applied Scientist",
+          "Research Scientist",
+          "Machine Learning Engineer",
+          "ML Engineer",
+          "Senior Machine Learning Engineer",
+          "Sr. Data Scientist",
+          "Senior Data Scientist, Product",
+          "Data Scientist II",
+          "Data Scientist III",
+          "Staff Data Scientist",
+          "Principal Data Scientist",
+          "Decision Scientist",
+          "Quantitative Researcher",
+          "Quantitative Analyst",
+          "Statistician",
+          "Senior Statistician",
+          "Product Data Scientist",
+          "Data Scientist, Analytics",
+          "Applied ML Scientist",
+          "Causal Inference Scientist",
+          "Experimentation Scientist",
+          "Senior Analytics Scientist",
+          "AI Scientist",
+          "NLP Scientist"
+        ]
+      }
+    ],
+    "keep_signals": ["experimentation", "causal inference", "forecasting", "statistical modeling"],
+    "cut_signals": ["Sales", "Recruiter", "Intern"],
+    "role_families": [
+      {
+        "name": "data-science",
+        "patterns": [
+          "data scientist",
+          "data science",
+          "decision scientist",
+          "analytics scientist",
+          "product scientist",
+          "statistician",
+          "quantitative"
+        ]
+      },
+      {
+        "name": "applied-ml",
+        "patterns": [
+          "machine learning",
+          "ml scientist",
+          "ml engineer",
+          "applied scientist",
+          "research scientist",
+          "ai scientist",
+          "nlp scientist"
+        ]
+      }
+    ]
+  },
+  "profile": {
+    "candidate": {
+      "full_name": "Jordan Example",
+      "domain": "data science"
+    },
+    "compensation": {
+      "currency": "USD",
+      "target_base": 185000,
+      "minimum_base": 155000
+    },
+    "location": {
+      "home": "Austin, TX",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false,
+      "commute_cities": [
+        "Round Rock, TX",
+        "Cedar Park, TX",
+        "Pflugerville, TX",
+        "Georgetown, TX",
+        "Leander, TX",
+        "San Marcos, TX",
+        "Kyle, TX"
+      ],
+      "commute_radius_miles": 25,
+      "remote_scope": "home-country"
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "postings": [
+    {
+      "id": "ds-01",
+      "title": "Senior Data Scientist",
+      "company": "Lumen Analytics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/lumen-analytics/senior-data-scientist-ds-01",
+      "comp": "$170,000 - $205,000",
+      "bodyText": "Own experimentation and causal inference for our growth org, partner with product on A/B test design and statistical modeling. Pay range: $170,000 - $205,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ds-02",
+      "title": "Senior Data Scientist, Product Analytics",
+      "company": "Northbeam Health",
+      "location": "Austin, TX (Hybrid)",
+      "url": "https://jobs.example.test/northbeam-health/senior-data-scientist-product-analytics-ds-02",
+      "comp": "$165,000 - $200,000",
+      "bodyText": "Lead product analytics and experimentation for the member app. Python, SQL, causal inference. Pay range: $165,000 - $200,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ds-03",
+      "title": "Sr. Data Scientist (Remote)",
+      "company": "Corvid Payments",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/corvid-payments/sr-data-scientist-remote-ds-03",
+      "comp": "$175,000 - $210,000",
+      "bodyText": "Build fraud and risk models, forecasting, and experiment analysis with engineering and risk teams. Pay range: $175,000 - $210,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ds-04",
+      "title": "Senior Data Scientist - Marketplace",
+      "company": "Plover Rides",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/plover-rides/senior-data-scientist-marketplace-ds-04",
+      "comp": "$180,000 - $215,000",
+      "bodyText": "Pricing and marketplace experimentation, statistical modeling, forecasting supply and demand. Pay range: $180,000 - $215,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ds-05",
+      "title": "Data Scientist III",
+      "company": "Kestrel Logistics",
+      "location": "Austin, TX",
+      "url": "https://jobs.example.test/kestrel-logistics/data-scientist-iii-ds-05",
+      "comp": "$160,000 - $190,000",
+      "bodyText": "Senior-level individual contributor role in statistical modeling and forecasting for network planning. Pay range: $160,000 - $190,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ds-06",
+      "title": "Senior Applied Scientist",
+      "company": "Heron Cloud",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/heron-cloud/senior-applied-scientist-ds-06",
+      "comp": "$185,000 - $225,000",
+      "bodyText": "Apply machine learning and statistical modeling to ranking problems. Run online experiments. Pay range: $185,000 - $225,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ds-07",
+      "title": "Senior Machine Learning Scientist",
+      "company": "Basalt Bio",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/basalt-bio/senior-machine-learning-scientist-ds-07",
+      "comp": "$175,000 - $210,000",
+      "bodyText": "Develop predictive models and forecasting for lab operations. Experimentation mindset required. Pay range: $175,000 - $210,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ds-08",
+      "title": "Staff Data Scientist, Experimentation",
+      "company": "Tern Commerce",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tern-commerce/staff-data-scientist-experimentation-ds-08",
+      "comp": "$200,000 - $240,000",
+      "bodyText": "Set experimentation standards, causal inference methods, and mentor senior data scientists. Pay range: $200,000 - $240,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ds-09",
+      "title": "Senior Decision Scientist",
+      "company": "Marlin Insurance",
+      "location": "Austin, TX (Hybrid)",
+      "url": "https://jobs.example.test/marlin-insurance/senior-decision-scientist-ds-09",
+      "comp": "$165,000 - $195,000",
+      "bodyText": "Decision science for pricing and retention: statistical modeling, causal inference, forecasting. Pay range: $165,000 - $195,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ds-10",
+      "title": "Senior Quantitative Analyst, Growth",
+      "company": "Ibis Subscriptions",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/ibis-subscriptions/senior-quantitative-analyst-growth-ds-10",
+      "comp": "$160,000 - $190,000",
+      "bodyText": "Quantitative analysis, experimentation, and forecasting for subscription growth. Pay range: $160,000 - $190,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ds-11",
+      "title": "Senior Data Scientist, Machine Learning (Contract-to-Hire)",
+      "company": "Osprey Media",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/osprey-media/senior-data-scientist-machine-learning-contract-to-hire-ds-11",
+      "comp": "$170,000 - $200,000",
+      "bodyText": "Recommendation models and offline evaluation, experimentation with product partners. Pay range: $170,000 - $200,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ds-12",
+      "title": "Senior Research Scientist, Statistics",
+      "company": "Wren Labs",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/wren-labs/senior-research-scientist-statistics-ds-12",
+      "comp": "$180,000 - $220,000",
+      "bodyText": "Statistical methodology and causal inference research applied to product questions. Pay range: $180,000 - $220,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ds-13",
+      "title": "Principal Data Scientist",
+      "company": "Sable Energy",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/sable-energy/principal-data-scientist-ds-13",
+      "comp": "$210,000 - $250,000",
+      "bodyText": "Set technical direction for forecasting and optimization across the energy trading org. Pay range: $210,000 - $250,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "ds-14",
+      "title": "Senior Analytics Engineer",
+      "company": "Quill Software",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/quill-software/senior-analytics-engineer-ds-14",
+      "comp": "$150,000 - $180,000",
+      "bodyText": "Build dbt models and metrics layers. Some experimentation support. Pay range: $150,000 - $180,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "ds-15",
+      "title": "Senior Machine Learning Engineer",
+      "company": "Aster Robotics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/aster-robotics/senior-machine-learning-engineer-ds-15",
+      "comp": "$190,000 - $230,000",
+      "bodyText": "Productionize models, build training pipelines, deploy to edge devices. Pay range: $190,000 - $230,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "ds-16",
+      "title": "Senior Product Analyst",
+      "company": "Fable Games",
+      "location": "Austin, TX",
+      "url": "https://jobs.example.test/fable-games/senior-product-analyst-ds-16",
+      "comp": "$140,000 - $165,000",
+      "bodyText": "Analyze product funnels and run A/B tests. Light modeling. Pay range: $140,000 - $165,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "ds-17",
+      "title": "Data Scientist, Senior - Healthcare (Remote)",
+      "company": "Cedar Clinics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cedar-clinics/data-scientist-senior-healthcare-remote-ds-17",
+      "comp": "$150,000 - $180,000",
+      "bodyText": "Forecasting and statistical modeling on clinic capacity and patient outcomes. Pay range: $150,000 - $180,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ds-18",
+      "title": "Junior Data Scientist",
+      "company": "Pike Retail",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/pike-retail/junior-data-scientist-ds-18",
+      "comp": "$85,000 - $105,000",
+      "bodyText": "Entry-level role supporting dashboards and basic analyses. Pay range: $85,000 - $105,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "ds-19",
+      "title": "Data Science Intern - Summer",
+      "company": "Lumen Analytics",
+      "location": "Austin, TX",
+      "url": "https://jobs.example.test/lumen-analytics/data-science-intern-summer-ds-19",
+      "comp": "$40 - $50 per hour",
+      "bodyText": "Summer internship supporting the data science team. Pay range: $40 - $50 per hour.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "ds-20",
+      "title": "Data Scientist I",
+      "company": "Moss Foods",
+      "location": "Austin, TX",
+      "url": "https://jobs.example.test/moss-foods/data-scientist-i-ds-20",
+      "comp": "$95,000 - $115,000",
+      "bodyText": "Early career data scientist. Works under close guidance on reporting. Pay range: $95,000 - $115,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "ds-21",
+      "title": "Director of Data Science",
+      "company": "Granite Financial",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/granite-financial/director-of-data-science-ds-21",
+      "comp": "$260,000 - $310,000",
+      "bodyText": "Lead a team of 20 data scientists and own the data science budget. Pay range: $260,000 - $310,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "ds-22",
+      "title": "Senior Data Scientist",
+      "company": "Drift Ads",
+      "location": "London, UK",
+      "url": "https://jobs.example.test/drift-ads/senior-data-scientist-ds-22",
+      "comp": "GBP 95,000 - 120,000",
+      "bodyText": "Based in our London office five days a week. No remote option. Pay range: GBP 95,000 - 120,000.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "ds-23",
+      "title": "Senior Data Scientist",
+      "company": "Sakura Mobile",
+      "location": "Tokyo, Japan",
+      "url": "https://jobs.example.test/sakura-mobile/senior-data-scientist-ds-23",
+      "comp": "",
+      "bodyText": "On-site in Tokyo. Japanese fluency required.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "ds-24",
+      "title": "Senior Data Scientist (Remote - Canada only)",
+      "company": "Maple Grid",
+      "location": "Toronto, Canada",
+      "url": "https://jobs.example.test/maple-grid/senior-data-scientist-remote-canada-only-ds-24",
+      "comp": "CAD 150,000 - 180,000",
+      "bodyText": "Must reside in Canada. We cannot hire outside Canada. Pay range: CAD 150,000 - 180,000.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "ds-25",
+      "title": "Senior Data Scientist",
+      "company": "Barn Owl Staffing",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/barn-owl-staffing/senior-data-scientist-ds-25",
+      "comp": "$95,000 - $110,000",
+      "bodyText": "Analytics and modeling for a regional services firm. Pay range: $95,000 - $110,000.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "ds-26",
+      "title": "Senior Data Scientist - Contract",
+      "company": "Tallow Consulting",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tallow-consulting/senior-data-scientist-contract-ds-26",
+      "comp": "$55 - $65 per hour",
+      "bodyText": "Six month contract, forecasting project. Pay range: $55 - $65 per hour.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "ds-27",
+      "title": "Senior Account Executive, Data Platform",
+      "company": "Lumen Analytics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/lumen-analytics/senior-account-executive-data-platform-ds-27",
+      "comp": "$140,000 OTE $240,000",
+      "bodyText": "Sell our analytics platform to enterprise accounts. Quota carrying. Pay range: $140,000 OTE $240,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "ds-28",
+      "title": "Technical Recruiter, Data and ML",
+      "company": "Hexa Talent",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/hexa-talent/technical-recruiter-data-and-ml-ds-28",
+      "comp": "$110,000 - $130,000",
+      "bodyText": "Recruit data scientists and ML engineers for our clients. Pay range: $110,000 - $130,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "ds-29",
+      "title": "Senior Software Engineer, Data Platform",
+      "company": "Ridge Systems",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/ridge-systems/senior-software-engineer-data-platform-ds-29",
+      "comp": "$185,000 - $225,000",
+      "bodyText": "Build Kafka and Spark pipelines. Not a modeling role. Pay range: $185,000 - $225,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "ds-30",
+      "title": "Data Entry Specialist",
+      "company": "Pike Retail",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/pike-retail/data-entry-specialist-ds-30",
+      "comp": "$20 - $24 per hour",
+      "bodyText": "Enter records into our inventory system. Pay range: $20 - $24 per hour.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "ds-31",
+      "title": "Senior Data Scientist",
+      "company": "Lumen Analytics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/lumen-analytics/senior-data-scientist-ds-31",
+      "comp": "$170,000 - $205,000",
+      "bodyText": "Own experimentation and causal inference for our growth org. Reposted. Pay range: $170,000 - $205,000.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "ds-32",
+      "title": "Senior Data Scientist, Product Analytics",
+      "company": "Northbeam Health",
+      "location": "Austin, TX (Hybrid)",
+      "url": "https://jobs.example.test/northbeam-health/senior-data-scientist-product-analytics-ds-32",
+      "comp": "$165,000 - $200,000",
+      "bodyText": "Lead product analytics and experimentation for the member app. Reposted. Pay range: $165,000 - $200,000.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "ds-33",
+      "title": "Senior Business Intelligence Analyst",
+      "company": "Dune Telecom",
+      "location": "Austin, TX",
+      "url": "https://jobs.example.test/dune-telecom/senior-business-intelligence-analyst-ds-33",
+      "comp": "$100,000 - $125,000",
+      "bodyText": "Build Tableau dashboards and monthly reports. Pay range: $100,000 - $125,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    }
+  ]
+}

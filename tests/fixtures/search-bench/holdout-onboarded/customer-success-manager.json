@@ -1,0 +1,486 @@
+{
+  "_meta": {
+    "purpose": "Synthetic customer success manager candidate; Seattle WA or remote US, B2B SaaS.",
+    "grades": "3 exact target, 2 adjacent or good, 1 stretch, 0 wrong. Duplicates of an already-listed posting are grade 0.",
+    "synthetic": true,
+    "holdout": true
+  },
+  "name": "customer-success-manager",
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Customer Success",
+        "priority": "primary",
+        "titles": [
+          "Customer Success Manager",
+          "Senior Customer Success Manager",
+          "Enterprise Customer Success Manager"
+        ],
+        "seniority_ladder": [
+          {
+            "rank": 10,
+            "titles": [
+              "Customer Success Associate",
+              "Associate Customer Success Manager",
+              "Junior Customer Success Manager",
+              "Customer Support Specialist"
+            ]
+          },
+          {
+            "rank": 20,
+            "titles": [
+              "Customer Success Manager",
+              "Customer Success Manager II",
+              "Senior Customer Success Manager",
+              "Sr. Customer Success Manager",
+              "Enterprise Customer Success Manager",
+              "Principal Customer Success Manager"
+            ]
+          },
+          {
+            "rank": 30,
+            "titles": ["Customer Success Lead", "Strategic Customer Success Manager"]
+          },
+          {
+            "rank": 40,
+            "titles": [
+              "Customer Success Team Lead",
+              "Manager, Customer Success",
+              "Customer Success Manager, Team Lead",
+              "Senior Manager, Customer Success"
+            ]
+          },
+          {
+            "rank": 50,
+            "titles": [
+              "Director of Customer Success",
+              "Head of Customer Success",
+              "VP of Customer Success",
+              "Vice President, Customer Success",
+              "Chief Customer Officer"
+            ]
+          }
+        ],
+        "seniority_ceiling": 30
+      },
+      {
+        "name": "Account Management",
+        "priority": "secondary",
+        "titles": [
+          "Technical Account Manager",
+          "Account Manager",
+          "Strategic Account Manager",
+          "Customer Success Engineer",
+          "Customer Success Specialist",
+          "Client Success Manager",
+          "Customer Success Lead",
+          "Customer Success Account Manager",
+          "Customer Onboarding Manager",
+          "Implementation Manager",
+          "Renewals Manager",
+          "Customer Success Operations Manager",
+          "CSM"
+        ]
+      }
+    ],
+    "keep_signals": ["renewals", "onboarding", "churn reduction", "net revenue retention"],
+    "cut_signals": ["Sales Development", "Recruiter", "Support Agent"],
+    "role_families": [
+      {
+        "name": "customer-success",
+        "patterns": [
+          "customer success",
+          "csm",
+          "client success",
+          "customer onboarding",
+          "customer experience manager"
+        ]
+      },
+      {
+        "name": "account-management",
+        "patterns": [
+          "account manager",
+          "technical account",
+          "tam",
+          "renewals manager",
+          "strategic account",
+          "implementation manager"
+        ]
+      }
+    ]
+  },
+  "profile": {
+    "candidate": {
+      "full_name": "Taylor Example",
+      "domain": "customer success"
+    },
+    "compensation": {
+      "currency": "USD",
+      "target_base": 135000,
+      "minimum_base": 110000
+    },
+    "location": {
+      "home": "Seattle, WA",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false,
+      "commute_cities": [
+        "Bellevue, WA",
+        "Redmond, WA",
+        "Kirkland, WA",
+        "Tacoma, WA",
+        "Everett, WA",
+        "Renton, WA"
+      ],
+      "commute_radius_miles": 25,
+      "remote_scope": "home-country"
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "postings": [
+    {
+      "id": "cs-01",
+      "title": "Senior Customer Success Manager",
+      "company": "Cobalt Metrics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cobalt-metrics/senior-customer-success-manager-cs-01",
+      "comp": "$120,000 - $150,000 + bonus",
+      "bodyText": "Manage a book of enterprise accounts, drive renewals, onboarding and net revenue retention. Pay range: $120,000 - $150,000 + bonus.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "cs-02",
+      "title": "Customer Success Manager, Enterprise",
+      "company": "Foxglove HR",
+      "location": "Seattle, WA (Hybrid)",
+      "url": "https://jobs.example.test/foxglove-hr/customer-success-manager-enterprise-cs-02",
+      "comp": "$125,000 - $155,000",
+      "bodyText": "Own onboarding, adoption and renewals for enterprise customers. Pay range: $125,000 - $155,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "cs-03",
+      "title": "Sr. Customer Success Manager (Remote)",
+      "company": "Larkspur Security",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/larkspur-security/sr-customer-success-manager-remote-cs-03",
+      "comp": "$130,000 - $160,000",
+      "bodyText": "Churn reduction and expansion for mid-market and enterprise accounts. Pay range: $130,000 - $160,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "cs-04",
+      "title": "Customer Success Manager II",
+      "company": "Tidewater Data",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tidewater-data/customer-success-manager-ii-cs-04",
+      "comp": "$115,000 - $140,000",
+      "bodyText": "Lead onboarding and renewals, build success plans, partner with support and product. Pay range: $115,000 - $140,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "cs-05",
+      "title": "Enterprise Customer Success Manager - Strategic Accounts",
+      "company": "Cobalt Metrics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cobalt-metrics/enterprise-customer-success-manager-strategic-accounts-cs-05",
+      "comp": "$135,000 - $165,000",
+      "bodyText": "Executive relationships, renewals, net revenue retention for top 40 accounts. Pay range: $135,000 - $165,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "cs-06",
+      "title": "Senior Client Success Manager",
+      "company": "Juniper Payroll",
+      "location": "Seattle, WA",
+      "url": "https://jobs.example.test/juniper-payroll/senior-client-success-manager-cs-06",
+      "comp": "$115,000 - $140,000",
+      "bodyText": "Client onboarding, renewals and adoption for payroll customers. Pay range: $115,000 - $140,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "cs-07",
+      "title": "Technical Account Manager",
+      "company": "Tidewater Data",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tidewater-data/technical-account-manager-cs-07",
+      "comp": "$130,000 - $160,000",
+      "bodyText": "Technical guidance, escalations, renewals for enterprise customers. Pay range: $130,000 - $160,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "cs-08",
+      "title": "Senior Account Manager, Existing Customers",
+      "company": "Foxglove HR",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/foxglove-hr/senior-account-manager-existing-customers-cs-08",
+      "comp": "$120,000 - $145,000",
+      "bodyText": "Renewals and expansion across an installed base. Churn reduction. Pay range: $120,000 - $145,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "cs-09",
+      "title": "Customer Onboarding Manager",
+      "company": "Larkspur Security",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/larkspur-security/customer-onboarding-manager-cs-09",
+      "comp": "$110,000 - $135,000",
+      "bodyText": "Lead implementations and onboarding for new enterprise customers. Pay range: $110,000 - $135,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "cs-10",
+      "title": "Customer Experience Manager, Strategic Accounts",
+      "company": "Cobalt Metrics",
+      "location": "Seattle, WA (Hybrid)",
+      "url": "https://jobs.example.test/cobalt-metrics/customer-experience-manager-strategic-accounts-cs-10",
+      "comp": "$118,000 - $145,000",
+      "bodyText": "Account health, renewals, and executive business reviews. Pay range: $118,000 - $145,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "cs-11",
+      "title": "Senior Customer Success Manager - Contract",
+      "company": "Tidewater Data",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tidewater-data/senior-customer-success-manager-contract-cs-11",
+      "comp": "$65 - $80 per hour",
+      "bodyText": "Six month contract covering a parental leave. Renewals and onboarding. Pay range: $65 - $80 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "cs-12",
+      "title": "Senior Customer Success Manager, Healthcare",
+      "company": "Meridian Health Tech",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/meridian-health-tech/senior-customer-success-manager-healthcare-cs-12",
+      "comp": "$125,000 - $150,000",
+      "bodyText": "Own a healthcare customer portfolio with a focus on renewals and net revenue retention. Pay range: $125,000 - $150,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "cs-13",
+      "title": "Customer Success Architect",
+      "company": "Larkspur Security",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/larkspur-security/customer-success-architect-cs-13",
+      "comp": "$140,000 - $170,000",
+      "bodyText": "Design onboarding programs and technical success plans for enterprise customers. Pay range: $140,000 - $170,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "cs-14",
+      "title": "Customer Success Operations Manager",
+      "company": "Foxglove HR",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/foxglove-hr/customer-success-operations-manager-cs-14",
+      "comp": "$115,000 - $140,000",
+      "bodyText": "Build the CS playbooks and reporting. Little direct customer contact. Pay range: $115,000 - $140,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "cs-15",
+      "title": "Implementation Consultant",
+      "company": "Juniper Payroll",
+      "location": "Seattle, WA",
+      "url": "https://jobs.example.test/juniper-payroll/implementation-consultant-cs-15",
+      "comp": "$100,000 - $125,000",
+      "bodyText": "Configure the product for new clients. Onboarding focus, no renewals. Pay range: $100,000 - $125,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "cs-16",
+      "title": "Solutions Engineer",
+      "company": "Cobalt Metrics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cobalt-metrics/solutions-engineer-cs-16",
+      "comp": "$140,000 - $170,000",
+      "bodyText": "Pre-sales technical demos. Overlaps with customer success on technical depth. Pay range: $140,000 - $170,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "cs-17",
+      "title": "Customer Success Manager, SMB (Associate)",
+      "company": "Larkspur Security",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/larkspur-security/customer-success-manager-smb-associate-cs-17",
+      "comp": "$70,000 - $85,000",
+      "bodyText": "Entry-level portfolio of small business customers. Pay range: $70,000 - $85,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "cs-18",
+      "title": "Customer Success Associate",
+      "company": "Meridian Health Tech",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/meridian-health-tech/customer-success-associate-cs-18",
+      "comp": "$62,000 - $75,000",
+      "bodyText": "Support onboarding for the CS team. One year experience. Pay range: $62,000 - $75,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "cs-19",
+      "title": "Director of Customer Success",
+      "company": "Tidewater Data",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tidewater-data/director-of-customer-success-cs-19",
+      "comp": "$190,000 - $230,000",
+      "bodyText": "Lead a team of 15 CSMs and own retention targets. Pay range: $190,000 - $230,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "cs-20",
+      "title": "VP, Customer Success",
+      "company": "Cobalt Metrics",
+      "location": "Seattle, WA",
+      "url": "https://jobs.example.test/cobalt-metrics/vp-customer-success-cs-20",
+      "comp": "$240,000 - $290,000",
+      "bodyText": "Executive owner of the customer organization. Pay range: $240,000 - $290,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "cs-21",
+      "title": "Senior Customer Success Manager",
+      "company": "Amstel Software",
+      "location": "Amsterdam, Netherlands",
+      "url": "https://jobs.example.test/amstel-software/senior-customer-success-manager-cs-21",
+      "comp": "EUR 80,000 - 95,000",
+      "bodyText": "Based in Amsterdam, Dutch and English required. Pay range: EUR 80,000 - 95,000.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "cs-22",
+      "title": "Customer Success Manager",
+      "company": "Outback Cloud",
+      "location": "Sydney, Australia",
+      "url": "https://jobs.example.test/outback-cloud/customer-success-manager-cs-22",
+      "comp": "",
+      "bodyText": "Sydney based role supporting APAC customers.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "cs-23",
+      "title": "Customer Success Manager",
+      "company": "Peddler Apps",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/peddler-apps/customer-success-manager-cs-23",
+      "comp": "$60,000 - $75,000",
+      "bodyText": "Small business SaaS, large volume of accounts. Pay range: $60,000 - $75,000.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "cs-24",
+      "title": "Customer Success Manager - Part Time",
+      "company": "Meridian Health Tech",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/meridian-health-tech/customer-success-manager-part-time-cs-24",
+      "comp": "$35 - $42 per hour",
+      "bodyText": "20 hours per week supporting a small customer set. Pay range: $35 - $42 per hour.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "cs-25",
+      "title": "Customer Support Specialist",
+      "company": "Foxglove HR",
+      "location": "Seattle, WA",
+      "url": "https://jobs.example.test/foxglove-hr/customer-support-specialist-cs-25",
+      "comp": "$55,000 - $68,000",
+      "bodyText": "Answer tickets and chats. Tier 1 support. Pay range: $55,000 - $68,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "cs-26",
+      "title": "Sales Development Representative",
+      "company": "Cobalt Metrics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cobalt-metrics/sales-development-representative-cs-26",
+      "comp": "$60,000 OTE $95,000",
+      "bodyText": "Outbound prospecting and qualifying leads. Pay range: $60,000 OTE $95,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "cs-27",
+      "title": "Senior Account Executive",
+      "company": "Larkspur Security",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/larkspur-security/senior-account-executive-cs-27",
+      "comp": "$150,000 OTE $300,000",
+      "bodyText": "New logo sales. Carry a quota. Pay range: $150,000 OTE $300,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "cs-28",
+      "title": "Recruiter, Customer Success and Sales",
+      "company": "Tidewater Data",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tidewater-data/recruiter-customer-success-and-sales-cs-28",
+      "comp": "$95,000 - $120,000",
+      "bodyText": "Hire for GTM teams. Pay range: $95,000 - $120,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "cs-29",
+      "title": "Senior Customer Success Manager",
+      "company": "Cobalt Metrics",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cobalt-metrics/senior-customer-success-manager-cs-29",
+      "comp": "$120,000 - $150,000 + bonus",
+      "bodyText": "Manage a book of enterprise accounts, renewals and onboarding. Reposted. Pay range: $120,000 - $150,000 + bonus.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "cs-30",
+      "title": "Customer Success Manager, Enterprise",
+      "company": "Foxglove HR",
+      "location": "Seattle, WA (Hybrid)",
+      "url": "https://jobs.example.test/foxglove-hr/customer-success-manager-enterprise-cs-30",
+      "comp": "$125,000 - $155,000",
+      "bodyText": "Own onboarding, adoption and renewals. Reposted. Pay range: $125,000 - $155,000.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "cs-31",
+      "title": "Product Marketing Manager, Customer Advocacy",
+      "company": "Juniper Payroll",
+      "location": "Seattle, WA",
+      "url": "https://jobs.example.test/juniper-payroll/product-marketing-manager-customer-advocacy-cs-31",
+      "comp": "$120,000 - $145,000",
+      "bodyText": "Run the customer reference program. Marketing role. Pay range: $120,000 - $145,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    }
+  ]
+}
