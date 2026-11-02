@@ -28,7 +28,7 @@ test("Textual setup installs hash-locked wheels privately and reuses the complet
   const calls = [];
   const run = async (command, args) => {
     calls.push({ command, args });
-    if (args[1] === "venv") {
+    if (args.includes("venv")) {
       const bin = join(args.at(-1), process.platform === "win32" ? "Scripts" : "bin");
       mkdirSync(bin, { recursive: true });
       writeFileSync(join(bin, process.platform === "win32" ? "python.exe" : "python"), "fixture");
@@ -55,7 +55,7 @@ test("failed Textual installation leaves no ready marker and can retry", async (
   const ctx = fixture(t);
   let directory;
   const run = async (_command, args) => {
-    if (args[1] === "venv") {
+    if (args.includes("venv")) {
       directory = args.at(-1);
       mkdirSync(directory, { recursive: true });
     }
@@ -80,7 +80,7 @@ test("Textual setup does not run two installers for the same environment", async
   const first = api.ensureTextualPython({
     ...ctx,
     run: async (_command, args) => {
-      if (args[1] === "venv") {
+      if (args.includes("venv")) {
         entered();
         await gate;
       }

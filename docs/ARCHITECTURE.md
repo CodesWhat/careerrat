@@ -407,7 +407,11 @@ locked dependencies, alongside the Node suite. CI creates its own temporary
 Python environment. Its UI tests include first installation and the normal CLI
 in an actual outer terminal, without model calls.
 
-Default `careerrat start` still opens the browser during TUI acceptance.
-Packaged platform checks, provider workflow acceptance and remaining report/history
-interactions are required before that startup changes and the browser product
-is retired.
+Default `careerrat start` opens the Textual workspace with the same agent
+selection as `careerrat tui`. A first run with unfinished candidate setup seeds the
+agent with an `ingest-profile` request (decided from `careerrat doctor`). Without a
+terminal, or without Python 3.11+, it exits non-zero and opens no browser. The
+browser workspace is reachable only through `careerrat start --browser` (and
+`careerrat tracker-dev`), kept so `careerrat update` can restart a running local app
+until the browser product is retired. Packaged Linux checks pass on Debian
+bookworm with `make` and a C++ compiler; Windows has unit coverage only.

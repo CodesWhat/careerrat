@@ -219,13 +219,16 @@ export default function Home() {
               <p className="eyebrow">Get CareerRat</p>
               <h2 id="get-title">One install, and you&apos;re talking.</h2>
               <p className="download-card__copy">
-                Run npm i -g careerrat, then careerrat start, and say hi. Setup is a conversation,
-                not a form. Open source under MIT.
+                Run npm i -g careerrat, then careerrat start. It opens in your terminal, and you say
+                hi. Setup is a conversation, not a form. Open source under MIT.
               </p>
               <TrackedCtaLink className="button button--lime" href={INSTALL_URL} placement="get">
                 Install with npm
               </TrackedCtaLink>
-              <p className="download-card__note">Needs Node.js 24.22.1 or newer.</p>
+              <p className="download-card__note">
+                Needs Node.js 24.22.1 or newer. Also needs Python 3.11 or newer; the first run takes
+                about a minute to set up.
+              </p>
             </div>
             <div className="engine-card">
               <p className="eyebrow">You&apos;ll need an AI CLI</p>

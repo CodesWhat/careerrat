@@ -17,17 +17,18 @@ or separate cloud service.
 
 ## Quick start
 
-**Install CareerRat.** You need Node.js 24.22.1 or newer, and Python 3.11 or
-newer if you want the terminal workspace.
+**Install CareerRat.** You need Node.js 24.22.1 or newer and Python 3.11 or
+newer. On Linux you also need `make` and a C++ compiler.
 
 ```bash
 npm i -g careerrat
 careerrat start
 ```
 
-`careerrat start` opens the workspace in your browser. `careerrat tui` opens the
-terminal workspace instead. The Mac app ended at v0.19.2 and is no longer
-updated.
+`careerrat start` opens the CareerRat workspace in your terminal: your saved jobs
+beside a chat with Claude Code or Codex. The first run sets up a private Python
+environment, which takes about a minute. The Mac app ended at v0.19.2 and is no
+longer updated.
 
 CareerRat needs one AI engine to do the work: Claude Code or OpenAI
 Codex. You do not need it before you install CareerRat. If neither is installed,
@@ -70,8 +71,8 @@ your floor, and what to do next.
 
 ### For developers
 
-To start a terminal agent session alongside the workspace (requires Node.js
-24.22.1 or newer):
+To pick the agent yourself (requires Node.js 24.22.1 or newer and Python 3.11 or
+newer):
 
 ```bash
 npm install -g careerrat
@@ -80,8 +81,8 @@ careerrat start claude
 careerrat start codex
 ```
 
-This scaffolds your workspace, boots the same local app at
-`http://localhost:7777`, and launches your agent with a starter message. See [Install & First Run](/getting-started/install) for the
+This scaffolds your workspace and opens the terminal workspace with that agent.
+A new install starts the chat on setup. See [Install & First Run](/getting-started/install) for the
 npm and source-checkout paths.
 
 ## Two reading tracks

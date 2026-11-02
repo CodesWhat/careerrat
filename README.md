@@ -107,16 +107,18 @@ you pick it.
 
 ### Install
 
-You need Node.js 24.22.1 or newer. Python 3.11 or newer is also needed if you want
-the terminal workspace (`careerrat tui`).
+You need Node.js 24.22.1 or newer and Python 3.11 or newer (with `venv`, which
+some Linux systems package separately, for example `python3-venv`). On Linux you
+also need `make` and a C++ compiler, because one dependency is built during
+install. On Debian or Ubuntu: `sudo apt install build-essential python3 python3-venv`.
 
 ```bash
 npm i -g careerrat
 careerrat start
 ```
 
-`careerrat start` opens the workspace in your browser. `careerrat tui` opens the
-terminal workspace instead.
+`careerrat start` opens the CareerRat workspace in your terminal. The Mac app
+and the browser workspace are being retired.
 
 The Mac app ended at v0.19.2 and is no longer updated. The `.dmg` and the
 Homebrew cask are frozen at that version, so install from npm.
@@ -129,36 +131,41 @@ shows `Ready` once the tool is installed, signed in, and passes a quick check.
 
 ### First run
 
-If CareerRat does not find Claude Code or Codex, it shows both supported choices
-in plain English. CareerRat can install Claude Code inside the app. Claude Code
-needs a paid Claude plan. Pro is enough; Max provides more usage. You can
-[get Claude through Scott's referral](https://claude.ai/referral/rOLHwxlsfA),
-then click **Install inside CareerRat**. The app runs Anthropic's official
-installer, shows its progress in the CareerRat window, and reports a clear retry
-if it fails. Click **Sign in**, finish in the browser, and return to CareerRat.
-The app checks for Claude in the background and also keeps a visible **Check
-setup** button. To use Codex, expand **Set up OpenAI Codex instead** and follow
-its official install guide.
+Run `careerrat start` in a terminal window. The first time, CareerRat sets up a
+private Python environment for the workspace, which takes a minute and needs an
+internet connection. It never touches your other Python packages. After that it
+opens right away.
 
-Choose the available AI engine, then drop a PDF, DOCX, image, or text resume into
-the conversation, or just start talking. Paul, the CareerRat rat, fills in "What
-Paul knows" beside the chat as it learns your target roles, location rules,
-compensation floor, dealbreakers, evidence, and honesty boundaries. Paul speaks
-in plain English: when it needs an abstract choice, it gives concrete examples
-instead of job-search jargon. For example:
+The workspace shows your saved jobs on one side and a chat with Claude Code or
+Codex on the other. CareerRat uses whichever one it finds on your machine, Claude
+Code first. If neither is installed, the workspace still opens and tells you so.
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) needs a
+paid Claude plan; Pro is enough, and Max gives more usage. You can
+[get Claude through Scott's referral](https://claude.ai/referral/rOLHwxlsfA).
+To use Codex, follow its [official install guide](https://developers.openai.com/codex/cli/).
+To pick one yourself, run `careerrat start claude` or `careerrat start codex`.
+
+On a brand new install, the chat starts on setup by itself. Drop a PDF, DOCX,
+image, or text resume into the conversation, or just start talking. Paul, the
+CareerRat rat, learns your target roles, location rules, compensation floor,
+dealbreakers, evidence, and honesty boundaries, and speaks in plain English. When
+it needs an abstract choice, it gives concrete examples instead of job-search
+jargon. For example:
 
 > "What would make one job worth applying to before another? The kind of work,
 > a schedule and pay that fit, or room to grow?"
 
 Progress saves continuously. Once the minimum search profile is ready, CareerRat
-starts the first location-aware search while the rest of onboarding continues.
-When setup finishes, the app opens Search and says clearly whether that search is
-running, found matches, needs a retry, or is ready to start.
+starts the first location-aware search while the rest of setup continues.
 
 From there, ask it to find roles, evaluate a posting, tailor an application,
-prepare an interview, or pick up a saved thread. Tool work appears as compact
-activity rows in the conversation, so you can see what it is reading, searching,
-and writing without a wall of approval prompts.
+prepare an interview, or pick up a saved thread. Click a job to see its details,
+and use the Search, Review and Apply buttons to send a request to the chat.
+Press F6 to move between the jobs and the chat, and Ctrl+Q to quit. Use
+`careerrat start --no-agent` to browse saved jobs without starting a chat.
+
+`careerrat start` needs a real terminal window. It will not run from a script or
+a pipe.
 
 <details>
 <summary>Windows, and the desktop window</summary>
@@ -465,23 +472,23 @@ threads fold into the same workspace as the rest of your search.
 
 <h2 align="center" id="for-developers">For Developers</h2>
 
-CareerRat ships as an npm package. The `careerrat` CLI runs the engine, the
-browser workspace and the terminal workspace, all on the same canonical skills
-and local data.
+CareerRat ships as an npm package. The `careerrat` CLI runs the engine and the
+terminal workspace, on the same canonical skills and local data.
 
 ### Install from npm
 
-Needs Node.js 24.22.1 or newer, and Python 3.11 or newer for `careerrat tui`.
+Needs Node.js 24.22.1 or newer and Python 3.11 or newer. Linux also needs
+`make` and a C++ compiler.
 
 ```bash
 npm i -g careerrat
 careerrat start
 ```
 
-Continue chatting in the browser workspace. It uses your selected local AI
-engine, and keeps job conversations and artifacts in the same workspace.
-To launch a terminal skill session as well, use `careerrat start claude` or
-`careerrat start codex`. Use `--no-open` to serve without opening a tab.
+`careerrat start` and `careerrat tui` are the same command: they open the
+terminal workspace. `careerrat start claude` or `careerrat start codex` picks the
+agent, and `--no-agent` skips it. `careerrat start --browser` still serves the
+legacy browser workspace (with `--no-open` and `--port`) until it is removed.
 
 Useful terminal commands:
 
@@ -490,18 +497,21 @@ careerrat next          # show the next useful agent-led workflow
 careerrat doctor        # verify setup, data, skills, and runtime health
 careerrat update        # update an npm installation without touching user data
 careerrat tracker       # write a recovery snapshot and summary
-careerrat tracker-dev   # serve the local browser workspace at localhost:7777
+careerrat tracker-dev   # serve the legacy browser workspace at localhost:7777
 ```
 
 ### Textual workspace
 
-`careerrat tui` opens clickable saved jobs, details, requirement reports and
+`careerrat start` (also `careerrat tui`) opens clickable saved jobs, details, requirement reports and
 history beside native agent chat. Use `--agent claude` or `--agent codex` to
 choose the agent, or `--no-agent` to browse saved jobs. F6 switches focus;
 Ctrl+Q closes the workspace and its agent.
 
-First launch needs Python 3.11 or newer with venv support. Linux also needs
-make and a C++ compiler for the native terminal dependency; its build fetches
+First launch needs Python 3.11 or newer with venv support. On Windows it looks
+for the `py -3` launcher, then `python`. Linux also needs make and a C++
+compiler for the native terminal dependency (`apt install build-essential` on
+Debian or Ubuntu); without them `npm i -g careerrat` fails while building it, and
+`careerrat doctor` reports when that helper is missing. The build fetches
 Node headers from nodejs.org. CareerRat installs
 hash-locked Textual dependencies in a private environment. `careerrat tui setup`
 prepares it ahead of time; `CAREERRAT_TUI_PYTHON` selects a Python interpreter.
@@ -510,7 +520,7 @@ Your global Python packages and candidate data stay separate from that runtime.
 Search, Review and Apply insert a request into the agent. Review it and press
 Enter there to run it. Add context saves pasted documents or local files before
 generating its request. Read saved JD opens the captured posting locally.
-The browser `start` entry remains available while terminal acceptance continues.
+Windows is untested end to end so far.
 
 ### Build from source
 
