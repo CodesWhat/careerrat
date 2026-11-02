@@ -14,11 +14,12 @@
 // posting is grade >= 2.
 //
 // Usage:
-//   node scripts/eval/search-bench.mjs [--json] [--update-baseline]
+//   node scripts/eval/search-bench.mjs [--json] [--update-baseline] [--fixtures <dir>]
+//   --fixtures runs another fixture directory (e.g. holdout/) and never writes the baseline.
 //   npm run bench:search -- --update-baseline   (intentional baseline change)
 
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildSearchSources } from "../../src/core/profile/generate-search-sources.mjs";
 import {
@@ -193,8 +194,22 @@ function formatText(result) {
 }
 
 function main() {
-  const args = new Set(process.argv.slice(2));
-  const result = runSearchBench();
+  const argv = process.argv.slice(2);
+  const args = new Set(argv);
+  const fixturesAt = argv.indexOf("--fixtures");
+  let dir = FIXTURE_DIR;
+  if (fixturesAt !== -1) {
+    if (!argv[fixturesAt + 1]) {
+      console.error("--fixtures needs a directory");
+      process.exit(2);
+    }
+    dir = resolve(argv[fixturesAt + 1]);
+    if (args.has("--update-baseline")) {
+      console.error("--update-baseline only applies to the default fixture directory");
+      process.exit(2);
+    }
+  }
+  const result = runSearchBench({ dir });
   if (args.has("--update-baseline")) {
     writeFileSync(BASELINE_PATH, JSON.stringify(baselineFrom(result), null, 2) + "\n");
     console.error(`Wrote ${BASELINE_PATH}`);

@@ -1,0 +1,400 @@
+{
+  "_meta": {
+    "purpose": "Synthetic ICU registered nurse candidate; Denver CO, onsite or hybrid-style, no remote.",
+    "grades": "3 exact target, 2 adjacent or good, 1 stretch, 0 wrong. Duplicates of an already-listed posting are grade 0.",
+    "synthetic": true,
+    "holdout": true
+  },
+  "name": "registered-nurse-icu",
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Critical Care Nursing",
+        "priority": "primary",
+        "titles": ["Registered Nurse ICU", "ICU Registered Nurse", "Critical Care Registered Nurse"]
+      },
+      {
+        "name": "Acute Care Nursing",
+        "priority": "secondary",
+        "titles": ["Registered Nurse", "Step-Down Registered Nurse"]
+      }
+    ],
+    "keep_signals": ["critical care", "BLS", "ACLS", "ventilator management"],
+    "cut_signals": ["Sales", "Recruiter", "Nursing Assistant"]
+  },
+  "profile": {
+    "candidate": {
+      "full_name": "Riley Example",
+      "domain": "nursing"
+    },
+    "compensation": {
+      "currency": "USD",
+      "target_base": 100000,
+      "minimum_base": 82000
+    },
+    "location": {
+      "home": "Denver, CO",
+      "remote": false,
+      "hybrid": false,
+      "onsite": true
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "postings": [
+    {
+      "id": "rn-01",
+      "title": "Registered Nurse - ICU (Night Shift)",
+      "company": "Front Range Medical Center",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/front-range-medical-center/registered-nurse-icu-night-shift-rn-01",
+      "comp": "$44 - $62 per hour",
+      "bodyText": "12 hour night shifts in a 24 bed adult ICU. Critical care, ventilator management, ACLS required. Colorado RN license. Pay range: $44 - $62 per hour.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "rn-02",
+      "title": "ICU Registered Nurse",
+      "company": "Mile High Health",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/mile-high-health/icu-registered-nurse-rn-02",
+      "comp": "$46 - $64 per hour",
+      "bodyText": "Full time days in the medical ICU. BLS and ACLS required, critical care experience preferred. Pay range: $46 - $64 per hour.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "rn-03",
+      "title": "RN - Intensive Care Unit, Full Time",
+      "company": "St. Brigid Hospital",
+      "location": "Aurora, CO",
+      "url": "https://jobs.example.test/st-brigid-hospital/rn-intensive-care-unit-full-time-rn-03",
+      "comp": "$43 - $60 per hour",
+      "bodyText": "36 hours per week, critical care nursing, CRRT support. Pay range: $43 - $60 per hour.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "rn-04",
+      "title": "Critical Care RN II",
+      "company": "Platte Valley Hospital",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/platte-valley-hospital/critical-care-rn-ii-rn-04",
+      "comp": "$47 - $66 per hour",
+      "bodyText": "Experienced RN in the cardiovascular ICU. ACLS, ventilator management. Pay range: $47 - $66 per hour.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "rn-05",
+      "title": "Registered Nurse, Surgical ICU (SICU)",
+      "company": "Summit Children's and Adult Care",
+      "location": "Lakewood, CO",
+      "url": "https://jobs.example.test/summit-children-s-and-adult-care/registered-nurse-surgical-icu-sicu-rn-05",
+      "comp": "$45 - $63 per hour",
+      "bodyText": "Post-operative critical care, ventilator and drip titration. Pay range: $45 - $63 per hour.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "rn-06",
+      "title": "Step-Down RN (Progressive Care)",
+      "company": "Front Range Medical Center",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/front-range-medical-center/step-down-rn-progressive-care-rn-06",
+      "comp": "$41 - $58 per hour",
+      "bodyText": "Progressive care unit with telemetry, titratable drips, BLS and ACLS. Pay range: $41 - $58 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "rn-07",
+      "title": "Registered Nurse - Cardiac Care Unit",
+      "company": "Mile High Health",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/mile-high-health/registered-nurse-cardiac-care-unit-rn-07",
+      "comp": "$44 - $61 per hour",
+      "bodyText": "CCU nursing, IABP and Impella experience a plus. ACLS required. Pay range: $44 - $61 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "rn-08",
+      "title": "Emergency Department RN",
+      "company": "Cherry Creek Emergency Hospital",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/cherry-creek-emergency-hospital/emergency-department-rn-rn-08",
+      "comp": "$43 - $60 per hour",
+      "bodyText": "Level II trauma center ED, critical patients, ACLS and TNCC. Pay range: $43 - $60 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "rn-09",
+      "title": "Neuro ICU Nurse (RN)",
+      "company": "Platte Valley Hospital",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/platte-valley-hospital/neuro-icu-nurse-rn-rn-09",
+      "comp": "$46 - $65 per hour",
+      "bodyText": "Neurocritical care, EVD monitoring, ventilator management. Pay range: $46 - $65 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "rn-10",
+      "title": "Travel RN - ICU (13 weeks)",
+      "company": "Aspen Staffing Group",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/aspen-staffing-group/travel-rn-icu-13-weeks-rn-10",
+      "comp": "$2,400 weekly",
+      "bodyText": "Thirteen week travel contract in a Denver ICU. Critical care experience required. Pay range: $2,400 weekly.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "rn-11",
+      "title": "Registered Nurse, PICU",
+      "company": "Summit Children's and Adult Care",
+      "location": "Aurora, CO",
+      "url": "https://jobs.example.test/summit-children-s-and-adult-care/registered-nurse-picu-rn-11",
+      "comp": "$44 - $62 per hour",
+      "bodyText": "Pediatric intensive care. PALS required, critical care experience. Pay range: $44 - $62 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "rn-12",
+      "title": "RN, Float Pool - Critical Care",
+      "company": "St. Brigid Hospital",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/st-brigid-hospital/rn-float-pool-critical-care-rn-12",
+      "comp": "$45 - $63 per hour",
+      "bodyText": "Float among ICU, step-down and CCU units. ACLS required. Pay range: $45 - $63 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "rn-13",
+      "title": "Charge Nurse, ICU (Registered Nurse)",
+      "company": "Mile High Health",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/mile-high-health/charge-nurse-icu-registered-nurse-rn-13",
+      "comp": "$50 - $68 per hour",
+      "bodyText": "Lead shift operations in the ICU. Leadership duties on top of patient care. Pay range: $50 - $68 per hour.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "rn-14",
+      "title": "Registered Nurse - Medical Surgical",
+      "company": "Front Range Medical Center",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/front-range-medical-center/registered-nurse-medical-surgical-rn-14",
+      "comp": "$38 - $52 per hour",
+      "bodyText": "Med-surg floor, 1:5 ratio. BLS required. Pay range: $38 - $52 per hour.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "rn-15",
+      "title": "Post-Anesthesia Care Unit (PACU) RN",
+      "company": "Cherry Creek Emergency Hospital",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/cherry-creek-emergency-hospital/post-anesthesia-care-unit-pacu-rn-rn-15",
+      "comp": "$42 - $58 per hour",
+      "bodyText": "Recovery room nursing, ACLS and airway management. Pay range: $42 - $58 per hour.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "rn-16",
+      "title": "Rapid Response RN",
+      "company": "Platte Valley Hospital",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/platte-valley-hospital/rapid-response-rn-rn-16",
+      "comp": "$46 - $62 per hour",
+      "bodyText": "Respond to deteriorating patients house wide. Critical care background required. Pay range: $46 - $62 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "rn-17",
+      "title": "Nurse Practitioner - Critical Care",
+      "company": "Mile High Health",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/mile-high-health/nurse-practitioner-critical-care-rn-17",
+      "comp": "$130,000 - $155,000",
+      "bodyText": "Advanced practice provider role. Requires DNP and NP licensure. Pay range: $130,000 - $155,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "rn-18",
+      "title": "Licensed Practical Nurse (LPN) - Long Term Care",
+      "company": "Aspen Meadows Senior Living",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/aspen-meadows-senior-living/licensed-practical-nurse-lpn-long-term-care-rn-18",
+      "comp": "$29 - $35 per hour",
+      "bodyText": "LPN position in skilled nursing facility. Pay range: $29 - $35 per hour.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "rn-19",
+      "title": "Certified Nursing Assistant (CNA) - ICU",
+      "company": "Mile High Health",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/mile-high-health/certified-nursing-assistant-cna-icu-rn-19",
+      "comp": "$19 - $24 per hour",
+      "bodyText": "Assist nurses with patient care. CNA certification. Pay range: $19 - $24 per hour.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "rn-20",
+      "title": "Nurse Recruiter",
+      "company": "Aspen Staffing Group",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/aspen-staffing-group/nurse-recruiter-rn-20",
+      "comp": "$75,000 - $95,000",
+      "bodyText": "Recruit registered nurses for hospital partners. Pay range: $75,000 - $95,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "rn-21",
+      "title": "Medical Device Sales Representative - Critical Care",
+      "company": "Pulsar Devices",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/pulsar-devices/medical-device-sales-representative-critical-care-rn-21",
+      "comp": "$90,000 OTE $180,000",
+      "bodyText": "Sell ventilators and monitors to hospitals. Pay range: $90,000 OTE $180,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "rn-22",
+      "title": "Director of Nursing, Critical Care Services",
+      "company": "St. Brigid Hospital",
+      "location": "Aurora, CO",
+      "url": "https://jobs.example.test/st-brigid-hospital/director-of-nursing-critical-care-services-rn-22",
+      "comp": "$145,000 - $175,000",
+      "bodyText": "Executive leadership for ICU and step-down. Master's degree required. Pay range: $145,000 - $175,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "rn-23",
+      "title": "Nurse Manager - ICU",
+      "company": "Platte Valley Hospital",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/platte-valley-hospital/nurse-manager-icu-rn-23",
+      "comp": "$120,000 - $140,000",
+      "bodyText": "Manage ICU staffing, budgets and quality. Management role. Pay range: $120,000 - $140,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "rn-24",
+      "title": "New Grad RN Residency - ICU",
+      "company": "Mile High Health",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/mile-high-health/new-grad-rn-residency-icu-rn-24",
+      "comp": "$36 - $40 per hour",
+      "bodyText": "Residency for new graduate nurses. Less than one year experience. Pay range: $36 - $40 per hour.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "rn-25",
+      "title": "Registered Nurse - ICU",
+      "company": "Bayview Memorial",
+      "location": "San Diego, CA",
+      "url": "https://jobs.example.test/bayview-memorial/registered-nurse-icu-rn-25",
+      "comp": "$60 - $85 per hour",
+      "bodyText": "ICU nursing in San Diego. California RN license required. Pay range: $60 - $85 per hour.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "rn-26",
+      "title": "ICU RN (Relocation Provided)",
+      "company": "Lakeshore Hospital",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/lakeshore-hospital/icu-rn-relocation-provided-rn-26",
+      "comp": "$45 - $62 per hour",
+      "bodyText": "Chicago ICU position, relocation assistance. Pay range: $45 - $62 per hour.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "rn-27",
+      "title": "Registered Nurse - ICU",
+      "company": "Pine Ridge Rural Clinic",
+      "location": "Alamosa, CO",
+      "url": "https://jobs.example.test/pine-ridge-rural-clinic/registered-nurse-icu-rn-27",
+      "comp": "$30 - $36 per hour",
+      "bodyText": "Small critical access hospital, occasional ICU boarders. Pay range: $30 - $36 per hour.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "rn-28",
+      "title": "Per Diem RN - ICU",
+      "company": "Aspen Meadows Senior Living",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/aspen-meadows-senior-living/per-diem-rn-icu-rn-28",
+      "comp": "$28 - $33 per hour",
+      "bodyText": "As-needed shifts for monitored patients. Pay range: $28 - $33 per hour.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "rn-29",
+      "title": "Telehealth Registered Nurse (Remote)",
+      "company": "CareLine Virtual",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/careline-virtual/telehealth-registered-nurse-remote-rn-29",
+      "comp": "$34 - $42 per hour",
+      "bodyText": "Phone triage from home. No bedside care. Pay range: $34 - $42 per hour.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "rn-30",
+      "title": "Registered Nurse - ICU (Night Shift)",
+      "company": "Front Range Medical Center",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/front-range-medical-center/registered-nurse-icu-night-shift-rn-30",
+      "comp": "$44 - $62 per hour",
+      "bodyText": "12 hour night shifts in a 24 bed adult ICU. Reposted. Pay range: $44 - $62 per hour.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "rn-31",
+      "title": "ICU Registered Nurse",
+      "company": "Mile High Health",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/mile-high-health/icu-registered-nurse-rn-31",
+      "comp": "$46 - $64 per hour",
+      "bodyText": "Full time days in the medical ICU. Reposted. Pay range: $46 - $64 per hour.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "rn-32",
+      "title": "Clinical Informatics Nurse Specialist",
+      "company": "Mile High Health",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/mile-high-health/clinical-informatics-nurse-specialist-rn-32",
+      "comp": "$95,000 - $115,000",
+      "bodyText": "Configure EHR workflows with IT. No bedside care. Pay range: $95,000 - $115,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    }
+  ]
+}
