@@ -4,6 +4,7 @@
 //   node src/cli/people.mjs list [--json]
 //   node src/cli/people.mjs add <name> [--authorized-by <who>] [--purpose <text>]
 //   node src/cli/people.mjs remove <name> --purge --yes
+//   careerrat --for <name> people contact show|set|opt-in|opt-out
 //   node src/cli/people.mjs --help
 //
 // A person lives at <data root>/people/<name>/. Use `careerrat --for <name> <command>`
@@ -12,12 +13,21 @@
 import { fileURLToPath } from "node:url";
 import {
   createPersonRoot,
+  currentPerson,
   peopleBase,
   personExists,
   personRoot,
   validatePersonName,
 } from "../core/paths/people.mjs";
 import { recordAuthorization } from "../core/people/authorization.mjs";
+import {
+  activeOptIn,
+  ContactError,
+  optIn,
+  optOut,
+  readContact,
+  setContact,
+} from "../core/people/contact.mjs";
 import { purgePerson } from "../core/people/purge.mjs";
 import { listPeople } from "../core/people/roster.mjs";
 
@@ -33,6 +43,11 @@ function printHelp() {
   remove <name> --purge --yes
                   Delete that person's data root, browser profile and generated documents
                   after writing a backup to <data root>/people-backups/. Refuses without --yes.
+
+  contact show | set [--email <a>] [--phone <p>] [--timezone <tz>] [--quiet-hours 21:00-08:00]
+          | opt-in email --evidence "<how they agreed>" | opt-out email
+                  With --for: the address CareerRat may notify, and their yes/no per channel.
+                  Notifications fail closed without an opt-in.
 
 Each person keeps their own profile, evidence, tracker and documents.
 Run any command for them with: careerrat --for <name> <command>
@@ -131,6 +146,52 @@ function cmdRemove(name, json, { purge, yes }) {
   console.log(`Backup: ${result.backup}`);
 }
 
+function cmdContact(action, channel, json, opts) {
+  const name = currentPerson(process.env);
+  if (!name) fail("contact needs a person. Try: careerrat --for <name> people contact show");
+  const base = peopleBase({ repoRoot: ROOT });
+  if (!personExists(base, name)) fail(`No workspace for "${name}".`);
+  try {
+    if (action === "set") {
+      const changes = {
+        email: opts.email,
+        phone: opts.phone,
+        timezone: opts.timezone,
+        quietHours: opts.quietHours,
+      };
+      if (Object.values(changes).every((value) => value === undefined)) {
+        fail("contact set needs --email, --phone, --timezone or --quiet-hours.");
+      }
+      setContact({ base, name, ...changes });
+    } else if (action === "opt-in") {
+      optIn({ base, name, channel: channel || "email", evidence: opts.evidence });
+    } else if (action === "opt-out") {
+      optOut({ base, name, channel: channel || "email" });
+    } else if (action !== "show") {
+      fail(`unknown contact command "${action}". Use show, set, opt-in or opt-out.`);
+    }
+  } catch (err) {
+    if (err instanceof ContactError) fail(err.message);
+    throw err;
+  }
+  const contact = readContact(base, name);
+  const emailOptIn = activeOptIn(contact, "email");
+  if (json) {
+    console.log(JSON.stringify({ ok: true, name, contact, emailOptIn }, null, 2));
+    return;
+  }
+  console.log(`${name}`);
+  console.log(`  email:       ${contact.email || "not set"}`);
+  console.log(`  phone:       ${contact.phone || "not set"}`);
+  console.log(`  timezone:    ${contact.timezone || "not set"}`);
+  console.log(`  quiet hours: ${contact.quietHours.start}-${contact.quietHours.end}`);
+  console.log(
+    emailOptIn
+      ? `  email opt-in: yes, ${emailOptIn.optedInAt} (${emailOptIn.evidence})`
+      : "  email opt-in: no"
+  );
+}
+
 function parseArgs(args) {
   const out = { json: false, purge: false, yes: false, help: false, positional: [] };
   for (let i = 0; i < args.length; i++) {
@@ -143,6 +204,10 @@ function parseArgs(args) {
       const value = args[++i];
       if (!value?.trim() || value.startsWith("--")) fail(`${arg} needs a value.`);
       out[arg === "--purpose" ? "purpose" : "authorizedBy"] = value;
+    } else if (["--email", "--phone", "--timezone", "--quiet-hours", "--evidence"].includes(arg)) {
+      const value = args[++i];
+      if (!value?.trim() || value.startsWith("--")) fail(`${arg} needs a value.`);
+      out[arg.slice(2).replace(/-(\w)/g, (_, c) => c.toUpperCase())] = value;
     } else if (arg.startsWith("-")) fail(`unknown option "${arg}".`);
     else out.positional.push(arg);
   }
@@ -156,11 +221,12 @@ if (parsed.help || positional.length === 0) {
   process.exit(positional.length === 0 && !parsed.help ? 1 : 0);
 }
 const [sub, name] = positional;
-if (sub === "list") cmdList(json);
+if (sub === "contact") cmdContact(positional[1] || "show", positional[2], json, parsed);
+else if (sub === "list") cmdList(json);
 else if (sub === "add") {
   if (!name) fail("add needs a name. Try: careerrat people add <name>");
   cmdAdd(name, json, parsed);
 } else if (sub === "remove") {
   if (!name) fail("remove needs a name. Try: careerrat people remove <name> --purge --yes");
   cmdRemove(name, json, parsed);
-} else fail(`unknown command "${sub}". Use list, add or remove.`);
+} else fail(`unknown command "${sub}". Use list, add, remove or contact.`);
