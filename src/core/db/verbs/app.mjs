@@ -163,12 +163,22 @@ function interviewLogisticsNote(at, who) {
   return `Interview: ${formatted}${firstName ? ` with ${firstName}` : ""}`.slice(0, 60);
 }
 
-// appUpsert({row}) — full-row insert/replace (capture-intake shape): a brand
-// new application row, or a wholesale replace of an existing one by id.
-export function appUpsert({ repoRoot, env, row } = {}) {
+// appUpsert({row, replace?}) — full-row insert/replace (capture-intake shape).
+// Callers that must never wipe an existing row (the CLI) pass `replace: false`,
+// which refuses an existing id: a replace drops every field the new row doesn't
+// carry (status, history, artifacts).
+export function appUpsert({ repoRoot, env, row, replace = true } = {}) {
   if (!row?.id) throw new Error("appUpsert: row.id is required");
   return runApplicationOutcome({ repoRoot, env }, row.id, (db) => {
     const existed = Boolean(getRow(db, "applications", row.id));
+    if (existed && !replace) {
+      const error = new Error(
+        `application "${row.id}" already exists. Upsert would replace the whole row and drop its other fields. ` +
+          "Use 'app set-fields' to change fields, or pass --replace to overwrite it on purpose."
+      );
+      error.code = "APPLICATION_EXISTS";
+      throw error;
+    }
     putRow(db, "applications", row.id, row);
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
@@ -297,6 +307,18 @@ export function appSetStatus({
   if (appliedAt != null && Number.isNaN(Date.parse(appliedAt))) {
     const error = new Error("appSetStatus: appliedAt must be an ISO date or datetime");
     error.code = "BAD_APPLIED_AT";
+    throw error;
+  }
+  if (!isKnownStatusLabel(to)) {
+    const error = new Error(
+      `appSetStatus: "${to}" doesn't match any status CareerRat recognizes (try applied, interview, offer, rejected, withdrawn)`
+    );
+    error.code = "BAD_STATUS";
+    throw error;
+  }
+  if (followUpDueAt != null && Number.isNaN(Date.parse(followUpDueAt))) {
+    const error = new Error("appSetStatus: followUpDueAt must be an ISO date or datetime");
+    error.code = "BAD_FOLLOW_UP_DUE";
     throw error;
   }
   return runApplicationOutcome({ repoRoot, env }, id, (db) => {
@@ -771,6 +793,11 @@ export function appPersistEvaluation({ repoRoot, env, id, evaluation, projection
 // "supersedes interviewAt once a follow-on is booked"). Not outcome-changing.
 export function appScheduleInterview({ repoRoot, env, id, at, round, note, who } = {}) {
   if (!at) throw new Error("appScheduleInterview: at is required");
+  if (Number.isNaN(Date.parse(at))) {
+    const error = new Error("appScheduleInterview: at must be an ISO date or datetime");
+    error.code = "BAD_INTERVIEW_AT";
+    throw error;
+  }
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
     const isFutureAlready =

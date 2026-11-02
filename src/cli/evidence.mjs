@@ -221,6 +221,30 @@ function cmdAdd() {
       claims: [plan.claim],
       writer: "evidence add",
     });
+    if (written.added === 0) {
+      // The bank already holds this exact text under another id, so nothing was stored.
+      const wanted = String(plan.claim.claim || "").trim();
+      const twin = written.data?.claims?.find((c) => String(c.claim || "").trim() === wanted);
+      const error = twin
+        ? `nothing saved: the bank already has this claim as "${twin.id}"`
+        : "nothing saved: the claim was empty or a duplicate";
+      if (opts.json)
+        console.log(
+          JSON.stringify(
+            {
+              ok: false,
+              written: false,
+              error,
+              duplicateOf: twin?.id ?? null,
+              count: written.total,
+            },
+            null,
+            2
+          )
+        );
+      else console.error(`evidence: ${error}.`);
+      process.exit(1);
+    }
     if (opts.json)
       console.log(
         JSON.stringify(
