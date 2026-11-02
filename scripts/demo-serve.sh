@@ -10,8 +10,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-export CAREERRAT_HOME="$PWD/.demo-home"   # isolated — never your default workspace
-export CAREERRAT_DEV_PORT=7788            # read by BOTH the backend and vite's proxy
+export CAREERRAT_HOME="$PWD/.demo-home" # isolated — never your default workspace
+export CAREERRAT_DEV_PORT=7788          # read by BOTH the backend and vite's proxy
 
 echo "→ Seeding demo into $CAREERRAT_HOME (isolated, safe) ..."
 node src/cli/data.mjs init --demo --force
@@ -26,8 +26,8 @@ trap 'kill "$BACKEND" 2>/dev/null || true' EXIT
 
 # wait for the backend to actually bind before vite starts proxying to it
 for _ in $(seq 1 30); do
-  lsof -nP -iTCP:7788 -sTCP:LISTEN >/dev/null 2>&1 && break
-  sleep 0.5
+	lsof -nP -iTCP:7788 -sTCP:LISTEN >/dev/null 2>&1 && break
+	sleep 0.5
 done
 
 echo "→ Starting Vite dev SPA on :5173 (proxy /api → :7788) ..."
