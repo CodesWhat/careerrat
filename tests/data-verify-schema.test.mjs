@@ -69,7 +69,7 @@ test("app set-status refuses a status the tracker doesn't recognize instead of s
   assert.equal(data(root, ["app", "upsert", "--data", JSON.stringify(row)]).status, 0);
   const bad = data(root, ["app", "set-status", "app-1", "zzz-not-a-status"]);
   assert.notEqual(bad.status, 0);
-  assert.match(bad.stdout + bad.stderr, /not a status the tracker recognizes/);
+  assert.match(bad.stdout + bad.stderr, /not a status CareerRat knows/);
   const good = data(root, ["app", "set-status", "app-1", "interview"]);
   assert.equal(good.status, 0, good.stdout + good.stderr);
 });
