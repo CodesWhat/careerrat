@@ -140,6 +140,90 @@ test("pay view explicitly separates annual earnings and uses upper endpoint to b
   assert.equal(viewJobs(data).jobs.find((job) => job.id === "earnings").pay.min, 500);
 });
 
+test("pay is read from saved base and total pay text, and vague text stays unknown", (t) => {
+  const note = (id, base, more = {}) => row(id, null, { base, ...more });
+  const ctx = fixture(t, {
+    sourced: [
+      note("a-range-k", "$150k-$200k"),
+      note("b-commas", "$176,000 - $204,000"),
+      note("c-unlisted", "unlisted"),
+      note("d-vague", "Competitive"),
+      note("e-extras", "$90k-$110k + equity"),
+      note("f-euro", "\u20ac90-110k"),
+      note("g-empty", ""),
+      note("h-null", null),
+      note("i-total", "unlisted", { tc: "$300k-$360k + equity" }),
+    ],
+  });
+  const data = readJobs(ctx);
+  const byId = (view, id) => view.jobs.find((job) => job.id === id).pay;
+  const view = viewJobs(data);
+  assert.deepEqual([byId(view, "a-range-k").min, byId(view, "a-range-k").max], [150000, 200000]);
+  assert.deepEqual([byId(view, "b-commas").min, byId(view, "b-commas").max], [176000, 204000]);
+  assert.deepEqual([byId(view, "e-extras").min, byId(view, "e-extras").max], [90000, 110000]);
+  assert.equal(byId(view, "a-range-k").currency, "USD");
+  assert.equal(byId(view, "a-range-k").source, "saved-note");
+  for (const id of ["c-unlisted", "d-vague", "g-empty", "h-null", "i-total"]) {
+    const pay = byId(view, id);
+    assert.deepEqual([pay.min, pay.max, pay.comparable], [null, null, false], id);
+  }
+  assert.equal(byId(view, "f-euro").currency, "EUR");
+  assert.equal(byId(view, "f-euro").comparable, false);
+  // Highest first really orders by pay; unknown and other currencies sort last.
+  assert.deepEqual(
+    view.jobs.map((job) => job.id),
+    [
+      "b-commas",
+      "a-range-k",
+      "e-extras",
+      "c-unlisted",
+      "d-vague",
+      "f-euro",
+      "g-empty",
+      "h-null",
+      "i-total",
+    ]
+  );
+  assert.deepEqual(
+    viewJobs(data, { order: "asc" })
+      .jobs.slice(0, 3)
+      .map((job) => job.id),
+    ["e-extras", "a-range-k", "b-commas"]
+  );
+  const earnings = viewJobs(data, { basis: "annual-earnings" });
+  assert.equal(earnings.jobs[0].id, "i-total");
+  assert.deepEqual([earnings.jobs[0].pay.min, earnings.jobs[0].pay.max], [300000, 360000]);
+  assert.equal(earnings.jobs[1].pay.comparable, false);
+});
+
+test("a saved evaluation's pay wins over the free-text note", (t) => {
+  const ctx = fixture(t, {
+    sourced: [row("both", pay(100000, 120000), { base: "$300k-$400k" })],
+  });
+  const job = viewJobs(readJobs(ctx)).jobs[0];
+  assert.deepEqual([job.pay.min, job.pay.max, job.pay.source], [100000, 120000, "job-description"]);
+});
+
+test("fit falls back to the score and verdict saved on the job", (t) => {
+  const ctx = fixture(t, {
+    sourced: [
+      row("gated", null, { fitScore: 84, gate: { gate: "KEEP", action: "apply" } }),
+      row("bucketed", null, { fitScore: 40, fitBucket: "stretch" }),
+      row("both", null, { fitScore: 70, gate: { gate: "REVIEW" }, fitBucket: "med" }),
+      row("zero", null, { fitScore: 0, fitBucket: "cut" }),
+      row("bare", null, { gate: null }),
+      row("evaluated", { gate: "keep", fitScore: 91 }, { fitScore: 12 }),
+    ],
+  });
+  const fit = Object.fromEntries(viewJobs(readJobs(ctx)).jobs.map((job) => [job.id, job.fit]));
+  assert.equal(fit.gated.label, "84 KEEP");
+  assert.equal(fit.bucketed.label, "40 stretch");
+  assert.equal(fit.both.label, "70 REVIEW");
+  assert.equal(fit.zero.label, "0 cut");
+  assert.deepEqual(fit.bare, { score: null, verdict: null, label: null });
+  assert.equal(fit.evaluated.label, "91 keep");
+});
+
 test("filtering uses lifecycle stage and restores a valid visible selection", (t) => {
   const ctx = fixture(t, {
     applications: [
