@@ -144,6 +144,7 @@ export async function notifyPerson({
   from,
   kind = "notification",
   windowKey = null,
+  extra = {},
   now = new Date(),
   ignoreQuietHours = false,
 }) {
@@ -158,6 +159,7 @@ export async function notifyPerson({
     transport: transport.name,
     messageId: result?.id ?? null,
     ...(windowKey ? { windowKey } : {}),
+    ...extra,
   };
   appendNotificationLog(base, name, entry);
   return entry;
