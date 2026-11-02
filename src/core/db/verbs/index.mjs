@@ -160,6 +160,13 @@ export {
   searchExecutionListRecoverable,
   searchExecutionSetLane,
 } from "./search-executions.mjs";
+export {
+  deadBoardList,
+  deadBoardPrune,
+  deadBoardRecord,
+  jobLinkCheckLast,
+  jobLinkCheckRecord,
+} from "./search-liveness.mjs";
 export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
 export {
   skillChatDecisionSet,
