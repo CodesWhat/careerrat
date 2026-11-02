@@ -200,8 +200,8 @@ export function viewJobs(
   };
 }
 
-export const SNAPSHOT_WORKSPACE_MESSAGE_LIMIT = 100;
-export const SNAPSHOT_WORKSPACE_BYTE_LIMIT = 2 * 1024 * 1024;
+const SNAPSHOT_WORKSPACE_MESSAGE_LIMIT = 100;
+const SNAPSHOT_WORKSPACE_BYTE_LIMIT = 2 * 1024 * 1024;
 
 // The Textual bridge sends each snapshot as one JSON line with a 32 MiB read
 // limit. Send only the newest workspace messages; the saved data and the
