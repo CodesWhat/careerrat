@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // CareerRat launcher — the `npx careerrat <command>` entrypoint.
 //
-//   careerrat start [ai]  Open the local app; optionally launch a terminal agent
+//   careerrat start [ai]  Open the terminal workspace (TUI) with Claude or Codex
 //   careerrat init        Scaffold candidate/ + workspace dirs, print next steps
 //   careerrat doctor      Environment health check
 //   careerrat next        Show the next agent task
@@ -10,7 +10,7 @@
 //   careerrat companies   Manage tracked employer ATS boards
 //   careerrat evaluate    Run the body-read gate on a saved job
 //   careerrat questions   Fetch a job's real application-form questions (no browser)
-//   careerrat tracker     One-shot tracker snapshot (use `start` for the live dev server)
+//   careerrat tracker     One-shot tracker snapshot (use `tracker-dev` for the live dev server)
 //   careerrat restore     Recover workspace/tracker.json from a rolling snapshot
 //   careerrat export      Render a tailored artifact / packet to PDF or DOCX
 //   careerrat people      List or add people, one workspace each (see --for)
@@ -51,6 +51,9 @@ import {
   strandedPackageDataDir,
   userPath,
 } from "../src/core/paths/workspace.mjs";
+import { borrowedAiWarning } from "../src/core/people/ai-route.mjs";
+import { authorizationPath, recordAuthorization } from "../src/core/people/authorization.mjs";
+import { migratePersonDocuments } from "../src/core/people/documents-migration.mjs";
 import {
   classifyLocalAppRuntime,
   commandMatchesTrackerScript,
@@ -72,7 +75,11 @@ import { readVersion } from "../src/core/version.mjs";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const pathCtx = { repoRoot: root };
-const { args: cliArgs, person: forPerson } = extractForFlag(process.argv.slice(2));
+const {
+  args: cliArgs,
+  person: forPerson,
+  create: createPerson,
+} = extractForFlag(process.argv.slice(2));
 const [command, ...rest] = cliArgs;
 
 const CLIS = {
@@ -194,7 +201,8 @@ if (command === "start") {
 // ---------------------------------------------------------------------------
 
 // Pulls a global `--for <name>` (or `--for=<name>`) out of argv so no command
-// ever sees it. The last one wins.
+// ever sees it. The last one wins. With a person selected, `--new` is global too:
+// it creates that person's workspace if it doesn't exist yet, on any command.
 function extractForFlag(argv) {
   const args = [];
   let person = null;
@@ -218,7 +226,11 @@ function extractForFlag(argv) {
       args.push(arg);
     }
   }
-  return { args, person };
+  if (person === null && !String(process.env.CAREERRAT_PERSON || "").trim()) {
+    return { args, person, create: false };
+  }
+  const create = args.includes("--new");
+  return { args: args.filter((arg) => arg !== "--new"), person, create };
 }
 
 // `--for <name>` or an inherited CAREERRAT_PERSON points CAREERRAT_HOME at
@@ -232,13 +244,43 @@ function applyPersonSelection() {
       env: process.env,
       forName: forPerson,
       allowMissing: command === "people",
-      createMissing: command === "start" && rest.includes("--new"),
+      createMissing: createPerson,
     });
   } catch (err) {
     console.error(err.message);
     process.exit(1);
   }
   if (env) Object.assign(process.env, env);
+  if (env) {
+    // Move a pre-namespace documents folder into the person namespace when it's
+    // unambiguously theirs; otherwise leave it alone and say so.
+    try {
+      const moved = migratePersonDocuments({
+        repoRoot: root,
+        base: env.CAREERRAT_PEOPLE_BASE,
+        name: env.CAREERRAT_PERSON,
+      });
+      if (moved.status === "moved") console.error(`Moved ${moved.from} to ${moved.to}`);
+      else if (moved.status === "skipped") {
+        console.error(
+          `Left ${moved.from} where it is (${moved.reason}). Move it by hand if it's theirs.`
+        );
+      }
+    } catch (error) {
+      console.error(`Could not check the old documents folder: ${error.message}`);
+    }
+  }
+  if (env && createPerson) {
+    // --new made the workspace: leave the same authorization note `people add` does.
+    const base = env.CAREERRAT_PEOPLE_BASE;
+    const name = env.CAREERRAT_PERSON;
+    if (!existsSync(authorizationPath(base, name))) {
+      recordAuthorization({ base, name, env: process.env });
+      console.error(
+        `Created ${name}'s workspace. Record who authorized it: careerrat people add ${name} --authorized-by "<who>" --purpose "<what for>"`
+      );
+    }
+  }
 }
 
 function runInit(extra) {
@@ -262,12 +304,20 @@ function runInit(extra) {
 // (`careerrat start claude`); `--agent <name>` is an equivalent alias. Both
 // accept either supported launcher by name.
 function parseStartArgs(extra) {
-  const out = { agent: null, port: null, noAgent: false, noDashboard: false, noOpen: false };
+  const out = {
+    agent: null,
+    port: null,
+    noAgent: false,
+    noDashboard: false,
+    noOpen: false,
+    browser: false,
+  };
   for (let i = 0; i < extra.length; i++) {
     const a = extra[i];
     if (a === "--no-agent") out.noAgent = true;
     else if (a === "--no-dashboard") out.noDashboard = true;
     else if (a === "--no-open") out.noOpen = true;
+    else if (a === "--browser") out.browser = true;
     else if (a === "--new") {
       // Consumed earlier by the --for resolver (createMissing); nothing to do here.
     } else if (a === "--agent") {
@@ -282,19 +332,41 @@ function parseStartArgs(extra) {
   return out;
 }
 
-// `careerrat start [agent]` — the one-command front door:
-//   scaffold workspace → boot the local app (:7777) → open the browser.
-//   An explicit agent name or --no-dashboard retains the terminal skill path.
-// Usage: careerrat start [claude|codex]
-//        [--agent <name>] [--no-agent] [--no-dashboard] [--no-open] [--port <n>]
+// `careerrat start [agent]`, the one-command front door. It opens the Textual
+// terminal workspace with a native Claude or Codex agent (same selection rules
+// as `careerrat tui`). The browser workspace is kept only behind --browser (and
+// --no-dashboard) while the browser entry is retired; `update` restarts a running
+// local app through it.
+// Usage: careerrat start [claude|codex] [--agent <name>] [--no-agent]
+//        careerrat start --browser [claude|codex] [--no-agent] [--no-open] [--port <n>]
+async function runTerminalWorkspace(opts) {
+  const person = currentPerson(process.env);
+  if (person) console.log(`• CareerRat for ${person}`);
+  console.log(`• Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
+  for (const dir of WORKSPACE_DIRS) {
+    const abs = userPath(pathCtx, dir);
+    if (!existsSync(abs)) mkdirSync(abs, { recursive: true });
+  }
+  const args = opts.noAgent ? ["--no-agent"] : opts.agent ? ["--agent", opts.agent] : [];
+  return run(join(root, CLIS.tui), args);
+}
+
 async function runStart(extra) {
   const opts = parseStartArgs(extra);
+  const legacy = opts.browser || opts.noDashboard;
+  if (!legacy && (opts.port != null || opts.noOpen))
+    throw new Error(
+      "--port and --no-open apply to the browser workspace. Add --browser to use them."
+    );
+  if (!legacy) return runTerminalWorkspace(opts);
   const wantDashboard = !opts.noDashboard;
   const wantAgent = !opts.noAgent && (Boolean(opts.agent) || opts.noDashboard);
   const forcedAgent = opts.agent;
 
   const person = currentPerson(process.env);
   if (person) console.log(`• CareerRat for ${person}`);
+  const aiWarning = borrowedAiWarning({ repoRoot: root, env: process.env });
+  if (aiWarning) console.error(aiWarning);
   console.log(`• Data root: ${resolveUserPaths(pathCtx).dataRoot}`);
 
   // 1) Scaffold workspace dirs (idempotent).
@@ -794,7 +866,7 @@ function restartDashboardAfterUpdate({ port }) {
   console.log("• Refreshing the running local app with the updated code…");
   const result = spawnSync(
     process.execPath,
-    [join(root, "bin/careerrat.mjs"), "start", "--no-agent", "--port", String(port)],
+    [join(root, "bin/careerrat.mjs"), "start", "--browser", "--no-agent", "--port", String(port)],
     { cwd: root, stdio: "inherit", env: process.env }
   );
   if (result.error) {
@@ -851,7 +923,7 @@ function printHelp() {
 Usage: careerrat <command> [options]
 
 Commands:
-  start [ai]  Open the browser workspace; optionally launch a terminal agent
+  start [ai]  Open the terminal workspace (TUI) with Claude or Codex; same as 'careerrat tui'
   init        Scaffold candidate/ + workspace dirs, print next steps
   install-skills  Create/repair the .claude/skills -> .agents/skills shim (--check to verify only)
   doctor      Environment health check
@@ -862,9 +934,9 @@ Commands:
   companies   Manage tracked employer ATS boards
   evaluate    Run the body-read gate on a saved job (GATE/FIT/COMP/ACTION)
   questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)
-  tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat start')
+  tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat tracker-dev')
   tracker-dev  Serve the live local app without launching an agent
-  people      List or add people, one workspace each (run any command for them with --for)
+  people      List, add or remove (--purge --yes) people, one workspace each (run any command for them with --for)
   data        sqlite-backed data layer: status/init/import/export/verify/backup/restore + per-domain verbs (M6)
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)
   modes       Show/change optional usage and application modes
@@ -888,18 +960,21 @@ Commands:
   help        Show this list
 
 start [ai]:
-  With no agent name, continue chatting in the browser workspace.
-  Name Claude or Codex explicitly to launch a terminal skill session as well.
-  --agent <name>      same as the positional, alternate spelling
-  --no-agent          scaffold + local app only, don't launch an agent
-  --no-dashboard      terminal session only; detect a supported agent if unnamed
-  --no-open           serve the local app without opening a browser tab
-  --port <n>          local app port (default 7777)
-  --new               with --for, create that person's workspace first
+  Opens the terminal workspace: saved jobs plus a Claude or Codex chat.
+  With no agent name it picks Claude, then Codex, whichever is installed.
+  First run with no profile yet starts the agent on candidate setup.
+  Needs Python 3.11+ (first launch builds a private environment) and a real terminal.
+  --agent <name>      claude or codex; same as the positional, alternate spelling
+  --no-agent          workspace only, don't launch an agent
+  --browser           legacy: serve the browser workspace instead (--no-open, --port <n>)
+  --no-dashboard      legacy: terminal agent session without any workspace
 
 --for <name>:
   Works on every command. Runs it in that person's workspace
   (<data root>/people/<name>/). Create one with: careerrat people add <name>
+  --new               with --for, create that person's workspace first (any command)
+  careerrat doctor shows which AI route their work runs on; see "Running CareerRat for
+  someone else" in the docs.
 
 Run any command with --help for its own options.`);
 }

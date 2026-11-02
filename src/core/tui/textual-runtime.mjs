@@ -1,15 +1,20 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { ensureTextualPython } from "./python-runtime.mjs";
+import { ensureTextualPython, textualLogPath } from "./python-runtime.mjs";
 
 export async function runTextualWorkspace({ repoRoot, env = process.env, args = [] } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY)
     throw new Error("Interactive TUI requires a terminal; use careerrat tui --json for saved jobs");
   const python = await ensureTextualPython({ repoRoot, env, progress: console.error });
   return new Promise((resolve, reject) => {
-    const child = spawn(python, [join(repoRoot, "src/core/tui/textual-app.py"), ...args], {
+    // -I: no user site packages, PYTHON* variables or script-directory imports.
+    const child = spawn(python, ["-I", join(repoRoot, "src/core/tui/textual-app.py"), ...args], {
       cwd: repoRoot,
-      env: { ...env, CAREERRAT_NODE: process.execPath },
+      env: {
+        ...env,
+        CAREERRAT_NODE: process.execPath,
+        CAREERRAT_TUI_LOG: textualLogPath({ repoRoot, env }),
+      },
       stdio: "inherit",
     });
     const terminate = () => child.kill("SIGTERM");

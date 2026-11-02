@@ -132,6 +132,7 @@ export {
   linkedinProposalBatchPut,
   linkedinProposalDecide,
 } from "./linkedin-proposals.mjs";
+export { postingSightingsLoad, postingSightingsRecord } from "./posting-sightings.mjs";
 export {
   PUBLIC_INTEL_REVIEW_ACTIONS,
   publicBoardIntelUpsert,

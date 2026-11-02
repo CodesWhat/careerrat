@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -28,7 +36,7 @@ test("Textual setup installs hash-locked wheels privately and reuses the complet
   const calls = [];
   const run = async (command, args) => {
     calls.push({ command, args });
-    if (args[1] === "venv") {
+    if (args.includes("venv")) {
       const bin = join(args.at(-1), process.platform === "win32" ? "Scripts" : "bin");
       mkdirSync(bin, { recursive: true });
       writeFileSync(join(bin, process.platform === "win32" ? "python.exe" : "python"), "fixture");
@@ -55,7 +63,7 @@ test("failed Textual installation leaves no ready marker and can retry", async (
   const ctx = fixture(t);
   let directory;
   const run = async (_command, args) => {
-    if (args[1] === "venv") {
+    if (args.includes("venv")) {
       directory = args.at(-1);
       mkdirSync(directory, { recursive: true });
     }
@@ -80,7 +88,7 @@ test("Textual setup does not run two installers for the same environment", async
   const first = api.ensureTextualPython({
     ...ctx,
     run: async (_command, args) => {
-      if (args[1] === "venv") {
+      if (args.includes("venv")) {
         entered();
         await gate;
       }
@@ -105,4 +113,73 @@ test("Textual setup recovers a lock whose installer process no longer exists", a
   writeFileSync(join(base, "setup.lock"), "2147483647");
   await api.ensureTextualPython({ ...ctx, run: async () => {} });
   assert.equal(existsSync(join(base, "setup.lock")), false);
+});
+
+test("every interpreter we run is isolated, and Windows asks the py launcher for Python 3", async (t) => {
+  const ctx = fixture(t);
+  const calls = [];
+  const run = async (command, args) => {
+    calls.push({ command, args });
+    if (args.includes("venv")) {
+      const bin = join(args.at(-1), "Scripts");
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(join(bin, "python.exe"), "fixture");
+    }
+  };
+  const env = { ...ctx.env };
+  delete env.CAREERRAT_TUI_PYTHON;
+  await api.ensureTextualPython({ ...ctx, env, platform: "win32", run });
+  assert.ok(calls.length >= 4);
+  for (const call of calls)
+    assert.ok(call.args.includes("-I"), `${call.args.join(" ")} is not isolated`);
+  assert.equal(calls[0].command, "py");
+  assert.deepEqual(calls[0].args.slice(0, 2), ["-3", "-I"]);
+  const venv = calls.find((call) => call.args.includes("venv"));
+  assert.deepEqual(venv.args.slice(0, 3), ["-3", "-I", "-m"]);
+  // An explicit interpreter is used as given, with no launcher flag.
+  const other = fixture(t);
+  const pinned = [];
+  await api.ensureTextualPython({
+    ...other,
+    env: { ...other.env, CAREERRAT_TUI_PYTHON: "/opt/python3.12" },
+    platform: "linux",
+    run: async (command, args) => {
+      pinned.push({ command, args });
+      if (args.includes("venv")) {
+        const bin = join(args.at(-1), "bin");
+        mkdirSync(bin, { recursive: true });
+        writeFileSync(join(bin, "python"), "fixture");
+      }
+    },
+  });
+  assert.equal(pinned[0].command, "/opt/python3.12");
+  assert.deepEqual(pinned[0].args.slice(0, 2), ["-I", "-c"]);
+});
+
+test("setup prunes old private environments but leaves recent and unrelated folders", async (t) => {
+  const ctx = fixture(t);
+  const base = join(ctx.home, "internal/tui");
+  const old = join(base, "python-0123456789abcdef");
+  const recent = join(base, "python-fedcba9876543210");
+  const unrelated = join(base, "notes");
+  for (const dir of [old, recent, unrelated]) mkdirSync(dir, { recursive: true });
+  const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  utimesSync(old, longAgo, longAgo);
+  const run = async (_command, args) => {
+    if (args.includes("venv")) {
+      mkdirSync(join(args.at(-1), "bin"), { recursive: true });
+      writeFileSync(join(args.at(-1), "bin/python"), "fixture");
+    }
+  };
+  const python = await api.ensureTextualPython({ ...ctx, run });
+  assert.equal(existsSync(old), false);
+  assert.equal(existsSync(recent), true);
+  assert.equal(existsSync(unrelated), true);
+  assert.ok(existsSync(python));
+  assert.equal(api.textualLogPath(ctx), join(base, "tui.log"));
+  // The cached launch prunes too.
+  mkdirSync(old, { recursive: true });
+  utimesSync(old, longAgo, longAgo);
+  await api.ensureTextualPython({ ...ctx, run });
+  assert.equal(existsSync(old), false);
 });

@@ -32,6 +32,7 @@ import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
 import { fetchPublicHttpText } from "../core/net/public-http-fetch.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
+import { describeAiRoute } from "../core/people/ai-route.mjs";
 import { verifyBundledPlugins } from "../core/plugins/index.mjs";
 import { checkTemplateLeftovers } from "../core/profile/candidate-setup.mjs";
 import { candidateConfigSource, loadCandidateConfig } from "../core/profile/config-store.mjs";
@@ -43,6 +44,7 @@ import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
 import { parseConfig } from "../core/providers/search-sources.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
 import { pendingSourceLoginRequests } from "../core/search/source-login-preflight.mjs";
+import { ptyStatus } from "../core/tui/pty-status.mjs";
 import { textualPythonStatus } from "../core/tui/python-runtime.mjs";
 import { exitOnUnknownFlags } from "./unknown-flags.mjs";
 
@@ -355,10 +357,18 @@ const companyAtsReadiness = loadCompanyAtsReadiness();
 // are reported but don't fail doctor, since the browser app works without them.
 // The network probe only runs when asked for, and then it does gate the result.
 const tuiRuntime = textualPythonStatus({ repoRoot: root });
+const tuiAgentPane = guidanceOnly ? null : ptyStatus();
 const agentsAvailable = guidanceOnly
   ? null
   : installedRuntimes.filter((runtime) => runtime.available && runtime.supported).map((r) => r.id);
 const network = args.includes("--network") ? await probeNetwork() : null;
+// Which AI access this workspace's work runs on. For someone else's workspace this is
+// the operator's key or subscription unless the person has their own key stored.
+const aiRoute = describeAiRoute({
+  repoRoot: root,
+  env: process.env,
+  runtimeAvailable: guidanceOnly ? null : agentsAvailable.length > 0,
+});
 const agentGuidance = buildAgentGuidance({
   missingUser,
   candidateConfigSource: candidateSource,
@@ -453,7 +463,7 @@ const result = {
     error: pluginVerification.error,
   },
   environment: {
-    tui: { ready: tuiRuntime.ready },
+    tui: { ready: tuiRuntime.ready, agentPane: tuiAgentPane },
     agents: agentsAvailable === null ? null : { available: agentsAvailable },
     network,
   },
@@ -473,6 +483,8 @@ const result = {
     preferences: inspectAIPreferencesFile(pathCtx),
   },
   dataRoot: userPaths.dataRoot,
+  person: aiRoute.person,
+  aiRoute: { kind: aiRoute.kind, label: aiRoute.label, borrowed: aiRoute.borrowed },
 };
 
 if (json) {
@@ -484,6 +496,13 @@ console.log("careerrat doctor");
 console.log("================");
 console.log("");
 console.log(`User data root: ${userPaths.dataRoot}`);
+if (aiRoute.person) console.log(`Workspace for: ${aiRoute.person}`);
+console.log(`AI route: ${aiRoute.label}`);
+if (aiRoute.borrowed) {
+  console.log(
+    `  ${aiRoute.person} has no AI key of their own, so their work runs on the operator's AI access.`
+  );
+}
 console.log("");
 
 if (missingSystem.length > 0) {
@@ -725,6 +744,10 @@ function printEnvironment() {
       ? "- Terminal workspace: ready."
       : "- Terminal workspace: not set up yet - run `careerrat tui setup` (needs Python 3.11+)."
   );
+  if (tuiAgentPane && !tuiAgentPane.ok)
+    console.log(
+      "- Terminal workspace agent chat: the native terminal helper (node-pty) did not load. On Linux, install make and a C++ compiler (for example `sudo apt install build-essential`), then run `npm i -g careerrat` again."
+    );
   if (agentsAvailable === null) console.log("- Agent: skipped (--guidance-only).");
   else if (agentsAvailable.length)
     console.log(`- Agent: ${agentsAvailable.join(", ")} found on this machine.`);

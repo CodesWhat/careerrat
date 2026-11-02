@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   BASELINE_PATH,
+  explainPosting,
   HOLDOUT_ONBOARDED_DIR,
   loadFixtures,
   METRICS,
@@ -63,4 +64,36 @@ test("onboarded holdout ranking quality has not regressed against its committed 
     join(HOLDOUT_ONBOARDED_DIR, "baseline.json"),
     "npm run bench:search -- --fixtures tests/fixtures/search-bench/holdout-onboarded --update-baseline"
   );
+});
+
+test("the report breaks cut good postings down by reason", () => {
+  const result = runSearchBench({ dir: HOLDOUT_ONBOARDED_DIR });
+  const misses = result.candidates.flatMap((c) => c.misses);
+  assert.ok(misses.length > 0);
+  assert.equal(
+    Object.values(result.missReasons).reduce((a, b) => a + b, 0),
+    misses.length
+  );
+  for (const m of misses) assert.ok(result.missReasons[m.reason] > 0);
+  assert.equal(
+    Object.values(result.missKinds).reduce((a, b) => a + b, 0),
+    misses.length
+  );
+});
+
+test("--why style explanation names the stage that cut a posting and the rank of a kept one", () => {
+  const result = runSearchBench({ dir: HOLDOUT_ONBOARDED_DIR });
+  const miss = result.candidates.flatMap((c) => c.misses)[0];
+  const [cut] = explainPosting(miss.id, { dir: HOLDOUT_ONBOARDED_DIR });
+  assert.equal(cut.outcome.status, "cut");
+  assert.equal(cut.outcome.reason, miss.reason);
+  assert.equal(cut.verdict, "MISS: good posting cut");
+  assert.ok(cut.rating.score > 0);
+
+  const top = result.candidates[0].top10[0];
+  const [kept] = explainPosting(top.id, { dir: HOLDOUT_ONBOARDED_DIR });
+  assert.equal(kept.outcome.status, "kept");
+  assert.equal(kept.outcome.rank, 1);
+
+  assert.deepEqual(explainPosting("no-such-id", { dir: HOLDOUT_ONBOARDED_DIR }), []);
 });

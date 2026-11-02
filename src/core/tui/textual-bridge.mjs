@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { findInstalledExecutable } from "../ai/installed-runtimes.mjs";
 import { claudeLaunchArgs } from "./claude-launch.mjs";
+import { firstRunPrompt } from "./first-run.mjs";
 import { createTextualSession } from "./textual-session.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -89,6 +90,8 @@ async function main(args) {
     const command = findInstalledExecutable([name]);
     if (command) {
       agent = { command, args: name === "codex" ? ["--no-daemon"] : claudeLaunchArgs(repoRoot) };
+      const opening = firstRunPrompt({ repoRoot });
+      if (opening) agent.args.push(opening);
       break;
     }
   }

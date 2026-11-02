@@ -5,77 +5,76 @@ description: Install CareerRat with npm.
 
 ## Install with npm
 
-Prerequisites:
+CareerRat runs in a terminal window. Prerequisites:
 
-- **Node.js >= 24.22.1** — check with `node -v`
-- **Python 3.11 or newer**, only if you want the terminal workspace (`careerrat tui`)
-- **A supported coding-agent CLI on your PATH.** Install any one of these.
-  - Claude Code: `npm install -g @anthropic-ai/claude-code`
-    ([claude.com/claude-code](https://claude.com/claude-code))
-  - Codex: `npm install -g @openai/codex`
-    ([github.com/openai/codex](https://github.com/openai/codex))
-
-You need one supported CLI on your PATH before running `careerrat start`. If
-neither is installed, CareerRat can install Claude Code for you on first run.
+- **Node.js >= 24.22.1.** Check with `node -v`.
+- **Python 3.11 or newer**, with `venv`. Check with `python3 --version`. On
+  Windows, install it from python.org so the `py` launcher is available. Some
+  Linux systems package `venv` separately (`sudo apt install python3-venv`).
+- **On Linux only:** `make` and a C++ compiler, because one dependency is built
+  during install. On Debian or Ubuntu: `sudo apt install build-essential`.
+- **Claude Code or OpenAI Codex**, one of them. You can install it after
+  CareerRat. See below.
 
 ```bash
 npm i -g careerrat
 careerrat start
 ```
 
-`careerrat start` opens the workspace in your browser. `careerrat tui` opens the
-terminal workspace instead.
+`careerrat start` opens the CareerRat workspace inside your terminal. It needs a
+real terminal window, not a script or a pipe.
 
-The `start` command does the whole arc in one shot:
+## What happens on first run
 
-1. Scaffolds `.careerrat/candidate/` and `.careerrat/workspace/` directories (idempotent, safe to re-run).
-2. Installs the skills so your agent sees `/apply-job`, `/evaluate-job`, etc.
-3. Seeds `.careerrat/workspace/tracker.json` from the demo template if not yet present.
-4. Boots the live local app at `http://localhost:7777` with event-driven data updates.
-5. Launches your agent with a starter message.
+1. CareerRat creates your private data folders (safe to re-run).
+2. It builds a private Python environment for the workspace. This takes about a
+   minute and needs an internet connection. It does not touch your other Python
+   packages, and it only happens once. You can do it ahead of time with
+   `careerrat tui setup`.
+3. The workspace opens. Saved jobs are on one side, and a chat with your AI
+   assistant is on the other. CareerRat installs its skills so the assistant can
+   run them.
+4. On a brand new install, the chat begins setup on its own: it asks about your
+   resume, target roles, location and pay.
 
-CareerRat needs one supported local AI tool. If neither is installed, CareerRat
-shows Claude Code and OpenAI Codex as the two supported choices. It can complete
-the Claude Code install inside CareerRat:
+CareerRat uses Claude Code if it finds it, otherwise Codex. If neither is
+installed, the workspace still opens and tells you. Install one, then run
+`careerrat start` again:
 
-1. Get a paid Claude plan. Pro is enough; Max provides more usage. You can use
-   [Scott's disclosed referral](https://claude.ai/referral/rOLHwxlsfA).
-2. Click **Install inside CareerRat**. CareerRat runs Anthropic's official native
-   installer and shows readable progress without sending you to another app.
-3. Click **Sign in**, finish Claude sign-in in the browser, and return to
-   CareerRat. The app checks automatically and also provides **Check setup**.
+- Claude Code needs a paid Claude plan. Pro is enough; Max provides more usage.
+  You can use [Scott's disclosed referral](https://claude.ai/referral/rOLHwxlsfA).
+  Install it with `npm install -g @anthropic-ai/claude-code`
+  ([claude.com/claude-code](https://claude.com/claude-code)) and sign in.
+- Codex: `npm install -g @openai/codex`, then follow the
+  [official guide](https://developers.openai.com/codex/cli/).
 
-To use Codex, expand **Set up OpenAI Codex instead** and follow its
-[official install guide](https://developers.openai.com/codex/cli/).
+To choose one yourself, run `careerrat start claude` or `careerrat start codex`. CareerRat never switches agents on its own.
+
+Keys in the workspace: click a job to see its details, press F6 to move between
+the jobs and the chat, and press Ctrl+Q to quit. The Search, Review and Apply
+buttons put a request in the chat for you to read and send.
+
+If something does not open, run `careerrat doctor`. It reports whether the
+terminal workspace is set up and whether the Linux build step worked.
 
 Claude Code and OpenAI Codex are the two supported product choices. Both run the
 same CareerRat-owned workflows and skills against the same durable local state.
-CareerRat invokes the selected installed CLI directly and never falls
-back to or silently switches providers. A runtime becomes `Ready` only after
-local availability, authentication, and its readiness check pass.
-
-After you choose either engine, drop a résumé or start talking. Paul asks only
-for missing facts, uses plain English, and gives concrete examples when a choice
-is abstract. As soon as role and location targeting are usable, CareerRat starts
-the first search in the background. Finishing setup opens Search with a clear
-running, matches-found, retry, or start state, so you never have to ask whether
-the job search has begun.
-
-Claude Code and Codex run the same complete CareerRat workflow with no fallback
-or silent provider switch. Long searches, application missions, drafts, choices,
-and selected views survive navigation and restart. Built-in job boards run
-alongside AI open-web discovery, and AI leads stay clearly unverified until
-Evaluate reads the posting.
+CareerRat invokes the selected installed CLI directly and never falls back to or
+silently switches providers. Claude Code and Codex run the same complete CareerRat workflow. A runtime counts as ready only after local
+availability, authentication, and its readiness check pass. Long searches,
+drafts, choices, and selected views survive navigation and restart. Built-in job boards run alongside
+AI open-web discovery, and AI leads stay clearly unverified until Evaluate reads the posting.
 
 Application questions stay with the exact job thread. CareerRat can fill reviewed
 fields and advance safe form steps, but CAPTCHA, sensitive attestations,
 and uncertainty stop it and hand the form to you. It presses Submit itself only when the application is complete and verified, unless you run `careerrat automation submit manual --write`.
 
-The Windows x64 installer passes build, install, launch, export, and uninstall
-QA, but it is not a public release asset yet. SignPath Foundation signing
-requires project reputation CareerRat does not yet have. Unsigned CI packages
-are QA-only and never public release assets. See the repository's
-[Windows status](https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md)
+On Windows, CareerRat looks for the `py -3` launcher, then `python`. The terminal
+workspace has not been tested end to end on Windows yet, so tell us if it fails
+on your machine. Separately, the Windows x64 installer passes build, install, launch, export, and uninstall QA,
+but it is not a public release asset yet. SignPath Foundation signing requires project reputation CareerRat does not yet
+have. Unsigned CI packages are QA-only and never public release assets. See the
+repository's [Windows status](https://github.com/CodesWhat/careerrat/blob/main/docs/WINDOWS.md)
 and [code signing policy](https://github.com/CodesWhat/careerrat/blob/main/docs/CODE_SIGNING_POLICY.md).
 
 ## The Mac app has ended
@@ -102,10 +101,10 @@ careerrat start
 
 | Flag | Effect |
 |------|--------|
-| `--no-agent` | Scaffold + local app only, no agent launch |
-| `--no-dashboard` | Launch agent only, no local app server |
-| `--agent <name>` | Override the agent command launched by the CLI |
-| `--port <n>` | Local app port (default 7777) |
+| `--agent <name>` | Use `claude` or `codex` (same as `careerrat start claude`) |
+| `--no-agent` | Open the workspace without starting a chat |
+| `--browser` | Legacy: serve the browser workspace instead (also `--no-open`, `--port <n>`) |
+| `--no-dashboard` | Legacy: terminal agent session without the workspace |
 
 ## Manual wiring
 
@@ -148,10 +147,13 @@ careerrat people list
 
 `--for <name>` works on every command, for example `careerrat --for maria doctor`.
 You can also set `CAREERRAT_PERSON=maria`. Documents for Maria export to
-`~/Documents/careerrat/maria/` under the default directory. An explicit
+`~/Documents/careerrat/_people/maria/` under the default directory. An explicit
 `CAREERRAT_DOWNLOADS_DIR` is used as-is, so it is shared between people. If you
 override it, set a different value for each person. Without `--for`, you get
 your own workspace, exactly as before.
+
+See [Running CareerRat for someone else](/guides/running-for-someone-else) for
+authorization notes, AI routes and removing a person.
 
 ## Health check
 

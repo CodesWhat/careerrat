@@ -9,6 +9,10 @@ import { preparePtyHelpers } from "./prepare.mjs";
 
 const { Terminal } = headless;
 
+const SCROLLBACK_LINES = 5000;
+const WHEEL_LINES = 3;
+const CLIPBOARD_BYTE_LIMIT = 1024 * 1024;
+
 function cellStyle(cell) {
   const codes = [0];
   for (const [test, code] of [
@@ -68,10 +72,19 @@ export function createAgentPane({
   rows = 24,
   onChange = () => {},
   onExit = () => {},
+  onBell = () => {},
+  onTitle = () => {},
+  onClipboard = () => {},
 } = {}) {
   preparePtyHelpers();
-  const terminal = new Terminal({ cols, rows, scrollback: 2000, allowProposedApi: true });
+  const terminal = new Terminal({
+    cols,
+    rows,
+    scrollback: SCROLLBACK_LINES,
+    allowProposedApi: true,
+  });
   let visible = true;
+  let sgrMouse = false;
   let exited = false;
   let disposed = false;
   let disposal;
@@ -114,6 +127,43 @@ export function createAgentPane({
       return false;
     })
   );
+  // Mouse reports are encoded one of two ways, and the parser doesn't say which.
+  for (const [final, value] of [
+    ["h", true],
+    ["l", false],
+  ])
+    subscriptions.push(
+      terminal.parser.registerCsiHandler({ prefix: "?", final }, (params) => {
+        if (params.includes(1006)) sgrMouse = value;
+        return false;
+      })
+    );
+  subscriptions.push(
+    terminal.onBell(() => {
+      if (!disposed) onBell();
+    })
+  );
+  subscriptions.push(
+    terminal.onTitleChange((title) => {
+      if (!disposed) onTitle(title);
+    })
+  );
+  // OSC 52: the program asks to set the clipboard. Reads ("?") are never
+  // answered, so nothing the agent prints can pull the user's clipboard back.
+  subscriptions.push(
+    terminal.parser.registerOscHandler(52, (data) => {
+      const payload = data.slice(data.indexOf(";") + 1);
+      if (
+        !disposed &&
+        payload &&
+        payload !== "?" &&
+        payload.length <= Math.ceil((CLIPBOARD_BYTE_LIMIT * 4) / 3) + 4 &&
+        /^[A-Za-z0-9+/]+={0,2}$/.test(payload)
+      )
+        onClipboard(Buffer.from(payload, "base64").toString("utf8"));
+      return true;
+    })
+  );
   subscriptions.push(
     terminal.onData((data) => {
       if (!exited) child.write(data);
@@ -142,8 +192,41 @@ export function createAgentPane({
     })
   );
 
+  function scrollState() {
+    const buffer = terminal.buffer.active;
+    return { offset: buffer.baseY - buffer.viewportY, max: buffer.baseY };
+  }
   function input(data) {
-    if (!exited && !disposed) terminal.input(data);
+    if (exited || disposed) return;
+    // Typing while looking at old output brings the live screen back.
+    if (scrollState().offset > 0) terminal.scrollToBottom();
+    terminal.input(data);
+  }
+  // Scroll the pane's own history. Returns whether anything moved.
+  function scroll({ lines = 0, pages = 0 } = {}) {
+    if (disposed) return false;
+    const before = terminal.buffer.active.viewportY;
+    terminal.scrollLines(lines + pages * Math.max(1, terminal.rows - 1));
+    return terminal.buffer.active.viewportY !== before;
+  }
+  // A wheel turn goes to the program when it asked for the mouse (the agent's
+  // fullscreen mode does), and scrolls the saved history when it didn't.
+  function wheel({ direction, col = 0, row = 0 } = {}) {
+    if (exited || disposed) return "ignored";
+    if (terminal.modes.mouseTrackingMode !== "none") {
+      const x = Math.min(Math.max(col, 0), terminal.cols - 1) + 1;
+      const y = Math.min(Math.max(row, 0), terminal.rows - 1) + 1;
+      const button = direction < 0 ? 64 : 65;
+      child.write(
+        sgrMouse
+          ? `\x1b[<${button};${x};${y}M`
+          : `\x1b[M${String.fromCharCode(32 + button, Math.min(32 + x, 255), Math.min(32 + y, 255))}`
+      );
+      return "mouse";
+    }
+    if (terminal.buffer.active.type === "alternate") return "ignored";
+    scroll({ lines: direction * WHEEL_LINES });
+    return "scroll";
   }
   function paste(text) {
     const value = String(text)
@@ -224,10 +307,13 @@ export function createAgentPane({
     input,
     paste,
     resize,
+    scroll,
+    wheel,
+    scrollState,
     cursor: () => ({
       x: Math.min(terminal.cols - 1, terminal.buffer.active.cursorX),
       y: terminal.buffer.active.cursorY,
-      visible: visible && !exited,
+      visible: visible && !exited && scrollState().offset === 0,
     }),
     dispose() {
       disposal ||= stop();

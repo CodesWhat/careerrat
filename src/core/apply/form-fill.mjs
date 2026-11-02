@@ -6,6 +6,7 @@
  * Produces recipes/plans the agent executes.
  */
 
+import { isAttestationQuestion } from "../packet/attestation.mjs";
 import { classifySelfIdentificationQuestion } from "../packet/questions.mjs";
 import { CANDIDATE_DEFAULTS } from "../profile/candidate-defaults.mjs";
 
@@ -938,6 +939,10 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
   const normalized = normalizeLabel(label);
   if (!normalized) return { action: "skip", value: null, reason: "empty_question" };
 
+  if (isAttestationQuestion(label)) {
+    return { action: "skip", value: null, reason: "attestation_needs_person" };
+  }
+
   if (isCurrentCompLabel(normalized)) {
     return { action: "skip", value: null, reason: "private_current_compensation" };
   }
@@ -1290,6 +1295,11 @@ export function buildFillPlan({ fields = [], formDefaults, profile, honesty, por
   return fields.map((field) => {
     const label = fieldLabel(field);
     const normalized = normalizeLabel(label);
+
+    // Truthfulness and AI-use attestations are the person's to answer, never filled.
+    if (isAttestationQuestion(label)) {
+      return { label, canonicalField: null, value: null, action: "skip" };
+    }
 
     const voluntary = resolveVoluntarySelfIdentification(field, formDefaults);
     if (voluntary) return voluntary;

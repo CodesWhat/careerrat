@@ -88,10 +88,13 @@ test("with no person selected, paths are unchanged", (t) => {
   );
 });
 
-test("documents go to ~/Documents/careerrat/<name> for a person unless the downloads dir is set", () => {
+test("documents go to ~/Documents/careerrat/_people/<name> for a person unless the downloads dir is set", () => {
   const application = { id: "x", company: "Acme" };
   const person = jobDocumentPaths({ application, env: { CAREERRAT_PERSON: "alice" } });
-  assert.equal(person.active, join(homedir(), "Documents", "careerrat", "alice", "Acme", "job-x"));
+  assert.equal(
+    person.active,
+    join(homedir(), "Documents", "careerrat", "_people", "alice", "Acme", "job-x")
+  );
   const explicit = jobDocumentPaths({
     application,
     env: { CAREERRAT_PERSON: "alice", CAREERRAT_DOWNLOADS_DIR: "/tmp/docs" },

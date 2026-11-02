@@ -50,21 +50,25 @@ async function fixture(t, { agentExit = 0, opener = false, appFails = false } = 
   const port = server.address().port;
   if (appFails) await new Promise((resolve) => server.close(resolve));
   const launch = (args = []) =>
-    run(process.execPath, ["bin/careerrat.mjs", "start", "--port", String(port), ...args], {
-      cwd: ROOT,
-      timeout: 15_000,
-      env: {
-        ...process.env,
-        CAREERRAT_HOME: home,
-        CAREERRAT_NO_UPDATE_CHECK: "1",
-        PATH: bin,
-        ...(appFails ? { CAREERRAT_TRACKER_HOST: "0.0.0.0" } : {}),
-      },
-    });
+    run(
+      process.execPath,
+      ["bin/careerrat.mjs", "start", "--browser", "--port", String(port), ...args],
+      {
+        cwd: ROOT,
+        timeout: 15_000,
+        env: {
+          ...process.env,
+          CAREERRAT_HOME: home,
+          CAREERRAT_NO_UPDATE_CHECK: "1",
+          PATH: bin,
+          ...(appFails ? { CAREERRAT_TRACKER_HOST: "0.0.0.0" } : {}),
+        },
+      }
+    );
   return { home, port, launch, agentRecord, openRecord };
 }
 
-test("start keeps the conversation in the browser without launching a terminal agent", async (t) => {
+test("start --browser keeps the conversation in the browser without launching a terminal agent", async (t) => {
   const f = await fixture(t, { agentExit: 42 });
   const result = await f.launch(["--no-open"]);
 
@@ -127,6 +131,7 @@ test("start help exits before creating workspace data or launching anything", as
   const result = await f.launch(["--help"]);
 
   assert.match(result.stdout, /--no-open/);
+  assert.match(result.stdout, /terminal workspace/);
   assert.equal(existsSync(join(f.home, "workspace")), false);
   assert.equal(existsSync(f.agentRecord), false);
 });
@@ -150,4 +155,45 @@ test("start claude keeps the terminal session but never opens a browser when the
   assert.match(result.stderr, /Continuing with the terminal session/);
   assert.equal(existsSync(f.openRecord), false);
   assert.equal(existsSync(f.agentRecord), true);
+});
+
+test("start with no flags never serves or opens the browser workspace, even with no terminal", async (t) => {
+  const f = await fixture(t, { opener: true });
+  const result = await run(process.execPath, ["bin/careerrat.mjs", "start"], {
+    cwd: ROOT,
+    timeout: 15_000,
+    env: {
+      ...process.env,
+      CAREERRAT_HOME: f.home,
+      CAREERRAT_NO_UPDATE_CHECK: "1",
+      PATH: join(f.home, "bin"),
+    },
+  }).then(
+    () => assert.fail("start must refuse without a terminal"),
+    (err) => err
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Interactive TUI requires a terminal/);
+  assert.doesNotMatch(result.stdout + result.stderr, /localhost|\/app\b/);
+  assert.equal(existsSync(f.openRecord), false);
+  assert.equal(existsSync(f.agentRecord), false);
+});
+
+test("browser-only options on start are refused unless --browser is given", async (t) => {
+  const f = await fixture(t);
+  const result = await run(process.execPath, ["bin/careerrat.mjs", "start", "--port", "7799"], {
+    cwd: ROOT,
+    timeout: 15_000,
+    env: {
+      ...process.env,
+      CAREERRAT_HOME: f.home,
+      CAREERRAT_NO_UPDATE_CHECK: "1",
+      PATH: join(f.home, "bin"),
+    },
+  }).then(
+    () => assert.fail("expected failure"),
+    (err) => err
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Add --browser/);
 });

@@ -1,0 +1,66 @@
+---
+title: Running CareerRat for someone else
+description: Set up a separate workspace for a friend or family member, keep it isolated, and know whose AI access it uses.
+---
+
+You can run CareerRat for another person. Each person gets their own workspace,
+so what one person saves never shows up in another's. `--for <name>` is the switch.
+
+## Set someone up
+
+```bash
+careerrat people add david --authorized-by "David" --purpose "help with his job search"
+careerrat --for david start
+careerrat --for david tui
+careerrat people list
+```
+
+`--for <name>` works on every command. Add `--new` to create the workspace on the
+spot: `careerrat --for david --new start`.
+
+Adding a person writes a short authorization note in their data: who authorized
+you, what it is for, when, and who recorded it. Leave the flags off and it says
+"not stated". Run `people add` again with the flags to add the real answer; the
+earlier entries stay.
+
+## What stays separate
+
+Each person has their own database, evidence, tracker, search runs, browser
+profile, generated documents and saved AI key. Documents go to
+`~/Documents/careerrat/_people/<name>/`. A background search started for one person can
+only read and write that person's workspace. `careerrat --for david tui` opens
+their saved jobs and puts their name in the header.
+
+An explicit `CAREERRAT_DOWNLOADS_DIR` is shared on purpose, so set a different
+one per person if you use it.
+
+## Whose AI is it
+
+Run `careerrat --for david doctor`. It shows the AI route for that workspace:
+
+- **their own key**: an API key saved in their workspace. This is the clean case.
+- **your key**: an `ANTHROPIC_API_KEY` exported in your shell.
+- **your subscription**: an AI command line tool installed and signed in on your computer.
+- **none**: no key and no tool. AI steps are skipped.
+
+If it isn't their own key, a background search for them prints a warning before
+it runs. It doesn't stop. Whether your plan or key may be used for someone else's
+work is between you and the provider's terms, so check that before you rely on it.
+
+## Questions only they can answer
+
+CareerRat never answers a question that asks the applicant to vouch for their
+answers ("I certify this is true") or to say whether AI helped prepare the
+application. Those always come back as NEEDS YOU, even when a saved answer
+exists. The person answers them themselves.
+
+## Removing someone
+
+```bash
+careerrat people remove david --purge --yes
+```
+
+This deletes their data root (including the browser profile) and their generated
+documents. A backup of both is written to `<data root>/people-backups/` first, so
+delete that folder too if the goal is to remove everything. Without `--yes` it
+refuses and changes nothing. A custom `CAREERRAT_DOWNLOADS_DIR` is left alone.

@@ -282,12 +282,20 @@ function readApp(repoRoot, id) {
   return row ? JSON.parse(row.data) : null;
 }
 
+// Exports copy into the documents folder, which defaults to the real ~/Documents.
+const downloadsDir = mkdtempSync(join(tmpdir(), "careerrat-packet-route-docs-"));
+
 function bootServer(repoRoot, opts = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
   }
-  mountPacketRoutes({ addRoute, repoRoot, env: {}, ...opts });
+  mountPacketRoutes({
+    addRoute,
+    repoRoot,
+    env: { CAREERRAT_DOWNLOADS_DIR: downloadsDir },
+    ...opts,
+  });
 
   const server = createServer((req, res) => {
     const url = (req.url || "/").split("?")[0];
@@ -405,6 +413,7 @@ before(async () => {
 
 after(async () => {
   closeAll();
+  rmSync(downloadsDir, { recursive: true, force: true });
   for (const root of cleanupRoots.splice(0)) {
     try {
       rmSync(root, { recursive: true, force: true });
