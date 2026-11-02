@@ -1389,6 +1389,53 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_a_refresh_updates_cells_in_place_and_keeps_scroll_and_selection(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-inplace-") as folder:
+            jobs = [
+                {"id": f"job-{n:03d}", "company": f"Company {n:03d}", "role": "Dev", "status": "applied"}
+                for n in range(80)
+            ]
+            self.make_home(folder, jobs)
+            path = Path(folder) / "workspace/tracker.json"
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(140, 30)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 80)
+                table.focus()
+                table.move_cursor(row=45)
+                await until(lambda: app.selected_id == "job-045")
+                await pilot.pause()
+                table.scroll_to(y=30, animate=False, immediate=True)
+                await pilot.pause()
+                scroll = table.scroll_y
+                self.assertGreater(scroll, 0)
+                cleared = []
+                original = table.clear
+                table.clear = lambda *a, **k: (cleared.append(1), original(*a, **k))[1]
+
+                # A cell changes: updated where it sits, nothing is refilled.
+                jobs[50]["status"] = "interview"
+                path.write_text(json.dumps({"meta": {"version": 7}, "applications": jobs}))
+                await until(lambda: "Interview" in str(table.get_row("job-050")[2]))
+                self.assertEqual(cleared, [])
+                self.assertEqual(table.scroll_y, scroll)
+                self.assertEqual(table.cursor_row, 45)
+                self.assertEqual(app.selected_id, "job-045")
+
+                # A job is added: the table refills but keeps scroll and selection.
+                jobs.append({"id": "job-999", "company": "Zeta", "role": "Dev", "status": "applied"})
+                path.write_text(json.dumps({"meta": {"version": 7}, "applications": jobs}))
+                await until(lambda: table.row_count == 81)
+                await pilot.pause()
+                await pilot.pause()
+                self.assertEqual(table.scroll_y, scroll)
+                self.assertEqual(app.selected_id, "job-045")
+                self.assertEqual(table.cursor_row, app.job_ids.index("job-045"))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
     async def test_review_names_what_it_took_and_apply_refuses_closed_jobs(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-asks-") as folder:
             self.make_home(folder, self.synthetic_jobs())

@@ -744,6 +744,8 @@ class CareerRatApp(App):
         self.updating = False
         self.job_ids = []
         self.table_signature = None
+        self.rendered_ids = []
+        self.rendered_rows = []
         self.job_cells = []
         self.stage_options = {}
         self.column_key = None
@@ -1129,26 +1131,50 @@ class CareerRatApp(App):
         )
 
     def render_jobs(self, force=False):
-        """Fit the columns to the table's width and refill the rows."""
+        """Fit the columns to the table's width and show the rows.
+
+        force says the saved jobs changed. When only cell text changed, the
+        cells are updated where they sit, so the scroll position and the
+        highlighted row stay put; only a new layout or a different set or order
+        of jobs refills the table, and that keeps the scroll position too."""
         table = self.query_one("#jobs", DataTable)
         # Leave room for the scrollbar so adding it never changes the layout.
         width = table.size.width - 2 if table.size.width else 76
         plan = plan_columns(width)
         key = (width, tuple(plan))
-        if not force and key == self.column_key:
+        relayout = key != self.column_key
+        if not force and not relayout:
             return
-        self.column_key = key
+        rows = [
+            [clip(cells[name], size) for name, size in plan] for cells in self.job_cells
+        ]
         self.updating = True
         try:
-            table.clear(columns=True)
-            for name, size in plan:
-                table.add_column(name, width=size, key=name)
-            for job_id, cells in zip(self.job_ids, self.job_cells):
-                table.add_row(
-                    *[clip(cells[name], size) for name, size in plan], key=job_id
+            if not relayout and self.job_ids == self.rendered_ids:
+                for job_id, row, before in zip(self.job_ids, rows, self.rendered_rows):
+                    for (name, _), cell, old in zip(plan, row, before):
+                        if cell != old:
+                            table.update_cell(job_id, name, cell, update_width=False)
+            else:
+                scroll = table.scroll_y
+                table.clear(columns=relayout)
+                if relayout:
+                    for name, size in plan:
+                        table.add_column(name, width=size, key=name)
+                for job_id, row in zip(self.job_ids, rows):
+                    table.add_row(*row, key=job_id)
+                if self.selected_id in self.job_ids:
+                    table.move_cursor(
+                        row=self.job_ids.index(self.selected_id), scroll=False
+                    )
+                # The table sizes itself after this refresh; scroll once it has.
+                table.call_after_refresh(
+                    table.call_after_refresh,
+                    lambda: table.scroll_to(y=scroll, animate=False, immediate=True),
                 )
-            if self.selected_id in self.job_ids:
-                table.move_cursor(row=self.job_ids.index(self.selected_id))
+            self.column_key = key
+            self.rendered_ids = list(self.job_ids)
+            self.rendered_rows = rows
         finally:
             self.updating = False
 
@@ -1166,7 +1192,10 @@ class CareerRatApp(App):
                 self.job_ids = [job["id"] for job in jobs]
                 self.job_cells = [job_cells(job, view.get("currency")) for job in jobs]
                 self.render_jobs(force=True)
-            if self.selected_id in self.job_ids:
+            if (
+                self.selected_id in self.job_ids
+                and table.cursor_row != self.job_ids.index(self.selected_id)
+            ):
                 table.move_cursor(row=self.job_ids.index(self.selected_id))
             total = view.get("total", len(jobs))
             count = str(len(jobs)) if len(jobs) == total else f"{len(jobs)} of {total}"
@@ -1384,8 +1413,11 @@ class CareerRatApp(App):
     async def on_data_table_row_highlighted(self, event):
         if event.data_table.id != "jobs":
             return
+        # A highlight posted while the table was refilled arrives after the
+        # cursor has already moved back; it describes a row nobody chose.
         if (
             self.updating
+            or event.cursor_row != event.data_table.cursor_row
             or not event.row_key.value
             or event.row_key.value == self.selected_id
         ):
