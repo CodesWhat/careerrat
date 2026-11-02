@@ -182,6 +182,16 @@ export function readJobDescriptionArtifact({ repoRoot, env = process.env, source
   const { recordType, recordId } = cleanRequest({ source, id });
   const db = requireDb({ repoRoot, env });
   const record = recordFromDb(db, SOURCE_TABLES[recordType], recordId, recordType);
+  return readSavedJobDescription({ repoRoot, env, record, recordType, recordId });
+}
+
+export function readSavedJobDescription({
+  repoRoot,
+  env = process.env,
+  record,
+  recordType,
+  recordId = record.id,
+} = {}) {
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
   const { full, storedPath } = resolveSafeJobPath(workspaceDir, record.artifacts?.jd);
   const text = readFileSync(full, "utf8");

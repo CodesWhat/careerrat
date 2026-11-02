@@ -8,7 +8,8 @@
         "scripts/*.mjs",
         "scripts/eval/*.mjs",
         "plugins/*/index.mjs",
-        "src/core/ai/runtime-probe-helper.mjs"
+        "src/core/ai/runtime-probe-helper.mjs",
+        "src/core/tui/textual-bridge.mjs"
       ],
       "project": [
         "src/**/*.mjs",

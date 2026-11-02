@@ -103,6 +103,18 @@ fewer enabled sources or a narrower recency window. If it is `run`, proceed norm
 
 ## STEP 1 — Full sweep
 
+In a terminal workspace (`CAREERRAT_SURFACE=tui`) with an existing database,
+start or reuse the configured-source scan with `careerrat search start --json`.
+Keep its exact returned run ID and continue the conversation while the worker
+runs. Inspect `careerrat search status --id <run-id> --json` for progress and
+completion. On completion, read the handoff and its complete `resultPath` JSON,
+including all `offers[]`; don't substitute the bounded TUI summary for the result.
+If the user cancels, use `careerrat search cancel --id <run-id> --json` and retain
+any saved partial results. Source errors and login requests need honest follow-up.
+Don't start a second foreground scan while the same worker is active. Additional
+agent-led search and AI Web Search still follow this skill's owning sections.
+The commands below remain the legacy/foreground entry, with no implicit migration.
+
 Run the full sourced sweep against all enabled sources since their `lastRunAt` watermarks:
 
 ```

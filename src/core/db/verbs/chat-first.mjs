@@ -359,6 +359,13 @@ function hydrateJobThread(db, thread) {
   };
 }
 
+export function jobThreadGet({ repoRoot, env, applicationId } = {}) {
+  const db = requireDb({ repoRoot, env });
+  const application = applicationRequired(db, applicationId);
+  const thread = readJobThread(db, application.id);
+  return { ok: true, thread: thread ? hydrateJobThread(db, thread) : null };
+}
+
 function derivedThreadCheckpoint(db, thread, at) {
   const messages = readJsonRows(
     db,
