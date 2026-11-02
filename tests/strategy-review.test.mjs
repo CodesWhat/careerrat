@@ -1144,3 +1144,23 @@ test("restoreRerankRows deletes priority for a row that had none instead of writ
     );
   }
 });
+
+test("restoreRerankRows puts back a prior status CareerRat does not recognize", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-odd", status: "Pending panel loop" });
+
+  const applied = await applyStrategyRecommendation({
+    repoRoot,
+    env: {},
+    recommendation: {
+      type: "rerank",
+      title: "Move",
+      proposal: { id: "app-odd", toStatus: "screen" },
+    },
+  });
+  assert.equal(readApplication(repoRoot, "app-odd").status, "screen");
+  const { previous, current } = applied.result;
+  const undone = restoreRerankRows({ repoRoot, env: {}, before: previous, after: current });
+  assert.equal(undone.ok, true);
+  assert.equal(readApplication(repoRoot, "app-odd").status, "Pending panel loop");
+});

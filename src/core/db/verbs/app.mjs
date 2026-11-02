@@ -291,21 +291,29 @@ export function appSetStatus({
   appliedAt,
   followUpDueAt,
   clearInterview,
+  restore = false,
 } = {}) {
   if (!to) throw new Error("appSetStatus: to is required");
-  if (!isKnownStatusLabel(to) || NOT_A_STATUS.test(String(to))) {
-    const error = new Error(
-      `appSetStatus: "${to}" is not a status CareerRat knows. Use one of: applied, manual-apply, awaiting, screen, interview, final, offer, accepted, rejected, withdrawn, reviewed-hold.`
-    );
-    error.code = "BAD_STATUS";
-    throw error;
-  }
   if (appliedAt != null && Number.isNaN(Date.parse(appliedAt))) {
     const error = new Error("appSetStatus: appliedAt must be an ISO date or datetime");
     error.code = "BAD_APPLIED_AT";
     throw error;
   }
   return runApplicationOutcome({ repoRoot, env }, id, (db) => {
+    // `restore` puts back a status the row already held (rerank undo), so the
+    // label is trusted. Anything else must be a known stage, including any
+    // custom stage configured in tracker.stages.
+    if (!restore) {
+      const stagesRow = db.prepare("SELECT data FROM kv WHERE key = 'stages'").get();
+      const customStages = stagesRow ? JSON.parse(stagesRow.data) : undefined;
+      if (!isKnownStatusLabel(to, customStages) || NOT_A_STATUS.test(String(to))) {
+        const error = new Error(
+          `appSetStatus: "${to}" is not a status CareerRat knows. Use one of: applied, manual-apply, awaiting, screen, interview, final, offer, accepted, rejected, withdrawn, reviewed-hold, or a stage from tracker.stages.`
+        );
+        error.code = "BAD_STATUS";
+        throw error;
+      }
+    }
     const app = requireApp(db, id);
     const { from, updated } = applyStatusUpdate(app, {
       to,

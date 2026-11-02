@@ -374,6 +374,22 @@ export function collectControls(elements) {
     return /(?:\*|\(required\)|\[required\]|\brequired)\s*$/i.test(String(text || "").trim());
   }
 
+  // Greenhouse's react-select renders a zero-opacity, tabindex=-1 text input
+  // (class "requiredInput") next to the real combobox purely for native
+  // required-validation. It's never user-facing, so it must not count as an
+  // unlabeled field. Also covers inputs nested in a react-select container
+  // that has its own label.
+  function isDecorativeInput(el) {
+    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return false;
+    const inputType = (el.getAttribute("type") || "text").toLowerCase();
+    if (["button", "submit", "reset", "file", "checkbox", "radio"].includes(inputType))
+      return false;
+    if (el.getAttribute("tabindex") === "-1") return true;
+    if (Number(window.getComputedStyle(el).opacity) === 0) return true;
+    const container = el.closest("[class*='select__container'], [class*='react-select']");
+    return Boolean(container && container.parentElement?.querySelector("label"));
+  }
+
   const controls = [];
   elements.forEach((el, index) => {
     const isFileInput =
@@ -413,6 +429,7 @@ export function collectControls(elements) {
       groupLabel,
       choiceGroup,
       checked: isNativeRadio && el.checked === true,
+      ...(isDecorativeInput(el) ? { decorative: true } : {}),
       ...(role === "button" && structuredProgressHasRemainingStep(el) ? { advanceSafe: true } : {}),
     });
   });
@@ -1038,6 +1055,7 @@ export function createPlaywrightOps({
             ? { fileInput: true, fileAttached: Boolean(control.fileAttached) }
             : {}),
           ...(control.disabled === true ? { disabled: true } : {}),
+          ...(control.decorative === true ? { decorative: true } : {}),
           ...(control.advanceSafe === true ? { advanceSafe: true } : {}),
         };
       }

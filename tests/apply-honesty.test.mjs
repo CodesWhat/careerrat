@@ -13,7 +13,12 @@ import {
 import { buildFillPlan, confirmationCheck } from "../src/core/apply/form-fill.mjs";
 import { automationStatus } from "../src/core/automation/consent.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
-import { appSetStatus, appUpsert, candidateSetupInitialize } from "../src/core/db/verbs.mjs";
+import {
+  appSetStatus,
+  appUpsert,
+  candidateSetupInitialize,
+  kvUpsert,
+} from "../src/core/db/verbs.mjs";
 import { classifySelfIdentificationQuestion } from "../src/core/packet/questions.mjs";
 
 const PROFILE = {
@@ -171,6 +176,25 @@ describe("recording a status", () => {
     assert.throws(
       () => appSetStatus({ repoRoot: dir, env, id: "app-1", to: "bogus-status" }),
       (error) => error.code === "BAD_STATUS" && /applied/.test(error.message)
+    );
+  });
+
+  it("accepts a stage configured in tracker.stages", () => {
+    const { dir, env } = workspace();
+    kvUpsert({
+      repoRoot: dir,
+      env,
+      key: "stages",
+      value: [{ id: "panel", label: "Panel", order: 40, patterns: ["onsite loop"] }],
+    });
+    assert.equal(appSetStatus({ repoRoot: dir, env, id: "app-1", to: "panel" }).to, "panel");
+    assert.equal(
+      appSetStatus({ repoRoot: dir, env, id: "app-1", to: "Onsite loop booked" }).to,
+      "Onsite loop booked"
+    );
+    assert.throws(
+      () => appSetStatus({ repoRoot: dir, env, id: "app-1", to: "bogus-status" }),
+      (error) => error.code === "BAD_STATUS"
     );
   });
 

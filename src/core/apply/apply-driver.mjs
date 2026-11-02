@@ -924,6 +924,7 @@ async function fillStep({
   for (const entry of Object.values(finalSnapshot.refs || {})) {
     const role = String(entry?.role || "").toLowerCase();
     if (!FIELD_ROLES.has(role) || entry?.field === false || entry?.disabled === true) continue;
+    if (entry?.decorative === true) continue;
     if (String(entry?.name || "").trim()) continue;
     unlabeledCount += 1;
     unresolved.push({

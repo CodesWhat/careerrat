@@ -115,6 +115,7 @@ function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
             groupLabel: control.groupLabel ?? null,
             choiceGroup: control.choiceGroup ?? null,
             checked: Boolean(control.checked),
+            ...(control.decorative === true ? { decorative: true } : {}),
             ...(control.advanceSafe === true ? { advanceSafe: true } : {}),
           }));
         },
@@ -250,7 +251,11 @@ function descendantsOf(root) {
 }
 
 class StubElement {
-  constructor(tagName, attrs = {}, { text = "", required = false, hidden = false } = {}) {
+  constructor(
+    tagName,
+    attrs = {},
+    { text = "", required = false, hidden = false, opacity = 1 } = {}
+  ) {
     this.tagName = tagName.toUpperCase();
     this._attrs = new Map(Object.entries(attrs));
     this.children = [];
@@ -258,6 +263,7 @@ class StubElement {
     this.innerText = text;
     this.required = required;
     this.hidden = hidden;
+    this.opacity = opacity;
     this._order = null;
   }
 
@@ -346,8 +352,8 @@ function createDomStub(root) {
     window: {
       getComputedStyle: (el) =>
         el.hidden
-          ? { visibility: "visible", display: "none" }
-          : { visibility: "visible", display: "block" },
+          ? { visibility: "visible", display: "none", opacity: String(el.opacity) }
+          : { visibility: "visible", display: "block", opacity: String(el.opacity) },
     },
     CSS: { escape: (value) => value },
   };
@@ -383,6 +389,33 @@ test("collectControls: fieldset legend names the group (P2 coverage)", () => {
   assert.equal(controls[0].role, "button");
   assert.equal(controls[0].name, "Attach");
   assert.equal(controls[0].groupLabel, "Resume/CV*");
+});
+
+test("collectControls: a Greenhouse react-select hidden validation input is marked decorative", () => {
+  const label = new StubElement("label", { for: "question_1" }, { text: "Country*" });
+  const combobox = new StubElement("input", { id: "question_1", role: "combobox" });
+  const hiddenByOpacity = new StubElement(
+    "input",
+    { class: "requiredInput", tabindex: "-1" },
+    { required: true, opacity: 0 }
+  );
+  const hiddenByTabindex = new StubElement("input", { tabindex: "-1" }, { required: true });
+  const plain = new StubElement("input", { type: "text" }, { required: true });
+  const root = new StubElement("div", { id: "root" }).append(
+    label,
+    combobox,
+    hiddenByOpacity,
+    hiddenByTabindex,
+    plain
+  );
+  const stub = createDomStub(root);
+  const controls = withDomGlobals(stub, () =>
+    collectControls([combobox, hiddenByOpacity, hiddenByTabindex, plain])
+  );
+  assert.deepEqual(
+    controls.map((control) => control.decorative === true),
+    [false, true, true, false]
+  );
 });
 
 test("collectControls: unwrapped native radios use form owner plus name identity without crossing identical names in another form", () => {
@@ -2435,6 +2468,25 @@ test("auto-submit does not press Submit while a visible field has no label", asy
       actions.filter((a) => a.op === "click" && a.index === 2).length,
       0,
       "Submit was never clicked"
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("auto-submit ignores a hidden react-select validation input but still flags a real unlabeled field", async () => {
+  const { run, cleanup } = honestyDriver({
+    controls: [
+      { role: "textbox", name: "First Name", required: true },
+      { role: "textbox", name: "", required: true, decorative: true },
+      SUBMIT,
+    ],
+  });
+  try {
+    const result = await run();
+    assert.ok(
+      !(result.session.unresolved || []).some((item) => /Unlabeled field/.test(item.label)),
+      "the hidden validation input is not an unresolved field"
     );
   } finally {
     cleanup();
