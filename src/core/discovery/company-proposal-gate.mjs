@@ -125,7 +125,7 @@ function offerTextForComp(offer) {
   return [
     evidence.baseComp ? `Base pay: ${evidence.baseComp}` : "",
     evidence.annualEarningsComp ? `Annual earnings: ${evidence.annualEarningsComp}` : "",
-    evidence.unclassifiedComp ? `Compensation: ${evidence.unclassifiedComp}` : "",
+    evidence.unclassifiedComp ? `Unlabeled amount: ${evidence.unclassifiedComp}` : "",
     offer?.bodyText,
     offer?.description,
     offer?.rawText,

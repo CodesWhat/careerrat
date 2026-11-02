@@ -114,6 +114,16 @@
       "kind": "exact"
     },
     {
+      "id": "fe-35",
+      "title": "Staff Frontend Engineer, Growth",
+      "company": "Willowbrook",
+      "location": "Remote - US",
+      "grade": 3,
+      "kind": "exact",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Compensation: $220,000 - $260,000 per year.",
+      "url": "https://jobs.example.test/willowbrook/staff-frontend-engineer-growth-fe-35"
+    },
+    {
       "id": "fe-07",
       "title": "Staff UI Engineer",
       "company": "Quillstone",
@@ -420,6 +430,16 @@
       "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $220,000 - $265,000 per year.",
       "grade": 0,
       "kind": "duplicate"
+    },
+    {
+      "id": "fe-36",
+      "title": "Staff Frontend Engineer, Payments",
+      "company": "Marigold Co",
+      "location": "Remote - US",
+      "grade": 0,
+      "kind": "below-comp",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Pay range: $150,000 - $170,000.",
+      "url": "https://jobs.example.test/marigold-co/staff-frontend-engineer-payments-fe-36"
     }
   ]
 }

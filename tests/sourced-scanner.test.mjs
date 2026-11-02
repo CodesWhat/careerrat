@@ -3819,3 +3819,209 @@ test("scoring: a title that is only adjacent to the target is scored lower and w
   assert.doesNotMatch(adjacent.ratingReason, /matches target title/);
   assert.match(adjacent.ratingReason, /adjacent to target title: release engineer/);
 });
+
+// ---------------------------------------------------------------------------
+// Adjacent titles are shown, ranked below exact matches; wrong functions cut
+// ---------------------------------------------------------------------------
+const FRONTEND_TITLE_FILTER = {
+  positive: ["Staff Frontend Engineer", "Principal Frontend Engineer"],
+  negative: ["Intern", "Recruiter"],
+  below_target: [],
+};
+
+test("title filter treats equivalent seniority tiers and function synonyms as adjacent", () => {
+  const filter = buildTitleFilter(FRONTEND_TITLE_FILTER);
+  for (const title of [
+    "Staff Design Engineer",
+    "Principal Software Engineer, Web",
+    "Lead Frontend Engineer",
+    "Frontend Architect",
+  ]) {
+    const decision = filter.classify(title);
+    assert.equal(decision.matched, false, title);
+    assert.equal(decision.adjacent, true, title);
+  }
+});
+
+test("title filter rejects a different function even with matching seniority and noun", () => {
+  const filter = buildTitleFilter({
+    positive: ["Staff Frontend Engineer", "Staff Web Platform Engineer"],
+    negative: [],
+    below_target: [],
+  });
+  for (const title of [
+    "Staff Backend Engineer",
+    "Staff Data Engineer",
+    "Staff Security Engineer",
+  ]) {
+    const decision = filter.classify(title);
+    assert.equal(decision.matched, false, title);
+    assert.equal(decision.adjacent, false, title);
+  }
+});
+
+test("title filter recognizes design and program-management function synonyms", () => {
+  const design = buildTitleFilter({
+    positive: ["Senior Product Designer"],
+    negative: [],
+  });
+  for (const title of [
+    "Senior UX Designer",
+    "Senior Interaction Designer",
+    "Senior UX Researcher & Designer",
+    "Design Lead, Mobile Product",
+  ]) {
+    assert.equal(design.classify(title).adjacent, true, title);
+  }
+  assert.equal(design.classify("Senior Product Manager").adjacent, false);
+  assert.equal(design.classify("Senior Software Engineer").adjacent, false);
+
+  const program = buildTitleFilter({
+    positive: ["Senior Program Manager", "Program Manager"],
+    negative: [],
+  });
+  for (const title of [
+    "Senior Project Manager",
+    "Delivery Manager",
+    "Senior Chief of Staff",
+    "Senior Implementation Manager",
+    "Program Operations Lead",
+  ]) {
+    assert.equal(program.classify(title).adjacent, true, title);
+  }
+  assert.equal(program.classify("Senior Accountant").adjacent, false);
+  assert.equal(program.classify("Senior Product Manager").adjacent, false);
+});
+
+test("filterAndDedupeOffers keeps adjacent titles but ranks them below exact matches", () => {
+  const config = {
+    targeting: {
+      role_buckets: [{ name: "FE", titles: ["Staff Frontend Engineer"] }],
+    },
+    profile: {
+      compensation: { minimum_base: 150000 },
+      location: { remote: true },
+    },
+  };
+  const offer = (title, company, comp) => ({
+    title,
+    company,
+    url: `https://jobs.example.test/${company}/${title.replace(/\W+/g, "-")}`,
+    location: "Remote - US",
+    comp,
+    bodyText: `Base salary range: ${comp} per year.`,
+  });
+  const result = filterAndDedupeOffers(
+    [
+      offer("Frontend Architect", "Silverpine", "$250,000 - $300,000"),
+      offer("Staff Backend Engineer", "Cobalt", "$250,000 - $300,000"),
+      offer("Staff Frontend Engineer", "Lumen", "$200,000 - $220,000"),
+    ],
+    {
+      titleFilter: buildTitleFilter({
+        positive: ["Staff Frontend Engineer"],
+        negative: [],
+      }),
+      config,
+      perCompanyCap: 5,
+    }
+  );
+  assert.deepEqual(
+    result.kept.map((o) => o.title),
+    ["Staff Frontend Engineer", "Frontend Architect"]
+  );
+  assert.equal(result.kept[1].titleRelevance, "adjacent-signal");
+  assert.deepEqual(
+    result.filteredTitle.map((o) => [o.title, o.qualificationReason]),
+    [["Staff Backend Engineer", "title-relevance-low"]]
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Reposts collapse to one row
+// ---------------------------------------------------------------------------
+const repostBatch = (overrides = {}) => [
+  {
+    company: "Lumen Works",
+    title: "Staff Frontend Engineer",
+    url: "https://jobs.example.test/lumen/original",
+    location: "Remote - US",
+    bodyText: "Own the web app.",
+  },
+  {
+    company: "Lumen Works",
+    title: "Staff Frontend Engineer",
+    url: "https://jobs.example.test/lumen/repost",
+    location: "Remote - US",
+    bodyText: "Own the web app. Base salary range: $215,000 - $260,000 per year.",
+    ...overrides,
+  },
+];
+
+test("same company, title and location under a new URL collapses to the most complete row", () => {
+  const result = filterAndDedupeOffers(repostBatch(), {});
+  assert.equal(result.kept.length, 1);
+  assert.equal(result.kept[0].url, "https://jobs.example.test/lumen/repost");
+  assert.equal(result.possibleDuplicates.length, 0);
+  assert.equal(result.duplicates.length, 1);
+  assert.equal(result.duplicates[0].duplicateReason, "company_role_batch");
+  assert.ok(result.kept[0].aliasKeys.includes("url:https://jobs.example.test/lumen/original"));
+});
+
+test("reposts stay separate when location or a team qualifier differs", () => {
+  const otherCity = filterAndDedupeOffers(repostBatch({ location: "Denver, CO" }), {});
+  assert.equal(otherCity.kept.length, 2);
+  const otherTeam = filterAndDedupeOffers(
+    repostBatch({ title: "Staff Frontend Engineer, Payments" }),
+    {}
+  );
+  assert.equal(otherTeam.kept.length, 2);
+});
+
+test("reposts with distinct requisition ids stay separate openings", () => {
+  const result = filterAndDedupeOffers(
+    repostBatch({
+      reqId: "req-2",
+    }).map((o, i) => ({ ...o, reqId: `req-${i + 1}` })),
+    {}
+  );
+  assert.equal(result.kept.length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// Common compensation phrasings parse as a base band
+// ---------------------------------------------------------------------------
+test("compensation parsing reads Compensation, Pay range and Salary labels as base bands", () => {
+  const band = { min: 215_000, max: 260_000, currency: "USD" };
+  for (const text of [
+    "Compensation: $215,000 - $260,000",
+    "Compensation: $215,000 - $260,000 per year.",
+    "Compensation range: $215,000 - $260,000 plus equity",
+    "Pay range: $215,000 - $260,000",
+    "Pay Range: $215,000 to $260,000 USD",
+    "Salary: $215,000 - $260,000",
+    "The anticipated compensation for this role is $215,000 - $260,000 per year",
+    "Expected pay: $215,000 - $260,000",
+  ]) {
+    assert.deepEqual(extractCompBand(text, { baseOnly: true }), band, text);
+  }
+});
+
+test("compensation labels do not promote variable pay or distant mentions to base", () => {
+  for (const text of [
+    "Total compensation: $300,000 - $400,000 including equity",
+    "Target bonus: $20,000 - $30,000",
+    "OTE: $200,000 - $260,000",
+    "We offer competitive compensation, benefits and a $1,500 - $2,000 learning stipend.",
+  ]) {
+    assert.equal(extractCompBand(text, { baseOnly: true }), null, text);
+  }
+});
+
+test("an unlabeled comp field is still not treated as a base band", () => {
+  const evidence = sourcedScanner.resolveCompensationEvidence({
+    comp: "$95k-$120k",
+  });
+  assert.equal(evidence.baseComp, "");
+  assert.equal(evidence.unclassifiedComp, "$95k-$120k");
+});

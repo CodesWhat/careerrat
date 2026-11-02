@@ -24,8 +24,9 @@ import { fetchRemotive } from "../providers/remotive.mjs";
 import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
 import { fetchWorkingNomads } from "../providers/workingnomads.mjs";
 import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
-import { normalizeCompanyRoleKey } from "../tracker/tracker-data.mjs";
-import { extractReqId, postingIdentityKeys } from "./sourced-identity.mjs";
+import { normalizeCompanyRoleKey, normalizeTextKey } from "../tracker/tracker-data.mjs";
+import { extractReqId, identityAliasAdditions, postingIdentityKeys } from "./sourced-identity.mjs";
+import { titleFunctionRelation } from "./title-functions.mjs";
 
 export { extractReqId } from "./sourced-identity.mjs";
 export { normalizeCompanyRoleKey };
@@ -197,7 +198,10 @@ const TITLE_SPECIALIZATION_FAMILIES = [
   new Set(["support"]),
 ];
 const TITLE_ENGINEERING_KINDS = new Set(["developer", "engineer", "engineering"]);
-const TITLE_SENIORITY_GROUPS = [new Set(["staff", "principal", "lead"]), new Set(["senior", "sr"])];
+const TITLE_SENIORITY_GROUPS = [
+  new Set(["staff", "principal", "lead", "architect"]),
+  new Set(["senior", "sr"]),
+];
 const TITLE_ADJACENCY_STOPWORDS = new Set([
   "assistant",
   "associate",
@@ -239,6 +243,9 @@ function hasAny(tokens, values) {
 
 function boundedRoleTitleEquivalent(actualTitle, targetTitle) {
   if (MANAGEMENT_TITLE_RE.test(actualTitle) !== MANAGEMENT_TITLE_RE.test(targetTitle)) return false;
+  // A different function lane ("Staff Backend Engineer" for a frontend target)
+  // is not the target even when the domain families overlap on "platform".
+  if (titleFunctionRelation(actualTitle, targetTitle).relation === "conflict") return false;
   const actual = titleTokens(actualTitle);
   const target = titleTokens(targetTitle);
   if (!hasAny(target, TITLE_ENGINEERING_KINDS) || !hasAny(actual, TITLE_ENGINEERING_KINDS)) {
@@ -273,19 +280,29 @@ function titleSeniorityCompatible(actual, target) {
 }
 
 function adjacentRoleTitleEquivalent(actualTitle, targetTitle) {
-  if (MANAGEMENT_TITLE_RE.test(actualTitle) !== MANAGEMENT_TITLE_RE.test(targetTitle)) return false;
+  const fn = titleFunctionRelation(actualTitle, targetTitle);
+  // A title in another function lane is wrong, not adjacent.
+  if (fn.relation === "conflict") return false;
+  if (
+    !fn.managerIsRole &&
+    MANAGEMENT_TITLE_RE.test(actualTitle) !== MANAGEMENT_TITLE_RE.test(targetTitle)
+  ) {
+    return false;
+  }
   const actual = titleTokens(actualTitle);
   const target = titleTokens(targetTitle);
   if (!titleSeniorityCompatible(actual, target)) return false;
 
   if (hasAny(target, TITLE_ENGINEERING_KINDS)) {
-    if (!hasAny(actual, TITLE_ENGINEERING_KINDS)) return false;
+    // "Frontend Architect" names the lane without an engineering noun.
+    if (!hasAny(actual, TITLE_ENGINEERING_KINDS) && fn.relation !== "shared") return false;
     if (!titleSpecializationsCompatible(actual, target)) {
       return false;
     }
     return true;
   }
 
+  if (fn.relation === "shared") return true;
   return [...target].some(
     (value) =>
       value.length >= 4 &&
@@ -1298,8 +1315,12 @@ export function applyPresentationCaps(
     Number.isFinite(normalizedCompanyCap) && normalizedCompanyCap > 0
       ? normalizedCompanyCap
       : Infinity;
+  // Adjacent-title offers always rank below exact-title ones, whatever their score.
+  const adjacentTier = (entry) => (entry.offer.titleRelevance === "adjacent-signal" ? 1 : 0);
   if (Number.isFinite(companyCap)) {
     candidates.sort((left, right) => {
+      const tierDelta = adjacentTier(left) - adjacentTier(right);
+      if (tierDelta) return tierDelta;
       const scoreDelta = Number(right.offer.score || 0) - Number(left.offer.score || 0);
       if (scoreDelta) return scoreDelta;
       const rightPosted = Date.parse(String(right.offer.postedAt || ""));
@@ -1313,6 +1334,11 @@ export function applyPresentationCaps(
       }
       return left.inputIndex - right.inputIndex;
     });
+  } else {
+    candidates.sort(
+      (left, right) =>
+        adjacentTier(left) - adjacentTier(right) || left.inputIndex - right.inputIndex
+    );
   }
 
   const presented = [];
@@ -1377,6 +1403,30 @@ const COMPENSATION_CONTEXT_RADIUS = 1_024;
 const BASE_COMP_LABEL_RE =
   /\b(?:base\s+(?:salary|pay|comp(?:ensation)?)|salary(?:\s+(?:range|band))?)\b/i;
 const ADJACENT_BARE_BASE_PREFIX_RE = /(?:^|[:;,|•])\s*base\s*:?\s*$/i;
+// "Compensation: $X - $Y", "Pay range: ...", "The anticipated pay for this role
+// is ..." name a base band only when the label sits directly before the amount
+// and is either colon-terminated or carries a qualifier (expected, range, for
+// this role). A bare "Compensation is $X" stays unlabeled, and a distant
+// "compensation" elsewhere in the posting does not promote stray dollar
+// figures. Variable-pay labels ("Total compensation", "Bonus pay") are
+// excluded by the lookbehind.
+const COMP_LABEL_LEAD = String.raw`(?<![a-z])(?<!(?:total|variable|incentive|equity|stock|bonus|overtime|ot|hourly|cash)\s)`;
+const COMP_LABEL_CORE = `(?:compensation|pay|salary)`;
+const COMP_LABEL_QUALIFIER = `(?:expected|anticipated|estimated|target|posted)`;
+const COMP_LABEL_RANGE = `(?:range|band)`;
+const COMP_LABEL_ROLE = String.raw`(?:for|of)\s+(?:this|the)\s+(?:role|position|job)`;
+const COMP_LABEL_TAIL = String.raw`(?:\s+(?:is|are|will\s+be|ranges?\s+(?:from|between)|from|between))?\s*(?:[A-Z]{3}\s*)?$`;
+const ADJACENT_COMP_LABEL_PREFIX_RE = new RegExp(
+  [
+    String.raw`${COMP_LABEL_CORE}(?:\s+${COMP_LABEL_RANGE})?\s*:\s*(?:[A-Z]{3}\s*)?$`,
+    String.raw`${COMP_LABEL_QUALIFIER}\s+${COMP_LABEL_CORE}(?:\s+${COMP_LABEL_RANGE})?(?:\s+${COMP_LABEL_ROLE})?${COMP_LABEL_TAIL}`,
+    String.raw`${COMP_LABEL_CORE}\s+${COMP_LABEL_RANGE}(?:\s+${COMP_LABEL_ROLE})?${COMP_LABEL_TAIL}`,
+    String.raw`${COMP_LABEL_CORE}\s+${COMP_LABEL_ROLE}${COMP_LABEL_TAIL}`,
+  ]
+    .map((pattern) => `${COMP_LABEL_LEAD}${pattern}`)
+    .join("|"),
+  "i"
+);
 const ADJACENT_BARE_BASE_SUFFIX_RE =
   /^[\s,]*(?:[A-Z]{3}\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b(?=\s*(?:$|[,.;:!?()[\]{}•–—]|(?:per\s+(?:year|annum|hour|hr)|a\s+year|annually|annualized|hourly|\/\s*(?:year|yr|hour|hr))\b))/iu;
 const VARIABLE_COMP_LABEL_RE =
@@ -1672,7 +1722,13 @@ function localCompensationContext(line, match) {
 function compensationMatchBasis(line, match) {
   const { fullPrefix, hasNextAmount, prefix, suffix } = localCompensationContext(line, match);
   const prefixBareBaseMatch = prefix.match(ADJACENT_BARE_BASE_PREFIX_RE);
-  const prefixBareBaseIndex = prefixBareBaseMatch?.index ?? -1;
+  // "Compensation: $20 guests per hour" is a throughput figure, not pay: a
+  // generic comp label only counts when any hourly unit directly follows the amount.
+  const throughputUnit = HOURLY_COMP_RE.test(suffix) && !HOURLY_COMP_SUFFIX_RE.test(suffix);
+  const prefixCompLabelIndex = throughputUnit
+    ? -1
+    : (prefix.match(ADJACENT_COMP_LABEL_PREFIX_RE)?.index ?? -1);
+  const prefixBareBaseIndex = Math.max(prefixBareBaseMatch?.index ?? -1, prefixCompLabelIndex);
   const baseLabelIndex = Math.max(lastLabelIndex(prefix, BASE_COMP_LABEL_RE), prefixBareBaseIndex);
   const variableLabelIndex = lastLabelIndex(prefix, VARIABLE_COMP_LABEL_RE);
   const suffixBareBaseMatch = suffix.match(ADJACENT_BARE_BASE_SUFFIX_RE);
@@ -1964,7 +2020,7 @@ function compensationEvidenceText(offer = {}, { includeBody = true } = {}) {
   return [
     evidence.baseComp ? `Base pay: ${evidence.baseComp}` : "",
     evidence.annualEarningsComp ? `Annual earnings: ${evidence.annualEarningsComp}` : "",
-    evidence.unclassifiedComp ? `Compensation: ${evidence.unclassifiedComp}` : "",
+    evidence.unclassifiedComp ? `Unlabeled amount: ${evidence.unclassifiedComp}` : "",
     includeBody ? offer?.bodyText : "",
     includeBody ? offer?.description : "",
   ]
@@ -2038,8 +2094,27 @@ export function inferProvider(entry = {}) {
   return inferCareerOpsProvider(entry);
 }
 
+// A repost is the same company, the same normalized title and the same place
+// under a new URL. Location stays in the key so the same
+// title in two cities, and any team qualifier in the title, remain separate
+// roles.
 function sameRunOfferKeys(offer) {
-  return postingIdentityKeys(offer);
+  const keys = postingIdentityKeys(offer);
+  const company = String(offer?.company || "").trim();
+  const title = String(offer?.title || "").trim();
+  if (company && title) {
+    const location = normalizeTextKey(offer?.location || "");
+    // Distinct requisition ids are distinct openings for the same title (the
+    // req-id rules above own that case), so an id is part of the repost key.
+    const req =
+      String(offer?.reqId || "")
+        .trim()
+        .toLowerCase() ||
+      extractReqId(offer?.url).id ||
+      "";
+    keys.push(`repost:${normalizeCompanyRoleKey(company, title)}::${location}::${req}`);
+  }
+  return keys;
 }
 
 function offerCompleteness(offer) {
@@ -2120,7 +2195,16 @@ function dedupeBeforeQualification(offers, { seenUrls, seenReqIds, seenRunCompan
         reqId: req.id,
       });
     }
-    primary.offer = winner.offer;
+    // The kept row answers for every posting collapsed into it: record the
+    // identities (URLs, requisition ids) of the discarded ones as aliasKeys.
+    const losers = candidates.filter((candidate) => candidate.offer !== winner.offer);
+    const aliasKeys = [
+      ...new Set([
+        ...(Array.isArray(winner.offer.aliasKeys) ? winner.offer.aliasKeys : []),
+        ...losers.flatMap((loser) => identityAliasAdditions(winner.offer, loser.offer)),
+      ]),
+    ];
+    primary.offer = aliasKeys.length ? { ...winner.offer, aliasKeys } : winner.offer;
     primary.inputIndex = winner.inputIndex;
     primary.keys = mergedKeys;
     for (const key of mergedKeys) entriesByKey.set(key, primary);

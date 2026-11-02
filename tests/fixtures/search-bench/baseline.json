@@ -2,27 +2,27 @@
   "overall": {
     "precisionAt10": 1,
     "ndcgAt10": 1,
-    "goodRecall": 0.6984,
-    "keptPrecision": 0.7167
+    "goodRecall": 1,
+    "keptPrecision": 0.9375
   },
   "candidates": {
     "operations-program-manager": {
       "precisionAt10": 1,
       "ndcgAt10": 1,
-      "keptPrecision": 0.7143,
-      "goodRecall": 0.6667
+      "keptPrecision": 0.9375,
+      "goodRecall": 1
     },
     "senior-product-designer": {
       "precisionAt10": 1,
       "ndcgAt10": 1,
-      "keptPrecision": 0.7692,
-      "goodRecall": 0.7143
+      "keptPrecision": 0.9375,
+      "goodRecall": 1
     },
     "staff-frontend-engineer": {
       "precisionAt10": 1,
       "ndcgAt10": 1,
-      "keptPrecision": 0.6667,
-      "goodRecall": 0.7143
+      "keptPrecision": 0.9375,
+      "goodRecall": 1
     }
   }
 }

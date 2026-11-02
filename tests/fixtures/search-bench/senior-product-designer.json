@@ -143,6 +143,16 @@
       "kind": "exact"
     },
     {
+      "id": "pd-34",
+      "title": "Senior Product Designer, Platform",
+      "company": "Willowbrook",
+      "location": "Remote - US",
+      "grade": 3,
+      "kind": "exact",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Compensation: $150,000 - $185,000 per year.",
+      "url": "https://jobs.example.test/willowbrook/senior-product-designer-platform-pd-34"
+    },
+    {
       "id": "pd-08",
       "title": "Senior UX Designer",
       "company": "Cedarwood",
@@ -427,6 +437,16 @@
       "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $165,000 - $200,000 per year.",
       "grade": 0,
       "kind": "duplicate"
+    },
+    {
+      "id": "pd-35",
+      "title": "Senior Product Designer, Consumer",
+      "company": "Marigold Co",
+      "location": "Remote - US",
+      "grade": 0,
+      "kind": "below-comp",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Salary: $90,000 - $110,000.",
+      "url": "https://jobs.example.test/marigold-co/senior-product-designer-consumer-pd-35"
     }
   ]
 }
