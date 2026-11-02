@@ -69,6 +69,7 @@ import {
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
 import { annotateTopResults } from "../src/core/search/ai-rerank.mjs";
+import { loadSweepSlugs, planSweep, resolveSweepSetting } from "../src/core/search/ats-sweep.mjs";
 import { planDeadBoardSkips, recordDeadBoardOutcome } from "../src/core/search/dead-boards.mjs";
 import {
   SEARCH_NOT_SEARCHABLE_BROWSER_REASON,
@@ -602,6 +603,31 @@ export async function runSourcedScan({
   const allSourceTasks = searchSourceTasks(searchSources);
   const canCaptureBrowser = typeof captureBrowserSourceImpl === "function";
   let sourceTasks = allSourceTasks.filter((task) => task.kind !== "browser" || canCaptureBrowser);
+  // Reverse ATS sweep: boards from an operator-provided slug list, scanned for
+  // matching roles. Off without the list file; never counts toward run health,
+  // since a guessed slug that 404s says nothing about the search.
+  let sweepPlan = null;
+  const sweepSetting = resolveSweepSetting(candidateConfig.targeting);
+  const sweepInfo = { enabled: false, boards: 0, scanned: 0, deadSkipped: 0, errors: 0, offers: 0 };
+  if (!companyFilter && !standaloneConfigMode && sweepSetting.enabled) {
+    try {
+      const loaded = loadSweepSlugs(pathCtx);
+      if (!loaded.missing) {
+        sweepPlan = planSweep({
+          slugs: loaded.slugs,
+          tracked: config.tracked_companies || [],
+          maxBoards: sweepSetting.maxBoards,
+          now: savedAt.getTime(),
+        });
+        sweepInfo.enabled = true;
+        sweepInfo.listed = loaded.slugs.length;
+        sweepInfo.droppedEntries = loaded.dropped;
+        sweepInfo.skippedTracked = sweepPlan.skippedTracked;
+      }
+    } catch (error) {
+      scanned.errors.push({ company: "ats-sweep-slugs", error: error.message });
+    }
+  }
   // Boards that answered 404/410 on 2 runs in a row sit out until their 14-day
   // re-check (or until the source is edited). An explicit --company or
   // --recheck-dead probes everything.
@@ -609,7 +635,7 @@ export async function runSourcedScan({
     pathCtx,
     companies,
     tasks: sourceTasks,
-    allCompanies: config.tracked_companies || [],
+    allCompanies: [...(config.tracked_companies || []), ...(sweepPlan?.entries || [])],
     allSources: searchSources?.[searchListKey(searchSources)] || [],
     bypass: Boolean(companyFilter) || recheckDead,
     prune: write && !standaloneConfigMode && !companyFilter,
@@ -776,6 +802,49 @@ export async function runSourcedScan({
       !failedSourceIndexes.has(task.sourceIndex)
     ) {
       successfulSearchSources.push(task.source);
+    }
+  }
+
+  if (sweepPlan?.entries.length) {
+    ensureActive();
+    const sweepDead = planDeadBoardSkips({
+      pathCtx,
+      companies: sweepPlan.entries,
+      tasks: [],
+      allCompanies: sweepPlan.entries,
+      bypass: recheckDead,
+      prune: false,
+      now: savedAt,
+    });
+    sweepInfo.deadSkipped = sweepDead.skipped.length;
+    sweepInfo.boards = sweepDead.companies.length;
+    const sweepResults = await mapWithConcurrency(
+      sweepDead.companies,
+      async (company) => {
+        ensureActive();
+        const result = await scanCompanies(
+          { ...config, tracked_companies: [company] },
+          { fetchImpl: fetchForRun, resolveHost, companyFilter: null }
+        );
+        ensureActive();
+        return { company, result };
+      },
+      SOURCE_SCAN_CONCURRENCY
+    );
+    for (const { company, result } of sweepResults) {
+      if (write) {
+        recordDeadBoardOutcome({
+          pathCtx,
+          key: sweepDead.companyKey(company),
+          kind: "sweep",
+          label: company.name,
+          result,
+        });
+      }
+      sweepInfo.scanned += 1;
+      sweepInfo.errors += (result.errors || []).length > 0 ? 1 : 0;
+      sweepInfo.offers += (result.offers || []).length;
+      scanned.offers.push(...(result.offers || []));
     }
   }
 
@@ -1082,6 +1151,7 @@ export async function runSourcedScan({
     sourceCoverage: scanned.sourceCoverage,
     ...(throttle ? { requestStats: throttle.stats() } : {}),
     ...(aiRerank ? { aiRerank } : {}),
+    ...(sweepInfo.enabled ? { atsSweep: sweepInfo } : {}),
     coldFamilies,
     revalidatedExisting,
     offers: outputOffers,
@@ -1134,6 +1204,12 @@ export function printSummary(summary, offers, cfg, limit) {
     const stats = summary.requestStats;
     console.log(
       `Rate limited: ${stats.rateLimited} of ${stats.attempts} requests (${stats.rateLimitedPct}%), ${stats.retried} retried after backoff`
+    );
+  }
+  if (summary.atsSweep) {
+    const sweep = summary.atsSweep;
+    console.log(
+      `ATS sweep: ${sweep.scanned} extra boards scanned (${sweep.offers} postings), ${sweep.deadSkipped} known-dead skipped, ${sweep.errors} unreachable`
     );
   }
   if (summary.aiRerank) console.log(`AI rerank: ${summary.aiRerank.message}`);

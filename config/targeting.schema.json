@@ -101,6 +101,15 @@
             "saved_at": { "type": "string" }
           }
         },
+        "ats_sweep": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Reverse ATS sweep over the operator's config/ats-sweep-slugs list. On when the list exists; set enabled false to skip it.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "max_boards": { "type": "integer", "minimum": 1, "description": "Boards scanned per run; a longer list rotates daily. Defaults to 150." }
+          }
+        },
         "ai_rerank": {
           "type": "object",
           "additionalProperties": false,

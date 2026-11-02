@@ -202,6 +202,28 @@ never written here.
 
 ---
 
+## ATS Sweep (your own slug list)
+
+The sweep scans employer boards you did not track, looking for roles that match your targeting.
+It reads a list you provide at `config/ats-sweep-slugs.json` or `config/ats-sweep-slugs.txt` in the
+workspace. Without that file nothing runs.
+
+```
+# config/ats-sweep-slugs.txt: one provider:slug per line
+greenhouse:acme
+lever:globex
+ashby:umbrella
+```
+
+JSON works too: `{"greenhouse": ["acme"], "lever": ["globex"]}`. Providers: greenhouse, lever, ashby,
+workable, smartrecruiters, recruitee. Boards you already track are skipped. A list longer than
+`search_preferences.ats_sweep.max_boards` (default 150) is covered over several days. Swept boards
+never count toward run health, and a swept board that answers 404 on two runs is skipped like any
+other dead board. Postings go through the same title, location and scoring filters as everything else.
+
+Known gap: CareerRat ships no slug data and downloads none. Building the list (from a public ATS
+slug dataset you trust, or your own research) is on you, and company names are derived from the slug.
+
 ## Deterministic provider parity
 
 The curated table above is a starter menu, not the complete runtime inventory.

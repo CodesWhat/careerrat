@@ -28,6 +28,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- ATS sweep: drop a `config/ats-sweep-slugs.txt` (or `.json`) of employer board slugs in the workspace and scans also check those boards for roles that match your targeting. No slug data is bundled.
 - Optional AI rerank (`search_preferences.ai_rerank.enabled` in targeting.yml, off by default): the top results get a short fit note and a suggested order from your AI. It never filters, hides or reorders results, and says so plainly when no AI is set up.
 - Scans now go easy on each host: a concurrency cap, a minimum gap between requests, and a wait-and-retry on 429 or 503 that follows Retry-After. The scan summary reports how many requests were rate limited.
 - Scans rank ghost-looking and reposted postings lower with a visible reason (evergreen wording, very old, or the same role showing up under new links across scans). They are never cut.
