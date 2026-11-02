@@ -428,6 +428,32 @@ closeAll();
                 await pilot.press("ctrl+q")
             self.assertIn("Saved data could not refresh: boom", log.read_text())
 
+    async def test_a_status_that_arrives_during_a_held_message_shows_when_the_hold_ends(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-hold-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                message = app.query_one("#message", Static)
+                app.show_message("Read this first", hold=0.4)
+                app.show_status("Search running · 1")
+                app.show_status("Search completed · 3 saved")
+                self.assertIn("Read this first", str(message.render()))
+                await until(lambda: "3 saved" in str(message.render()), 3)
+                self.assertNotIn("running", str(message.render()))
+                # Nothing is left to replay once it has been shown.
+                self.assertIsNone(app.pending_status)
+                app.show_message("Later hold", hold=0.3)
+                app.show_status("Newest")
+                await pilot.pause(0.1)
+                app.show_message("Longer hold", hold=0.5)
+                await until(lambda: "Newest" in str(message.render()), 3)
+                self.assertGreaterEqual(time.monotonic(), app.held[1] - 0.05)
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
     async def test_saved_jobs_clicks_requests_context_and_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-ui-") as folder:
             home = Path(folder)

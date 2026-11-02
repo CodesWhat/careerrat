@@ -737,6 +737,8 @@ class CareerRatApp(App):
         self.detail = None
         self.last_bell = float("-inf")
         self.resize_timer = None
+        self.pending_status = None
+        self.status_timer = None
         self.env = dict(os.environ if env is None else env)
         self.bridge_args = list(sys.argv[1:] if bridge_args is None else bridge_args)
         self.proc = None
@@ -975,10 +977,25 @@ class CareerRatApp(App):
         self.query_one("#message", Static).update(text)
 
     def show_status(self, text):
-        # The snapshot-driven line yields to a message someone still needs to read.
-        if time.monotonic() < self.held[1]:
+        # The snapshot-driven line yields to a message someone still needs to
+        # read, then takes over again when the hold ends: the latest status is
+        # kept and shown then, so an old one can't stay on screen.
+        self.pending_status = text
+        remaining = self.held[1] - time.monotonic()
+        if remaining > 0:
+            if self.status_timer:
+                self.status_timer.stop()
+            self.status_timer = self.set_timer(remaining + 0.02, self.release_status)
             return
-        self.show_message(text)
+        self.release_status()
+
+    def release_status(self):
+        remaining = self.held[1] - time.monotonic()
+        if remaining > 0:
+            self.show_status(self.pending_status)
+        elif self.pending_status is not None:
+            text, self.pending_status = self.pending_status, None
+            self.show_message(text)
 
     def show_agent_status(self, text):
         """Agent trouble stays on screen in its own line until the app is closed."""
