@@ -49,6 +49,33 @@ test("search worker saves a private handoff from its canonical completed run", a
   assert.match(saved.nextAction, /evaluate-job/);
   if (process.platform !== "win32") assert.equal(statSync(result.handoffPath).mode & 0o777, 0o600);
 });
+test("a completed search with mostly failed sources is reported as failed health", async (t) => {
+  const ctx = fixture(t);
+  const errors = Array.from({ length: 8 }, (_, i) => ({ company: `c${i}`, error: "fetch failed" }));
+  const result = await api.runTerminalSearchWorker({
+    ...ctx,
+    execute: async ({ runId }) =>
+      sourcingRunComplete({
+        ...ctx,
+        id: runId,
+        summary: {
+          new: 1,
+          attemptedSources: 10,
+          errorCount: errors.length,
+          errors,
+          health: undefined,
+        },
+      }).run,
+  });
+  const saved = JSON.parse(readFileSync(result.handoffPath, "utf8"));
+  assert.equal(saved.status, "completed");
+  assert.equal(saved.health.status, "failed");
+  assert.deepEqual(saved.health.errorReasons, [{ reason: "fetch failed", count: 8 }]);
+  assert.match(saved.nextAction, /failed/);
+  assert.doesNotMatch(saved.nextAction, /evaluate-job/);
+  const status = api.terminalSearchStatus({ ...ctx, id: ctx.runId });
+  assert.equal(status.health.status, "failed");
+});
 test("cancellation aborts active work and cannot be replaced with completed results", async (t) => {
   assert.equal(typeof api.runTerminalSearchWorker, "function");
   const ctx = fixture(t);

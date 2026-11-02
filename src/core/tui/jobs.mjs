@@ -4,6 +4,7 @@ import { dbFilePath } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { extractCompBand } from "../scoring/sourced-scanner.mjs";
+import { searchRunHealth } from "../search/search-health.mjs";
 import { classifyStage, isKnownStatusLabel, isTerminalStage } from "../tracker/dashboard.mjs";
 import { readHistorySnapshot } from "./history.mjs";
 
@@ -60,7 +61,10 @@ export function readJobs({ repoRoot, env = process.env } = {}) {
           "SELECT data FROM sourcing_runs ORDER BY (status = 'running') DESC, updated_at DESC LIMIT 6"
         )
         .all()
-        .map((row) => JSON.parse(row.data));
+        .map((row) => {
+          const run = JSON.parse(row.data);
+          return { ...run, health: searchRunHealth(run) };
+        });
       db.exec("COMMIT");
       mode = "database";
     } finally {

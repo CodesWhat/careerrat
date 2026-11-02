@@ -11,6 +11,7 @@ import {
 } from "../db/verbs/sourcing-runs.mjs";
 import { runFirstSearchInBackground } from "../onboarding/first-search-run.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { searchRunHealth } from "./search-health.mjs";
 
 export function searchHandoffPath(ctx, runId) {
   return userPath(ctx, `workspace/research/search-runs/${encodeURIComponent(runId)}.json`);
@@ -20,7 +21,12 @@ export function terminalSearchStatus({ repoRoot, env = process.env, id } = {}) {
   const ctx = { repoRoot, env };
   const { run } = sourcingRunGet({ ...ctx, id });
   const path = searchHandoffPath(ctx, run.id);
-  return { ok: true, run, handoffPath: existsSync(path) ? path : null };
+  return {
+    ok: true,
+    run,
+    health: searchRunHealth(run),
+    handoffPath: existsSync(path) ? path : null,
+  };
 }
 
 function writePrivateJson(path, value) {
@@ -38,6 +44,8 @@ function saveHandoff(ctx, run, result) {
   const path = searchHandoffPath(ctx, run.id);
   const resultPath = result ? `${path.slice(0, -5)}.results.json` : null;
   if (resultPath) writePrivateJson(resultPath, result);
+  const health = searchRunHealth(run);
+  const unhealthy = health && health.status !== "ok";
   const handoff = {
     schemaVersion: 1,
     runId: run.id,
@@ -45,6 +53,7 @@ function saveHandoff(ctx, run, result) {
     status: run.status,
     completedAt: run.completedAt,
     summary: run.summary,
+    health,
     resultPath,
     jobs: (result?.offers || []).map((offer) => ({
       id: offer.id,
@@ -56,9 +65,11 @@ function saveHandoff(ctx, run, result) {
     })),
     error: run.error,
     nextAction:
-      run.status === "completed"
-        ? "Read the canonical sourced jobs and use evaluate-job on the strongest matches before apply-job."
-        : "Inspect the error and any saved partial results before retrying this search.",
+      run.status !== "completed"
+        ? "Inspect the error and any saved partial results before retrying this search."
+        : unhealthy
+          ? `Tell the user this search was ${health.status}: ${health.message}. Report the grouped error reasons, then use the saved results below, and don't call the search a success.`
+          : "Read the canonical sourced jobs and use evaluate-job on the strongest matches before apply-job.",
   };
   writePrivateJson(path, handoff);
   return path;
