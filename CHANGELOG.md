@@ -28,7 +28,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
-- Search can use USAJobs and Adzuna when their free API keys are set, and new
+- Search can use USAJobs (free key) and Adzuna (paid key) when their keys are set, and new
   searches also include Himalayas, Jobicy and, for tech roles, Hacker News "Who is
   hiring". A missing key is reported on that source instead of returning nothing.
 - A job board that comes back not found on two runs in a row is skipped until a

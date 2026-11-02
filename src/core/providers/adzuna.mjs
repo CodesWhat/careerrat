@@ -1,4 +1,4 @@
-// Adzuna job search API (https://developer.adzuna.com/). Needs a free
+// Adzuna job search API (https://developer.adzuna.com/). Needs a paid (25 trial calls)
 // application id and key: ADZUNA_APP_ID and ADZUNA_APP_KEY. See
 // keyed-credentials.mjs.
 //

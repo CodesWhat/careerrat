@@ -180,7 +180,7 @@ never written here.
 | The Muse | general | niche-board | high | implemented | public JSON API; paged, so add it by hand (`--add-provider themuse --query "<title>"`) rather than seeding it |
 | Hacker News: Who is hiring | tech/software | niche-board | high | implemented | monthly thread read through the public Algolia API; seeded for tech domains |
 | USAJobs | general | official-api | high | implemented | `src/core/providers/usajobs.mjs`; US federal postings; free key in `USAJOBS_API_KEY` and `USAJOBS_USER_AGENT` (your email) |
-| Adzuna | general | aggregator | high | implemented | `src/core/providers/adzuna.mjs`; one country per source; free `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`; returns a snippet, so the body is marked partial |
+| Adzuna | general | aggregator | high | implemented | `src/core/providers/adzuna.mjs`; one country per source; paid `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` (25 trial calls, then a paid plan); returns a snippet, so the body is marked partial |
 | OysterLink | hospitality | niche-board | high | implemented | public hospitality search and structured job-detail adapter |
 | Hcareers | hospitality | niche-board | high | implemented | public hospitality search and structured job-detail adapter |
 | Hospitality Online | hospitality | niche-board | high | implemented | public hospitality search and structured job-detail adapter |

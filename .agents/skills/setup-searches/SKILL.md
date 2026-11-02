@@ -61,7 +61,7 @@ careerrat searches --add-provider "<provider>" --query "<title or keyword>" [--l
 careerrat searches --add-provider "<provider>" --url "<branded board URL>" [--label "<label>"]
 ```
 
-Public boards that need no key and work for any field: `remotive`, `remoteok`, `workingnomads`, `himalayas`, `jobicy`, `arbeitnow`, and `themuse` (paged, so add it by hand with a query). `hackernews` reads the monthly "Who is hiring" thread and suits tech roles. Keyed sources use a free key from the environment:
+Public boards that need no key and work for any field: `remotive`, `remoteok`, `workingnomads`, `himalayas`, `jobicy`, `arbeitnow`, and `themuse` (paged, so add it by hand with a query). `hackernews` reads the monthly "Who is hiring" thread and suits tech roles. Keyed sources read a key from the environment (USAJobs is free; Adzuna is paid after 25 trial calls):
 
 ```bash
 careerrat searches --add-provider "usajobs" --query "<title or keyword>" [--location "<place>"]
