@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { dbFilePath } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { extractCompBand } from "../scoring/sourced-scanner.mjs";
 import { classifyStage, isKnownStatusLabel } from "../tracker/dashboard.mjs";
 import { readHistorySnapshot } from "./history.mjs";
 
@@ -95,15 +96,46 @@ function numeric(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+function unknownPay(comp = {}) {
+  return {
+    currency: comp.currency ?? null,
+    basis: comp.basis ?? null,
+    source: comp.source ?? "unknown",
+    min: null,
+    max: null,
+    comparable: false,
+  };
+}
+
+// Saved jobs usually carry pay as free text (base, tc), not a structured
+// evaluation. Read a range only where the existing compensation parser finds
+// one; vague text such as "unlisted" stays unknown.
+function notePay(record, currency, basis) {
+  const text = basis === "annual-earnings" ? record.tc : record.base;
+  if (typeof text !== "string" || !text.trim()) return null;
+  const band = extractCompBand(text);
+  const min = numeric(band?.min);
+  const max = numeric(band?.max);
+  if (min === null || max === null) return null;
+  return {
+    currency: band.currency ?? null,
+    basis,
+    source: "saved-note",
+    min,
+    max,
+    comparable: band.currency === currency && min <= max,
+  };
+}
+
 function payFor(record, currency, basis) {
   const comp = record.evaluation?.compensation || {};
   const min = numeric(comp.basis === "annual-earnings" ? comp.minAnnualEarnings : comp.minBase);
   const max = numeric(comp.basis === "annual-earnings" ? comp.maxAnnualEarnings : comp.maxBase);
+  if (min === null && max === null) return notePay(record, currency, basis) || unknownPay(comp);
   const comparable =
     comp.currency === currency &&
     comp.basis === basis &&
     comp.source === "job-description" &&
-    (min !== null || max !== null) &&
     (min === null || max === null || min <= max);
   return {
     currency: comp.currency ?? null,
@@ -112,6 +144,23 @@ function payFor(record, currency, basis) {
     min,
     max,
     comparable,
+  };
+}
+
+function text(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+// What the Fit column shows. Prefer the saved evaluation, else the scores
+// the tracker already holds on the job itself.
+export function fitFor(record) {
+  const evaluation = record.evaluation || {};
+  const score = numeric(evaluation.fitScore ?? record.fitScore);
+  const verdict = text(evaluation.gate) ?? text(record.gate?.gate) ?? text(record.fitBucket);
+  return {
+    score,
+    verdict,
+    label: [score, verdict].filter((part) => part !== null).join(" ") || null,
   };
 }
 
@@ -125,7 +174,11 @@ export function viewJobs(
   const direction = order === "desc" ? -1 : 1;
   const jobs = data.jobs
     .filter((job) => stage === "all" || job.stage.id === stage)
-    .map((job) => ({ ...job, pay: payFor(job.record, currency, basis) }))
+    .map((job) => ({
+      ...job,
+      pay: payFor(job.record, currency, basis),
+      fit: fitFor(job.record),
+    }))
     .sort((a, b) => {
       if (a.pay.comparable !== b.pay.comparable) return a.pay.comparable ? -1 : 1;
       if (a.pay.comparable) {

@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import sys
@@ -63,6 +64,210 @@ def format_messages(messages):
     )
 
 
+JOB_COLUMNS = ["Company", "Role", "Status", "Fit", "Pay"]
+# Columns that keep a set width; the rest share what is left.
+FIXED_WIDTHS = {"Status": 12, "Fit": 10, "Pay": 14}
+MINIMUM_WIDTHS = {"Company": 12, "Role": 12, "Status": 10, "Fit": 7, "Pay": 9}
+# Narrow screens give these up first. Company and Status always stay.
+DROP_ORDER = ["Role", "Pay", "Fit"]
+CELL_PADDING = 2
+
+
+def clean(value):
+    """Readable text for a saved field, or "" when it holds nothing."""
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float)):
+        return f"{value:,}" if isinstance(value, int) else f"{value:g}"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(part for part in (clean(item) for item in value) if part)
+    return ""
+
+
+def clip(value, width):
+    """One line, cut with an ellipsis when it does not fit."""
+    text = Text(" ".join(clean(value).split()), no_wrap=True)
+    text.truncate(max(width, 1), overflow="ellipsis")
+    return text
+
+
+def plan_columns(available):
+    """Pick the columns that fit and give each a width."""
+    names = list(JOB_COLUMNS)
+
+    def need(items):
+        return sum(
+            FIXED_WIDTHS.get(name, MINIMUM_WIDTHS[name]) + CELL_PADDING
+            for name in items
+        )
+
+    for name in DROP_ORDER:
+        if need(names) <= available:
+            break
+        names.remove(name)
+    flexible = [n for n in names if n not in FIXED_WIDTHS]
+    fixed = {n: FIXED_WIDTHS[n] for n in names if n in FIXED_WIDTHS}
+    if need(names) > available:
+        fixed = {n: MINIMUM_WIDTHS[n] for n in fixed}
+    spare = available - sum(w + CELL_PADDING for w in fixed.values())
+    spare -= sum(MINIMUM_WIDTHS[n] + CELL_PADDING for n in flexible)
+    spare = max(spare, 0)
+    shares = {"Company": 0.4, "Role": 0.6} if len(flexible) == 2 else {"Company": 1}
+    widths = {n: MINIMUM_WIDTHS[n] + int(spare * shares[n]) for n in flexible}
+    return [(name, widths.get(name) or fixed[name]) for name in names]
+
+
+def short_amount(value):
+    value = int(value)
+    return f"{round(value / 1000, 1):g}k" if value >= 1000 else str(value)
+
+
+def pay_label(pay, currency=None):
+    """Compact pay for the table; a dash when nothing is known."""
+    low, high = pay.get("min"), pay.get("max")
+    if low is None and high is None:
+        return "—"
+    if low is None:
+        amount = f"≤{short_amount(high)}"
+    elif high is None:
+        amount = f"≥{short_amount(low)}"
+    elif low == high:
+        amount = short_amount(low)
+    else:
+        amount = f"{short_amount(low)}–{short_amount(high)}"
+    code = pay.get("currency")
+    return amount if code and code == currency else f"{code or '?'} {amount}"
+
+
+def job_cells(job, currency=None):
+    record = job["record"]
+    fit = job.get("fit") or {}
+    return {
+        "Company": clean(record.get("company")),
+        "Role": clean(record.get("role")),
+        "Status": clean((job.get("stage") or {}).get("label")),
+        "Fit": clean(fit.get("label")) or "—",
+        "Pay": pay_label(job.get("pay") or {}, currency),
+    }
+
+
+def has_saved_jd(record):
+    return bool(clean((record.get("artifacts") or {}).get("jd")))
+
+
+def _label(key):
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", key).lower()
+    return {"jd": "Job description"}.get(key) or spaced.capitalize()
+
+
+def saved_documents(artifacts, limit=10):
+    """File names the job has on record, one readable line each."""
+    if not isinstance(artifacts, dict):
+        return []
+    lines, seen = [], set()
+    for key, value in artifacts.items():
+        if "token" in key.lower() or not isinstance(value, str):
+            continue
+        value = value.strip()
+        name = Path(value).name
+        if (
+            not value
+            or "://" in value
+            or name in seen
+            or not re.search(r"\.[A-Za-z][A-Za-z0-9]{1,4}$", name)
+        ):
+            continue
+        seen.add(name)
+        lines.append(f"{_label(key)}: {name}")
+    if len(lines) > limit:
+        lines = [*lines[:limit], f"and {len(lines) - limit} more"]
+    return lines
+
+
+def bullet_lines(value):
+    items = value if isinstance(value, (list, tuple)) else [value]
+    return ["• " + text for text in (clean(item) for item in items) if text]
+
+
+def labeled(*pairs):
+    return [f"{label}: {clean(value)}" for label, value in pairs if clean(value)]
+
+
+def job_detail_text(job):
+    row = job["record"]
+    fit = job.get("fit") or {}
+    title = " · ".join(
+        part for part in (clean(row.get("company")), clean(row.get("role"))) if part
+    )
+    status = clean((job.get("stage") or {}).get("label")) or clean(row.get("status"))
+    gate = row.get("gate") if isinstance(row.get("gate"), dict) else {}
+    head = labeled(
+        ("Status", status),
+        ("Fit", fit.get("label")),
+        ("Base pay", row.get("base")),
+        ("Total pay", row.get("tc")),
+        ("Next step", clean(row.get("nextAction")) or clean(row.get("action"))
+         or clean(gate.get("action"))),
+        ("Status note", row.get("statusNote")),
+        ("Note", row.get("note")),
+        ("Heads up", row.get("warn")),
+        ("Ask", row.get("ask")),
+        ("Apply link", row.get("link")),
+    )
+    sections = [[title] if title else [], head]
+    fit_notes = row.get("roleFit") if isinstance(row.get("roleFit"), dict) else {}
+    for key in ("why", "risks"):
+        items = bullet_lines(fit_notes.get(key))
+        if items:
+            sections.append([key.title(), *items])
+    documents = saved_documents(row.get("artifacts"))
+    if documents:
+        sections.append(["Saved documents", *documents])
+    return "\n\n".join("\n".join(lines) for lines in sections if lines)
+
+
+def fit_report_text(row, fit, has_table):
+    """Summary above the requirements table, built from whatever is saved."""
+    evaluation = row.get("evaluation") or {}
+    if evaluation:
+        return (
+            f"Saved evaluation: {clean(evaluation.get('gate')) or 'Not evaluated'} · "
+            f"{clean(evaluation.get('evaluatedAt')) or 'No evaluation date'}\n"
+            + (
+                "Scroll across for the complete evidence table."
+                if has_table
+                else "No saved requirements report. Use Review matches to evaluate the saved JD."
+            )
+        )
+    gate = row.get("gate") if isinstance(row.get("gate"), dict) else {}
+    verdict = clean(gate.get("gate")) or clean(row.get("fitBucket"))
+    bucket = clean(row.get("fitBucket"))
+    group = bucket if bucket.lower() != verdict.lower() else ""
+    lines = labeled(
+        ("Score", fit.get("score")),
+        ("Verdict", verdict),
+        ("Fit group", group),
+        ("Action", clean(row.get("action")) or clean(gate.get("action"))),
+        ("Why this score", row.get("ratingReason")),
+        ("Heads up", row.get("warn")),
+    )
+    notes = row.get("roleFit") if isinstance(row.get("roleFit"), dict) else {}
+    sections = [lines]
+    for key in ("why", "risks"):
+        items = bullet_lines(notes.get(key))
+        if items:
+            sections.append([key.title(), *items])
+    sections.append(
+        [
+            "No detailed requirement-by-requirement evidence is saved for this job."
+            " Use Review matches to build it from the saved JD."
+        ]
+    )
+    return "\n\n".join("\n".join(part) for part in sections if part)
+
+
 class NativePane(Widget):
     can_focus = True
     frame = None
@@ -104,6 +309,11 @@ class NativePane(Widget):
 
     async def on_resize(self):
         await self.app.resize_agent()
+
+
+class JobsTable(DataTable):
+    def on_resize(self, event):
+        self.app.render_jobs()
 
 
 class RemoveFile(Button):
@@ -266,10 +476,11 @@ class CareerRatApp(App):
     #actions Button { min-width: 13; margin-right: 1; }
     #filters { height: 3; padding: 0 1; }
     #filters Select { width: 1fr; margin-right: 1; }
-    #workspace { grid-size: 2 2; grid-columns: 3fr 2fr; grid-rows: 13 1fr; height: 1fr; padding: 0 1; grid-gutter: 1; }
+    #workspace { grid-size: 2 2; grid-columns: 2fr 1fr; grid-rows: 3fr 2fr; height: 1fr; padding: 0 1; grid-gutter: 1; }
     #jobs { height: 1fr; border: round $accent; }
     #inspector { height: 1fr; border: round $secondary; }
-    TabPane { padding: 1; overflow-y: auto; }
+    TabPane { padding: 0 1; overflow-y: auto; }
+    #open-jd { margin-bottom: 1; }
     .change-controls { height: 3; }
     #native { row-span: 2; height: 1fr; border: round $primary; }
     #native:focus { border: double $accent; }
@@ -291,6 +502,8 @@ class CareerRatApp(App):
         self.updating = False
         self.job_ids = []
         self.table_signature = None
+        self.job_cells = []
+        self.column_key = None
         self.theme = "nord"
         self.request_counter = 0
 
@@ -322,11 +535,11 @@ class CareerRatApp(App):
                 id="order",
             )
         with Grid(id="workspace"):
-            yield DataTable(id="jobs", cursor_type="row")
+            yield JobsTable(id="jobs", cursor_type="row")
             yield NativePane(id="native")
             with TabbedContent(id="inspector"):
                 with TabPane("Job details", id="fit"):
-                    yield Button("Read saved JD", id="open-jd")
+                    yield Button("Read saved JD", id="open-jd", compact=True)
                     yield Static(id="details", markup=False)
                 with TabPane("Fit report", id="assessment"):
                     yield Static(id="assessment-summary", markup=False)
@@ -357,9 +570,7 @@ class CareerRatApp(App):
         if sys.platform != "win32":
             for name in (signal.SIGTERM, signal.SIGHUP):
                 loop.add_signal_handler(name, self.exit)
-        self.query_one("#jobs", DataTable).add_columns(
-            "Company", "Role", "Status", "Fit", "Pay"
-        )
+        self.render_jobs()
         report = self.query_one("#requirements", DataTable)
         for label, width in [
             ("Requirement", 26),
@@ -511,6 +722,30 @@ class CareerRatApp(App):
             self.errors.append(value["message"])
             self.show_message(value["message"])
 
+    def render_jobs(self, force=False):
+        """Fit the columns to the table's width and refill the rows."""
+        table = self.query_one("#jobs", DataTable)
+        # Leave room for the scrollbar so adding it never changes the layout.
+        width = table.size.width - 2 if table.size.width else 76
+        plan = plan_columns(width)
+        key = (width, tuple(plan))
+        if not force and key == self.column_key:
+            return
+        self.column_key = key
+        self.updating = True
+        try:
+            table.clear(columns=True)
+            for name, size in plan:
+                table.add_column(name, width=size, key=name)
+            for job_id, cells in zip(self.job_ids, self.job_cells):
+                table.add_row(
+                    *[clip(cells[name], size) for name, size in plan], key=job_id
+                )
+            if self.selected_id in self.job_ids:
+                table.move_cursor(row=self.job_ids.index(self.selected_id))
+        finally:
+            self.updating = False
+
     def update_workspace(self, value):
         self.snapshot = value
         view, state = value["view"], value["state"]
@@ -522,33 +757,9 @@ class CareerRatApp(App):
         try:
             if signature != self.table_signature:
                 self.table_signature = signature
-                table.clear()
                 self.job_ids = [job["id"] for job in jobs]
-                for job in jobs:
-                    row, pay = job["record"], job["pay"]
-                    numbers = [
-                        str(int(pay[key]))
-                        for key in ("min", "max")
-                        if pay[key] is not None
-                    ]
-                    label = "–".join(dict.fromkeys(numbers)) or "Unknown"
-                    if numbers:
-                        label = (
-                            f"{pay['currency'] or '?'} {label} / {pay['basis'] or '?'}"
-                        )
-                    table.add_row(
-                        *[
-                            Text(str(item))
-                            for item in (
-                                row.get("company", ""),
-                                row.get("role", ""),
-                                job["stage"]["label"],
-                                (row.get("evaluation") or {}).get("gate", "—"),
-                                label,
-                            )
-                        ],
-                        key=job["id"],
-                    )
+                self.job_cells = [job_cells(job, view.get("currency")) for job in jobs]
+                self.render_jobs(force=True)
             if self.selected_id in self.job_ids:
                 table.move_cursor(row=self.job_ids.index(self.selected_id))
             table.border_title = f"Saved jobs · {len(jobs)} · {view['mode']}"
@@ -562,20 +773,23 @@ class CareerRatApp(App):
             }
             # Keep all previously observed stages available while a filter is active.
             self.stage_options = {**getattr(self, "stage_options", {}), **stage_options}
-            self.query_one("#status", Select).set_options(
-                [(label, key) for key, label in self.stage_options.items()]
-            )
-            self.query_one("#status", Select).value = state["stage"]
             currencies = sorted(
                 {
                     state["currency"],
                     *[job["pay"]["currency"] for job in jobs if job["pay"]["currency"]],
                 }
             )
-            self.query_one("#currency", Select).set_options(
-                [(item, item) for item in currencies]
-            )
-            self.query_one("#currency", Select).value = state["currency"]
+            # Refilling a Select resets it to its first option and announces that
+            # as a change; only a click should ever send a new filter.
+            with self.prevent(Select.Changed):
+                status = self.query_one("#status", Select)
+                status.set_options(
+                    [(label, key) for key, label in self.stage_options.items()]
+                )
+                status.value = state["stage"]
+                currency = self.query_one("#currency", Select)
+                currency.set_options([(item, item) for item in currencies])
+                currency.value = state["currency"]
         finally:
             self.updating = False
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)
@@ -624,7 +838,10 @@ class CareerRatApp(App):
     def update_details(self, selected):
         report = self.query_one("#requirements", DataTable)
         report.clear()
+        jd_button = self.query_one("#open-jd", Button)
         if not selected:
+            jd_button.display = False
+            report.display = False
             self.query_one("#details", Static).update("No jobs in this view.")
             self.query_one("#history-text", Static).update("No selected job.")
             self.query_one("#assessment-summary", Static).update("No selected job.")
@@ -632,13 +849,10 @@ class CareerRatApp(App):
         row = selected["record"]
         evaluation = row.get("evaluation") or {}
         requirements = evaluation.get("requirements") or []
+        report.display = bool(requirements)
+        jd_button.display = has_saved_jd(row)
         self.query_one("#assessment-summary", Static).update(
-            f"Saved evaluation: {evaluation.get('gate') or 'Not evaluated'} · {evaluation.get('evaluatedAt') or 'No evaluation date'}\n"
-            + (
-                "Scroll across for the complete evidence table."
-                if requirements
-                else "No saved requirements report. Use Review matches to evaluate the saved JD."
-            )
+            fit_report_text(row, selected.get("fit") or {}, bool(requirements))
         )
         for item in requirements:
             item = item or {}
@@ -659,22 +873,7 @@ class CareerRatApp(App):
                 ),
                 height=None,
             )
-        lines = [
-            f"{str(row.get('company') or '')} · {str(row.get('role') or '')}",
-            "",
-            str(row.get("statusNote") or ""),
-            str(row.get("nextAction") or ""),
-        ]
-        fit = row.get("roleFit") or {}
-        for key in ("why", "risks"):
-            if fit.get(key):
-                lines += ["", key.title(), *["• " + str(item) for item in fit[key]]]
-        lines += [
-            "",
-            "Saved documents",
-            json.dumps(row.get("artifacts", {}), indent=2, ensure_ascii=False),
-        ]
-        self.query_one("#details", Static).update("\n".join(lines))
+        self.query_one("#details", Static).update(job_detail_text(selected))
         messages = sorted_messages(
             ((selected.get("thread") or {}).get("messages") or [])
             + (selected.get("contextMessages") or [])

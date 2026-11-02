@@ -719,5 +719,197 @@ closeAll();
                 await pilot.press("ctrl+q")
 
 
+REAL_SHAPE = [
+    {
+        "id": "long-name",
+        "company": "A very long company name that would otherwise take the whole table",
+        "role": "Senior Platform Engineer, Reliability and Developer Productivity",
+        "status": "applied",
+        "fitScore": 84,
+        "fitBucket": "high",
+        "gate": {"gate": "KEEP", "action": "apply"},
+        "base": "$150k-$200k + equity",
+        "tc": "",
+        "action": "Apply this week",
+        "note": "Short note",
+        "warn": "Onsite two days",
+        "ask": 210000,
+        "ratingReason": "Strong match on scope",
+        "link": "https://example.com/jobs/1",
+        "statusNote": None,
+        "nextAction": None,
+        "roleFit": {"why": ["Fits the scope"], "risks": ["Long commute"]},
+        "artifacts": {
+            "jd": "workspace/jobs/long-name.md",
+            "reqId": "R-1",
+            "resumeSource": "workspace/out/Resume Draft.docx",
+            "canonicalUrl": "https://example.com/jobs/1",
+            "submittedAt": "2026-01-02T03:04:05.000Z",
+        },
+    },
+    {
+        "id": "bare",
+        "company": None,
+        "role": None,
+        "status": "sourced",
+        "fitScore": 40,
+        "fitBucket": "stretch",
+        "gate": None,
+        "base": "unlisted",
+        "tc": None,
+        "roleFit": None,
+        "artifacts": {},
+        "link": None,
+    },
+]
+
+
+class JobsTableTest(unittest.IsolatedAsyncioTestCase):
+    def test_pay_labels_show_a_dash_when_unknown(self):
+        known = {"min": 150000, "max": 200000, "currency": "USD"}
+        self.assertEqual(MODULE.pay_label(known, "USD"), "150k–200k")
+        self.assertEqual(MODULE.pay_label({**known, "currency": "CAD"}, "USD"), "CAD 150k–200k")
+        self.assertEqual(MODULE.pay_label({"min": None, "max": None}), "—")
+        self.assertEqual(MODULE.pay_label({}), "—")
+
+    def test_columns_fit_the_width_and_drop_the_least_important_first(self):
+        for width in range(30, 260):
+            plan = MODULE.plan_columns(width)
+            names = [name for name, _ in plan]
+            self.assertIn("Company", names)
+            self.assertIn("Status", names)
+            if width >= 70:
+                self.assertEqual(names, MODULE.JOB_COLUMNS, width)
+            if width >= 36:
+                total = sum(size + MODULE.CELL_PADDING for _, size in plan)
+                self.assertLessEqual(total, width, width)
+
+    def test_details_skip_empty_fields_and_read_documents_plainly(self):
+        job = {
+            "record": REAL_SHAPE[0],
+            "stage": {"label": "Applied"},
+            "fit": {"score": 84, "label": "84 KEEP"},
+        }
+        text = MODULE.job_detail_text(job)
+        self.assertNotIn("None", text)
+        self.assertNotIn("{", text)
+        self.assertNotIn("\n\n\n", text)
+        for expected in (
+            "Status: Applied",
+            "Fit: 84 KEEP",
+            "Next step: Apply this week",
+            "Note: Short note",
+            "Heads up: Onsite two days",
+            "Ask: 210,000",
+            "Apply link: https://example.com/jobs/1",
+            "Job description: long-name.md",
+            "Resume source: Resume Draft.docx",
+        ):
+            self.assertIn(expected, text)
+        self.assertNotIn("R-1", text)
+        self.assertNotIn("Submitted", text)
+        bare = MODULE.job_detail_text(
+            {"record": REAL_SHAPE[1], "stage": {"label": "Sourced"}, "fit": {}}
+        )
+        self.assertEqual(bare, "Status: Sourced\nBase pay: unlisted")
+        self.assertEqual(MODULE.saved_documents({}), [])
+        self.assertEqual(MODULE.saved_documents(None), [])
+
+    def test_fit_report_uses_what_is_saved_when_there_is_no_evaluation(self):
+        text = MODULE.fit_report_text(REAL_SHAPE[0], {"score": 84}, False)
+        for expected in (
+            "Score: 84",
+            "Verdict: KEEP",
+            "Fit group: high",
+            "Action: Apply this week",
+            "Why this score: Strong match on scope",
+            "Heads up: Onsite two days",
+            "• Fits the scope",
+            "• Long commute",
+            "No detailed requirement-by-requirement evidence",
+        ):
+            self.assertIn(expected, text)
+        bare = MODULE.fit_report_text(REAL_SHAPE[1], {"score": 40}, False)
+        self.assertNotIn("None", bare)
+        self.assertIn("Verdict: stretch", bare)
+
+    async def test_every_column_shows_at_120_and_company_and_status_at_80(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-shape-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            (Path(folder) / "workspace/tracker.json").write_text(
+                json.dumps({"applications": REAL_SHAPE[:1], "sourced": REAL_SHAPE[1:]})
+            )
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await until(lambda: app.snapshot and app.job_ids)
+                await pilot.pause()
+                table = app.query_one("#jobs", DataTable)
+                self.assertEqual(
+                    [str(c.label) for c in table.columns.values()], MODULE.JOB_COLUMNS
+                )
+                self.assertLessEqual(
+                    table.virtual_size.width, table.scrollable_content_region.width
+                )
+                self.assertFalse(table.show_horizontal_scrollbar)
+                cells = {
+                    key.value: [str(cell) for cell in table.get_row(key)]
+                    for key in table.rows
+                }
+                first = cells["long-name"]
+                self.assertTrue(first[0].endswith("…"))
+                self.assertEqual(first[2], "Applied")
+                self.assertEqual(first[3], "84 KEEP")
+                self.assertEqual(first[4], "150k–200k")
+                self.assertEqual(cells["bare"][3], "40 stretch")
+                self.assertEqual(cells["bare"][4], "—")
+                await until(lambda: app.selected_id == "long-name")
+                self.assertTrue(app.query_one("#open-jd", Button).display)
+                self.assertIn(
+                    "Strong match",
+                    str(app.query_one("#assessment-summary", Static).render()),
+                )
+                self.assertFalse(app.query_one("#requirements", DataTable).display)
+                await pilot.resize_terminal(80, 30)
+                await pilot.pause()
+                names = [str(c.label) for c in table.columns.values()]
+                self.assertIn("Company", names)
+                self.assertIn("Status", names)
+                self.assertFalse(table.show_horizontal_scrollbar)
+                await pilot.resize_terminal(150, 40)
+                await pilot.pause()
+                self.assertEqual(
+                    [str(c.label) for c in table.columns.values()], MODULE.JOB_COLUMNS
+                )
+                # A job with nothing saved: no crash, no empty button, no blanks.
+                await pilot.press("down")
+                await until(lambda: app.selected_id == "bare")
+                self.assertFalse(app.query_one("#open-jd", Button).display)
+                self.assertEqual(
+                    str(app.query_one("#details", Static).render()),
+                    "Status: Sourced\nFit: 40 stretch\nBase pay: unlisted",
+                )
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_an_empty_view_shows_plain_messages(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-empty-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(120, 40)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.pause()
+                self.assertEqual(
+                    str(app.query_one("#details", Static).render()),
+                    "No jobs in this view.",
+                )
+                self.assertFalse(app.query_one("#open-jd", Button).display)
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+
 if __name__ == "__main__":
     unittest.main()
