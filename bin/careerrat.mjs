@@ -21,18 +21,11 @@
 //
 // Each subcommand delegates to the matching src/cli script, forwarding args.
 
-// Node version guard — must run before any ESM import that requires >=24
-// features (M6: node:sqlite is a builtin from Node 22.5, but only stable
-// without a flag from 24 — see package.json#engines).
-{
-  const major = parseInt(process.versions.node.split(".")[0], 10);
-  if (major < 24) {
-    process.stderr.write(
-      `careerrat requires Node.js >= 24 (you have ${process.versions.node}). Please upgrade.\n`
-    );
-    process.exit(1);
-  }
-}
+// Node version guard. Refuses unpatched Node (CVE-2026-111497) and anything
+// below the 24 floor in package.json#engines before any command runs.
+import { requirePatchedNode } from "../src/core/runtime/node-floor.mjs";
+
+requirePatchedNode();
 
 import { spawn, spawnSync } from "node:child_process";
 import {

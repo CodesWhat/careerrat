@@ -14,15 +14,14 @@ import {
   applicationPlatformForUrl,
   buildFillPlan,
   confirmationCheck,
-  EASY_APPLY_STEPS,
   findAdvanceButtonRef,
   findSubmitButtonRef,
   hostnameToPortal,
-  isEasyApply,
   isSsoOrAccountLabel,
   REQUIRED_FIELDS_UNANSWERED,
   submitGuard,
 } from "./form-fill.mjs";
+import { employerApplyLink, isLinkedInUrl } from "./linkedin-link.mjs";
 
 const FIELD_ROLES = new Map([
   ["textbox", "text"],
@@ -319,6 +318,9 @@ function hasPublicApplicationFormEvidence(snapshot) {
     );
   });
 }
+
+const LINKEDIN_WAITING_REASON =
+  "LinkedIn doesn't allow apps to apply for you, so CareerRat opened the job page and stopped. Apply there yourself, then tell me when you've applied.";
 
 function applicationCapabilityOffReason(platform, permission) {
   const label = PLATFORM_LABELS[platform] || "this application site";
@@ -903,23 +905,13 @@ function retainedOriginIsTrusted(session, value) {
   return Boolean(origin && session?.trustedOrigins?.has(origin));
 }
 
-function easyApplyStepKey(stepIndex) {
-  return EASY_APPLY_STEPS[stepIndex - 1]?.key ?? null;
-}
-
-// Cosmetic session fields the multi-step loop attaches once it has actually
+// Cosmetic session field the multi-step loop attaches once it has actually
 // advanced past the first page (stepIndex > 1). A single-page ATS form (no
-// advance button ever found) never sets these, matching the pre-generalization
-// shape that callers (AskBar/JobDrawer) already treat as "not a stepped flow".
-// stepKey is LinkedIn Easy Apply's own named-section vocabulary (contact →
-// resume → work_auth → ...); it's only meaningful when the flow IS Easy Apply.
-// A generic paginated ATS (Workday, SmartRecruiters' stepped wizard, or any
-// other multi-page form) still gets a numeric stepIndex (genuinely portal-
-// agnostic) but always reports stepKey: null rather than borrowing LinkedIn's
-// section names for a page they don't actually describe.
-function stepSessionFields(stepIndex, easyApply) {
+// advance button ever found) never sets it, so callers treat it as "not a
+// stepped flow".
+function stepSessionFields(stepIndex) {
   if (stepIndex <= 1) return {};
-  return { stepIndex, stepKey: easyApply ? easyApplyStepKey(stepIndex) : null };
+  return { stepIndex };
 }
 
 function confirmationFromSnapshot(snapshot) {
@@ -1170,7 +1162,7 @@ export function createApplyDriver({
     // submitMode "auto" explicitly AND prepareOnly is false. Anything else keeps
     // the human-presses-Submit handoff exactly as before.
     const autoSubmit = submitMode === "auto" && prepareOnly === false;
-    const url = safePostingUrl(postingUrl);
+    let url = safePostingUrl(postingUrl);
     if (!url) {
       return {
         available: false,
@@ -1178,6 +1170,41 @@ export function createApplyDriver({
         state: "unavailable",
         reason: "A valid HTTP application link is required.",
       };
+    }
+    // CareerRat never applies through a LinkedIn session. A LinkedIn posting
+    // that has the employer's own link goes to that link. Without one, the page
+    // is opened for the person: no snapshot, no clicks, nothing filled.
+    if (isLinkedInUrl(url)) {
+      const employerUrl = employerApplyLink(application);
+      if (employerUrl) {
+        url = employerUrl;
+      } else {
+        throwIfAborted(signal);
+        let opened = false;
+        try {
+          await browserOp(ops, "openTab", { url }, signal);
+          opened = true;
+        } catch {
+          throwIfAborted(signal);
+        }
+        return {
+          available: true,
+          verified: false,
+          state: "waiting-on-person",
+          code: "LINKEDIN_PERSON_APPLIES",
+          platform: "linkedin",
+          reason: opened
+            ? LINKEDIN_WAITING_REASON
+            : "LinkedIn doesn't allow apps to apply for you, and the browser didn't open the page. Open the job on LinkedIn and apply there yourself.",
+          currentUrl: url,
+          session: {
+            provider: providerLabel,
+            filledCount: 0,
+            uploadedCount: 0,
+            blockers: [],
+          },
+        };
+      }
     }
 
     const applicationKey = String(applicationId);
@@ -1248,7 +1275,6 @@ export function createApplyDriver({
       }
     }
 
-    const easyApply = isEasyApply(url);
     const applicationPlatform = applicationPlatformForUrl(url);
     const permission = mayRunImpl({
       capability: "authenticated_apply_preparation",
@@ -1368,6 +1394,23 @@ export function createApplyDriver({
     const entry = applicationEntry(snapshot);
     if (entry) {
       const detailSnapshot = snapshot;
+      if (entry.targetUrl && isLinkedInUrl(entry.targetUrl)) {
+        return {
+          available: true,
+          verified: false,
+          state: "waiting-on-person",
+          code: "LINKEDIN_PERSON_APPLIES",
+          platform: "linkedin",
+          reason: LINKEDIN_WAITING_REASON,
+          currentUrl: detailSnapshot.origin || url,
+          session: {
+            provider: providerLabel,
+            filledCount: 0,
+            uploadedCount: 0,
+            blockers: [],
+          },
+        };
+      }
       const targetOrigin = safeHttpOrigin(entry.targetUrl);
       const targetPlatform = entry.targetUrl ? applicationPlatformForUrl(entry.targetUrl) : null;
       if (targetPlatform) {
@@ -1496,18 +1539,12 @@ export function createApplyDriver({
     }
 
     // ----- Multi-step form advancement -----
-    // Not LinkedIn-specific: LinkedIn Easy Apply's paginated modal was the
-    // first shape this handled, but Workday-style multi-page wizards and
-    // stepped ATS forms (SmartRecruiters' recipe note calls out its own
-    // "resume upload is a distinct step") hit the exact same problem: fill
-    // one page, confirm the page actually moved, repeat. Rather than a
-    // parallel LinkedIn-only loop plus a single-shot path for everyone else,
-    // one loop runs for every provider. A single-page ATS form falls out of
-    // it naturally: findAdvanceButtonRef finds no advance button on its only
-    // page, so the loop exits after one iteration exactly like the old
-    // single-page path did. `easyApply` (URL-gated, checked above for the
-    // authenticated preparation consent gate) only still matters for cosmetic step
-    // naming. See stepSessionFields.
+    // Workday-style multi-page wizards and stepped ATS forms (SmartRecruiters'
+    // recipe note calls out its own "resume upload is a distinct step") need
+    // the same thing: fill one page, confirm the page actually moved, repeat.
+    // One loop runs for every provider. A single-page ATS form falls out of it
+    // naturally: findAdvanceButtonRef finds no advance button on its only
+    // page, so the loop exits after one iteration. See stepSessionFields.
     let stepIndex = 0;
     // Sums fillStep's per-call counts across every page in this run:
     // AskBar/JobDrawer/workspace-agent render these as run totals, not the
@@ -1534,7 +1571,6 @@ export function createApplyDriver({
             blockers: ["step limit reached"],
             submitMode: "manual",
             stepIndex,
-            stepKey: null,
           },
         };
       }
@@ -1554,7 +1590,7 @@ export function createApplyDriver({
             unresolved: [],
             blockers: stepBlockers,
             submitMode: "manual",
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1582,7 +1618,7 @@ export function createApplyDriver({
             answerableCount: captured.questions?.length || 0,
             excludedCount: captured.excluded?.length || 0,
             demographicSectionPresent: captured.demographicSectionPresent === true,
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1631,7 +1667,7 @@ export function createApplyDriver({
             unresolved: [],
             blockers: result.blockers,
             submitMode: result.mode,
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1656,7 +1692,7 @@ export function createApplyDriver({
             unresolved,
             blockers: guard.blockers,
             submitMode: guard.mode,
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1684,7 +1720,7 @@ export function createApplyDriver({
             // to answer these fields, so callers can flag the job instead.
             stopReason: REQUIRED_FIELDS_UNANSWERED,
             submitMode: guard.mode,
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1719,7 +1755,7 @@ export function createApplyDriver({
             unresolved,
             blockers: blocked.blockers,
             submitMode: blocked.mode,
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1729,7 +1765,7 @@ export function createApplyDriver({
             findAdvanceButtonRef(preAdvanceSnapshot)
           : findAdvanceButtonRef(preAdvanceSnapshot);
       if (!advanceRef) {
-        if (!easyApply && !hasPublicApplicationFormEvidence(preAdvanceSnapshot)) {
+        if (!hasPublicApplicationFormEvidence(preAdvanceSnapshot)) {
           return {
             available: true,
             verified: false,
@@ -1744,7 +1780,7 @@ export function createApplyDriver({
               unresolved,
               blockers: ["application form not found"],
               submitMode: "manual",
-              ...stepSessionFields(stepIndex, easyApply),
+              ...stepSessionFields(stepIndex),
             },
           };
         }
@@ -1785,7 +1821,7 @@ export function createApplyDriver({
             applicationId,
             onSubmitAttempt,
             snapshot: preAdvanceSnapshot,
-            stepSession: stepSessionFields(stepIndex, easyApply),
+            stepSession: stepSessionFields(stepIndex),
             counts: {
               filledCount: totalFilledCount,
               uploadedCount: totalUploadedCount,
@@ -1821,7 +1857,7 @@ export function createApplyDriver({
             submitMode: autoStopReason ? "auto" : guard.mode,
             ...(autoStopReason ? { autoSubmitStopped: { reason: autoStopReason } } : {}),
             ...(prepareOnly === true ? { prepareOnly: true } : {}),
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1849,7 +1885,7 @@ export function createApplyDriver({
             blockers: [],
             submitMode: guard.mode,
             ...(prepareOnly === true ? { prepareOnly: true } : {}),
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1870,7 +1906,7 @@ export function createApplyDriver({
             blockers: guard.blockers,
             submitMode: "manual",
             prepareOnly: true,
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1939,7 +1975,7 @@ export function createApplyDriver({
             unresolved,
             blockers: [],
             submitMode: guard.mode,
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
@@ -1970,7 +2006,7 @@ export function createApplyDriver({
             unresolved,
             blockers: [],
             submitMode: guard.mode,
-            ...stepSessionFields(stepIndex, easyApply),
+            ...stepSessionFields(stepIndex),
           },
         };
       }
