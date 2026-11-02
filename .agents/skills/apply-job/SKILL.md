@@ -1,6 +1,6 @@
 ---
 name: apply-job
-description: End-to-end job application workflow. Gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including supervised LinkedIn Easy Apply preparation), submits when the application is complete and verified (or stops for the user in manual mode), verifies the result, and updates the tracker.
+description: End-to-end job application workflow. Gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the employer's ATS form (LinkedIn postings go to the employer's own link, or wait for you), submits when the application is complete and verified (or stops for the user in manual mode), verifies the result, and updates the tracker.
 ---
 
 # apply-job
@@ -245,95 +245,43 @@ interaction to confirm page state.
 
 Do not fabricate values. Read honesty constraints from `candidate/honesty.yml` throughout the fill (STEP 10 governs this continuously).
 
-If the posting is a LinkedIn Easy Apply (`isEasyApply(url)` returns true, or `hostnameToPortal(url) === "linkedin"` and the user explicitly asks to apply via LinkedIn), branch to STEP 7b instead of submitting here.
+If the posting is on LinkedIn (`linkedin.com`), do not apply through LinkedIn. Branch to STEP 7b instead of filling or submitting here.
 
 ---
 
-## STEP 7b — Authenticated supervised apply (LinkedIn Easy Apply)
+## STEP 7b — LinkedIn postings (employer link, or you apply)
 
-Enter this step when `isEasyApply(url)` returns true OR `hostnameToPortal(url) === "linkedin"` and the user explicitly asked to apply via LinkedIn. Standard ATS postings proceed through STEP 7 unchanged.
+CareerRat never applies through LinkedIn. LinkedIn's User Agreement bans automation and restricts accounts that use it. That covers Easy Apply and every other apply control on linkedin.com. There is no setting that turns this back on, and an old `submit: auto` or `platforms.linkedin` value in `automation.yml` changes nothing here. Enter this step whenever the posting URL is on `linkedin.com`. All earlier gates (limits, `evaluate-job`, honesty) still apply before this step.
 
-### Capability check
+### 1. Look for the employer's own application link
 
-Run:
+Check these in order and stop at the first real one:
 
-```
-careerrat automation status --json
-```
+1. The saved job record (`applyUrl`, `externalApplyUrl`, `link`, `url`, `sourceUrl`). A `linkedin.com/jobs/view/externalApply/...?url=` link holds the employer's link in its `url` value.
+2. The JD you already captured.
+3. The posting's public page, read the same way intake reads any public page (`resolveJobUrl(url, { employerLinkLookup: true })`). No login, no session browser, no clicks. Do not click Apply on LinkedIn to find the link.
 
-Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means neither the `authenticated_apply_preparation` capability switch nor LinkedIn's switch is turned off. This is the verdict from `mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose. This capability is on by default.
+If you find one (an `https` link that is not on `linkedin.com`):
 
-If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, tell the operator it is turned off, give the commands that turn it on, and **skip the browser step** (do not open a browser). If `readError` is set, say the automation settings file can't be read and name it. Do not ask for consent or permission to turn it on.
+- Save it on the job: `careerrat data app set-fields <id> --data '{"link":"<employer link>"}'`. The LinkedIn address stays in `sourceMeta.linkedinUrl`.
+- Go back to STEP 7 and continue the normal ATS flow at that link. The usual submit rules in STEP 6 apply to that employer site.
 
-1. Capability switch: `careerrat automation enable authenticated_apply_preparation --write`
-2. LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
+### 2. No employer link, or Easy Apply only
 
-This step is always user-initiated and must never run on a schedule or unattended.
+Do this and stop:
 
-### Session browser + live DOM
+1. Open the LinkedIn job page in the person's browser (just open the tab). Make no clicks. Do not open the Easy Apply modal. Do not fill, upload or submit anything on linkedin.com.
+2. Record that the job is waiting on the person:
 
-Open the job posting URL in the session browser tool-agnostically. Keep the provider on
-`auto` unless the user explicitly changes it; CareerRat resolves the current session
-browser and reuses its signed-in session (see `docs/BROWSER.md`). Snapshot or read the
-current page state before each action. Drive the live DOM turn by turn — no hardcoded
-selectors, same model as STEP 7.
+   ```bash
+   careerrat data app set-status <id> manual-apply
+   careerrat data app set-fields <id> --data '{"statusNote":"Waiting on you: apply on LinkedIn, then tell CareerRat you applied.","nextAction":"Apply on LinkedIn, then tell me when you've applied"}'
+   ```
 
-If you encounter a login wall, captcha, platform 2FA / two-step-verification prompt, or any unexpected interstitial at any point: **halt immediately** — do not attempt to bypass or automate around it. Write the blocked state to the tracker row (`status: "manual-apply"`, note: `"manual-apply: LinkedIn 2FA / two-step-verification prompt — resume at <url>"` or similar), report to the user, and offer re-entry at the top of STEP 7b Fill once cleared. If the interstitial specifically says an emailed verification code was sent, use the STEP 8 verification-code protocol below instead of treating it as generic 2FA.
+   (Legacy workspace with no DB: set `status: "manual-apply"` with the same note and next action on the tracker row.) Keep any existing status that is already `applied` or later.
+3. Tell the person: the page is open, you can't apply for them on LinkedIn, and you're waiting for them to say they applied.
 
-### Walk the Easy Apply modal
-
-1. **Open the modal.** Click the "Easy Apply" button on the posting page. Snapshot the page to confirm the modal opened before proceeding.
-
-2. **Step through `EASY_APPLY_STEPS`** (Contact info → Resume → Work authorization → Additional questions → Review → Submit). For each modal page:
-
-   a. Snapshot the visible fields.
-
-   b. Build the fill plan using the existing `buildFillPlan` / `resolveFieldValue` / `resolveScreeningAnswer` logic with `portal: "linkedin"` (`PORTAL_RECIPES.linkedin` from `src/core/apply/form-fill.mjs`). Pass `formDefaults`, `profile`, and `honesty`.
-
-   c. Apply the same `requiresConfirmation` rule from STEP 7. Preconfigured `current_employer` and `current_title` values are normal fill values unless the config asks for confirmation or the page requests a new disclosure. **Never read or echo `profile.compensation.current_base` in any field.**
-
-   d. Fill resolved fields. For the resume upload page, use the modal-first upload pattern documented in STEP 7 (open the Attach/Upload control within the modal before triggering the file action — direct upload without the modal fails silently).
-
-   e. **Employer-custom screening questions:** use the screening answer posture above. If a safe resolved value exists from configured answers, profile, honesty, evidence, the tailored artifacts, or the JD, fill it and continue. If no safe value exists after checking those sources, mark that question `NEEDS YOU`, flag it on the job thread for the operator, leave the rest of the form filled, and do not submit while it is open. STEP 10 honesty rules apply continuously here.
-
-   f. Advance to the next page by clicking a button whose visible text matches an entry in `EASY_APPLY_ADVANCE_LABELS` (from `src/core/apply/form-fill.mjs`). Snapshot after advancing to confirm the page changed.
-
-3. **Submit-safety gate — honor STEP 6 exactly.**
-
-   After filling the entire modal through the Review page, follow STEP 6. In
-   `submit: auto`, CareerRat presses the final submit button (visible text like
-   "Submit application" or "Submit") once, only when STEP 6's conditions hold. In
-   `submit: manual`, stop at it, show a summary, return focus to the retained page,
-   and leave the click to the user. Never click it from a later agent turn or retry
-   it.
-
-   **Immediately halt** on captcha, platform 2FA / two-step-verification prompt,
-   an application-limit blocker, or a required exercise that cannot be completed
-   in the modal. On halt:
-   - **DB workspace (same composition as STEP 6's DB branch):**
-
-     ```
-     careerrat data app set-status <id> manual-apply
-     careerrat data app set-fields <id> --data '{"note":"manual-apply: <blocker type> — <url>"}'
-     ```
-
-     (e.g. `"manual-apply: captcha — <url>"`, `"manual-apply: LinkedIn application limit reached — <url>"`). `manual-apply` is ACTIVE and stays visible on the dashboard. Then apply the same comm-thread write-back as STEP 6 (patch locally + `comm upsert`, then `comm append-message` with the block reason and URL; do NOT flip `comm.status` to `waiting`; rewrite `comm.nextAction`, advance `comm.nextActionDue` by one day).
-   - **Legacy workspace (no DB):** Set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type and the apply URL (e.g. `"manual-apply: captcha — <url>"`, `"manual-apply: LinkedIn application limit reached — <url>"`) to the tracker row immediately. `manual-apply` is ACTIVE and stays visible on the dashboard.
-     - **Comm-thread write-back (blocker case — same rule as STEP 6):** in the same `tracker.json` write, check for a backing comm thread (`jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due`). If one exists: append a `note`-direction entry to `comm.messages[]` with the block reason and URL, rewrite `comm.nextAction` to describe the manual step, and advance `comm.nextActionDue` by one day. Do NOT flip `comm.status` to `waiting`. Write atomically.
-   - Report what was found and ask the user how to proceed.
-   - **Re-entry point:** when the user clears the blocker, resume at STEP 7b Fill — re-read the current page state via the session browser before continuing.
-
-### Verify
-
-After Submit (CareerRat's click in auto mode, the user's in manual mode), continue into **STEP 8**. The LinkedIn Easy Apply
-success signal is the "Your application was sent" / "Application sent"
-confirmation modal. Screenshot it. Never trust its absence. If the confirmation
-modal does not appear, do not mark the application as submitted. Report what the
-page shows and ask the user.
-
-### Tracker
-
-After STEP 8 confirms submission, continue into **STEP 9** with `channel: "LinkedIn"`.
+Nothing is recorded as applied until the person says so. When they do, record it with the normal outcome path (`application.record-external`, or `careerrat data app set-status <id> applied`) and continue into **STEP 9** with `channel: "LinkedIn"`.
 
 ---
 

@@ -99,14 +99,18 @@ The `apply-job` skill:
    application is marked submitted-unverified, never retried, and you're asked to check the site. The app and Activity Pulse update
    in the same transaction.
 
-### LinkedIn Easy Apply
+### LinkedIn jobs
 
-For LinkedIn postings, `apply-job` supports supervised form preparation via
-the session browser. In the desktop app, the job's application review offers
-**Turn it on** if you switched form preparation off. Terminal users can inspect
-the same `authenticated_apply_preparation` capability with `careerrat automation
-status`. CareerRat fills and advances the modal and follows the `submit` setting at the
-final submit control.
+CareerRat never applies through LinkedIn. LinkedIn's User Agreement bans
+automation, and accounts that use it get restricted. So for a LinkedIn job,
+`apply-job` first looks for the employer's own application link, in the saved
+job, the job description, or the public job page. If it finds one, it saves that
+link on the job and applies there like any other site.
+
+If there's no employer link, or the job is Easy Apply only, CareerRat opens the
+LinkedIn page in your browser, makes no clicks, and marks the job as waiting on
+you. Apply on LinkedIn yourself, then tell CareerRat you applied. Nothing is
+recorded as applied until you say so.
 
 ## Application limits
 
