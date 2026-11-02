@@ -9,6 +9,8 @@ description: Draft, reply to, follow up on, summarize, and track job-search emai
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing in-chat commentary around drafts. Apply the register from AGENTS.md#mode-switches. The **drafted artifact itself** (email subject + body) is always written in full regardless of register — `writing-style.md` governs its tone. Register governs the **agent commentary**: `exec-summary` = draft only + one action line; `standard` = draft + short bullets on intent/next-step; `technical` = draft + thread-context summary + strategy note; `verbose` = draft + full thread reconstruction + alternatives.
 
+> **Recipient classes.** Employer- and recruiter-facing mail stays draft-only: CareerRat never sends it, and `communication.send` never reaches a recipient who is not the person. Agent-to-person notifications (to the person whose workspace it is, at the address in their contact record, after they opted in) are a separate class that CareerRat may send, only on the operator's command: `careerrat --for <name> roundup --send`, or a recruiter-reply draft delivered to them with `--deliver-to-person`. No opt-in, an unregistered address, or quiet hours means the notification is refused. See AGENTS.md#recipient-classes-hard.
+
 ## Inputs
 
 - `workspace/tracker.json` — communications[] and applications[] arrays
