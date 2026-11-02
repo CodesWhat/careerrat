@@ -122,6 +122,14 @@ test("people add creates the root and prints the next command; list reports each
   assert.match(text.stdout, /alice\s+setup not finished/);
 });
 
+test("start --new creates the person's workspace instead of rejecting the flag", (t) => {
+  const base = tempBase(t);
+  const result = cli(base, ["--for", "alice", "start", "--new", "--no-agent", "--no-dashboard"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /Unknown option/);
+  assert.ok(existsSync(join(base, "people", "alice")));
+});
+
 test("people list on an empty base says how to add someone", (t) => {
   const base = tempBase(t);
   const list = cli(base, ["people", "list"]);

@@ -266,7 +266,9 @@ function parseStartArgs(extra) {
     if (a === "--no-agent") out.noAgent = true;
     else if (a === "--no-dashboard") out.noDashboard = true;
     else if (a === "--no-open") out.noOpen = true;
-    else if (a === "--agent") {
+    else if (a === "--new") {
+      // Consumed earlier by the --for resolver (createMissing); nothing to do here.
+    } else if (a === "--agent") {
       if (!extra[i + 1]?.trim() || extra[i + 1].startsWith("-"))
         throw new Error("--agent needs a name. Try: careerrat start --agent claude");
       out.agent = extra[++i];
