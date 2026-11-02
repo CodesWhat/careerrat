@@ -94,7 +94,7 @@ test("docs index names both start commands, the Node minimum, and leads with the
 
   assert.match(flat, /careerrat start claude/);
   assert.match(flat, /careerrat start codex/);
-  assert.match(flat, /Node\.js 24\.15 or newer/);
+  assert.match(flat, /Node\.js 24\.22\.1 or newer/);
 
   const macDownloadIndex = flat.search(/Download the Mac app\./);
   const forDevelopersIndex = flat.search(/### For developers/);
@@ -662,8 +662,8 @@ test("website stays download-only while docs keep the public careerrat CLI conve
   assert.match(publicAgents, /careerrat start claude/);
   assert.match(publicAgents, /careerrat ingest/);
   assert.match(publicAgents, /careerrat update/);
-  assert.equal(packageJson.engines.node, ">=24.15.0");
-  assert.match(installDocs, /Node\.js >= 24\.15/);
+  assert.equal(packageJson.engines.node, ">=24.22.1");
+  assert.match(installDocs, /Node\.js >= 24\.22\.1/);
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
 });

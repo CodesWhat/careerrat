@@ -6,6 +6,12 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Security
+
+- Raised the minimum Node.js to 24.22.1 for the Brotli decoder fix (CVE-2026-111497).
+  `careerrat` now refuses to start on an unpatched Node (older 24.x, any 25.x, or
+  26.x before 26.12.1) and prints the upgrade step.
+
 ## [0.22.0] - 2026-10-31
 
 ### Added
