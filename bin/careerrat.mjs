@@ -191,13 +191,14 @@ if (command === "start") {
     }
   );
 } else {
-  const cli = CLIS[command];
+  // `careerrat comm ...` is shorthand for `careerrat data comm ...`.
+  const cli = command === "comm" ? CLIS.data : CLIS[command];
   if (!cli) {
     console.error(`Unknown command: ${command}`);
     printHelp();
     process.exit(1);
   }
-  process.exit(run(join(root, cli), rest));
+  process.exit(run(join(root, cli), command === "comm" ? ["comm", ...rest] : rest));
 }
 
 // ---------------------------------------------------------------------------
@@ -939,6 +940,7 @@ Commands:
   tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat tracker-dev')
   tracker-dev  Serve the live local app without launching an agent
   people      List, add or remove (--purge --yes) people, one workspace each (run any command for them with --for)
+  comm        Shorthand for "data comm": upsert, append-message, mark-sent, handoff [--deliver-to-person]
   roundup     With --for: print or email (--send) a person their job-search roundup
   data        sqlite-backed data layer: status/init/import/export/verify/backup/restore + per-domain verbs (M6)
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)

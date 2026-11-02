@@ -106,6 +106,13 @@ written, issuing the `careerrat data comm ...` commands directly.
   above. **Never auto-send stays absolute.** No code path in the handoff ever
   submits, clicks send, or opens a real network connection on the candidate's
   behalf; it only builds links and waits for the candidate's explicit confirm.
+- **Delivering the draft to the person.** In a person workspace (`--for <name>`),
+  `careerrat --for <name> comm handoff <id> --deliver-to-person` emails the reviewed
+  draft to that person instead of printing compose links. Subject: "Draft reply to
+  <recruiter> for you to send". It goes only to the address in their contact record
+  and only after they opted in; it is never sent to the recruiter, and quiet hours
+  apply (`--now` overrides). The draft stays on the thread, so the person's later
+  "sent" (`careerrat --for <name> comm mark-sent <id>`) records the `supervised` tier.
 - **Verification tiers.** `mark-sent` (`careerrat data comm mark-sent` / the
   `commMarkSent` writer) now records one of three tiers on every send, instead of
   a bare boolean:

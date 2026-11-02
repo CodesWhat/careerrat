@@ -32,6 +32,7 @@
 //   node src/cli/data.mjs comm upsert --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
+//   node src/cli/data.mjs comm handoff <id> [--deliver-to-person [--now]]
 //   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path> [--window <startIso>..<endIso>]
 //   node src/cli/data.mjs calendar write --data <json> | --data-file <path>
 //   node src/cli/data.mjs source watermark --data <json|json-array> | --data-file <path> [--at <iso>]
@@ -70,6 +71,8 @@ import { recordedKnowledgeChanges } from "../core/agent/knowledge-changes.mjs";
 import { undoWorkspaceKnowledge } from "../core/agent/knowledge-history.mjs";
 import { mergeRecordedCandidateEvidence } from "../core/agent/recorded-evidence-write.mjs";
 import { workspaceMessageAppend, workspaceThreadRead } from "../core/agent/workspace-thread.mjs";
+import { deliverDraftToPerson } from "../core/comms/deliver-draft.mjs";
+import { buildSendLinks, resolveRecipient } from "../core/comms/recipient.mjs";
 import { createBackup, listBackups, restoreBackup } from "../core/db/backup.mjs";
 import { dbExists, dbFilePath, NO_DATABASE_MESSAGE, openDb } from "../core/db/connection.mjs";
 import { seedDemo } from "../core/db/demo-seed.mjs";
@@ -117,6 +120,7 @@ import {
   sourcedUpsertBatch,
   sourceWatermarkUpsert,
 } from "../core/db/verbs.mjs";
+import { currentPerson, peopleBase } from "../core/paths/people.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { sanitizeCandidateConfigForAgent } from "../core/profile/config-store.mjs";
 import { validate } from "../core/profile/schema-validator.mjs";
@@ -132,6 +136,8 @@ function parseArgs(argv) {
     else if (a === "--help" || a === "-h") opts.help = true;
     else if (a === "--demo") opts.demo = true;
     else if (a === "--force") opts.force = true;
+    else if (a === "--deliver-to-person") opts.deliverToPerson = true;
+    else if (a === "--now") opts.now = true;
     else if (a === "--force-candidate") opts.forceCandidate = true;
     else if (a === "--yes") opts.yes = true;
     else if (a === "--keep") opts.keep = Number.parseInt(argv[++i], 10);
@@ -242,7 +248,7 @@ try {
       cmdSourced(sub, rest);
       break;
     case "comm":
-      cmdComm(sub, rest);
+      await cmdComm(sub, rest);
       break;
     case "calendar":
       cmdCalendar(sub, rest);
@@ -563,6 +569,43 @@ function cmdSourced(sub, rest) {
 // comm <sub>
 // ---------------------------------------------------------------------------
 
+// comm handoff <id> [--deliver-to-person [--now]] (CR123): without the flag, print the
+// compose links for the reviewed draft (nothing is sent). With it, in a person's
+// workspace, email the draft to that person's opted-in address only.
+async function cmdCommHandoff(id) {
+  if (!opts.deliverToPerson) {
+    const row = openDb(pathCtx).prepare("SELECT data FROM communications WHERE id = ?").get(id);
+    if (!row) return fail(`no communication "${id}".`);
+    const comm = JSON.parse(row.data);
+    if (!comm.draft?.body) return fail("draft a reply and review it before handing it off.");
+    const recipient = resolveRecipient(comm);
+    const links =
+      recipient.state === "ready"
+        ? buildSendLinks({ to: recipient.to, subject: comm.draft.subject, body: comm.draft.body })
+        : null;
+    return printResult({ id, recipient, links, sent: false });
+  }
+  const name = currentPerson(process.env);
+  if (!name) {
+    return fail(
+      "--deliver-to-person only works in a person's workspace. Try: careerrat --for <name> comm handoff <id> --deliver-to-person"
+    );
+  }
+  try {
+    const result = await deliverDraftToPerson({
+      repoRoot: opts.root,
+      env: opts.env,
+      base: peopleBase({ repoRoot: opts.root, env: opts.env }),
+      name,
+      id,
+      ignoreQuietHours: opts.now === true,
+    });
+    return printResult({ id, delivered: true, to: result.entry.to, subject: result.subject });
+  } catch (err) {
+    return fail(err?.message || String(err));
+  }
+}
+
 function cmdComm(sub, rest) {
   switch (sub) {
     case "upsert":
@@ -578,6 +621,11 @@ function cmdComm(sub, rest) {
       const [id] = rest;
       if (!id) fail("comm mark-sent requires <id>");
       return printResult(commMarkSent({ ...pathCtx, id, at: opts.at, summary: opts.summary }));
+    }
+    case "handoff": {
+      const [id] = rest;
+      if (!id) fail("comm handoff requires <id>");
+      return cmdCommHandoff(id);
     }
     default:
       return fail(`unknown "comm" command "${sub}". See --help.`);
@@ -1079,6 +1127,7 @@ Usage:
   node src/cli/data.mjs comm upsert --data <json> | --data-file <path>
   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
+  node src/cli/data.mjs comm handoff <id> [--deliver-to-person [--now]]
 
   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path> [--window <startIso>..<endIso>]
   node src/cli/data.mjs calendar write --data <json> | --data-file <path>
