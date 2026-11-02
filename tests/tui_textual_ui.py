@@ -22,8 +22,8 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-async def until(check):
-    async with asyncio.timeout(5):
+async def until(check, seconds=5):
+    async with asyncio.timeout(seconds):
         while not check():
             await asyncio.sleep(0.03)
 
@@ -584,6 +584,100 @@ closeAll();
                 self.assertLess(history.index("FIRST"), history.index("SECOND"))
                 self.assertNotIn("None", str(app.query_one("#details", Static).render()))
                 await pilot.press("ctrl+q")
+
+    async def seed_workspace(self, folder, count, size):
+        home = Path(folder)
+        (home / "workspace").mkdir(exist_ok=True)
+        (home / "workspace/tracker.json").write_text(
+            json.dumps(
+                {
+                    "applications": [
+                        {"id": "saved-role", "company": "Example", "role": "Lead", "status": "applied"}
+                    ]
+                }
+            )
+        )
+        env = {**os.environ, "CAREERRAT_HOME": folder}
+
+        def module(value):
+            return json.dumps((ROOT / value).as_uri())
+
+        code = f"""
+import {{ importFromTracker }} from {module('src/core/db/import-from-tracker.mjs')};
+import {{ closeAll }} from {module('src/core/db/connection.mjs')};
+import {{ candidateSetupInitialize, candidateConfigPatch }} from {module('src/core/db/verbs/candidate.mjs')};
+import {{ workspaceMessageAppend }} from {module('src/core/agent/workspace-thread.mjs')};
+import {{ buildKnowledgeWriteEntry }} from {module('src/core/agent/knowledge-write-log.mjs')};
+const ctx={{repoRoot:{json.dumps(str(ROOT))},env:process.env}};
+importFromTracker({{...ctx,sourceDir:{json.dumps(str(home / 'workspace'))}}});
+candidateSetupInitialize(ctx);
+candidateConfigPatch({{...ctx,name:'targeting',patch:{{fit_bands:{{fit_floor:70}}}}}});
+workspaceMessageAppend({{...ctx,role:'assistant',kind:'action_result',text:'Saved fit floor',artifacts:[buildKnowledgeWriteEntry({{target:'candidate_config:targeting',op:'set',path:'fit_bands.fit_floor',before:60,after:70,label:'Fit floor'}})]}});
+for (let i = 0; i < {count}; i++) workspaceMessageAppend({{...ctx,role:'assistant',kind:'action_result',text:'WS'+i+' '+'x'.repeat({size})}});
+closeAll();
+"""
+        setup = await asyncio.to_thread(
+            subprocess.run,
+            [shutil.which("node"), "--input-type=module", "-e", code],
+            env=env,
+            capture_output=True,
+            timeout=120,
+        )
+        self.assertEqual(setup.returncode, 0, setup.stderr.decode())
+        return env
+
+    async def test_workspace_tab_shows_skill_results_apart_from_job_history(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-ws-") as folder:
+            env = await self.seed_workspace(folder, 2, 20)
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.snapshot["view"]["changes"])
+                await pilot.click("#--content-tab-workspace-history")
+                text = str(app.query_one("#workspace-history-text", Static).render())
+                self.assertIn("Saved fit floor", text)
+                self.assertIn("WS1", text)
+                self.assertIn("not a chat transcript", text)
+                self.assertNotIn("Showing the latest", text)
+                self.assertNotIn("Saved fit floor", str(app.query_one("#history-text", Static).render()))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_workspace_tab_empty_state(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-wsempty-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.click("#--content-tab-workspace-history")
+                text = str(app.query_one("#workspace-history-text", Static).render())
+                self.assertIn("No workspace history yet.", text)
+                self.assertIn("not a chat transcript", text)
+                await pilot.press("ctrl+q")
+
+    async def test_huge_workspace_history_is_capped_and_keeps_the_reader_alive(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-wsbig-") as folder:
+            # 700 x 50,000 characters is over the 32 MiB event line limit.
+            env = await self.seed_workspace(folder, 700, 49000)
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.snapshot["view"]["changes"], 40)
+                view = app.snapshot["view"]
+                self.assertEqual(view["workspaceMessagesTotal"], 701)
+                self.assertLess(len(view["workspaceMessages"]), 701)
+                self.assertEqual(len(view["changes"]), 1)
+                self.assertFalse(app.reader.done())
+                await pilot.click("#--content-tab-workspace-history")
+                text = str(app.query_one("#workspace-history-text", Static).render())
+                self.assertIn(f"Showing the latest {len(view['workspaceMessages'])} of 701.", text)
+                await pilot.click("#--content-tab-changes")
+                self.assertTrue(await pilot.click("#preview-undo"))
+                # Previewing reads the whole saved thread, which is ~35 MB here.
+                await until(lambda: app.snapshot["state"].get("pendingUndo"), 40)
+                self.assertFalse(app.reader.done())
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
 
     async def test_a_bad_event_does_not_stop_later_events(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-events-") as folder:

@@ -146,3 +146,24 @@ export function viewJobs(
     selectedId: jobs.some((job) => job.id === selectedId) ? selectedId : (jobs[0]?.id ?? null),
   };
 }
+
+export const SNAPSHOT_WORKSPACE_MESSAGE_LIMIT = 100;
+export const SNAPSHOT_WORKSPACE_BYTE_LIMIT = 2 * 1024 * 1024;
+
+// The Textual bridge sends each snapshot as one JSON line with a 32 MiB read
+// limit. Send only the newest workspace messages; the saved data and the
+// Changes list are untouched.
+export function capWorkspaceMessages(
+  messages,
+  { limit = SNAPSHOT_WORKSPACE_MESSAGE_LIMIT, bytes = SNAPSHOT_WORKSPACE_BYTE_LIMIT } = {}
+) {
+  const rows = Array.isArray(messages) ? messages : [];
+  const kept = [];
+  let size = 0;
+  for (let index = rows.length - 1; index >= 0 && kept.length < limit; index--) {
+    size += Buffer.byteLength(JSON.stringify(rows[index]) ?? "");
+    if (size > bytes) break;
+    kept.push(rows[index]);
+  }
+  return { messages: kept.reverse(), total: rows.length };
+}

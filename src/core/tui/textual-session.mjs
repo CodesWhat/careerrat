@@ -7,7 +7,7 @@ import { userPath } from "../paths/workspace.mjs";
 import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
 import { applyTuiUndo } from "./history.mjs";
 import { captureTuiContext, listDroppedFiles } from "./intake.mjs";
-import { readJobs, viewJobs } from "./jobs.mjs";
+import { capWorkspaceMessages, readJobs, viewJobs } from "./jobs.mjs";
 import { createWorkspaceState, refreshWorkspace, workspaceKey } from "./workspace.mjs";
 
 export async function createTextualSession({ repoRoot, env = process.env, agent = null, emit }) {
@@ -29,7 +29,13 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
     if (!closing) emit(event);
   }
   function snapshot() {
-    send({ type: "workspace", view: viewJobs(data, state), state });
+    const view = viewJobs(data, state);
+    const capped = capWorkspaceMessages(view.workspaceMessages);
+    send({
+      type: "workspace",
+      view: { ...view, workspaceMessages: capped.messages, workspaceMessagesTotal: capped.total },
+      state,
+    });
   }
   function frame() {
     drawing = null;

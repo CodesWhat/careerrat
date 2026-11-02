@@ -49,6 +49,20 @@ KEYS = {
 }
 
 
+def sorted_messages(messages):
+    return sorted(
+        (item for item in messages if isinstance(item, dict)),
+        key=lambda item: str(item.get("createdAt") or ""),
+    )
+
+
+def format_messages(messages):
+    return "\n\n".join(
+        f"{item.get('role') or ''} · {item.get('createdAt') or ''}\n{item.get('text') or ''}"
+        for item in messages
+    )
+
+
 class NativePane(Widget):
     can_focus = True
     frame = None
@@ -319,6 +333,8 @@ class CareerRatApp(App):
                     yield DataTable(id="requirements", cursor_type="row")
                 with TabPane("History", id="history"):
                     yield Static(id="history-text", markup=False)
+                with TabPane("Workspace", id="workspace-history"):
+                    yield Static(id="workspace-history-text", markup=False)
                 with TabPane("Changes", id="changes"):
                     with Horizontal(classes="change-controls"):
                         yield Button("Previous", id="previous-change")
@@ -564,6 +580,7 @@ class CareerRatApp(App):
             self.updating = False
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)
         self.update_details(selected)
+        self.update_workspace_history(view)
         changes = view.get("changes", [])
         change = next(
             (
@@ -589,6 +606,20 @@ class CareerRatApp(App):
                 else "Click a job to inspect it. Requests wait for Enter in the native agent."
             )
         )
+
+    def update_workspace_history(self, view):
+        messages = view.get("workspaceMessages") or []
+        total = view.get("workspaceMessagesTotal")
+        total = total if isinstance(total, int) else len(messages)
+        lines = ["Skill results and saved changes. This is not a chat transcript."]
+        if not messages:
+            lines = ["No workspace history yet.", *lines]
+        elif total > len(messages):
+            lines.append(f"Showing the latest {len(messages)} of {total}.")
+        text = "\n".join(lines)
+        if messages:
+            text += "\n\n" + format_messages(sorted_messages(messages))
+        self.query_one("#workspace-history-text", Static).update(text)
 
     def update_details(self, selected):
         report = self.query_one("#requirements", DataTable)
@@ -644,17 +675,13 @@ class CareerRatApp(App):
             json.dumps(row.get("artifacts", {}), indent=2, ensure_ascii=False),
         ]
         self.query_one("#details", Static).update("\n".join(lines))
-        messages = sorted(
+        messages = sorted_messages(
             ((selected.get("thread") or {}).get("messages") or [])
-            + (selected.get("contextMessages") or []),
-            key=lambda item: str(item.get("createdAt") or ""),
+            + (selected.get("contextMessages") or [])
         )
         calls = row.get("conversations") or []
         self.query_one("#history-text", Static).update(
-            "\n\n".join(
-                f"{item.get('role') or ''} · {item.get('createdAt') or ''}\n{item.get('text') or ''}"
-                for item in messages
-            )
+            format_messages(messages)
             + (
                 "\n\nCalls and interviews\n"
                 + "\n\n".join(
