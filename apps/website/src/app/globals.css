@@ -604,6 +604,18 @@ button {
   color: var(--ink);
 }
 
+.star-history {
+  display: block;
+  max-width: 800px;
+  margin-top: 24px;
+}
+
+.star-history img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .final-cta {
   display: flex;
   flex-direction: column;

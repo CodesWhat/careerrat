@@ -3,6 +3,10 @@ import { Footer } from "@/components/Footer";
 import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
 const RELEASE_URL = "https://github.com/CodesWhat/careerrat/releases/latest";
+const STAR_HISTORY_URL =
+  "https://www.star-history.com/?repos=codeswhat%2Fcareerrat&type=date&legend=top-left";
+const STAR_HISTORY_CHART =
+  "https://api.star-history.com/chart?repos=codeswhat/careerrat&type=date&legend=top-left";
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
   if (compact) {
@@ -260,6 +264,28 @@ export default function Home() {
               </p>
             </div>
           </div>
+        </section>
+
+        <section className="section" id="star-history" aria-labelledby="star-history-title">
+          <p className="eyebrow">Open source</p>
+          <h2 id="star-history-title">Star history</h2>
+          <a
+            className="star-history"
+            href={STAR_HISTORY_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {/* Light-only: this site has no dark theme, so no dark variant is served. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={STAR_HISTORY_CHART}
+              alt="Star history chart for CodesWhat/careerrat"
+              width={800}
+              height={533}
+              loading="lazy"
+              decoding="async"
+            />
+          </a>
         </section>
 
         <section className="section" aria-labelledby="final-title">

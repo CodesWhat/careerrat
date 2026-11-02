@@ -433,10 +433,11 @@ threads fold into the same workspace as the rest of your search.
 <h2 align="center" id="star-history">Star History</h2>
 
 <div align="center">
-  <a href="https://github.com/CodesWhat/careerrat/stargazers">
+  <a href="https://www.star-history.com/?repos=codeswhat%2Fcareerrat&type=date&legend=top-left">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="apps/website/public/star-history-dark.svg" />
-      <img src="apps/website/public/star-history.svg" alt="Star history for CodesWhat/careerrat" width="900" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=codeswhat/careerrat&type=date&legend=top-left&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=codeswhat/careerrat&type=date&legend=top-left" />
+      <img alt="Star history chart for CodesWhat/careerrat" src="https://api.star-history.com/chart?repos=codeswhat/careerrat&type=date&legend=top-left" width="900" />
     </picture>
   </a>
 </div>

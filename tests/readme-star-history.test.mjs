@@ -1,91 +1,62 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
-import path from "node:path";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const repoRoot = new URL("../", import.meta.url);
-const FORBIDDEN_HOSTS = [/warpchart\.dev/, /star-history\.com/];
-const WEBSITE_EXTENSIONS = new Set([".tsx", ".ts", ".jsx", ".js", ".mdx", ".md", ".html"]);
+const CHART_PATTERN =
+  /^https:\/\/api\.star-history\.com\/chart\?repos=codeswhat\/careerrat&type=date(&legend=top-left)?(&theme=dark)?$/;
 
-async function walk(dirUrl) {
-  let entries;
-  try {
-    entries = await readdir(dirUrl, { withFileTypes: true });
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    throw error;
-  }
-
-  const files = [];
-  for (const entry of entries) {
-    const entryUrl = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, dirUrl);
-    if (entry.isDirectory()) {
-      files.push(...(await walk(entryUrl)));
-    } else {
-      files.push(entryUrl);
-    }
-  }
-  return files;
-}
-
-function assertNoRetiredHosts(content, label) {
-  for (const host of FORBIDDEN_HOSTS) {
-    assert.doesNotMatch(content, host, `${label} references a retired chart host`);
-  }
-}
-
-test("README.md does not reference a retired chart host", async () => {
-  const readme = await readFile(new URL("README.md", repoRoot), "utf8");
-  assertNoRetiredHosts(readme, "README.md");
-});
-
-test("README.md wires the committed star history SVGs into a <picture> element", async () => {
-  const readme = await readFile(new URL("README.md", repoRoot), "utf8");
-  const pictureMatch = readme.match(/<picture>[\s\S]*?<\/picture>/);
-  assert.ok(
-    pictureMatch,
-    "README.md should contain a <picture> element for the star history chart"
+function chartUrls(content) {
+  return [...content.matchAll(/https:\/\/api\.star-history\.com\/chart\?[^"'\s)]+/g)].map(
+    (match) => match[0]
   );
+}
 
-  const picture = pictureMatch[0];
-  assert.match(picture, /apps\/website\/public\/star-history\.svg/);
-  assert.match(picture, /apps\/website\/public\/star-history-dark\.svg/);
-});
+test("README.md embeds the Star History chart in a light/dark <picture> element", async () => {
+  const readme = await readFile(new URL("README.md", repoRoot), "utf8");
+  const picture = readme.match(/<picture>[\s\S]*?<\/picture>/)?.[0];
+  assert.ok(picture, "README.md should contain a <picture> element for the star history chart");
 
-test("apps/website source and public assets do not reference a retired chart host", async () => {
-  const websiteRoot = new URL("apps/website/", repoRoot);
-  const dirs = ["src", "public"];
+  const dark = picture.match(
+    /<source media="\(prefers-color-scheme: dark\)" srcset="([^"]+)"/
+  )?.[1];
+  const light = picture.match(
+    /<source media="\(prefers-color-scheme: light\)" srcset="([^"]+)"/
+  )?.[1];
+  const img = picture.match(/<img [^>]*src="([^"]+)"/)?.[1];
+  assert.ok(dark && light && img, "picture needs dark and light sources plus an <img> fallback");
 
-  for (const dir of dirs) {
-    const files = await walk(new URL(`${dir}/`, websiteRoot));
-    for (const fileUrl of files) {
-      const ext = path.extname(fileUrl.pathname);
-      if (!WEBSITE_EXTENSIONS.has(ext)) continue;
-      const content = await readFile(fileUrl, "utf8");
-      assertNoRetiredHosts(content, fileUrl.pathname);
-    }
+  for (const url of [dark, light, img]) {
+    assert.match(url, CHART_PATTERN);
   }
+  assert.match(dark, /&theme=dark/);
+  assert.doesNotMatch(light, /theme=dark/);
+  assert.equal(img, light);
+  assert.match(picture, /<img [^>]*alt="[^"]+"/, "the chart needs meaningful alt text");
 });
 
-test("apps/docs/content does not reference a retired chart host", async () => {
-  const files = await walk(new URL("apps/docs/content/", repoRoot));
-  assert.ok(files.length > 0, "expected apps/docs/content to contain files");
+test("README.md links the chart to its Star History page", async () => {
+  const readme = await readFile(new URL("README.md", repoRoot), "utf8");
+  assert.match(
+    readme,
+    /<a href="https:\/\/www\.star-history\.com\/\?repos=codeswhat%2Fcareerrat[^"]*">\s*<picture>/
+  );
+});
 
-  for (const fileUrl of files) {
-    const content = await readFile(fileUrl, "utf8").catch(() => null);
-    if (content === null) continue;
-    assertNoRetiredHosts(content, fileUrl.pathname);
+test("the website renders the same Star History chart", async () => {
+  const page = await readFile(new URL("apps/website/src/app/page.tsx", repoRoot), "utf8");
+  const urls = chartUrls(page);
+  assert.ok(urls.length > 0, "page.tsx should reference the Star History chart endpoint");
+  for (const url of urls) assert.match(url, CHART_PATTERN);
+  assert.match(page, /alt="Star history chart for CodesWhat\/careerrat"/);
+});
+
+test("the retired first-party chart assets and refresh workflow are gone", async () => {
+  for (const file of [
+    "apps/website/public/star-history.svg",
+    "apps/website/public/star-history-dark.svg",
+    ".github/workflows/starchart.yml",
+  ]) {
+    await assert.rejects(readFile(new URL(file, repoRoot)), { code: "ENOENT" }, file);
   }
-});
-
-test("starchart.yml pins the reusable workflow to a full commit SHA and targets a dev branch", async () => {
-  const workflow = await readFile(new URL(".github/workflows/starchart.yml", repoRoot), "utf8");
-
-  const usesMatch = workflow.match(/uses:\s*\S+@([0-9a-f]+)/);
-  assert.ok(usesMatch, "expected a `uses:` line pinned with @<sha>");
-  assert.match(usesMatch[1], /^[0-9a-f]{40}$/, "the pinned ref should be a full 40-hex commit SHA");
-
-  const branchMatch = workflow.match(/branch:\s*(\S+)/);
-  assert.ok(branchMatch, "expected a `branch:` input");
-  assert.match(branchMatch[1], /^dev\//, "branch input should target the active dev branch");
 });
