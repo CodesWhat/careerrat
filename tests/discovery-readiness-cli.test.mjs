@@ -109,6 +109,49 @@ function doctorJson(home, args = [], extraEnv = {}) {
   return { status: result.status, report: JSON.parse(result.stdout) };
 }
 
+test("doctor says when targeting has no related titles or commute cities", () => {
+  const home = tempHome();
+  try {
+    seedCandidateFiles(home);
+    writeFileSync(
+      join(home, "candidate", "targeting.yml"),
+      "role_buckets:\n  - name: Core\n    priority: primary\n    titles:\n      - Registered Nurse\n",
+      "utf8"
+    );
+    writeFileSync(
+      join(home, "candidate", "profile.yml"),
+      "location:\n  home: Denver, CO\n  hybrid: true\n",
+      "utf8"
+    );
+
+    const text = runCli("src/cli/doctor.mjs", [], home);
+    assert.match(text.stdout, /Targeting is missing adjacency config/);
+    assert.match(text.stdout, /no related titles/);
+    assert.match(text.stdout, /no commute cities/);
+    assert.match(text.stdout, /Next action: run search setup to add related titles/);
+
+    const { report } = doctorJson(home);
+    assert.equal(report.targetingAdjacency.missingAdjacentTitles, true);
+    assert.equal(report.targetingAdjacency.missingCommuteCities, true);
+
+    writeFileSync(
+      join(home, "candidate", "targeting.yml"),
+      "role_buckets:\n  - name: Core\n    priority: primary\n    titles:\n      - Registered Nurse\n  - name: Near\n    priority: secondary\n    titles:\n      - Charge Nurse\n",
+      "utf8"
+    );
+    writeFileSync(
+      join(home, "candidate", "profile.yml"),
+      "location:\n  home: Denver, CO\n  hybrid: true\n  commute_cities:\n    - Aurora, CO\n",
+      "utf8"
+    );
+    const fixed = runCli("src/cli/doctor.mjs", [], home);
+    assert.doesNotMatch(fixed.stdout, /missing adjacency config/);
+    assert.equal(doctorJson(home).report.targetingAdjacency.nextAction, null);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("doctor fails on an invalid search config instead of calling the setup fine", () => {
   const home = tempHome();
   try {

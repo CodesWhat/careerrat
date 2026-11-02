@@ -40,6 +40,7 @@ import {
   loadLegacyCandidateConfig,
   loadCandidateConfig as loadStoredCandidateConfig,
 } from "../src/core/profile/config-store.mjs";
+import { adjacencyNote } from "../src/core/profile/targeting-adjacency.mjs";
 import { buildSourceUrl } from "../src/core/providers/source-url.mjs";
 import {
   captureAndPersistOffersIfDb,
@@ -967,6 +968,7 @@ export async function runSourcedScan({
       notSearchable,
     }),
     notSearchable,
+    adjacencyNote: adjacencyNote(candidateConfig.targeting, candidateConfig.profile),
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
     coldFamilies,
@@ -1015,6 +1017,7 @@ export function printSummary(summary, offers, cfg, limit) {
   if (summary.health && summary.health.status !== "ok") {
     console.log(`Scan health: ${summary.health.status}. ${summary.health.message}.`);
   }
+  if (summary.adjacencyNote) console.log(summary.adjacencyNote);
   console.log(`Scanned: ${summary.scanned}`);
   console.log(`New after filters/dedupe: ${summary.new}`);
   console.log(`Filtered by title: ${summary.filteredTitle}`);

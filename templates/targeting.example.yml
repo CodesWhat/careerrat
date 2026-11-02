@@ -11,6 +11,8 @@ role_buckets:
       - "Forward Deployed Engineer"
       - "Applied AI Engineer"
     notes: "Roles where the candidate's core edge is central."
+    # Optional. Ranks strictly above this are cut (the ladder must list them).
+    seniority_ceiling: 30
     # Optional. Each rank is explicit; list order never implies seniority.
     seniority_ladder:
       - rank: 30

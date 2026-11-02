@@ -1,0 +1,532 @@
+{
+  "_meta": {
+    "purpose": "Synthetic senior accountant candidate; Chicago IL, hybrid or remote US.",
+    "grades": "3 exact target, 2 adjacent or good, 1 stretch, 0 wrong. Duplicates of an already-listed posting are grade 0.",
+    "synthetic": true,
+    "holdout": true
+  },
+  "name": "senior-accountant",
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Accounting",
+        "priority": "primary",
+        "titles": ["Senior Accountant", "Staff Accountant III", "Accountant"],
+        "seniority_ladder": [
+          {
+            "rank": 10,
+            "titles": [
+              "Bookkeeper",
+              "Accounting Clerk",
+              "Accounts Payable Clerk",
+              "Accounts Receivable Clerk",
+              "Accounting Assistant",
+              "Junior Accountant",
+              "Associate Accountant",
+              "Accounting Intern"
+            ]
+          },
+          {
+            "rank": 20,
+            "titles": ["Staff Accountant", "Staff Accountant II", "Accountant", "Accountant II"]
+          },
+          {
+            "rank": 30,
+            "titles": [
+              "Senior Accountant",
+              "Sr. Accountant",
+              "Staff Accountant III",
+              "Accountant III",
+              "Senior Accounting Analyst",
+              "Financial Reporting Analyst"
+            ]
+          },
+          {
+            "rank": 40,
+            "titles": [
+              "Lead Accountant",
+              "Principal Accountant",
+              "Accounting Supervisor",
+              "Supervisor, Accounting",
+              "Assistant Controller",
+              "Accounting Manager",
+              "Senior Accounting Manager",
+              "Financial Reporting Manager"
+            ]
+          },
+          {
+            "rank": 50,
+            "titles": [
+              "Controller",
+              "Senior Controller",
+              "Director of Accounting",
+              "Director of Finance",
+              "VP Finance",
+              "Vice President of Finance",
+              "Chief Accounting Officer",
+              "CFO",
+              "Chief Financial Officer"
+            ]
+          }
+        ],
+        "seniority_ceiling": 30
+      },
+      {
+        "name": "Accounting Neighbors",
+        "priority": "secondary",
+        "titles": [
+          "Senior Accountant",
+          "Sr. Accountant",
+          "Sr Accountant",
+          "Staff Accountant",
+          "Staff Accountant II",
+          "Accountant II",
+          "Accountant III",
+          "General Ledger Accountant",
+          "GL Accountant",
+          "Corporate Accountant",
+          "Revenue Accountant",
+          "Cost Accountant",
+          "Technical Accountant",
+          "SEC Reporting Accountant",
+          "Accounting Analyst",
+          "Senior Accounting Analyst",
+          "Financial Accountant"
+        ]
+      },
+      {
+        "name": "Financial Reporting",
+        "priority": "secondary",
+        "titles": [
+          "Financial Reporting Analyst",
+          "Senior Financial Reporting Analyst",
+          "Financial Reporting Accountant",
+          "Financial Reporting Specialist",
+          "Consolidation Accountant",
+          "Accounting Operations Analyst",
+          "Close Accountant"
+        ]
+      }
+    ],
+    "keep_signals": ["month-end close", "GAAP", "account reconciliation", "journal entries"],
+    "cut_signals": ["Sales", "Recruiter", "Bookkeeper"],
+    "role_families": [
+      {
+        "name": "accounting",
+        "patterns": [
+          "accountant",
+          "accounting analyst",
+          "accounting specialist",
+          "general ledger",
+          "gl accountant",
+          "staff accountant",
+          "revenue accountant",
+          "cost accountant",
+          "cpa"
+        ]
+      },
+      {
+        "name": "financial-reporting",
+        "patterns": [
+          "financial reporting",
+          "consolidation",
+          "sec reporting",
+          "technical accounting",
+          "month-end",
+          "close accountant"
+        ]
+      }
+    ]
+  },
+  "profile": {
+    "candidate": {
+      "full_name": "Morgan Example",
+      "domain": "accounting"
+    },
+    "compensation": {
+      "currency": "USD",
+      "target_base": 100000,
+      "minimum_base": 85000
+    },
+    "location": {
+      "home": "Chicago, IL",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false,
+      "commute_cities": [
+        "Evanston, IL",
+        "Oak Brook, IL",
+        "Schaumburg, IL",
+        "Naperville, IL",
+        "Rosemont, IL",
+        "Oak Park, IL",
+        "Skokie, IL",
+        "Downers Grove, IL",
+        "Lombard, IL",
+        "Deerfield, IL",
+        "Itasca, IL",
+        "Lisle, IL"
+      ],
+      "commute_radius_miles": 25,
+      "remote_scope": "home-country"
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "postings": [
+    {
+      "id": "ac-01",
+      "title": "Senior Accountant",
+      "company": "Lakeshore Manufacturing",
+      "location": "Chicago, IL (Hybrid)",
+      "url": "https://jobs.example.test/lakeshore-manufacturing/senior-accountant-ac-01",
+      "comp": "$90,000 - $110,000",
+      "bodyText": "Own month-end close, account reconciliation, and journal entries under GAAP. Pay range: $90,000 - $110,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ac-02",
+      "title": "Sr. Accountant (Hybrid)",
+      "company": "Prairie Software",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/prairie-software/sr-accountant-hybrid-ac-02",
+      "comp": "$95,000 - $115,000",
+      "bodyText": "Revenue accounting, month-end close, GAAP technical research, balance sheet reconciliations. Pay range: $95,000 - $115,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ac-03",
+      "title": "Senior Accountant - General Ledger",
+      "company": "Union Square Hospitality",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/union-square-hospitality/senior-accountant-general-ledger-ac-03",
+      "comp": "$88,000 - $105,000",
+      "bodyText": "GL maintenance, month-end close, intercompany reconciliations. Pay range: $88,000 - $105,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ac-04",
+      "title": "Senior Accountant II",
+      "company": "Calumet Biosciences",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/calumet-biosciences/senior-accountant-ii-ac-04",
+      "comp": "$92,000 - $112,000",
+      "bodyText": "Month-end close and GAAP reporting for a public biotech. Journal entries and flux analysis. Pay range: $92,000 - $112,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ac-05",
+      "title": "Senior Corporate Accountant",
+      "company": "Ardent Retail Group",
+      "location": "Oak Brook, IL (Hybrid)",
+      "url": "https://jobs.example.test/ardent-retail-group/senior-corporate-accountant-ac-05",
+      "comp": "$90,000 - $108,000",
+      "bodyText": "Consolidations, month-end close, account reconciliation. Pay range: $90,000 - $108,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ac-06",
+      "title": "Senior Accountant (Remote)",
+      "company": "Beacon Nonprofit Partners",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/beacon-nonprofit-partners/senior-accountant-remote-ac-06",
+      "comp": "$85,000 - $100,000",
+      "bodyText": "Fund accounting, month-end close, GAAP compliance for nonprofits. Pay range: $85,000 - $100,000.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "ac-07",
+      "title": "Staff Accountant III",
+      "company": "Lakeshore Manufacturing",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/lakeshore-manufacturing/staff-accountant-iii-ac-07",
+      "comp": "$82,000 - $98,000",
+      "bodyText": "Senior-level staff role: reconciliations, journal entries, close support. Pay range: $82,000 - $98,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ac-08",
+      "title": "Revenue Accountant",
+      "company": "Prairie Software",
+      "location": "Chicago, IL (Hybrid)",
+      "url": "https://jobs.example.test/prairie-software/revenue-accountant-ac-08",
+      "comp": "$90,000 - $110,000",
+      "bodyText": "ASC 606 revenue recognition, journal entries, month-end close. Pay range: $90,000 - $110,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ac-09",
+      "title": "Senior Financial Reporting Analyst",
+      "company": "Ardent Retail Group",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/ardent-retail-group/senior-financial-reporting-analyst-ac-09",
+      "comp": "$95,000 - $118,000",
+      "bodyText": "GAAP reporting, flux analysis, month-end close support. Pay range: $95,000 - $118,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ac-10",
+      "title": "Senior Accounting Analyst",
+      "company": "Calumet Biosciences",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/calumet-biosciences/senior-accounting-analyst-ac-10",
+      "comp": "$90,000 - $108,000",
+      "bodyText": "Account reconciliation, journal entries, GAAP research. Pay range: $90,000 - $108,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ac-11",
+      "title": "Accountant, Intermediate",
+      "company": "Union Square Hospitality",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/union-square-hospitality/accountant-intermediate-ac-11",
+      "comp": "$80,000 - $95,000",
+      "bodyText": "Month-end close, AP and AR accruals, reconciliations. Two to four years experience. Pay range: $80,000 - $95,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ac-12",
+      "title": "Senior GL Accountant - Contract",
+      "company": "Robert Half Finance",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/robert-half-finance/senior-gl-accountant-contract-ac-12",
+      "comp": "$48 - $58 per hour",
+      "bodyText": "Six month contract, month-end close and reconciliations. Pay range: $48 - $58 per hour.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ac-13",
+      "title": "Senior Cost Accountant",
+      "company": "Lakeshore Manufacturing",
+      "location": "Joliet, IL",
+      "url": "https://jobs.example.test/lakeshore-manufacturing/senior-cost-accountant-ac-13",
+      "comp": "$92,000 - $112,000",
+      "bodyText": "Standard costing, inventory accounting, journal entries and month-end close. Pay range: $92,000 - $112,000.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "ac-14",
+      "title": "Accounting Manager",
+      "company": "Prairie Software",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/prairie-software/accounting-manager-ac-14",
+      "comp": "$120,000 - $145,000",
+      "bodyText": "Manage a team of three accountants and own the close calendar. Pay range: $120,000 - $145,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "ac-15",
+      "title": "Senior Tax Accountant",
+      "company": "Midwest Advisory LLP",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/midwest-advisory-llp/senior-tax-accountant-ac-15",
+      "comp": "$95,000 - $115,000",
+      "bodyText": "Prepare corporate and partnership returns, tax provision support. Pay range: $95,000 - $115,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "ac-16",
+      "title": "Senior Internal Auditor",
+      "company": "Ardent Retail Group",
+      "location": "Oak Brook, IL",
+      "url": "https://jobs.example.test/ardent-retail-group/senior-internal-auditor-ac-16",
+      "comp": "$98,000 - $118,000",
+      "bodyText": "SOX testing and operational audits. Accounting background helpful. Pay range: $98,000 - $118,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "ac-17",
+      "title": "Senior Financial Analyst, FP&A",
+      "company": "Calumet Biosciences",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/calumet-biosciences/senior-financial-analyst-fp-a-ac-17",
+      "comp": "$100,000 - $125,000",
+      "bodyText": "Budgeting and forecasting. Some accounting exposure. Pay range: $100,000 - $125,000.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "ac-18",
+      "title": "Staff Accountant",
+      "company": "Union Square Hospitality",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/union-square-hospitality/staff-accountant-ac-18",
+      "comp": "$62,000 - $72,000",
+      "bodyText": "Entry level accountant: AP, bank rec, basic journal entries. Pay range: $62,000 - $72,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "ac-19",
+      "title": "Accounting Intern",
+      "company": "Lakeshore Manufacturing",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/lakeshore-manufacturing/accounting-intern-ac-19",
+      "comp": "$22 - $26 per hour",
+      "bodyText": "Spring internship in the accounting department. Pay range: $22 - $26 per hour.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "ac-20",
+      "title": "Controller",
+      "company": "Beacon Nonprofit Partners",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/beacon-nonprofit-partners/controller-ac-20",
+      "comp": "$150,000 - $180,000",
+      "bodyText": "Lead the finance function and report to the CFO. Pay range: $150,000 - $180,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "ac-21",
+      "title": "Director of Accounting",
+      "company": "Ardent Retail Group",
+      "location": "Oak Brook, IL",
+      "url": "https://jobs.example.test/ardent-retail-group/director-of-accounting-ac-21",
+      "comp": "$165,000 - $195,000",
+      "bodyText": "Direct accounting operations, external audit, and SEC reporting. Pay range: $165,000 - $195,000.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "ac-22",
+      "title": "Senior Accountant",
+      "company": "Hudson Credit Union",
+      "location": "New York, NY",
+      "url": "https://jobs.example.test/hudson-credit-union/senior-accountant-ac-22",
+      "comp": "$105,000 - $125,000",
+      "bodyText": "Five days a week in Manhattan. Pay range: $105,000 - $125,000.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "ac-23",
+      "title": "Senior Accountant",
+      "company": "Pacific Harvest",
+      "location": "Fresno, CA",
+      "url": "https://jobs.example.test/pacific-harvest/senior-accountant-ac-23",
+      "comp": "$88,000 - $105,000",
+      "bodyText": "On-site at our Fresno packing facility. Pay range: $88,000 - $105,000.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "ac-24",
+      "title": "Senior Accountant",
+      "company": "Tri-County Services",
+      "location": "Rockford, IL",
+      "url": "https://jobs.example.test/tri-county-services/senior-accountant-ac-24",
+      "comp": "$58,000 - $68,000",
+      "bodyText": "Local services firm, AP and GL work. Pay range: $58,000 - $68,000.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "ac-25",
+      "title": "Senior Accountant - Part Time",
+      "company": "Beacon Nonprofit Partners",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/beacon-nonprofit-partners/senior-accountant-part-time-ac-25",
+      "comp": "$30 - $36 per hour",
+      "bodyText": "20 hours per week, bookkeeping and reconciliations. Pay range: $30 - $36 per hour.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "ac-26",
+      "title": "Bookkeeper",
+      "company": "Oakline Dental",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/oakline-dental/bookkeeper-ac-26",
+      "comp": "$22 - $28 per hour",
+      "bodyText": "Small practice bookkeeping, QuickBooks. Pay range: $22 - $28 per hour.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "ac-27",
+      "title": "Accounts Payable Specialist",
+      "company": "Prairie Software",
+      "location": "Chicago, IL (Hybrid)",
+      "url": "https://jobs.example.test/prairie-software/accounts-payable-specialist-ac-27",
+      "comp": "$55,000 - $68,000",
+      "bodyText": "Process vendor invoices and payment runs. Pay range: $55,000 - $68,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "ac-28",
+      "title": "Financial Recruiter - Accounting and Finance",
+      "company": "Robert Half Finance",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/robert-half-finance/financial-recruiter-accounting-and-finance-ac-28",
+      "comp": "$70,000 - $90,000",
+      "bodyText": "Place accounting professionals at client firms. Pay range: $70,000 - $90,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "ac-29",
+      "title": "Account Executive, Accounting Software",
+      "company": "LedgerLoop",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/ledgerloop/account-executive-accounting-software-ac-29",
+      "comp": "$100,000 OTE $200,000",
+      "bodyText": "Sell our accounting automation platform. Pay range: $100,000 OTE $200,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "ac-30",
+      "title": "Senior Accountant",
+      "company": "Lakeshore Manufacturing",
+      "location": "Chicago, IL (Hybrid)",
+      "url": "https://jobs.example.test/lakeshore-manufacturing/senior-accountant-ac-30",
+      "comp": "$90,000 - $110,000",
+      "bodyText": "Own month-end close, account reconciliation, and journal entries. Reposted. Pay range: $90,000 - $110,000.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "ac-31",
+      "title": "Sr. Accountant (Hybrid)",
+      "company": "Prairie Software",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/prairie-software/sr-accountant-hybrid-ac-31",
+      "comp": "$95,000 - $115,000",
+      "bodyText": "Revenue accounting and month-end close. Reposted. Pay range: $95,000 - $115,000.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "ac-32",
+      "title": "Software Accountant - Systems Implementation",
+      "company": "Ardent Retail Group",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/ardent-retail-group/software-accountant-systems-implementation-ac-32",
+      "comp": "$90,000 - $110,000",
+      "bodyText": "Implement an ERP rollout. Project management, not accounting operations. Pay range: $90,000 - $110,000.",
+      "grade": 0,
+      "kind": "wrong-function"
+    }
+  ]
+}

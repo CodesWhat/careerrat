@@ -1,0 +1,475 @@
+{
+  "_meta": {
+    "purpose": "Synthetic operations and program manager candidate; Atlanta or remote US.",
+    "grades": "3 exact target, 2 adjacent or good, 1 stretch, 0 wrong. Duplicates of an already-listed posting are grade 0.",
+    "synthetic": true
+  },
+  "name": "operations-program-manager",
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Program Management",
+        "priority": "primary",
+        "titles": ["Senior Program Manager", "Technical Program Manager", "Program Manager"],
+        "seniority_ladder": [
+          {
+            "rank": 10,
+            "titles": ["Associate Program Manager", "Program Coordinator", "Program Analyst"]
+          },
+          {
+            "rank": 20,
+            "titles": ["Program Manager"]
+          },
+          {
+            "rank": 30,
+            "titles": [
+              "Senior Program Manager",
+              "Technical Program Manager",
+              "Senior Technical Program Manager"
+            ]
+          },
+          {
+            "rank": 40,
+            "titles": [
+              "Director of Program Management",
+              "Program Director",
+              "Head of Program Management"
+            ]
+          },
+          {
+            "rank": 50,
+            "titles": ["VP of Program Management", "Vice President, Programs"]
+          }
+        ],
+        "seniority_ceiling": 30
+      },
+      {
+        "name": "Operations",
+        "priority": "secondary",
+        "titles": [
+          "Operations Manager",
+          "Senior Operations Manager",
+          "Business Operations Manager",
+          "Strategy and Operations Manager",
+          "Program Operations Manager"
+        ]
+      },
+      {
+        "name": "Delivery and Project Management",
+        "priority": "secondary",
+        "titles": [
+          "Project Manager",
+          "Senior Project Manager",
+          "Delivery Manager",
+          "Implementation Manager",
+          "Senior Implementation Manager",
+          "Chief of Staff"
+        ]
+      }
+    ],
+    "keep_signals": [
+      "cross-functional",
+      "program delivery",
+      "process improvement",
+      "stakeholder management"
+    ],
+    "cut_signals": ["Sales", "Recruiter", "Account Executive"],
+    "role_families": [
+      {
+        "name": "program-management",
+        "patterns": ["program manager", "program management", "technical program"]
+      },
+      {
+        "name": "operations",
+        "patterns": ["operations manager", "business operations"]
+      }
+    ]
+  },
+  "profile": {
+    "candidate": {
+      "full_name": "Casey Example",
+      "domain": "operations"
+    },
+    "compensation": {
+      "currency": "USD",
+      "target_base": 140000,
+      "minimum_base": 115000
+    },
+    "location": {
+      "home": "Atlanta, GA",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false,
+      "commute_cities": ["Decatur, GA", "Marietta, GA", "Sandy Springs, GA"]
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "postings": [
+    {
+      "id": "pm-01",
+      "title": "Senior Program Manager",
+      "company": "Vantage Freight",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/vantage-freight/senior-program-manager-pm-01",
+      "comp": "$130,000 - $160,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $130,000 - $160,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pm-02",
+      "title": "Technical Program Manager",
+      "company": "Corvus Systems",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/corvus-systems/technical-program-manager-pm-02",
+      "comp": "$145,000 - $180,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $145,000 - $180,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pm-03",
+      "title": "Program Manager",
+      "company": "Peachtree Health",
+      "location": "Atlanta, GA",
+      "url": "https://jobs.example.test/peachtree-health/program-manager-pm-03",
+      "comp": "$115,000 - $140,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $115,000 - $140,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pm-04",
+      "title": "Senior Operations Manager",
+      "company": "Redwood Supply",
+      "location": "Atlanta, GA (Hybrid)",
+      "url": "https://jobs.example.test/redwood-supply/senior-operations-manager-pm-04",
+      "comp": "$125,000 - $150,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $125,000 - $150,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pm-05",
+      "title": "Operations Manager",
+      "company": "Juniper Retail",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/juniper-retail/operations-manager-pm-05",
+      "comp": "$115,000 - $135,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $115,000 - $135,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pm-06",
+      "title": "Senior Technical Program Manager, Platform",
+      "company": "Corvus Systems",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/corvus-systems/senior-technical-program-manager-platform-pm-06",
+      "comp": "$155,000 - $190,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $155,000 - $190,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pm-07",
+      "title": "Program Manager, Operations",
+      "company": "Halcyon",
+      "location": "Remote (US)",
+      "url": "https://jobs.example.test/halcyon/program-manager-operations-pm-07",
+      "comp": "$120,000 - $145,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $120,000 - $145,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pm-08",
+      "title": "Senior Program Manager, Strategic Initiatives",
+      "company": "Delta Ridge",
+      "location": "Atlanta, GA",
+      "url": "https://jobs.example.test/delta-ridge/senior-program-manager-strategic-initiatives-pm-08",
+      "comp": "$135,000 - $165,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $135,000 - $165,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pm-09",
+      "title": "Senior Project Manager",
+      "company": "Peachtree Health",
+      "location": "Atlanta, GA",
+      "url": "https://jobs.example.test/peachtree-health/senior-project-manager-pm-09",
+      "comp": "$115,000 - $140,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $115,000 - $140,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pm-10",
+      "title": "Business Operations Manager",
+      "company": "Halcyon",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/halcyon/business-operations-manager-pm-10",
+      "comp": "$120,000 - $145,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $120,000 - $145,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pm-11",
+      "title": "Senior Strategy & Operations Manager",
+      "company": "Vantage Freight",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/vantage-freight/senior-strategy-operations-manager-pm-11",
+      "comp": "$135,000 - $165,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $135,000 - $165,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pm-12",
+      "title": "Delivery Manager",
+      "company": "Corvus Systems",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/corvus-systems/delivery-manager-pm-12",
+      "comp": "$125,000 - $150,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $125,000 - $150,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pm-13",
+      "title": "Senior Chief of Staff",
+      "company": "Delta Ridge",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/delta-ridge/senior-chief-of-staff-pm-13",
+      "comp": "$140,000 - $175,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $140,000 - $175,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pm-14",
+      "title": "Senior Implementation Manager",
+      "company": "Juniper Retail",
+      "location": "Remote, US",
+      "url": "https://jobs.example.test/juniper-retail/senior-implementation-manager-pm-14",
+      "comp": "$115,000 - $140,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $115,000 - $140,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pm-15",
+      "title": "Program Operations Lead",
+      "company": "Redwood Supply",
+      "location": "Atlanta, GA",
+      "url": "https://jobs.example.test/redwood-supply/program-operations-lead-pm-15",
+      "comp": "$110,000 - $135,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $110,000 - $135,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pm-16",
+      "title": "Associate Program Manager",
+      "company": "Halcyon",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/halcyon/associate-program-manager-pm-16",
+      "comp": "$80,000 - $100,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $80,000 - $100,000 per year.",
+      "grade": 1,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "pm-17",
+      "title": "Director of Program Management",
+      "company": "Vantage Freight",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/vantage-freight/director-of-program-management-pm-17",
+      "comp": "$190,000 - $240,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $190,000 - $240,000 per year.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "pm-18",
+      "title": "Senior Product Manager",
+      "company": "Corvus Systems",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/corvus-systems/senior-product-manager-pm-18",
+      "comp": "$150,000 - $185,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $150,000 - $185,000 per year.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "pm-19",
+      "title": "Senior Program Manager",
+      "company": "Granite Row",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/granite-row/senior-program-manager-pm-19",
+      "comp": "$70,000 - $85,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $70,000 - $85,000 per year.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "pm-20",
+      "title": "Senior Program Manager",
+      "company": "Ironbridge",
+      "location": "Dublin, Ireland",
+      "url": "https://jobs.example.test/ironbridge/senior-program-manager-pm-20",
+      "comp": "",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "pm-21",
+      "title": "Operations Manager",
+      "company": "Wrenfield",
+      "location": "Phoenix, AZ (On-site)",
+      "url": "https://jobs.example.test/wrenfield/operations-manager-pm-21",
+      "comp": "$115,000 - $135,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $115,000 - $135,000 per year.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "pm-22",
+      "title": "Program Manager",
+      "company": "Foxglove",
+      "location": "Remote - India",
+      "url": "https://jobs.example.test/foxglove/program-manager-pm-22",
+      "comp": "",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "pm-23",
+      "title": "Operations Intern",
+      "company": "Juniper Retail",
+      "location": "Atlanta, GA",
+      "url": "https://jobs.example.test/juniper-retail/operations-intern-pm-23",
+      "comp": "",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "pm-24",
+      "title": "Junior Operations Coordinator",
+      "company": "Redwood Supply",
+      "location": "Atlanta, GA",
+      "url": "https://jobs.example.test/redwood-supply/junior-operations-coordinator-pm-24",
+      "comp": "$45,000 - $55,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $45,000 - $55,000 per year.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "pm-25",
+      "title": "Sales Operations Manager",
+      "company": "Delta Ridge",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/delta-ridge/sales-operations-manager-pm-25",
+      "comp": "$115,000 - $140,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $115,000 - $140,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "pm-26",
+      "title": "Technical Recruiter",
+      "company": "Halcyon",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/halcyon/technical-recruiter-pm-26",
+      "comp": "$100,000 - $125,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $100,000 - $125,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "pm-27",
+      "title": "Account Executive, Enterprise",
+      "company": "Vantage Freight",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/vantage-freight/account-executive-enterprise-pm-27",
+      "comp": "$120,000 - $160,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $120,000 - $160,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "pm-28",
+      "title": "Senior Software Engineer",
+      "company": "Corvus Systems",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/corvus-systems/senior-software-engineer-pm-28",
+      "comp": "$170,000 - $210,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $170,000 - $210,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "pm-29",
+      "title": "Senior Accountant",
+      "company": "Peachtree Health",
+      "location": "Atlanta, GA",
+      "url": "https://jobs.example.test/peachtree-health/senior-accountant-pm-29",
+      "comp": "$85,000 - $105,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $85,000 - $105,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "pm-30",
+      "title": "Warehouse Operations Associate",
+      "company": "Redwood Supply",
+      "location": "Atlanta, GA",
+      "url": "https://jobs.example.test/redwood-supply/warehouse-operations-associate-pm-30",
+      "comp": "$38,000 - $48,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $38,000 - $48,000 per year.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "pm-31",
+      "title": "Senior Program Manager",
+      "company": "Vantage Freight",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/vantage-freight/repost-senior-program-manager-pm-31",
+      "comp": "$130,000 - $160,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $130,000 - $160,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "pm-32",
+      "title": "Technical Program Manager",
+      "company": "Corvus Systems",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/corvus-systems/repost-technical-program-manager-pm-32",
+      "comp": "$145,000 - $180,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $145,000 - $180,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "pm-33",
+      "title": "Operations Manager",
+      "company": "Juniper Retail",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/juniper-retail/repost-operations-manager-pm-33",
+      "comp": "$115,000 - $135,000",
+      "bodyText": "You will run cross-functional programs, build operating cadences, track milestones and risks, and report progress to leadership. Base salary range: $115,000 - $135,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    }
+  ]
+}

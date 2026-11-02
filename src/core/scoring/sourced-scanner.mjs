@@ -24,8 +24,9 @@ import { fetchRemotive } from "../providers/remotive.mjs";
 import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
 import { fetchWorkingNomads } from "../providers/workingnomads.mjs";
 import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
-import { normalizeCompanyRoleKey } from "../tracker/tracker-data.mjs";
-import { extractReqId, postingIdentityKeys } from "./sourced-identity.mjs";
+import { normalizeCompanyRoleKey, normalizeTextKey } from "../tracker/tracker-data.mjs";
+import { extractReqId, identityAliasAdditions, postingIdentityKeys } from "./sourced-identity.mjs";
+import { buildLaneSpec, laneMatch } from "./title-lanes.mjs";
 
 export { extractReqId } from "./sourced-identity.mjs";
 export { normalizeCompanyRoleKey };
@@ -126,11 +127,19 @@ export function buildTitleFilter(titleFilter = {}, targeting = {}) {
   const positive = normalizeKeywordList(titleFilter.positive);
   const negative = normalizeKeywordList(titleFilter.negative);
   const belowTarget = normalizeKeywordList(titleFilter.below_target);
+  // Secondary-bucket titles are adjacent: shown, ranked below the primary ones.
+  const spec = buildLaneSpec(targeting, positive);
+  const secondary = new Set(spec.adjacent.map((title) => title.toLowerCase()));
+  const primaryTerms = positive.filter((term) => !secondary.has(term));
+  const exactTerms = primaryTerms.length > 0 ? primaryTerms : positive;
+  const adjacentTerms =
+    primaryTerms.length > 0 ? positive.filter((term) => secondary.has(term)) : [];
   const classify = (title = "") => {
     const lower = title.toLowerCase();
     const standing = relativeSeniority(title, targeting);
     const rankedEligible = standing.classification === "at-or-above-target";
-    const rankedBelow = standing.classification === "below-target";
+    const rankedBelow =
+      standing.classification === "below-target" || standing.classification === "above-target";
     const blocked =
       negative.some((term) => keywordMatches(lower, term)) ||
       rankedBelow ||
@@ -138,7 +147,7 @@ export function buildTitleFilter(titleFilter = {}, targeting = {}) {
     const matched =
       positive.length === 0 ||
       rankedEligible ||
-      positive.some(
+      exactTerms.some(
         (term) => keywordMatches(lower, term) || boundedRoleTitleEquivalent(lower, term)
       );
     return {
@@ -148,7 +157,8 @@ export function buildTitleFilter(titleFilter = {}, targeting = {}) {
         !matched &&
         !blocked &&
         standing.classification === "unclassified" &&
-        positive.some((term) => adjacentRoleTitleEquivalent(lower, term)),
+        (adjacentTerms.some((term) => keywordMatches(lower, term)) ||
+          adjacentRoleTitleEquivalent(lower, spec)),
     };
   };
   const filter = (title = "") => classify(title).matched;
@@ -180,10 +190,6 @@ const TITLE_DOMAIN_FAMILIES = [
   ]),
   new Set(["finance", "financial", "fintech", "payment", "payments"]),
 ];
-const TITLE_ADJACENT_FAMILIES = [
-  new Set(["design", "front", "frontend", "ui"]),
-  ...TITLE_DOMAIN_FAMILIES,
-];
 const TITLE_SPECIALIZATION_FAMILIES = [
   new Set(["advocate"]),
   new Set(["gtm"]),
@@ -197,25 +203,10 @@ const TITLE_SPECIALIZATION_FAMILIES = [
   new Set(["support"]),
 ];
 const TITLE_ENGINEERING_KINDS = new Set(["developer", "engineer", "engineering"]);
-const TITLE_SENIORITY_GROUPS = [new Set(["staff", "principal", "lead"]), new Set(["senior", "sr"])];
-const TITLE_ADJACENCY_STOPWORDS = new Set([
-  "assistant",
-  "associate",
-  "chief",
-  "director",
-  "head",
-  "intern",
-  "junior",
-  "lead",
-  "manager",
-  "principal",
-  "senior",
-  "specialist",
-  "staff",
-  "the",
-  "vice",
-]);
-
+const TITLE_SENIORITY_GROUPS = [
+  new Set(["staff", "principal", "lead", "architect"]),
+  new Set(["senior", "sr"]),
+];
 function titleSpecializationsCompatible(actual, target) {
   return TITLE_SPECIALIZATION_FAMILIES.every(
     (family) => hasAny(actual, family) === hasAny(target, family)
@@ -272,38 +263,16 @@ function titleSeniorityCompatible(actual, target) {
   );
 }
 
-function adjacentRoleTitleEquivalent(actualTitle, targetTitle) {
-  if (MANAGEMENT_TITLE_RE.test(actualTitle) !== MANAGEMENT_TITLE_RE.test(targetTitle)) return false;
+// A title in the candidate's lane or a secondary bucket that is not itself a
+// target title. Lanes and adjacent titles come from the candidate's targeting
+// (see title-lanes.mjs); a different lane is not adjacent.
+function adjacentRoleTitleEquivalent(actualTitle, spec) {
   const actual = titleTokens(actualTitle);
-  const target = titleTokens(targetTitle);
-  if (!titleSeniorityCompatible(actual, target)) return false;
-
-  if (hasAny(target, TITLE_ENGINEERING_KINDS)) {
-    if (!hasAny(actual, TITLE_ENGINEERING_KINDS)) return false;
-    if (!titleSpecializationsCompatible(actual, target)) {
-      return false;
-    }
-    return true;
-  }
-
-  return [...target].some(
-    (value) =>
-      value.length >= 4 &&
-      !TITLE_ADJACENCY_STOPWORDS.has(value) &&
-      !TITLE_ENGINEERING_KINDS.has(value) &&
-      actual.has(value)
+  return (
+    laneMatch(actualTitle, spec, (source) =>
+      titleSeniorityCompatible(actual, titleTokens(source))
+    ) !== null
   );
-}
-
-function adjacentTitleFamiliesCompatible(actualTitle, targetTitle) {
-  const familyFor = (title) => {
-    const words = titleTokens(title);
-    return TITLE_ADJACENT_FAMILIES.findIndex((family) => hasAny(words, family));
-  };
-  const targetFamily = familyFor(targetTitle);
-  if (targetFamily < 0) return true;
-  const actualFamily = familyFor(actualTitle);
-  return actualFamily < 0 || actualFamily === targetFamily;
 }
 
 // The same words in another order or with extra filler ("Food and Beverage
@@ -326,30 +295,28 @@ function targetRoleTitleMatchKind(actualTitle, targetTitles, targeting) {
   if (targetTitles.length === 0) return "target";
   const standing = relativeSeniority(actualTitle, targeting);
   if (standing.classification === "at-or-above-target") return "target";
-  if (standing.classification === "below-target") return null;
+  if (standing.classification === "below-target" || standing.classification === "above-target") {
+    return null;
+  }
+  const spec = buildLaneSpec(targeting, targetTitles);
+  const secondary = new Set(spec.adjacent.map((title) => title.toLowerCase()));
   const actual = String(actualTitle || "").toLowerCase();
   let adjacent = false;
   for (const targetTitle of targetTitles) {
     const target = String(targetTitle || "").toLowerCase();
-    if (
+    if (secondary.has(target)) {
+      if (keywordMatches(actual, target) || reorderedTitleEquivalent(actual, target)) {
+        adjacent = true;
+      }
+    } else if (
       keywordMatches(actual, target) ||
       boundedRoleTitleEquivalent(actual, target) ||
       reorderedTitleEquivalent(actual, target)
     ) {
       return "target";
     }
-    const targetHasDomain = TITLE_DOMAIN_FAMILIES.some((family) =>
-      hasAny(titleTokens(target), family)
-    );
-    if (
-      !targetHasDomain &&
-      adjacentRoleTitleEquivalent(actual, target) &&
-      adjacentTitleFamiliesCompatible(actual, target)
-    ) {
-      adjacent = true;
-    }
   }
-  return adjacent ? "adjacent" : null;
+  return adjacent || adjacentRoleTitleEquivalent(actual, spec) ? "adjacent" : null;
 }
 
 function targetRoleTitleMatches(actualTitle, targetTitles, targeting) {
@@ -643,6 +610,9 @@ function seniorityEligibility(offer, config) {
   if (standing.classification === "below-target") {
     return { eligible: false, reason: "seniority-below-target" };
   }
+  if (standing.classification === "above-target") {
+    return { eligible: false, reason: "seniority-above-target" };
+  }
   if (standing.classification === "at-or-above-target") return { eligible: true };
   const targetsManagement = targets.some((target) => MANAGEMENT_TITLE_RE.test(target));
   if (MANAGEMENT_TITLE_RE.test(title) && !targetsManagement) {
@@ -710,7 +680,14 @@ function commuteEligibility(location, profileLocation) {
   const relocations = Array.isArray(profileLocation?.relocation)
     ? profileLocation.relocation.filter(Boolean)
     : [];
-  if (placeMatchesAllowed(location, [home, ...relocations])) return { eligible: true };
+  // Cities the candidate lists as part of their commute area (suburbs, towns
+  // of the metro) count as home.
+  const commuteCities = Array.isArray(profileLocation?.commute_cities)
+    ? profileLocation.commute_cities.filter(Boolean)
+    : [];
+  if (placeMatchesAllowed(location, [home, ...commuteCities, ...relocations])) {
+    return { eligible: true };
+  }
 
   const radius = Number(profileLocation?.commute_radius_miles);
   const homeCoordinates =
@@ -1298,8 +1275,12 @@ export function applyPresentationCaps(
     Number.isFinite(normalizedCompanyCap) && normalizedCompanyCap > 0
       ? normalizedCompanyCap
       : Infinity;
+  // Adjacent-title offers always rank below exact-title ones, whatever their score.
+  const adjacentTier = (entry) => (entry.offer.titleRelevance === "adjacent-signal" ? 1 : 0);
   if (Number.isFinite(companyCap)) {
     candidates.sort((left, right) => {
+      const tierDelta = adjacentTier(left) - adjacentTier(right);
+      if (tierDelta) return tierDelta;
       const scoreDelta = Number(right.offer.score || 0) - Number(left.offer.score || 0);
       if (scoreDelta) return scoreDelta;
       const rightPosted = Date.parse(String(right.offer.postedAt || ""));
@@ -1313,6 +1294,11 @@ export function applyPresentationCaps(
       }
       return left.inputIndex - right.inputIndex;
     });
+  } else {
+    candidates.sort(
+      (left, right) =>
+        adjacentTier(left) - adjacentTier(right) || left.inputIndex - right.inputIndex
+    );
   }
 
   const presented = [];
@@ -1377,6 +1363,30 @@ const COMPENSATION_CONTEXT_RADIUS = 1_024;
 const BASE_COMP_LABEL_RE =
   /\b(?:base\s+(?:salary|pay|comp(?:ensation)?)|salary(?:\s+(?:range|band))?)\b/i;
 const ADJACENT_BARE_BASE_PREFIX_RE = /(?:^|[:;,|•])\s*base\s*:?\s*$/i;
+// "Compensation: $X - $Y", "Pay range: ...", "The anticipated pay for this role
+// is ..." name a base band only when the label sits directly before the amount
+// and is either colon-terminated or carries a qualifier (expected, range, for
+// this role). A bare "Compensation is $X" stays unlabeled, and a distant
+// "compensation" elsewhere in the posting does not promote stray dollar
+// figures. Variable-pay labels ("Total compensation", "Bonus pay") are
+// excluded by the lookbehind.
+const COMP_LABEL_LEAD = String.raw`(?<![a-z])(?<!(?:total|variable|incentive|equity|stock|bonus|overtime|ot|hourly|cash)\s)`;
+const COMP_LABEL_CORE = `(?:compensation|pay|salary)`;
+const COMP_LABEL_QUALIFIER = `(?:expected|anticipated|estimated|target|posted)`;
+const COMP_LABEL_RANGE = `(?:range|band)`;
+const COMP_LABEL_ROLE = String.raw`(?:for|of)\s+(?:this|the)\s+(?:role|position|job)`;
+const COMP_LABEL_TAIL = String.raw`(?:\s+(?:is|are|will\s+be|ranges?\s+(?:from|between)|from|between))?\s*(?:[A-Z]{3}\s*)?$`;
+const ADJACENT_COMP_LABEL_PREFIX_RE = new RegExp(
+  [
+    String.raw`${COMP_LABEL_CORE}(?:\s+${COMP_LABEL_RANGE})?\s*:\s*(?:[A-Z]{3}\s*)?$`,
+    String.raw`${COMP_LABEL_QUALIFIER}\s+${COMP_LABEL_CORE}(?:\s+${COMP_LABEL_RANGE})?(?:\s+${COMP_LABEL_ROLE})?${COMP_LABEL_TAIL}`,
+    String.raw`${COMP_LABEL_CORE}\s+${COMP_LABEL_RANGE}(?:\s+${COMP_LABEL_ROLE})?${COMP_LABEL_TAIL}`,
+    String.raw`${COMP_LABEL_CORE}\s+${COMP_LABEL_ROLE}${COMP_LABEL_TAIL}`,
+  ]
+    .map((pattern) => `${COMP_LABEL_LEAD}${pattern}`)
+    .join("|"),
+  "i"
+);
 const ADJACENT_BARE_BASE_SUFFIX_RE =
   /^[\s,]*(?:[A-Z]{3}\b[\s,]*)?(?:(?:per\s+(?:year|annum)|a\s+year|annually|annualized)\b[\s,]*)?base\b(?=\s*(?:$|[,.;:!?()[\]{}•–—]|(?:per\s+(?:year|annum|hour|hr)|a\s+year|annually|annualized|hourly|\/\s*(?:year|yr|hour|hr))\b))/iu;
 const VARIABLE_COMP_LABEL_RE =
@@ -1672,7 +1682,13 @@ function localCompensationContext(line, match) {
 function compensationMatchBasis(line, match) {
   const { fullPrefix, hasNextAmount, prefix, suffix } = localCompensationContext(line, match);
   const prefixBareBaseMatch = prefix.match(ADJACENT_BARE_BASE_PREFIX_RE);
-  const prefixBareBaseIndex = prefixBareBaseMatch?.index ?? -1;
+  // "Compensation: $20 guests per hour" is a throughput figure, not pay: a
+  // generic comp label only counts when any hourly unit directly follows the amount.
+  const throughputUnit = HOURLY_COMP_RE.test(suffix) && !HOURLY_COMP_SUFFIX_RE.test(suffix);
+  const prefixCompLabelIndex = throughputUnit
+    ? -1
+    : (prefix.match(ADJACENT_COMP_LABEL_PREFIX_RE)?.index ?? -1);
+  const prefixBareBaseIndex = Math.max(prefixBareBaseMatch?.index ?? -1, prefixCompLabelIndex);
   const baseLabelIndex = Math.max(lastLabelIndex(prefix, BASE_COMP_LABEL_RE), prefixBareBaseIndex);
   const variableLabelIndex = lastLabelIndex(prefix, VARIABLE_COMP_LABEL_RE);
   const suffixBareBaseMatch = suffix.match(ADJACENT_BARE_BASE_SUFFIX_RE);
@@ -1964,7 +1980,7 @@ function compensationEvidenceText(offer = {}, { includeBody = true } = {}) {
   return [
     evidence.baseComp ? `Base pay: ${evidence.baseComp}` : "",
     evidence.annualEarningsComp ? `Annual earnings: ${evidence.annualEarningsComp}` : "",
-    evidence.unclassifiedComp ? `Compensation: ${evidence.unclassifiedComp}` : "",
+    evidence.unclassifiedComp ? `Unlabeled amount: ${evidence.unclassifiedComp}` : "",
     includeBody ? offer?.bodyText : "",
     includeBody ? offer?.description : "",
   ]
@@ -2038,8 +2054,27 @@ export function inferProvider(entry = {}) {
   return inferCareerOpsProvider(entry);
 }
 
+// A repost is the same company, the same normalized title and the same place
+// under a new URL. Location stays in the key so the same
+// title in two cities, and any team qualifier in the title, remain separate
+// roles.
 function sameRunOfferKeys(offer) {
-  return postingIdentityKeys(offer);
+  const keys = postingIdentityKeys(offer);
+  const company = String(offer?.company || "").trim();
+  const title = String(offer?.title || "").trim();
+  if (company && title) {
+    const location = normalizeTextKey(offer?.location || "");
+    // Distinct requisition ids are distinct openings for the same title (the
+    // req-id rules above own that case), so an id is part of the repost key.
+    const req =
+      String(offer?.reqId || "")
+        .trim()
+        .toLowerCase() ||
+      extractReqId(offer?.url).id ||
+      "";
+    keys.push(`repost:${normalizeCompanyRoleKey(company, title)}::${location}::${req}`);
+  }
+  return keys;
 }
 
 function offerCompleteness(offer) {
@@ -2120,7 +2155,16 @@ function dedupeBeforeQualification(offers, { seenUrls, seenReqIds, seenRunCompan
         reqId: req.id,
       });
     }
-    primary.offer = winner.offer;
+    // The kept row answers for every posting collapsed into it: record the
+    // identities (URLs, requisition ids) of the discarded ones as aliasKeys.
+    const losers = candidates.filter((candidate) => candidate.offer !== winner.offer);
+    const aliasKeys = [
+      ...new Set([
+        ...(Array.isArray(winner.offer.aliasKeys) ? winner.offer.aliasKeys : []),
+        ...losers.flatMap((loser) => identityAliasAdditions(winner.offer, loser.offer)),
+      ]),
+    ];
+    primary.offer = aliasKeys.length ? { ...winner.offer, aliasKeys } : winner.offer;
     primary.inputIndex = winner.inputIndex;
     primary.keys = mergedKeys;
     for (const key of mergedKeys) entriesByKey.set(key, primary);

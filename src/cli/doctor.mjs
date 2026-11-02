@@ -38,6 +38,7 @@ import { candidateConfigSource, loadCandidateConfig } from "../core/profile/conf
 import { loadEvidence } from "../core/profile/evidence-writer.mjs";
 import { listLearnings } from "../core/profile/learnings.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
+import { targetingAdjacencyGaps } from "../core/profile/targeting-adjacency.mjs";
 import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
 import { parseConfig } from "../core/providers/search-sources.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
@@ -348,6 +349,7 @@ const setup = setupState
     };
 
 const searchReadiness = loadSearchReadiness();
+const targetingAdjacency = loadTargetingAdjacency();
 const companyAtsReadiness = loadCompanyAtsReadiness();
 // Checks that look outside the data files. The terminal workspace and the agent
 // are reported but don't fail doctor, since the browser app works without them.
@@ -384,6 +386,12 @@ const result = {
   templateLeftovers,
   skillsNotDiscoverable,
   workspaceDirs,
+  targetingAdjacency: {
+    checked: targetingAdjacency.checked,
+    missingAdjacentTitles: targetingAdjacency.missingAdjacentTitles,
+    missingCommuteCities: targetingAdjacency.missingCommuteCities,
+    nextAction: targetingAdjacency.nextAction,
+  },
   learnings: { count: learnings.length, families: learnings.map((l) => l.family) },
   storyBank: { exists: storyBank.exists, count: storyBank.stories.length },
   evidenceBank: { exists: evidenceBank.exists, count: evidenceBank.claims.length },
@@ -661,6 +669,7 @@ if (candidateSetupReadiness) {
 console.log("Search readiness:");
 printSearchReadiness(searchReadiness);
 printCompanyAtsReadiness(companyAtsReadiness);
+printTargetingAdjacency(targetingAdjacency);
 console.log("");
 
 console.log("Discovery pipeline:");
@@ -739,6 +748,27 @@ function loadCandidateSetupReadiness() {
   } catch {
     return null;
   }
+}
+
+function loadTargetingAdjacency() {
+  try {
+    const config = loadCandidateConfig(pathCtx);
+    return targetingAdjacencyGaps(config.targeting, config.profile);
+  } catch {
+    return targetingAdjacencyGaps(null, null);
+  }
+}
+
+function printTargetingAdjacency(adjacency) {
+  if (adjacency.gaps.length === 0) return;
+  console.log("- Targeting is missing adjacency config, so recall will be low:");
+  if (adjacency.missingAdjacentTitles) {
+    console.log("  no related titles (no secondary role bucket and no role_families).");
+  }
+  if (adjacency.missingCommuteCities) {
+    console.log("  no commute cities for an on-site or hybrid candidate.");
+  }
+  console.log(`  Next action: ${adjacency.nextAction}.`);
 }
 
 function loadSearchReadiness() {
