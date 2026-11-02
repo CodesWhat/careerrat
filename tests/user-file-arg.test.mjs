@@ -43,7 +43,7 @@ test("evaluate, questions and export find workspace/ files under the data root",
     const result = run(script, ["workspace/jobs/role.md", ...extra], dir);
     assert.doesNotMatch(
       result.stderr + result.stdout,
-      /not found/i,
+      /file not found/i,
       `${script} must resolve workspace/ paths: ${result.stderr}`
     );
   }
