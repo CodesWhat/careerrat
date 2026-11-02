@@ -3,6 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { dbExists } from "../src/core/db/connection.mjs";
+import { jobLinkCheckLast, jobLinkCheckRecord } from "../src/core/db/verbs/search-liveness.mjs";
+import { closedSinceLastCheck } from "../src/core/liveness/closed-since.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { displayPath, userPath } from "../src/core/paths/workspace.mjs";
 import { loadTrackerData } from "../src/core/tracker/tracker-data.mjs";
@@ -31,6 +34,8 @@ if (fileArg) {
   urls = [...data.apps, ...data.sourced].map((row) => row.link).filter(Boolean);
 }
 
+const keepLedger = dbExists(pathCtx);
+const previous = keepLedger ? jobLinkCheckLast(pathCtx) : new Map();
 const results = [];
 for (const url of urls) {
   const result = await checkUrlLiveness(url);
@@ -50,6 +55,20 @@ console.log(
   `${results.length - couldNotRun.length} of ${results.length} links could be checked: ` +
     `${live} live, ${expired} closed, ${couldNotRun.length} unreachable.`
 );
+
+// Remember only definitive answers, so a network blip never overwrites what we
+// last knew, then name the links that closed since the previous run.
+if (keepLedger) {
+  jobLinkCheckRecord({
+    ...pathCtx,
+    entries: results.filter((r) => r.result === "active" || r.result === "expired"),
+  });
+}
+const closedSince = closedSinceLastCheck(previous, results);
+if (closedSince.length > 0) {
+  console.log(`Closed since last check (${closedSince.length}):`);
+  for (const url of closedSince) console.log(`  ${url}`);
+}
 
 const bad = results.filter(
   (result) => result.result === "expired" || (strict && result.result === "uncertain")
