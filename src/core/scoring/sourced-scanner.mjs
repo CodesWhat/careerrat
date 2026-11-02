@@ -25,6 +25,7 @@ import { fetchRemotive } from "../providers/remotive.mjs";
 import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
 import { fetchUsaJobs } from "../providers/usajobs.mjs";
 import { fetchWorkingNomads } from "../providers/workingnomads.mjs";
+import { assessScanDemotion, demotionNote, rankScore } from "../search/posting-demotion.mjs";
 import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
 import { normalizeCompanyRoleKey, normalizeTextKey } from "../tracker/tracker-data.mjs";
 import { extractReqId, identityAliasAdditions, postingIdentityKeys } from "./sourced-identity.mjs";
@@ -1023,6 +1024,13 @@ export function requalifyCanonicalOffers(
       qualificationUnknowns: qualification.qualificationUnknowns,
       ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
       ...rating,
+      ...(offer.demotion
+        ? {
+            ratingReason: [rating.ratingReason, demotionNote(offer.demotion)]
+              .filter(Boolean)
+              .join("; "),
+          }
+        : {}),
     });
   }
   return result;
@@ -1287,7 +1295,7 @@ export function applyPresentationCaps(
     candidates.sort((left, right) => {
       const tierDelta = adjacentTier(left) - adjacentTier(right);
       if (tierDelta) return tierDelta;
-      const scoreDelta = Number(right.offer.score || 0) - Number(left.offer.score || 0);
+      const scoreDelta = rankScore(right.offer) - rankScore(left.offer);
       if (scoreDelta) return scoreDelta;
       const rightPosted = Date.parse(String(right.offer.postedAt || ""));
       const leftPosted = Date.parse(String(left.offer.postedAt || ""));
@@ -1301,9 +1309,12 @@ export function applyPresentationCaps(
       return left.inputIndex - right.inputIndex;
     });
   } else {
+    const demotedTier = (entry) => (entry.offer.demotion ? 1 : 0);
     candidates.sort(
       (left, right) =>
-        adjacentTier(left) - adjacentTier(right) || left.inputIndex - right.inputIndex
+        adjacentTier(left) - adjacentTier(right) ||
+        demotedTier(left) - demotedTier(right) ||
+        left.inputIndex - right.inputIndex
     );
   }
 
@@ -2197,6 +2208,7 @@ export function filterAndDedupeOffers(
     seenRunCompanyRoles = new Set(),
     perCompanyCap = Infinity,
     deferPartialCandidatePolicy = false,
+    postingHistory = null,
   }
 ) {
   const kept = [];
@@ -2304,6 +2316,12 @@ export function filterAndDedupeOffers(
     const qualifiedOffer = qualification.displayLocation
       ? { ...offer, location: qualification.displayLocation }
       : offer;
+    const scored = rating || scoreSourcedOffer(qualifiedOffer, config);
+    const demotion = assessScanDemotion(qualifiedOffer, {
+      targeting: config?.targeting,
+      now,
+      history: postingHistory?.get?.(key),
+    });
     qualified.push({
       ...qualifiedOffer,
       key,
@@ -2313,7 +2331,13 @@ export function filterAndDedupeOffers(
       ...(qualification.compBand ? { compBand: qualification.compBand } : {}),
       ...(titleRelevance ? { titleRelevance } : {}),
       _qualificationInputIndex: inputIndex,
-      ...(rating || scoreSourcedOffer(qualifiedOffer, config)),
+      ...scored,
+      ...(demotion
+        ? {
+            demotion,
+            ratingReason: [scored.ratingReason, demotionNote(demotion)].filter(Boolean).join("; "),
+          }
+        : {}),
     });
   }
 

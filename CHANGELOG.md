@@ -12,6 +12,13 @@ All notable changes to CareerRat are documented here. This project follows
   `careerrat` now refuses to start on an unpatched Node (older 24.x, any 25.x, or
   26.x before 26.12.1) and prints the upgrade step.
 
+### Added
+
+- Shared posting cache for multi-person setups. A board is fetched once, reused by other
+  people's scans inside a 6 hour window, and new postings are matched against every other
+  person's own targeting and saved to their workspace as `shared-cache`. The scan summary
+  lists "Also matched for" counts. Opt out per person or turn it off globally (docs/SOURCES.md).
+
 ### Fixed
 
 - Search now cuts generic wrong-seniority titles (VP, Chief, Head of, Director, intern,
@@ -28,6 +35,11 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- `npm run bench:search` now breaks cut good postings down by reason, and `-- --why <id>` explains one posting's path (title decision, score, the stage that cut it or its rank).
+- ATS sweep: drop a `config/ats-sweep-slugs.txt` (or `.json`) of employer board slugs in the workspace and scans also check those boards for roles that match your targeting. No slug data is bundled.
+- Optional AI rerank (`search_preferences.ai_rerank.enabled` in targeting.yml, off by default): the top results get a short fit note and a suggested order from your AI. It never filters, hides or reorders results, and says so plainly when no AI is set up.
+- Scans now go easy on each host: a concurrency cap, a minimum gap between requests, and a wait-and-retry on 429 or 503 that follows Retry-After. The scan summary reports how many requests were rate limited.
+- Scans rank ghost-looking and reposted postings lower with a visible reason (evergreen wording, very old, or the same role showing up under new links across scans). They are never cut.
 - Search can use USAJobs (free key) and Adzuna (paid key) when their keys are set, and new
   searches also include Himalayas, Jobicy and, for tech roles, Hacker News "Who is
   hiring". A missing key is reported on that source instead of returning nothing.

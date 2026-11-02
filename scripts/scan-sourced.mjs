@@ -30,11 +30,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dbExists } from "../src/core/db/connection.mjs";
 import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
 import { companyBoardResolutionRecordScan } from "../src/core/db/verbs/company-discovery.mjs";
-import { deepIngestConfirmedForGeneration } from "../src/core/db/verbs/index.mjs";
+import {
+  deepIngestConfirmedForGeneration,
+  postingSightingsLoad,
+  postingSightingsRecord,
+} from "../src/core/db/verbs/index.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../src/core/db/verbs/source-config.mjs";
 import { normalizeCompanyKey } from "../src/core/discovery/company-board-resolver.mjs";
 import { hydrateJobOffer } from "../src/core/intake/resolve.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
+import { createHostThrottle } from "../src/core/net/host-throttle.mjs";
 import { resolvePublicFetch } from "../src/core/net/public-http-fetch.mjs";
 import {
   loadLegacyCandidateConfig,
@@ -63,6 +68,8 @@ import {
   scanSearchSources,
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
+import { annotateTopResults } from "../src/core/search/ai-rerank.mjs";
+import { loadSweepSlugs, planSweep, resolveSweepSetting } from "../src/core/search/ats-sweep.mjs";
 import { planDeadBoardSkips, recordDeadBoardOutcome } from "../src/core/search/dead-boards.mjs";
 import {
   SEARCH_NOT_SEARCHABLE_BROWSER_REASON,
@@ -70,7 +77,9 @@ import {
   summarizeDeadSources,
   summarizeSearchHealth,
 } from "../src/core/search/search-health.mjs";
+import { crossMatchNewPostings, openRunCache } from "../src/core/search/shared-postings-cache.mjs";
 import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
+import { normalizeCompanyRoleKey } from "../src/core/tracker/tracker-data.mjs";
 
 const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
 
@@ -205,7 +214,10 @@ function persistSearchSourceWatermark({ pathCtx, source, savedAt, guard }) {
           isFetchableSearchSource(entry)
             ? {
                 ...entry,
-                recency: { ...(entry.recency || {}), lastRunAt: savedAt.toISOString() },
+                recency: {
+                  ...(entry.recency || {}),
+                  lastRunAt: savedAt.toISOString(),
+                },
               }
             : entry
         ),
@@ -272,7 +284,12 @@ function searchSourceTasks(searchSources) {
     if (!source.rssUrl && !supportedBoard) {
       const browserSource = materializeBrowserSearchSource(source);
       if (browserSource?.url) {
-        browsers.push({ kind: "browser", source, captureSource: browserSource, sourceIndex });
+        browsers.push({
+          kind: "browser",
+          source,
+          captureSource: browserSource,
+          sourceIndex,
+        });
       }
     }
   });
@@ -348,6 +365,7 @@ function sourceCoverageReceipt({ kind, label, company, url, result }) {
   };
   const warningCount = Array.isArray(result?.warnings) ? result.warnings.length : 0;
   if (warningCount > 0) receipt.warningCount = warningCount;
+  if (result?.cacheHit) receipt.cached = true;
   if (company) receipt.company = String(company).trim().slice(0, 160);
   return receipt;
 }
@@ -513,41 +531,92 @@ function emptySeenContext() {
 // this exact pattern.
 // ---------------------------------------------------------------------------
 
-export async function runSourcedScan({
-  repoRoot,
-  env = process.env,
-  fetchImpl = fetch,
-  resolveHost,
-  configPath,
-  companyFilter = null,
-  write = true,
-  verify = false,
-  limit = 0,
-  onProgress,
-  assertActive,
-  writeGuard,
-  hydrateOfferImpl = hydratePartialOffer,
-  captureBrowserSourceImpl,
-  recheckDead = false,
-  signal,
-} = {}) {
+export async function runSourcedScan(options = {}) {
+  const state = { sharedRun: null };
+  try {
+    return await runSourcedScanCore(options, state);
+  } finally {
+    state.sharedRun?.close();
+  }
+}
+
+// `prefetchedOffers` (internal, used for shared-cache cross-matching) replaces
+// every fetch: the postings run through this workspace's own filters, dedupe,
+// caps and canonical writer, and nothing about sources (watermarks, dead boards,
+// sightings, revalidation) is touched, since this workspace never fetched them.
+async function runSourcedScanCore(
+  {
+    repoRoot,
+    env = process.env,
+    fetchImpl = fetch,
+    resolveHost,
+    configPath,
+    companyFilter = null,
+    write = true,
+    verify = false,
+    limit = 0,
+    onProgress,
+    assertActive,
+    writeGuard,
+    hydrateOfferImpl = hydratePartialOffer,
+    captureBrowserSourceImpl,
+    recheckDead = false,
+    hostThrottle,
+    rerankImpl = annotateTopResults,
+    signal,
+    prefetchedOffers = null,
+    crossMatch = true,
+  } = {},
+  state = { sharedRun: null }
+) {
+  const prefetched = Array.isArray(prefetchedOffers);
   const ensureActive = () => {
     signal?.throwIfAborted();
     if (typeof assertActive === "function") assertActive();
   };
+  // Per-host concurrency, spacing and Retry-After backoff for every request of
+  // the run. Pass hostThrottle: false to bypass (tests that count raw calls).
+  const throttle =
+    hostThrottle === false
+      ? null
+      : createHostThrottle(resolvePublicFetch(fetchImpl), hostThrottle || {});
   const fetchForRun = (url, init = {}) => {
     const requestSignal =
       signal && init.signal ? AbortSignal.any([signal, init.signal]) : signal || init.signal;
-    return resolvePublicFetch(fetchImpl)(
-      url,
-      requestSignal ? { ...init, signal: requestSignal } : init
-    );
+    const requestInit = requestSignal ? { ...init, signal: requestSignal } : init;
+    return throttle
+      ? throttle.fetch(url, requestInit)
+      : resolvePublicFetch(fetchImpl)(url, requestInit);
   };
   ensureActive();
   const pathCtx = { repoRoot, env };
   const standaloneConfigMode = Boolean(configPath);
+  // Shared public-posting cache: reuse another person's recent fetch of a source
+  // and hand newly cached postings to everyone else afterwards. An explicit
+  // --company or --recheck-dead still fetches fresh (and refreshes the cache).
+  const sharedRun =
+    !prefetched && write && !standaloneConfigMode
+      ? openRunCache({
+          repoRoot,
+          env,
+          bypassReads: Boolean(companyFilter) || recheckDead,
+        })
+      : null;
+  state.sharedRun = sharedRun;
+  const scanCompanyCached = async (company) => {
+    const hit = sharedRun?.lookup("company", company);
+    if (hit) return hit;
+    const result = await scanCompanies(
+      { ...config, tracked_companies: [company] },
+      { fetchImpl: fetchForRun, resolveHost, companyFilter: null }
+    );
+    sharedRun?.store("company", company, company.name, result);
+    return result;
+  };
   const config = loadScannerConfigForRun({ pathCtx, configPath });
-  const candidateConfig = loadCandidateConfig(pathCtx, { standaloneConfigMode });
+  const candidateConfig = loadCandidateConfig(pathCtx, {
+    standaloneConfigMode,
+  });
   const { seenUrls, seenReqIds, seenCompanyRoles, tracker } = standaloneConfigMode
     ? emptySeenContext()
     : buildSeenSetsForRun(pathCtx);
@@ -565,7 +634,13 @@ export async function runSourcedScan({
   const titleFilter = buildTitleFilter(config.title_filter, candidateConfig.targeting);
   const locationFilter = buildLocationFilter(config.location_filter);
 
-  const scanned = { offers: [], errors: [], warnings: [], loginRequests: [], sourceCoverage: [] };
+  const scanned = {
+    offers: [],
+    errors: [],
+    warnings: [],
+    loginRequests: [],
+    sourceCoverage: [],
+  };
   const savedAt = new Date();
   const configuredCompanyCap = Number(
     candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
@@ -574,11 +649,15 @@ export async function runSourcedScan({
     Number.isInteger(configuredCompanyCap) && configuredCompanyCap > 0 ? configuredCompanyCap : 5;
   let companies = enabledCompanies(config, companyFilter);
   let searchSources = null;
-  if (!companyFilter && !standaloneConfigMode) {
+  if (prefetched) companies = [];
+  if (!companyFilter && !standaloneConfigMode && !prefetched) {
     try {
       searchSources = loadSearchSourcesForRun(pathCtx);
     } catch (error) {
-      scanned.errors.push({ company: "search-sources.yml", error: error.message });
+      scanned.errors.push({
+        company: "search-sources.yml",
+        error: error.message,
+      });
     }
   }
   // Browser-backed sources can't run without a capture implementation (the
@@ -587,18 +666,59 @@ export async function runSourcedScan({
   const allSourceTasks = searchSourceTasks(searchSources);
   const canCaptureBrowser = typeof captureBrowserSourceImpl === "function";
   let sourceTasks = allSourceTasks.filter((task) => task.kind !== "browser" || canCaptureBrowser);
+  // Reverse ATS sweep: boards from an operator-provided slug list, scanned for
+  // matching roles. Off without the list file; never counts toward run health,
+  // since a guessed slug that 404s says nothing about the search.
+  let sweepPlan = null;
+  const sweepSetting = resolveSweepSetting(candidateConfig.targeting);
+  const sweepInfo = {
+    enabled: false,
+    boards: 0,
+    scanned: 0,
+    deadSkipped: 0,
+    errors: 0,
+    offers: 0,
+  };
+  if (!companyFilter && !standaloneConfigMode && !prefetched && sweepSetting.enabled) {
+    try {
+      const loaded = loadSweepSlugs(pathCtx);
+      if (!loaded.missing) {
+        sweepPlan = planSweep({
+          slugs: loaded.slugs,
+          tracked: config.tracked_companies || [],
+          maxBoards: sweepSetting.maxBoards,
+          now: savedAt.getTime(),
+        });
+        sweepInfo.enabled = true;
+        sweepInfo.listed = loaded.slugs.length;
+        sweepInfo.droppedEntries = loaded.dropped;
+        sweepInfo.skippedTracked = sweepPlan.skippedTracked;
+      }
+    } catch (error) {
+      scanned.errors.push({ company: "ats-sweep-slugs", error: error.message });
+    }
+  }
   // Boards that answered 404/410 on 2 runs in a row sit out until their 14-day
   // re-check (or until the source is edited). An explicit --company or
   // --recheck-dead probes everything.
-  const deadPlan = planDeadBoardSkips({
-    pathCtx,
-    companies,
-    tasks: sourceTasks,
-    allCompanies: config.tracked_companies || [],
-    allSources: searchSources?.[searchListKey(searchSources)] || [],
-    bypass: Boolean(companyFilter) || recheckDead,
-    prune: write && !standaloneConfigMode && !companyFilter,
-  });
+  const deadPlan = prefetched
+    ? {
+        companies,
+        tasks: sourceTasks,
+        skipped: [],
+        keys: new Map(),
+        companyKey: () => null,
+        taskKey: () => null,
+      }
+    : planDeadBoardSkips({
+        pathCtx,
+        companies,
+        tasks: sourceTasks,
+        allCompanies: [...(config.tracked_companies || []), ...(sweepPlan?.entries || [])],
+        allSources: searchSources?.[searchListKey(searchSources)] || [],
+        bypass: Boolean(companyFilter) || recheckDead,
+        prune: write && !standaloneConfigMode && !companyFilter,
+      });
   companies = deadPlan.companies;
   sourceTasks = deadPlan.tasks;
   const notSearchableSources = allSourceTasks
@@ -610,7 +730,10 @@ export async function runSourcedScan({
           ? SEARCH_NOT_SEARCHABLE_LOGIN_REASON
           : SEARCH_NOT_SEARCHABLE_BROWSER_REASON,
     }));
-  const notSearchable = { count: notSearchableSources.length, sources: notSearchableSources };
+  const notSearchable = {
+    count: notSearchableSources.length,
+    sources: notSearchableSources,
+  };
   const totalSources = companies.length + sourceTasks.length;
   scanned.loginRequests.push(...pendingSourceLoginRequests(searchSources));
   let completedSources = 0;
@@ -659,10 +782,7 @@ export async function runSourcedScan({
     companies,
     async (company) => {
       ensureActive();
-      const result = await scanCompanies(
-        { ...config, tracked_companies: [company] },
-        { fetchImpl: fetchForRun, resolveHost, companyFilter: null }
-      );
+      const result = await scanCompanyCached(company);
       ensureActive();
       await reportBatch(result, { kind: "company", label: company.name });
       return { company, result };
@@ -670,7 +790,7 @@ export async function runSourcedScan({
     SOURCE_SCAN_CONCURRENCY
   );
   for (const { company, result } of companyResults) {
-    if (write && !standaloneConfigMode) {
+    if (write && !standaloneConfigMode && !result.cacheHit) {
       recordBoardHealth({ pathCtx, company, result });
       recordDeadBoardOutcome({
         pathCtx,
@@ -709,12 +829,24 @@ export async function runSourcedScan({
     async (task) => {
       ensureActive();
       const singleton = singleSearchSourceConfig(searchSources, task.source);
-      const result =
-        task.kind === "rss"
-          ? await scanSearchSources(singleton, { fetchImpl: fetchForRun, resolveHost })
-          : task.kind === "board"
-            ? await scanBoards(singleton, { fetchImpl: fetchForRun, resolveHost })
-            : await captureBrowserSourceImpl(task.captureSource || task.source);
+      const cacheable = task.kind === "rss" || task.kind === "board";
+      const label = task.source.label || task.source.provider || task.kind;
+      let result = cacheable ? sharedRun?.lookup(task.kind, task.source) : null;
+      if (!result) {
+        result =
+          task.kind === "rss"
+            ? await scanSearchSources(singleton, {
+                fetchImpl: fetchForRun,
+                resolveHost,
+              })
+            : task.kind === "board"
+              ? await scanBoards(singleton, {
+                  fetchImpl: fetchForRun,
+                  resolveHost,
+                })
+              : await captureBrowserSourceImpl(task.captureSource || task.source);
+        if (cacheable) sharedRun?.store(task.kind, task.source, label, result);
+      }
       ensureActive();
       await reportBatch(result, {
         kind: task.kind,
@@ -725,7 +857,12 @@ export async function runSourcedScan({
     SOURCE_SCAN_CONCURRENCY
   );
   for (const { task, result } of searchSourceResults) {
-    if (write && !standaloneConfigMode && ["rss", "board"].includes(task.kind)) {
+    if (
+      write &&
+      !standaloneConfigMode &&
+      !result.cacheHit &&
+      ["rss", "board"].includes(task.kind)
+    ) {
       recordDeadBoardOutcome({
         pathCtx,
         key: deadPlan.taskKey(task),
@@ -764,7 +901,61 @@ export async function runSourcedScan({
     }
   }
 
+  if (sweepPlan?.entries.length) {
+    ensureActive();
+    const sweepDead = planDeadBoardSkips({
+      pathCtx,
+      companies: sweepPlan.entries,
+      tasks: [],
+      allCompanies: sweepPlan.entries,
+      bypass: recheckDead,
+      prune: false,
+      now: savedAt,
+    });
+    sweepInfo.deadSkipped = sweepDead.skipped.length;
+    sweepInfo.boards = sweepDead.companies.length;
+    const sweepResults = await mapWithConcurrency(
+      sweepDead.companies,
+      async (company) => {
+        ensureActive();
+        const result = await scanCompanyCached(company);
+        ensureActive();
+        return { company, result };
+      },
+      SOURCE_SCAN_CONCURRENCY
+    );
+    for (const { company, result } of sweepResults) {
+      if (write && !result.cacheHit) {
+        recordDeadBoardOutcome({
+          pathCtx,
+          key: sweepDead.companyKey(company),
+          kind: "sweep",
+          label: company.name,
+          result,
+        });
+      }
+      sweepInfo.scanned += 1;
+      sweepInfo.errors += (result.errors || []).length > 0 ? 1 : 0;
+      sweepInfo.offers += (result.offers || []).length;
+      scanned.offers.push(...(result.offers || []));
+    }
+  }
+
+  if (prefetched) scanned.offers.push(...prefetchedOffers);
+
+  // Cross-scan memory for ghost/repost demotion. Best-effort: never fails a scan.
+  const sightingKey = (offer) => normalizeCompanyRoleKey(offer.company, offer.title);
+  let postingHistory = null;
+  if (!standaloneConfigMode && dbExists(pathCtx)) {
+    try {
+      postingHistory = postingSightingsLoad(pathCtx);
+    } catch {
+      postingHistory = null;
+    }
+  }
+
   let filtered = filterAndDedupeOffers(scanned.offers, {
+    postingHistory,
     seenUrls,
     seenReqIds,
     seenCompanyRoles,
@@ -775,6 +966,20 @@ export async function runSourcedScan({
     seenRunCompanyRoles: new Set(),
     deferPartialCandidatePolicy: true,
   });
+
+  if (write && !standaloneConfigMode && !prefetched && dbExists(pathCtx)) {
+    try {
+      postingSightingsRecord({
+        ...pathCtx,
+        entries: scanned.offers
+          .filter((offer) => offer?.company && offer?.title)
+          .map((offer) => ({ key: sightingKey(offer), url: offer.url })),
+        now: savedAt,
+      });
+    } catch {
+      // Memory is an aid, not a gate.
+    }
+  }
 
   if (
     filtered.kept.some(
@@ -828,7 +1033,9 @@ export async function runSourcedScan({
       filtered.kept,
       async (offer) => {
         ensureActive();
-        const live = await checkUrlLiveness(offer.url, { fetchImpl: fetchForRun });
+        const live = await checkUrlLiveness(offer.url, {
+          fetchImpl: fetchForRun,
+        });
         ensureActive();
         return { offer, live };
       },
@@ -841,9 +1048,25 @@ export async function runSourcedScan({
     filtered = { ...filtered, kept: checked, expired: dropped };
   }
 
+  // Opt-in AI rerank: annotates the top results, never filters or reorders them.
+  let aiRerank = null;
+  if (filtered.kept.length > 0) {
+    ensureActive();
+    const reranked = await rerankImpl({
+      kept: filtered.kept,
+      config: candidateConfig,
+      repoRoot,
+      env,
+      signal,
+    });
+    ensureActive();
+    if (reranked.aiRerank.status !== "disabled") aiRerank = reranked.aiRerank;
+    filtered = { ...filtered, kept: reranked.kept };
+  }
+
   if (write) ensureActive();
   const revalidatedExisting =
-    write && !standaloneConfigMode
+    write && !standaloneConfigMode && !prefetched
       ? revalidatePersistedSourcedRows({
           repoRoot,
           env,
@@ -867,7 +1090,12 @@ export async function runSourcedScan({
   const persistedResult = write
     ? standaloneConfigMode
       ? {
-          offers: offersWithCapturedJobs({ repoRoot, env, offers: filtered.kept, savedAt }),
+          offers: offersWithCapturedJobs({
+            repoRoot,
+            env,
+            offers: filtered.kept,
+            savedAt,
+          }),
           failed: 0,
           failedIds: [],
           conflicts: 0,
@@ -880,7 +1108,13 @@ export async function runSourcedScan({
           savedAt,
           guard: writeGuard,
         })
-    : { offers: filtered.kept, failed: 0, failedIds: [], conflicts: 0, conflictOffers: [] };
+    : {
+        offers: filtered.kept,
+        failed: 0,
+        failedIds: [],
+        conflicts: 0,
+        conflictOffers: [],
+      };
   const persistedOffers = persistedResult.offers;
 
   // A source's watermark only advances when this run's write came back
@@ -1023,10 +1257,57 @@ export async function runSourcedScan({
     adjacencyNote: adjacencyNote(candidateConfig.targeting, candidateConfig.profile),
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
+    ...(throttle ? { requestStats: throttle.stats() } : {}),
+    ...(aiRerank ? { aiRerank } : {}),
+    ...(sweepInfo.enabled ? { atsSweep: sweepInfo } : {}),
     coldFamilies,
     revalidatedExisting,
     offers: outputOffers,
   };
+
+  if (sharedRun) {
+    const shared = {
+      enabled: true,
+      freshnessHours: sharedRun.settings.freshnessHours,
+      sourcesReused: sharedRun.stats.hits,
+      sourcesFetched: sharedRun.stats.fetched,
+      newPostings: sharedRun.newPostings.length,
+      alsoMatchedFor: [],
+      skipped: [],
+    };
+    // Hand postings no one had cached before to everyone else's own pipeline.
+    // Only per-person counts come back; nothing else about them reaches this summary.
+    if (crossMatch && summary.ok && sharedRun.newPostings.length > 0) {
+      ensureActive();
+      const matched = await crossMatchNewPostings({
+        repoRoot,
+        env,
+        postings: sharedRun.newPostings,
+        assertActive: ensureActive,
+        runScan: ({ env: personEnv, offers }) =>
+          runSourcedScan({
+            repoRoot,
+            env: personEnv,
+            fetchImpl,
+            resolveHost,
+            prefetchedOffers: offers,
+            crossMatch: false,
+            hostThrottle: false,
+            write: true,
+            hydrateOfferImpl: async (offer) => offer,
+            rerankImpl: async ({ kept }) => ({
+              kept,
+              aiRerank: { status: "disabled" },
+            }),
+            assertActive,
+            signal,
+          }),
+      });
+      shared.alsoMatchedFor = matched.alsoMatchedFor;
+      shared.skipped = matched.skipped;
+    }
+    summary.sharedCache = shared;
+  }
 
   return summary;
 }
@@ -1071,6 +1352,34 @@ export function printSummary(summary, offers, cfg, limit) {
     console.log(`Scan health: ${summary.health.status}. ${summary.health.message}.`);
   }
   if (summary.adjacencyNote) console.log(summary.adjacencyNote);
+  if (summary.requestStats?.rateLimited > 0) {
+    const stats = summary.requestStats;
+    console.log(
+      `Rate limited: ${stats.rateLimited} of ${stats.attempts} requests (${stats.rateLimitedPct}%), ${stats.retried} retried after backoff`
+    );
+  }
+  if (summary.atsSweep) {
+    const sweep = summary.atsSweep;
+    console.log(
+      `ATS sweep: ${sweep.scanned} extra boards scanned (${sweep.offers} postings), ${sweep.deadSkipped} known-dead skipped, ${sweep.errors} unreachable`
+    );
+  }
+  if (summary.aiRerank) console.log(`AI rerank: ${summary.aiRerank.message}`);
+  if (summary.sharedCache) {
+    const shared = summary.sharedCache;
+    console.log(
+      `Shared cache: ${shared.sourcesReused} sources reused, ${shared.sourcesFetched} fetched, ${shared.newPostings} new postings cached`
+    );
+    const matched = shared.alsoMatchedFor.filter((entry) => entry.count > 0);
+    if (matched.length > 0) {
+      console.log(
+        `Also matched for: ${matched.map((entry) => `${entry.person} (${entry.count})`).join(", ")}`
+      );
+    }
+    for (const entry of shared.skipped) {
+      console.log(`Shared cache skipped ${entry.person}: ${entry.reason}`);
+    }
+  }
   console.log(`Scanned: ${summary.scanned}`);
   console.log(`New after filters/dedupe: ${summary.new}`);
   console.log(`Filtered by title: ${summary.filteredTitle}`);

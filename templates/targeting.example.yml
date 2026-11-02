@@ -89,6 +89,9 @@ search_preferences:
     mode: "since-last-run" # default: only scan since the prior successful source run
     # mode: "fixed-days"   # use this instead to always scan a fixed posting-age window
     # days: 14             # examples: 1, 7, 14, 30
+  # ai_rerank:           # OPTIONAL, off by default. Adds an AI fit note to the top results.
+  #   enabled: true      # Never filters, hides or reorders a result; needs a configured AI route.
+  #   top_n: 20          # how many top results get a note (1 to 50)
 
 role_families:            # override outcome role-family taxonomy; omit to derive from role_buckets names
   - name: "fde"

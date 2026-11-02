@@ -14,7 +14,10 @@
 // posting is grade >= 2.
 //
 // Usage:
-//   node scripts/eval/search-bench.mjs [--json] [--update-baseline] [--fixtures <dir>]
+//   node scripts/eval/search-bench.mjs [--json] [--update-baseline] [--fixtures <dir>] [--why <id>]
+//   --why <id> explains one posting's path: title decision, score and flags, the
+//   stage that cut it (or its rank), against its label. Miss reasons per cut good
+//   posting are always part of the report.
 //   --fixtures runs another fixture directory (e.g. holdout/). Its baseline.json, if any, is
 //   only written with --update-baseline; holdout-onboarded/ carries one.
 //   npm run bench:search -- --update-baseline   (intentional baseline change)
@@ -28,6 +31,7 @@ import {
   buildLocationFilter,
   buildTitleFilter,
   filterAndDedupeOffers,
+  scoreSourcedOffer,
 } from "../../src/core/scoring/sourced-scanner.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -52,6 +56,14 @@ const CUT_BUCKETS = [
   "overflow",
 ];
 
+function countBy(items, keyOf) {
+  const counts = {};
+  for (const item of items) counts[keyOf(item)] = (counts[keyOf(item)] || 0) + 1;
+  return Object.fromEntries(
+    Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  );
+}
+
 function round(value) {
   return Number(value.toFixed(4));
 }
@@ -71,10 +83,11 @@ function cutReasonFor(bucket, entry) {
   return entry.qualificationReason || entry.reason || bucket;
 }
 
-export function evaluateCandidate(fixture) {
+function runFilter(fixture) {
   const { targeting, profile, postings } = fixture;
   const generated = buildSearchSources(targeting, profile);
   const config = { targeting, profile };
+  const titleFilter = buildTitleFilter(generated.title_filter, targeting);
   const filtered = filterAndDedupeOffers(
     postings.map((p) => ({
       _benchId: p.id,
@@ -86,13 +99,19 @@ export function evaluateCandidate(fixture) {
       bodyText: p.bodyText,
     })),
     {
-      titleFilter: buildTitleFilter(generated.title_filter, targeting),
+      titleFilter,
       locationFilter: buildLocationFilter(generated.location_filter),
       config,
       now: FIXED_NOW,
       perCompanyCap: PER_COMPANY_CAP,
     }
   );
+  return { filtered, titleFilter, config };
+}
+
+export function evaluateCandidate(fixture) {
+  const { postings } = fixture;
+  const { filtered } = runFilter(fixture);
 
   const byId = new Map(postings.map((p) => [p.id, p]));
   const ranking = filtered.kept.map((offer) => byId.get(offer._benchId));
@@ -133,6 +152,7 @@ export function evaluateCandidate(fixture) {
 
   return {
     name: fixture.name,
+    missReasons: countBy(misses, (m) => m.reason),
     postings: postings.length,
     kept: ranking.length,
     goodTotal,
@@ -157,12 +177,106 @@ export function runSearchBench({ dir = FIXTURE_DIR } = {}) {
   const candidates = loadFixtures(dir).map(evaluateCandidate);
   const mean = (metric) =>
     round(candidates.reduce((sum, c) => sum + c.metrics[metric], 0) / (candidates.length || 1));
+  const allMisses = candidates.flatMap((c) => c.misses);
   return {
     k: K,
     goodGrade: GOOD_GRADE,
+    missReasons: countBy(allMisses, (m) => m.reason),
+    missKinds: countBy(allMisses, (m) => m.kind || "unlabelled"),
     candidates,
     overall: Object.fromEntries(METRICS.map((metric) => [metric, mean(metric)])),
   };
+}
+
+// Where one posting went and why: the title decision, the score and flags the
+// scorer gave it, the stage that cut it or the rank it kept, against its label.
+export function explainPosting(id, { dir = FIXTURE_DIR } = {}) {
+  const matches = [];
+  for (const fixture of loadFixtures(dir)) {
+    const posting = fixture.postings.find((p) => p.id === id);
+    if (!posting) continue;
+    const { filtered, titleFilter, config } = runFilter(fixture);
+    const offer = {
+      title: posting.title,
+      company: posting.company,
+      location: posting.location,
+      url: posting.url,
+      comp: posting.comp,
+      bodyText: posting.bodyText,
+    };
+    const decision =
+      typeof titleFilter.classify === "function"
+        ? titleFilter.classify(posting.title)
+        : { matched: titleFilter(posting.title) };
+    const rating = scoreSourcedOffer(offer, config);
+    const kept = filtered.kept.findIndex((o) => o._benchId === id);
+    let outcome;
+    if (kept !== -1) {
+      const entry = filtered.kept[kept];
+      outcome = {
+        status: "kept",
+        rank: kept + 1,
+        demotion: entry.demotion || null,
+      };
+    } else {
+      outcome = { status: "cut", bucket: null, reason: "unknown" };
+      for (const bucket of CUT_BUCKETS) {
+        const entry = (filtered[bucket] || []).find((o) => o._benchId === id);
+        if (entry) outcome = { status: "cut", bucket, reason: cutReasonFor(bucket, entry) };
+      }
+    }
+    matches.push({
+      candidate: fixture.name,
+      id,
+      title: posting.title,
+      company: posting.company,
+      location: posting.location,
+      grade: posting.grade,
+      kind: posting.kind || null,
+      titleDecision: {
+        matched: Boolean(decision.matched),
+        blocked: Boolean(decision.blocked),
+        adjacent: Boolean(decision.adjacent),
+      },
+      rating: {
+        score: rating.score,
+        fit: rating.fit,
+        gate: rating.gate,
+        flags: rating.ruleFlags || [],
+        reason: rating.ratingReason,
+      },
+      outcome,
+      verdict:
+        posting.grade >= GOOD_GRADE
+          ? outcome.status === "kept"
+            ? "good posting kept"
+            : "MISS: good posting cut"
+          : outcome.status === "kept"
+            ? "junk kept"
+            : "junk cut",
+    });
+  }
+  return matches;
+}
+
+function formatWhy(matches, id) {
+  if (!matches.length) return `No posting with id "${id}" in the fixtures.`;
+  return matches
+    .map((m) => {
+      const lines = [
+        `${m.id} (${m.candidate}): ${m.title} @ ${m.company} (${m.location})`,
+        `  label: grade ${m.grade}${m.kind ? `, ${m.kind}` : ""}`,
+        `  title: ${m.titleDecision.matched ? "matched" : m.titleDecision.blocked ? "blocked" : m.titleDecision.adjacent ? "adjacent" : "no match"}`,
+        `  score: ${m.rating.score} (${m.rating.fit}), gate ${m.rating.gate}${m.rating.flags.length ? `, flags: ${m.rating.flags.join(", ")}` : ""}`,
+        m.rating.reason ? `  scorer: ${m.rating.reason}` : null,
+        m.outcome.status === "kept"
+          ? `  outcome: kept at rank ${m.outcome.rank}${m.outcome.demotion ? `, ranked lower: ${m.outcome.demotion.reasons.join("; ")}` : ""}`
+          : `  outcome: cut at ${m.outcome.bucket || "unknown"}: ${m.outcome.reason}`,
+        `  verdict: ${m.verdict}`,
+      ];
+      return lines.filter(Boolean).join("\n");
+    })
+    .join("\n\n");
 }
 
 export function baselineFrom(result) {
@@ -190,6 +304,16 @@ function formatText(result) {
     }
     lines.push("");
   }
+  const reasonEntries = Object.entries(result.missReasons || {});
+  if (reasonEntries.length) {
+    lines.push("Cut good postings by reason:");
+    for (const [reason, count] of reasonEntries) lines.push(`  ${count}  ${reason}`);
+    const kindEntries = Object.entries(result.missKinds || {});
+    lines.push(
+      `  by label: ${kindEntries.map(([kind, count]) => `${kind} ${count}`).join(", ")}`,
+      ""
+    );
+  }
   lines.push(
     `overall: precision@10 ${pct(result.overall.precisionAt10)}  kept precision ${pct(result.overall.keptPrecision)}  ndcg@10 ${pct(result.overall.ndcgAt10)}  good recall ${pct(result.overall.goodRecall)}`
   );
@@ -207,6 +331,18 @@ function main() {
       process.exit(2);
     }
     dir = resolve(argv[fixturesAt + 1]);
+  }
+  const whyAt = argv.indexOf("--why");
+  if (whyAt !== -1) {
+    const id = argv[whyAt + 1];
+    if (!id) {
+      console.error("--why needs a posting id");
+      process.exit(2);
+    }
+    const matches = explainPosting(id, { dir });
+    console.log(args.has("--json") ? JSON.stringify(matches, null, 2) : formatWhy(matches, id));
+    if (!matches.length) process.exit(1);
+    return;
   }
   const result = runSearchBench({ dir });
   if (args.has("--update-baseline")) {
