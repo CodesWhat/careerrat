@@ -28,15 +28,23 @@ function relativeImports(file) {
   return found;
 }
 
+// npm 11 prints `npm pack --json` as an array; CI's pinned npm 12 prints an
+// object keyed by package name. Accept either.
+function firstPackedPackage(json) {
+  return Array.isArray(json) ? json[0] : Object.values(json)[0];
+}
+
 test("every script the shipped code spawns or imports is in the packed tarball", () => {
   const packed = new Set(
-    JSON.parse(
-      execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-        cwd: root,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-    )[0].files.map((file) => file.path.split("/").join(sep))
+    firstPackedPackage(
+      JSON.parse(
+        execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+          cwd: root,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+      )
+    ).files.map((file) => file.path.split("/").join(sep))
   );
 
   const referenced = new Set();
