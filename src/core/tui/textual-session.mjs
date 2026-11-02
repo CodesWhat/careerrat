@@ -31,6 +31,7 @@ export async function createTextualSession({
   let drawing;
   let watcher;
   let lastSnapshot = "";
+  let framed = null;
 
   function send(event) {
     if (!closing) emit(event);
@@ -64,16 +65,29 @@ export async function createTextualSession({
     });
     sendDetail();
   }
+  // Only the rows that changed since the last frame go over the bridge. The
+  // first frame, and any frame after a resize, carries every row.
   function frame() {
     drawing = null;
     if (!pane) return;
+    const lines = native.renderTerminalRows(pane.terminal);
+    const { cols, rows } = pane.terminal;
+    const cursor = pane.cursor();
+    const scroll = pane.scrollState();
+    const meta = JSON.stringify([cols, rows, cursor, scroll]);
+    const full = !framed || framed.lines.length !== lines.length || framed.cols !== cols;
+    const changed = full
+      ? []
+      : lines.flatMap((line, index) => (line === framed.lines[index] ? [] : [[index, line]]));
+    if (!full && !changed.length && meta === framed.meta) return;
+    framed = { lines, cols, meta };
     send({
       type: "frame",
-      lines: native.renderTerminalRows(pane.terminal),
-      cursor: pane.cursor(),
-      cols: pane.terminal.cols,
-      rows: pane.terminal.rows,
-      scroll: pane.scrollState(),
+      ...(full ? { lines } : { changed }),
+      cursor,
+      cols,
+      rows,
+      scroll,
     });
   }
   function scheduleFrame() {

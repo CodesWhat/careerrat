@@ -15,7 +15,8 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
-from textual.geometry import Offset
+from textual.geometry import Offset, Region
+from textual.strip import Strip
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets._select import SelectOverlay
@@ -356,6 +357,56 @@ def fit_report_text(row, fit, has_table):
 class NativePane(Widget):
     can_focus = True
     frame = None
+    lines = ()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.strips = {}
+
+    def apply_frame(self, value):
+        """Take a frame from the bridge and repaint only the rows that changed."""
+        old = self.lines
+        if "lines" in value:
+            lines = list(value["lines"])
+        else:
+            lines = list(old)
+            for index, line in value["changed"]:
+                if index >= len(lines):
+                    lines.extend([""] * (index + 1 - len(lines)))
+                lines[index] = line
+        changed = [
+            index
+            for index in range(max(len(lines), len(old)))
+            if index >= len(old) or index >= len(lines) or lines[index] != old[index]
+        ]
+        resized = len(lines) != len(old)
+        self.lines = lines
+        self.frame = {**{k: v for k, v in value.items() if k != "changed"}, "lines": lines}
+        for index in changed:
+            self.strips.pop(index, None)
+        if resized or "lines" in value and len(changed) == len(lines):
+            self.strips.clear()
+            self.refresh()
+        elif changed:
+            gutter = self.gutter
+            width = self.size.width
+            self.refresh(
+                *[
+                    Region(0, index + gutter.top, width, 1)
+                    for index in changed
+                ]
+            )
+
+    def render_line(self, y):
+        if not self.frame:
+            return super().render_line(y)
+        strip = self.strips.get(y)
+        if strip is None:
+            line = self.lines[y] if y < len(self.lines) else ""
+            text = Text.from_ansi(line)
+            strip = Strip(text.render(self.app.console)).simplify()
+            self.strips[y] = strip
+        return strip.adjust_cell_length(self.content_size.width)
 
     def render(self):
         if not self.frame:
@@ -954,12 +1005,11 @@ class CareerRatApp(App):
             self.show_agent_status(value["message"])
         elif kind == "frame":
             pane = self.query_one(NativePane)
-            pane.frame = value
+            pane.apply_frame(value)
             behind = (value.get("scroll") or {}).get("offset") or 0
             pane.border_subtitle = (
                 f"{behind} lines up · type or Shift+PageDown to return" if behind else ""
             )
-            pane.refresh()
             pane.place_cursor()
         elif kind == "request":
             self.query_one("#request", Input).value = value["text"]

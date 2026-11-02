@@ -65,6 +65,17 @@ async function fixture(t, agent = null, extraEnv = {}, extraOptions = {}) {
 function snapshot(events) {
   return events.filter((event) => event.type === "workspace").at(-1);
 }
+// Replays frame events the way the Python side does: a full frame, then only
+// the rows that changed.
+function screen(events) {
+  let lines = [];
+  for (const event of events) {
+    if (event.type !== "frame") continue;
+    if (event.lines) lines = [...event.lines];
+    else for (const [index, line] of event.changed) lines[index] = line;
+  }
+  return lines.join("");
+}
 async function until(check) {
   const end = Date.now() + 4000;
   while (!check()) {
@@ -259,26 +270,47 @@ test("Textual reuses the actual PTY for input, paste, resize and cleanup", {
     args: ["-e", childCode],
   });
   await session.dispatch({ op: "resize", cols: 70, rows: 18 });
-  await until(() =>
-    events.some(
-      (event) => event.type === "frame" && event.lines.join("").includes("TEXTUAL_NATIVE_READY")
-    )
-  );
+  await until(() => screen(events).includes("TEXTUAL_NATIVE_READY"));
   const pid = events.find((event) => event.type === "agent-started").pid;
   await session.dispatch({ op: "input", data: "hello" });
-  await until(() =>
-    events.some((event) => event.type === "frame" && event.lines.join("").includes("GOT:hello"))
-  );
+  await until(() => screen(events).includes("GOT:hello"));
   await session.dispatch({ op: "paste", data: "world" });
-  await until(() =>
-    events.some((event) => event.type === "frame" && event.lines.join("").includes("world"))
-  );
+  await until(() => screen(events).includes("world"));
   await session.dispatch({ op: "resize", cols: 64, rows: 15 });
   await until(() =>
     events.some((event) => event.type === "frame" && event.cols === 64 && event.rows === 15)
   );
   await session.close();
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
+test("later frames carry only the rows that changed", { timeout: 9000 }, async (t) => {
+  const childCode =
+    "process.stdin.setRawMode(true);process.stdin.resume();process.stdout.write('FIRST_ROW');process.stdin.on('data',()=>process.stdout.write('\\x1b[5;1HFIFTH_ROW'));";
+  const { events, session } = await fixture(t, {
+    command: process.execPath,
+    args: ["-e", childCode],
+  });
+  await session.dispatch({ op: "resize", cols: 40, rows: 8 });
+  await until(() => screen(events).includes("FIRST_ROW"));
+  assert.equal(events.find((event) => event.type === "frame").lines.length, 8);
+  const before = events.filter((event) => event.type === "frame").length;
+  await session.dispatch({ op: "input", data: "x" });
+  await until(() => screen(events).includes("FIFTH_ROW"));
+  const later = events.filter((event) => event.type === "frame").slice(before);
+  assert.ok(later.length > 0);
+  for (const event of later) {
+    assert.equal("lines" in event, false);
+    assert.ok(event.changed.length <= 2, `sent ${event.changed.length} rows for one row's change`);
+  }
+  assert.ok(later.some((event) => event.changed.some(([index]) => index === 4)));
+  // Nothing changed, so nothing more is sent.
+  const count = events.length;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(events.length, count);
+  await session.dispatch({ op: "resize", cols: 44, rows: 8 });
+  await until(() => events.at(-1).type === "frame" && events.at(-1).cols === 44);
+  assert.equal(events.at(-1).lines.length, 8);
 });
 
 test("the agent pane resolves careerrat to this checkout, not an earlier install", {
@@ -298,13 +330,8 @@ test("the agent pane resolves careerrat to this checkout, not an earlier install
   );
   const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
   await session.dispatch({ op: "resize", cols: 70, rows: 18 });
-  await until(() =>
-    events.some((event) => event.type === "frame" && event.lines.join("").includes("CLI["))
-  );
-  const text = events
-    .filter((event) => event.type === "frame")
-    .at(-1)
-    .lines.join("");
+  await until(() => screen(events).includes("CLI["));
+  const text = screen(events);
   assert.match(text, new RegExp(`CLI\\[${version.replaceAll(".", "\\.")}\\]`));
   assert.doesNotMatch(text, /OLD-INSTALL/);
 });
