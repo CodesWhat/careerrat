@@ -1,20 +1,16 @@
 import { createHash } from "node:crypto";
-
 import {
   captureWorkspaceIntake,
   executeWorkspaceIntent,
   previewWorkspaceIntent,
   runWorkspaceAgentTurn,
 } from "../core/agent/workspace-agent.mjs";
-import {
-  normalizeWorkspaceIntent,
-  WORKSPACE_THREAD_ID,
-  workspaceThreadOpen,
-} from "../core/agent/workspace-thread.mjs";
+import { normalizeWorkspaceIntent, WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
 import { loadAIPreferences } from "../core/ai/ai-preferences.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../core/ai/operation-policy.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
+import { mountWorkspaceReviewRoutes } from "./workspace-review-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const CONFLICT_CODES = new Set([
@@ -444,48 +440,8 @@ export function mountWorkspaceAgentRoutes({
   captureIntakeImpl = captureWorkspaceIntake,
   previewIntentImpl = previewWorkspaceIntent,
   appOperations,
-  revertKnowledgeImpl = executeWorkspaceIntent,
 } = {}) {
-  addRoute("POST", "/api/workspace/knowledge/revert", async (req, res) => {
-    try {
-      const body = exactInput(
-        await readJsonBodyCapped(req, MAX_BODY_BYTES),
-        ["messageId", "index"],
-        "knowledge undo"
-      );
-      if (
-        typeof body.messageId !== "string" ||
-        !body.messageId.trim() ||
-        body.messageId.length > 500 ||
-        !Number.isInteger(body.index) ||
-        body.index < 0
-      ) {
-        const error = new Error("A saved message and artifact index are required.");
-        error.code = "BAD_REQUEST";
-        throw error;
-      }
-      const result = await revertKnowledgeImpl({
-        repoRoot,
-        env,
-        intent: {
-          type: "knowledge.revert",
-          entity: { type: "workspace", id: "workspace-main" },
-          input: { messageId: body.messageId, index: body.index },
-        },
-      });
-      sendJson(res, 200, { ok: true, data: result });
-    } catch (error) {
-      sendError(res, error);
-    }
-  });
-
-  addRoute("GET", "/api/workspace/thread", (_req, res) => {
-    try {
-      sendJson(res, 200, { ok: true, data: workspaceThreadOpen({ repoRoot, env }) });
-    } catch (error) {
-      sendError(res, error);
-    }
-  });
+  mountWorkspaceReviewRoutes({ addRoute, repoRoot, env });
 
   addRoute("POST", "/api/workspace/message", async (req, res) => {
     try {

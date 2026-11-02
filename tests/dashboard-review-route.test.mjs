@@ -1,19 +1,21 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { test } from "node:test";
-import { mountWorkspaceAgentRoutes } from "../src/cli/workspace-agent-route.mjs";
+import { mountWorkspaceReviewRoutes } from "../src/cli/workspace-review-route.mjs";
 
-function fixture() {
+function fixture(revert) {
   const routes = new Map();
   const calls = [];
-  mountWorkspaceAgentRoutes({
+  mountWorkspaceReviewRoutes({
     repoRoot: "/synthetic-workspace",
     env: { CAREERRAT_PERSON: "alex" },
     addRoute: (method, path, handler) => routes.set(`${method} ${path}`, handler),
-    revertKnowledgeImpl: async (input) => {
-      calls.push(input);
-      return { messages: [{ text: "Undid the saved change." }] };
-    },
+    revertKnowledgeImpl:
+      revert ||
+      (async (input) => {
+        calls.push(input);
+        return { messages: [{ text: "Undid the saved change." }] };
+      }),
   });
   async function request(body) {
     const handler = routes.get("POST /api/workspace/knowledge/revert");
@@ -41,11 +43,9 @@ test("dashboard undo needs no AI route or operation manager", async () => {
   assert.equal(result.status, 200);
   assert.equal(result.response.data.messages[0].text, "Undid the saved change.");
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].intent, {
-    type: "knowledge.revert",
-    entity: { type: "workspace", id: "workspace-main" },
-    input: { messageId: "saved-message", index: 2 },
-  });
+  assert.equal(calls[0].messageId, "saved-message");
+  assert.equal(calls[0].index, 2);
+  assert.equal(calls[0].intent, undefined);
   assert.equal(calls[0].env.CAREERRAT_PERSON, "alex");
 });
 
@@ -60,4 +60,13 @@ test("dashboard undo refuses caller-supplied write contents and invalid referenc
     assert.equal((await request(body)).status, 400);
   }
   assert.equal(calls.length, 0);
+});
+
+test("dashboard undo keeps internal failure details out of its response", async () => {
+  const { request } = fixture(() => {
+    throw new Error("synthetic internal database path");
+  });
+  const result = await request({ messageId: "saved-message", index: 0 });
+  assert.equal(result.status, 500);
+  assert.doesNotMatch(result.response.error, /internal database path/);
 });
