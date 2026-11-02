@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { registerDbHolder } from "../db/holders.mjs";
 import { readSavedJobDescription } from "../jobs/job-description.mjs";
 import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
 import { withCareerratShim } from "./cli-shim.mjs";
@@ -30,6 +31,7 @@ export async function createTextualSession({
   let closePromise;
   let drawing;
   let watcher;
+  const releaseHolder = registerDbHolder(ctx, "tui");
   let lastSnapshot = "";
   let framed = null;
 
@@ -318,6 +320,7 @@ export async function createTextualSession({
     closing = true;
     clearTimeout(drawing);
     watcher?.close();
+    releaseHolder();
     closePromise = (async () => {
       try {
         await pane?.dispose();

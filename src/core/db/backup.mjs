@@ -16,6 +16,7 @@ import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dataPath } from "../paths/workspace.mjs";
 import { closeAll, dbExists, dbFilePath, openDb } from "./connection.mjs";
+import { assertNoDbHolders } from "./holders.mjs";
 import { ALL_MIGRATIONS } from "./migrations.mjs";
 
 const BACKUP_REL_DIR = "db/backups";
@@ -117,6 +118,9 @@ function assertUsableBackup(file) {
 // Replace the live database with a backup. The database being replaced is
 // itself copied into the backups folder first, so a restore can be undone.
 export function restoreBackup(ctx = {}, selector) {
+  // Before anything is read or copied: a process with the old file open would
+  // keep writing to it after the restore deleted it.
+  assertNoDbHolders(ctx);
   const chosen = resolveBackup(ctx, selector);
   assertUsableBackup(chosen.full);
 
