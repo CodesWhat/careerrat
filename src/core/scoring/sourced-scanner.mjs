@@ -2189,10 +2189,13 @@ export function filterAndDedupeOffers(
         continue;
       }
       rating = scoreSourcedOffer(offer, config);
+      // Adjacent titles are shown but ranked below exact matches (base 70 vs
+      // 82), so only a real cut signal or a different job family removes them,
+      // never the mode threshold.
       if (
         !titleDecision.adjacent ||
-        rating.score < scannerLikelyKeepThreshold(config?.modes) ||
-        rating.gate === "likely-cut"
+        rating.gate === "likely-cut" ||
+        rating.ruleFlags?.includes("title-target-mismatch")
       ) {
         filteredTitle.push({
           ...offer,

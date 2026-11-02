@@ -1518,49 +1518,58 @@ test("distinct Hireology requisitions survive even when their job facts match", 
   assert.equal(result.duplicates.length, 0);
 });
 
-test("adjacent engineering titles need strong candidate evidence while blockers stay blocked", () => {
+test("adjacent engineering titles are shown below exact matches in every mode while blockers stay blocked", () => {
   const titleFilter = buildTitleFilter({
     positive: ["Staff Frontend Engineer"],
     negative: ["Security", "Sales"],
   });
-  const config = {
-    targeting: {
-      role_buckets: [{ titles: ["Staff Frontend Engineer"] }],
-      keep_signals: ["accessibility systems"],
-    },
-    profile: { location: { home: "New York, NY", remote: true } },
-  };
   const makeOffer = (id, title) => ({
     company: "Acme",
     title,
     url: `https://jobs.example.test/${id}`,
     location: "Remote - United States",
-    bodyText: "Build accessibility systems for a mature product platform. ".repeat(12),
+    // No keep-signal evidence in the body on purpose.
+    bodyText: "Build and maintain a mature product platform with a friendly team. ".repeat(12),
   });
-  const result = filterAndDedupeOffers(
-    [
-      makeOffer("design-systems", "Staff Software Engineer, Design Systems"),
-      makeOffer("security", "Staff Security Engineer"),
-      makeOffer("marketing", "Product Marketing Manager"),
-    ],
-    {
-      seenUrls: new Set(),
-      seenReqIds: new Set(),
-      seenCompanyRoles: new Set(),
-      titleFilter,
-      locationFilter: () => true,
-      config,
-    }
-  );
+  for (const application_mode of ["balanced", "high-volume"]) {
+    const config = {
+      targeting: { role_buckets: [{ titles: ["Staff Frontend Engineer"] }] },
+      modes: { application_mode },
+      profile: { location: { home: "New York, NY", remote: true } },
+    };
+    const exact = scoreSourcedOffer(makeOffer("exact", "Staff Frontend Engineer"), config);
+    const adjacentTitles = ["Staff UI Engineer", "Staff Software Engineer, Design Systems"];
+    const result = filterAndDedupeOffers(
+      [
+        ...adjacentTitles.map((title, i) => makeOffer(`adjacent-${i}`, title)),
+        makeOffer("security", "Staff Security Engineer"),
+        makeOffer("marketing", "Product Marketing Manager"),
+      ],
+      {
+        seenUrls: new Set(),
+        seenReqIds: new Set(),
+        seenCompanyRoles: new Set(),
+        titleFilter,
+        locationFilter: () => true,
+        config,
+      }
+    );
 
-  assert.deepEqual(
-    result.kept.map((offer) => [offer.title, offer.titleRelevance]),
-    [["Staff Software Engineer, Design Systems", "adjacent-signal"]]
-  );
-  assert.deepEqual(
-    result.filteredTitle.map((offer) => offer.qualificationReason),
-    ["title-negative-blocker", "title-relevance-low"]
-  );
+    assert.deepEqual(
+      result.kept.map((offer) => [offer.title, offer.titleRelevance]),
+      adjacentTitles.map((title) => [title, "adjacent-signal"]),
+      application_mode
+    );
+    for (const title of adjacentTitles) {
+      const adjacent = scoreSourcedOffer(makeOffer("a", title), config);
+      assert.ok(adjacent.score < exact.score, `${application_mode} ${title}: ${adjacent.score}`);
+    }
+    assert.deepEqual(
+      result.filteredTitle.map((offer) => offer.qualificationReason),
+      ["title-negative-blocker", "title-relevance-low"],
+      application_mode
+    );
+  }
 });
 
 test("frontend targeting does not admit a backend role as an adjacent engineering title", () => {
