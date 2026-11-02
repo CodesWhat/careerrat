@@ -93,6 +93,28 @@ export function loadAiConfigFile({ root = DEFAULT_ROOT } = {}) {
   return data;
 }
 
+// Doctor's view of config/ai.json: the loader above quietly uses defaults for a
+// file it can't read, so this says so. status is "missing" (fine, defaults),
+// "ok", or "invalid" with a plain reason.
+export function inspectAiConfigFile({ root = DEFAULT_ROOT } = {}) {
+  const path = userPath({ repoRoot: root }, AI_CONFIG_REL_PATH);
+  if (!existsSync(path)) return { path, status: "missing", error: null };
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    return { path, status: "invalid", error: `not valid JSON (${error.message})` };
+  }
+  const { valid, errors } = normalizeAiConfig(parsed, { schema: loadAiConfigSchema({ root }) });
+  return valid
+    ? { path, status: "ok", error: null }
+    : {
+        path,
+        status: "invalid",
+        error: errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("; "),
+      };
+}
+
 // The one precedence rule (env > config file > shipped default), resolved
 // once so every consumer agrees. `env` is injected (defaults to process.env)
 // for testability. The shipped default is the last fallback — a configured

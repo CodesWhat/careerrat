@@ -168,6 +168,11 @@ note when it was taken, and re-ingest before relying on it for a fresh decision.
   careerrat data calendar busy --data '<JSON array of opaque blocks>' --source calendar_read
   ```
 
+  A plain ingest only adds. To make it replace what you read, add
+  `--window <startIso>..<endIso>` for the span the calendar read covered: stored
+  blocks overlapping that span are dropped first, so a cancelled or moved meeting
+  goes away, and an empty array (`--data '[]'`) records a free calendar.
+
   The verb stores `calendarBusy[]` as top-level tracker state, dedupes on
   `provider + startIso + endIso`, forces `label: "Busy"`, stamps
   `ingestedAt`, bumps meta, logs one activity event, and exports the generated
@@ -220,7 +225,7 @@ emit a bracket token (`[Name]`, `[Time]`, `[Company]`) — brackets are a build 
 TODO. For `send-scheduling-link`, share `availability.scheduling_link` with a one-line
 invitation; do not also trade slots.
 
-If saved to a file, run `node src/cli/lint-placeholders.mjs <draft-path>` before presenting.
+If saved to a file, run `careerrat lint-placeholders <draft-path>` before presenting.
 
 Present the draft and the chosen slot(s) to the user and **wait for explicit approval before
 anything is sent or written to a calendar.**

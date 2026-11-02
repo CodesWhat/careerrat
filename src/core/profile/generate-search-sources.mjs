@@ -397,6 +397,39 @@ function generatedRecency(targeting) {
  * @param {object} profile   - CareerRat candidate profile (candidate, compensation, location, …)
  * @returns {object}
  */
+function searchIdentity(search) {
+  const norm = (value) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase();
+  return [norm(search?.provider), norm(search?.label || search?.query || search?.url)].join("|");
+}
+
+// Re-running setup must not throw away a curated list. When a config already
+// has searches, every existing entry (with its run history under
+// `recency.lastRunAt`) and the existing filters stay exactly as they are; only
+// generated searches the config doesn't have yet are appended. A config with
+// no searches takes the generated one whole.
+export function mergeGeneratedSearchSources(existing, generated) {
+  const key = Array.isArray(existing?.searches)
+    ? "searches"
+    : Array.isArray(existing?.sources)
+      ? "sources"
+      : null;
+  if (!key || existing[key].length === 0) {
+    return { merged: generated, kept: 0, added: generated.searches?.length ?? 0 };
+  }
+  const known = new Set(existing[key].map(searchIdentity));
+  const additions = (generated.searches ?? []).filter(
+    (search) => !known.has(searchIdentity(search))
+  );
+  return {
+    merged: { ...existing, [key]: [...existing[key], ...additions] },
+    kept: existing[key].length,
+    added: additions.length,
+  };
+}
+
 export function buildSearchSources(targeting, profile) {
   // --- title_filter ---
   const seenTitles = new Set();

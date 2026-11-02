@@ -118,7 +118,7 @@ Apply priority logic:
 
 ## STEP 4 — Tailor
 
-Check if `workspace/writing-samples/` contains files newer than `candidate/writing-style.md`. If so: run `npm run calibrate:style` first, then confirm it completed before continuing.
+Check if `workspace/writing-samples/` contains files newer than `candidate/writing-style.md`. If so: run `npm run calibrate:style` first, then confirm it completed before continuing. If it reports "Not calibrated" (no writing samples yet), draft in a plain, neutral voice and ask the user for a few samples; don't treat the style as set.
 
 Read: `candidate/writing-style.md`, `candidate/honesty.yml`, `candidate/evidence.yml`. Then run `careerrat learnings read "<role>"` (the helper resolves the family from `targeting.yml` and exits 0 silently if no file exists yet — a missing file is normal).
 
@@ -127,8 +127,8 @@ Invoke `tailor-application` to produce `workspace/tailored/<Company>_<Role>.md` 
 Run placeholder lint on every produced artifact:
 
 ```
-node src/cli/lint-placeholders.mjs workspace/tailored/<Company>_<Role>.md
-node src/cli/lint-placeholders.mjs workspace/tailored/<Company>_<Role>_cover.md
+careerrat lint-placeholders workspace/tailored/<Company>_<Role>.md
+careerrat lint-placeholders workspace/tailored/<Company>_<Role>_cover.md
 ```
 
 Block on any lint hit — do not proceed to Build until lint is clean.

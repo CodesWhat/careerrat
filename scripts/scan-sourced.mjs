@@ -60,7 +60,10 @@ import {
   scanSearchSources,
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
-import { SEARCH_SKIP_BROWSER_REASON } from "../src/core/search/search-health.mjs";
+import {
+  SEARCH_SKIP_BROWSER_REASON,
+  summarizeSearchHealth,
+} from "../src/core/search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
 
 const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
@@ -895,6 +898,13 @@ export async function runSourcedScan({
       .slice(0, CONFLICT_OFFER_SAMPLE_LIMIT)
       .map(conflictOfferSample),
     errors: scanned.errors,
+    // Whether the sources could be read at all. `ok` above only covers saving
+    // what was found, so a scan where every fetch failed used to read
+    // ok:true with nothing to show for it.
+    health: summarizeSearchHealth({
+      errors: scanned.errors,
+      attemptedSources: scanned.sourceCoverage?.length,
+    }),
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
     coldFamilies,
@@ -939,6 +949,9 @@ function assertKnownOptions(args) {
 export function printSummary(summary, offers, cfg, limit) {
   if (summary.coldFamilies.length > 0) {
     console.log(`Cold-board lanes down-weighted: ${summary.coldFamilies.join(", ")}`);
+  }
+  if (summary.health && summary.health.status !== "ok") {
+    console.log(`Scan health: ${summary.health.status}. ${summary.health.message}.`);
   }
   console.log(`Scanned: ${summary.scanned}`);
   console.log(`New after filters/dedupe: ${summary.new}`);
@@ -1007,6 +1020,8 @@ async function main() {
   // (a cron sweep, a CI job) had no process-level signal that offers were
   // silently lost and needed a retry (CR-29 round 7).
   if (summary.ok === false) process.exitCode = 1;
+  // A scan that could not read its sources is a failed scan, not an empty one.
+  if (summary.health?.status === "failed") process.exitCode = 1;
 
   const candidateConfig = loadCandidateConfig(pathCtx);
 

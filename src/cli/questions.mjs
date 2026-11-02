@@ -10,12 +10,14 @@
 //   careerrat questions --help
 //
 // Zero LLM cost: one HTTP GET (or stdin parse), no browser automation.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { fetchFormQuestions, parseManualQuestions } from "../core/apply/form-questions.mjs";
 import { parseSavedJob } from "../core/evaluate/gate.mjs";
+import { resolveUserFileArg } from "../core/paths/user-file-arg.mjs";
 
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const args = process.argv.slice(2);
 const json = args.includes("--json");
 const paste = args.includes("--paste");
@@ -49,9 +51,9 @@ async function run(arg) {
   let outPath = null;
 
   if (!isUrl) {
-    const jobPath = isAbsolute(arg) ? arg : join(process.cwd(), arg);
-    if (!existsSync(jobPath)) {
-      console.error(`Job file not found: ${jobPath}`);
+    const { path: jobPath, tried } = resolveUserFileArg(arg, { repoRoot });
+    if (!jobPath) {
+      console.error(`Job file not found. Looked in:\n  ${tried.join("\n  ")}`);
       return 1;
     }
     const saved = parseSavedJob(readFileSync(jobPath, "utf8"));

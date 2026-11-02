@@ -477,7 +477,7 @@ verbs), then exports — do not repeat these by hand in DB mode:
   channels/dupes). It does not run the ajv schema check (`careerrat tracker
   --verify`); run that too after export if schema-level parity is needed.
 
-Verbs available today (`node src/cli/data.mjs --help` for exact syntax):
+Verbs available today (`careerrat data --help` for exact syntax):
 `app upsert|set-status|set-fields|schedule-interview|register-artifact`,
 `sourced upsert-batch|promote`, `comm upsert|append-message|mark-sent`,
 `calendar busy`, `candidate init|get`, `candidate patch`, `candidate evidence`,

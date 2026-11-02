@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { runSourcedScan } from "../../../scripts/scan-sourced.mjs";
+import { sanitizeFailureCause } from "../ai/failure-cause.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import { companyBoardResolutionGet } from "../db/verbs/company-discovery.mjs";
 import { companyAtsUpsert, sourceConfigGet, sourceConfigPut } from "../db/verbs/source-config.mjs";
@@ -742,14 +743,20 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
     timer = setTimeout(() => resolve(timedOut), COMPANY_BOARD_AI_HINT_TIMEOUT_MS);
   });
   let filled;
+  // Why the rescue found nothing, so a search summary can say so instead of
+  // looking the same as "the AI had no answers".
+  let failure = null;
   try {
     const outcome = await Promise.race([
       fillManualDomainHints({ repoRoot, env, seeds, call }),
       timeout,
     ]);
     filled = outcome === timedOut ? null : outcome;
-  } catch {
+    if (outcome === timedOut) failure = "The AI took too long to answer.";
+    else failure = outcome?.failure || null;
+  } catch (error) {
     filled = null;
+    failure = sanitizeFailureCause(error) || "The AI step failed.";
   } finally {
     clearTimeout(timer);
   }
@@ -761,6 +768,7 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
     attempted: 0,
     resolved: 0,
     promoted: 0,
+    ...(failure ? { failure: String(failure).slice(0, 300) } : {}),
   };
   if (!hintedSeeds.length) return outcome;
 
@@ -860,6 +868,7 @@ async function backfillCompanyBoards({
       requested: rescue.requested,
       hinted: rescue.hinted,
       resolved: rescue.resolved,
+      ...(rescue.failure ? { failure: rescue.failure } : {}),
     };
   }
 

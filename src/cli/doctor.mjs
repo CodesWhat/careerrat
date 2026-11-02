@@ -14,6 +14,8 @@ import {
   readDiscoverySkips,
   readSetupState,
 } from "../core/agent-guidance.mjs";
+import { inspectAiConfigFile } from "../core/ai/ai-config.mjs";
+import { inspectAIPreferencesFile } from "../core/ai/ai-preferences.mjs";
 import {
   detectInstalledRuntimes,
   installedRuntimeExecutionIdentity,
@@ -41,11 +43,13 @@ import { parseConfig } from "../core/providers/search-sources.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
 import { pendingSourceLoginRequests } from "../core/search/source-login-preflight.mjs";
 import { textualPythonStatus } from "../core/tui/python-runtime.mjs";
+import { exitOnUnknownFlags } from "./unknown-flags.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
 const pathCtx = { repoRoot: root };
 const userPaths = resolveUserPaths(pathCtx);
 const args = process.argv.slice(2);
+exitOnUnknownFlags(args, ["--json", "--guidance-only", "--network"], "doctor");
 const json = args.includes("--json");
 // Skips runtime detection (and the fingerprint hashing it does for every
 // discovered executable — hundreds of MB across Claude and Codex) and
@@ -436,6 +440,7 @@ const result = {
   plugins: {
     bundled: pluginVerification.plugins.length,
     runnable: pluginVerification.plugins.length - invalidPlugins.length,
+    verified: pluginVerification.plugins.length - invalidPlugins.length,
     invalid: invalidPlugins.map((p) => ({ name: p.name, errors: p.errors })),
     error: pluginVerification.error,
   },
@@ -453,6 +458,12 @@ const result = {
     completedSteps: discoveryCompleted,
   },
   agentGuidance,
+  // Warning only (never flips result.ok): a config file CareerRat can't read is
+  // otherwise silently replaced by defaults.
+  aiFiles: {
+    config: inspectAiConfigFile({ root }),
+    preferences: inspectAIPreferencesFile(pathCtx),
+  },
   dataRoot: userPaths.dataRoot,
 };
 
@@ -471,6 +482,16 @@ if (missingSystem.length > 0) {
   console.log("System files missing:");
   for (const path of missingSystem) console.log(`- ${path}`);
   console.log("");
+}
+
+{
+  const unreadable = Object.values(result.aiFiles).filter(({ status }) => status === "invalid");
+  if (unreadable.length > 0) {
+    console.log("AI settings files CareerRat could not read (defaults are in use):");
+    for (const file of unreadable) console.log(`- ${file.path}: ${file.error}`);
+    console.log("  fix: correct or delete the file.");
+    console.log("");
+  }
 }
 
 if (skillsNotDiscoverable.length > 0) {
@@ -593,8 +614,12 @@ if (guidanceOnly) {
 console.log("");
 
 {
-  const runnable = pluginVerification.plugins.length - invalidPlugins.length;
-  console.log(`Plugins: ${pluginVerification.plugins.length} bundled, ${runnable} runnable.`);
+  const verified = pluginVerification.plugins.length - invalidPlugins.length;
+  // "Verified" means the manifest and entry check out. Nothing in CareerRat calls
+  // a plugin yet, so this is not a claim that any plugin is in use.
+  console.log(
+    `Plugins: ${pluginVerification.plugins.length} bundled, ${verified} verified (nothing calls plugins yet).`
+  );
   if (pluginVerification.error) {
     console.log(`- ${pluginVerification.error}`);
   }

@@ -72,7 +72,7 @@ Read all of the following before doing anything else:
    behavioural answers that already trace to evidence. Run:
 
    ```sh
-   careerrat stories match "workspace/jobs/<jd-file>.md.json"
+   careerrat stories match "workspace/jobs/<jd-file>.md"
    ```
 
    (or `--signals "a,b,c"` when you don't have the JD JSON path). A missing or empty
@@ -119,8 +119,9 @@ one-off node script:
 import { renderInterviewPacket } from './src/core/interview/packet.mjs';
 import { loadStories } from './src/core/interview/story-bank.mjs';
 import { parseYaml } from './src/core/profile/yaml.mjs';
+import { parseSavedJob } from './src/core/evaluate/gate.mjs';
 import { readFileSync } from 'node:fs';
-const job      = JSON.parse(readFileSync('workspace/jobs/<jd-file>.md.json', 'utf8'));
+const job      = parseSavedJob(readFileSync('workspace/jobs/<jd-file>.md', 'utf8'));
 const profile  = parseYaml(readFileSync('candidate/profile.yml', 'utf8'));
 const evidence = parseYaml(readFileSync('candidate/evidence.yml', 'utf8'));
 const honesty  = parseYaml(readFileSync('candidate/honesty.yml', 'utf8'));
@@ -623,7 +624,7 @@ Run `careerrat tracker --verify` immediately after. Then write the outcome to th
 Run:
 
 ```sh
-node src/cli/lint-placeholders.mjs workspace/interview-prep/<company>-<role>.md
+careerrat lint-placeholders workspace/interview-prep/<company>-<role>.md
 ```
 
 Fix every `[Company]`, `[Role]`, `<insert>`, or unfilled placeholder before

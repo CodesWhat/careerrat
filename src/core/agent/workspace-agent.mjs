@@ -1797,7 +1797,7 @@ async function evaluateApplicationRequest({
     evaluation,
     gate,
     gateLabel,
-    text: `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`,
+    text: evaluationSummaryText(application, evaluation, gateLabel),
     artifact: {
       kind: "job_evaluation",
       title: `${applicationLabel(application)}: ${gateLabel}`,
@@ -1805,6 +1805,21 @@ async function evaluateApplicationRequest({
       evaluation,
     },
   };
+}
+
+// A verdict the AI never produced (no AI set up, or the call failed) is
+// stored as a manual-review placeholder. It must not read as "Evaluated: Review".
+// A genuine AI "review" verdict also carries manual.required, but it has a score.
+function evaluationHasNoVerdict(evaluation) {
+  return evaluation?.manual?.required === true && evaluation.fitScore == null;
+}
+
+function evaluationSummaryText(application, evaluation, gateLabel) {
+  if (evaluationHasNoVerdict(evaluation)) {
+    const reason = String(evaluation.manual.reason || "").trim();
+    return `Could not evaluate ${applicationLabel(application)}${reason ? `: ${reason}` : "."} Nothing was scored; it needs your manual review.`;
+  }
+  return `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`;
 }
 
 function persistedEvaluationResult(application, applicationId) {
@@ -1816,7 +1831,7 @@ function persistedEvaluationResult(application, applicationId) {
     evaluation,
     gate,
     gateLabel,
-    text: `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`,
+    text: evaluationSummaryText(application, evaluation, gateLabel),
     artifact: {
       kind: "job_evaluation",
       title: `${applicationLabel(application)}: ${gateLabel}`,
@@ -1826,7 +1841,13 @@ function persistedEvaluationResult(application, applicationId) {
   };
 }
 
-function evaluationNextActions(gate, applicationId, fitRisks = [], evaluatedAt = null) {
+function evaluationNextActions(
+  gate,
+  applicationId,
+  fitRisks = [],
+  evaluatedAt = null,
+  manualRequired = false
+) {
   if (gate === "keep") {
     return [
       {
@@ -1846,6 +1867,9 @@ function evaluationNextActions(gate, applicationId, fitRisks = [], evaluatedAt =
       entityId: applicationId,
     }),
   ];
+  // No AI verdict exists to approve or to coach on, and its only "risk" is the
+  // reason the AI didn't run.
+  if (manualRequired) return actions;
   if (gate === "review") {
     actions.push({
       label: "Approve review and prepare",
@@ -5155,7 +5179,8 @@ async function executeWorkspaceIntentCore({
               evaluated.gate,
               captured.applicationId,
               evaluated.evaluation.fitRisks,
-              evaluated.evaluation.evaluatedAt
+              evaluated.evaluation.evaluatedAt,
+              evaluationHasNoVerdict(evaluated.evaluation)
             ),
           },
           now,
@@ -5272,7 +5297,8 @@ async function executeWorkspaceIntentCore({
             evaluated.gate,
             normalized.entity.id,
             evaluated.evaluation.fitRisks,
-            evaluated.evaluation.evaluatedAt
+            evaluated.evaluation.evaluatedAt,
+            evaluationHasNoVerdict(evaluated.evaluation)
           ),
         },
         now,
@@ -6260,6 +6286,15 @@ async function executeWorkspaceIntentCore({
         throw actionError(
           operation?.body?.error?.message || "The coaching plan could not be built.",
           operation?.body?.code || "COACHING_PLAN_FAILED"
+        );
+      }
+      // A plan the AI never produced (no AI set up, or the call failed) is only
+      // a placeholder where every gap reads "no honest close path yet". Saving
+      // it would show that as the real answer, so report why instead.
+      if (plan.manual?.required) {
+        throw actionError(
+          `The coaching plan was not built: ${plan.manual.reason || "the AI could not produce one."}`,
+          plan.manual.code || "COACHING_PLAN_NO_AI"
         );
       }
       appSetFields({
@@ -9286,7 +9321,8 @@ async function executeWorkspaceIntentCore({
                 evaluated.gate,
                 normalized.entity.id,
                 evaluated.evaluation.fitRisks,
-                evaluated.evaluation.evaluatedAt
+                evaluated.evaluation.evaluatedAt,
+                evaluationHasNoVerdict(evaluated.evaluation)
               ),
             },
             now,
@@ -9327,7 +9363,8 @@ async function executeWorkspaceIntentCore({
               evaluated.gate,
               normalized.entity.id,
               evaluated.evaluation.fitRisks,
-              evaluated.evaluation.evaluatedAt
+              evaluated.evaluation.evaluatedAt,
+              evaluationHasNoVerdict(evaluated.evaluation)
             ),
           },
           now,
@@ -9421,7 +9458,8 @@ async function executeWorkspaceIntentCore({
                 evaluated.gate,
                 normalized.entity.id,
                 evaluated.evaluation.fitRisks,
-                evaluated.evaluation.evaluatedAt
+                evaluated.evaluation.evaluatedAt,
+                evaluationHasNoVerdict(evaluated.evaluation)
               ),
             },
             now,

@@ -102,6 +102,44 @@ All notable changes to CareerRat are documented here. This project follows
   downloads by size and a deadline that includes reading the response body.
 - Updated dependencies with security fixes for schema validation, test tooling,
   and the retained desktop build tools.
+- The update notice works for npm installs: the background update check script
+  now ships in the package.
+- Re-running `careerrat ingest --write-config` keeps your hand-added searches and
+  each search's run history. It only adds searches that are missing.
+- `careerrat lint-placeholders` fails on a path that doesn't exist or a file type
+  it can't read, instead of saying no placeholders were found. It also catches
+  bracketed fill-ins like `[Hiring Manager]`, and skills now call it as a normal
+  `careerrat` command.
+- The older `npm run scan:sourced` and `npm run check:jobs` exit with an error when
+  every source or link couldn't be reached, instead of reporting a clean run.
+- The terminal workspace tells you when CareerRat skills couldn't be installed for
+  the agent, instead of starting with none and saying nothing.
+- Commands the skills name now work as written: `careerrat evaluate`, `questions`
+  and `export` find `workspace/...` files, `stories match` reads a saved job file,
+  `linkedin-proposals latest --status any` and `approve` work from a terminal, and
+  an unknown `modes allows` operation, a mistyped `tracker` or `doctor` option, or
+  an unrecognized `app set-status` value is rejected instead of ignored. A test
+  checks every command, option and script the skills name against the real CLI.
+- `careerrat data verify` also checks the tracker file against its schema, and
+  saving a conversation with an unknown message direction or bad timestamp is
+  refused, so `data verify` and `tracker --verify` agree.
+- `careerrat evaluate` reads a saved job that has no "Job Description" heading from
+  the text after the header, and warns when a file has no job text at all.
+- When an AI call fails, the message says why in plain words (rate limited, not
+  signed in, program not found) without echoing anything the provider sent back,
+  and a failed call is no longer labeled as AI output.
+- A coaching plan or job evaluation that the AI never produced is no longer saved
+  or shown as a real result. CareerRat says it could not evaluate, and doesn't
+  offer Coach or Approve on it.
+- Calendar busy times can be re-ingested with `--window <start>..<end>`, which
+  replaces what was stored for that span, so cancelled meetings clear and a free
+  calendar can be recorded.
+- A search started from the terminal now finds an installed, signed-in Claude or
+  Codex, and the search summary says why the AI steps didn't run when they didn't.
+- With no writing samples, the style calibration says "not calibrated" and exits
+  with an error rather than saving a placeholder that later drafts treat as set.
+- `careerrat doctor` reports an unreadable AI settings file, and counts plugins as
+  verified rather than runnable.
 
 ### Changed
 

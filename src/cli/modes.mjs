@@ -21,6 +21,7 @@ import {
   MODE_ROUTES,
   MODES_REL_PATH,
   MODES_TEMPLATE_PATH,
+  USAGE_OPERATIONS,
 } from "../core/profile/modes.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -69,6 +70,14 @@ if (cmd === "status") {
 if (cmd === "allows") {
   const operation = opts.positional[1];
   if (!operation) fail("Usage: modes allows <operation>");
+  // The library treats an unknown operation as "run" so callers never block on a
+  // new name. At the CLI that turned a typo or a renamed operation in a skill
+  // into a quiet "run", so the usage-mode gate never held anything back.
+  if (!Object.hasOwn(USAGE_OPERATIONS, operation)) {
+    fail(
+      `unknown operation "${operation}". Known operations: ${Object.keys(USAGE_OPERATIONS).join(", ")}`
+    );
+  }
   const modes = loadModes({ root: opts.root });
   if (!modes.valid) {
     if (opts.json) {

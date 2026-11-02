@@ -30,13 +30,14 @@
 //   node src/cli/data.mjs comm upsert --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
-//   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path>
+//   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path> [--window <startIso>..<endIso>]
 //   node src/cli/data.mjs calendar write --data <json> | --data-file <path>
 //   node src/cli/data.mjs source watermark --data <json|json-array> | --data-file <path> [--at <iso>]
 //   node src/cli/data.mjs relationship leads upsert --data <json-array> | --data-file <path>
 //   node src/cli/data.mjs relationship lead set-status <id> <review|approved|rejected> [--at <iso>] [--follow-up-due <iso>] [--note <t>]
 //   node src/cli/data.mjs linkedin-proposals record --data <json> | --data-file <path> [--write]
-//   node src/cli/data.mjs linkedin-proposals latest [--status <s>]
+//   node src/cli/data.mjs linkedin-proposals latest [--status <pending|reviewed|any>]
+//   node src/cli/data.mjs linkedin-proposals approve --batch <id> --surface <surfaceId> --version <n> [--reason <t>]
 //   node src/cli/data.mjs linkedin-proposals mark-applied --batch <id> --surface <surfaceId> --version <n> [--reason <t>]
 //   node src/cli/data.mjs candidate init|get
 //   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>
@@ -61,6 +62,7 @@
 // default: this install).
 
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { recordedKnowledgeChanges } from "../core/agent/knowledge-changes.mjs";
 import { undoWorkspaceKnowledge } from "../core/agent/knowledge-history.mjs";
@@ -114,6 +116,7 @@ import {
 } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { sanitizeCandidateConfigForAgent } from "../core/profile/config-store.mjs";
+import { validate } from "../core/profile/schema-validator.mjs";
 import { loadTrackerData, validateTrackerData } from "../core/tracker/tracker-data.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -135,6 +138,7 @@ function parseArgs(argv) {
       opts.version = /^[1-9]\d*$/.test(rawVersion ?? "") ? Number(rawVersion) : Number.NaN;
     } else if (a === "--root") opts.root = argv[++i];
     else if (a === "--source") opts.source = argv[++i];
+    else if (a === "--window") opts.window = argv[++i];
     else if (a === "--data") opts.data = argv[++i];
     else if (a === "--data-file") opts.dataFile = argv[++i];
     else if (a === "--note") opts.note = argv[++i];
@@ -333,6 +337,18 @@ function cmdVerify() {
   const trackerPath = userPath(pathCtx, "workspace/tracker.json");
   const data = loadTrackerData(trackerPath);
   const result = validateTrackerData(data);
+  // Also hold the exported file to config/tracker.schema.json, the same check
+  // `careerrat tracker --verify` runs. Without it `data verify` passed rows
+  // (communications, mostly) that `tracker --verify` rejected.
+  const schemaResult = validate(
+    JSON.parse(readFileSync(trackerPath, "utf8")),
+    JSON.parse(readFileSync(join(ROOT, "config/tracker.schema.json"), "utf8"))
+  );
+  if (!schemaResult.valid) {
+    for (const error of schemaResult.errors) {
+      result.errors.push(`schema ${error.path || "(root)"}: ${error.message}`);
+    }
+  }
 
   if (opts.json) {
     console.log(
@@ -500,6 +516,16 @@ function cmdComm(sub, rest) {
 // calendar <sub>
 // ---------------------------------------------------------------------------
 
+// --window <startIso>..<endIso>: the span this ingest covers in full.
+function parseCalendarWindow(raw) {
+  if (raw === undefined) return undefined;
+  const [startIso, endIso, ...extra] = String(raw).split("..");
+  if (!startIso || !endIso || extra.length) {
+    fail("--window must look like <startIso>..<endIso>");
+  }
+  return { startIso: startIso.trim(), endIso: endIso.trim() };
+}
+
 function cmdCalendar(sub, _rest) {
   switch (sub) {
     case "busy":
@@ -508,6 +534,7 @@ function cmdCalendar(sub, _rest) {
           ...pathCtx,
           blocks: readPayload("calendar busy"),
           source: opts.source,
+          window: parseCalendarWindow(opts.window),
         })
       );
     case "write":
@@ -589,6 +616,22 @@ function cmdRelationship(sub, rest) {
 // top-level catch below, same as every other verb's errors.
 // ---------------------------------------------------------------------------
 
+// `--status null` and `--status any` mean "any status" (the verb's null).
+// Anything else must be a real status: a bare string used to pass through and
+// match no row, which looked exactly like "no batch recorded".
+function parseLinkedinProposalStatus(raw) {
+  const statuses = ["pending", "reviewed"];
+  if (raw === undefined) return "pending";
+  const value = String(raw).trim().toLowerCase();
+  if (value === "null" || value === "any") return null;
+  if (!statuses.includes(value)) {
+    fail(
+      `linkedin-proposals --status must be one of ${statuses.join(", ")}, or "any" (got ${JSON.stringify(raw)})`
+    );
+  }
+  return value;
+}
+
 function cmdLinkedinProposals(sub, _rest) {
   switch (sub) {
     case "record":
@@ -596,14 +639,18 @@ function cmdLinkedinProposals(sub, _rest) {
     case "latest":
       return printResult({
         ok: true,
-        batch: linkedinProposalBatchLatest({ ...pathCtx, status: opts.status ?? "pending" }),
+        batch: linkedinProposalBatchLatest({
+          ...pathCtx,
+          status: parseLinkedinProposalStatus(opts.status),
+        }),
       });
+    case "approve":
     case "mark-applied":
       if (!opts.batch || !opts.surface) {
-        fail("linkedin-proposals mark-applied requires --batch <id> --surface <surfaceId>");
+        fail(`linkedin-proposals ${sub} requires --batch <id> --surface <surfaceId>`);
       }
       if (!Number.isSafeInteger(opts.version) || opts.version < 1) {
-        fail("linkedin-proposals mark-applied requires --version <n>");
+        fail(`linkedin-proposals ${sub} requires --version <n>`);
       }
       return printResult({
         ok: true,
@@ -611,7 +658,7 @@ function cmdLinkedinProposals(sub, _rest) {
           ...pathCtx,
           batchId: opts.batch,
           surfaceId: opts.surface,
-          action: "applied",
+          action: sub === "approve" ? "approve" : "applied",
           version: opts.version,
           reason: opts.reason,
         }),
@@ -937,7 +984,7 @@ Usage:
   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
 
-  node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path>
+  node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path> [--window <startIso>..<endIso>]
   node src/cli/data.mjs calendar write --data <json> | --data-file <path>
 
   node src/cli/data.mjs source watermark --data <json|json-array> | --data-file <path> [--at <iso>]

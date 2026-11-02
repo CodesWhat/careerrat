@@ -224,6 +224,21 @@ export function validateStories(stories, evidenceClaims = []) {
 // Match + coverage (pure)
 // ---------------------------------------------------------------------------
 
+// A saved JD (.md) has no extracted signals. Use the signals the bank's own
+// stories are tagged with and keep the ones the JD text actually mentions, so
+// matching works straight from the job file. Case-insensitive substring match.
+export function deriveJobSignals({ stories, text } = {}) {
+  const haystack = String(text || "").toLowerCase();
+  const seen = new Set();
+  for (const story of Array.isArray(stories) ? stories : []) {
+    for (const signal of Array.isArray(story.role_signals) ? story.role_signals : []) {
+      const value = String(signal || "").trim();
+      if (value && haystack.includes(value.toLowerCase())) seen.add(value);
+    }
+  }
+  return [...seen];
+}
+
 // Rank stories for a role by overlap with JD signals (weighted x2) and target
 // competencies (x1). Returns [{ story, score, matchedSignals[], matchedComps[] }].
 // With no query (no signals, no competencies) the whole bank is surfaced (top

@@ -210,8 +210,31 @@ export function commCaptureInbound({
 
 // commUpsert({row}) — full-row insert/replace, same "capture-intake" shape as
 // appUpsert.
+const MESSAGE_DIRECTIONS = new Set(["inbound", "outbound-draft", "outbound-sent", "note"]);
+
+// Messages are stored as given, and a bad direction or timestamp only showed up
+// later when `tracker --verify` rejected the exported file. Refuse them here.
+function assertMessagesValid(messages) {
+  if (messages === undefined) return;
+  if (!Array.isArray(messages)) throw new Error("commUpsert: row.messages must be an array");
+  messages.forEach((message, index) => {
+    if (!message || typeof message !== "object") {
+      throw new Error(`commUpsert: messages[${index}] must be an object`);
+    }
+    if (!MESSAGE_DIRECTIONS.has(message.direction)) {
+      throw new Error(
+        `commUpsert: messages[${index}].direction must be one of ${[...MESSAGE_DIRECTIONS].join(", ")}`
+      );
+    }
+    if (message.at !== undefined && Number.isNaN(Date.parse(message.at))) {
+      throw new Error(`commUpsert: messages[${index}].at must be a date-time`);
+    }
+  });
+}
+
 export function commUpsert({ repoRoot, env, row } = {}) {
   if (!row?.id) throw new Error("commUpsert: row.id is required");
+  assertMessagesValid(row.messages);
   return runVerb({ repoRoot, env }, (db) => {
     const existed = Boolean(getRow(db, "communications", row.id));
     putRow(db, "communications", row.id, row, { application_id: resolveApplicationId(db, row) });
