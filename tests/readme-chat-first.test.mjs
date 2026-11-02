@@ -2,15 +2,18 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("README leads with the shipped chat-first Mac app", async () => {
+test("README leads with the npm install path", async () => {
   const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
 
-  assert.match(
-    readme,
-    /A Mac app that turns the AI CLI you already have into a personal recruiter\./
-  );
-  assert.match(readme, /Download the latest `\.dmg`/);
-  assert.match(readme, /signed and notarized Apple Silicon app/);
+  assert.match(readme, /Turns the AI CLI you already have into a personal recruiter\./);
+  assert.match(readme, /npm i -g careerrat/);
+  assert.match(readme, /Node\.js 24\.22\.1 or newer/);
+  assert.match(readme, /Python 3\.11 or newer/);
+  assert.match(readme, /`careerrat start` opens the workspace in your browser/);
+  assert.match(readme, /`careerrat tui` opens the\s+terminal workspace/);
+  assert.match(readme, /Mac app ended at v0\.19\.2/);
+  assert.doesNotMatch(readme, /Download the latest `\.dmg`|brew install --cask/);
+  assert.doesNotMatch(readme, /Get the Mac app/);
   assert.match(readme, /complete and verified, CareerRat\s+submits it\./);
   assert.match(readme, /SQLite/);
   assert.match(readme, /Deep ingest/);
@@ -30,8 +33,8 @@ test("README states runtime, update, and Windows boundaries without overclaiming
   assert.match(flattened, /passes a quick check/i);
   assert.doesNotMatch(readme, /Hermes Agent|Gemini CLI|OpenCode|GitHub Copilot/);
   assert.match(readme, /never falls back to another tool or switches on its own/);
-  assert.match(flattened, /You do not need it before you open the app/);
-  assert.match(flattened, /install Claude Code from inside the app on first run/);
+  assert.match(flattened, /You do not need it before you install CareerRat/);
+  assert.match(flattened, /install Claude Code for you on first run/);
   assert.doesNotMatch(flattened, /already installed before anything in the app works/i);
   assert.doesNotMatch(readme, /equal, complete CareerRat engines/i);
   assert.match(readme, /downloads the signed and notarized\s+app update/i);

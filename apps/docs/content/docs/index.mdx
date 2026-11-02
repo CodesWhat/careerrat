@@ -8,27 +8,30 @@ CLI runs inside the CareerRat workspace and drives a set of skills that cover
 every step of the job-search loop, from sourcing and vetting to tailoring,
 tracking, and interview prep.
 
-**The Mac app is the front door. The agent is the runtime.** Download the app,
-open it, and pick an AI engine on first run. You paste a job posting (or a
+**The workspace is the front door. The agent is the runtime.** Install
+CareerRat with npm, open it, and pick an AI engine on first run. You paste a job posting (or a
 recruiter email, or a link) into the agent chat and say what you want to do.
-The skills handle the work. For developers, the `careerrat` CLI runs the same
-engine from a terminal: it scaffolds the workspace, serves the local app,
-checks health, and exposes safe config helpers — it is not a job board or
-separate cloud service.
+The skills handle the work. The `careerrat` CLI scaffolds the workspace, serves the
+local app, checks health, and exposes safe config helpers. It is not a job board
+or separate cloud service.
 
 ## Quick start
 
-**Download the Mac app.** On an Apple Silicon Mac, get the signed, notarized
-build from the [latest release](https://github.com/CodesWhat/careerrat/releases/latest),
-or install it with Homebrew:
+**Install CareerRat.** You need Node.js 24.22.1 or newer, and Python 3.11 or
+newer if you want the terminal workspace.
 
 ```bash
-brew install --cask codeswhat/tap/careerrat
+npm i -g careerrat
+careerrat start
 ```
 
-Open CareerRat. It needs one AI engine to do the work: Claude Code or OpenAI
-Codex. You do not need it before you open the app. If neither is installed,
-CareerRat can install Claude Code from inside the app on first run, or point
+`careerrat start` opens the workspace in your browser. `careerrat tui` opens the
+terminal workspace instead. The Mac app ended at v0.19.2 and is no longer
+updated.
+
+CareerRat needs one AI engine to do the work: Claude Code or OpenAI
+Codex. You do not need it before you install CareerRat. If neither is installed,
+CareerRat can install Claude Code on first run, or point
 you at the Codex setup guide. CareerRat detects which one is ready and lets you
 pick it. Local availability, authentication, and the complete readiness check
 decide whether an engine is `Ready`. An older Claude Code shows as
@@ -67,8 +70,8 @@ your floor, and what to do next.
 
 ### For developers
 
-CareerRat also ships as an npm package, so you can run the same engine from a
-terminal on any platform (requires Node.js 24.22.1 or newer):
+To start a terminal agent session alongside the workspace (requires Node.js
+24.22.1 or newer):
 
 ```bash
 npm install -g careerrat
@@ -78,8 +81,7 @@ careerrat start codex
 ```
 
 This scaffolds your workspace, boots the same local app at
-`http://localhost:7777`, and launches your agent with a starter message, just
-like the Mac app. See [Install & First Run](/getting-started/install) for the
+`http://localhost:7777`, and launches your agent with a starter message. See [Install & First Run](/getting-started/install) for the
 npm and source-checkout paths.
 
 ## Two reading tracks
@@ -87,7 +89,7 @@ npm and source-checkout paths.
 ### Not sure where to start?
 
 Go to [Getting Started](/getting-started/what-is-careerrat). It walks you from
-downloading the Mac app through your first job evaluation in under ten
+installing CareerRat through your first job evaluation in under ten
 minutes.
 
 ### Already running, want to go deeper?

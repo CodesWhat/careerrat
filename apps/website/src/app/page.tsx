@@ -2,7 +2,7 @@ import { ArrowRight, ClipboardList, FileUp, LoaderCircle, Lock, Radar, Target } 
 import { Footer } from "@/components/Footer";
 import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
-const RELEASE_URL = "https://github.com/CodesWhat/careerrat/releases/latest";
+const INSTALL_URL = "/docs/getting-started/install";
 const STAR_HISTORY_URL =
   "https://www.star-history.com/?repos=codeswhat%2Fcareerrat&type=date&legend=top-left";
 const STAR_HISTORY_CHART =
@@ -89,19 +89,16 @@ export default function Home() {
           <BrandMark />
           <h1 id="hero-title">Your job hunt, run by a rat.</h1>
           <p className="hero__copy">
-            CareerRat is a Mac app that turns the AI CLI you already have into a personal recruiter.
-            It rates the jobs worth chasing, applies with your real experience, and tracks what
-            happens.
+            CareerRat turns the AI CLI you already have into a personal recruiter. It rates the jobs
+            worth chasing, applies with your real experience, and tracks what happens.
           </p>
           <div className="button-row">
             <TrackedCtaLink
               className="button button--lime button--large"
-              href={RELEASE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={INSTALL_URL}
               placement="hero"
             >
-              Download for Mac <ArrowRight aria-hidden="true" size={17} strokeWidth={2.2} />
+              Install with npm <ArrowRight aria-hidden="true" size={17} strokeWidth={2.2} />
             </TrackedCtaLink>
             <a className="button button--white button--large" href="#how-it-works">
               See how it works
@@ -220,23 +217,15 @@ export default function Home() {
           <div className="download-card">
             <div>
               <p className="eyebrow">Get CareerRat</p>
-              <h2 id="get-title">One download, and you&apos;re talking.</h2>
+              <h2 id="get-title">One install, and you&apos;re talking.</h2>
               <p className="download-card__copy">
-                Download the app, open it, say hi. Setup is a conversation, not a form. Open source
-                under MIT.
+                Run npm i -g careerrat, then careerrat start, and say hi. Setup is a conversation,
+                not a form. Open source under MIT.
               </p>
-              <TrackedCtaLink
-                className="button button--lime"
-                href={RELEASE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                placement="get"
-              >
-                Download for Mac
+              <TrackedCtaLink className="button button--lime" href={INSTALL_URL} placement="get">
+                Install with npm
               </TrackedCtaLink>
-              <p className="download-card__note">
-                Signed and notarized, for Apple Silicon Macs on macOS 12 or newer.
-              </p>
+              <p className="download-card__note">Needs Node.js 24.22.1 or newer.</p>
             </div>
             <div className="engine-card">
               <p className="eyebrow">You&apos;ll need an AI CLI</p>
@@ -259,8 +248,7 @@ export default function Home() {
               <p className="engine-card__note">
                 A runtime appears ready only when it is available, signed in, and passes its
                 readiness check. CareerRat itself costs nothing; your AI provider may have its own
-                plan or usage costs. Signed Mac updates download in the app and wait for you to
-                choose Restart and install.
+                plan or usage costs. Update any time with careerrat update.
               </p>
             </div>
           </div>
@@ -292,11 +280,11 @@ export default function Home() {
           <div className="final-cta">
             <BrandMark compact />
             <h2 id="final-title">Ready when you are.</h2>
-            <p>Download it and start talking.</p>
+            <p>Install it and start talking.</p>
             <div className="button-row">
               <TrackedCtaLink
                 className="button button--ink button--large"
-                href={RELEASE_URL}
+                href={INSTALL_URL}
                 placement="final"
               >
                 Get CareerRat

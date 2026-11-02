@@ -7,7 +7,7 @@ import Image from "next/image";
 const CODESWHAT = "https://codeswhat.com";
 const YEAR = new Date().getFullYear();
 const BLURB =
-  "CareerRat is a Mac app that turns your AI CLI into a personal recruiter. Rate jobs before you apply, use your real experience, and track every outcome.";
+  "CareerRat is a personal recruiter built on your AI CLI. Rate jobs before you apply, use your real experience, and track every outcome.";
 const LICENSE_URL = "https://github.com/CodesWhat/careerrat/blob/main/LICENSE";
 
 type FooterLink = { label: string; href: string; external?: boolean };
