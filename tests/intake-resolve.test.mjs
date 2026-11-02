@@ -1839,6 +1839,34 @@ test("plain aggregator page: keeps its job body but hands application work to an
   assert.match(result.bodyText, /Build reliable distributed systems/);
 });
 
+test("LinkedIn public page: resolves the employer link from the hidden externalApply wrapper", async () => {
+  const linkedinUrl = "https://www.linkedin.com/jobs/view/4123456789";
+  const employerUrl = "https://careers.example-employer.com/jobs/staff-engineer/apply";
+  const wrapped = `https://www.linkedin.com/jobs/view/externalApply/4123456789?url=${encodeURIComponent(employerUrl)}&amp;urlHash=abc`;
+  const html = `<html><body><h1>Staff Engineer</h1><p>${"Build reliable distributed systems and platform tooling. ".repeat(20)}</p><code id="applyUrl" style="display: none"><!--"${wrapped}"--></code></body></html>`;
+
+  const result = await resolveJobUrl(linkedinUrl, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: linkedinUrl }),
+    resolveHost: publicResolver,
+    employerLinkLookup: true,
+  });
+
+  assert.equal(result.url, employerUrl);
+  assert.equal(result.sourceUrl, linkedinUrl);
+
+  // Without the lookup flag a LinkedIn page is never fetched.
+  let fetched = 0;
+  const deferred = await resolveJobUrl(linkedinUrl, {
+    fetchImpl: async () => {
+      fetched += 1;
+      return htmlResponse(html, { finalUrl: linkedinUrl });
+    },
+    resolveHost: publicResolver,
+  });
+  assert.equal(deferred.bodyFetchStatus, "deferred");
+  assert.equal(fetched, 0);
+});
+
 test("plain aggregator page: decodes only one mixed escaping layer in an embedded application URL", async () => {
   const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
   const applicationUrl =

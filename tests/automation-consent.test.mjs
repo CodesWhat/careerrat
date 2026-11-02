@@ -99,7 +99,6 @@ test("automation consent: supervised apply preparation replaces the removed one-
     "ashby",
     "workable",
     "smartrecruiters",
-    "linkedin",
     "external_ats",
   ]);
   assert.equal(
@@ -115,7 +114,7 @@ test("automation consent: supervised apply preparation replaces the removed one-
       platform: "linkedin",
       data: cfg,
     }).allowed,
-    true
+    false
   );
   assert.equal(
     mayRun({
@@ -128,6 +127,34 @@ test("automation consent: supervised apply preparation replaces the removed one-
   const removed = mayRun({ capability: "one_click_apply", platform: "linkedin", data: cfg });
   assert.equal(removed.allowed, false);
   assert.match(removed.reasons.join(" "), /unknown capability/i);
+});
+
+test("an old config that turns LinkedIn apply on or asks for auto submit changes nothing", () => {
+  const schema = loadJson("config/automation.schema.json");
+  const old = {
+    version: 1,
+    capabilities_default: "on",
+    submit: "auto",
+    capabilities: {
+      authenticated_apply_preparation: {
+        enabled: true,
+        platforms: { linkedin: true, greenhouse: true },
+      },
+    },
+  };
+  assert.equal(validate(old, schema).valid, true);
+  const data = normalizeAutomationConfig(old);
+  const linkedin = mayRun({
+    capability: "authenticated_apply_preparation",
+    platform: "linkedin",
+    data,
+  });
+  assert.equal(linkedin.allowed, false);
+  assert.match(linkedin.reasons.join(" "), /does not apply to platform "linkedin"/);
+  assert.equal(
+    mayRun({ capability: "authenticated_apply_preparation", platform: "greenhouse", data }).allowed,
+    true
+  );
 });
 
 test("automation schema rejects the removed one-click capability id", () => {
@@ -600,7 +627,7 @@ test("a legacy file migrated then disabled keeps one capability off and the rest
   assert.equal(denied.allowed, false);
   assert.match(denied.reasons.join(" "), /careerrat automation enable mail_access --write/);
   assert.equal(
-    mayRun({ capability: "authenticated_apply_preparation", platform: "linkedin", data: cfg })
+    mayRun({ capability: "authenticated_apply_preparation", platform: "greenhouse", data: cfg })
       .allowed,
     true
   );

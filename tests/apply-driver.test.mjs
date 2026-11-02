@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
-import { EASY_APPLY_STEPS, findAdvanceButtonRef } from "../src/core/apply/form-fill.mjs";
+import { findAdvanceButtonRef } from "../src/core/apply/form-fill.mjs";
 
 const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 const ASHBY_URL = "https://jobs.ashbyhq.com/curri/d616afe4-311f-4c73-8dc9-87c40f8c7ea8";
-const EASY_APPLY_URL = "https://www.linkedin.com/jobs/view/4123456789/?easyApplyModal=true";
+const MULTI_STEP_URL = "https://careers.example.test/apply/4123456789?stage=1";
+const LINKEDIN_URL = "https://www.linkedin.com/jobs/view/4123456789/?easyApplyModal=true";
 const WORKDAY_URL = "https://acme.wd5.myworkdayjobs.com/en-US/External/job/req-123";
 
 const CONFIG = {
@@ -551,37 +552,94 @@ test("a listing with no application-form entry never reports awaiting submit", a
   assert.equal(result.session.filledCount, 0);
 });
 
-test("LinkedIn form preparation uses the authenticated_apply_preparation capability", async () => {
-  const seen = [];
-  const { ops } = createFakeOps([]);
+test("LinkedIn posting with no employer link opens the page, makes no clicks and waits on the person", async () => {
+  let consulted = 0;
+  const { ops, log } = createFakeOps([]);
   const execute = makeDriver({
     ops,
-    mayRunImpl: (request) => {
-      seen.push(request);
-      return {
-        allowed: false,
-        reasons: ["capability off"],
-        checks: { global: true, platform: false },
-      };
+    mayRunImpl: () => {
+      consulted += 1;
+      return { allowed: true };
+    },
+  });
+
+  // submitMode "auto" is what an old config asking for auto would send.
+  const result = await execute({
+    applicationId: "app-linkedin",
+    application: { id: "app-linkedin", link: LINKEDIN_URL },
+    postingUrl: LINKEDIN_URL,
+    questionCapture: { state: "captured" },
+    submitMode: "auto",
+    prepareOnly: false,
+  });
+
+  assert.equal(result.state, "waiting-on-person");
+  assert.equal(result.code, "LINKEDIN_PERSON_APPLIES");
+  assert.equal(result.verified, false);
+  assert.equal(result.currentUrl, LINKEDIN_URL);
+  assert.deepEqual(log, [{ op: "openTab" }], "only the page open; no snapshot, fill or click");
+  assert.equal(consulted, 0);
+  assert.equal(result.session.submitClicked, undefined);
+});
+
+test("LinkedIn posting with an employer link applies at that link instead", async () => {
+  const opened = [];
+  const form = {
+    origin: GREENHOUSE_URL,
+    pageText: "Apply",
+    refs: refsOf([["e1", "textbox", "First Name", true]]),
+  };
+  const { ops } = createFakeOps([form]);
+  const execute = makeDriver({
+    ops: {
+      ...ops,
+      async openTab(args) {
+        opened.push(args.url);
+        return ops.openTab(args);
+      },
     },
   });
 
   const result = await execute({
-    applicationId: "app-consent",
-    application: { id: "app-consent" },
-    postingUrl: EASY_APPLY_URL,
+    applicationId: "app-linkedin-external",
+    application: { id: "app-linkedin-external", link: LINKEDIN_URL, applyUrl: GREENHOUSE_URL },
+    postingUrl: LINKEDIN_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
   });
 
-  assert.equal(result.state, "blocked");
-  assert.equal(result.code, "CAPABILITY_OFF");
-  assert.equal(result.platform, "linkedin");
-  assert.equal(
-    result.reason,
-    "Application preparation is turned off for LinkedIn. Turn it on with `careerrat automation enable authenticated_apply_preparation linkedin --write`, or ask me to turn it on."
-  );
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0].capability, "authenticated_apply_preparation");
-  assert.equal(seen[0].platform, "linkedin");
+  assert.deepEqual(opened, [GREENHOUSE_URL]);
+  assert.equal(result.state, "awaiting-submit");
+});
+
+test("LinkedIn externalApply wrapper link is unwrapped to the employer link", async () => {
+  const opened = [];
+  const form = {
+    origin: GREENHOUSE_URL,
+    pageText: "Apply",
+    refs: refsOf([["e1", "textbox", "First Name", true]]),
+  };
+  const { ops } = createFakeOps([form]);
+  const execute = makeDriver({
+    ops: {
+      ...ops,
+      async openTab(args) {
+        opened.push(args.url);
+        return ops.openTab(args);
+      },
+    },
+  });
+  const wrapped = `https://www.linkedin.com/jobs/view/externalApply/4123456789?url=${encodeURIComponent(GREENHOUSE_URL)}`;
+
+  await execute({
+    applicationId: "app-linkedin-wrapped",
+    application: { id: "app-linkedin-wrapped", applyUrl: wrapped },
+    postingUrl: LINKEDIN_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.deepEqual(opened, [GREENHOUSE_URL]);
 });
 
 test("external ATS preparation checks the capability switch before opening the application", async () => {
@@ -1039,9 +1097,9 @@ test("a required checkbox with an honest No answer is explicitly left unchecked"
   );
 });
 
-test("LinkedIn Easy Apply: fills step 1, advances, fills step 2, ends awaiting-submit", async () => {
+test("multi-step form: fills step 1, advances, fills step 2, ends awaiting-submit", async () => {
   const contactStep = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Contact info",
     refs: refsOf([
       ["e1", "textbox", "First Name", true],
@@ -1049,7 +1107,7 @@ test("LinkedIn Easy Apply: fills step 1, advances, fills step 2, ends awaiting-s
     ]),
   };
   const reviewStep = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Review your application",
     refs: refsOf([
       ["e3", "textbox", "Phone Number", true],
@@ -1062,7 +1120,7 @@ test("LinkedIn Easy Apply: fills step 1, advances, fills step 2, ends awaiting-s
   const result = await execute({
     applicationId: "app-linkedin",
     application: { id: "app-linkedin" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -1073,7 +1131,6 @@ test("LinkedIn Easy Apply: fills step 1, advances, fills step 2, ends awaiting-s
     "sums step 1's fill pass (First Name) and step 2's fill pass (Phone Number), not just the last step"
   );
   assert.equal(result.session.stepIndex, 2);
-  assert.equal(result.session.stepKey, EASY_APPLY_STEPS[1].key);
   assert.deepEqual(
     log.filter((entry) => entry.op === "clickButton"),
     [{ op: "clickButton", pageId: "page-1", ref: "e2" }]
@@ -1096,7 +1153,7 @@ test("adversarial submit-label variant: 'Submit and continue' is disqualified ev
   );
 
   const step = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Additional questions",
     refs: refsOf([
       ["e1", "button", "Submit and continue", false],
@@ -1109,7 +1166,7 @@ test("adversarial submit-label variant: 'Submit and continue' is disqualified ev
   const result = await execute({
     applicationId: "app-submit-and-continue",
     application: { id: "app-submit-and-continue" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -1137,9 +1194,12 @@ test("adversarial submit-label variant: 'Review and submit' is disqualified even
   );
 
   const step = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Review your application",
-    refs: refsOf([["e1", "button", "Review and submit", false]]),
+    refs: refsOf([
+      ["e1", "button", "Review and submit", false],
+      ["e2", "textbox", "First Name", true],
+    ]),
   };
   const { ops, log } = createFakeOps([step]);
   const execute = makeDriver({ ops });
@@ -1147,7 +1207,7 @@ test("adversarial submit-label variant: 'Review and submit' is disqualified even
   const result = await execute({
     applicationId: "app-review-and-submit",
     application: { id: "app-review-and-submit" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -1214,14 +1274,17 @@ test("a page mixing a legit advance button with an SSO control picks the legit o
 
 test("advance button vanishes between the fill pass and the fresh pre-click snapshot: no click, terminal state from the fresh snapshot", async () => {
   const withButton = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Additional questions",
-    refs: refsOf([["e1", "button", "Next", false]]),
+    refs: refsOf([
+      ["e1", "button", "Next", false],
+      ["e2", "textbox", "First Name", true],
+    ]),
   };
   const withoutButton = {
-    origin: `${EASY_APPLY_URL}&step=stale`,
+    origin: `${MULTI_STEP_URL}&step=stale`,
     pageText: "Additional questions (button removed)",
-    refs: refsOf([]),
+    refs: refsOf([["e2", "textbox", "First Name", true]]),
   };
   const log = [];
   let snapshotCalls = 0;
@@ -1263,7 +1326,7 @@ test("advance button vanishes between the fill pass and the fresh pre-click snap
   const result = await execute({
     applicationId: "app-vanish",
     application: { id: "app-vanish" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -1282,7 +1345,7 @@ test("advance button vanishes between the fill pass and the fresh pre-click snap
 
 test("cumulative counts across Easy Apply steps: fillStep totals sum, not overwrite", async () => {
   const stepOne = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Contact info",
     refs: refsOf([
       ["e1", "textbox", "First Name", false],
@@ -1291,7 +1354,7 @@ test("cumulative counts across Easy Apply steps: fillStep totals sum, not overwr
     ]),
   };
   const stepTwo = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Work authorization & sponsorship",
     refs: refsOf([
       ["e4", "combobox", "Work authorization", false],
@@ -1304,7 +1367,7 @@ test("cumulative counts across Easy Apply steps: fillStep totals sum, not overwr
   const result = await execute({
     applicationId: "app-cumulative",
     application: { id: "app-cumulative" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -1322,12 +1385,12 @@ test("cumulative counts across Easy Apply steps: fillStep totals sum, not overwr
 
 test("mid-loop confirmation: a post-advance snapshot that reads as a confirmation page returns submitted/verified, not awaiting-submit", async () => {
   const stepA = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Additional questions",
     refs: refsOf([["e1", "button", "Next", false]]),
   };
   const confirmationStep = {
-    origin: `${EASY_APPLY_URL}&submitted=true`,
+    origin: `${MULTI_STEP_URL}&submitted=true`,
     pageText: "Your application has been submitted",
     refs: refsOf([]),
   };
@@ -1337,7 +1400,7 @@ test("mid-loop confirmation: a post-advance snapshot that reads as a confirmatio
   const result = await execute({
     applicationId: "app-midconfirm",
     application: { id: "app-midconfirm" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -1354,7 +1417,7 @@ test("mid-loop confirmation: a post-advance snapshot that reads as a confirmatio
 
 test("stall guard: unchanged snapshot fingerprint after the advance click blocks instead of looping", async () => {
   const stepA = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Step A",
     refs: refsOf([
       ["e1", "textbox", "Notes", false],
@@ -1362,7 +1425,7 @@ test("stall guard: unchanged snapshot fingerprint after the advance click blocks
     ]),
   };
   const stepAAgain = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Step A again",
     refs: refsOf([
       ["e5", "textbox", "Notes", false],
@@ -1375,7 +1438,7 @@ test("stall guard: unchanged snapshot fingerprint after the advance click blocks
   const result = await execute({
     applicationId: "app-stall",
     application: { id: "app-stall" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -1386,12 +1449,12 @@ test("stall guard: unchanged snapshot fingerprint after the advance click blocks
 
 test("step cap: more steps than maxFormSteps blocks and the cap is respected", async () => {
   const stepP = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "P",
     refs: refsOf([["eP", "button", "Next", false]]),
   };
   const stepQ = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Q",
     refs: refsOf([["eQ", "button", "Continue", false]]),
   };
@@ -1401,19 +1464,18 @@ test("step cap: more steps than maxFormSteps blocks and the cap is respected", a
   const result = await execute({
     applicationId: "app-cap",
     application: { id: "app-cap" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
   assert.equal(result.state, "blocked");
   assert.match(result.reason, /more steps than CareerRat will advance automatically/);
   assert.equal(result.session.stepIndex, 4);
-  assert.equal(result.session.stepKey, null);
 });
 
 test("unresolved required field on an intermediate step blocks immediately without clicking advance", async () => {
   const step = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Additional questions",
     refs: refsOf([
       ["e1", "textbox", "Favorite existential dread", true],
@@ -1426,7 +1488,7 @@ test("unresolved required field on an intermediate step blocks immediately witho
   const result = await execute({
     applicationId: "app-unresolved",
     application: { id: "app-unresolved" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -1444,17 +1506,17 @@ test("unresolved required field on an intermediate step blocks immediately witho
 
 test("question capture is re-evaluated per step: a later step's custom questions trigger capture even after earlier steps had none", async () => {
   const step1 = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Contact info",
     refs: refsOf([["e1", "button", "Next", false]]),
   };
   const step2 = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Resume",
     refs: refsOf([["e2", "button", "Continue", false]]),
   };
   const step3 = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Additional questions",
     refs: refsOf([["e3", "textbox", "Why do you want this role?", false]]),
   };
@@ -1471,13 +1533,12 @@ test("question capture is re-evaluated per step: a later step's custom questions
   const result = await execute({
     applicationId: "app-questions",
     application: { id: "app-questions" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "site-required" },
   });
 
   assert.equal(result.state, "questions-captured");
   assert.equal(result.session.stepIndex, 3);
-  assert.equal(result.session.stepKey, EASY_APPLY_STEPS[2].key);
   assert.equal(captures.length, 1);
   assert.deepEqual(
     captures[0].questions.map(({ label }) => label),
@@ -1645,7 +1706,7 @@ test("saved question capture without ID arrays uses its persisted counts to dete
 
 test("step cap after real fills reports cumulative counts, not zero", async () => {
   const stepOne = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Contact info",
     refs: refsOf([
       ["e1", "textbox", "First Name", false],
@@ -1653,7 +1714,7 @@ test("step cap after real fills reports cumulative counts, not zero", async () =
     ]),
   };
   const stepTwo = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "More contact info",
     refs: refsOf([
       ["e3", "textbox", "Phone Number", false],
@@ -1666,7 +1727,7 @@ test("step cap after real fills reports cumulative counts, not zero", async () =
   const result = await execute({
     applicationId: "app-cap-counts",
     application: { id: "app-cap-counts" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
   });
 
@@ -2008,7 +2069,7 @@ test("concurrent preparation requests for one application share one live browser
 // hostname.
 // ---------------------------------------------------------------------------
 
-test("generic (non-LinkedIn) multi-step ATS: advances across pages exactly like Easy Apply, ending awaiting-submit with a numeric stepIndex but no LinkedIn stepKey", async () => {
+test("generic (non-LinkedIn) multi-step ATS: advances across pages ending awaiting-submit with a numeric stepIndex", async () => {
   const pageOne = {
     origin: GREENHOUSE_URL,
     pageText: "Basic info",
@@ -2042,11 +2103,6 @@ test("generic (non-LinkedIn) multi-step ATS: advances across pages exactly like 
     "sums page one's First Name and page two's Phone Number, not just the final page"
   );
   assert.equal(result.session.stepIndex, 2, "stepIndex is portal-agnostic: it advanced once");
-  assert.equal(
-    result.session.stepKey,
-    null,
-    "stepKey is LinkedIn Easy Apply's own section vocabulary; a generic ATS never borrows it"
-  );
   assert.deepEqual(
     log.filter((entry) => entry.op === "clickButton"),
     [{ op: "clickButton", pageId: "page-1", ref: "e2" }],
@@ -2651,12 +2707,12 @@ test("prepare-only chooses the proven Next control over an earlier unrelated Con
 
 test("prepare-only advances a LinkedIn Easy Apply Next step and stops at final Submit", async () => {
   const contactPage = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Contact information",
     refs: refsOf([["e1", "button", "Next", false, { advanceSafe: true }]]),
   };
   const reviewPage = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Review your application",
     refs: refsOf([["e2", "button", "Submit application", false]]),
   };
@@ -2666,7 +2722,7 @@ test("prepare-only advances a LinkedIn Easy Apply Next step and stops at final S
   const result = await execute({
     applicationId: "app-prepare-only-easy-apply",
     application: { id: "app-prepare-only-easy-apply" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
     prepareOnly: true,
   });
@@ -2682,12 +2738,12 @@ test("prepare-only advances a LinkedIn Easy Apply Next step and stops at final S
 
 test("prepare-only does not trust a LinkedIn Easy Apply Next button without structured progress evidence", async () => {
   const applicationPage = {
-    origin: EASY_APPLY_URL,
+    origin: MULTI_STEP_URL,
     pageText: "Application details",
     refs: refsOf([["e1", "button", "Next", false]]),
   };
   const confirmationPage = {
-    origin: `${EASY_APPLY_URL}&submitted=true`,
+    origin: `${MULTI_STEP_URL}&submitted=true`,
     pageText: "Thank you for applying",
     refs: refsOf([]),
   };
@@ -2697,13 +2753,13 @@ test("prepare-only does not trust a LinkedIn Easy Apply Next button without stru
   const result = await execute({
     applicationId: "app-prepare-only-easy-apply-unknown",
     application: { id: "app-prepare-only-easy-apply-unknown" },
-    postingUrl: EASY_APPLY_URL,
+    postingUrl: MULTI_STEP_URL,
     questionCapture: { state: "captured" },
     prepareOnly: true,
   });
 
   assert.equal(result.state, "awaiting-submit");
-  assert.equal(result.currentUrl, EASY_APPLY_URL);
+  assert.equal(result.currentUrl, MULTI_STEP_URL);
   assert.equal(
     log.some((entry) => entry.op === "clickButton"),
     false

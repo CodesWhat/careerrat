@@ -2102,35 +2102,34 @@ test("Orca executor uploads generated PDFs through explicit live controls", asyn
   }
 });
 
-test("Orca executor refuses LinkedIn Easy Apply while application preparation is turned off", async () => {
+test("Orca executor opens a LinkedIn Easy Apply job for the person and makes no clicks", async () => {
   const commands = [];
   const execute = createOrcaApplyExecutor({
     repoRoot: "/repo",
     env: {},
     runOrcaImpl: async (args) => {
       commands.push(args);
+      if (args[0] === "tab") return { browserPageId: "page-123" };
       return {};
     },
-    mayRunImpl: () => ({
-      allowed: false,
-      reasons: ["authenticated_apply_preparation on LinkedIn is off"],
-    }),
+    mayRunImpl: allowApply,
   });
 
   const result = await execute({
     applicationId: "app-linkedin",
     application: {},
     postingUrl: "https://www.linkedin.com/jobs/view/123?easyApplyModal=true",
+    submitMode: "auto",
+    prepareOnly: false,
   });
 
   assert.equal(result.available, true);
   assert.equal(result.verified, false);
-  assert.equal(result.state, "blocked");
-  assert.equal(
-    result.reason,
-    "Application preparation is turned off for LinkedIn. Turn it on with `careerrat automation enable authenticated_apply_preparation --write`, or ask me to turn it on."
+  assert.equal(result.state, "waiting-on-person");
+  assert.deepEqual(
+    commands.filter((args) => ["click", "fill", "upload", "snapshot"].includes(args[0])),
+    []
   );
-  assert.deepEqual(commands, []);
 });
 
 test("Orca executor stops before account creation or password entry", async () => {

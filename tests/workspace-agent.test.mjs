@@ -9365,9 +9365,9 @@ test("capability-off preparation says it is turned off and offers Turn it on ins
       verified: false,
       state: "blocked",
       code: "CAPABILITY_OFF",
-      platform: "linkedin",
+      platform: "greenhouse",
       reason:
-        "Application preparation is turned off for LinkedIn. Turn it on with `careerrat automation enable authenticated_apply_preparation --write`, or ask me to turn it on.",
+        "Application preparation is turned off for Greenhouse. Turn it on with `careerrat automation enable authenticated_apply_preparation --write`, or ask me to turn it on.",
       session: { provider: "orca", blockers: ["capability off"] },
     }),
   });
@@ -9381,10 +9381,10 @@ test("capability-off preparation says it is turned off and offers Turn it on ins
     op: "capability",
     capability: "authenticated_apply_preparation",
     enabled: true,
-    platforms: ["linkedin"],
+    platforms: ["greenhouse"],
   });
   assert.equal(last.metadata.nextActions[1].label, "I applied");
-  assert.match(last.text, /Authenticated apply preparation is turned off for linkedin/i);
+  assert.match(last.text, /Authenticated apply preparation is turned off for greenhouse/i);
   assert.match(last.text, /careerrat automation enable authenticated_apply_preparation/);
   assert.doesNotMatch(last.text, /permission|consent|allow/i);
   assert.doesNotMatch(last.text, /prepared browser session/i);
@@ -10482,7 +10482,6 @@ test("settings.apply automation: an old application-preparation button turns the
     "ashby",
     "workable",
     "smartrecruiters",
-    "linkedin",
     "external_ats",
   ]) {
     assert.equal(
@@ -10633,13 +10632,13 @@ test("typed turn on <capability> previews an enable for every capability, not on
   const platform = previewWorkspaceIntent({
     repoRoot,
     env: {},
-    text: "Turn on apply preparation on linkedin",
+    text: "Turn on apply preparation on greenhouse",
   }).action;
   assert.deepEqual(platform.intent.input.change, {
     kind: "automation",
     op: "platform",
     capability: "authenticated_apply_preparation",
-    platform: "linkedin",
+    platform: "greenhouse",
     enabled: true,
   });
 });
@@ -10663,7 +10662,7 @@ test("settings.apply automation: any capability can be turned on from Ask", asyn
     assert.equal(automation.capabilities[capability].enabled, true, capability);
   }
   // A platform switch is separate: capability-level enable leaves it as it was.
-  assert.equal(automation.capabilities.authenticated_apply_preparation.platforms.linkedin, false);
+  assert.equal(automation.capabilities.authenticated_apply_preparation.platforms.greenhouse, false);
 });
 
 test("settings.apply automation: a platform can be turned on from Ask for any capability", async () => {
@@ -10679,7 +10678,7 @@ test("settings.apply automation: a platform can be turned on from Ask for any ca
           kind: "automation",
           op: "platform",
           capability: "authenticated_apply_preparation",
-          platform: "linkedin",
+          platform: "greenhouse",
           enabled: true,
         },
       },
@@ -10688,7 +10687,7 @@ test("settings.apply automation: a platform can be turned on from Ask for any ca
   assert.equal(settingsArtifact(result).to, true);
   assert.equal(
     candidateConfigGet({ repoRoot, env: {} }).automation.capabilities
-      .authenticated_apply_preparation.platforms.linkedin,
+      .authenticated_apply_preparation.platforms.greenhouse,
     true
   );
 });
