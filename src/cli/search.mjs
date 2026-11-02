@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureInstalledRuntimeSelection } from "../core/ai/ensure-runtime-selection.mjs";
 import { closeAll } from "../core/db/connection.mjs";
+import { registerDbHolder } from "../core/db/holders.mjs";
 import { sourcingRunLatest } from "../core/db/verbs/sourcing-runs.mjs";
 import { startManualSearchRun } from "../core/onboarding/first-search-run.mjs";
 import { borrowedAiWarning } from "../core/people/ai-route.mjs";
@@ -35,6 +36,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     const stop = () => controller.abort();
     process.once("SIGTERM", stop);
     process.once("SIGINT", stop);
+    const releaseHolder = registerDbHolder(ctx, "search");
     try {
       const outcome = await runTerminalSearchWorker({
         ...ctx,
@@ -45,6 +47,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
       });
       return outcome.run.status === "completed" ? 0 : 1;
     } finally {
+      releaseHolder();
       process.removeListener("SIGTERM", stop);
       process.removeListener("SIGINT", stop);
     }

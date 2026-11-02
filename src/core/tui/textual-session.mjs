@@ -1,14 +1,13 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, watch } from "node:fs";
-import { dirname } from "node:path";
-import { dbFilePath } from "../db/connection.mjs";
+import { createHash, randomUUID } from "node:crypto";
+import { registerDbHolder } from "../db/holders.mjs";
 import { readSavedJobDescription } from "../jobs/job-description.mjs";
-import { userPath } from "../paths/workspace.mjs";
 import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
 import { withCareerratShim } from "./cli-shim.mjs";
+import { createDataWatch } from "./data-watch.mjs";
 import { applyTuiUndo } from "./history.mjs";
 import { captureTuiContext, listDroppedFiles } from "./intake.mjs";
 import { capWorkspaceMessages, readJobs, viewJobs } from "./jobs.mjs";
+import { jobDetail, summaryJobs } from "./snapshot.mjs";
 import { createWorkspaceState, refreshWorkspace, workspaceKey } from "./workspace.mjs";
 
 // agentIssue says why there is no agent when one was asked for or expected:
@@ -31,13 +30,19 @@ export async function createTextualSession({
   let closing = false;
   let closePromise;
   let drawing;
-  let refreshing;
-  let watched = "";
-  let watchers = [];
+  let watcher;
+  const releaseHolder = registerDbHolder(ctx, "tui");
   let lastSnapshot = "";
+  let framed = null;
 
   function send(event) {
     if (!closing) emit(event);
+  }
+  // The selected job travels in full after each snapshot and selection; the
+  // snapshot itself carries summary rows only, so its size stays flat.
+  function sendDetail() {
+    const job = currentView?.jobs.find((item) => item.id === state.selectedId);
+    if (job) send({ type: "detail", id: job.id, job: jobDetail(job) });
   }
   // A refresh that finds nothing new sends nothing, so an idle workspace stays
   // quiet and a status message isn't wiped by a snapshot identical to the last.
@@ -45,70 +50,62 @@ export async function createTextualSession({
     const view = viewJobs(data, state);
     currentView = view;
     const capped = capWorkspaceMessages(view.workspaceMessages);
-    const event = {
-      type: "workspace",
-      view: { ...view, workspaceMessages: capped.messages, workspaceMessagesTotal: capped.total },
-      state,
+    const full = {
+      ...view,
+      workspaceMessages: capped.messages,
+      workspaceMessagesTotal: capped.total,
     };
-    const key = JSON.stringify(event);
+    const key = createHash("sha1")
+      .update(JSON.stringify({ view: full, state }))
+      .digest("hex");
     if (!force && key === lastSnapshot) return;
     lastSnapshot = key;
-    send(event);
+    send({
+      type: "workspace",
+      view: { ...full, jobs: summaryJobs(view.jobs) },
+      state,
+    });
+    sendDetail();
   }
+  // Only the rows that changed since the last frame go over the bridge. The
+  // first frame, and any frame after a resize, carries every row.
   function frame() {
     drawing = null;
     if (!pane) return;
+    const lines = native.renderTerminalRows(pane.terminal);
+    const { cols, rows } = pane.terminal;
+    const cursor = pane.cursor();
+    const scroll = pane.scrollState();
+    const meta = JSON.stringify([cols, rows, cursor, scroll]);
+    const full = !framed || framed.lines.length !== lines.length || framed.cols !== cols;
+    const changed = full
+      ? []
+      : lines.flatMap((line, index) => (line === framed.lines[index] ? [] : [[index, line]]));
+    if (!full && !changed.length && meta === framed.meta) return;
+    framed = { lines, cols, meta };
     send({
       type: "frame",
-      lines: native.renderTerminalRows(pane.terminal),
-      cursor: pane.cursor(),
-      cols: pane.terminal.cols,
-      rows: pane.terminal.rows,
+      ...(full ? { lines } : { changed }),
+      cursor,
+      cols,
+      rows,
+      scroll,
     });
   }
   function scheduleFrame() {
     if (!closing && !drawing) drawing = setTimeout(frame, 16);
-  }
-  function watchTargets() {
-    const targets = new Set(
-      [dirname(dbFilePath(ctx)), userPath(ctx, "workspace")].map((path) => {
-        while (!existsSync(path) && dirname(path) !== path) path = dirname(path);
-        return path;
-      })
-    );
-    const key = [...targets].sort().join("\n");
-    if (key === watched) return;
-    for (const watcher of watchers) watcher.close();
-    watchers = [];
-    watched = key;
-    for (const target of targets) {
-      try {
-        const watcher = watch(target, (_event, filename) => {
-          // Reading the database touches its -shm file. Counting that as a
-          // change makes every read trigger the next one. Real writes also
-          // touch the database or its -wal file, which still count.
-          if (closing || refreshing || String(filename ?? "").endsWith("-shm")) return;
-          refreshing = setTimeout(() => {
-            refreshing = null;
-            refresh({ force: false });
-          }, 40);
-        });
-        watcher.on("error", (error) => send({ type: "error", message: error.message }));
-        watchers.push(watcher);
-      } catch (error) {
-        send({ type: "error", message: error.message });
-      }
-    }
   }
   function refresh({ force = true } = {}) {
     if (closing) return;
     try {
       data = readJobs(ctx);
       state = refreshWorkspace(data, state);
-      watchTargets();
       snapshot({ force });
     } catch (error) {
-      send({ type: "error", message: `Saved data could not refresh: ${error.message}` });
+      send({
+        type: "error",
+        message: `Saved data could not refresh: ${error.message}`,
+      });
     }
   }
   function request(text, notice) {
@@ -133,7 +130,11 @@ export async function createTextualSession({
         message: `The agent may run a different careerrat install: ${error.message}`,
       });
     }
-    return { ...base, CAREERRAT_SURFACE: "tui", CAREERRAT_TUI_SESSION: sessionId };
+    return {
+      ...base,
+      CAREERRAT_SURFACE: "tui",
+      CAREERRAT_TUI_SESSION: sessionId,
+    };
   }
   async function dispatch(message) {
     if (closing) throw new Error("Textual session is closed");
@@ -145,10 +146,16 @@ export async function createTextualSession({
           message.id !== state.selectedId &&
           currentView.jobs.some((job) => job.id === message.id)
         )
-          state = { ...state, selectedId: message.id, detailOffset: 0, pendingUndo: null };
+          state = {
+            ...state,
+            selectedId: message.id,
+            detailOffset: 0,
+            pendingUndo: null,
+          };
         else state = { ...state, pendingUndo: null };
         currentView = { ...currentView, selectedId: state.selectedId };
         send({ type: "selection", selectedId: state.selectedId, state });
+        sendDetail();
         break;
       }
       case "view": {
@@ -165,7 +172,11 @@ export async function createTextualSession({
         if (options.currency !== undefined && !/^[A-Z]{3}$/.test(options.currency))
           throw new TypeError("Currency must be a three-letter code");
         viewJobs(data, { ...state, ...options });
-        state = refreshWorkspace(data, { ...state, ...options, pendingUndo: null });
+        state = refreshWorkspace(data, {
+          ...state,
+          ...options,
+          pendingUndo: null,
+        });
         snapshot();
         break;
       }
@@ -214,7 +225,11 @@ export async function createTextualSession({
             selectedId: state.selectedId,
           });
         } catch (error) {
-          send({ type: "capture-error", id: message.id ?? null, message: error.message });
+          send({
+            type: "capture-error",
+            id: message.id ?? null,
+            message: error.message,
+          });
           break;
         }
         send({ type: "context", id: message.id ?? null, ...captured });
@@ -263,6 +278,9 @@ export async function createTextualSession({
             cols,
             rows,
             onChange: scheduleFrame,
+            onBell: () => send({ type: "bell" }),
+            onTitle: (title) => send({ type: "title", title }),
+            onClipboard: (text) => send({ type: "clipboard", text }),
             onExit: ({ exitCode }) => {
               exited = true;
               send({ type: "agent-exited", exitCode });
@@ -272,6 +290,20 @@ export async function createTextualSession({
           send({ type: "agent-started", pid: pane.pid });
         } else if (pane && !exited) pane.resize(cols, rows);
         scheduleFrame();
+        break;
+      }
+      case "scroll": {
+        const { lines = 0, pages = 0 } = message;
+        if (!Number.isInteger(lines) || !Number.isInteger(pages))
+          throw new TypeError("Scroll amounts must be whole numbers");
+        if (pane && !exited && pane.scroll({ lines, pages })) scheduleFrame();
+        break;
+      }
+      case "wheel": {
+        const { direction, col = 0, row = 0 } = message;
+        if (![-1, 1].includes(direction) || !Number.isInteger(col) || !Number.isInteger(row))
+          throw new TypeError("Invalid wheel event");
+        if (pane && !exited && pane.wheel({ direction, col, row }) === "scroll") scheduleFrame();
         break;
       }
       case "input":
@@ -287,8 +319,8 @@ export async function createTextualSession({
     if (closePromise) return closePromise;
     closing = true;
     clearTimeout(drawing);
-    clearTimeout(refreshing);
-    for (const watcher of watchers) watcher.close();
+    watcher?.close();
+    releaseHolder();
     closePromise = (async () => {
       try {
         await pane?.dispose();
@@ -298,8 +330,16 @@ export async function createTextualSession({
     })();
     return closePromise;
   }
-  watchTargets();
   snapshot();
+  watcher = createDataWatch({
+    ctx,
+    onChange: () => refresh({ force: false }),
+    onError: (error) =>
+      send({
+        type: "error",
+        message: `Saved data could not be watched: ${error.message}`,
+      }),
+  });
   if (agentIssue) send({ type: "agent-status", message: agentIssue });
   return { dispatch, refresh, close };
 }

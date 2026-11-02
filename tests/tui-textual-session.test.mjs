@@ -38,7 +38,12 @@ async function fixture(t, agent = null, extraEnv = {}, extraOptions = {}) {
           },
         },
       },
-      { id: "harbor", company: "Harbor", role: "Platform Lead", status: "applied" },
+      {
+        id: "harbor",
+        company: "Harbor",
+        role: "Platform Lead",
+        status: "applied",
+      },
     ],
   };
   const path = join(home, "workspace/tracker.json");
@@ -59,6 +64,17 @@ async function fixture(t, agent = null, extraEnv = {}, extraOptions = {}) {
 }
 function snapshot(events) {
   return events.filter((event) => event.type === "workspace").at(-1);
+}
+// Replays frame events the way the Python side does: a full frame, then only
+// the rows that changed.
+function screen(events) {
+  let lines = [];
+  for (const event of events) {
+    if (event.type !== "frame") continue;
+    if (event.lines) lines = [...event.lines];
+    else for (const [index, line] of event.changed) lines[index] = line;
+  }
+  return lines.join("");
 }
 async function until(check) {
   const end = Date.now() + 4000;
@@ -110,7 +126,12 @@ test("selecting a row clears a pending Undo preview", async (t) => {
 
 test("Review and Apply report what they took and refuse closed-out targets", async (t) => {
   const { events, session, path, tracker } = await fixture(t);
-  tracker.applications.push({ id: "gone", company: "Gone", role: "Dev", status: "rejected" });
+  tracker.applications.push({
+    id: "gone",
+    company: "Gone",
+    role: "Dev",
+    status: "rejected",
+  });
   writeFileSync(path, JSON.stringify(tracker));
   session.refresh();
   await until(() => snapshot(events).view.total === 3);
@@ -145,7 +166,9 @@ test("Textual refresh observes external canonical writes while keeping stable se
   tracker.applications[1].statusNote = "Recruiter replied";
   writeFileSync(path, JSON.stringify(tracker));
   await until(() =>
-    snapshot(events).view.jobs.some((job) => job.record.statusNote === "Recruiter replied")
+    events.some(
+      (event) => event.type === "detail" && event.job.record.statusNote === "Recruiter replied"
+    )
   );
   assert.equal(snapshot(events).view.selectedId, "harbor");
 });
@@ -180,7 +203,11 @@ test("Textual inspect lists dropped files and saves nothing; attached files capt
   const source = join(home, "my offer.txt");
   writeFileSync(source, "Synthetic offer");
   await session.dispatch({ op: "inspect", id: 1, text: `'${source}'` });
-  await session.dispatch({ op: "inspect", id: 2, text: "plain recruiter note" });
+  await session.dispatch({
+    op: "inspect",
+    id: 2,
+    text: "plain recruiter note",
+  });
   const previews = events.filter((event) => event.type === "intake-preview");
   assert.deepEqual(previews[0].files, [{ path: source, name: "my offer.txt" }]);
   assert.equal(previews[1].files, null);
@@ -243,20 +270,12 @@ test("Textual reuses the actual PTY for input, paste, resize and cleanup", {
     args: ["-e", childCode],
   });
   await session.dispatch({ op: "resize", cols: 70, rows: 18 });
-  await until(() =>
-    events.some(
-      (event) => event.type === "frame" && event.lines.join("").includes("TEXTUAL_NATIVE_READY")
-    )
-  );
+  await until(() => screen(events).includes("TEXTUAL_NATIVE_READY"));
   const pid = events.find((event) => event.type === "agent-started").pid;
   await session.dispatch({ op: "input", data: "hello" });
-  await until(() =>
-    events.some((event) => event.type === "frame" && event.lines.join("").includes("GOT:hello"))
-  );
+  await until(() => screen(events).includes("GOT:hello"));
   await session.dispatch({ op: "paste", data: "world" });
-  await until(() =>
-    events.some((event) => event.type === "frame" && event.lines.join("").includes("world"))
-  );
+  await until(() => screen(events).includes("world"));
   await session.dispatch({ op: "resize", cols: 64, rows: 15 });
   await until(() =>
     events.some((event) => event.type === "frame" && event.cols === 64 && event.rows === 15)
@@ -265,12 +284,43 @@ test("Textual reuses the actual PTY for input, paste, resize and cleanup", {
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });
 
+test("later frames carry only the rows that changed", { timeout: 9000 }, async (t) => {
+  const childCode =
+    "process.stdin.setRawMode(true);process.stdin.resume();process.stdout.write('FIRST_ROW');process.stdin.on('data',()=>process.stdout.write('\\x1b[5;1HFIFTH_ROW'));";
+  const { events, session } = await fixture(t, {
+    command: process.execPath,
+    args: ["-e", childCode],
+  });
+  await session.dispatch({ op: "resize", cols: 40, rows: 8 });
+  await until(() => screen(events).includes("FIRST_ROW"));
+  assert.equal(events.find((event) => event.type === "frame").lines.length, 8);
+  const before = events.filter((event) => event.type === "frame").length;
+  await session.dispatch({ op: "input", data: "x" });
+  await until(() => screen(events).includes("FIFTH_ROW"));
+  const later = events.filter((event) => event.type === "frame").slice(before);
+  assert.ok(later.length > 0);
+  for (const event of later) {
+    assert.equal("lines" in event, false);
+    assert.ok(event.changed.length <= 2, `sent ${event.changed.length} rows for one row's change`);
+  }
+  assert.ok(later.some((event) => event.changed.some(([index]) => index === 4)));
+  // Nothing changed, so nothing more is sent.
+  const count = events.length;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(events.length, count);
+  await session.dispatch({ op: "resize", cols: 44, rows: 8 });
+  await until(() => events.at(-1).type === "frame" && events.at(-1).cols === 44);
+  assert.equal(events.at(-1).lines.length, 8);
+});
+
 test("the agent pane resolves careerrat to this checkout, not an earlier install", {
   timeout: 15000,
 }, async (t) => {
   const decoy = mkdtempSync(join(tmpdir(), "careerrat-decoy-"));
   t.after(() => rmSync(decoy, { recursive: true, force: true }));
-  writeFileSync(join(decoy, "careerrat"), "#!/bin/sh\necho OLD-INSTALL\n", { mode: 0o755 });
+  writeFileSync(join(decoy, "careerrat"), "#!/bin/sh\necho OLD-INSTALL\n", {
+    mode: 0o755,
+  });
   const childCode =
     "const r=require('node:child_process').spawnSync('careerrat',['--version'],{encoding:'utf8',shell:process.platform==='win32'});process.stdout.write('CLI['+String(r.stdout).trim()+']');setTimeout(()=>{},3000)";
   const { events, session } = await fixture(
@@ -280,13 +330,8 @@ test("the agent pane resolves careerrat to this checkout, not an earlier install
   );
   const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
   await session.dispatch({ op: "resize", cols: 70, rows: 18 });
-  await until(() =>
-    events.some((event) => event.type === "frame" && event.lines.join("").includes("CLI["))
-  );
-  const text = events
-    .filter((event) => event.type === "frame")
-    .at(-1)
-    .lines.join("");
+  await until(() => screen(events).includes("CLI["));
+  const text = screen(events);
   assert.match(text, new RegExp(`CLI\\[${version.replaceAll(".", "\\.")}\\]`));
   assert.doesNotMatch(text, /OLD-INSTALL/);
 });
@@ -349,8 +394,68 @@ test("an idle database workspace doesn't keep re-reading and re-sending itself",
   assert.equal(tracker.applications.length, 2);
   await new Promise((resolve) => setTimeout(resolve, 1500));
   // ...but reading the database must not cause more reads on its own.
-  assert.ok(
-    events.filter((event) => event.type === "workspace").length <= 3,
+  assert.equal(
+    events.filter((event) => event.type === "workspace").length,
+    1,
     `idle workspace sent ${events.filter((event) => event.type === "workspace").length} snapshots`
   );
+});
+
+test("a database write is seen once by polling the data version, then the session goes quiet", async (t) => {
+  const { home } = await fixture(t);
+  const env = { ...process.env, CAREERRAT_HOME: home };
+  importFromTracker({
+    repoRoot: root,
+    env,
+    sourceDir: join(home, "workspace"),
+  });
+  closeAll();
+  const events = [];
+  const session = await api.createTextualSession({
+    repoRoot: root,
+    env,
+    emit: (event) => events.push(event),
+  });
+  t.after(async () => {
+    await session.close();
+    closeAll();
+  });
+  const { DatabaseSync } = await import("node:sqlite");
+  const { dbFilePath } = await import("../src/core/db/connection.mjs");
+  const writer = new DatabaseSync(dbFilePath({ repoRoot: root, env }));
+  t.after(() => writer.close());
+  writer.exec("PRAGMA busy_timeout = 5000");
+  const row = writer.prepare("SELECT id, data FROM applications WHERE id = 'northstar'").get();
+  const record = JSON.parse(row.data);
+  record.statusNote = "Changed from outside";
+  writer
+    .prepare("UPDATE applications SET data = ? WHERE id = ?")
+    .run(JSON.stringify(record), row.id);
+  await until(() =>
+    events.some(
+      (event) => event.type === "detail" && event.job.record.statusNote === "Changed from outside"
+    )
+  );
+  const seen = events.filter((event) => event.type === "workspace").length;
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  assert.equal(events.filter((event) => event.type === "workspace").length, seen);
+});
+
+test("snapshots carry summary rows and the selected job arrives as one detail event", async (t) => {
+  const { events, session, path, tracker } = await fixture(t);
+  tracker.applications[0].evaluation.requirements = Array.from({ length: 500 }, (_, index) => ({
+    requirement: `Requirement ${index}`,
+    evidence: "x".repeat(2000),
+  }));
+  writeFileSync(path, JSON.stringify(tracker));
+  session.refresh();
+  await until(() => events.some((event) => event.type === "detail" && event.job.truncated));
+  const view = snapshot(events).view;
+  assert.deepEqual(Object.keys(view.jobs[0].record).sort(), ["company", "role", "status"]);
+  assert.ok(JSON.stringify(view).length < 20000, "summary snapshot grew with the saved data");
+  const detail = events.filter((event) => event.type === "detail").at(-1);
+  assert.equal(detail.job.record.evaluation.requirements.length, 200);
+  assert.ok(Buffer.byteLength(JSON.stringify(detail)) < 2 * 1024 * 1024);
+  await session.dispatch({ op: "select", id: "harbor" });
+  assert.equal(events.filter((event) => event.type === "detail").at(-1).id, "harbor");
 });

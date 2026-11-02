@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 from types import SimpleNamespace
@@ -213,6 +214,244 @@ closeAll();
             for pid in (child_pid, bridge_pid):
                 with self.assertRaises(ProcessLookupError):
                     os.kill(pid, 0)
+            self.assertEqual(app.errors, [])
+
+    def test_key_map_covers_newlines_modifiers_and_function_keys(self):
+        table = {
+            ("shift+enter", None): "\n",
+            ("ctrl+j", "\n"): "\n",
+            ("alt+enter", None): "\x1b\r",
+            ("enter", "\r"): "\r",
+            ("ctrl+c", None): "\x03",
+            ("ctrl+space", None): "\x00",
+            ("up", None): "\x1b[A",
+            ("ctrl+left", None): "\x1b[1;5D",
+            ("shift+right", None): "\x1b[1;2C",
+            ("ctrl+shift+up", None): "\x1b[1;6A",
+            ("pageup", None): "\x1b[5~",
+            ("ctrl+delete", None): "\x1b[3;5~",
+            ("delete", None): "\x1b[3~",
+            ("insert", None): "\x1b[2~",
+            ("f1", None): "\x1bOP",
+            ("f5", None): "\x1b[15~",
+            ("shift+f5", None): "\x1b[15;2~",
+            ("shift+f1", None): "\x1b[1;2P",
+            ("alt+backspace", None): "\x1b\x7f",
+            ("alt+b", "b"): "\x1bb",
+            ("shift+tab", None): "\x1b[Z",
+            ("a", "a"): "a",
+            ("é", "é"): "é",
+        }
+        for (key, character), expected in table.items():
+            self.assertEqual(MODULE.key_bytes(key, character), expected, key)
+        self.assertIsNone(MODULE.key_bytes("shift+f13x", None))
+
+    async def test_newline_and_modified_keys_reach_the_native_agent(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-keys-") as folder:
+            home = Path(folder)
+            executable = home / "codex"
+            executable.write_text(
+                f"#!{shutil.which('node')}\n"
+                "import fs from 'node:fs';\n"
+                "process.stdin.setRawMode(true);process.stdin.resume();process.stdout.write('KEYS_READY');\n"
+                "process.stdin.on('data',b=>fs.appendFileSync(process.env.CAREERRAT_HOME+'/keys.log',b.toString('hex')+'\\n'));\n"
+            )
+            executable.chmod(0o700)
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "KEYS_READY" in pane.render().plain)
+                await pilot.press("f6")
+                log = home / "keys.log"
+                for key, expected in [
+                    ("shift+enter", "0a"),
+                    ("ctrl+j", "0a"),
+                    ("alt+enter", "1b0d"),
+                    ("ctrl+left", "1b5b313b3544"),
+                    ("f5", "1b5b31357e"),
+                ]:
+                    before = len(log.read_text().split()) if log.exists() else 0
+                    await pilot.press(key)
+                    await until(lambda: log.exists() and len(log.read_text().split()) > before)
+                    self.assertEqual(log.read_text().split()[-1], expected, key)
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_pane_scrollback_follows_the_wheel_and_shift_page_keys(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-scroll-") as folder:
+            home = Path(folder)
+            executable = home / "codex"
+            executable.write_text(
+                f"#!{shutil.which('node')}\n"
+                "for(let i=0;i<120;i++)console.log('HISTORY'+i);console.log('AT_BOTTOM');"
+                "process.stdin.resume();\n"
+            )
+            executable.chmod(0o700)
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "AT_BOTTOM" in pane.render().plain)
+                self.assertEqual(pane.frame["scroll"]["offset"], 0)
+
+                class Wheel:
+                    def get_content_offset(self, widget):
+                        return SimpleNamespace(x=2, y=3)
+
+                    def stop(self):
+                        pass
+
+                    def prevent_default(self):
+                        pass
+
+                for _ in range(4):
+                    await pane.wheel(Wheel(), -1)
+                await until(lambda: pane.frame["scroll"]["offset"] == 12)
+                self.assertNotIn("AT_BOTTOM", pane.render().plain)
+                self.assertIn("12 lines up", pane.border_subtitle)
+                await pane.wheel(Wheel(), 1)
+                await until(lambda: pane.frame["scroll"]["offset"] == 9)
+                await pilot.press("f6", "shift+pageup")
+                await until(lambda: pane.frame["scroll"]["offset"] > 9)
+                await pilot.press("shift+pagedown")
+                await until(lambda: pane.frame["scroll"]["offset"] == 9)
+                await pilot.press("x")
+                await until(lambda: pane.frame["scroll"]["offset"] == 0)
+                self.assertEqual(pane.border_subtitle, "")
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_agent_bell_title_and_clipboard_reach_the_outer_terminal(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-osc-") as folder:
+            home = Path(folder)
+            executable = home / "codex"
+            executable.write_text(
+                f"#!{shutil.which('node')}\n"
+                "process.stdin.resume();\n"
+                "process.stdout.write('\\x07\\x1b]2;Agent: plan\\x07"
+                "\\x1b]52;c;aGVsbG8gY2xpcGJvYXJk\\x07\\x1b]52;c;?\\x07\\x1b]52;c;%%%\\x07READY');\n"
+            )
+            executable.chmod(0o700)
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            bells, copies, writes = [], [], []
+            app.bell = lambda: bells.append(1)
+            app.copy_to_clipboard = lambda text: copies.append(text)
+            async with app.run_test(size=(160, 50)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "READY" in pane.render().plain)
+                await until(lambda: copies and app.sub_title == "Agent: plan")
+                self.assertEqual(copies, ["hello clipboard"])
+                self.assertEqual(len(bells), 1)
+                # Two bells inside a second are one bell.
+                app.ring_bell()
+                app.ring_bell()
+                self.assertEqual(len(bells), 1)
+                app.write_terminal = writes.append
+                app.set_agent_title("a\x1b]0;evil\x07 title")
+                self.assertEqual(app.sub_title, "a]0;evil title")
+                self.assertNotIn("\x1b]0;evil", writes[-1])
+                self.assertTrue(writes[-1].startswith("\x1b]2;CareerRat"))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_letters_go_to_the_agent_not_the_shortcuts_when_the_pane_has_focus(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-letters-") as folder:
+            home = Path(folder)
+            self.fake_agent(home)
+            (home / "workspace").mkdir()
+            (home / "workspace/tracker.json").write_text(
+                json.dumps({"applications": [{"id": "a", "company": "Alpha", "role": "Dev", "status": "applied"}]})
+            )
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            async with app.run_test(size=(160, 40)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "AGENT_READY" in pane.render().plain)
+                await pilot.press("f6", "s", "v")
+                await until(lambda: len(self.agent_log(home)) >= 1)
+                self.assertNotIsInstance(app.screen, MODULE.RequestText)
+                self.assertIn("s", "".join(item["data"] for item in self.agent_log(home)))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_many_resizes_send_one_resize_and_the_log_file_keeps_errors(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-log-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            log = Path(folder) / "internal/tui/tui.log"
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder, "CAREERRAT_TUI_LOG": str(log)},
+                bridge_args=["--no-agent"],
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.pause()
+                sent = []
+                original = app.send
+
+                async def record(message):
+                    sent.append(message["op"])
+                    await original(message)
+
+                app.send = record
+                pane = app.query_one(MODULE.NativePane)
+                for _ in range(20):
+                    pane.on_resize()
+                await pilot.pause(0.4)
+                self.assertEqual(sent.count("resize"), 1)
+                await app.handle_event({"type": "error", "message": "Saved data could not refresh: boom"})
+                await pilot.press("ctrl+q")
+            self.assertIn("Saved data could not refresh: boom", log.read_text())
+
+    async def test_a_status_that_arrives_during_a_held_message_shows_when_the_hold_ends(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-hold-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                message = app.query_one("#message", Static)
+                app.show_message("Read this first", hold=0.4)
+                app.show_status("Search running · 1")
+                app.show_status("Search completed · 3 saved")
+                self.assertIn("Read this first", str(message.render()))
+                await until(lambda: "3 saved" in str(message.render()), 3)
+                self.assertNotIn("running", str(message.render()))
+                # Nothing is left to replay once it has been shown.
+                self.assertIsNone(app.pending_status)
+                app.show_message("Later hold", hold=0.3)
+                app.show_status("Newest")
+                await pilot.pause(0.1)
+                app.show_message("Longer hold", hold=0.5)
+                await until(lambda: "Newest" in str(message.render()), 3)
+                self.assertGreaterEqual(time.monotonic(), app.held[1] - 0.05)
+                await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
     async def test_saved_jobs_clicks_requests_context_and_cleanup(self):
@@ -776,6 +1015,7 @@ closeAll();
                     stopping=False,
                     errors=[],
                     show_message=app.show_message,
+                    write_log=app.write_log,
                     handle_event=record,
                     bridge_closed=bridge_closed,
                 )
@@ -784,6 +1024,78 @@ closeAll();
                 self.assertEqual(handled, ["context"])
                 self.assertEqual(closed, [True])
                 await pilot.press("ctrl+q")
+
+    async def test_an_oversized_bridge_line_is_dropped_and_later_events_still_arrive(self):
+        reader = asyncio.StreamReader(limit=64)
+        # Over the limit with the newline already buffered, then over the limit
+        # arriving in pieces, then a normal event.
+        reader.feed_data(b"x" * 500 + b"\n")
+        reader.feed_data(b'{"type":"ok"}\n')
+
+        async def late():
+            await asyncio.sleep(0.05)
+            reader.feed_data(b"y" * 300)
+            await asyncio.sleep(0.05)
+            reader.feed_data(b"y" * 300 + b"\n" + b'{"type":"late"}\n')
+            reader.feed_eof()
+
+        task = asyncio.create_task(late())
+        seen = []
+        while line := await MODULE.read_event_line(reader):
+            seen.append("big" if line is MODULE.OVERSIZED else json.loads(line)["type"])
+        await task
+        self.assertEqual(seen, ["big", "ok", "big", "late"])
+
+    async def test_a_multi_megabyte_workspace_stays_connected_and_responsive(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-large-") as folder:
+            home = Path(folder)
+            (home / "workspace").mkdir()
+            jobs = [
+                {
+                    "id": f"job-{index:03d}",
+                    "company": f"Company {index:03d}",
+                    "role": "Platform Engineer",
+                    "status": "applied",
+                    "note": "n" * 20000,
+                    "evaluation": {
+                        "gate": "keep",
+                        "requirements": [
+                            {
+                                "requirement": f"Requirement {item}",
+                                "importance": "high",
+                                "evidence": "e" * 400,
+                                "match": "strong",
+                            }
+                            for item in range(250)
+                        ],
+                    },
+                }
+                for index in range(40)
+            ]
+            text = json.dumps({"applications": jobs})
+            self.assertGreater(len(text), 4_000_000)
+            (home / "workspace/tracker.json").write_text(text)
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 40, 20)
+                self.assertLess(len(json.dumps(app.snapshot)), 200_000)
+                await until(lambda: app.detail and app.detail["id"] == app.selected_id, 10)
+                first = app.selected_id
+                table.focus()
+                started = time.monotonic()
+                await pilot.press("down")
+                await until(lambda: app.selected_id != first, 5)
+                await until(
+                    lambda: app.detail and app.detail["id"] == app.selected_id, 5
+                )
+                self.assertLess(time.monotonic() - started, 3)
+                self.assertFalse(app.reader.done())
+                self.assertIn("Platform Engineer", str(app.query_one("#details", Static).render()))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
 
 
 REAL_SHAPE = [
@@ -1074,6 +1386,108 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     app.snapshot["state"]["selectedId"], app.selected_id
                 )
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_every_toolbar_action_has_a_key_escape_closes_dialogs_and_f1_opens_the_palette(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-keys-") as folder:
+            self.make_home(folder, self.synthetic_jobs())
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 40)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 2)
+                self.assertTrue(table.has_focus)
+                for key, name in (("s", "search"), ("v", "review"), ("a", "apply")):
+                    await pilot.press(key)
+                    await until(lambda: isinstance(app.screen, MODULE.RequestText))
+                    self.assertIn(
+                        "No agent", app.screen.reason, f"{key} did not send {name}"
+                    )
+                    await pilot.press("escape")
+                    await until(lambda: not isinstance(app.screen, MODULE.RequestText))
+                await pilot.press("c")
+                await until(lambda: isinstance(app.screen, MODULE.ContextCapture))
+                # Letters are text inside a dialog, not shortcuts.
+                await pilot.press("s", "a")
+                self.assertEqual(app.screen.query_one("#context-text").text, "sa")
+                await pilot.press("escape")
+                await until(lambda: not isinstance(app.screen, MODULE.ContextCapture))
+                await pilot.press("f5")
+                await pilot.pause()
+                self.assertEqual(app.errors, [])
+                for key, select_id in (
+                    ("t", "status"),
+                    ("b", "basis"),
+                    ("o", "order"),
+                ):
+                    await pilot.press(key)
+                    await until(lambda: app.query_one(f"#{select_id}", Select).expanded)
+                    await pilot.press("escape")
+                    await until(lambda: not app.query_one(f"#{select_id}", Select).expanded)
+                # The currency list only exists with more than one currency.
+                await pilot.press("y")
+                await pilot.pause()
+                self.assertFalse(app.query_one("#currency", Select).expanded)
+                await pilot.press("f1")
+                await until(lambda: type(app.screen).__name__ == "CommandPalette")
+                await pilot.press("escape")
+                await until(lambda: type(app.screen).__name__ != "CommandPalette")
+                await app.run_action("add_context")
+                await until(lambda: isinstance(app.screen, MODULE.ContextCapture))
+                await pilot.press("escape")
+                await until(lambda: not isinstance(app.screen, MODULE.ContextCapture))
+                commands = [item.title for item in app.get_system_commands(app.screen)]
+                for title in ("Search jobs", "Review matches", "Apply selected", "Add context", "Refresh"):
+                    self.assertIn(title, commands)
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_a_refresh_updates_cells_in_place_and_keeps_scroll_and_selection(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-inplace-") as folder:
+            jobs = [
+                {"id": f"job-{n:03d}", "company": f"Company {n:03d}", "role": "Dev", "status": "applied"}
+                for n in range(80)
+            ]
+            self.make_home(folder, jobs)
+            path = Path(folder) / "workspace/tracker.json"
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(140, 30)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 80)
+                table.focus()
+                table.move_cursor(row=45)
+                await until(lambda: app.selected_id == "job-045")
+                await pilot.pause()
+                table.scroll_to(y=30, animate=False, immediate=True)
+                await pilot.pause()
+                scroll = table.scroll_y
+                self.assertGreater(scroll, 0)
+                cleared = []
+                original = table.clear
+                table.clear = lambda *a, **k: (cleared.append(1), original(*a, **k))[1]
+
+                # A cell changes: updated where it sits, nothing is refilled.
+                jobs[50]["status"] = "interview"
+                path.write_text(json.dumps({"meta": {"version": 7}, "applications": jobs}))
+                await until(lambda: "Interview" in str(table.get_row("job-050")[2]))
+                self.assertEqual(cleared, [])
+                self.assertEqual(table.scroll_y, scroll)
+                self.assertEqual(table.cursor_row, 45)
+                self.assertEqual(app.selected_id, "job-045")
+
+                # A job is added: the table refills but keeps scroll and selection.
+                jobs.append({"id": "job-999", "company": "Zeta", "role": "Dev", "status": "applied"})
+                path.write_text(json.dumps({"meta": {"version": 7}, "applications": jobs}))
+                await until(lambda: table.row_count == 81)
+                await pilot.pause()
+                await pilot.pause()
+                self.assertEqual(table.scroll_y, scroll)
+                self.assertEqual(app.selected_id, "job-045")
+                self.assertEqual(table.cursor_row, app.job_ids.index("job-045"))
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 

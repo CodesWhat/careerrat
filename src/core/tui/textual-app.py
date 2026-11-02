@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import traceback
 from pathlib import Path
 import re
 import shutil
@@ -12,10 +13,11 @@ import time
 
 from rich.text import Text
 from textual import events
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical
-from textual.geometry import Offset
+from textual.geometry import Offset, Region
+from textual.strip import Strip
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets._select import SelectOverlay
@@ -35,6 +37,12 @@ from textual.widgets import (
 )
 
 HOLD_SECONDS = 12
+LOG_LIMIT_BYTES = 512 * 1024
+# A window resize fires many events; the agent only needs the last one.
+RESIZE_DELAY = 0.08
+# One bridge event is one line. A line past this is dropped, not fatal.
+EVENT_LINE_LIMIT = 32 * 1024 * 1024
+OVERSIZED = object()
 ROOT = Path(__file__).resolve().parents[3]
 KEYS = {
     "enter": "\r",
@@ -42,16 +50,82 @@ KEYS = {
     "tab": "\t",
     "shift+tab": "\x1b[Z",
     "escape": "\x1b",
-    "up": "\x1b[A",
-    "down": "\x1b[B",
-    "right": "\x1b[C",
-    "left": "\x1b[D",
-    "home": "\x1b[H",
-    "end": "\x1b[F",
-    "delete": "\x1b[3~",
-    "pageup": "\x1b[5~",
-    "pagedown": "\x1b[6~",
+    "space": " ",
 }
+# A newline that doesn't submit. Shift+Enter only reaches us in terminals that
+# report it (Kitty keyboard protocol); the agents read a bare line feed
+# (Ctrl+J) as "insert a newline" in every terminal.
+NEWLINE_KEYS = {"shift+enter", "ctrl+enter", "ctrl+j", "newline"}
+CURSOR_KEYS = {"up": "A", "down": "B", "right": "C", "left": "D", "home": "H", "end": "F"}
+TILDE_KEYS = {"insert": 2, "delete": 3, "pageup": 5, "pagedown": 6}
+FUNCTION_KEYS = {
+    "f1": "\x1bOP",
+    "f2": "\x1bOQ",
+    "f3": "\x1bOR",
+    "f4": "\x1bOS",
+    **{
+        f"f{number}": f"\x1b[{code}~"
+        for number, code in zip(
+            range(5, 13), (15, 17, 18, 19, 20, 21, 23, 24)
+        )
+    },
+}
+# xterm's modifier parameter: 1 + shift(1) + alt(2) + ctrl(4).
+MODIFIER_BITS = {"shift": 1, "alt": 2, "meta": 2, "ctrl": 4}
+
+
+def key_bytes(key, character=None):
+    """What the native agent should receive for a Textual key, or None."""
+    if key in NEWLINE_KEYS:
+        return "\n"
+    if key in KEYS:
+        return KEYS[key]
+    *held, base = key.split("+") if key != "+" else ["+"]
+    if any(name not in MODIFIER_BITS for name in held):
+        return character
+    modifier = 1 + sum(MODIFIER_BITS[name] for name in set(held))
+    if held == ["alt"] and base == "enter":
+        return "\x1b\r"
+    if base in CURSOR_KEYS:
+        final = CURSOR_KEYS[base]
+        return f"\x1b[1;{modifier}{final}" if held else f"\x1b[{final}"
+    if base in TILDE_KEYS:
+        code = TILDE_KEYS[base]
+        return f"\x1b[{code};{modifier}~" if held else f"\x1b[{code}~"
+    if base in FUNCTION_KEYS:
+        sequence = FUNCTION_KEYS[base]
+        if not held:
+            return sequence
+        if sequence.startswith("\x1bO"):
+            return f"\x1b[1;{modifier}{sequence[-1]}"
+        return sequence[:-1] + f";{modifier}~"
+    if held == ["ctrl"] and len(base) == 1 and base.isalpha():
+        return chr(ord(base.upper()) - 64)
+    if held == ["ctrl"] and base in ("space", "at", "@"):
+        return "\x00"
+    if held == ["ctrl"] and base in "[]\\^_" and len(base) == 1:
+        return chr(ord(base) - 64)
+    if held == ["alt"] and base == "backspace":
+        return "\x1b\x7f"
+    if held == ["alt"] and character and character.isprintable():
+        return "\x1b" + character
+    return character
+
+
+async def read_event_line(reader):
+    """The next bridge line, OVERSIZED if it ran past the limit (the rest of it
+    is discarded so later events still arrive), or b"" at the end of the stream."""
+    skipped = False
+    while True:
+        try:
+            line = await reader.readuntil(b"\n")
+        except asyncio.LimitOverrunError as error:
+            await reader.readexactly(error.consumed)
+            skipped = True
+            continue
+        except asyncio.IncompleteReadError as error:
+            return b"" if skipped else error.partial
+        return OVERSIZED if skipped else line
 
 
 def sorted_messages(messages):
@@ -287,6 +361,56 @@ def fit_report_text(row, fit, has_table):
 class NativePane(Widget):
     can_focus = True
     frame = None
+    lines = ()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.strips = {}
+
+    def apply_frame(self, value):
+        """Take a frame from the bridge and repaint only the rows that changed."""
+        old = self.lines
+        if "lines" in value:
+            lines = list(value["lines"])
+        else:
+            lines = list(old)
+            for index, line in value["changed"]:
+                if index >= len(lines):
+                    lines.extend([""] * (index + 1 - len(lines)))
+                lines[index] = line
+        changed = [
+            index
+            for index in range(max(len(lines), len(old)))
+            if index >= len(old) or index >= len(lines) or lines[index] != old[index]
+        ]
+        resized = len(lines) != len(old)
+        self.lines = lines
+        self.frame = {**{k: v for k, v in value.items() if k != "changed"}, "lines": lines}
+        for index in changed:
+            self.strips.pop(index, None)
+        if resized or "lines" in value and len(changed) == len(lines):
+            self.strips.clear()
+            self.refresh()
+        elif changed:
+            gutter = self.gutter
+            width = self.size.width
+            self.refresh(
+                *[
+                    Region(0, index + gutter.top, width, 1)
+                    for index in changed
+                ]
+            )
+
+    def render_line(self, y):
+        if not self.frame:
+            return super().render_line(y)
+        strip = self.strips.get(y)
+        if strip is None:
+            line = self.lines[y] if y < len(self.lines) else ""
+            text = Text.from_ansi(line)
+            strip = Strip(text.render(self.app.console)).simplify()
+            self.strips[y] = strip
+        return strip.adjust_cell_length(self.content_size.width)
 
     def render(self):
         if not self.frame:
@@ -308,12 +432,34 @@ class NativePane(Widget):
     def on_focus(self):
         self.place_cursor()
 
+    async def on_mouse_scroll_up(self, event: events.MouseScrollUp):
+        await self.wheel(event, -1)
+
+    async def on_mouse_scroll_down(self, event: events.MouseScrollDown):
+        await self.wheel(event, 1)
+
+    async def wheel(self, event, direction):
+        offset = event.get_content_offset(self)
+        await self.app.send(
+            {
+                "op": "wheel",
+                "direction": direction,
+                "col": offset.x if offset else 0,
+                "row": offset.y if offset else 0,
+            }
+        )
+        event.stop()
+        event.prevent_default()
+
     async def on_key(self, event: events.Key):
-        data = KEYS.get(event.key)
-        if data is None and event.key.startswith("ctrl+") and len(event.key) == 6:
-            data = chr(ord(event.key[-1].upper()) - 64)
-        if data is None:
-            data = event.character
+        if event.key in ("shift+pageup", "shift+pagedown"):
+            await self.app.send(
+                {"op": "scroll", "pages": -1 if event.key == "shift+pageup" else 1}
+            )
+            event.stop()
+            event.prevent_default()
+            return
+        data = key_bytes(event.key, event.character)
         if data is not None:
             await self.app.send({"op": "input", "data": data})
         event.stop()
@@ -323,8 +469,8 @@ class NativePane(Widget):
         await self.app.send({"op": "paste", "data": event.text})
         event.stop()
 
-    async def on_resize(self):
-        await self.app.resize_agent()
+    def on_resize(self):
+        self.app.schedule_agent_resize()
 
 
 class JobsTable(DataTable):
@@ -340,7 +486,10 @@ class RemoveFile(Button):
 
 
 class ContextCapture(ModalScreen):
-    BINDINGS = [Binding("ctrl+s", "save", "Save context", priority=True)]
+    BINDINGS = [
+        Binding("ctrl+s", "save", "Save context", priority=True),
+        Binding("escape", "close", "Cancel"),
+    ]
     CSS = """
     ContextCapture { align: center middle; background: $background 70%; }
     #capture-dialog { width: 85%; height: 70%; padding: 1 2; border: round $accent; background: $surface; }
@@ -421,6 +570,9 @@ class ContextCapture(ModalScreen):
             f"Not saved: {message}\nYour text and files are still here. Fix it and try again."
         )
 
+    def action_close(self):
+        self.dismiss()
+
     async def action_save(self):
         if self.waiting:
             return
@@ -450,6 +602,7 @@ class ContextCapture(ModalScreen):
 
 
 class JobDocument(ModalScreen):
+    BINDINGS = [Binding("escape", "close", "Close")]
     CSS = """
     JobDocument { align: center middle; background: $background 70%; }
     #document-dialog { width: 90%; height: 90%; padding: 1 2; border: round $accent; background: $surface; }
@@ -474,6 +627,9 @@ class JobDocument(ModalScreen):
                 id="jd-viewer",
             )
             yield Button("Close", id="close-document")
+
+    def action_close(self):
+        self.dismiss()
 
     def on_button_pressed(self, event):
         event.stop()
@@ -525,10 +681,20 @@ class RequestText(ModalScreen):
 class CareerRatApp(App):
     TITLE = "CareerRat · Workspace"
     AUTO_FOCUS = "#jobs"
-    ENABLE_COMMAND_PALETTE = False
+    # F1, because the agent keeps Ctrl+P for its own history.
+    COMMAND_PALETTE_BINDING = "f1"
     BINDINGS = [
         Binding("f6", "switch_focus", "Jobs / agent", priority=True),
         Binding("ctrl+q", "quit", "Quit", priority=True),
+        Binding("s", "request('search')", "Search jobs"),
+        Binding("v", "request('review')", "Review matches"),
+        Binding("a", "request('apply')", "Apply selected"),
+        Binding("c", "add_context", "Add context"),
+        Binding("f5", "refresh_jobs", "Refresh"),
+        Binding("t", "filter('status')", "Status", show=False),
+        Binding("y", "filter('currency')", "Currency", show=False),
+        Binding("b", "filter('basis')", "Pay basis", show=False),
+        Binding("o", "filter('order')", "Pay order", show=False),
     ]
     CSS = """
     #toolbar { height: auto; padding: 0 1; layout: vertical; }
@@ -565,8 +731,14 @@ class CareerRatApp(App):
     #agent-status.shown { display: block; }
     """
 
-    def __init__(self, env=None, bridge_args=None):
+    def __init__(self, env=None, bridge_args=None, line_limit=EVENT_LINE_LIMIT):
         super().__init__()
+        self.line_limit = line_limit
+        self.detail = None
+        self.last_bell = float("-inf")
+        self.resize_timer = None
+        self.pending_status = None
+        self.status_timer = None
         self.env = dict(os.environ if env is None else env)
         self.bridge_args = list(sys.argv[1:] if bridge_args is None else bridge_args)
         self.proc = None
@@ -579,6 +751,8 @@ class CareerRatApp(App):
         self.updating = False
         self.job_ids = []
         self.table_signature = None
+        self.rendered_ids = []
+        self.rendered_rows = []
         self.job_cells = []
         self.stage_options = {}
         self.column_key = None
@@ -670,6 +844,7 @@ class CareerRatApp(App):
         if sys.platform != "win32":
             for name in (signal.SIGTERM, signal.SIGHUP):
                 loop.add_signal_handler(name, self.exit)
+        self.write_terminal("\x1b[22;0t\x1b]2;CareerRat\x07")
         self.render_jobs()
         for select_id, options in {
             "status": [("Active", "active"), ("All statuses", "all")],
@@ -701,7 +876,7 @@ class CareerRatApp(App):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            limit=32 * 1024 * 1024,
+            limit=self.line_limit,
         )
         self.reader = asyncio.create_task(self.read_events())
         self.stderr_reader = asyncio.create_task(self.read_errors())
@@ -724,6 +899,26 @@ class CareerRatApp(App):
         toolbar = self.query("#toolbar")
         if toolbar:
             toolbar.first().set_class(event.size.width >= 150, "wide")
+
+    def schedule_agent_resize(self):
+        if self.resize_timer:
+            self.resize_timer.stop()
+        self.resize_timer = self.set_timer(RESIZE_DELAY, self.resize_agent)
+
+    def write_log(self, text):
+        """Keep a line for later in the log file; the screen only has room for one."""
+        path = self.env.get("CAREERRAT_TUI_LOG")
+        if not path:
+            return
+        try:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() and target.stat().st_size > LOG_LIMIT_BYTES:
+                target.replace(target.with_name(target.name + ".1"))
+            with target.open("a", encoding="utf-8") as handle:
+                handle.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {text}\n")
+        except OSError:
+            pass
 
     def next_request_id(self):
         self.request_counter += 1
@@ -786,10 +981,25 @@ class CareerRatApp(App):
         self.query_one("#message", Static).update(text)
 
     def show_status(self, text):
-        # The snapshot-driven line yields to a message someone still needs to read.
-        if time.monotonic() < self.held[1]:
+        # The snapshot-driven line yields to a message someone still needs to
+        # read, then takes over again when the hold ends: the latest status is
+        # kept and shown then, so an old one can't stay on screen.
+        self.pending_status = text
+        remaining = self.held[1] - time.monotonic()
+        if remaining > 0:
+            if self.status_timer:
+                self.status_timer.stop()
+            self.status_timer = self.set_timer(remaining + 0.02, self.release_status)
             return
-        self.show_message(text)
+        self.release_status()
+
+    def release_status(self):
+        remaining = self.held[1] - time.monotonic()
+        if remaining > 0:
+            self.show_status(self.pending_status)
+        elif self.pending_status is not None:
+            text, self.pending_status = self.pending_status, None
+            self.show_message(text)
 
     def show_agent_status(self, text):
         """Agent trouble stays on screen in its own line until the app is closed."""
@@ -802,23 +1012,33 @@ class CareerRatApp(App):
             text = line.decode(errors="replace").strip()
             if text:
                 self.stderr_lines.append(text)
+                self.write_log(f"bridge stderr: {text}")
             if not self.stopping and text:
                 self.show_message(text, hold=HOLD_SECONDS)
 
     async def read_events(self):
         try:
-            while line := await self.proc.stdout.readline():
+            while line := await read_event_line(self.proc.stdout):
+                if line is OVERSIZED:
+                    message = "A workspace update was too large to show and was skipped."
+                    self.errors.append(message)
+                    self.write_log(message)
+                    if not self.stopping:
+                        self.show_message(message, hold=HOLD_SECONDS)
+                    continue
                 try:
                     await self.handle_event(json.loads(line))
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
                     self.errors.append(str(error))
+                    self.write_log(f"event error: {traceback.format_exc()}")
                     if not self.stopping:
                         self.show_message(str(error), hold=HOLD_SECONDS)
             await self.bridge_closed()
         except (ValueError, OSError) as error:
             self.errors.append(str(error))
+            self.write_log(f"bridge read error: {error}")
             if not self.stopping:
                 self.show_message(str(error), hold=HOLD_SECONDS)
 
@@ -837,6 +1057,7 @@ class CareerRatApp(App):
             )
             return
         self.bridge_code = code or 0
+        self.write_log(f"bridge exited with code {code}")
         text = "Workspace connection closed. Quit and reopen to reconnect."
         if code:
             text = f"Workspace connection failed (exit {code}). {reason} Quit and reopen to reconnect."
@@ -851,15 +1072,26 @@ class CareerRatApp(App):
             self.update_workspace(value)
         elif kind == "selection":
             self.apply_selection(value)
+        elif kind == "detail":
+            self.apply_detail(value)
         elif kind == "notice":
             self.show_message(value["message"], hold=HOLD_SECONDS)
         elif kind == "agent-status":
             self.show_agent_status(value["message"])
         elif kind == "frame":
             pane = self.query_one(NativePane)
-            pane.frame = value
-            pane.refresh()
+            pane.apply_frame(value)
+            behind = (value.get("scroll") or {}).get("offset") or 0
+            pane.border_subtitle = (
+                f"{behind} lines up · type or Shift+PageDown to return" if behind else ""
+            )
             pane.place_cursor()
+        elif kind == "bell":
+            self.ring_bell()
+        elif kind == "title":
+            self.set_agent_title(value.get("title"))
+        elif kind == "clipboard":
+            self.copy_from_agent(value.get("text"))
         elif kind == "request":
             self.query_one("#request", Input).value = value["text"]
             note = value.get("notice")
@@ -918,29 +1150,83 @@ class CareerRatApp(App):
             )
         elif kind == "error":
             self.errors.append(value["message"])
+            self.write_log(f"error: {value['message']}")
             self.show_message(value["message"], hold=HOLD_SECONDS)
 
+    def ring_bell(self):
+        """The agent rang the bell: pass it to the outer terminal, at most once a second."""
+        now = time.monotonic()
+        if now - self.last_bell >= 1:
+            self.last_bell = now
+            self.bell()
+
+    def write_terminal(self, text):
+        driver = getattr(self, "_driver", None)
+        if driver is not None and not self.is_headless:
+            driver.write(text)
+            driver.flush()
+
+    def set_agent_title(self, title):
+        """Show the agent's window title in the header and the outer terminal's title."""
+        title = "".join(c for c in str(title or "") if c.isprintable())[:120].strip()
+        self.sub_title = title
+        self.write_terminal(f"\x1b]2;CareerRat{' · ' + title if title else ''}\x07")
+
+    def copy_from_agent(self, text):
+        """The agent asked to set the clipboard (OSC 52); send it to the outer terminal."""
+        if not isinstance(text, str) or not text:
+            return
+        self.copy_to_clipboard(text)
+        self.show_message(
+            f"The agent copied {len(text):,} characters to your clipboard.",
+            hold=HOLD_SECONDS,
+        )
+
     def render_jobs(self, force=False):
-        """Fit the columns to the table's width and refill the rows."""
+        """Fit the columns to the table's width and show the rows.
+
+        force says the saved jobs changed. When only cell text changed, the
+        cells are updated where they sit, so the scroll position and the
+        highlighted row stay put; only a new layout or a different set or order
+        of jobs refills the table, and that keeps the scroll position too."""
         table = self.query_one("#jobs", DataTable)
         # Leave room for the scrollbar so adding it never changes the layout.
         width = table.size.width - 2 if table.size.width else 76
         plan = plan_columns(width)
         key = (width, tuple(plan))
-        if not force and key == self.column_key:
+        relayout = key != self.column_key
+        if not force and not relayout:
             return
-        self.column_key = key
+        rows = [
+            [clip(cells[name], size) for name, size in plan] for cells in self.job_cells
+        ]
         self.updating = True
         try:
-            table.clear(columns=True)
-            for name, size in plan:
-                table.add_column(name, width=size, key=name)
-            for job_id, cells in zip(self.job_ids, self.job_cells):
-                table.add_row(
-                    *[clip(cells[name], size) for name, size in plan], key=job_id
+            if not relayout and self.job_ids == self.rendered_ids:
+                for job_id, row, before in zip(self.job_ids, rows, self.rendered_rows):
+                    for (name, _), cell, old in zip(plan, row, before):
+                        if cell != old:
+                            table.update_cell(job_id, name, cell, update_width=False)
+            else:
+                scroll = table.scroll_y
+                table.clear(columns=relayout)
+                if relayout:
+                    for name, size in plan:
+                        table.add_column(name, width=size, key=name)
+                for job_id, row in zip(self.job_ids, rows):
+                    table.add_row(*row, key=job_id)
+                if self.selected_id in self.job_ids:
+                    table.move_cursor(
+                        row=self.job_ids.index(self.selected_id), scroll=False
+                    )
+                # The table sizes itself after this refresh; scroll once it has.
+                table.call_after_refresh(
+                    table.call_after_refresh,
+                    lambda: table.scroll_to(y=scroll, animate=False, immediate=True),
                 )
-            if self.selected_id in self.job_ids:
-                table.move_cursor(row=self.job_ids.index(self.selected_id))
+            self.column_key = key
+            self.rendered_ids = list(self.job_ids)
+            self.rendered_rows = rows
         finally:
             self.updating = False
 
@@ -958,7 +1244,10 @@ class CareerRatApp(App):
                 self.job_ids = [job["id"] for job in jobs]
                 self.job_cells = [job_cells(job, view.get("currency")) for job in jobs]
                 self.render_jobs(force=True)
-            if self.selected_id in self.job_ids:
+            if (
+                self.selected_id in self.job_ids
+                and table.cursor_row != self.job_ids.index(self.selected_id)
+            ):
                 table.move_cursor(row=self.job_ids.index(self.selected_id))
             total = view.get("total", len(jobs))
             count = str(len(jobs)) if len(jobs) == total else f"{len(jobs)} of {total}"
@@ -1006,7 +1295,7 @@ class CareerRatApp(App):
         finally:
             self.updating = False
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)
-        self.update_details(selected, view)
+        self.show_selected(selected, view)
         self.update_workspace_history(view)
         self.update_status(view, state)
 
@@ -1053,11 +1342,23 @@ class CareerRatApp(App):
                     table.move_cursor(row=index)
                 finally:
                     self.updating = False
-        self.update_details(
+        self.show_selected(
             next((j for j in view["jobs"] if j["id"] == self.selected_id), None),
             view,
         )
         self.update_status(view, state)
+
+    def apply_detail(self, value):
+        """The selected job in full. The snapshot only carries summary rows."""
+        if self.detail == value or not self.snapshot:
+            return
+        self.detail = value
+        if value["id"] == self.selected_id:
+            view = self.snapshot["view"]
+            self.show_selected(
+                next((j for j in view["jobs"] if j["id"] == self.selected_id), None),
+                view,
+            )
 
     def update_workspace_history(self, view):
         messages = view.get("workspaceMessages") or []
@@ -1072,6 +1373,16 @@ class CareerRatApp(App):
         if messages:
             text += "\n\n" + format_messages(sorted_messages(messages))
         self.query_one("#workspace-history-text", Static).update(text)
+
+    def show_selected(self, summary, view):
+        """Show the selected job from its saved detail, or say it is loading."""
+        if summary and (self.detail or {}).get("id") != summary["id"]:
+            self.query_one("#requirements", DataTable).display = False
+            self.query_one("#open-jd", Button).display = False
+            for name in ("details", "history-text", "assessment-summary"):
+                self.query_one(f"#{name}", Static).update("Loading…")
+            return
+        self.update_details(self.detail["job"] if summary else None, view)
 
     def update_details(self, selected, view=None):
         report = self.query_one("#requirements", DataTable)
@@ -1154,8 +1465,11 @@ class CareerRatApp(App):
     async def on_data_table_row_highlighted(self, event):
         if event.data_table.id != "jobs":
             return
+        # A highlight posted while the table was refilled arrives after the
+        # cursor has already moved back; it describes a row nobody chose.
         if (
             self.updating
+            or event.cursor_row != event.data_table.cursor_row
             or not event.row_key.value
             or event.row_key.value == self.selected_id
         ):
@@ -1206,12 +1520,49 @@ class CareerRatApp(App):
             }[name]
             await self.send({"op": "key", "name": key})
 
+    def check_action(self, action, parameters):
+        # Single letters belong to the agent and to text boxes; they only act
+        # from the jobs side, and never under a dialog.
+        if action in ("request", "add_context", "refresh_jobs", "filter"):
+            if len(self.screen_stack) > 1 or self.query_one(NativePane).has_focus:
+                return False
+            if action == "filter" and not self.query_one(f"#{parameters[0]}").display:
+                return False
+        return True
+
+    def get_system_commands(self, screen):
+        yield from super().get_system_commands(screen)
+        for label, help_text, callback in (
+            ("Search jobs", "Ask the agent to search for jobs", lambda: self.action_request("search")),
+            ("Review matches", "Ask the agent to review the shown jobs", lambda: self.action_request("review")),
+            ("Apply selected", "Ask the agent to apply to the selected job", lambda: self.action_request("apply")),
+            ("Add context", "Paste a JD, transcript or file path", self.action_add_context),
+            ("Refresh", "Read the saved workspace again", self.action_refresh_jobs),
+            ("Jobs / agent", "Move focus between the jobs table and the agent", self.action_switch_focus),
+        ):
+            yield SystemCommand(label, help_text, callback)
+
+    async def action_request(self, name):
+        await self.send({"op": "request", "action": name})
+
+    def action_add_context(self):
+        self.push_screen(ContextCapture())
+
+    async def action_refresh_jobs(self):
+        await self.send({"op": "refresh"})
+
+    def action_filter(self, name):
+        select = self.query_one(f"#{name}", Select)
+        select.focus()
+        select.action_show_overlay()
+
     def action_switch_focus(self):
         pane = self.query_one(NativePane)
         (self.query_one("#jobs") if pane.has_focus else pane).focus()
 
     async def on_unmount(self):
         self.stopping = True
+        self.write_terminal("\x1b[23;0t")
         if self.proc:
             await self.send({"op": "quit"})
             try:
@@ -1233,5 +1584,9 @@ class CareerRatApp(App):
 
 if __name__ == "__main__":
     app = CareerRatApp()
-    app.run()
+    try:
+        app.run()
+    except BaseException:
+        app.write_log(f"crash: {traceback.format_exc()}")
+        raise
     sys.exit(app.return_code or app.bridge_code or 0)
