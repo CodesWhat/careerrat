@@ -50,7 +50,7 @@ test("website points installation at the npm install docs", async () => {
   assert.match(page, /Install with npm/);
   assert.match(page, /\/docs\/getting-started\/install/);
   assert.match(page, /npm i -g careerrat/);
-  assert.match(page, /Needs Node\.js 24\.15 or newer\./);
+  assert.match(page, /Needs Node\.js 24\.22\.1 or newer\./);
   assert.doesNotMatch(page, /Download for Mac|releases\/latest|Signed and notarized/);
   assert.match(page, /CareerRat itself costs nothing/);
   assert.doesNotMatch(page, /Runs on your own AI CLI/);

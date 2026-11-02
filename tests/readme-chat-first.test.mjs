@@ -7,7 +7,7 @@ test("README leads with the npm install path", async () => {
 
   assert.match(readme, /Turns the AI CLI you already have into a personal recruiter\./);
   assert.match(readme, /npm i -g careerrat/);
-  assert.match(readme, /Node\.js 24\.15 or newer/);
+  assert.match(readme, /Node\.js 24\.22\.1 or newer/);
   assert.match(readme, /Python 3\.11 or newer/);
   assert.match(readme, /`careerrat start` opens the workspace in your browser/);
   assert.match(readme, /`careerrat tui` opens the\s+terminal workspace/);

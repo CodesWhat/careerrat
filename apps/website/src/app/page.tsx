@@ -225,7 +225,7 @@ export default function Home() {
               <TrackedCtaLink className="button button--lime" href={INSTALL_URL} placement="get">
                 Install with npm
               </TrackedCtaLink>
-              <p className="download-card__note">Needs Node.js 24.15 or newer.</p>
+              <p className="download-card__note">Needs Node.js 24.22.1 or newer.</p>
             </div>
             <div className="engine-card">
               <p className="eyebrow">You&apos;ll need an AI CLI</p>
