@@ -1942,7 +1942,7 @@ test("plain fetch: short/shell body -> deferred (insufficient_content)", async (
     resolveHost: publicResolver,
   });
   assert.equal(result.bodyFetchStatus, "deferred");
-  assert.match(result.reason, /insufficient content/);
+  assert.match(result.reason, /almost no content/);
 });
 
 test("plain fetch: bot-wall interstitial -> deferred (bot_challenge)", async () => {
@@ -2001,4 +2001,44 @@ test("plain fetch: a network error -> deferred with the error message", async ()
   });
   assert.equal(result.bodyFetchStatus, "deferred");
   assert.match(result.reason, /fetch failed: ECONNRESET/);
+});
+
+const LONG_ERROR_PAGE = `<html><body>${"Sorry, something went wrong on our side. ".repeat(20)}</body></html>`;
+
+test("plain fetch: a 500 error page is not a resolved job description", async () => {
+  const result = await resolveJobUrl("https://example-startup.com/careers/eng-500", {
+    fetchImpl: async () => htmlResponse(LONG_ERROR_PAGE, { status: 500 }),
+    resolveHost: publicResolver,
+  });
+  assert.equal(result.bodyFetchStatus, "deferred");
+  assert.equal(result.unreachable, true);
+  assert.match(result.reason, /HTTP 500/);
+  assert.equal(result.bodyText, undefined);
+});
+
+test("plain fetch: a 404 page is reported as a closed job, not a saved description", async () => {
+  const result = await resolveJobUrl("https://example-startup.com/careers/eng-404", {
+    fetchImpl: async () => htmlResponse(LONG_ERROR_PAGE, { status: 404 }),
+    resolveHost: publicResolver,
+  });
+  assert.equal(result.bodyFetchStatus, "deferred");
+  assert.equal(result.liveness.result, "expired");
+  assert.equal(result.bodyText, undefined);
+});
+
+test("hydrateJobOffer: a failed fetch reads as unreachable, not as a posting-identity rejection", async () => {
+  const hydrated = await hydrateJobOffer(
+    { url: "https://example-startup.com/careers/eng-down", title: "Engineer", company: "Acme" },
+    {
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+      resolveHost: publicResolver,
+      requirePostingIdentity: true,
+    }
+  );
+  assert.equal(hydrated.bodyFetchStatus, "deferred");
+  assert.equal(hydrated.bodyFetchUnreachable, true);
+  assert.doesNotMatch(hydrated.bodyFetchReason, /does not identify/);
+  assert.match(hydrated.bodyFetchReason, /reach/);
 });

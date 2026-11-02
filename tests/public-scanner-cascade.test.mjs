@@ -228,3 +228,21 @@ test("ambiguous reachable public text creates review metadata before any source-
   assert.equal(result.reviewItem.reason, "ambiguous_public_page");
   assert.equal(companyAtsWrites, 0);
 });
+
+test("public page extraction reports a network failure as unreachable, not as an empty page", async () => {
+  const { extractPublicCareersPage } = await extractorModule();
+  const result = await extractPublicCareersPage({
+    url: "https://careers.example.test/jobs",
+    resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("x"), { code: "ECONNREFUSED" }),
+      });
+    },
+    now: NOW,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.unreachable, true);
+  assert.equal(result.extractionStatus, "blocked_fetch_failed");
+});

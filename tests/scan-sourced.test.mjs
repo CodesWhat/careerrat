@@ -40,6 +40,8 @@ import {
   candidateConfigPatch,
   candidateSetupInitialize,
   companyAtsUpsert,
+  companyBoardResolutionGet,
+  companyBoardResolutionUpsert,
   sourceConfigGet,
   sourceConfigPut,
   sourcedUpsertBatch,
@@ -771,6 +773,92 @@ test("DB mode write:true stamps a successful company-board watermark", async () 
   }
 });
 
+function boardResolution(over = {}) {
+  return {
+    company_key: "acme",
+    company_name: "Acme",
+    company_domain: "jobs.lever.co",
+    careers_url: "https://jobs.lever.co/acme",
+    job_board_url: "https://jobs.lever.co/acme",
+    ats_provider: "lever",
+    api_url: "https://api.lever.co/v0/postings/acme",
+    confidence: "high",
+    provenance: [],
+    first_resolved_at: "2026-10-30T00:00:00.000Z",
+    last_verified_at: new Date().toISOString(),
+    last_scan_result: { status: "resolved" },
+    failure_count: 0,
+    zero_job_count: 0,
+    next_refresh_reason: null,
+    status: "supported_ats",
+    proposed_action: "approve-supported-ats",
+    promotable: true,
+    ...over,
+  };
+}
+
+test("a dead company board feeds back into its resolution and says the board wasn't found", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    });
+    companyBoardResolutionUpsert({ repoRoot, resolution: boardResolution() });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () => new Response("Not Found", { status: 404, statusText: "Not Found" }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: true,
+    });
+
+    assert.match(summary.errors[0].error, /HTTP 404/);
+    assert.match(summary.errors[0].error, /job board wasn't found/);
+    const row = companyBoardResolutionGet({ repoRoot, companyKey: "acme" }).resolution;
+    assert.equal(row.last_scan_result.status, "http-404");
+    assert.equal(row.failure_count, 1);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a company board that keeps returning zero jobs counts up, and a good scan resets it", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    });
+    companyBoardResolutionUpsert({ repoRoot, resolution: boardResolution() });
+    const empty = async () =>
+      new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    const opts = {
+      repoRoot,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: true,
+    };
+
+    await runSourcedScan({ ...opts, fetchImpl: empty });
+    await runSourcedScan({ ...opts, fetchImpl: empty });
+    assert.equal(
+      companyBoardResolutionGet({ repoRoot, companyKey: "acme" }).resolution.zero_job_count,
+      2
+    );
+
+    await runSourcedScan({ ...opts, fetchImpl: leverFetchStub() });
+    const row = companyBoardResolutionGet({ repoRoot, companyKey: "acme" }).resolution;
+    assert.equal(row.zero_job_count, 0);
+    assert.equal(row.last_scan_result.status, "success");
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("DB mode scoring uses SQLite targeting when candidate YAML is absent", async () => {
   const repoA = tempRepo();
   const repoB = tempRepo();
@@ -1100,6 +1188,66 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
     const lastRunAt = stored.searches[0].recency.lastRunAt;
     assert.match(lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a provider warning reaches the run health and holds back the source watermark", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "builtin",
+            source_type: "board",
+            label: "Short board",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () => new Response("", { status: 200 }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: true,
+    });
+
+    assert.equal(summary.warnings.length, 1);
+    assert.match(summary.warnings[0].warning, /nothing to scan/);
+    assert.equal(summary.health.status, "degraded");
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(stored.searches[0].recency.lastRunAt, undefined);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a scan where every source fails reports failed health for the CLI exit code", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: searchSourcesFixture() });
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: false,
+    });
+    assert.equal(summary.errors.length, 1);
+    assert.equal(summary.health.status, "failed");
+    assert.equal(summary.attemptedSources, 1);
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });

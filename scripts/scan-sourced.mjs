@@ -29,8 +29,10 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dbExists } from "../src/core/db/connection.mjs";
 import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
+import { companyBoardResolutionRecordScan } from "../src/core/db/verbs/company-discovery.mjs";
 import { deepIngestConfirmedForGeneration } from "../src/core/db/verbs/index.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../src/core/db/verbs/source-config.mjs";
+import { normalizeCompanyKey } from "../src/core/discovery/company-board-resolver.mjs";
 import { hydrateJobOffer } from "../src/core/intake/resolve.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { resolvePublicFetch } from "../src/core/net/public-http-fetch.mjs";
@@ -291,7 +293,43 @@ function sourceCoverageHost(value) {
 function sourceCoverageStatus(result = {}) {
   if (result.needsLogin) return "login-required";
   if (Array.isArray(result.errors) && result.errors.length > 0) return "failed";
+  if (Array.isArray(result.warnings) && result.warnings.length > 0) return "partial";
   return Array.isArray(result.offers) && result.offers.length > 0 ? "success" : "zero";
+}
+
+const BOARD_NOT_FOUND_NOTE =
+  " This company's job board wasn't found, so CareerRat will look it up again next time it checks for companies.";
+
+// Feed each company scan back into its cached board resolution: a board that
+// answers 404 or errors is marked for a fresh lookup, and one that keeps coming
+// back empty gets flagged too. Network failures say nothing about the board, so
+// they are left alone.
+function recordBoardHealth({ pathCtx, company, result }) {
+  const errors = result.errors || [];
+  let outcome;
+  if (errors.length > 0) {
+    const httpStatus = Number(/\bHTTP (\d{3})\b/.exec(errors[0]?.error || "")?.[1]) || 0;
+    outcome = httpStatus ? { kind: "http-error", httpStatus } : { kind: "other-failure" };
+    if (httpStatus === 404) {
+      for (const error of errors) {
+        if (/\bHTTP 404\b/.test(error.error || "")) error.error += BOARD_NOT_FOUND_NOTE;
+      }
+    }
+  } else if (result.needsLogin) {
+    return;
+  } else {
+    outcome = { kind: (result.offers || []).length > 0 ? "success" : "zero" };
+  }
+  if (!dbExists(pathCtx)) return;
+  try {
+    companyBoardResolutionRecordScan({
+      ...pathCtx,
+      companyKey: normalizeCompanyKey(company.name),
+      outcome,
+    });
+  } catch {
+    // Feedback is best-effort and must never fail the scan itself.
+  }
 }
 
 function sourceCoverageReceipt({ kind, label, company, url, result }) {
@@ -304,6 +342,8 @@ function sourceCoverageReceipt({ kind, label, company, url, result }) {
     status: sourceCoverageStatus(result),
     found: Array.isArray(result?.offers) ? result.offers.length : 0,
   };
+  const warningCount = Array.isArray(result?.warnings) ? result.warnings.length : 0;
+  if (warningCount > 0) receipt.warningCount = warningCount;
   if (company) receipt.company = String(company).trim().slice(0, 160);
   return receipt;
 }
@@ -520,7 +560,7 @@ export async function runSourcedScan({
   const titleFilter = buildTitleFilter(config.title_filter, candidateConfig.targeting);
   const locationFilter = buildLocationFilter(config.location_filter);
 
-  const scanned = { offers: [], errors: [], loginRequests: [], sourceCoverage: [] };
+  const scanned = { offers: [], errors: [], warnings: [], loginRequests: [], sourceCoverage: [] };
   const savedAt = new Date();
   const configuredCompanyCap = Number(
     candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
@@ -577,6 +617,7 @@ export async function runSourcedScan({
   function acceptBatch(result) {
     scanned.offers.push(...(result.offers || []));
     scanned.errors.push(...(result.errors || []));
+    scanned.warnings.push(...(result.warnings || []));
     if (result.needsLogin) scanned.loginRequests.push(result.needsLogin);
   }
 
@@ -595,6 +636,7 @@ export async function runSourcedScan({
     SOURCE_SCAN_CONCURRENCY
   );
   for (const { company, result } of companyResults) {
+    if (write && !standaloneConfigMode) recordBoardHealth({ pathCtx, company, result });
     acceptBatch(result);
     scanned.sourceCoverage.push(
       sourceCoverageReceipt({
@@ -605,7 +647,14 @@ export async function runSourcedScan({
         result,
       })
     );
-    if (write && !standaloneConfigMode && result.errors.length === 0) {
+    // A truncated or partial scan hasn't seen everything, so it must not move
+    // the source's watermark forward.
+    if (
+      write &&
+      !standaloneConfigMode &&
+      result.errors.length === 0 &&
+      !(result.warnings || []).length
+    ) {
       successfulCompanySources.push(company);
     }
   }
@@ -656,7 +705,11 @@ export async function runSourcedScan({
       })
     );
 
-    if ((result.errors || []).length > 0 || result.needsLogin) {
+    if (
+      (result.errors || []).length > 0 ||
+      (result.warnings || []).length > 0 ||
+      result.needsLogin
+    ) {
       failedSourceIndexes.add(task.sourceIndex);
     }
     const remaining = (remainingTasksBySource.get(task.sourceIndex) || 1) - 1;
@@ -898,11 +951,14 @@ export async function runSourcedScan({
       .slice(0, CONFLICT_OFFER_SAMPLE_LIMIT)
       .map(conflictOfferSample),
     errors: scanned.errors,
+    warnings: scanned.warnings,
+    attemptedSources: scanned.sourceCoverage?.length,
     // Whether the sources could be read at all. `ok` above only covers saving
     // what was found, so a scan where every fetch failed used to read
     // ok:true with nothing to show for it.
     health: summarizeSearchHealth({
       errors: scanned.errors,
+      warnings: scanned.warnings,
       attemptedSources: scanned.sourceCoverage?.length,
     }),
     loginRequests: scanned.loginRequests,
@@ -984,6 +1040,12 @@ export function printSummary(summary, offers, cfg, limit) {
     console.log("Errors:");
     for (const error of summary.errors) console.log(`- ${error.company}: ${error.error}`);
   }
+  if (Array.isArray(summary.warnings) && summary.warnings.length > 0) {
+    console.log("Warnings (results may be incomplete):");
+    for (const entry of summary.warnings) console.log(`- ${entry.company}: ${entry.warning}`);
+  }
+  if (summary.health)
+    console.log(`Search health: ${summary.health.status}. ${summary.health.message}`);
   console.log("Top scanner output:");
   for (const offer of offers.slice(0, limit || 25)) {
     const dup = offer.possibleDuplicate ? " possible-duplicate" : "";
@@ -1021,7 +1083,8 @@ async function main() {
   // silently lost and needed a retry (CR-29 round 7).
   if (summary.ok === false) process.exitCode = 1;
   // A scan that could not read its sources is a failed scan, not an empty one.
-  if (summary.health?.status === "failed") process.exitCode = 1;
+  // Exit 3 keeps it apart from a crash (exit 1).
+  else if (summary.health?.status === "failed") process.exitCode = 3;
 
   const candidateConfig = loadCandidateConfig(pathCtx);
 

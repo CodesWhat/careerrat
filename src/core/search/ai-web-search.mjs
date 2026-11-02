@@ -740,7 +740,9 @@ function mergePromptCoverage({ selected, outcomes }) {
 
 function concentratedRejectedHosts(rejections) {
   const counts = new Map();
-  for (const { offer } of rejections) {
+  for (const { offer, unreachable } of rejections) {
+    // A host we couldn't reach says nothing about the host's postings.
+    if (unreachable) continue;
     const host = sourceHost(offer?.url);
     if (host) counts.set(host, (counts.get(host) || 0) + 1);
   }
@@ -755,7 +757,7 @@ function concentratedRejectedHosts(rejections) {
 function unreadableRejectedHosts(rejections) {
   return new Set(
     rejections
-      .filter(({ offer }) => offer?.bodyFetchStatus === "deferred")
+      .filter(({ offer, unreachable }) => !unreachable && offer?.bodyFetchStatus === "deferred")
       .map(({ offer }) => sourceHost(offer?.url))
       .filter(Boolean)
   );
@@ -2116,7 +2118,9 @@ export async function runAiWebSearch({
           reason,
         });
         if (!rejectionsByPrompt.has(promptId)) rejectionsByPrompt.set(promptId, []);
-        rejectionsByPrompt.get(promptId).push({ offer, reason });
+        rejectionsByPrompt
+          .get(promptId)
+          .push({ offer, reason, unreachable: hydrated?.bodyFetchUnreachable === true });
         continue;
       }
 

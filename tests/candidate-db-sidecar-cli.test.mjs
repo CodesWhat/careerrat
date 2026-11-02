@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
-import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs.mjs";
+import {
+  candidateConfigGet,
+  candidateConfigPatch,
+  sourceConfigGet,
+  sourceConfigPut,
+} from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 const repo = join(import.meta.dirname, "..");
@@ -349,4 +354,41 @@ test("careerrat ingest --write-config exports DB candidate setup to compatibilit
     readFileSync(userPath({ repoRoot }, "candidate/application-limits.yml"), "utf8"),
     /OpenAI/
   );
+});
+
+test("careerrat ingest --write-config keeps curated searches and their run watermarks", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  dataCli(repoRoot, [
+    "candidate",
+    "patch",
+    "targeting",
+    "--data",
+    JSON.stringify({ role_buckets: [{ name: "AI Platform", titles: ["AI Platform Engineer"] }] }),
+  ]);
+  jsonCli(["src/cli/ingest.mjs", "--root", repoRoot, "--write-config", "--json"]);
+
+  const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  stored.searches.push({
+    provider: "Curated Feed",
+    source_type: "rss",
+    label: "Curated feed",
+    rssUrl: "https://example.test/curated.xml",
+    enabled: true,
+    recency: { mode: "since-last-run", lastRunAt: "2026-10-30T00:00:00.000Z" },
+  });
+  const generatedWithWatermark = stored.searches.find((entry) => entry.provider !== "Curated Feed");
+  generatedWithWatermark.recency = {
+    ...generatedWithWatermark.recency,
+    lastRunAt: "2026-10-31T00:00:00.000Z",
+  };
+  sourceConfigPut({ repoRoot, name: "search-sources", data: stored });
+
+  jsonCli(["src/cli/ingest.mjs", "--root", repoRoot, "--write-config", "--json"]);
+
+  const after = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const curated = after.searches.find((entry) => entry.provider === "Curated Feed");
+  assert.equal(curated?.recency?.lastRunAt, "2026-10-30T00:00:00.000Z");
+  const generated = after.searches.find((entry) => entry.provider !== "Curated Feed");
+  assert.equal(generated.recency.lastRunAt, "2026-10-31T00:00:00.000Z");
 });

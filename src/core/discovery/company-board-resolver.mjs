@@ -358,7 +358,9 @@ function cacheRecordFromResult(result, { existing = null, observedAt }) {
     provenance: result.provenance,
     first_resolved_at: existing?.first_resolved_at || observedAt,
     last_verified_at: observedAt,
-    last_scan_result: existing?.last_scan_result || {
+    // A fresh resolution replaces the old scan verdict, otherwise an
+    // "http-404" from the board it just replaced would force a refresh forever.
+    last_scan_result: {
       status: result.status === "supported_ats" ? "resolved" : "generic-public",
     },
     failure_count: 0,
@@ -404,6 +406,9 @@ function readCachedResolution({ repoRoot, env, companyKey, companyDomain }) {
   if (!repoRoot) return null;
   const byKey = companyBoardResolutionGet({ repoRoot, env, companyKey }).resolution;
   if (byKey || !companyDomain) return byKey;
+  // On a shared ATS host the "domain" is the ATS itself, so every company on
+  // it would inherit whichever company was cached first.
+  if (inferProvider({ careers_url: `https://${companyDomain}/placeholder` })) return null;
   return companyBoardResolutionGet({ repoRoot, env, companyDomain }).resolution;
 }
 

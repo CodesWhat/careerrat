@@ -19,6 +19,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- `careerrat data backup` and `careerrat data restore` save and bring back the
+  database. A restore saves your current database first and needs `--yes`.
 - CLI commands read and append durable job or workspace history, list recorded
   knowledge changes, and undo them through the existing stale-write checks.
 - `careerrat tui` opens a clickable Textual workspace beside native Claude or
@@ -61,6 +63,28 @@ All notable changes to CareerRat are documented here. This project follows
   `submitted-unverified`) and records the applied date, so follow-up reminders
   fire. `automation status` warns when a leftover `automation.yml` is being
   ignored, and a missing browser now says to run `npx playwright install chromium`.
+- Job links that answer with a block, rate limit or server error, or that load as a nearly
+  empty page, are no longer called "closed". `--verify` and `check:jobs` keep them and say
+  they could not be checked. `check:jobs` also prints a summary and exits 1 when no
+  link could be checked.
+- A pasted job link that returns an error page is no longer saved as the job description.
+  A 404 reads as a closed job, and a site that could not be reached reads as unreachable,
+  not as "does not identify one specific job posting". Network errors now keep their cause.
+- A title that is only adjacent to a target title is scored lower and says "adjacent to
+  target title" instead of claiming a match.
+- Sources that came back short (cut off, partial pages, ignored settings) now count against
+  search health, are listed in the run summary, and keep their last-run time so the next
+  search covers the gap. `scan:sourced` exits 3 when half or more of the
+  sources failed, or when only browser-only sources were left to read.
+- Company boards that return an error or no jobs are remembered and looked up again. A
+  company on a shared job-board host no longer picks up another company's cached board.
+- A company check that could not reach the board is retried the next day and no longer
+  rejects a good pending suggestion on Refresh.
+- Careers pages that could not be fetched are reported as unreachable, and company lookups
+  that fail are counted instead of vanishing.
+- `careerrat ingest --write-config` keeps your saved searches and their last-run times.
+- A stored `--query` now reaches providers that read keywords, and the RemoteOK, Remotive
+  and Working Nomads feeds keep the job description they already return.
 
 ## [0.22.0] - 2026-10-31
 
@@ -93,6 +117,21 @@ All notable changes to CareerRat are documented here. This project follows
   exits with a failure.
 - The update check script is now included in the npm package, so the "newer
   version available" notice can work for installed copies.
+- `data init --demo` now refuses to run over a workspace that already has data
+  (use `--force` to override), so sample jobs can't replace your profile.
+- `data import` keeps the candidate settings already saved in the database
+  instead of reverting them to old YAML files (`--force-candidate` overrides).
+- A database written by a newer CareerRat is refused instead of silently opened.
+- `data app set-status`, `schedule-interview` and `--follow-up-due` reject
+  unknown statuses and invalid dates. `data app upsert` and `sourced promote`
+  refuse to overwrite an existing application (`--replace` is explicit).
+- `evidence add --write` says so and exits 1 when the claim was a duplicate.
+  `data changes undo` exits 1 when the undo is refused. `data candidate patch`
+  errors name the bad field.
+- `activity backfill` writes to the database, and `activity prune` says it
+  can't run on a database workspace instead of trimming a generated file.
+- Help text for `automation` and `tracker` no longer says defaults are off or
+  that copying a snapshot back restores a database workspace.
 - Incomplete resume extractions fail clearly and can be retried instead of
   silently saving a title without the source resume's experience.
 - Workspace import accepts YAML flow collections and migrates retired settings.

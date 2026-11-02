@@ -120,8 +120,11 @@ export async function extractPublicCareersPage({
   });
   if (!fetched.ok) {
     const unsafe = fetched.code === "unsafe_url" || fetched.code === "unsafe_redirect";
+    const unreachable = !unsafe && fetched.code !== "response_too_large";
     return {
-      ok: true,
+      // A page we couldn't reach is a failed fetch, not an empty result.
+      ok: !unreachable,
+      ...(unreachable ? { unreachable: true } : {}),
       extractionStatus: unsafe
         ? "blocked_unsafe_url"
         : fetched.code === "response_too_large"

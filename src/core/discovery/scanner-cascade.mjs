@@ -331,7 +331,8 @@ export async function scanPublicIntelSeed({
   }
 
   return {
-    ok: true,
+    ok: extraction.ok !== false,
+    ...(extraction.unreachable ? { unreachable: true } : {}),
     status: extraction.extractionStatus,
     classification: extraction.extractionStatus,
     ai: noAi(),
@@ -385,6 +386,7 @@ export async function scanPublicIntelSeeds({
     data: {
       scanned: results.length,
       reviewCreated: results.filter((item) => item.reviewItem).length,
+      unreachable: results.filter((item) => item.unreachable).length,
       results,
       state: publicIntelStateGet({ repoRoot, env }).data,
     },

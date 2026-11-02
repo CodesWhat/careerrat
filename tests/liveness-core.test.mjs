@@ -138,7 +138,7 @@ test("an archived recommendation card does not close the active primary posting"
   assert.equal(result.code, "apply_control_visible");
 });
 
-test("short pages without apply controls are treated as expired shell pages", () => {
+test("short pages without apply controls are uncertain, not expired", () => {
   const result = classifyLiveness({
     status: 200,
     finalUrl: "https://jobs.example.com/role",
@@ -146,6 +146,23 @@ test("short pages without apply controls are treated as expired shell pages", ()
     applyControls: [],
   });
 
-  assert.equal(result.result, "expired");
-  assert.equal(result.code, "insufficient_content");
+  assert.equal(result.result, "uncertain");
+  assert.equal(result.code, "thin_content");
+});
+
+test("HTTP errors other than 404 and 410 are uncertain, never expired", () => {
+  for (const status of [401, 403, 429, 500, 503]) {
+    const result = classifyLiveness({
+      status,
+      finalUrl: "https://jobs.example.com/role",
+      bodyText: "",
+      applyControls: [],
+    });
+    assert.equal(result.result, "uncertain", `status ${status}`);
+    assert.equal(result.code, "http_error");
+  }
+  assert.equal(
+    classifyLiveness({ status: 404, finalUrl: "https://jobs.example.com/x", bodyText: "" }).result,
+    "expired"
+  );
 });

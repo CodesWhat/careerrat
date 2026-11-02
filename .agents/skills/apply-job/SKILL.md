@@ -331,7 +331,7 @@ Locate the application row in `workspace/tracker.json`:
 
 - Match `applications[]` entry by `id` field first; if no `id`, match by `company` + `role` (case-insensitive).
 - If no matching row exists: create a new entry in `applications[]` with at minimum `company`, `role`, and `id` (generate a short slug, e.g. `<company-slug>-<role-slug>`). Do not halt — the row must exist before writing status.
-  - **DB workspace:** create it with `careerrat data app upsert --data '{"id":"<slug>","company":"<Company>","role":"<Role>"}'` (full-row insert/replace), then continue with the field writes below against that same `<id>`.
+  - **DB workspace:** create it with `careerrat data app upsert --data '{"id":"<slug>","company":"<Company>","role":"<Role>"}'` (it refuses an id that already exists, so an existing row is never wiped; for an existing row use `app set-fields`), then continue with the field writes below against that same `<id>`.
   - **Legacy workspace (no DB):** create the entry directly in the `tracker.json` edit below.
 
 **`app.note` validation (run before writing the row):** `note` is the INTERNAL submission one-liner — ≤60 chars, one topic, ATS/system + "submitted" only (e.g. `"Greenhouse — submitted, confirmation received."`). It must NOT contain application-form answer text, work-arrangement Q&A (onsite/hybrid/remote phrases), interview-loop descriptions, or language copied from the JD or form fields. Anything that fails this check routes to `statusNote` (live state text), `compNote` (comp intel), or is dropped entirely. A polluted `note` produces phantom interview Focus cards on the dashboard — prevent it here.

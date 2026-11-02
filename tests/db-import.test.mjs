@@ -8,11 +8,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { seedDemo } from "../src/core/db/demo-seed.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import {
   candidateArtifactExists,
   candidateArtifactGet,
   candidateConfigGet,
+  candidateSetupInitialize,
   sourceConfigGet,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -240,6 +242,33 @@ test("examples/demo-workspace imports cleanly and twice produces an identical DB
   );
 });
 
+test("importFromTracker imports legacy profile.yml after init seeds the empty default profile", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-source");
+  writeSourceFixture(sourceDir);
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "candidate/profile.yml"),
+    `${stringifyYaml({ candidate: { full_name: "Legacy Candidate", email: "legacy@example.com" } })}\n`
+  );
+
+  candidateSetupInitialize({ repoRoot });
+  assert.equal(candidateConfigGet({ repoRoot }).profile.candidate.full_name, "");
+
+  const result = importFromTracker({ repoRoot, sourceDir });
+
+  assert.equal(result.counts.candidate.profile, true);
+  assert.doesNotMatch(result.warnings.join(" "), /Kept your saved candidate settings/);
+  assert.equal(candidateConfigGet({ repoRoot }).profile.candidate.full_name, "Legacy Candidate");
+});
+
+test("seedDemo is not blocked by the empty default profile that init seeds", () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+
+  assert.doesNotThrow(() => seedDemo({ repoRoot, env: {}, today: "2026-08-14" }));
+});
+
 test("importFromTracker migrates legacy candidate YAML into canonical SQLite setup tables", () => {
   const repoRoot = tempRepo();
   const sourceDir = join(repoRoot, "fixture-source");
@@ -323,7 +352,8 @@ test("importFromTracker migrates legacy candidate YAML into canonical SQLite set
   );
 
   const second = importFromTracker({ repoRoot, sourceDir });
-  assert.equal(second.counts.candidate["source-resume"], false);
+  assert.equal(second.counts.candidate, null, "re-import must not re-read the stale YAML");
+  assert.match(second.warnings.join(" "), /Kept your saved candidate settings/);
   assert.equal(
     candidateArtifactGet({ repoRoot, id: "source-resume" }).savedAt,
     sourceResumeArtifact.savedAt,

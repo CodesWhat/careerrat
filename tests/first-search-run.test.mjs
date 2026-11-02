@@ -606,6 +606,23 @@ test("prepareFirstSearchSources uses AI domain hints to promote a bare tracked c
   );
 });
 
+test("prepareFirstSearchSources counts a hinted company whose lookup threw as failed", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  setTrackedCompanies(repoRoot, ["Neutral Labs"]);
+  const result = await prepareFirstSearchSources({
+    repoRoot,
+    env: aiRouteEnv(),
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed");
+    },
+    call: async () =>
+      domainHintResponse([{ name: "Neutral Labs", domain_hint: "https://93.184.216.10/careers" }]),
+  });
+  assert.equal(result.companyBoardResolution.resolved, 0);
+  assert.equal(result.companyBoardResolution.failed, 1);
+});
+
 test("prepareFirstSearchSources skips AI rescue after a cache-hinted company attempt", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
@@ -652,6 +669,7 @@ test("prepareFirstSearchSources skips AI rescue when no companies are tracked", 
     attempted: 0,
     resolved: 0,
     promoted: 0,
+    failed: 0,
   });
 });
 

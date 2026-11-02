@@ -16,11 +16,13 @@
 //
 // Usage:
 //   node src/cli/data.mjs status [--json]
-//   node src/cli/data.mjs init [--demo] [--json]
-//   node src/cli/data.mjs import [--source <dir>] [--json]
+//   node src/cli/data.mjs init [--demo [--force]] [--json]
+//   node src/cli/data.mjs import [--source <dir>] [--force-candidate] [--json]
 //   node src/cli/data.mjs export [--json]
 //   node src/cli/data.mjs verify [--json]
-//   node src/cli/data.mjs app upsert --data <json> | --data-file <path>
+//   node src/cli/data.mjs backup [--keep <n>] [--json]
+//   node src/cli/data.mjs restore [<number|name> --yes] [--json]
+//   node src/cli/data.mjs app upsert --data <json> | --data-file <path> [--replace]
 //   node src/cli/data.mjs app set-status <id> <to> [--note <t>] [--follow-up-due <iso>] [--clear-interview|--no-clear-interview]
 //   node src/cli/data.mjs app set-fields <id> --data <json> | --data-file <path>
 //   node src/cli/data.mjs app schedule-interview <id> --at <iso> [--round <t>] [--note <t>]
@@ -68,6 +70,7 @@ import { recordedKnowledgeChanges } from "../core/agent/knowledge-changes.mjs";
 import { undoWorkspaceKnowledge } from "../core/agent/knowledge-history.mjs";
 import { mergeRecordedCandidateEvidence } from "../core/agent/recorded-evidence-write.mjs";
 import { workspaceMessageAppend, workspaceThreadRead } from "../core/agent/workspace-thread.mjs";
+import { createBackup, listBackups, restoreBackup } from "../core/db/backup.mjs";
 import { dbExists, dbFilePath, NO_DATABASE_MESSAGE, openDb } from "../core/db/connection.mjs";
 import { seedDemo } from "../core/db/demo-seed.mjs";
 import { exportToTracker } from "../core/db/export-to-tracker.mjs";
@@ -128,6 +131,11 @@ function parseArgs(argv) {
     if (a === "--json") opts.json = true;
     else if (a === "--help" || a === "-h") opts.help = true;
     else if (a === "--demo") opts.demo = true;
+    else if (a === "--force") opts.force = true;
+    else if (a === "--force-candidate") opts.forceCandidate = true;
+    else if (a === "--yes") opts.yes = true;
+    else if (a === "--keep") opts.keep = Number.parseInt(argv[++i], 10);
+    else if (a === "--replace") opts.replace = true;
     else if (a === "--clear-interview") opts.clearInterview = true;
     else if (a === "--no-clear-interview") opts.clearInterview = false;
     else if (a === "--write") opts.write = true;
@@ -215,6 +223,12 @@ try {
     case "verify":
       cmdVerify();
       break;
+    case "backup":
+      cmdBackup();
+      break;
+    case "restore":
+      cmdRestore(sub);
+      break;
     case "app":
       cmdApp(sub, rest);
       break;
@@ -261,7 +275,7 @@ try {
       fail(`unknown command "${verb}". See --help.`);
   }
 } catch (err) {
-  fail(err?.message || String(err));
+  fail(err?.message || String(err), err?.errors);
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +314,7 @@ function cmdStatus() {
 
 function cmdInit() {
   if (opts.demo) {
-    const result = seedDemo(pathCtx);
+    const result = seedDemo({ ...pathCtx, force: opts.force });
     printResult(result, `Seeded demo data → ${dbDisplayPath()}`);
     return;
   }
@@ -312,7 +326,11 @@ function cmdInit() {
 }
 
 function cmdImport() {
-  const result = importFromTracker({ ...pathCtx, sourceDir: opts.source });
+  const result = importFromTracker({
+    ...pathCtx,
+    sourceDir: opts.source,
+    forceCandidate: opts.forceCandidate,
+  });
   // Immediately export back out so workspace/tracker.json reflects the db
   // right away — most importantly when --source points somewhere other than
   // this workspace's own tracker.json, where nothing would otherwise write
@@ -321,6 +339,52 @@ function cmdImport() {
   printResult(
     { ...result, exported },
     `Imported → ${dbDisplayPath()} (${JSON.stringify(result.counts)})${result.warnings.map((w) => `\n  note: ${w}`).join("")}`
+  );
+}
+
+function cmdBackup() {
+  const result = createBackup(pathCtx, opts.keep ? { keep: opts.keep } : {});
+  printResult(
+    { ok: true, ...result },
+    `Backed up → ${result.path}${result.pruned.length ? ` (removed ${result.pruned.length} older)` : ""}`
+  );
+}
+
+function cmdRestore(selector) {
+  const backups = listBackups(pathCtx);
+  if (!selector) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify(
+          { ok: true, backups: backups.map(({ name, size, mtime }) => ({ name, size, mtime })) },
+          null,
+          2
+        )
+      );
+      return;
+    }
+    if (!backups.length) {
+      console.log("No backups yet. Run 'careerrat data backup' to make one.");
+      return;
+    }
+    console.log("Backups (newest first):");
+    backups.forEach((b, i) => {
+      console.log(`  ${i + 1}. ${b.name}  (${new Date(b.mtime).toISOString().slice(0, 19)} UTC)`);
+    });
+    console.log("");
+    console.log("Restore one with: careerrat data restore <number|name> --yes");
+    return;
+  }
+  if (!opts.yes) {
+    fail(
+      "restore replaces your current database with that backup (the current one is saved first). Add --yes to go ahead"
+    );
+  }
+  const result = restoreBackup(pathCtx, selector);
+  exportToTracker(pathCtx);
+  printResult(
+    { ok: true, ...result },
+    `Restored ${result.restored}.${result.safetyCopy ? ` Your previous database was saved as ${result.safetyCopy}.` : ""}`
   );
 }
 
@@ -416,7 +480,13 @@ async function cmdChanges(sub, rest) {
       !Number.isSafeInteger(index)
     )
       fail("changes undo requires <message-id> <nonnegative-artifact-index>");
-    return printResult(undoWorkspaceKnowledge({ ...pathCtx, messageId, index }));
+    const undone = undoWorkspaceKnowledge({ ...pathCtx, messageId, index });
+    const outcome = undone?.operationResult;
+    if (outcome && outcome.ok === false) {
+      fail(`undo refused: ${outcome.reason || "unknown reason"}`);
+    }
+    // Only the outcome, not the whole workspace thread (it carries claim text and config values).
+    return printResult({ ok: true, operationResult: outcome ?? null }, "Undone.");
   }
   fail(`unknown changes action "${sub}". See --help.`);
 }
@@ -424,7 +494,9 @@ async function cmdChanges(sub, rest) {
 function cmdApp(sub, rest) {
   switch (sub) {
     case "upsert":
-      return printResult(appUpsert({ ...pathCtx, row: readPayload("app upsert") }));
+      return printResult(
+        appUpsert({ ...pathCtx, row: readPayload("app upsert"), replace: opts.replace === true })
+      );
     case "set-status": {
       const [id, to] = rest;
       if (!id || !to) fail("app set-status requires <id> <to>");
@@ -950,9 +1022,31 @@ function printResult(result, humanLine) {
   console.log(humanLine || JSON.stringify(result));
 }
 
-function fail(msg) {
-  if (opts.json) console.log(JSON.stringify({ ok: false, error: msg }, null, 2));
-  else console.error(`data: ${msg}`);
+// Schema failures carry err.errors (path + message); without them a caller
+// can't tell which field to fix.
+function describeErrors(errors) {
+  if (!Array.isArray(errors)) return "";
+  return errors
+    .map((e) => {
+      if (typeof e === "string") return e;
+      const where = e?.path || e?.instancePath || "";
+      return `${where ? `${where}: ` : ""}${e?.message || JSON.stringify(e)}`;
+    })
+    .join("; ");
+}
+
+function fail(msg, errors) {
+  const detail = describeErrors(errors);
+  const full = detail ? `${msg}: ${detail}` : msg;
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        { ok: false, error: full, ...(Array.isArray(errors) ? { errors } : {}) },
+        null,
+        2
+      )
+    );
+  } else console.error(`data: ${full}`);
   process.exit(1);
 }
 
@@ -966,12 +1060,14 @@ Usage:
   node src/cli/data.mjs changes undo <message-id> <artifact-index> [--json]
 
   node src/cli/data.mjs status [--json]
-  node src/cli/data.mjs init [--demo] [--json]
-  node src/cli/data.mjs import [--source <dir>] [--json]
+  node src/cli/data.mjs init [--demo [--force]] [--json]
+  node src/cli/data.mjs import [--source <dir>] [--force-candidate] [--json]
   node src/cli/data.mjs export [--json]
   node src/cli/data.mjs verify [--json]
+  node src/cli/data.mjs backup [--keep <n>] [--json]
+  node src/cli/data.mjs restore [<number|name> --yes] [--json]
 
-  node src/cli/data.mjs app upsert --data <json> | --data-file <path>
+  node src/cli/data.mjs app upsert --data <json> | --data-file <path> [--replace]
   node src/cli/data.mjs app set-status <id> <to> [--note <t>] [--follow-up-due <iso>] [--clear-interview|--no-clear-interview]
   node src/cli/data.mjs app set-fields <id> --data <json> | --data-file <path>
   node src/cli/data.mjs app schedule-interview <id> --at <iso> [--round <t>] [--note <t>]

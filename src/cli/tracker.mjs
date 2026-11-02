@@ -203,5 +203,6 @@ Usage:
 
 Reads workspace/tracker.json (seed from templates/tracker.json).
 Snapshots: workspace/.snapshots/tracker-<timestamp>.json, newest-20 kept.
-Recovery: copy a snapshot back over workspace/tracker.json to restore.`);
+Recovery: on a database workspace, tracker.json is regenerated from the database, so copying a snapshot back does nothing.
+Use 'careerrat data backup' and 'careerrat data restore' instead. (Without a database, 'careerrat restore' restores a snapshot.)`);
 }

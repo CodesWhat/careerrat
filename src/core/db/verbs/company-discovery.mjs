@@ -146,6 +146,58 @@ export function companyBoardResolutionGet({ repoRoot, env, companyKey, companyDo
   return { ok: true, resolution: parseJsonRow(row) };
 }
 
+// Feed a company scan's outcome back into its cached board resolution so a dead
+// or empty board gets re-resolved instead of erroring (or reporting success with
+// no jobs) forever. No-op when the company has no cached resolution.
+//   outcome.kind: "success" | "zero" | "http-error" | "other-failure"
+// "other-failure" (a network error, a timeout) is not a verdict on the board and
+// changes nothing.
+export function companyBoardResolutionRecordScan({
+  repoRoot,
+  env,
+  companyKey,
+  outcome,
+  now = new Date(),
+} = {}) {
+  const key = String(companyKey || "").trim();
+  if (!key) throw makeError("companyBoardResolutionRecordScan requires companyKey", "BAD_REQUEST");
+  const kind = outcome?.kind;
+  if (!["success", "zero", "http-error", "other-failure"].includes(kind)) {
+    throw makeError("unknown scan outcome kind", "BAD_REQUEST");
+  }
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const existing = readResolutionByCompanyKey(db, key);
+    if (!existing) return { ok: true, resolution: null };
+    if (kind === "other-failure") return { ok: true, resolution: existing };
+    const at = normalizeNow(now).toISOString();
+    const next = { ...existing };
+    if (kind === "success") {
+      next.failure_count = 0;
+      next.zero_job_count = 0;
+      next.last_scan_result = { status: "success", at };
+    } else if (kind === "zero") {
+      next.failure_count = 0;
+      next.zero_job_count = Number(existing.zero_job_count || 0) + 1;
+      next.last_scan_result = { status: "zero-jobs", at };
+    } else {
+      const httpStatus = Number(outcome.httpStatus) || 0;
+      next.failure_count = Number(existing.failure_count || 0) + 1;
+      next.last_scan_result = {
+        status: httpStatus === 403 || httpStatus === 404 ? `http-${httpStatus}` : "http-error",
+        httpStatus,
+        at,
+      };
+    }
+    db.prepare("UPDATE company_board_resolutions SET data = ?, updated_at = ? WHERE id = ?").run(
+      JSON.stringify(next),
+      at,
+      key
+    );
+    return { ok: true, resolution: readResolutionByCompanyKey(db, key) };
+  });
+}
+
 export function companyBoardResolutionListDue({ repoRoot, env, now = new Date() } = {}) {
   const db = requireDb({ repoRoot, env });
   const cutoff = staleCutoffIso(now);

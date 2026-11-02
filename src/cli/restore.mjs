@@ -24,7 +24,8 @@ const pathCtx = { repoRoot: root, env: process.env };
 
 if (dbExists(pathCtx)) {
   console.error(
-    "CareerRat's database is canonical for this workspace. JSON tracker snapshots cannot safely restore it, so nothing was changed."
+    "CareerRat's database is canonical for this workspace. JSON tracker snapshots cannot safely restore it, so nothing was changed.\n" +
+      "Use 'careerrat data backup' to make a backup and 'careerrat data restore' to list and restore one."
   );
   process.exit(1);
 }
