@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import traceback
 from pathlib import Path
 import re
 import shutil
@@ -36,6 +37,9 @@ from textual.widgets import (
 )
 
 HOLD_SECONDS = 12
+LOG_LIMIT_BYTES = 512 * 1024
+# A window resize fires many events; the agent only needs the last one.
+RESIZE_DELAY = 0.08
 # One bridge event is one line. A line past this is dropped, not fatal.
 EVENT_LINE_LIMIT = 32 * 1024 * 1024
 OVERSIZED = object()
@@ -465,8 +469,8 @@ class NativePane(Widget):
         await self.app.send({"op": "paste", "data": event.text})
         event.stop()
 
-    async def on_resize(self):
-        await self.app.resize_agent()
+    def on_resize(self):
+        self.app.schedule_agent_resize()
 
 
 class JobsTable(DataTable):
@@ -732,6 +736,7 @@ class CareerRatApp(App):
         self.line_limit = line_limit
         self.detail = None
         self.last_bell = float("-inf")
+        self.resize_timer = None
         self.env = dict(os.environ if env is None else env)
         self.bridge_args = list(sys.argv[1:] if bridge_args is None else bridge_args)
         self.proc = None
@@ -889,6 +894,26 @@ class CareerRatApp(App):
         if toolbar:
             toolbar.first().set_class(event.size.width >= 150, "wide")
 
+    def schedule_agent_resize(self):
+        if self.resize_timer:
+            self.resize_timer.stop()
+        self.resize_timer = self.set_timer(RESIZE_DELAY, self.resize_agent)
+
+    def write_log(self, text):
+        """Keep a line for later in the log file; the screen only has room for one."""
+        path = self.env.get("CAREERRAT_TUI_LOG")
+        if not path:
+            return
+        try:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists() and target.stat().st_size > LOG_LIMIT_BYTES:
+                target.replace(target.with_name(target.name + ".1"))
+            with target.open("a", encoding="utf-8") as handle:
+                handle.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {text}\n")
+        except OSError:
+            pass
+
     def next_request_id(self):
         self.request_counter += 1
         return self.request_counter
@@ -966,6 +991,7 @@ class CareerRatApp(App):
             text = line.decode(errors="replace").strip()
             if text:
                 self.stderr_lines.append(text)
+                self.write_log(f"bridge stderr: {text}")
             if not self.stopping and text:
                 self.show_message(text, hold=HOLD_SECONDS)
 
@@ -975,6 +1001,7 @@ class CareerRatApp(App):
                 if line is OVERSIZED:
                     message = "A workspace update was too large to show and was skipped."
                     self.errors.append(message)
+                    self.write_log(message)
                     if not self.stopping:
                         self.show_message(message, hold=HOLD_SECONDS)
                     continue
@@ -984,11 +1011,13 @@ class CareerRatApp(App):
                     raise
                 except Exception as error:
                     self.errors.append(str(error))
+                    self.write_log(f"event error: {traceback.format_exc()}")
                     if not self.stopping:
                         self.show_message(str(error), hold=HOLD_SECONDS)
             await self.bridge_closed()
         except (ValueError, OSError) as error:
             self.errors.append(str(error))
+            self.write_log(f"bridge read error: {error}")
             if not self.stopping:
                 self.show_message(str(error), hold=HOLD_SECONDS)
 
@@ -1007,6 +1036,7 @@ class CareerRatApp(App):
             )
             return
         self.bridge_code = code or 0
+        self.write_log(f"bridge exited with code {code}")
         text = "Workspace connection closed. Quit and reopen to reconnect."
         if code:
             text = f"Workspace connection failed (exit {code}). {reason} Quit and reopen to reconnect."
@@ -1099,6 +1129,7 @@ class CareerRatApp(App):
             )
         elif kind == "error":
             self.errors.append(value["message"])
+            self.write_log(f"error: {value['message']}")
             self.show_message(value["message"], hold=HOLD_SECONDS)
 
     def ring_bell(self):
@@ -1532,5 +1563,9 @@ class CareerRatApp(App):
 
 if __name__ == "__main__":
     app = CareerRatApp()
-    app.run()
+    try:
+        app.run()
+    except BaseException:
+        app.write_log(f"crash: {traceback.format_exc()}")
+        raise
     sys.exit(app.return_code or app.bridge_code or 0)

@@ -400,6 +400,34 @@ closeAll();
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_many_resizes_send_one_resize_and_the_log_file_keeps_errors(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-log-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            log = Path(folder) / "internal/tui/tui.log"
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder, "CAREERRAT_TUI_LOG": str(log)},
+                bridge_args=["--no-agent"],
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.pause()
+                sent = []
+                original = app.send
+
+                async def record(message):
+                    sent.append(message["op"])
+                    await original(message)
+
+                app.send = record
+                pane = app.query_one(MODULE.NativePane)
+                for _ in range(20):
+                    pane.on_resize()
+                await pilot.pause(0.4)
+                self.assertEqual(sent.count("resize"), 1)
+                await app.handle_event({"type": "error", "message": "Saved data could not refresh: boom"})
+                await pilot.press("ctrl+q")
+            self.assertIn("Saved data could not refresh: boom", log.read_text())
+
     async def test_saved_jobs_clicks_requests_context_and_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-ui-") as folder:
             home = Path(folder)
@@ -961,6 +989,7 @@ closeAll();
                     stopping=False,
                     errors=[],
                     show_message=app.show_message,
+                    write_log=app.write_log,
                     handle_event=record,
                     bridge_closed=bridge_closed,
                 )
