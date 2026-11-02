@@ -33,6 +33,7 @@ import { deepIngestConfirmedForGeneration } from "../src/core/db/verbs/index.mjs
 import { sourceConfigGet, sourceConfigMutate } from "../src/core/db/verbs/source-config.mjs";
 import { hydrateJobOffer } from "../src/core/intake/resolve.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
+import { resolvePublicFetch } from "../src/core/net/public-http-fetch.mjs";
 import {
   loadLegacyCandidateConfig,
   loadCandidateConfig as loadStoredCandidateConfig,
@@ -59,6 +60,7 @@ import {
   scanSearchSources,
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
+import { SEARCH_SKIP_BROWSER_REASON } from "../src/core/search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
 
 const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
@@ -488,7 +490,10 @@ export async function runSourcedScan({
   const fetchForRun = (url, init = {}) => {
     const requestSignal =
       signal && init.signal ? AbortSignal.any([signal, init.signal]) : signal || init.signal;
-    return fetchImpl(url, requestSignal ? { ...init, signal: requestSignal } : init);
+    return resolvePublicFetch(fetchImpl)(
+      url,
+      requestSignal ? { ...init, signal: requestSignal } : init
+    );
   };
   ensureActive();
   const pathCtx = { repoRoot, env };
@@ -621,7 +626,8 @@ export async function runSourcedScan({
                   errors: [
                     {
                       company: task.source.label || task.source.provider || "Browser source",
-                      error: "Open this search in the CareerRat app so its browser can read it.",
+                      error: SEARCH_SKIP_BROWSER_REASON,
+                      skipped: true,
                     },
                   ],
                   needsLogin: null,

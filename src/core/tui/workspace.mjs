@@ -426,7 +426,7 @@ export function renderWorkspace(data, state, { cols, rows }, agent = null) {
     searchText =
       run.status === "running"
         ? `Search running: ${progress.completedSources || 0}/${progress.totalSources || "?"} sources, ${progress.foundCount || 0} saved · ${run.id}`
-        : `Search ${run.status}: ${run.summary?.new || 0} saved${run.summary?.errorCount ? `, ${run.summary.errorCount} source errors` : ""} · ${run.id}`;
+        : `Search ${run.status}: ${run.summary?.new || 0} saved${run.health && run.health.status !== "ok" ? `, ${run.health.status}: ${run.health.message}` : ""} · ${run.id}`;
   }
   line(1, 3, cols - 1, searchText);
   const left = layout.jobs;

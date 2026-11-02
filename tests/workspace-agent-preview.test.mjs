@@ -1344,12 +1344,12 @@ test("previewWorkspaceIntent: a comp-floor-to-current-salary phrasing flags comp
 test("previewWorkspaceIntent: turning off apply preparation on a named platform classifies as a settings.apply automation change", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({
-    text: "turn off authenticated apply preparation on linkedin",
+    text: "turn off authenticated apply preparation on greenhouse",
     repoRoot,
     env: {},
   });
   assert.deepEqual(result.action, {
-    label: "Turn off Authenticated apply preparation on linkedin",
+    label: "Turn off Authenticated apply preparation on greenhouse",
     intent: {
       type: "settings.apply",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -1358,7 +1358,7 @@ test("previewWorkspaceIntent: turning off apply preparation on a named platform 
           kind: "automation",
           op: "platform",
           capability: "authenticated_apply_preparation",
-          platform: "linkedin",
+          platform: "greenhouse",
           enabled: false,
         },
       },

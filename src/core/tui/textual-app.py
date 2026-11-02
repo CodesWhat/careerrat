@@ -714,6 +714,17 @@ class CareerRatApp(App):
                 }
             )
 
+    def search_status_line(self, run):
+        """One honest line for the latest search, including source health."""
+        saved = (run.get("summary") or {}).get("new") or 0
+        health = run.get("health") or {}
+        line = f"Search {run['status']}"
+        if run["status"] != "running":
+            line += f" · {saved} saved"
+            if health and health.get("status") != "ok":
+                line += f" · {health.get('status')}: {health.get('message')}"
+        return f"{line} · {run['id']}"
+
     def show_message(self, text):
         self.query_one("#message", Static).update(text)
 
@@ -911,7 +922,7 @@ class CareerRatApp(App):
         self.show_message(
             state.get("message")
             or (
-                f"Search {run['status']} · {run['id']}"
+                self.search_status_line(run)
                 if run
                 else "Click a job to inspect it. Requests wait for Enter in the native agent."
             )

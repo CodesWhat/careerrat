@@ -13,6 +13,7 @@
 // sourced-scanner.mjs's own provider-fetch tests already use.
 
 import { hostnameToPortal } from "../apply/form-fill.mjs";
+import { isLinkedInUrl, unwrapLinkedInExternalApply } from "../apply/linkedin-link.mjs";
 import {
   extractApplyControlsFromHtml,
   htmlToText as htmlToTextLiveness,
@@ -44,6 +45,7 @@ export async function resolveJobUrl(
     signal,
     resolutionCache,
     probePostingRedirect = false,
+    employerLinkLookup = false,
   } = {}
 ) {
   const cacheKey = exactResolutionKey(rawUrl, { probePostingRedirect });
@@ -58,6 +60,7 @@ export async function resolveJobUrl(
     signal,
     resolutionCache,
     probePostingRedirect,
+    employerLinkLookup,
   });
   if (resolutionCache && cacheKey) resolutionCache.set(cacheKey, resolution);
   return resolution;
@@ -65,7 +68,16 @@ export async function resolveJobUrl(
 
 async function resolveJobUrlUncached(
   rawUrl,
-  { fetchImpl, resolveHost, timeoutMs, maxBytes, signal, resolutionCache, probePostingRedirect }
+  {
+    fetchImpl,
+    resolveHost,
+    timeoutMs,
+    maxBytes,
+    signal,
+    resolutionCache,
+    probePostingRedirect,
+    employerLinkLookup,
+  }
 ) {
   signal?.throwIfAborted();
   let parsed;
@@ -101,6 +113,23 @@ async function resolveJobUrlUncached(
     // board, or its list payload has no description. Fall through to the
     // posting page for full-JD recovery instead of treating an empty body as
     // resolved. SPA hosts still defer honestly to the session-browser path.
+  }
+
+  // LinkedIn's public posting page names the employer's own application link
+  // when there is one. Read it once, with no login and no session, and only
+  // when the caller asked for that link. Anything else stays deferred below.
+  if (employerLinkLookup && isLinkedInUrl(rawUrl)) {
+    const plain = await resolvePlainFetch({
+      url: rawUrl,
+      fetchImpl,
+      resolveHost,
+      timeoutMs,
+      maxBytes,
+      provider,
+      signal,
+      resolutionCache,
+    });
+    if (plain?.url && plain.url !== rawUrl && !isLinkedInUrl(plain.url)) return plain;
   }
 
   if (isSpaJobHost(parsed.hostname) || platformForHost(parsed.hostname)) {
@@ -803,11 +832,20 @@ function extractEmbeddedApplicationUrl(html, baseUrl) {
     .replace(/\\"/g, '"');
   const current = normalizeComparableUrl(baseUrl);
   const destinations = new Map();
-  for (const match of normalized.matchAll(
-    /["'](?:applyUrl|applicationUrl)["']\s*:\s*["']([^"']+)["']/gi
-  )) {
+  const wrapped = new Set();
+  // LinkedIn's public page carries the employer's link in a hidden
+  // <code id="applyUrl"> element, wrapped as /jobs/view/externalApply/<id>?url=...
+  const rawValues = [
+    ...normalized.matchAll(/["'](?:applyUrl|applicationUrl)["']\s*:\s*["']([^"']+)["']/gi),
+    ...normalized.matchAll(
+      /<code[^>]*\bid=["']applyUrl["'][^>]*>\s*(?:<!--)?\s*["']?([^"'<>\s]+)/gi
+    ),
+  ].map((match) => match[1]);
+  for (const value of rawValues) {
     try {
-      const candidate = new URL(match[1], baseUrl);
+      const unwrapped = unwrapLinkedInExternalApply(new URL(value, baseUrl).href);
+      if (unwrapped) wrapped.add(unwrapped);
+      const candidate = new URL(unwrapped || value, baseUrl);
       if (
         (candidate.protocol !== "http:" && candidate.protocol !== "https:") ||
         candidate.username ||
@@ -831,7 +869,11 @@ function extractEmbeddedApplicationUrl(html, baseUrl) {
   const sameOrigin = candidate.origin === source.origin;
   const knownApplicationHost =
     Boolean(hostnameToPortal(candidate.href)) || platformForHost(candidate.hostname) === "linkedin";
-  if (!sameOrigin && (candidate.protocol !== "https:" || !knownApplicationHost)) return null;
+  // A LinkedIn externalApply wrapper names the employer's own link, so any
+  // public https host is fine there.
+  const employerChosen = wrapped.has(candidate.toString());
+  if (!sameOrigin && !employerChosen && (candidate.protocol !== "https:" || !knownApplicationHost))
+    return null;
   return validated.url;
 }
 
