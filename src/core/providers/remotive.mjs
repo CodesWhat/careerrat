@@ -16,14 +16,9 @@
 // scanBoards() (sourced-scanner.mjs) applies the entry's title_filter/location_filter
 // downstream, same as every other sourced-scan lane.
 
-const FEED_URL = "https://remotive.com/api/remote-jobs";
+import { feedBody, fetchFeedJson } from "./board-feed.mjs";
 
-async function fetchJsonBody(url, fetchImpl) {
-  const res = await fetchImpl(url);
-  if (typeof res === "string") return JSON.parse(res);
-  if (res && typeof res.json === "function") return await res.json();
-  return res;
-}
+const FEED_URL = "https://remotive.com/api/remote-jobs";
 
 function toIsoDate(value) {
   if (value == null || value === "") return null;
@@ -38,7 +33,7 @@ function toIsoDate(value) {
  * @returns {Promise<Array<{title: string, url: string, company: string, location: string, postedAt: string|null}>>}
  */
 export async function fetchRemotive(entry = {}, fetchImpl = fetch) {
-  const json = await fetchJsonBody(FEED_URL, fetchImpl);
+  const json = await fetchFeedJson("remotive", FEED_URL, fetchImpl);
   if (!json || !Array.isArray(json.jobs)) {
     throw new Error(
       `remotive: unexpected API response: expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(", ") : "null"}]`
@@ -67,5 +62,6 @@ export async function fetchRemotive(entry = {}, fetchImpl = fetch) {
           ? job.candidate_required_location.trim()
           : "",
       postedAt: toIsoDate(job.publication_date),
+      ...feedBody(job.description),
     }));
 }

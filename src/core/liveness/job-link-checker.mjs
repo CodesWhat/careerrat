@@ -138,7 +138,7 @@ export async function checkUrlLiveness(
       bodyText: htmlToText(html),
       applyControls: extractApplyControlsFromHtml(html),
     });
-    if (classified.code === "insufficient_content" && isSpaJobHost(parsed.hostname)) {
+    if (classified.code === "thin_content" && isSpaJobHost(parsed.hostname)) {
       return {
         url,
         result: "uncertain",

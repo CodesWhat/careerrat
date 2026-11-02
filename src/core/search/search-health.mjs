@@ -16,7 +16,8 @@ const MAX_REASON_LENGTH = 120;
 const MAX_REASON_GROUPS = 10;
 
 function reasonText(error) {
-  const raw = typeof error === "string" ? error : error?.error || error?.message || "";
+  const raw =
+    typeof error === "string" ? error : error?.error || error?.warning || error?.message || "";
   const text = String(raw)
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/\s+/g, " ")
@@ -37,6 +38,7 @@ export function summarizeSearchHealth(summary = {}) {
   const errors = Array.isArray(summary?.errors) ? summary.errors : [];
   const skippedErrors = errors.filter((entry) => entry?.skipped === true);
   const failedErrors = errors.filter((entry) => entry?.skipped !== true);
+  const warnings = Array.isArray(summary?.warnings) ? summary.warnings : [];
   const attempted = Math.max(0, Number(summary?.attemptedSources ?? summary?.attempted) || 0);
   const skipped = skippedErrors.length;
   const failed = failedErrors.length;
@@ -47,13 +49,19 @@ export function summarizeSearchHealth(summary = {}) {
   let status = "ok";
   if (nothingRead || failedShare >= SEARCH_HEALTH_FAILED_SHARE) status = "failed";
   else if (failedShare >= SEARCH_HEALTH_DEGRADED_SHARE) status = "degraded";
+  // A source that answered but came back short (truncated, partial pages,
+  // ignored settings) is not a clean read.
+  else if (warnings.length > 0) status = "degraded";
 
   const skippedNote = skipped ? `, ${skipped} skipped (need a browser)` : "";
   let message;
   if (readable === 0 && skipped === 0) message = "No sources were scanned";
   else if (readable === 0) message = `No source could be read${skippedNote}`;
-  else if (failed === 0) message = `All ${readable} sources read${skippedNote}`;
-  else message = `${failed} of ${readable} sources failed${skippedNote}`;
+  else if (failed === 0 && warnings.length === 0) {
+    message = `All ${readable} sources read${skippedNote}`;
+  } else if (failed === 0) {
+    message = `${readable} sources read, but ${warnings.length} came back incomplete${skippedNote}`;
+  } else message = `${failed} of ${readable} sources failed${skippedNote}`;
 
   return {
     status,
@@ -62,6 +70,8 @@ export function summarizeSearchHealth(summary = {}) {
     readable,
     failed,
     skipped,
+    warningCount: warnings.length,
+    warningReasons: groupReasons(warnings.map(reasonText)),
     failedShare: Math.round(failedShare * 1000) / 1000,
     errorReasons: groupReasons(failedErrors.map(reasonText)),
     skippedReasons: groupReasons(skippedErrors.map(reasonText)),

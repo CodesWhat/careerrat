@@ -3790,3 +3790,23 @@ test("config-driven scorer: nursing offer with config scores differently than wi
     "expected config path and no-config path to produce different scores/reasons for a nursing offer"
   );
 });
+
+test("scoring: a title that is only adjacent to the target is scored lower and worded as adjacent", () => {
+  const config = {
+    targeting: { role_buckets: [{ title: "Release Engineer" }], keep_signals: [], cut_signals: [] },
+  };
+  const offer = (title) => ({
+    title,
+    company: "Acme",
+    location: "Remote",
+    bodyText: "A job.",
+  });
+  const exact = scoreSourcedOffer(offer("Release Engineer"), config);
+  const adjacent = scoreSourcedOffer(offer("Data Engineer"), config);
+
+  assert.equal(exact.score, 82);
+  assert.match(exact.ratingReason, /matches target title: release engineer/);
+  assert.ok(adjacent.score < exact.score, `adjacent ${adjacent.score} vs exact ${exact.score}`);
+  assert.doesNotMatch(adjacent.ratingReason, /matches target title/);
+  assert.match(adjacent.ratingReason, /adjacent to target title: release engineer/);
+});

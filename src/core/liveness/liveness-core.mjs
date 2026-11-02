@@ -79,6 +79,15 @@ export function classifyLiveness({
   if (status === 404 || status === 410) {
     return { result: "expired", code: "http_gone", reason: `HTTP ${status}` };
   }
+  // 401/403/429/5xx say nothing about whether the job is still open. A thin
+  // error page must never read as "expired" and get a live job dropped.
+  if (status >= 400) {
+    return {
+      result: "uncertain",
+      code: "http_error",
+      reason: `HTTP ${status}: the site did not return the page, so the job could not be checked`,
+    };
+  }
 
   const expiredUrl = firstMatch(EXPIRED_URL_PATTERNS, finalUrl);
   if (expiredUrl) {
@@ -134,9 +143,10 @@ export function classifyLiveness({
 
   if (bodyText.trim().length < MIN_CONTENT_CHARS) {
     return {
-      result: "expired",
-      code: "insufficient_content",
-      reason: "insufficient content - likely nav/footer only",
+      result: "uncertain",
+      code: "thin_content",
+      reason:
+        "page had almost no content (likely a shell or error page), so the job could not be checked",
     };
   }
 

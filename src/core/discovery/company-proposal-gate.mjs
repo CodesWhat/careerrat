@@ -26,6 +26,8 @@ function proposalCompany(seed, resolution) {
   };
 }
 
+const SCAN_FAILED_REASON = "scan-failed";
+
 function list(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -371,6 +373,20 @@ export function buildCompanyProposal({
   }
 
   if (offers.length === 0) {
+    // A scan that errored saw nothing. That is "couldn't check", not "this
+    // company has no matching roles", and it is retried instead of settled.
+    if (list(scanResult?.errors).length > 0) {
+      return rejectedResult({
+        seed,
+        resolution,
+        scanResult,
+        proposalId,
+        version,
+        reason: SCAN_FAILED_REASON,
+        rejectReasons: [SCAN_FAILED_REASON],
+        status: SCAN_FAILED_REASON,
+      });
+    }
     return rejectedResult({
       seed,
       resolution,

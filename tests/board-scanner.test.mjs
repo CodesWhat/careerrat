@@ -103,6 +103,8 @@ test("scanBoards fetches only enabled supported board sources and tags offers", 
       company: "Example Labs",
       location: "",
       postedAt: null,
+      bodyText: "",
+      bodyPartial: true,
       source: "remoteok-board",
     },
   ]);

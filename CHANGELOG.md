@@ -61,6 +61,28 @@ All notable changes to CareerRat are documented here. This project follows
   `submitted-unverified`) and records the applied date, so follow-up reminders
   fire. `automation status` warns when a leftover `automation.yml` is being
   ignored, and a missing browser now says to run `npx playwright install chromium`.
+- Job links that answer with a block, rate limit or server error, or that load as a nearly
+  empty page, are no longer called "closed". `--verify` and `check:jobs` keep them and say
+  they could not be checked. `check:jobs` also prints a summary and exits 1 when no
+  link could be checked.
+- A pasted job link that returns an error page is no longer saved as the job description.
+  A 404 reads as a closed job, and a site that could not be reached reads as unreachable,
+  not as "does not identify one specific job posting". Network errors now keep their cause.
+- A title that is only adjacent to a target title is scored lower and says "adjacent to
+  target title" instead of claiming a match.
+- Sources that came back short (cut off, partial pages, ignored settings) now count against
+  search health, are listed in the run summary, and keep their last-run time so the next
+  search covers the gap. `scan:sourced` exits 3 when half or more of the
+  sources failed, or when only browser-only sources were left to read.
+- Company boards that return an error or no jobs are remembered and looked up again. A
+  company on a shared job-board host no longer picks up another company's cached board.
+- A company check that could not reach the board is retried the next day and no longer
+  rejects a good pending suggestion on Refresh.
+- Careers pages that could not be fetched are reported as unreachable, and company lookups
+  that fail are counted instead of vanishing.
+- `careerrat ingest --write-config` keeps your saved searches and their last-run times.
+- A stored `--query` now reaches providers that read keywords, and the RemoteOK, Remotive
+  and Working Nomads feeds keep the job description they already return.
 
 ## [0.22.0] - 2026-10-31
 

@@ -13,14 +13,9 @@
 // scanBoards() (sourced-scanner.mjs) applies the entry's title_filter/location_filter
 // downstream, same as every other sourced-scan lane.
 
-const FEED_URL = "https://www.workingnomads.com/api/exposed_jobs/";
+import { feedBody, fetchFeedJson } from "./board-feed.mjs";
 
-async function fetchJsonBody(url, fetchImpl) {
-  const res = await fetchImpl(url);
-  if (typeof res === "string") return JSON.parse(res);
-  if (res && typeof res.json === "function") return await res.json();
-  return res;
-}
+const FEED_URL = "https://www.workingnomads.com/api/exposed_jobs/";
 
 function toIsoDate(value) {
   if (value == null || value === "") return null;
@@ -35,7 +30,7 @@ function toIsoDate(value) {
  * @returns {Promise<Array<{title: string, url: string, company: string, location: string, postedAt: string|null}>>}
  */
 export async function fetchWorkingNomads(entry = {}, fetchImpl = fetch) {
-  const data = await fetchJsonBody(FEED_URL, fetchImpl);
+  const data = await fetchFeedJson("workingnomads", FEED_URL, fetchImpl);
   if (!Array.isArray(data)) {
     throw new Error(
       `workingnomads: unexpected API response: expected a JSON array, got ${data === null ? "null" : typeof data}`
@@ -61,5 +56,6 @@ export async function fetchWorkingNomads(entry = {}, fetchImpl = fetch) {
           : entry.label || entry.name || "Working Nomads",
       location: typeof job.location === "string" ? job.location.trim() : "",
       postedAt: toIsoDate(job.pub_date),
+      ...feedBody(job.description),
     }));
 }

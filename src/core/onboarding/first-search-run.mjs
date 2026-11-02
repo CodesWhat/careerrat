@@ -707,7 +707,8 @@ async function resolveAndPromoteCompanyBoard({ repoRoot, env, fetchImpl, name, h
   } catch {
     // One company's resolution failure/timeout never sinks the batch — it
     // just stays unresolved until a later first/manual search retries it.
-    return { resolved: false, promoted: false };
+    // It is counted as failed so a network outage doesn't read as "no match".
+    return { resolved: false, promoted: false, failed: true };
   }
 }
 
@@ -769,6 +770,7 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
     resolved: 0,
     promoted: 0,
     ...(failure ? { failure: String(failure).slice(0, 300) } : {}),
+    failed: 0,
   };
   if (!hintedSeeds.length) return outcome;
 
@@ -790,6 +792,7 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
       });
       if (result.resolved) outcome.resolved += 1;
       if (result.promoted) outcome.promoted += 1;
+      if (result.failed) outcome.failed += 1;
     }
   }
   await Promise.all(
@@ -811,7 +814,7 @@ async function backfillCompanyBoards({
   candidateConfig,
   sourcedScan,
 }) {
-  const summary = { attempted: 0, resolved: 0, promoted: 0 };
+  const summary = { attempted: 0, resolved: 0, promoted: 0, failed: 0 };
   const known = knownCompanyNames(sourcedScan);
   const pending = trackedCompanyNames(candidateConfig).filter(
     (name) => !known.has(name.toLowerCase())
@@ -843,6 +846,7 @@ async function backfillCompanyBoards({
       });
       if (result.resolved) summary.resolved += 1;
       if (result.promoted) summary.promoted += 1;
+      if (result.failed) summary.failed += 1;
     }
   }
 
@@ -864,6 +868,7 @@ async function backfillCompanyBoards({
     summary.attempted += rescue.attempted;
     summary.resolved += rescue.resolved;
     summary.promoted += rescue.promoted;
+    summary.failed += rescue.failed || 0;
     summary.aiHintFill = {
       requested: rescue.requested,
       hinted: rescue.hinted,
@@ -884,6 +889,7 @@ function currentSourceConfigs(pathCtx) {
 
 function normalizeRunSummary(summary = {}, deterministicSources) {
   const errors = Array.isArray(summary.errors) ? summary.errors : [];
+  const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
   const loginRequests = Array.isArray(summary.loginRequests) ? summary.loginRequests : [];
   return {
     attemptedSources: deterministicSources.attempted,
@@ -900,7 +906,12 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     rejectionSamples: clone(summary.rejectionSamples || {}),
     errorCount: errors.length,
     errors: clone(errors),
-    health: summarizeSearchHealth({ errors, attemptedSources: deterministicSources.attempted }),
+    warnings: clone(warnings),
+    health: summarizeSearchHealth({
+      errors,
+      warnings,
+      attemptedSources: deterministicSources.attempted,
+    }),
     loginRequests: clone(loginRequests),
     sourceCoverage: clone(Array.isArray(summary.sourceCoverage) ? summary.sourceCoverage : []),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,

@@ -74,3 +74,17 @@ test("searchRunHealth computes health for runs saved before the field existed", 
   const health = searchRunHealth({ summary: { attemptedSources: 4, errors: fail("boom", 4) } });
   assert.equal(health.status, "failed");
 });
+
+test("provider warnings make an otherwise clean run degraded", () => {
+  const clean = summarizeSearchHealth({ attemptedSources: 5, errors: [] });
+  assert.equal(clean.status, "ok");
+  const warned = summarizeSearchHealth({
+    attemptedSources: 5,
+    errors: [],
+    warnings: [{ company: "Acme", warning: "workday: Acme truncated at 10 pages" }],
+  });
+  assert.equal(warned.status, "degraded");
+  assert.equal(warned.warningCount, 1);
+  assert.match(warned.message, /incomplete/);
+  assert.equal(warned.warningReasons[0].reason, "workday: Acme truncated at 10 pages");
+});

@@ -38,6 +38,19 @@ for (const url of urls) {
   console.log(`${result.result.padEnd(9)} ${url} - ${result.reason}`);
 }
 
+// Codes meaning the check itself never ran (as opposed to a page that was read
+// and could not be judged).
+const COULD_NOT_RUN_CODES = new Set(["fetch_failed", "timeout", "navigation_error", "unsafe_url"]);
+const couldNotRun = results.filter(
+  (result) => result.result === "uncertain" && COULD_NOT_RUN_CODES.has(result.code)
+);
+const live = results.filter((result) => result.result === "active").length;
+const expired = results.filter((result) => result.result === "expired").length;
+console.log(
+  `${results.length - couldNotRun.length} of ${results.length} links could be checked: ` +
+    `${live} live, ${expired} closed, ${couldNotRun.length} unreachable.`
+);
+
 const bad = results.filter(
   (result) => result.result === "expired" || (strict && result.result === "uncertain")
 );

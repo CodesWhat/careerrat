@@ -306,25 +306,54 @@ function adjacentTitleFamiliesCompatible(actualTitle, targetTitle) {
   return actualFamily < 0 || actualFamily === targetFamily;
 }
 
-function targetRoleTitleMatches(actualTitle, targetTitles, targeting) {
-  if (targetTitles.length === 0) return true;
+// The same words in another order or with extra filler ("Food and Beverage
+// Operations Manager" for "Operations Manager, Food & Beverage") is the target
+// title, not a neighbour of it.
+function reorderedTitleEquivalent(actualTitle, targetTitle) {
+  const words = [...titleTokens(targetTitle)].filter(
+    (word) => !["and", "of", "the"].includes(word)
+  );
+  if (words.length < 2) return false;
+  const actual = titleTokens(actualTitle);
+  return words.every((word) => actual.has(word));
+}
+
+// How a title relates to the targets: "target" for a direct match, "adjacent"
+// when it only shares a generic role word or engineering noun with one, or null.
+// Adjacent titles still pass the target filter, but they must not be scored or
+// worded as if they were the target title itself.
+function targetRoleTitleMatchKind(actualTitle, targetTitles, targeting) {
+  if (targetTitles.length === 0) return "target";
   const standing = relativeSeniority(actualTitle, targeting);
-  if (standing.classification === "at-or-above-target") return true;
-  if (standing.classification === "below-target") return false;
+  if (standing.classification === "at-or-above-target") return "target";
+  if (standing.classification === "below-target") return null;
   const actual = String(actualTitle || "").toLowerCase();
-  return targetTitles.some((targetTitle) => {
+  let adjacent = false;
+  for (const targetTitle of targetTitles) {
     const target = String(targetTitle || "").toLowerCase();
+    if (
+      keywordMatches(actual, target) ||
+      boundedRoleTitleEquivalent(actual, target) ||
+      reorderedTitleEquivalent(actual, target)
+    ) {
+      return "target";
+    }
     const targetHasDomain = TITLE_DOMAIN_FAMILIES.some((family) =>
       hasAny(titleTokens(target), family)
     );
-    return (
-      keywordMatches(actual, target) ||
-      boundedRoleTitleEquivalent(actual, target) ||
-      (!targetHasDomain &&
-        adjacentRoleTitleEquivalent(actual, target) &&
-        adjacentTitleFamiliesCompatible(actual, target))
-    );
-  });
+    if (
+      !targetHasDomain &&
+      adjacentRoleTitleEquivalent(actual, target) &&
+      adjacentTitleFamiliesCompatible(actual, target)
+    ) {
+      adjacent = true;
+    }
+  }
+  return adjacent ? "adjacent" : null;
+}
+
+function targetRoleTitleMatches(actualTitle, targetTitles, targeting) {
+  return targetRoleTitleMatchKind(actualTitle, targetTitles, targeting) !== null;
 }
 
 function keywordMatches(text, term) {
@@ -1100,9 +1129,9 @@ function scoreSourcedOfferFromConfig(
     }
   }
   for (const term of bucketTitles.filter(Boolean)) {
-    if (targetRoleTitleMatches(title, [term], effectiveTargeting)) {
-      setBase(82, `matches target title: ${term}`);
-    }
+    const matchKind = targetRoleTitleMatchKind(title, [term], effectiveTargeting);
+    if (matchKind === "target") setBase(82, `matches target title: ${term}`);
+    else if (matchKind === "adjacent") setBase(70, `adjacent to target title: ${term}`);
   }
 
   // --- Cut signals from targeting.cut_signals ---
@@ -2269,6 +2298,7 @@ export async function scanCompanies(
 
   const results = [];
   const errors = [];
+  const warnings = [];
 
   for (const company of companies) {
     signal?.throwIfAborted?.();
@@ -2277,20 +2307,23 @@ export async function scanCompanies(
       errors.push({ company: company.name, error: "no supported provider inferred" });
       continue;
     }
+    const sink = [];
     try {
       const jobs = await fetchProvider(provider, company, {
         fetchImpl,
         resolveHost,
         dispatcherFactory,
         signal,
+        warnings: sink,
       });
       results.push(...jobs.map((job) => ({ ...job, source: `${provider}-api` })));
     } catch (error) {
       errors.push({ company: company.name, error: error.message });
     }
+    for (const warning of sink) warnings.push({ company: company.name, warning });
   }
 
-  return { offers: results, errors };
+  return { offers: results, errors, warnings };
 }
 
 // Every provider this dispatches to — the seven ATS providers formerly fetched
@@ -2422,24 +2455,33 @@ export async function scanBoards(
 
   const results = [];
   const errors = [];
+  const warnings = [];
   for (const source of sources) {
     const providerId = String(source.provider || "").toLowerCase();
     const provider = BOARD_PROVIDERS[providerId];
+    const sink = [];
     try {
       const offers = provider
         ? await provider(source, {
             fetchImpl,
             resolveHost,
             dispatcherFactory,
+            warnings: sink,
           })
-        : await fetchProvider(providerId, source, { fetchImpl, resolveHost, dispatcherFactory });
+        : await fetchProvider(providerId, source, {
+            fetchImpl,
+            resolveHost,
+            dispatcherFactory,
+            warnings: sink,
+          });
       const sourceKind = source.source_type === "ats" ? "api" : "board";
       results.push(...offers.map((offer) => ({ ...offer, source: `${providerId}-${sourceKind}` })));
     } catch (error) {
       errors.push({ company: source.label || providerId, error: error.message });
     }
+    for (const warning of sink) warnings.push({ company: source.label || providerId, warning });
   }
-  return { offers: results, errors };
+  return { offers: results, errors, warnings };
 }
 
 // Load the company-watchlist scanner config. When no config exists the scanner

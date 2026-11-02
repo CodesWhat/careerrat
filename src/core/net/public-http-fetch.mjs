@@ -335,7 +335,9 @@ export async function fetchPublicHttpText(
       const timedOut = controller.signal.aborted;
       return failure(
         timedOut ? "timeout" : "fetch_failed",
-        timedOut ? `fetch timed out after ${timeoutMs}ms` : `fetch failed: ${error.message}`,
+        timedOut
+          ? `fetch timed out after ${timeoutMs}ms`
+          : `fetch failed: ${error.message}${errorCauseDetail(error)}`,
         { url: rawUrl, finalUrl: currentUrl }
       );
     } finally {
@@ -345,6 +347,14 @@ export async function fetchPublicHttpText(
   }
 
   return failure("too_many_redirects", "too many redirects", { url: rawUrl });
+}
+
+// Node's fetch reports every network failure as "fetch failed"; the real
+// reason (ENOTFOUND, ECONNREFUSED, a TLS error) sits on error.cause.
+function errorCauseDetail(error) {
+  const cause = error?.cause;
+  const detail = cause?.code || cause?.message;
+  return detail ? ` (${detail})` : "";
 }
 
 // Caller-supplied host allowlist (e.g. a plugin's manifest.fetchHosts). Undefined
