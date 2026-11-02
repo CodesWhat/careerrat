@@ -15,8 +15,10 @@
 //
 // Usage:
 //   node scripts/eval/search-bench.mjs [--json] [--update-baseline] [--fixtures <dir>]
-//   --fixtures runs another fixture directory (e.g. holdout/) and never writes the baseline.
+//   --fixtures runs another fixture directory (e.g. holdout/). Its baseline.json, if any, is
+//   only written with --update-baseline; holdout-onboarded/ carries one.
 //   npm run bench:search -- --update-baseline   (intentional baseline change)
+//   npm run bench:search -- --fixtures tests/fixtures/search-bench/holdout-onboarded --update-baseline
 
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -31,6 +33,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_DIR = join(__dirname, "..", "..", "tests", "fixtures", "search-bench");
 export const BASELINE_PATH = join(FIXTURE_DIR, "baseline.json");
+export const HOLDOUT_ONBOARDED_DIR = join(FIXTURE_DIR, "holdout-onboarded");
 export const METRICS = ["precisionAt10", "ndcgAt10", "goodRecall", "keptPrecision"];
 const K = 10;
 const GOOD_GRADE = 2;
@@ -204,15 +207,12 @@ function main() {
       process.exit(2);
     }
     dir = resolve(argv[fixturesAt + 1]);
-    if (args.has("--update-baseline")) {
-      console.error("--update-baseline only applies to the default fixture directory");
-      process.exit(2);
-    }
   }
   const result = runSearchBench({ dir });
   if (args.has("--update-baseline")) {
-    writeFileSync(BASELINE_PATH, JSON.stringify(baselineFrom(result), null, 2) + "\n");
-    console.error(`Wrote ${BASELINE_PATH}`);
+    const target = join(dir, "baseline.json");
+    writeFileSync(target, JSON.stringify(baselineFrom(result), null, 2) + "\n");
+    console.error(`Wrote ${target}`);
   }
   console.log(args.has("--json") ? JSON.stringify(result, null, 2) : formatText(result));
 }

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   BASELINE_PATH,
+  HOLDOUT_ONBOARDED_DIR,
   loadFixtures,
   METRICS,
   runSearchBench,
@@ -28,9 +30,9 @@ test("search bench fixtures are well-formed", () => {
   }
 });
 
-test("search ranking quality has not regressed against the committed baseline", () => {
-  const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
-  const result = runSearchBench();
+function assertNoRegression(dir, baselinePath, updateCommand) {
+  const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
+  const result = runSearchBench({ dir });
   const failures = [];
   for (const metric of METRICS) {
     if (result.overall[metric] < baseline.overall[metric] - TOLERANCE) {
@@ -48,9 +50,17 @@ test("search ranking quality has not regressed against the committed baseline", 
       }
     }
   }
-  assert.deepEqual(
-    failures,
-    [],
-    "search quality regressed; if intentional run: npm run bench:search -- --update-baseline"
+  assert.deepEqual(failures, [], `search quality regressed; if intentional run: ${updateCommand}`);
+}
+
+test("search ranking quality has not regressed against the committed baseline", () => {
+  assertNoRegression(undefined, BASELINE_PATH, "npm run bench:search -- --update-baseline");
+});
+
+test("onboarded holdout ranking quality has not regressed against its committed baseline", () => {
+  assertNoRegression(
+    HOLDOUT_ONBOARDED_DIR,
+    join(HOLDOUT_ONBOARDED_DIR, "baseline.json"),
+    "npm run bench:search -- --fixtures tests/fixtures/search-bench/holdout-onboarded --update-baseline"
   );
 });
