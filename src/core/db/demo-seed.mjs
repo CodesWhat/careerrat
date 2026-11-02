@@ -10,11 +10,12 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:f
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveUserPaths, userPath } from "../paths/workspace.mjs";
+import { CANDIDATE_DEFAULTS } from "../profile/candidate-defaults.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
 import { stringifyYaml } from "../profile/yaml.mjs";
 import { dbExists, openDb } from "./connection.mjs";
 import { exportToTracker } from "./export-to-tracker.mjs";
-import { importFromTracker } from "./import-from-tracker.mjs";
+import { hasNonDefaultCandidateRow, importFromTracker } from "./import-from-tracker.mjs";
 
 const DEMO_WORKSPACE_DIR = join(
   fileURLToPath(new URL("../../..", import.meta.url)),
@@ -86,13 +87,7 @@ function seedDemoArtifacts({ repoRoot, env }) {
   return { partialCreated };
 }
 
-const DATA_TABLES = [
-  "applications",
-  "sourced",
-  "communications",
-  "candidate_profile",
-  "candidate_evidence_claims",
-];
+const DATA_TABLES = ["applications", "sourced", "communications", "candidate_evidence_claims"];
 
 // What would the demo seed overwrite? Anything here means this is somebody's
 // workspace: candidate YAML on disk, or rows in the tables the seed patches.
@@ -109,6 +104,10 @@ function existingWorkspaceData({ repoRoot, env } = {}) {
     for (const table of DATA_TABLES) {
       const { n } = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get();
       if (n > 0) found.push(`${n} row(s) in ${table}`);
+    }
+    // `careerrat init` seeds an empty default profile row; only a changed one is real data.
+    if (hasNonDefaultCandidateRow(db, "candidate_profile", CANDIDATE_DEFAULTS.profile)) {
+      found.push("1 row(s) in candidate_profile");
     }
   }
   return found;

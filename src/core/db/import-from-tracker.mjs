@@ -12,7 +12,9 @@
 // per key, in the `kv` table — see export-to-tracker.mjs for the inverse.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { userPath } from "../paths/workspace.mjs";
+import { CANDIDATE_DEFAULTS } from "../profile/candidate-defaults.mjs";
 import { loadLegacyCandidateConfig } from "../profile/config-store.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
 import { rebaseTrackerData, shiftTreeByMs } from "../tracker/rebase-dates.mjs";
@@ -331,11 +333,24 @@ function importLegacySourceConfigs(pathCtx) {
 // <sourceDir||workspace>/tracker.json (+ activity.jsonl if present) and
 // upserts every row into the db. Idempotent: running it twice against the
 // same source produces an identical db.
-// True once the database holds a candidate profile or targeting: from then on
+// True when the table's singleton row exists and differs from the empty default
+// that `careerrat init` seeds (ensureSetupRows). The seeded default is not setup.
+export function hasNonDefaultCandidateRow(db, table, defaults) {
+  const row = db.prepare(`SELECT data FROM ${table} WHERE id = 1`).get();
+  if (!row) return false;
+  try {
+    return !isDeepStrictEqual(JSON.parse(row.data), defaults);
+  } catch {
+    return true;
+  }
+}
+
+// True once the database holds a real candidate profile or targeting: from then on
 // the database is the source of truth and the old candidate/*.yml files are stale.
 function dbHasCandidateSetup(db) {
-  return ["candidate_profile", "candidate_targeting"].some(
-    (table) => db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined
+  return (
+    hasNonDefaultCandidateRow(db, "candidate_profile", CANDIDATE_DEFAULTS.profile) ||
+    hasNonDefaultCandidateRow(db, "candidate_targeting", CANDIDATE_DEFAULTS.targeting)
   );
 }
 
