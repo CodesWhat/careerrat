@@ -35,6 +35,9 @@ from textual.widgets import (
 )
 
 HOLD_SECONDS = 12
+# One bridge event is one line. A line past this is dropped, not fatal.
+EVENT_LINE_LIMIT = 32 * 1024 * 1024
+OVERSIZED = object()
 ROOT = Path(__file__).resolve().parents[3]
 KEYS = {
     "enter": "\r",
@@ -52,6 +55,22 @@ KEYS = {
     "pageup": "\x1b[5~",
     "pagedown": "\x1b[6~",
 }
+
+
+async def read_event_line(reader):
+    """The next bridge line, OVERSIZED if it ran past the limit (the rest of it
+    is discarded so later events still arrive), or b"" at the end of the stream."""
+    skipped = False
+    while True:
+        try:
+            line = await reader.readuntil(b"\n")
+        except asyncio.LimitOverrunError as error:
+            await reader.readexactly(error.consumed)
+            skipped = True
+            continue
+        except asyncio.IncompleteReadError as error:
+            return b"" if skipped else error.partial
+        return OVERSIZED if skipped else line
 
 
 def sorted_messages(messages):
@@ -565,8 +584,10 @@ class CareerRatApp(App):
     #agent-status.shown { display: block; }
     """
 
-    def __init__(self, env=None, bridge_args=None):
+    def __init__(self, env=None, bridge_args=None, line_limit=EVENT_LINE_LIMIT):
         super().__init__()
+        self.line_limit = line_limit
+        self.detail = None
         self.env = dict(os.environ if env is None else env)
         self.bridge_args = list(sys.argv[1:] if bridge_args is None else bridge_args)
         self.proc = None
@@ -697,7 +718,7 @@ class CareerRatApp(App):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            limit=32 * 1024 * 1024,
+            limit=self.line_limit,
         )
         self.reader = asyncio.create_task(self.read_events())
         self.stderr_reader = asyncio.create_task(self.read_errors())
@@ -803,7 +824,13 @@ class CareerRatApp(App):
 
     async def read_events(self):
         try:
-            while line := await self.proc.stdout.readline():
+            while line := await read_event_line(self.proc.stdout):
+                if line is OVERSIZED:
+                    message = "A workspace update was too large to show and was skipped."
+                    self.errors.append(message)
+                    if not self.stopping:
+                        self.show_message(message, hold=HOLD_SECONDS)
+                    continue
                 try:
                     await self.handle_event(json.loads(line))
                 except asyncio.CancelledError:
@@ -847,6 +874,8 @@ class CareerRatApp(App):
             self.update_workspace(value)
         elif kind == "selection":
             self.apply_selection(value)
+        elif kind == "detail":
+            self.apply_detail(value)
         elif kind == "notice":
             self.show_message(value["message"], hold=HOLD_SECONDS)
         elif kind == "agent-status":
@@ -1002,7 +1031,7 @@ class CareerRatApp(App):
         finally:
             self.updating = False
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)
-        self.update_details(selected, view)
+        self.show_selected(selected, view)
         self.update_workspace_history(view)
         self.update_status(view, state)
 
@@ -1049,11 +1078,23 @@ class CareerRatApp(App):
                     table.move_cursor(row=index)
                 finally:
                     self.updating = False
-        self.update_details(
+        self.show_selected(
             next((j for j in view["jobs"] if j["id"] == self.selected_id), None),
             view,
         )
         self.update_status(view, state)
+
+    def apply_detail(self, value):
+        """The selected job in full. The snapshot only carries summary rows."""
+        if self.detail == value or not self.snapshot:
+            return
+        self.detail = value
+        if value["id"] == self.selected_id:
+            view = self.snapshot["view"]
+            self.show_selected(
+                next((j for j in view["jobs"] if j["id"] == self.selected_id), None),
+                view,
+            )
 
     def update_workspace_history(self, view):
         messages = view.get("workspaceMessages") or []
@@ -1068,6 +1109,16 @@ class CareerRatApp(App):
         if messages:
             text += "\n\n" + format_messages(sorted_messages(messages))
         self.query_one("#workspace-history-text", Static).update(text)
+
+    def show_selected(self, summary, view):
+        """Show the selected job from its saved detail, or say it is loading."""
+        if summary and (self.detail or {}).get("id") != summary["id"]:
+            self.query_one("#requirements", DataTable).display = False
+            self.query_one("#open-jd", Button).display = False
+            for name in ("details", "history-text", "assessment-summary"):
+                self.query_one(f"#{name}", Static).update("Loading…")
+            return
+        self.update_details(self.detail["job"] if summary else None, view)
 
     def update_details(self, selected, view=None):
         report = self.query_one("#requirements", DataTable)

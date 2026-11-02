@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 from types import SimpleNamespace
@@ -784,6 +785,78 @@ closeAll();
                 self.assertEqual(handled, ["context"])
                 self.assertEqual(closed, [True])
                 await pilot.press("ctrl+q")
+
+    async def test_an_oversized_bridge_line_is_dropped_and_later_events_still_arrive(self):
+        reader = asyncio.StreamReader(limit=64)
+        # Over the limit with the newline already buffered, then over the limit
+        # arriving in pieces, then a normal event.
+        reader.feed_data(b"x" * 500 + b"\n")
+        reader.feed_data(b'{"type":"ok"}\n')
+
+        async def late():
+            await asyncio.sleep(0.05)
+            reader.feed_data(b"y" * 300)
+            await asyncio.sleep(0.05)
+            reader.feed_data(b"y" * 300 + b"\n" + b'{"type":"late"}\n')
+            reader.feed_eof()
+
+        task = asyncio.create_task(late())
+        seen = []
+        while line := await MODULE.read_event_line(reader):
+            seen.append("big" if line is MODULE.OVERSIZED else json.loads(line)["type"])
+        await task
+        self.assertEqual(seen, ["big", "ok", "big", "late"])
+
+    async def test_a_multi_megabyte_workspace_stays_connected_and_responsive(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-large-") as folder:
+            home = Path(folder)
+            (home / "workspace").mkdir()
+            jobs = [
+                {
+                    "id": f"job-{index:03d}",
+                    "company": f"Company {index:03d}",
+                    "role": "Platform Engineer",
+                    "status": "applied",
+                    "note": "n" * 20000,
+                    "evaluation": {
+                        "gate": "keep",
+                        "requirements": [
+                            {
+                                "requirement": f"Requirement {item}",
+                                "importance": "high",
+                                "evidence": "e" * 400,
+                                "match": "strong",
+                            }
+                            for item in range(250)
+                        ],
+                    },
+                }
+                for index in range(40)
+            ]
+            text = json.dumps({"applications": jobs})
+            self.assertGreater(len(text), 4_000_000)
+            (home / "workspace/tracker.json").write_text(text)
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 40, 20)
+                self.assertLess(len(json.dumps(app.snapshot)), 200_000)
+                await until(lambda: app.detail and app.detail["id"] == app.selected_id, 10)
+                first = app.selected_id
+                table.focus()
+                started = time.monotonic()
+                await pilot.press("down")
+                await until(lambda: app.selected_id != first, 5)
+                await until(
+                    lambda: app.detail and app.detail["id"] == app.selected_id, 5
+                )
+                self.assertLess(time.monotonic() - started, 3)
+                self.assertFalse(app.reader.done())
+                self.assertIn("Platform Engineer", str(app.query_one("#details", Static).render()))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
 
 
 REAL_SHAPE = [
