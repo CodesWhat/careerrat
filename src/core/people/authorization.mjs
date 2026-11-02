@@ -13,15 +13,26 @@ export function authorizationPath(base, name) {
   return join(personRoot(base, name), AUTHORIZATION_RELPATH);
 }
 
-function readAuthorization(base, name) {
+// CR121: the same file also carries the person's contact details and per-channel
+// opt-ins (see contact.mjs), so a read keeps every key it doesn't own and a write
+// puts them back.
+export function readAuthorization(base, name) {
   const path = authorizationPath(base, name);
   if (!existsSync(path)) return { person: name, records: [] };
   try {
     const data = JSON.parse(readFileSync(path, "utf8"));
-    return { person: name, records: Array.isArray(data.records) ? data.records : [] };
+    return { ...data, person: name, records: Array.isArray(data.records) ? data.records : [] };
   } catch {
     return { person: name, records: [] };
   }
+}
+
+export function writeAuthorization(base, name, data) {
+  const path = authorizationPath(base, name);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify({ ...data, person: name }, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
+  return path;
 }
 
 function operatorName(env) {
@@ -50,12 +61,6 @@ export function recordAuthorization({
     authorizedAt: now.toISOString(),
     recordedBy: operatorName(env),
   };
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(
-    path,
-    `${JSON.stringify({ person: name, records: [...existing.records, record] }, null, 2)}\n`,
-    { mode: 0o600 }
-  );
-  chmodSync(path, 0o600);
+  writeAuthorization(base, name, { ...existing, records: [...existing.records, record] });
   return { path, record };
 }

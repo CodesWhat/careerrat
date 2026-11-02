@@ -1255,6 +1255,10 @@ rounds are persisted to `conversations[]` on the application row via
 `interview-prep` STEP 6, with the formal written counter sent immediately after
 via `email-comms`.
 
+### Recipient classes (hard)
+
+Employer- and recruiter-facing mail stays draft-only: CareerRat never sends it, and `communication.send` never reaches a recipient who is not the person. Agent-to-person notifications (to the person whose workspace it is, at the address in their contact record, after they opted in) are a separate class that CareerRat may send, only on the operator's command: `careerrat --for <name> roundup --send`, or a recruiter-reply draft delivered to them with `--deliver-to-person`. No opt-in, an unregistered address, or quiet hours means the notification is refused.
+
 ### Honesty Firewall (hard)
 
 - **Never fabricate** competing offers, deadlines, comp numbers, referrals, or

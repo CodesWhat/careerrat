@@ -13,6 +13,9 @@ The primary entry point. Run as `careerrat <command> [args] [--flags]`.
 | `start claude` | Same, with Claude Code as the agent |
 | `start codex` | Same, with Codex as the agent |
 | `people list` / `people add <name>` / `people remove <name> --purge --yes` | List, create (with an authorization note) or purge per-person workspaces. These work on the shared roster. `--for <name>` applies to workspace commands; `--new` creates the person first. See [Running CareerRat for someone else](/guides/running-for-someone-else) |
+| `--for <name> people contact show\|set\|opt-in\|opt-out` | Record the address CareerRat may notify, their timezone and quiet hours, and their per-channel yes. Notifications fail without an opt-in |
+| `--for <name> roundup [--since <date>] [--send] [--now]` | Print a person's job-search roundup, or email it to their registered address. See [Running CareerRat for someone else](/guides/running-for-someone-else) |
+| `--for <name> comm handoff <id> --deliver-to-person` | Email a reviewed recruiter-reply draft to the person, never the recruiter. `comm mark-sent <id>` records their send |
 | `init` | Scaffold workspace only (no agent, no dashboard) |
 | `doctor` | Environment health check, scaffold state, skills discoverability |
 | `next` | Show the next agent task from doctor guidance |
