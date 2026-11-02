@@ -310,6 +310,7 @@ test("source acquisition uses a bounded worker pool instead of fetching boards s
       repoRoot,
       configPath,
       write: false,
+      hostThrottle: false,
       fetchImpl: async (url) => {
         const slug = new URL(String(url)).pathname.split("/").filter(Boolean).at(-1);
         started += 1;
@@ -363,6 +364,7 @@ test("offer liveness verification uses bounded concurrency", async () => {
       repoRoot,
       configPath,
       write: false,
+      hostThrottle: false,
       verify: true,
       fetchImpl: async (url) => {
         if (String(url).includes("api.lever.co")) {
@@ -3251,6 +3253,45 @@ test("a scan where every source is non-runnable says so instead of reading as su
     assert.equal(summary.errors.length, 0);
     assert.equal(summary.health.status, "failed");
     assert.match(summary.health.message, /None of the 1 sources can be searched from the terminal/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a 429 with Retry-After is retried inside the scan and reported in requestStats", async () => {
+  const repoRoot = tempRepo();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot, {
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    });
+    let calls = 0;
+    const summary = await runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      hostThrottle: { minSpacingMs: 0, sleep: async () => {} },
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1)
+          return new Response("slow down", { status: 429, headers: { "retry-after": "1" } });
+        return new Response(
+          JSON.stringify([
+            {
+              text: "Platform Engineer",
+              hostedUrl: "https://jobs.lever.co/acme/role-1",
+              categories: { location: "Remote - US" },
+              descriptionPlain: "Build reliable platform infrastructure and developer tooling.",
+            },
+          ]),
+          { status: 200 }
+        );
+      },
+    });
+    assert.equal(summary.scanned, 1);
+    assert.equal(summary.requestStats.rateLimited, 1);
+    assert.equal(summary.requestStats.retried, 1);
+    assert.equal(calls, 2);
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });

@@ -28,6 +28,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- Scans now go easy on each host: a concurrency cap, a minimum gap between requests, and a wait-and-retry on 429 or 503 that follows Retry-After. The scan summary reports how many requests were rate limited.
 - Scans rank ghost-looking and reposted postings lower with a visible reason (evergreen wording, very old, or the same role showing up under new links across scans). They are never cut.
 - Search can use USAJobs (free key) and Adzuna (paid key) when their keys are set, and new
   searches also include Himalayas, Jobicy and, for tech roles, Hacker News "Who is

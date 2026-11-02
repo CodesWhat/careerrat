@@ -39,6 +39,7 @@ import { sourceConfigGet, sourceConfigMutate } from "../src/core/db/verbs/source
 import { normalizeCompanyKey } from "../src/core/discovery/company-board-resolver.mjs";
 import { hydrateJobOffer } from "../src/core/intake/resolve.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
+import { createHostThrottle } from "../src/core/net/host-throttle.mjs";
 import { resolvePublicFetch } from "../src/core/net/public-http-fetch.mjs";
 import {
   loadLegacyCandidateConfig,
@@ -534,19 +535,26 @@ export async function runSourcedScan({
   hydrateOfferImpl = hydratePartialOffer,
   captureBrowserSourceImpl,
   recheckDead = false,
+  hostThrottle,
   signal,
 } = {}) {
   const ensureActive = () => {
     signal?.throwIfAborted();
     if (typeof assertActive === "function") assertActive();
   };
+  // Per-host concurrency, spacing and Retry-After backoff for every request of
+  // the run. Pass hostThrottle: false to bypass (tests that count raw calls).
+  const throttle =
+    hostThrottle === false
+      ? null
+      : createHostThrottle(resolvePublicFetch(fetchImpl), hostThrottle || {});
   const fetchForRun = (url, init = {}) => {
     const requestSignal =
       signal && init.signal ? AbortSignal.any([signal, init.signal]) : signal || init.signal;
-    return resolvePublicFetch(fetchImpl)(
-      url,
-      requestSignal ? { ...init, signal: requestSignal } : init
-    );
+    const requestInit = requestSignal ? { ...init, signal: requestSignal } : init;
+    return throttle
+      ? throttle.fetch(url, requestInit)
+      : resolvePublicFetch(fetchImpl)(url, requestInit);
   };
   ensureActive();
   const pathCtx = { repoRoot, env };
@@ -1054,6 +1062,7 @@ export async function runSourcedScan({
     adjacencyNote: adjacencyNote(candidateConfig.targeting, candidateConfig.profile),
     loginRequests: scanned.loginRequests,
     sourceCoverage: scanned.sourceCoverage,
+    ...(throttle ? { requestStats: throttle.stats() } : {}),
     coldFamilies,
     revalidatedExisting,
     offers: outputOffers,
@@ -1102,6 +1111,12 @@ export function printSummary(summary, offers, cfg, limit) {
     console.log(`Scan health: ${summary.health.status}. ${summary.health.message}.`);
   }
   if (summary.adjacencyNote) console.log(summary.adjacencyNote);
+  if (summary.requestStats?.rateLimited > 0) {
+    const stats = summary.requestStats;
+    console.log(
+      `Rate limited: ${stats.rateLimited} of ${stats.attempts} requests (${stats.rateLimitedPct}%), ${stats.retried} retried after backoff`
+    );
+  }
   console.log(`Scanned: ${summary.scanned}`);
   console.log(`New after filters/dedupe: ${summary.new}`);
   console.log(`Filtered by title: ${summary.filteredTitle}`);
