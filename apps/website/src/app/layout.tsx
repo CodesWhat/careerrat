@@ -36,7 +36,7 @@ const figtree = localFont({
 });
 
 const siteDescription =
-  "CareerRat is a Mac app that turns your AI CLI into a personal recruiter. Rate jobs before you apply, use your real experience, and track every outcome.";
+  "CareerRat is a personal recruiter built on your AI CLI. Rate jobs before you apply, use your real experience, and track every outcome.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://careerrat.com"),

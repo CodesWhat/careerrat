@@ -4,14 +4,12 @@
 
 <h1>CareerRat</h1>
 
-**A Mac app that turns the AI CLI you already have into a personal recruiter.**
+**Turns the AI CLI you already have into a personal recruiter.**
 
 </div>
 
 <p align="center">
-  <a href="https://github.com/CodesWhat/careerrat/releases/latest"><img src="https://img.shields.io/github/v/release/CodesWhat/careerrat?label=desktop" alt="Latest desktop release"></a>
   <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/v/careerrat" alt="npm version"></a>
-  <a href="https://github.com/CodesWhat/careerrat/releases/latest"><img src="https://img.shields.io/badge/platform-macOS_(Apple_Silicon)-informational?logo=apple&logoColor=white" alt="Platform"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/CodesWhat/careerrat" alt="MIT License"></a>
   <br>
   <a href="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
@@ -71,7 +69,7 @@ Automatic submission, introduced in v0.21.0:
   was sent.
 
 If you use the Mac app, it keeps working at v0.19.2. There won't be a later Mac
-build; switch with `npm install -g careerrat`.
+build; switch with `npm i -g careerrat`.
 
 <hr>
 
@@ -95,33 +93,33 @@ build; switch with `npm install -g careerrat`.
 
 <h2 align="center" id="quick-start">Quick Start</h2>
 
-CareerRat runs as a Mac app. It hands the actual work to an AI coding assistant
+CareerRat installs from npm. It hands the actual work to an AI coding assistant
 you probably already have on your machine, Claude Code or OpenAI Codex, and
 gives that assistant a full recruiter's job to do: read the posting, check it
 against what you want, write your materials, and keep score of everything.
 
 CareerRat needs one AI engine to do the actual work: [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
 2.1.241 or newer, or [OpenAI Codex](https://developers.openai.com/codex/cli/)
-(any version). You do not need it before you open the app. If neither is
-installed, CareerRat can install Claude Code from inside the app on first run,
-or point you at the Codex setup guide. CareerRat detects which one is ready on
-your machine and you pick it.
+(any version). You do not need it before you install CareerRat. If neither is
+there, CareerRat can install Claude Code for you on first run, or point you at
+the Codex setup guide. CareerRat detects which one is ready on your machine and
+you pick it.
 
-### Get the Mac app (Apple Silicon)
+### Install
 
-The current macOS release is a signed and notarized Apple Silicon app for macOS
-13 (Ventura) or newer.
+You need Node.js 24.22.1 or newer. Python 3.11 or newer is also needed if you want
+the terminal workspace (`careerrat tui`).
 
-1. [Download the latest `.dmg`](https://github.com/CodesWhat/careerrat/releases/latest),
-   or install it with Homebrew:
+```bash
+npm i -g careerrat
+careerrat start
+```
 
-   ```bash
-   brew install --cask codeswhat/tap/careerrat
-   ```
+`careerrat start` opens the workspace in your browser. `careerrat tui` opens the
+terminal workspace instead.
 
-2. Open CareerRat.
-3. Choose Claude Code or Codex if it is ready. If neither is installed, CareerRat
-   offers in-app Claude Code setup and the official OpenAI Codex setup guide.
+The Mac app ended at v0.19.2 and is no longer updated. The `.dmg` and the
+Homebrew cask are frozen at that version, so install from npm.
 
 CareerRat works with [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
 or [OpenAI Codex](https://developers.openai.com/codex/cli/). Install and sign
@@ -273,8 +271,8 @@ application work begins.
   approved. It then waits for a confirmation page. If it doesn't see one, the
   application is marked submitted-unverified, never retried, and you're asked to
   check the site. Run `careerrat automation submit manual --write` and CareerRat
-  fills the form and stops for you to press Submit. The Mac app checks for signed updates, downloads them in place, and waits for an
-  explicit **Restart and install**.
+  fills the form and stops for you to press Submit. If you still run the v0.19.2 Mac app, it checks for signed updates, downloads
+  them in place, and waits for an explicit **Restart and install**.
 
 ### One workspace for the whole search
 
@@ -313,7 +311,7 @@ Your workspace stays on your machine and can be exported.
   and privacy terms.
 - Search, research, and browser skills fetch the public or authenticated pages
   needed for the task you started.
-- The Mac app checks GitHub's `latest-mac.yml` SHA-512 checksum metadata at most
+- The v0.19.2 Mac app checks GitHub's `latest-mac.yml` SHA-512 checksum metadata at most
   once a day. It sends no candidate data and no unique installation or device
   identifier. When a newer version exists, it downloads the signed and notarized
   app update. Nothing installs until you choose **Restart and install**.
@@ -467,16 +465,16 @@ threads fold into the same workspace as the rest of your search.
 
 <h2 align="center" id="for-developers">For Developers</h2>
 
-The desktop app is CareerRat's shipping product. The `careerrat` CLI exists to
-make it easier to run and develop the same engine from a terminal; both use the
-same canonical skills and local data.
+CareerRat ships as an npm package. The `careerrat` CLI runs the engine, the
+browser workspace and the terminal workspace, all on the same canonical skills
+and local data.
 
-### Any other platform (npm)
+### Install from npm
 
-Needs Node.js 24.22.1 or newer.
+Needs Node.js 24.22.1 or newer, and Python 3.11 or newer for `careerrat tui`.
 
 ```bash
-npm install -g careerrat
+npm i -g careerrat
 careerrat start
 ```
 

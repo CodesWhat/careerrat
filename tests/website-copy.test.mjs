@@ -32,8 +32,8 @@ test("website hero leads with the CareerRat pitch", async () => {
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
 
   assert.match(page, /Your job hunt, run by a rat\./);
-  assert.match(page, /Mac app that turns the AI CLI you already have into a personal recruiter/);
-  assert.doesNotMatch(page, /npm install -g careerrat|careerrat start|careerrat update/);
+  assert.match(page, /CareerRat turns the AI CLI you already have into a personal recruiter/);
+  assert.doesNotMatch(page, /Mac app/);
   assert.doesNotMatch(page, new RegExp(LEGACY_BRAND, "i"));
   assert.doesNotMatch(
     styles,
@@ -42,15 +42,16 @@ test("website hero leads with the CareerRat pitch", async () => {
   );
 });
 
-test("website leads with the signed Mac app and keeps installation focused on the download", async () => {
+test("website points installation at the npm install docs", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
 
-  // Hero: the Mac app is the primary framing and the primary CTA. Free and
-  // local are supporting facts, not the headline.
-  assert.match(page, /Mac app that turns the AI CLI you already have into a personal recruiter/);
-  assert.match(page, /Download for Mac/);
-  assert.match(page, /https:\/\/github\.com\/CodesWhat\/careerrat\/releases\/latest/);
-  assert.match(page, /Signed and notarized, for Apple Silicon Macs on macOS 12 or newer\./);
+  // The Mac app ended at v0.19.2, so the CTA goes to the npm install docs.
+  assert.match(page, /CareerRat turns the AI CLI you already have into a personal recruiter/);
+  assert.match(page, /Install with npm/);
+  assert.match(page, /\/docs\/getting-started\/install/);
+  assert.match(page, /npm i -g careerrat/);
+  assert.match(page, /Needs Node\.js 24\.15 or newer\./);
+  assert.doesNotMatch(page, /Download for Mac|releases\/latest|Signed and notarized/);
   assert.match(page, /CareerRat itself costs nothing/);
   assert.doesNotMatch(page, /Runs on your own AI CLI/);
   assert.doesNotMatch(page, /Get started, free &amp; open source/);
@@ -58,7 +59,7 @@ test("website leads with the signed Mac app and keeps installation focused on th
   assert.doesNotMatch(page, /Agent runtime/);
   assert.doesNotMatch(page, /Self-host it/);
 
-  assert.doesNotMatch(page, /Anywhere with npm|brew install|npm install|Node\.js 24/);
+  assert.doesNotMatch(page, /Anywhere with npm|brew install/);
 });
 
 test("website privacy card names the local workspace and the provider boundary precisely", async () => {
@@ -85,10 +86,10 @@ test("website engine card pins the runtime minimum, thinking-depth choices, cost
     flat,
     /CareerRat itself costs nothing; your AI provider may have its own plan or usage costs\./
   );
-  assert.match(flat, /wait for you to choose Restart and install\./);
+  assert.match(flat, /Update any time with careerrat update\./);
 });
 
-test("docs index names both start commands, the Node minimum, and leads with the Mac app", async () => {
+test("docs index names both start commands, the Node minimum, and leads with the npm install", async () => {
   const docsIndex = await readFile("apps/docs/content/docs/index.mdx", "utf8");
   const flat = normalizeWhitespace(docsIndex);
 
@@ -96,14 +97,15 @@ test("docs index names both start commands, the Node minimum, and leads with the
   assert.match(flat, /careerrat start codex/);
   assert.match(flat, /Node\.js 24\.22\.1 or newer/);
 
-  const macDownloadIndex = flat.search(/Download the Mac app\./);
+  const installIndex = flat.search(/npm i -g careerrat/);
   const forDevelopersIndex = flat.search(/### For developers/);
-  assert.notEqual(macDownloadIndex, -1, "docs index should mention the Mac app download");
+  assert.notEqual(installIndex, -1, "docs index should show the npm install");
   assert.notEqual(forDevelopersIndex, -1, "docs index should have a For developers heading");
   assert.ok(
-    macDownloadIndex < forDevelopersIndex,
-    "the Mac app download should read before the For developers section"
+    installIndex < forDevelopersIndex,
+    "the npm install should read before the For developers section"
   );
+  assert.doesNotMatch(flat, /brew install|Download the Mac app/);
 });
 
 test("website presents Claude Code and Codex as neutral direct runtime choices", async () => {
@@ -648,17 +650,14 @@ test("deployed sites bundle fonts without Google build-time fetches", async () =
   assert.match(docsLayout, /next\/font\/local/);
 });
 
-test("website stays download-only while docs keep the public careerrat CLI convention", async () => {
+test("website points to the install docs while docs keep the public careerrat CLI convention", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const publicAgents = await readFile("apps/website/public/AGENTS.md", "utf8");
   const installDocs = await readFile("apps/docs/content/docs/getting-started/install.mdx", "utf8");
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   const combined = publicAgents;
 
-  assert.doesNotMatch(
-    page,
-    /npm install -g careerrat|careerrat start|careerrat update|Node\.js 24/
-  );
+  assert.match(page, /npm i -g careerrat/);
   assert.match(publicAgents, /careerrat start claude/);
   assert.match(publicAgents, /careerrat ingest/);
   assert.match(publicAgents, /careerrat update/);
