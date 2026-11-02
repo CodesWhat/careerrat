@@ -11,7 +11,7 @@ import unittest
 
 from types import SimpleNamespace
 
-from textual.widgets import Button, DataTable, Input, Static, TabbedContent
+from textual.widgets import Button, DataTable, Input, Select, Static, TabbedContent
 from textual import events
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -398,9 +398,11 @@ closeAll();
                 app.query_one("#jobs").focus()
                 app.post_message(events.Paste("Synthetic recruiter note"))
                 await until(lambda: isinstance(app.screen, MODULE.ContextCapture))
-                await until(lambda: not app.screen.waiting)
-                self.assertEqual(
-                    app.screen.query_one("#context-text").text, "Synthetic recruiter note"
+                await until(
+                    lambda: app.screen.query_one("#context-text").text
+                    == "Synthetic recruiter note"
+                    and app.screen.request_id is None
+                    and not app.screen.waiting
                 )
                 await pilot.pause(0.3)
                 self.assertEqual(self.agent_log(home), [])
@@ -797,7 +799,7 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
         for expected in (
             "Status: Applied",
             "Fit: 84 KEEP",
-            "Next step: Apply this week",
+            "Suggested action: Apply this week",
             "Note: Short note",
             "Heads up: Onsite two days",
             "Ask: 210,000",
@@ -821,7 +823,7 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
             "Score: 84",
             "Verdict: KEEP",
             "Fit group: high",
-            "Action: Apply this week",
+            "Suggested action: Apply this week",
             "Why this score: Strong match on scope",
             "Heads up: Onsite two days",
             "• Fits the scope",
@@ -892,6 +894,121 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
                 )
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
+
+    def make_home(self, folder, applications):
+        (Path(folder) / "workspace").mkdir()
+        (Path(folder) / "workspace/tracker.json").write_text(
+            json.dumps({"meta": {"version": 7}, "applications": applications})
+        )
+
+    def synthetic_jobs(self):
+        return [
+            {"id": "open-a", "company": "Alpha", "role": "Dev", "status": "applied"},
+            {"id": "open-b", "company": "Beta", "role": "Dev", "status": "interview"},
+            {"id": "shut", "company": "Gamma", "role": "Dev", "status": "rejected"},
+        ]
+
+    async def test_active_is_the_default_view_and_all_statuses_shows_closed_jobs(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-active-") as folder:
+            self.make_home(folder, self.synthetic_jobs())
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(140, 40)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 2)
+                self.assertEqual(app.query_one("#status", Select).value, "active")
+                self.assertIn("2 of 3", table.border_title)
+                self.assertIn("rejected", app.stage_options)
+                app.query_one("#status", Select).value = "all"
+                await until(lambda: table.row_count == 3)
+                self.assertNotIn("of", table.border_title.replace("Saved jobs", ""))
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_an_empty_active_view_says_how_to_see_everything(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-closed-") as folder:
+            self.make_home(
+                folder,
+                [{"id": "shut", "company": "Gamma", "role": "Dev", "status": "rejected"}],
+            )
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(140, 40)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.pause(0.2)
+                text = str(app.query_one("#details", Static).render())
+                self.assertIn("No active jobs", text)
+                self.assertIn("All statuses", text)
+                await pilot.press("ctrl+q")
+
+    async def test_moving_the_highlight_does_not_resend_the_job_list(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-move-") as folder:
+            self.make_home(folder, self.synthetic_jobs())
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            snapshots = []
+            original = app.update_workspace
+            app.update_workspace = lambda value: (snapshots.append(1), original(value))[1]
+            async with app.run_test(size=(140, 40)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 2)
+                first = app.selected_id
+                before = len(snapshots)
+                table.focus()
+                await pilot.press("down")
+                await until(lambda: app.selected_id not in (None, first))
+                await until(
+                    lambda: "Beta" in str(app.query_one("#details", Static).render())
+                    or "Alpha" in str(app.query_one("#details", Static).render())
+                )
+                self.assertEqual(len(snapshots), before)
+                self.assertEqual(
+                    app.snapshot["state"]["selectedId"], app.selected_id
+                )
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    async def test_review_names_what_it_took_and_apply_refuses_closed_jobs(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-asks-") as folder:
+            self.make_home(folder, self.synthetic_jobs())
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(140, 40)) as pilot:
+                table = app.query_one("#jobs", DataTable)
+                await until(lambda: table.row_count == 2)
+                await pilot.click("#review")
+                request = app.query_one("#request")
+                await until(lambda: "evaluate-job" in request.value)
+                self.assertIn("open-a", request.value)
+                self.assertIn("open-b", request.value)
+                self.assertNotIn("shut", request.value)
+                message = str(app.query_one("#message", Static).render())
+                self.assertIn("took the first 2 active jobs", message)
+                request.value = ""
+                app.query_one("#status", Select).value = "rejected"
+                await until(lambda: table.row_count == 1)
+                await pilot.click("#apply")
+                await until(
+                    lambda: "Apply selected" in str(app.query_one("#message", Static).render())
+                )
+                self.assertEqual(request.value, "")
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
+    def test_a_saved_action_that_repeats_the_verdict_is_left_out(self):
+        row = {"action": "cut", "gate": {"gate": "cut"}, "fitBucket": "low"}
+        self.assertEqual(MODULE.suggested_action(row), "")
+        self.assertEqual(
+            MODULE.suggested_action({"action": "Apply this week", "fitBucket": "high"}),
+            "Apply this week",
+        )
+        text = MODULE.job_detail_text({"record": row, "stage": {"label": "Sourced"}, "fit": {}})
+        self.assertNotIn("Next step", text)
+        self.assertNotIn("cut", text.lower().replace("cut off", ""))
 
     async def test_an_empty_view_shows_plain_messages(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-empty-") as folder:

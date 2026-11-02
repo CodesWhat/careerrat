@@ -5,6 +5,7 @@ import { dbFilePath } from "../db/connection.mjs";
 import { readSavedJobDescription } from "../jobs/job-description.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
+import { withCareerratShim } from "./cli-shim.mjs";
 import { applyTuiUndo } from "./history.mjs";
 import { captureTuiContext, listDroppedFiles } from "./intake.mjs";
 import { capWorkspaceMessages, readJobs, viewJobs } from "./jobs.mjs";
@@ -15,6 +16,7 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
   const sessionId = randomUUID();
   let data = readJobs(ctx);
   let state = createWorkspaceState(data);
+  let currentView;
   let pane;
   let native;
   let exited = false;
@@ -30,6 +32,7 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
   }
   function snapshot() {
     const view = viewJobs(data, state);
+    currentView = view;
     const capped = capWorkspaceMessages(view.workspaceMessages);
     send({
       type: "workspace",
@@ -90,18 +93,37 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
       send({ type: "error", message: `Saved data could not refresh: ${error.message}` });
     }
   }
-  function request(text) {
+  function request(text, notice) {
     const inserted = Boolean(pane && !exited);
     if (inserted) pane.paste(text);
-    send({ type: "request", text, inserted });
+    send({ type: "request", text, inserted, notice: notice ?? null });
+  }
+  function paneEnv() {
+    let base = env;
+    try {
+      base = withCareerratShim({ repoRoot, env });
+    } catch (error) {
+      send({
+        type: "error",
+        message: `The agent may run a different careerrat install: ${error.message}`,
+      });
+    }
+    return { ...base, CAREERRAT_SURFACE: "tui", CAREERRAT_TUI_SESSION: sessionId };
   }
   async function dispatch(message) {
     if (closing) throw new Error("Textual session is closed");
     switch (message.op) {
       case "select": {
-        if (viewJobs(data, state).jobs.some((job) => job.id === message.id))
-          state = refreshWorkspace(data, { ...state, selectedId: message.id, pendingUndo: null });
-        snapshot();
+        // Only the selection changed: the list Python holds is still right, so
+        // send the new state alone instead of every job again.
+        if (
+          message.id !== state.selectedId &&
+          currentView.jobs.some((job) => job.id === message.id)
+        )
+          state = { ...state, selectedId: message.id, detailOffset: 0, pendingUndo: null };
+        else state = { ...state, pendingUndo: null };
+        currentView = { ...currentView, selectedId: state.selectedId };
+        send({ type: "selection", selectedId: state.selectedId, state });
         break;
       }
       case "view": {
@@ -111,6 +133,7 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
         if (
           options.stage !== undefined &&
           options.stage !== "all" &&
+          options.stage !== "active" &&
           !data.jobs.some((job) => job.stage.id === options.stage)
         )
           throw new TypeError("Unknown job stage");
@@ -140,7 +163,9 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
         const name = { search: "1", review: "2", apply: "3", context: "4" }[message.action];
         if (!name) throw new TypeError("Unknown agent action");
         const next = workspaceKey(data, { ...state, focus: "jobs", pendingUndo: null }, { name });
-        if (next.effect?.type === "agent-request") request(next.effect.text);
+        if (next.effect?.type === "agent-request") request(next.effect.text, next.effect.notice);
+        else if (next.effect?.type === "notice")
+          send({ type: "notice", message: next.effect.text });
         break;
       }
       case "inspect": {
@@ -209,7 +234,7 @@ export async function createTextualSession({ repoRoot, env = process.env, agent 
             command: agent.command,
             args: agent.args || [],
             cwd: repoRoot,
-            env: { ...env, CAREERRAT_SURFACE: "tui", CAREERRAT_TUI_SESSION: sessionId },
+            env: paneEnv(),
             cols,
             rows,
             onChange: scheduleFrame,

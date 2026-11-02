@@ -195,6 +195,18 @@ def labeled(*pairs):
     return [f"{label}: {clean(value)}" for label, value in pairs if clean(value)]
 
 
+def suggested_action(row):
+    """The saved action, unless it only repeats the verdict already shown."""
+    gate = row.get("gate") if isinstance(row.get("gate"), dict) else {}
+    evaluation = row.get("evaluation") or {}
+    action = clean(row.get("action")) or clean(gate.get("action"))
+    verdicts = {
+        clean(value).lower()
+        for value in (gate.get("gate"), row.get("fitBucket"), evaluation.get("gate"))
+    }
+    return "" if action.lower() in verdicts else action
+
+
 def job_detail_text(job):
     row = job["record"]
     fit = job.get("fit") or {}
@@ -208,8 +220,8 @@ def job_detail_text(job):
         ("Fit", fit.get("label")),
         ("Base pay", row.get("base")),
         ("Total pay", row.get("tc")),
-        ("Next step", clean(row.get("nextAction")) or clean(row.get("action"))
-         or clean(gate.get("action"))),
+        ("Next step", row.get("nextAction")),
+        ("Suggested action", suggested_action(row)),
         ("Status note", row.get("statusNote")),
         ("Note", row.get("note")),
         ("Heads up", row.get("warn")),
@@ -249,7 +261,7 @@ def fit_report_text(row, fit, has_table):
         ("Score", fit.get("score")),
         ("Verdict", verdict),
         ("Fit group", group),
-        ("Action", clean(row.get("action")) or clean(gate.get("action"))),
+        ("Suggested action", suggested_action(row)),
         ("Why this score", row.get("ratingReason")),
         ("Heads up", row.get("warn")),
     )
@@ -503,6 +515,7 @@ class CareerRatApp(App):
         self.job_ids = []
         self.table_signature = None
         self.job_cells = []
+        self.stage_options = {}
         self.column_key = None
         self.theme = "nord"
         self.request_counter = 0
@@ -517,7 +530,10 @@ class CareerRatApp(App):
             yield Button("Refresh", id="refresh")
         with Horizontal(id="filters"):
             yield Select(
-                [("All statuses", "all")], value="all", allow_blank=False, id="status"
+                [("Active", "active"), ("All statuses", "all")],
+                value="active",
+                allow_blank=False,
+                id="status",
             )
             yield Select(
                 [("USD", "USD")], value="USD", allow_blank=False, id="currency"
@@ -678,6 +694,10 @@ class CareerRatApp(App):
         kind = value["type"]
         if kind == "workspace":
             self.update_workspace(value)
+        elif kind == "selection":
+            self.apply_selection(value)
+        elif kind == "notice":
+            self.show_message(value["message"])
         elif kind == "frame":
             pane = self.query_one(NativePane)
             pane.frame = value
@@ -685,10 +705,14 @@ class CareerRatApp(App):
             pane.place_cursor()
         elif kind == "request":
             self.query_one("#request", Input).value = value["text"]
+            note = value.get("notice")
             self.show_message(
-                "Request inserted. Review it and press Enter in the agent."
-                if value["inserted"]
-                else "No running agent. The request is available below."
+                (f"{note} " if note else "")
+                + (
+                    "Request inserted. Review it and press Enter in the agent."
+                    if value["inserted"]
+                    else "No running agent. The request is available below."
+                )
             )
             if value["inserted"]:
                 self.query_one(NativePane).focus()
@@ -762,17 +786,23 @@ class CareerRatApp(App):
                 self.render_jobs(force=True)
             if self.selected_id in self.job_ids:
                 table.move_cursor(row=self.job_ids.index(self.selected_id))
-            table.border_title = f"Saved jobs · {len(jobs)} · {view['mode']}"
-            stages = sorted(
-                {job["stage"]["id"]: job["stage"]["label"] for job in jobs}.items()
-            )
-            stage_options = {
-                state["stage"]: state["stage"],
-                **dict(stages),
+            total = view.get("total", len(jobs))
+            count = str(len(jobs)) if len(jobs) == total else f"{len(jobs)} of {total}"
+            table.border_title = f"Saved jobs · {count} · {view['mode']}"
+            stages = [
+                (item["id"], item["label"])
+                for item in view.get("stages")
+                or [job["stage"] for job in jobs]
+            ]
+            self.stage_options = {
+                "active": "Active",
                 "all": "All statuses",
+                **{key: label for key, label in self.stage_options.items()
+                   if key not in ("active", "all")},
+                **dict(stages),
             }
-            # Keep all previously observed stages available while a filter is active.
-            self.stage_options = {**getattr(self, "stage_options", {}), **stage_options}
+            if state["stage"] not in self.stage_options:
+                self.stage_options[state["stage"]] = state["stage"]
             currencies = sorted(
                 {
                     state["currency"],
@@ -793,8 +823,11 @@ class CareerRatApp(App):
         finally:
             self.updating = False
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)
-        self.update_details(selected)
+        self.update_details(selected, view)
         self.update_workspace_history(view)
+        self.update_status(view, state)
+
+    def update_status(self, view, state):
         changes = view.get("changes", [])
         change = next(
             (
@@ -821,6 +854,28 @@ class CareerRatApp(App):
             )
         )
 
+    def apply_selection(self, value):
+        """Move the highlight without re-reading every job."""
+        if not self.snapshot:
+            return
+        view, state = self.snapshot["view"], value["state"]
+        self.snapshot["state"] = state
+        view["selectedId"] = self.selected_id = value["selectedId"]
+        if self.selected_id in self.job_ids:
+            index = self.job_ids.index(self.selected_id)
+            table = self.query_one("#jobs", DataTable)
+            if table.cursor_row != index:
+                self.updating = True
+                try:
+                    table.move_cursor(row=index)
+                finally:
+                    self.updating = False
+        self.update_details(
+            next((j for j in view["jobs"] if j["id"] == self.selected_id), None),
+            view,
+        )
+        self.update_status(view, state)
+
     def update_workspace_history(self, view):
         messages = view.get("workspaceMessages") or []
         total = view.get("workspaceMessagesTotal")
@@ -835,14 +890,19 @@ class CareerRatApp(App):
             text += "\n\n" + format_messages(sorted_messages(messages))
         self.query_one("#workspace-history-text", Static).update(text)
 
-    def update_details(self, selected):
+    def update_details(self, selected, view=None):
         report = self.query_one("#requirements", DataTable)
         report.clear()
         jd_button = self.query_one("#open-jd", Button)
         if not selected:
             jd_button.display = False
             report.display = False
-            self.query_one("#details", Static).update("No jobs in this view.")
+            total = (view or {}).get("total", 0)
+            self.query_one("#details", Static).update(
+                f"No active jobs. Pick All statuses in the status list to see all {total} saved jobs."
+                if total and (self.snapshot or {}).get("state", {}).get("stage") == "active"
+                else "No jobs in this view."
+            )
             self.query_one("#history-text", Static).update("No selected job.")
             self.query_one("#assessment-summary", Static).update("No selected job.")
             return

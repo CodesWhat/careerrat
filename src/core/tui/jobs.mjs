@@ -4,7 +4,7 @@ import { dbFilePath } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { extractCompBand } from "../scoring/sourced-scanner.mjs";
-import { classifyStage, isKnownStatusLabel } from "../tracker/dashboard.mjs";
+import { classifyStage, isKnownStatusLabel, isTerminalStage } from "../tracker/dashboard.mjs";
 import { readHistorySnapshot } from "./history.mjs";
 
 function jobRows(tracker) {
@@ -153,7 +153,7 @@ function text(value) {
 
 // What the Fit column shows. Prefer the saved evaluation, else the scores
 // the tracker already holds on the job itself.
-export function fitFor(record) {
+function fitFor(record) {
   const evaluation = record.evaluation || {};
   const score = numeric(evaluation.fitScore ?? record.fitScore);
   const verdict = text(evaluation.gate) ?? text(record.gate?.gate) ?? text(record.fitBucket);
@@ -164,16 +164,27 @@ export function fitFor(record) {
   };
 }
 
+// A job in a closed-out stage (rejected, withdrawn) is not live work.
+export function isClosedJob(job) {
+  return isTerminalStage(job.stage.id);
+}
+
 export function viewJobs(
   data,
-  { stage = "all", currency = "USD", basis = "base", order = "desc", selectedId = null } = {}
+  { stage = "active", currency = "USD", basis = "base", order = "desc", selectedId = null } = {}
 ) {
   if (!["asc", "desc"].includes(order)) throw new TypeError("Pay order must be asc or desc");
   if (!["base", "annual-earnings"].includes(basis))
     throw new TypeError("Pay basis must be base or annual-earnings");
   const direction = order === "desc" ? -1 : 1;
   const jobs = data.jobs
-    .filter((job) => stage === "all" || job.stage.id === stage)
+    .filter((job) =>
+      stage === "all"
+        ? true
+        : stage === "active"
+          ? !isTerminalStage(job.stage.id)
+          : job.stage.id === stage
+    )
     .map((job) => ({
       ...job,
       pay: payFor(job.record, currency, basis),
@@ -196,6 +207,14 @@ export function viewJobs(
     basis,
     order,
     jobs,
+    total: data.jobs.length,
+    stages: [
+      ...new Map(
+        [...data.jobs]
+          .sort((a, b) => a.stage.order - b.stage.order)
+          .map((job) => [job.stage.id, { id: job.stage.id, label: job.stage.label }])
+      ).values(),
+    ],
     selectedId: jobs.some((job) => job.id === selectedId) ? selectedId : (jobs[0]?.id ?? null),
   };
 }
