@@ -8,6 +8,7 @@ import { ingestAppleMail } from "../src/core/automation/apple-mail-ingest.mjs";
 import { openDb, requireDb } from "../src/core/db/connection.mjs";
 import { assembleTrackerObject } from "../src/core/db/export-to-tracker.mjs";
 import { appUpsert } from "../src/core/db/verbs/app.mjs";
+import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 test("ingestAppleMail captures bounded job-search messages and advances the source watermark", async () => {
@@ -132,6 +133,140 @@ test("ingestAppleMail writes the communication and sweep through canonical DB ow
       tracker.sources.find((source) => source.id === "apple-mail")?.lastRunAt,
       "2026-08-24T12:00:00.000Z"
     );
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+function personEnvFor(base, name) {
+  return {
+    CAREERRAT_HOME: join(base, "people", name),
+    CAREERRAT_PERSON: name,
+    CAREERRAT_PEOPLE_BASE: base,
+  };
+}
+
+function setupPerson(repoRoot, env, email) {
+  openDb({ repoRoot, env });
+  if (email) {
+    candidateConfigPatch({
+      repoRoot,
+      env,
+      name: "profile",
+      patch: { candidate: { full_name: "Test Person", email } },
+    });
+  }
+  appUpsert({
+    repoRoot,
+    env,
+    row: {
+      id: "app-acme",
+      company: "Acme",
+      role: "Engineer",
+      status: "applied",
+    },
+  });
+}
+
+const shared = (id, subject, to) => ({
+  id,
+  subject,
+  sender: "Jobs <jobs@acme.example>",
+  receivedAt: "2026-08-24T09:30:00.000Z",
+  recipients: [to],
+  body: "Body text.",
+});
+
+test("ingestAppleMail attaches each message only to its addressee's workspace", async () => {
+  const base = mkdtempSync(join(tmpdir(), "careerrat-apple-mail-people-"));
+  try {
+    const inbox = [
+      shared("m-alice", "Acme Engineer interview", "alice@example.com"),
+      shared("m-bob", "Acme Engineer interview invite", "bob@example.com"),
+      shared("m-owner", "Acme Engineer interview owner", "owner@example.com"),
+    ];
+    const run = async (name, email) => {
+      const env = personEnvFor(base, name);
+      setupPerson(base, env, email);
+      await ingestAppleMail({
+        repoRoot: base,
+        env,
+        applications: [{ id: "app-acme", company: "Acme", role: "Engineer" }],
+        now: () => new Date("2026-08-24T12:00:00.000Z"),
+        readMessagesImpl: async () => inbox,
+      });
+      return assembleTrackerObject(requireDb({ repoRoot: base, env })).communications;
+    };
+    const alice = await run("alice", "alice@example.com");
+    const bob = await run("bob", "bob@example.com");
+    assert.deepEqual(
+      alice.flatMap((c) => c.messages.map((m) => m.id)),
+      ["intake:m-alice"]
+    );
+    assert.deepEqual(
+      bob.flatMap((c) => c.messages.map((m) => m.id)),
+      ["intake:m-bob"]
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("ingestAppleMail refuses a person workspace with no registered email", async () => {
+  const base = mkdtempSync(join(tmpdir(), "careerrat-apple-mail-noaddr-"));
+  try {
+    const env = personEnvFor(base, "carol");
+    setupPerson(base, env, null);
+    let read = false;
+    const result = await ingestAppleMail({
+      repoRoot: base,
+      env,
+      readMessagesImpl: async () => {
+        read = true;
+        return [];
+      },
+    });
+    assert.equal(read, false);
+    assert.equal(result.blocker?.code, "APPLE_MAIL_ADDRESS_REQUIRED");
+    assert.match(result.blocker.message, /carol/);
+    assert.match(result.blocker.message, /candidate\.email/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("ingestAppleMail captures application acknowledgments as waiting and skips verification mail", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apple-mail-ack-"));
+  try {
+    setupPerson(repoRoot, {}, null);
+    const result = await ingestAppleMail({
+      repoRoot,
+      env: {},
+      applications: [{ id: "app-acme", company: "Acme", role: "Engineer" }],
+      now: () => new Date("2026-08-24T12:00:00.000Z"),
+      readMessagesImpl: async () => [
+        {
+          ...shared("m-conf", "Application confirmation – Acme", "x@example.com"),
+        },
+        {
+          ...shared("m-thanks", "Thank you for applying to Beta", "x@example.com"),
+          sender: "Beta Careers <careers@beta.example>",
+        },
+        { ...shared("m-code", "Your verification code", "x@example.com") },
+        {
+          ...shared("m-verify", "Verify your email to finish your application", "x@example.com"),
+        },
+      ],
+    });
+    assert.equal(result.captured, 2);
+    const comms = assembleTrackerObject(requireDb({ repoRoot, env: {} })).communications;
+    assert.equal(comms.length, 2);
+    for (const comm of comms) {
+      assert.equal(comm.status, "waiting");
+      assert.equal(comm.nextActionDue, undefined);
+    }
+    const ids = comms.flatMap((c) => c.messages.map((m) => m.id)).sort();
+    assert.deepEqual(ids, ["intake:m-conf", "intake:m-thanks"]);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
