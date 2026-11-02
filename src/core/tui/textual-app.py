@@ -317,37 +317,14 @@ class CareerRatApp(App):
     async def read_events(self):
         try:
             while line := await self.proc.stdout.readline():
-                value = json.loads(line)
-                if self.stopping or not len(self.query("#jobs")):
-                    continue
-                kind = value["type"]
-                if kind == "workspace":
-                    self.update_workspace(value)
-                elif kind == "frame":
-                    pane = self.query_one(NativePane)
-                    pane.frame = value
-                    pane.refresh()
-                    pane.place_cursor()
-                elif kind == "request":
-                    self.query_one("#request", Input).value = value["text"]
-                    self.show_message(
-                        "Request inserted. Review it and press Enter in the agent."
-                        if value["inserted"]
-                        else "No running agent. The request is available below."
-                    )
-                    if value["inserted"]:
-                        self.query_one(NativePane).focus()
-                elif kind == "document":
-                    self.push_screen(JobDocument(value))
-                elif kind == "context":
-                    self.show_message("Context saved: " + value["path"])
-                elif kind == "agent-exited":
-                    self.show_message(
-                        f"Agent exited ({value['exitCode']}). Saved jobs remain available."
-                    )
-                elif kind == "error":
-                    self.errors.append(value["message"])
-                    self.show_message(value["message"])
+                try:
+                    await self.handle_event(json.loads(line))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    self.errors.append(str(error))
+                    if not self.stopping:
+                        self.show_message(str(error))
             if not self.stopping:
                 self.show_message(
                     "Workspace connection closed. Quit and reopen to reconnect."
@@ -356,6 +333,38 @@ class CareerRatApp(App):
             self.errors.append(str(error))
             if not self.stopping:
                 self.show_message(str(error))
+
+    async def handle_event(self, value):
+        if self.stopping or not len(self.query("#jobs")):
+            return
+        kind = value["type"]
+        if kind == "workspace":
+            self.update_workspace(value)
+        elif kind == "frame":
+            pane = self.query_one(NativePane)
+            pane.frame = value
+            pane.refresh()
+            pane.place_cursor()
+        elif kind == "request":
+            self.query_one("#request", Input).value = value["text"]
+            self.show_message(
+                "Request inserted. Review it and press Enter in the agent."
+                if value["inserted"]
+                else "No running agent. The request is available below."
+            )
+            if value["inserted"]:
+                self.query_one(NativePane).focus()
+        elif kind == "document":
+            self.push_screen(JobDocument(value))
+        elif kind == "context":
+            self.show_message("Context saved: " + value["path"])
+        elif kind == "agent-exited":
+            self.show_message(
+                f"Agent exited ({value['exitCode']}). Saved jobs remain available."
+            )
+        elif kind == "error":
+            self.errors.append(value["message"])
+            self.show_message(value["message"])
 
     def update_workspace(self, value):
         self.snapshot = value
@@ -472,25 +481,29 @@ class CareerRatApp(App):
             )
         )
         for item in requirements:
+            item = item or {}
+            match = item.get("match") or ""
             report.add_row(
-                Text(f"{item['requirement']}\n{item['importance']}"),
-                Text(item["jdSignal"]),
-                Text(f"{item['evidence']}\n{item['note']}"),
                 Text(
-                    item["match"],
+                    f"{item.get('requirement') or ''}\n{item.get('importance') or ''}"
+                ),
+                Text(item.get("jdSignal") or ""),
+                Text(f"{item.get('evidence') or ''}\n{item.get('note') or ''}"),
+                Text(
+                    match,
                     style={
                         "strong": "green",
                         "partial": "yellow",
                         "missing": "red",
-                    }.get(item["match"], "dim"),
+                    }.get(match, "dim"),
                 ),
                 height=None,
             )
         lines = [
-            f"{row.get('company', '')} · {row.get('role', '')}",
+            f"{str(row.get('company') or '')} · {str(row.get('role') or '')}",
             "",
-            row.get("statusNote", ""),
-            row.get("nextAction", ""),
+            str(row.get("statusNote") or ""),
+            str(row.get("nextAction") or ""),
         ]
         fit = row.get("roleFit") or {}
         for key in ("why", "risks"):
@@ -502,14 +515,15 @@ class CareerRatApp(App):
             json.dumps(row.get("artifacts", {}), indent=2, ensure_ascii=False),
         ]
         self.query_one("#details", Static).update("\n".join(lines))
-        messages = (selected.get("thread") or {}).get("messages", []) + selected.get(
-            "contextMessages", []
+        messages = sorted(
+            ((selected.get("thread") or {}).get("messages") or [])
+            + (selected.get("contextMessages") or []),
+            key=lambda item: str(item.get("createdAt") or ""),
         )
-        messages += self.snapshot["view"].get("workspaceMessages", [])
         calls = row.get("conversations") or []
         self.query_one("#history-text", Static).update(
             "\n\n".join(
-                f"{item.get('role', '')} · {item.get('createdAt', '')}\n{item.get('text', '')}"
+                f"{item.get('role') or ''} · {item.get('createdAt') or ''}\n{item.get('text') or ''}"
                 for item in messages
             )
             + (

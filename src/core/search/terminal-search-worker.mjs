@@ -262,7 +262,13 @@ export async function launchTerminalSearchWorker({ repoRoot, env = process.env, 
   }
 }
 
-export async function stopTerminalSessionSearches({ repoRoot, env = process.env, sessionId } = {}) {
+export async function stopTerminalSessionSearches({
+  repoRoot,
+  env = process.env,
+  sessionId,
+  shutdownMs = 3000,
+  graceMs = 750,
+} = {}) {
   const ctx = { repoRoot, env };
   if (!sessionId || !dbExists(ctx)) return { stopped: [] };
   const runs = requireDb(ctx)
@@ -274,22 +280,56 @@ export async function stopTerminalSessionSearches({ repoRoot, env = process.env,
   const pending = new Set(
     runs.map((run) => run.progress?.workerPid).filter((pid) => Number.isSafeInteger(pid) && pid > 0)
   );
-  const deadline = Date.now() + 3000;
-  while (pending.size) {
+  const unconfirmed = new Set();
+  const refresh = () => {
     for (const pid of pending) {
       try {
         process.kill(pid, 0);
+        unconfirmed.delete(pid);
       } catch (error) {
-        if (error.code === "ESRCH") pending.delete(pid);
-        else throw error;
+        if (error.code === "ESRCH") {
+          pending.delete(pid);
+          unconfirmed.delete(pid);
+        } else unconfirmed.add(pid);
       }
     }
-    if (!pending.size) break;
-    if (Date.now() >= deadline)
-      throw new Error(
-        "Search cancellation was saved, but a terminal worker did not exit within its shutdown deadline"
-      );
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    return pending.size === 0;
+  };
+  const waitGone = async (ms) => {
+    const until = Date.now() + ms;
+    while (!refresh()) {
+      if (Date.now() >= until) return false;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return true;
+  };
+  const escalate = (signal) => {
+    for (const pid of pending) {
+      try {
+        // Workers are spawned detached, so on POSIX each leads its own process group.
+        process.kill(process.platform === "win32" ? pid : -pid, signal);
+      } catch (error) {
+        if (error.code === "ESRCH") {
+          pending.delete(pid);
+          unconfirmed.delete(pid);
+        } else unconfirmed.add(pid);
+      }
+    }
+  };
+  if (!(await waitGone(shutdownMs))) {
+    escalate("SIGTERM");
+    if (!(await waitGone(graceMs))) {
+      escalate("SIGKILL");
+      if (!(await waitGone(graceMs))) {
+        const denied = [...unconfirmed];
+        throw new Error(
+          "Search cancellation was saved, but terminal worker " +
+            [...pending].join(", ") +
+            " could not be confirmed stopped after SIGKILL" +
+            (denied.length ? ` (no permission to signal or check ${denied.join(", ")})` : "")
+        );
+      }
+    }
   }
   return { stopped: runs.map((run) => run.id) };
 }

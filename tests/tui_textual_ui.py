@@ -9,7 +9,9 @@ import sys
 import tempfile
 import unittest
 
-from textual.widgets import Button, DataTable, Input, TabbedContent
+from types import SimpleNamespace
+
+from textual.widgets import Button, DataTable, Input, Static, TabbedContent
 from textual import events
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -330,6 +332,99 @@ closeAll();
             with self.assertRaises(ProcessLookupError):
                 os.kill(bridge_pid, 0)
             self.assertEqual(app.errors, [])
+
+    async def test_details_tolerate_nulls_and_history_stays_with_the_job(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-null-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                app.snapshot["view"]["workspaceMessages"] = [
+                    {"role": "assistant", "createdAt": "2026-01-01", "text": "UNRELATED"}
+                ]
+                shared = {
+                    "role": "user",
+                    "createdAt": "2026-01-03",
+                    "text": "SECOND",
+                }
+                app.update_details(
+                    {
+                        "record": {
+                            "company": None,
+                            "role": None,
+                            "statusNote": None,
+                            "nextAction": None,
+                            "evaluation": {
+                                "gate": "keep",
+                                "requirements": [
+                                    None,
+                                    {"requirement": "Only name", "match": None},
+                                ],
+                            },
+                        },
+                        "thread": {
+                            "messages": [
+                                {"role": "user", "createdAt": None, "text": "NULLDATE"},
+                                shared,
+                            ]
+                        },
+                        "contextMessages": [
+                            {"role": "user", "createdAt": "2026-01-02", "text": "FIRST"}
+                        ],
+                    }
+                )
+                await pilot.pause()
+                report = app.query_one("#requirements", DataTable)
+                self.assertEqual(report.row_count, 2)
+                self.assertIn("Only name", str(report.get_row_at(1)))
+                history = str(app.query_one("#history-text", Static).render())
+                self.assertNotIn("UNRELATED", history)
+                self.assertEqual(history.count("SECOND"), 1)
+                self.assertLess(history.index("NULLDATE"), history.index("FIRST"))
+                self.assertLess(history.index("FIRST"), history.index("SECOND"))
+                self.assertNotIn("None", str(app.query_one("#details", Static).render()))
+                await pilot.press("ctrl+q")
+
+    async def test_a_bad_event_does_not_stop_later_events(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-events-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                reader = asyncio.StreamReader()
+                for line in (
+                    b"not json\n",
+                    b'{"no":"type"}\n',
+                    b'{"type":"request"}\n',
+                    b'{"type":"context","path":"/saved/here.md"}\n',
+                ):
+                    reader.feed_data(line)
+                reader.feed_eof()
+                handled = []
+
+                async def record(value):
+                    await app.handle_event(value)
+                    handled.append(value["type"])
+
+                shim = SimpleNamespace(
+                    proc=SimpleNamespace(stdout=reader),
+                    stopping=False,
+                    errors=[],
+                    show_message=app.show_message,
+                    handle_event=record,
+                )
+                await MODULE.CareerRatApp.read_events(shim)
+                self.assertEqual(len(shim.errors), 3)
+                self.assertEqual(handled, ["context"])
+                self.assertIn(
+                    "Workspace connection closed",
+                    str(app.query_one("#message", Static).render()),
+                )
+                await pilot.press("ctrl+q")
 
 
 if __name__ == "__main__":

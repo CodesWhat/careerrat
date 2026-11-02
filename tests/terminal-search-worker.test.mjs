@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -194,4 +195,100 @@ test("terminal shutdown does not create a database in a legacy workspace", async
     { stopped: [] }
   );
   assert.equal(existsSync(join(home, "db")), false);
+});
+
+function spawnStubbornWorker(t, { ignoreTerm }) {
+  const child = spawn(
+    process.execPath,
+    ["-e", (ignoreTerm ? "process.on('SIGTERM',()=>{});" : "") + "setInterval(()=>{},1000)"],
+    { detached: true, stdio: "ignore" }
+  );
+  t.after(() => {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {}
+  });
+  return child;
+}
+function ownedBy(ctx, pid) {
+  sourcingRunProgress({
+    ...ctx,
+    id: ctx.runId,
+    progress: { ownerSession: "session-a", workerPid: pid },
+  });
+}
+function isGone(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+}
+
+test("shutdown escalates to SIGTERM for a worker that outlives the deadline", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const ctx = fixture(t);
+  const child = spawnStubbornWorker(t, { ignoreTerm: false });
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  ownedBy(ctx, child.pid);
+  await api.stopTerminalSessionSearches({
+    ...ctx,
+    sessionId: "session-a",
+    shutdownMs: 50,
+    graceMs: 2000,
+  });
+  assert.equal(isGone(child.pid), true);
+});
+
+test("shutdown escalates to SIGKILL when a worker ignores SIGTERM", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const ctx = fixture(t);
+  const child = spawnStubbornWorker(t, { ignoreTerm: true });
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  ownedBy(ctx, child.pid);
+  await api.stopTerminalSessionSearches({
+    ...ctx,
+    sessionId: "session-a",
+    shutdownMs: 50,
+    graceMs: 200,
+  });
+  assert.equal(isGone(child.pid), true);
+});
+
+test("EPERM on the liveness check does not abort shutdown of other workers", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const ctx = fixture(t);
+  const child = spawnStubbornWorker(t, { ignoreTerm: false });
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  ownedBy(ctx, child.pid);
+  const other = sourcingRunStart({ ...ctx, purpose: "first-search" }).run;
+  const foreign = 4194001;
+  sourcingRunProgress({
+    ...ctx,
+    id: other.id,
+    progress: { ownerSession: "session-a", workerPid: foreign },
+  });
+  const real = process.kill.bind(process);
+  t.mock.method(process, "kill", (pid, signal) => {
+    if (Math.abs(pid) === foreign) {
+      const error = new Error("operation not permitted");
+      error.code = "EPERM";
+      throw error;
+    }
+    return real(pid, signal);
+  });
+  await assert.rejects(
+    api.stopTerminalSessionSearches({
+      ...ctx,
+      sessionId: "session-a",
+      shutdownMs: 50,
+      graceMs: 100,
+    }),
+    (error) => error.message.includes(String(foreign)) && /no permission/.test(error.message)
+  );
+  assert.equal(isGone(child.pid), true);
 });
