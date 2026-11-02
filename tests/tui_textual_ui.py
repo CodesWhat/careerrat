@@ -284,6 +284,56 @@ closeAll();
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_pane_scrollback_follows_the_wheel_and_shift_page_keys(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-scroll-") as folder:
+            home = Path(folder)
+            executable = home / "codex"
+            executable.write_text(
+                f"#!{shutil.which('node')}\n"
+                "for(let i=0;i<120;i++)console.log('HISTORY'+i);console.log('AT_BOTTOM');"
+                "process.stdin.resume();\n"
+            )
+            executable.chmod(0o700)
+            app = MODULE.CareerRatApp(
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                },
+                bridge_args=["--agent", "codex"],
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                pane = app.query_one(MODULE.NativePane)
+                await until(lambda: pane.frame and "AT_BOTTOM" in pane.render().plain)
+                self.assertEqual(pane.frame["scroll"]["offset"], 0)
+
+                class Wheel:
+                    def get_content_offset(self, widget):
+                        return SimpleNamespace(x=2, y=3)
+
+                    def stop(self):
+                        pass
+
+                    def prevent_default(self):
+                        pass
+
+                for _ in range(4):
+                    await pane.wheel(Wheel(), -1)
+                await until(lambda: pane.frame["scroll"]["offset"] == 12)
+                self.assertNotIn("AT_BOTTOM", pane.render().plain)
+                self.assertIn("12 lines up", pane.border_subtitle)
+                await pane.wheel(Wheel(), 1)
+                await until(lambda: pane.frame["scroll"]["offset"] == 9)
+                await pilot.press("f6", "shift+pageup")
+                await until(lambda: pane.frame["scroll"]["offset"] > 9)
+                await pilot.press("shift+pagedown")
+                await until(lambda: pane.frame["scroll"]["offset"] == 9)
+                await pilot.press("x")
+                await until(lambda: pane.frame["scroll"]["offset"] == 0)
+                self.assertEqual(pane.border_subtitle, "")
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
     async def test_saved_jobs_clicks_requests_context_and_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-ui-") as folder:
             home = Path(folder)

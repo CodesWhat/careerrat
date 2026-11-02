@@ -73,6 +73,7 @@ export async function createTextualSession({
       cursor: pane.cursor(),
       cols: pane.terminal.cols,
       rows: pane.terminal.rows,
+      scroll: pane.scrollState(),
     });
   }
   function scheduleFrame() {
@@ -270,6 +271,20 @@ export async function createTextualSession({
           send({ type: "agent-started", pid: pane.pid });
         } else if (pane && !exited) pane.resize(cols, rows);
         scheduleFrame();
+        break;
+      }
+      case "scroll": {
+        const { lines = 0, pages = 0 } = message;
+        if (!Number.isInteger(lines) || !Number.isInteger(pages))
+          throw new TypeError("Scroll amounts must be whole numbers");
+        if (pane && !exited && pane.scroll({ lines, pages })) scheduleFrame();
+        break;
+      }
+      case "wheel": {
+        const { direction, col = 0, row = 0 } = message;
+        if (![-1, 1].includes(direction) || !Number.isInteger(col) || !Number.isInteger(row))
+          throw new TypeError("Invalid wheel event");
+        if (pane && !exited && pane.wheel({ direction, col, row }) === "scroll") scheduleFrame();
         break;
       }
       case "input":

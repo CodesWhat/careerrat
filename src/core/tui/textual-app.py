@@ -377,7 +377,33 @@ class NativePane(Widget):
     def on_focus(self):
         self.place_cursor()
 
+    async def on_mouse_scroll_up(self, event: events.MouseScrollUp):
+        await self.wheel(event, -1)
+
+    async def on_mouse_scroll_down(self, event: events.MouseScrollDown):
+        await self.wheel(event, 1)
+
+    async def wheel(self, event, direction):
+        offset = event.get_content_offset(self)
+        await self.app.send(
+            {
+                "op": "wheel",
+                "direction": direction,
+                "col": offset.x if offset else 0,
+                "row": offset.y if offset else 0,
+            }
+        )
+        event.stop()
+        event.prevent_default()
+
     async def on_key(self, event: events.Key):
+        if event.key in ("shift+pageup", "shift+pagedown"):
+            await self.app.send(
+                {"op": "scroll", "pages": -1 if event.key == "shift+pageup" else 1}
+            )
+            event.stop()
+            event.prevent_default()
+            return
         data = key_bytes(event.key, event.character)
         if data is not None:
             await self.app.send({"op": "input", "data": data})
@@ -929,6 +955,10 @@ class CareerRatApp(App):
         elif kind == "frame":
             pane = self.query_one(NativePane)
             pane.frame = value
+            behind = (value.get("scroll") or {}).get("offset") or 0
+            pane.border_subtitle = (
+                f"{behind} lines up · type or Shift+PageDown to return" if behind else ""
+            )
             pane.refresh()
             pane.place_cursor()
         elif kind == "request":
