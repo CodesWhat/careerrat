@@ -675,7 +675,7 @@ function comboboxHandoffError(name) {
 // form, so collapse every line break run to one space before typing.
 function collapseLineSeparators(value) {
   return String(value ?? "")
-    .replace(/[\r\n\v\f\u2028\u2029\u0085]+/g, " ")
+    .replace(/[ \t]*[\r\n\v\f\u2028\u2029\u0085]+[ \t]*/g, " ")
     .trim();
 }
 
