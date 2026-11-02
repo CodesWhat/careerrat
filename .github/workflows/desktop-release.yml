@@ -227,7 +227,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
           # This job signs, notarizes, and uploads a release artifact; a
           # poisoned shared dependency cache must never be able to reach it.
           # Same fix as publish.yml's setup-node step.
@@ -373,7 +373,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
           package-manager-cache: false
       - name: Install dependencies
         run: npm ci
