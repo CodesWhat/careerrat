@@ -178,6 +178,30 @@ test("selectOption on the Ashby-shaped combobox prefers the exact match over a s
   });
 });
 
+test("selectOption on the Ashby-shaped combobox never presses Enter for a newline inside the value, so the form is not submitted", {
+  skip: !LIVE,
+}, async () => {
+  await withLiveOps(async (ops) => {
+    const { pageId } = await ops.openTab({ url: FIXTURE_URL });
+    const ref = await refFor(ops, pageId, "Citizenship");
+
+    // A raw newline in typed text is an Enter keypress, which implicitly
+    // submits the form. Line breaks must collapse to a space, so these
+    // values (and the alias) type as "Canada Tanzania" etc. and the real
+    // alias "Tanzania" still selects.
+    await ops.selectOption({
+      pageId,
+      ref,
+      value: "Canada\nTanzania",
+      optionAliases: ["Tanzania\r\nCanada", "Tanzania"],
+    });
+
+    const after = await ops.snapshot({ pageId });
+    assert.doesNotMatch(after.pageText, /FORM SUBMITTED/);
+    assert.match(after.pageText, /Citizenship selected: Tanzania/);
+  });
+});
+
 test("selectOption on the Ashby-shaped combobox fails fast with the human-handoff error when nothing matches", {
   skip: !LIVE,
 }, async () => {

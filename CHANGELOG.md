@@ -6,6 +6,17 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Security
+
+- Raised the minimum Node.js to 24.22.1 for the Brotli decoder fix (CVE-2026-111497).
+  `careerrat` now refuses to start on an unpatched Node (older 24.x, any 25.x, or
+  26.x before 26.12.1) and prints the upgrade step.
+
+### Fixed
+
+- Typing a dropdown answer that contains a line break no longer risks pressing
+  Enter and submitting the application form early. Line breaks become a space.
+
 ### Added
 
 - CLI commands read and append durable job or workspace history, list recorded
@@ -19,6 +30,15 @@ All notable changes to CareerRat are documented here. This project follows
   existing extractor. Unsupported formats retain their original file for follow-up.
 - DB-backed settings and evidence commands record supported changes and their
   guarded Undo in the same transaction.
+
+### Changed
+
+- CareerRat no longer applies through LinkedIn, Easy Apply included, because
+  LinkedIn's User Agreement bans automation. A LinkedIn job now applies at the
+  employer's own link when one is found. Otherwise CareerRat opens the LinkedIn
+  page, clicks nothing, and marks the job as waiting on you until you say you
+  applied. The `linkedin` apply setting is retired; older settings files that
+  still have it load fine and are ignored.
 
 ## [0.22.0] - 2026-10-31
 

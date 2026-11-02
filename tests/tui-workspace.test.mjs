@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import headless from "@xterm/headless";
 
+import { viewJobs } from "../src/core/tui/jobs.mjs";
+
 const api = await import("../src/core/tui/workspace.mjs").catch((error) => {
   if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
   return {};
@@ -81,6 +83,9 @@ test("job focus owns navigation/filter/order while agent focus forwards typing",
   let state = invoke("createWorkspaceState", data);
   state = invoke("workspaceKey", data, state, { name: "down" }).state;
   assert.equal(state.selectedId, "atlas");
+  assert.equal(state.stage, "active");
+  state = invoke("workspaceKey", data, state, { name: "f" }).state;
+  assert.equal(state.stage, "all");
   state = invoke("workspaceKey", data, state, { name: "f" }).state;
   assert.equal(state.stage, "sourced");
   state = invoke("workspaceKey", data, state, { name: "s" }).state;
@@ -101,6 +106,65 @@ test("refresh retains visible selection by ID and command requests pin the chose
   assert.match(action.effect.text, /atlas/);
   assert.match(action.effect.text, /apply-job/);
   assert.doesNotMatch(action.effect.text, /northstar/);
+});
+
+const closedData = {
+  jobs: [
+    ...Array.from({ length: 7 }, (_, index) => ({
+      id: `open-${index}`,
+      kind: "application",
+      stage: { id: "applied", label: "Applied", order: 1 },
+      record: { id: `open-${index}`, company: `Open${index}`, role: "Engineer", status: "applied" },
+    })),
+    {
+      id: "closed-one",
+      kind: "application",
+      stage: { id: "rejected", label: "Rejected", order: 90 },
+      record: { id: "closed-one", company: "Aaa", role: "Engineer", status: "rejected" },
+    },
+  ],
+};
+
+test("the Active view is the default and hides closed-out stages", () => {
+  const state = invoke("createWorkspaceState", closedData);
+  assert.equal(state.stage, "active");
+  const view = viewJobs(closedData, state);
+  assert.equal(view.jobs.length, 7);
+  assert.equal(view.total, 8);
+  assert.equal(viewJobs(closedData, { ...state, stage: "all" }).jobs.length, 8);
+  assert.equal(viewJobs(closedData, { ...state, stage: "rejected" }).jobs.length, 1);
+  assert.deepEqual(
+    view.stages.map((stage) => stage.id),
+    ["applied", "rejected"]
+  );
+});
+
+test("Review matches names the exact IDs, takes five and skips closed-out jobs", () => {
+  const all = { ...invoke("createWorkspaceState", closedData), stage: "all" };
+  const { effect } = invoke("workspaceKey", closedData, all, { name: "2", sequence: "2" });
+  assert.equal(effect.type, "agent-request");
+  const ids = JSON.parse(effect.text.match(/\[.*?\]/)[0]);
+  assert.equal(ids.length, 5);
+  assert.equal(ids.includes("closed-one"), false);
+  assert.match(effect.notice, /first 5 active jobs/);
+  const onlyClosed = { ...all, stage: "rejected" };
+  const none = invoke("workspaceKey", closedData, onlyClosed, { name: "2", sequence: "2" });
+  assert.equal(none.effect.type, "notice");
+});
+
+test("Apply selected refuses a closed-out job or an empty selection", () => {
+  const closed = { ...invoke("createWorkspaceState", closedData), stage: "rejected" };
+  const refused = invoke("workspaceKey", closedData, closed, { name: "3", sequence: "3" });
+  assert.equal(refused.effect.type, "notice");
+  assert.match(refused.effect.text, /rejected/);
+  const empty = invoke("createWorkspaceState", { jobs: [] });
+  const none = invoke("workspaceKey", { jobs: [] }, empty, { name: "3", sequence: "3" });
+  assert.equal(none.effect.type, "notice");
+  const open = invoke("workspaceKey", closedData, invoke("createWorkspaceState", closedData), {
+    name: "3",
+    sequence: "3",
+  });
+  assert.equal(open.effect.type, "agent-request");
 });
 
 test("saved job labels cannot inject terminal commands into the frame", async () => {

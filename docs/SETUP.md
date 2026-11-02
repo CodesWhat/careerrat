@@ -7,7 +7,7 @@ drafts and next steps do not depend on one terminal session's history.
 
 ## Prerequisites
 
-- Node.js >= 24.15
+- Node.js >= 24.22.1
 - A supported coding-agent CLI on your PATH:
   - Claude Code:  `npm install -g @anthropic-ai/claude-code`  (<https://claude.com/claude-code>)
   - Codex:        `npm install -g @openai/codex`               (<https://github.com/openai/codex>)
