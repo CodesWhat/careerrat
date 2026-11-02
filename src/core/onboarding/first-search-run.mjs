@@ -891,8 +891,18 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
   const errors = Array.isArray(summary.errors) ? summary.errors : [];
   const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
   const loginRequests = Array.isArray(summary.loginRequests) ? summary.loginRequests : [];
+  // The scan knows which configured sources it could actually search. The
+  // pre-scan deterministic count includes browser-only and login-backed ones,
+  // so prefer the scan's own attempted count and health over recomputing.
+  const attemptedSources = Number.isFinite(Number(summary.attemptedSources))
+    ? Number(summary.attemptedSources)
+    : deterministicSources.attempted;
+  const notSearchable =
+    summary.notSearchable && typeof summary.notSearchable === "object"
+      ? clone(summary.notSearchable)
+      : undefined;
   return {
-    attemptedSources: deterministicSources.attempted,
+    attemptedSources,
     scanned: Number(summary.scanned || 0),
     new: Number(summary.new || 0),
     qualified: Number(summary.qualified || 0),
@@ -907,11 +917,11 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     errorCount: errors.length,
     errors: clone(errors),
     warnings: clone(warnings),
-    health: summarizeSearchHealth({
-      errors,
-      warnings,
-      attemptedSources: deterministicSources.attempted,
-    }),
+    ...(notSearchable ? { notSearchable } : {}),
+    health:
+      summary.health && typeof summary.health === "object"
+        ? clone(summary.health)
+        : summarizeSearchHealth({ errors, warnings, attemptedSources, notSearchable }),
     loginRequests: clone(loginRequests),
     sourceCoverage: clone(Array.isArray(summary.sourceCoverage) ? summary.sourceCoverage : []),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,

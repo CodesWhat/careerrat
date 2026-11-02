@@ -27,6 +27,7 @@ import {
 } from "../src/core/onboarding/first-search-run.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { buildWellfoundUrl } from "../src/core/providers/wellfound.mjs";
+import { searchRunHealth } from "../src/core/search/search-health.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 
 const cleanupRoots = [];
@@ -1892,4 +1893,63 @@ test("a superseded background search cannot write stale watermarks, offers, or c
   const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
   assert.equal(latest.id, replacement.run.id);
   assert.equal(latest.status, "running");
+});
+
+test("a completed run keeps the scan-time health when sources were not searchable", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "operations" });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          label: "Empty RSS",
+          source_type: "rss",
+          rssUrl: "https://example.test/empty.xml",
+          enabled: true,
+        },
+        {
+          provider: "hiringcafe",
+          source_type: "browser",
+          label: "Browser only board",
+          url: "https://hiring.cafe/?q=bar",
+          enabled: true,
+        },
+        {
+          provider: "linkedin",
+          platform: "linkedin",
+          source_type: "browser",
+          auth: true,
+          label: "LinkedIn NYC",
+          url: "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+          enabled: true,
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+  const started = await startFirstSearchRun({ repoRoot, env: {} });
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    fetchImpl: async () =>
+      new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
+  });
+
+  const { run } = sourcingRunLatest({ repoRoot, purpose: "first-search" });
+  assert.equal(run.status, "completed");
+  const skippedLabels = run.summary.notSearchable.sources.map((source) => source.label);
+  assert.ok(skippedLabels.includes("Browser only board"));
+  assert.ok(skippedLabels.includes("LinkedIn NYC"));
+  const health = searchRunHealth(run);
+  assert.equal(health.notSearchable, run.summary.notSearchable.count);
+  assert.equal(health.attempted, run.summary.attemptedSources);
+  assert.equal(health.readable, run.summary.attemptedSources);
+  assert.ok(run.summary.attemptedSources < run.summary.deterministicSources.attempted);
+  assert.deepEqual(health, run.summary.health);
 });
