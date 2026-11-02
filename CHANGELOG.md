@@ -12,6 +12,11 @@ All notable changes to CareerRat are documented here. This project follows
   `careerrat` now refuses to start on an unpatched Node (older 24.x, any 25.x, or
   26.x before 26.12.1) and prints the upgrade step.
 
+### Fixed
+
+- Typing a dropdown answer that contains a line break no longer risks pressing
+  Enter and submitting the application form early. Line breaks become a space.
+
 ## [0.22.0] - 2026-10-31
 
 ### Added

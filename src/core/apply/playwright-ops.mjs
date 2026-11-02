@@ -670,6 +670,15 @@ function comboboxHandoffError(name) {
   );
 }
 
+// Agent-supplied dropdown values get typed key by key. A raw CR/LF (or Unicode
+// line/paragraph separator) is an Enter keypress and implicitly submits the
+// form, so collapse every line break run to one space before typing.
+function collapseLineSeparators(value) {
+  return String(value ?? "")
+    .replace(/[\r\n\v\f\u2028\u2029\u0085]+/g, " ")
+    .trim();
+}
+
 // createPlaywrightOps — bundled-Playwright implementation of the provider-neutral
 // ops contract. The browser context launches lazily on the first openTab call so
 // constructing ops (e.g. inside createPlaywrightApplyExecutor) never touches
@@ -1084,7 +1093,7 @@ export function createPlaywrightOps({
       const { locator, name } = resolveRef(pageId, ref);
       const stringValue = String(value);
       const candidateValues = [stringValue, ...(Array.isArray(optionAliases) ? optionAliases : [])]
-        .map((candidate) => String(candidate || "").trim())
+        .map(collapseLineSeparators)
         .filter(
           (candidate, index, candidates) =>
             candidate &&
