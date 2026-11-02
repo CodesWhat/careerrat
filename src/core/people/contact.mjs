@@ -3,8 +3,8 @@ import { readAuthorization, writeAuthorization } from "./authorization.mjs";
 // CR121: how CareerRat may reach the person whose workspace this is, and whether they
 // agreed to it. Stored inside the person's internal/authorization.json so purge and
 // backup take it with them. Nothing here sends anything; notify.mjs enforces it.
-export const DEFAULT_QUIET_HOURS = Object.freeze({ start: "21:00", end: "08:00" });
-export const CHANNELS = Object.freeze(["email"]);
+const DEFAULT_QUIET_HOURS = Object.freeze({ start: "21:00", end: "08:00" });
+const CHANNELS = Object.freeze(["email"]);
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CLOCK_SHAPE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -31,7 +31,7 @@ function validTimezone(zone) {
   }
 }
 
-export function parseQuietHours(raw) {
+function parseQuietHours(raw) {
   const match = clean(raw).match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
   if (!match || !CLOCK_SHAPE.test(match[1]) || !CLOCK_SHAPE.test(match[2])) {
     throw new ContactError("CONTACT_BAD_QUIET_HOURS", 'Quiet hours look like "21:00-08:00".');
@@ -134,7 +134,7 @@ export function optOut({ base, name, channel, now = new Date(), reason }) {
   return revoked;
 }
 
-export function isStopKeyword(text) {
+function isStopKeyword(text) {
   return STOP_WORDS.has(
     clean(text)
       .toLowerCase()

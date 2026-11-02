@@ -18,7 +18,7 @@ export class NotifyError extends Error {
 
 const LOG_RELPATH = join("internal", "notifications.json");
 
-export function notificationLogPath(base, name) {
+function notificationLogPath(base, name) {
   return join(personRoot(base, name), LOG_RELPATH);
 }
 
@@ -57,7 +57,7 @@ function clockMinutes(clock) {
   return hours * 60 + minutes;
 }
 
-export function quietHoursState({ now = new Date(), timezone, quietHours }) {
+function quietHoursState({ now = new Date(), timezone, quietHours }) {
   const minutes = localMinutes(now, timezone);
   const start = clockMinutes(quietHours.start);
   const end = clockMinutes(quietHours.end);

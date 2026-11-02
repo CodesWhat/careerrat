@@ -6,13 +6,13 @@ import tls from "node:tls";
 // `{ name, send({ from, to, subject, text }) -> { id } }`. Two real ones: the Resend
 // HTTP API and plain SMTP. Nothing configured means a "not set up" error that lists
 // what to set, never a silent no-op.
-export const SETUP_ENV_VARS = [
+const SETUP_ENV_VARS = [
   "CAREERRAT_MAIL_FROM  the From address, on your sending subdomain (updates@mail.example.com)",
   "RESEND_API_KEY       Resend API key (the Resend transport), or",
   "CAREERRAT_SMTP_HOST, CAREERRAT_SMTP_PORT, CAREERRAT_SMTP_USER, CAREERRAT_SMTP_PASS  (the SMTP transport)",
 ];
 
-export const SETUP_DNS_RECORDS = [
+const SETUP_DNS_RECORDS = [
   "SPF    TXT on the sending subdomain authorizing your provider (e.g. v=spf1 include:<provider> ~all)",
   "DKIM   the CNAME/TXT keys your provider gives you for the sending subdomain",
   "DMARC  TXT at _dmarc.<sending subdomain>, e.g. v=DMARC1; p=none; rua=mailto:<you>",
@@ -28,7 +28,7 @@ export class MailNotSetUpError extends Error {
   }
 }
 
-export class MailTransportError extends Error {
+class MailTransportError extends Error {
   constructor(message) {
     super(message);
     this.name = "MailTransportError";

@@ -33,7 +33,7 @@ function clean(value) {
     .trim();
 }
 
-export function dayKey(date, timeZone) {
+function dayKey(date, timeZone) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: timeZone || "UTC",
     year: "numeric",
@@ -78,7 +78,7 @@ function label(app) {
   return role ? `${company}, ${role}` : company;
 }
 
-export function resolveWindow({ base, name, since, now = new Date() }) {
+function resolveWindow({ base, name, since, now = new Date() }) {
   const contact = readContact(base, name);
   let from;
   let defaulted = false;
@@ -108,7 +108,7 @@ export function resolveWindow({ base, name, since, now = new Date() }) {
   };
 }
 
-export function buildRoundup({ repoRoot, env, base, name, window, operator }) {
+function buildRoundup({ repoRoot, env, base, name, window, operator }) {
   const db = openDb({ repoRoot, env });
   const contact = readContact(base, name);
   const tz = contact.timezone;
