@@ -266,10 +266,15 @@ function parseStartArgs(extra) {
     if (a === "--no-agent") out.noAgent = true;
     else if (a === "--no-dashboard") out.noDashboard = true;
     else if (a === "--no-open") out.noOpen = true;
-    else if (a === "--agent") out.agent = extra[++i] || out.agent;
-    else if (a === "--port") out.port = extra[++i] || out.port;
+    else if (a === "--new") {
+      // Consumed earlier by the --for resolver (createMissing); nothing to do here.
+    } else if (a === "--agent") {
+      if (!extra[i + 1]?.trim() || extra[i + 1].startsWith("-"))
+        throw new Error("--agent needs a name. Try: careerrat start --agent claude");
+      out.agent = extra[++i];
+    } else if (a === "--port") out.port = extra[++i] || out.port;
     else if (a.startsWith("-")) {
-      /* unknown flag — ignore */
+      throw new Error(`Unknown option for start: ${a}. Run careerrat start --help for the list.`);
     } else if (!out.agent) out.agent = a; // first bare positional = agent name
   }
   return out;
@@ -376,6 +381,7 @@ async function runStart(extra) {
       console.log("");
       if (forcedAgent) {
         console.log(`Couldn't find "${forcedAgent}" on your PATH.`);
+        exitCode = 1;
       } else {
         console.log("No agent CLI found on PATH (looked for: claude, codex).");
         console.log("");

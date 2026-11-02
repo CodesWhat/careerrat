@@ -43,6 +43,22 @@ const bad = results.filter(
 );
 if (bad.length > 0) process.exitCode = 1;
 
+// Say how many links could not be checked at all. Without this a dead network
+// looks the same as a clean run: one quiet line per link and a zero exit.
+const unchecked = results.filter((result) => result.result === "uncertain");
+if (results.length > 0) {
+  console.log("");
+  console.log(
+    `Checked ${results.length} link(s): ${results.length - unchecked.length} gave an answer, ${unchecked.length} could not be checked.`
+  );
+  if (unchecked.length === results.length) {
+    console.error(
+      `None of the ${results.length} link(s) could be checked. Check your connection and try again.`
+    );
+    process.exitCode = 1;
+  }
+}
+
 function valueAfter(flag) {
   const index = args.indexOf(flag);
   return index === -1 ? null : args[index + 1];

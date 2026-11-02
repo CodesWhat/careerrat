@@ -75,6 +75,24 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- The terminal workspace now says when the agent stops, can't be found, or can't
+  load its skills, in a line that stays on screen. Requests with no agent open a
+  box you can read and copy, instead of a greyed-out line. Status messages and
+  notices stay up long enough to read, and an idle workspace no longer re-reads
+  your saved jobs over and over.
+- A damaged saved database now shows its real error in the terminal workspace and
+  exits with a failure code, instead of opening empty.
+- Read saved JD works for jobs whose description was saved as text, not a file. A
+  dropped PDF or image that couldn't be read now says "Saved, but not read yet".
+- `careerrat doctor` fails on an invalid saved search or company config, reports
+  whether the terminal workspace and an agent are ready, and `--network` checks
+  that source scans can reach the internet. `check:jobs` says when no link could
+  be checked and exits with a failure.
+- `careerrat start` rejects unknown options and exits with a failure when the agent
+  you named isn't installed. `companies --remove` of a name that isn't tracked
+  exits with a failure.
+- The update check script is now included in the npm package, so the "newer
+  version available" notice can work for installed copies.
 - Incomplete resume extractions fail clearly and can be retried instead of
   silently saving a title without the source resume's experience.
 - Workspace import accepts YAML flow collections and migrates retired settings.

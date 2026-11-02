@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
+import { skillsInstallIssue } from "../src/core/tui/textual-bridge.mjs";
 
 test("Textual bridge carries canonical requests and survives malformed messages until EOF", {
   timeout: 6000,
@@ -48,4 +49,17 @@ test("Textual bridge carries canonical requests and survives malformed messages 
   assert.match(events.find((event) => event.type === "request").text, /saved-role/);
   child.stdin.end();
   assert.equal(await exit, 0, errors);
+});
+
+test("a failed skills install is reported instead of being swallowed", (t) => {
+  const bare = mkdtempSync(join(tmpdir(), "careerrat-skills-"));
+  t.after(() => rmSync(bare, { recursive: true, force: true }));
+  mkdirSync(join(bare, "scripts"));
+  writeFileSync(
+    join(bare, "scripts/install-skills.mjs"),
+    readFileSync(join(import.meta.dirname, "../scripts/install-skills.mjs"))
+  );
+  assert.match(skillsInstallIssue(bare), /skills could not be installed.*No skills found/);
+  assert.equal(skillsInstallIssue(join(import.meta.dirname, "..")), null);
+  assert.match(skillsInstallIssue(join(bare, "nowhere")), /could not be installed/);
 });

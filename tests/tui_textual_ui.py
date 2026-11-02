@@ -311,6 +311,9 @@ closeAll();
                 self.assertIn(
                     "Press Enter", app.query_one("#request", Input).placeholder
                 )
+                await until(lambda: isinstance(app.screen, MODULE.RequestText))
+                await pilot.press("escape")
+                await until(lambda: not isinstance(app.screen, MODULE.RequestText))
                 await pilot.click("#--content-tab-history")
                 self.assertEqual(app.query_one(TabbedContent).active, "history")
                 await app.send({"op": "view", "stage": "applied"})
@@ -681,6 +684,65 @@ closeAll();
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_a_dead_agent_stays_visible_and_snapshots_keep_held_messages(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-dead-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            (Path(folder) / "workspace/tracker.json").write_text(
+                json.dumps({"applications": REAL_SHAPE})
+            )
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                await app.handle_event({"type": "agent-exited", "exitCode": 1})
+                await app.handle_event({"type": "notice", "message": "Look at this"})
+                for _ in range(2):
+                    app.snapshot = None
+                    await app.send({"op": "refresh"})
+                    await until(lambda: app.snapshot)
+                banner = app.query_one("#agent-status", Static)
+                self.assertIn("The agent stopped (exit 1)", str(banner.render()))
+                self.assertTrue(banner.has_class("shown"))
+                self.assertEqual(
+                    str(app.query_one("#message", Static).render()), "Look at this"
+                )
+                await pilot.press("ctrl+q")
+
+    async def test_a_request_with_no_agent_opens_a_readable_copyable_box(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-noagent-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            (Path(folder) / "workspace/tracker.json").write_text(
+                json.dumps({"applications": REAL_SHAPE})
+            )
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.click("#search")
+                await until(lambda: isinstance(app.screen, MODULE.RequestText))
+                box = app.screen.query_one("#request-body", MODULE.TextArea)
+                self.assertTrue(box.read_only)
+                self.assertIn("search-jobs", box.text)
+                self.assertIn("No agent is running.", str(app.query_one("#message", Static).render()))
+                await pilot.click("#copy-request")
+                self.assertEqual(app.clipboard, box.text)
+                await pilot.press("escape")
+                await pilot.press("ctrl+q")
+
+    async def test_a_corrupt_database_exits_with_the_real_error(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-corrupt-") as folder:
+            (Path(folder) / "db").mkdir()
+            (Path(folder) / "db" / "careerrat.db").write_bytes(b"this is not a database" * 50)
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)):
+                await until(lambda: app.return_code, seconds=15)
+            self.assertNotEqual(app.return_code, 0)
+            self.assertIn("not a database", " ".join(app.stderr_lines))
+
     async def test_a_bad_event_does_not_stop_later_events(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-events-") as folder:
             (Path(folder) / "workspace").mkdir()
@@ -704,20 +766,23 @@ closeAll();
                     await app.handle_event(value)
                     handled.append(value["type"])
 
+                closed = []
+
+                async def bridge_closed():
+                    closed.append(True)
+
                 shim = SimpleNamespace(
                     proc=SimpleNamespace(stdout=reader),
                     stopping=False,
                     errors=[],
                     show_message=app.show_message,
                     handle_event=record,
+                    bridge_closed=bridge_closed,
                 )
                 await MODULE.CareerRatApp.read_events(shim)
                 self.assertEqual(len(shim.errors), 3)
                 self.assertEqual(handled, ["context"])
-                self.assertIn(
-                    "Workspace connection closed",
-                    str(app.query_one("#message", Static).render()),
-                )
+                self.assertEqual(closed, [True])
                 await pilot.press("ctrl+q")
 
 
@@ -1024,6 +1089,9 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
                 await pilot.click("#review")
                 request = app.query_one("#request")
                 await until(lambda: "evaluate-job" in request.value)
+                await until(lambda: isinstance(app.screen, MODULE.RequestText))
+                await pilot.press("escape")
+                await until(lambda: not isinstance(app.screen, MODULE.RequestText))
                 self.assertIn("open-a", request.value)
                 self.assertIn("open-b", request.value)
                 self.assertNotIn("shut", request.value)

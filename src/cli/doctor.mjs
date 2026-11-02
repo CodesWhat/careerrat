@@ -28,6 +28,7 @@ import { automationStatus, loadAutomation } from "../core/automation/consent.mjs
 import { detectSession } from "../core/automation/session.mjs";
 import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
+import { fetchPublicHttpText } from "../core/net/public-http-fetch.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
 import { verifyBundledPlugins } from "../core/plugins/index.mjs";
 import { checkTemplateLeftovers } from "../core/profile/candidate-setup.mjs";
@@ -39,6 +40,7 @@ import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
 import { parseConfig } from "../core/providers/search-sources.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
 import { pendingSourceLoginRequests } from "../core/search/source-login-preflight.mjs";
+import { textualPythonStatus } from "../core/tui/python-runtime.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
 const pathCtx = { repoRoot: root };
@@ -54,6 +56,9 @@ const guidanceOnly = args.includes("--guidance-only");
 // Matches companies.mjs's PUBLIC_PROVIDER_COUNT: excludes local-parser, the
 // one adopted id that is not a public network source adapter.
 const PUBLIC_PROVIDER_COUNT = CAREER_OPS_UPSTREAM.providerCount - 1;
+// One small, stable public JSON endpoint for `doctor --network`. It goes through
+// the same fetch every source scan uses, so a pass here means scans can reach out.
+const NETWORK_PROBE_URL = "https://boards-api.greenhouse.io/v1/boards/cloudflare";
 
 const userPrereqs = [
   {
@@ -340,6 +345,14 @@ const setup = setupState
 
 const searchReadiness = loadSearchReadiness();
 const companyAtsReadiness = loadCompanyAtsReadiness();
+// Checks that look outside the data files. The terminal workspace and the agent
+// are reported but don't fail doctor, since the browser app works without them.
+// The network probe only runs when asked for, and then it does gate the result.
+const tuiRuntime = textualPythonStatus({ repoRoot: root });
+const agentsAvailable = guidanceOnly
+  ? null
+  : installedRuntimes.filter((runtime) => runtime.available && runtime.supported).map((r) => r.id);
+const network = args.includes("--network") ? await probeNetwork() : null;
 const agentGuidance = buildAgentGuidance({
   missingUser,
   candidateConfigSource: candidateSource,
@@ -358,6 +371,9 @@ const result = {
     missingSystem.length === 0 &&
     modes.valid &&
     pluginVerification.ok &&
+    searchReadiness.valid &&
+    companyAtsReadiness.valid &&
+    (network ? network.ok : true) &&
     (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
   missingSystem,
@@ -422,6 +438,11 @@ const result = {
     runnable: pluginVerification.plugins.length - invalidPlugins.length,
     invalid: invalidPlugins.map((p) => ({ name: p.name, errors: p.errors })),
     error: pluginVerification.error,
+  },
+  environment: {
+    tui: { ready: tuiRuntime.ready },
+    agents: agentsAvailable === null ? null : { available: agentsAvailable },
+    network,
   },
   setup,
   candidateSetup: candidateSetupReadiness,
@@ -621,12 +642,23 @@ console.log("Discovery pipeline:");
 printDiscoveryPipeline(searchReadiness, companyAtsReadiness, discoverySkips);
 console.log("");
 
+console.log("Environment:");
+printEnvironment();
+console.log("");
+
 console.log("Agent guidance:");
 printAgentGuidance(agentGuidance);
 console.log("");
 
 if (result.ok) {
   console.log("All required files are present and CareerRat skills are available.");
+} else if (network && !network.ok) {
+  console.log(
+    "CareerRat files are fine, but the network check failed. Source scans can't reach out."
+  );
+} else if (!searchReadiness.valid || !companyAtsReadiness.valid) {
+  console.log("CareerRat scaffold is present, but a saved source config is invalid.");
+  console.log("Fix the config named under Search readiness above.");
 } else if (!modes.valid) {
   console.log("CareerRat scaffold is present, but candidate/modes.yml is invalid.");
   console.log("Run `careerrat modes status` for details.");
@@ -639,6 +671,41 @@ if (result.ok) {
 }
 
 process.exit(result.ok ? 0 : 1);
+
+async function probeNetwork() {
+  const url = String(process.env.CAREERRAT_DOCTOR_PROBE_URL || "").trim() || NETWORK_PROBE_URL;
+  const host = new URL(url).hostname;
+  try {
+    const fetched = await fetchPublicHttpText(url, { timeoutMs: 10_000 });
+    if (!fetched.ok) return { ok: false, host, reason: fetched.reason || fetched.code };
+    if (fetched.status >= 400) return { ok: false, host, reason: `HTTP ${fetched.status}` };
+    return { ok: true, host, reason: null };
+  } catch (err) {
+    return { ok: false, host, reason: err.message };
+  }
+}
+
+function printEnvironment() {
+  console.log(
+    tuiRuntime.ready
+      ? "- Terminal workspace: ready."
+      : "- Terminal workspace: not set up yet - run `careerrat tui setup` (needs Python 3.11+)."
+  );
+  if (agentsAvailable === null) console.log("- Agent: skipped (--guidance-only).");
+  else if (agentsAvailable.length)
+    console.log(`- Agent: ${agentsAvailable.join(", ")} found on this machine.`);
+  else
+    console.log(
+      "- Agent: none found. Install Claude Code or Codex to run skills from the terminal."
+    );
+  if (network) {
+    console.log(
+      network.ok
+        ? `- Network: reached ${network.host} through CareerRat's own fetch.`
+        : `- Network: could not reach ${network.host} (${network.reason}). Source scans will fail until this works.`
+    );
+  } else console.log("- Network: not checked. Run `careerrat doctor --network` to test it.");
+}
 
 function loadCandidateSetupReadiness() {
   if (candidateSource !== "db") return null;
@@ -698,6 +765,18 @@ function loadSearchReadiness() {
 }
 
 function summarizeSearchReadiness(config, { exists }) {
+  if (config?.searches !== undefined && !Array.isArray(config.searches)) {
+    return {
+      exists,
+      valid: false,
+      total: 0,
+      enabled: 0,
+      pendingLogin: 0,
+      withLastRun: 0,
+      providers: [],
+      error: "searches must be a list",
+    };
+  }
   const searches = Array.isArray(config?.searches) ? config.searches : [];
   const enabled = searches.filter((search) => search.enabled !== false);
   return {

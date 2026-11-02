@@ -130,3 +130,18 @@ test("careerrat companies rejects local-parser as a network source", () => {
   );
   assert.match(result.stderr, /Unsupported provider/i);
 });
+
+test("careerrat companies --remove exits non-zero when the name isn't tracked", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  const result = runCli(
+    ["src/cli/companies.mjs", "--root", repoRoot, "--remove", "nonexist", "--write"],
+    { expectedStatus: 1 }
+  );
+  assert.match(result.stdout, /Not found: "nonexist"/);
+  const json = runCli(
+    ["src/cli/companies.mjs", "--root", repoRoot, "--remove", "nonexist", "--write", "--json"],
+    { expectedStatus: 1 }
+  );
+  assert.equal(JSON.parse(json.stdout).status, "not-found");
+});

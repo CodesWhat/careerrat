@@ -7,6 +7,36 @@ import { userPath } from "../paths/workspace.mjs";
 
 const execute = promisify(execFile);
 
+function textualEnvironment({ repoRoot, env, platform }) {
+  const requirements = join(repoRoot, "src/core/tui/requirements.txt");
+  const digest = createHash("sha256").update(readFileSync(requirements)).digest("hex");
+  const base = userPath({ repoRoot, env }, ".internal/tui");
+  const directory = join(base, `python-${digest.slice(0, 16)}`);
+  const python = join(directory, platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  const ready = join(directory, ".ready.json");
+  return { requirements, digest, base, directory, python, ready };
+}
+
+function textualEnvironmentReady({ digest, python, ready }) {
+  if (!existsSync(python) || !existsSync(ready)) return false;
+  try {
+    return JSON.parse(readFileSync(ready, "utf8")).digest === digest;
+  } catch {
+    return false;
+  }
+}
+
+// Whether the private Textual environment is already built, without building
+// it. The doctor uses this to say if `careerrat tui` can open right now.
+export function textualPythonStatus({
+  repoRoot,
+  env = process.env,
+  platform = process.platform,
+} = {}) {
+  const found = textualEnvironment({ repoRoot, env, platform });
+  return { ready: textualEnvironmentReady(found), python: found.python };
+}
+
 export async function ensureTextualPython({
   repoRoot,
   env = process.env,
@@ -14,19 +44,10 @@ export async function ensureTextualPython({
   run = execute,
   progress = () => {},
 } = {}) {
-  const requirements = join(repoRoot, "src/core/tui/requirements.txt");
-  const digest = createHash("sha256").update(readFileSync(requirements)).digest("hex");
-  const base = userPath({ repoRoot, env }, ".internal/tui");
-  const directory = join(base, `python-${digest.slice(0, 16)}`);
-  const python = join(directory, platform === "win32" ? "Scripts/python.exe" : "bin/python");
-  const ready = join(directory, ".ready.json");
-  if (existsSync(python) && existsSync(ready)) {
-    try {
-      if (JSON.parse(readFileSync(ready, "utf8")).digest === digest) return python;
-    } catch {
-      /* An incomplete receipt is rebuilt under the setup lock. */
-    }
-  }
+  const found = textualEnvironment({ repoRoot, env, platform });
+  const { requirements, digest, base, directory, python, ready } = found;
+  // An incomplete receipt is rebuilt under the setup lock.
+  if (textualEnvironmentReady(found)) return python;
   mkdirSync(base, { recursive: true, mode: 0o700 });
   const lock = join(base, "setup.lock");
   try {
