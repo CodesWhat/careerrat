@@ -102,12 +102,12 @@ export function searchRunHealth(run) {
 // gone, not flaky. It stays an error row, and is also listed apart with its URL
 // and what to do about it. Nothing is stored here; a later slice remembers dead
 // boards between runs.
-export const DEAD_SOURCE_ACTION = "Remove it or re-resolve it.";
+const DEAD_SOURCE_ACTION = "Remove it or re-resolve it.";
 
 const DEAD_SOURCE_PATTERN =
   /\bHTTP 404\b|\breturned 404\b|\b(?:board|company|tenant|site|account)\b[^.]{0,40}\b(?:was not found|wasn't found|not found|does not exist|doesn't exist|no longer exists)\b/i;
 
-export function isDeadSourceError(error) {
+function isDeadSourceError(error) {
   const text = typeof error === "string" ? error : error?.error || error?.message || "";
   return DEAD_SOURCE_PATTERN.test(String(text));
 }

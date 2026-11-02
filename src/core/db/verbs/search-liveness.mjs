@@ -4,9 +4,9 @@ import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 
 // A board is confirmed dead after this many consecutive dead answers.
-export const DEAD_BOARD_STRIKES = 2;
+const DEAD_BOARD_STRIKES = 2;
 // A confirmed-dead board is probed again after this long.
-export const DEAD_BOARD_RECHECK_DAYS = 14;
+const DEAD_BOARD_RECHECK_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function iso(now) {

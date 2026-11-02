@@ -25,7 +25,7 @@ function stable(value) {
   return value;
 }
 
-export function deadBoardSourceKey(kind, entry) {
+function deadBoardSourceKey(kind, entry) {
   const digest = createHash("sha256")
     .update(JSON.stringify(stable(entry || {})))
     .digest("hex")
