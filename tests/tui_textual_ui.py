@@ -926,6 +926,47 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_toolbar_never_clips_a_control_and_startup_focus_is_the_jobs_table(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-toolbar-") as folder:
+            jobs = [
+                {
+                    "id": f"job-{index}",
+                    "company": f"Extraordinarily Long Company Name {index} Holdings",
+                    "role": "Principal Staff Platform Reliability Engineer",
+                    "status": "applied",
+                    "base": "$150k - $200k" if index % 2 else "GBP 90k - 120k",
+                }
+                for index in range(30)
+            ]
+            self.make_home(folder, jobs)
+            for width, height, rows in [(80, 30, 2), (120, 40, 2), (160, 50, 1)]:
+                app = MODULE.CareerRatApp(
+                    env={**os.environ, "CAREERRAT_HOME": folder},
+                    bridge_args=["--no-agent"],
+                )
+                async with app.run_test(size=(width, height)) as pilot:
+                    table = app.query_one("#jobs", DataTable)
+                    await until(lambda: table.row_count > 0)
+                    await pilot.pause(0.2)
+                    self.assertIs(app.focused, table)
+                    toolbar = app.query_one("#toolbar")
+                    self.assertEqual(toolbar.region.height, rows)
+                    controls = [
+                        widget
+                        for widget in toolbar.query("Button, Select, Label")
+                        if widget.display
+                    ]
+                    self.assertGreaterEqual(len(controls), 9)
+                    for widget in controls:
+                        region = widget.region
+                        self.assertEqual(region.height, 1, widget.id)
+                        self.assertGreaterEqual(region.x, 0, widget.id)
+                        self.assertLessEqual(region.right, width, widget.id)
+                        self.assertTrue(toolbar.region.contains_region(region), widget.id)
+                        self.assertLessEqual(widget.size.width, region.width, widget.id)
+                    await pilot.press("ctrl+q")
+                self.assertEqual(app.errors, [])
+
     async def test_an_empty_active_view_says_how_to_see_everything(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-closed-") as folder:
             self.make_home(

@@ -17,12 +17,14 @@ from textual.containers import Grid, Horizontal, Vertical
 from textual.geometry import Offset
 from textual.screen import ModalScreen
 from textual.widget import Widget
+from textual.widgets._select import SelectOverlay
 from textual.widgets import (
     Button,
     DataTable,
     Footer,
     Header,
     Input,
+    Label,
     MarkdownViewer,
     Select,
     Static,
@@ -478,16 +480,32 @@ class JobDocument(ModalScreen):
 
 class CareerRatApp(App):
     TITLE = "CareerRat · Workspace"
+    AUTO_FOCUS = "#jobs"
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("f6", "switch_focus", "Jobs / agent", priority=True),
         Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
     CSS = """
-    #actions { height: 3; padding: 0 1; }
-    #actions Button { min-width: 13; margin-right: 1; }
-    #filters { height: 3; padding: 0 1; }
-    #filters Select { width: 1fr; margin-right: 1; }
+    #toolbar { height: auto; padding: 0 1; layout: vertical; }
+    #toolbar.wide { height: 1; layout: horizontal; }
+    #actions, #filters { height: 1; }
+    #actions { width: 1fr; }
+    #filters { width: 1fr; align-horizontal: right; }
+    #toolbar.wide #filters { width: auto; }
+    #toolbar Button { min-width: 0; margin-right: 1; background: $surface; color: $foreground; text-style: none; }
+    #toolbar Button.-primary { background: $primary-muted; color: $text; }
+    #toolbar Button:hover { background: $surface-lighten-2; }
+    #toolbar Button:focus { background: $accent-muted; color: $text; text-style: bold; }
+    #toolbar Label { color: $text-muted; margin-right: 1; height: 1; }
+    #toolbar Select { margin-right: 2; height: 1; }
+    #toolbar Select > SelectCurrent { background: $surface; }
+    #toolbar Select > SelectCurrent:hover { background: $surface-lighten-2; }
+    #toolbar Select:focus > SelectCurrent { background: $accent-muted; border: none; }
+    #filters Select:last-child { margin-right: 0; }
+    #currency-label { display: none; }
+    #currency { display: none; }
+    #currency-label.multi, #currency.multi { display: block; }
     #workspace { grid-size: 2 2; grid-columns: 2fr 1fr; grid-rows: 3fr 2fr; height: 1fr; padding: 0 1; grid-gutter: 1; }
     #jobs { height: 1fr; border: round $accent; }
     #inspector { height: 1fr; border: round $secondary; }
@@ -496,8 +514,9 @@ class CareerRatApp(App):
     .change-controls { height: 3; }
     #native { row-span: 2; height: 1fr; border: round $primary; }
     #native:focus { border: double $accent; }
-    #request { margin: 0 1; }
-    #message { height: 2; padding: 0 2; color: $text-muted; }
+    #request { margin: 0 1; border: none; height: 1; background: $surface; padding: 0 1; }
+    #request:focus { background: $accent-muted; }
+    #message { height: 1; padding: 0 2; color: $text-muted; }
     """
 
     def __init__(self, env=None, bridge_args=None):
@@ -522,34 +541,45 @@ class CareerRatApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal(id="actions"):
-            yield Button("Search jobs", id="search", variant="primary")
-            yield Button("Review matches", id="review")
-            yield Button("Apply selected", id="apply")
-            yield Button("Add context", id="context")
-            yield Button("Refresh", id="refresh")
-        with Horizontal(id="filters"):
-            yield Select(
-                [("Active", "active"), ("All statuses", "all")],
-                value="active",
-                allow_blank=False,
-                id="status",
-            )
-            yield Select(
-                [("USD", "USD")], value="USD", allow_blank=False, id="currency"
-            )
-            yield Select(
-                [("Base pay", "base"), ("Annual earnings", "annual-earnings")],
-                value="base",
-                allow_blank=False,
-                id="basis",
-            )
-            yield Select(
-                [("Highest pay first", "desc"), ("Lowest pay first", "asc")],
-                value="desc",
-                allow_blank=False,
-                id="order",
-            )
+        with Horizontal(id="toolbar"):
+            with Horizontal(id="actions"):
+                yield Button("Search jobs", id="search", variant="primary", compact=True)
+                yield Button("Review matches", id="review", compact=True)
+                yield Button("Apply selected", id="apply", compact=True)
+                yield Button("Add context", id="context", compact=True)
+                yield Button("Refresh", id="refresh", compact=True)
+            with Horizontal(id="filters"):
+                yield Label("Status:", id="status-label")
+                yield Select(
+                    [("Active", "active"), ("All statuses", "all")],
+                    value="active",
+                    allow_blank=False,
+                    compact=True,
+                    id="status",
+                )
+                yield Label("Currency:", id="currency-label")
+                yield Select(
+                    [("USD", "USD")],
+                    value="USD",
+                    allow_blank=False,
+                    compact=True,
+                    id="currency",
+                )
+                yield Label("Pay:", id="basis-label")
+                yield Select(
+                    [("Base", "base"), ("Annual earnings", "annual-earnings")],
+                    value="base",
+                    allow_blank=False,
+                    compact=True,
+                    id="basis",
+                )
+                yield Select(
+                    [("Highest first", "desc"), ("Lowest first", "asc")],
+                    value="desc",
+                    allow_blank=False,
+                    compact=True,
+                    id="order",
+                )
         with Grid(id="workspace"):
             yield JobsTable(id="jobs", cursor_type="row")
             yield NativePane(id="native")
@@ -587,6 +617,13 @@ class CareerRatApp(App):
             for name in (signal.SIGTERM, signal.SIGHUP):
                 loop.add_signal_handler(name, self.exit)
         self.render_jobs()
+        for select_id, options in {
+            "status": [("Active", "active"), ("All statuses", "all")],
+            "currency": [("USD", "USD")],
+            "basis": [("Base", "base"), ("Annual earnings", "annual-earnings")],
+            "order": [("Highest first", "desc"), ("Lowest first", "asc")],
+        }.items():
+            self.fit_select(self.query_one(f"#{select_id}", Select), options)
         report = self.query_one("#requirements", DataTable)
         for label, width in [
             ("Requirement", 26),
@@ -616,6 +653,23 @@ class CareerRatApp(App):
         self.stderr_reader = asyncio.create_task(self.read_errors())
         await self.resize_agent()
         self.query_one("#jobs").focus()
+
+    def fit_select(self, select, options):
+        # A compact Select does not shrink to its content. Size the closed
+        # control to the chosen label and the open list to the longest one.
+        select.labels = {value: label for label, value in options}
+        select.longest = max((len(label) for label, _ in options), default=4)
+        self.size_select(select)
+
+    def size_select(self, select):
+        label = select.labels.get(select.value, "")
+        select.styles.width = len(label) + 3
+        select.query_one(SelectOverlay).styles.min_width = select.longest + 3
+
+    def on_resize(self, event):
+        toolbar = self.query("#toolbar")
+        if toolbar:
+            toolbar.first().set_class(event.size.width >= 150, "wide")
 
     def next_request_id(self):
         self.request_counter += 1
@@ -813,13 +867,22 @@ class CareerRatApp(App):
             # as a change; only a click should ever send a new filter.
             with self.prevent(Select.Changed):
                 status = self.query_one("#status", Select)
-                status.set_options(
-                    [(label, key) for key, label in self.stage_options.items()]
-                )
+                status_options = [
+                    (label, key) for key, label in self.stage_options.items()
+                ]
+                status.set_options(status_options)
+                self.fit_select(status, status_options)
                 status.value = state["stage"]
+                self.size_select(status)
                 currency = self.query_one("#currency", Select)
-                currency.set_options([(item, item) for item in currencies])
+                currency_options = [(item, item) for item in currencies]
+                currency.set_options(currency_options)
+                self.fit_select(currency, currency_options)
                 currency.value = state["currency"]
+                self.size_select(currency)
+                multi = len(currencies) > 1
+                currency.set_class(multi, "multi")
+                self.query_one("#currency-label").set_class(multi, "multi")
         finally:
             self.updating = False
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)
@@ -980,6 +1043,8 @@ class CareerRatApp(App):
         await self.send({"op": "select", "id": event.row_key.value})
 
     async def on_select_changed(self, event):
+        if hasattr(event.select, "labels"):
+            self.size_select(event.select)
         field = {
             "status": "stage",
             "currency": "currency",
