@@ -8,7 +8,8 @@ The dashboard should be live during active CareerRat work. Check
 `http://localhost:7777`; if it is down, start `careerrat tracker-dev` from the repo
 root before telling the user to use the dashboard.
 
-The normal entry point, `careerrat start [agent]`, starts the dashboard as a
+`careerrat start` opens the terminal workspace and does not serve the dashboard.
+`careerrat start --browser` starts the legacy dashboard as a
 separate local process and records `.internal/tracker-dev.pid` plus
 `.internal/tracker-dev.log`. Agents opened directly in the repo must perform the
 same check themselves.

@@ -12,7 +12,10 @@ function textualEnvironment({ repoRoot, env, platform }) {
   const digest = createHash("sha256").update(readFileSync(requirements)).digest("hex");
   const base = userPath({ repoRoot, env }, ".internal/tui");
   const directory = join(base, `python-${digest.slice(0, 16)}`);
-  const python = join(directory, platform === "win32" ? "Scripts/python.exe" : "bin/python");
+  const python =
+    platform === "win32"
+      ? join(directory, "Scripts", "python.exe")
+      : join(directory, "bin", "python");
   const ready = join(directory, ".ready.json");
   return { requirements, digest, base, directory, python, ready };
 }
@@ -35,6 +38,41 @@ export function textualPythonStatus({
 } = {}) {
   const found = textualEnvironment({ repoRoot, env, platform });
   return { ready: textualEnvironmentReady(found), python: found.python };
+}
+
+// Interpreters that might build the private environment, in order. An explicit
+// CAREERRAT_TUI_PYTHON is the only choice when set. Windows puts the `py -3`
+// launcher first (python.org installs it, and a bare `python` there is often
+// the Microsoft Store stub); other platforms try python3, then python.
+export function bootstrapPythonCandidates({ env = process.env, platform = process.platform } = {}) {
+  if (env.CAREERRAT_TUI_PYTHON) return [{ command: env.CAREERRAT_TUI_PYTHON, args: [] }];
+  if (platform === "win32")
+    return [
+      { command: "py", args: ["-3"] },
+      { command: "python", args: [] },
+      { command: "python3", args: [] },
+    ];
+  return [
+    { command: "python3", args: [] },
+    { command: "python", args: [] },
+  ];
+}
+
+const PYTHON_VERSION_CHECK =
+  'import sys; assert sys.version_info >= (3,11), "Python 3.11 or newer is required"';
+
+// The first candidate that runs and is 3.11+. Reports the last failure if none do.
+async function selectBootstrapPython({ candidates, run, options }) {
+  let failure;
+  for (const candidate of candidates) {
+    try {
+      await run(candidate.command, [...candidate.args, "-c", PYTHON_VERSION_CHECK], options);
+      return candidate;
+    } catch (error) {
+      failure = error;
+    }
+  }
+  throw failure;
 }
 
 export async function ensureTextualPython({
@@ -71,16 +109,15 @@ export async function ensureTextualPython({
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, abort);
   const options = { env, signal: controller.signal, timeout: 180000, maxBuffer: 2 * 1024 * 1024 };
   try {
-    const bootstrap = env.CAREERRAT_TUI_PYTHON || (platform === "win32" ? "python" : "python3");
     progress("Checking Python 3.11 or newer…");
-    await run(
-      bootstrap,
-      ["-c", 'import sys; assert sys.version_info >= (3,11), "Python 3.11 or newer is required"'],
-      options
-    );
+    const bootstrap = await selectBootstrapPython({
+      candidates: bootstrapPythonCandidates({ env, platform }),
+      run,
+      options,
+    });
     rmSync(directory, { recursive: true, force: true });
     progress("Creating a private Textual environment…");
-    await run(bootstrap, ["-m", "venv", directory], options);
+    await run(bootstrap.command, [...bootstrap.args, "-m", "venv", directory], options);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     progress("Installing verified Textual dependencies…");
     await run(

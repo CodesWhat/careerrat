@@ -9,8 +9,8 @@ test("README leads with the npm install path", async () => {
   assert.match(readme, /npm i -g careerrat/);
   assert.match(readme, /Node\.js 24\.22\.1 or newer/);
   assert.match(readme, /Python 3\.11 or newer/);
-  assert.match(readme, /`careerrat start` opens the workspace in your browser/);
-  assert.match(readme, /`careerrat tui` opens the\s+terminal workspace/);
+  assert.match(readme, /`careerrat start` opens the CareerRat workspace in your terminal/);
+  assert.doesNotMatch(readme, /opens the workspace in your browser/);
   assert.match(readme, /Mac app ended at v0\.19\.2/);
   assert.doesNotMatch(readme, /Download the latest `\.dmg`|brew install --cask/);
   assert.doesNotMatch(readme, /Get the Mac app/);

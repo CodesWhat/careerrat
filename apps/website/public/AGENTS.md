@@ -18,6 +18,8 @@ and the local app has no telemetry. CareerRat is free to self-host and MIT licen
 ## Requirements
 
 - Node.js >= 24
+- Python >= 3.11 with `venv` (the terminal workspace builds a private environment on first run)
+- Linux only: `make` and a C++ compiler (`apt install build-essential`)
 - A supported coding-agent CLI on PATH, Claude Code or Codex (CareerRat runs *through* you):
   - Claude Code: `npm install -g @anthropic-ai/claude-code` (<https://claude.com/claude-code>)
   - Codex: `npm install -g @openai/codex` (<https://github.com/openai/codex>)
@@ -31,9 +33,9 @@ npm install -g careerrat
 careerrat start claude        # or: careerrat start codex
 ```
 
-`start` scaffolds a local `workspace/`, installs the skills (so `/evaluate-job`,
-`/apply-job`, etc. become available), seeds demo data and boots a live dashboard at
-<http://localhost:7777>, then hands control to you with a starter message. Paste a job
+`start` opens the terminal workspace (saved jobs beside a native agent chat), installs
+the skills (so `/evaluate-job`, `/apply-job`, etc. become available), and starts the named
+agent. A new install begins with `ingest-profile`. It needs a real terminal. Paste a job
 posting and say "evaluate this", or try the bundled sample under `examples/sample-jobs/`.
 
 ## After it starts — what to do
