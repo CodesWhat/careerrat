@@ -2626,6 +2626,31 @@ test("printSummary stays silent about failures when the batch is clean", () => {
   );
 });
 
+test("printSummary prints the adjacency note when the scan ran without adjacency config", () => {
+  const base = {
+    coldFamilies: [],
+    scanned: 1,
+    new: 1,
+    filteredTitle: 0,
+    filteredLocation: 0,
+    duplicates: 0,
+    ok: true,
+    failed: 0,
+    failedIds: [],
+    errors: [],
+  };
+  const note =
+    "Ran without adjacency config: no related titles. Related roles may be missed; run search setup to add related titles.";
+  const withNote = captureConsoleLog(() =>
+    printSummary({ ...base, adjacencyNote: note }, [], {}, 0)
+  );
+  assert.equal(withNote.filter((line) => line === note).length, 1);
+  const without = captureConsoleLog(() =>
+    printSummary({ ...base, adjacencyNote: null }, [], {}, 0)
+  );
+  assert.ok(!without.some((line) => line.includes("adjacency config")));
+});
+
 test("printSummary reports a bounded (max 10) failure-id sample when the batch is not ok", () => {
   const failedIds = Array.from({ length: 14 }, (_, index) => `sourced-acme-${index}`);
   const summary = {

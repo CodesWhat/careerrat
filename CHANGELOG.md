@@ -14,6 +14,12 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Search now cuts generic wrong-seniority titles (VP, Chief, Head of, Director, intern,
+  new grad, residency, junior, associate) when your targeting has a seniority ladder,
+  unless the ladder lists them.
+- `careerrat doctor` and the scan summary now say when your targeting has no related
+  titles or commute cities, which lowers recall for workspaces set up on older
+  versions. Run search setup to add related titles.
 - Search now shows titles close to your target (like "Staff UI Engineer" when you
   target "Staff Frontend Engineer") instead of dropping them. They rank below exact
   matches, and wrong-seniority or excluded titles are still cut.

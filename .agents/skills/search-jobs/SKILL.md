@@ -43,6 +43,8 @@ Finish with **exactly one** fenced ` ```json ` block matching `config/ai-web-sea
 
 ## STEP 0 — Prerequisites
 
+Check adjacency config first. Run `careerrat doctor` (or read `candidate/targeting.yml` and `candidate/profile.yml`) and look for a "Targeting is missing adjacency config" note: no non-primary role bucket and no `role_families`, or no `profile.location.commute_cities` for a hybrid or on-site candidate. Targeting saved before title lanes shipped usually lacks all of it, and a scan without it drops related titles and nearby towns without saying so. When it is missing, do not scan yet. Propose the additions yourself from the candidate's field, following the ingest-profile instructions (secondary bucket of adjacent titles, `role_families`, seniority ladder and ceiling on the primary bucket, commute cities), show them to the candidate, and save only what they confirm. If they decline, scan anyway; the scan summary will say it ran without adjacency config.
+
 Read all gate files before touching anything else:
 
 1. `candidate/targeting.yml` — `role_buckets`, `keep_signals`, `cut_signals`, `excluded_companies`, `fit_bands`, `degree_policy`
