@@ -28,6 +28,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- Scans rank ghost-looking and reposted postings lower with a visible reason (evergreen wording, very old, or the same role showing up under new links across scans). They are never cut.
 - Search can use USAJobs (free key) and Adzuna (paid key) when their keys are set, and new
   searches also include Himalayas, Jobicy and, for tech roles, Hacker News "Who is
   hiring". A missing key is reported on that source instead of returning nothing.

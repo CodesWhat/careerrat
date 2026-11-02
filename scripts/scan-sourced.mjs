@@ -30,7 +30,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dbExists } from "../src/core/db/connection.mjs";
 import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
 import { companyBoardResolutionRecordScan } from "../src/core/db/verbs/company-discovery.mjs";
-import { deepIngestConfirmedForGeneration } from "../src/core/db/verbs/index.mjs";
+import {
+  deepIngestConfirmedForGeneration,
+  postingSightingsLoad,
+  postingSightingsRecord,
+} from "../src/core/db/verbs/index.mjs";
 import { sourceConfigGet, sourceConfigMutate } from "../src/core/db/verbs/source-config.mjs";
 import { normalizeCompanyKey } from "../src/core/discovery/company-board-resolver.mjs";
 import { hydrateJobOffer } from "../src/core/intake/resolve.mjs";
@@ -71,6 +75,7 @@ import {
   summarizeSearchHealth,
 } from "../src/core/search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../src/core/search/source-login-preflight.mjs";
+import { normalizeCompanyRoleKey } from "../src/core/tracker/tracker-data.mjs";
 
 const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
 
@@ -764,7 +769,19 @@ export async function runSourcedScan({
     }
   }
 
+  // Cross-scan memory for ghost/repost demotion. Best-effort: never fails a scan.
+  const sightingKey = (offer) => normalizeCompanyRoleKey(offer.company, offer.title);
+  let postingHistory = null;
+  if (!standaloneConfigMode && dbExists(pathCtx)) {
+    try {
+      postingHistory = postingSightingsLoad(pathCtx);
+    } catch {
+      postingHistory = null;
+    }
+  }
+
   let filtered = filterAndDedupeOffers(scanned.offers, {
+    postingHistory,
     seenUrls,
     seenReqIds,
     seenCompanyRoles,
@@ -775,6 +792,20 @@ export async function runSourcedScan({
     seenRunCompanyRoles: new Set(),
     deferPartialCandidatePolicy: true,
   });
+
+  if (write && !standaloneConfigMode && dbExists(pathCtx)) {
+    try {
+      postingSightingsRecord({
+        ...pathCtx,
+        entries: scanned.offers
+          .filter((offer) => offer?.company && offer?.title)
+          .map((offer) => ({ key: sightingKey(offer), url: offer.url })),
+        now: savedAt,
+      });
+    } catch {
+      // Memory is an aid, not a gate.
+    }
+  }
 
   if (
     filtered.kept.some(
