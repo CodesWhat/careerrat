@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { detectArtifactKind, scoreAtsParseability } from "../core/documents/ats-parseability.mjs";
 import { detectDocxCapability, exportArtifact } from "../core/documents/export.mjs";
+import { resolveUserFileArg } from "../core/paths/user-file-arg.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
 const args = process.argv.slice(2);
@@ -66,14 +67,14 @@ const titleArg = titleIdx !== -1 ? args[titleIdx + 1] : null;
 
 // --- Resolve input path ---
 
-let inputPath = isAbsolute(inputArg) ? inputArg : join(process.cwd(), inputArg);
-if (!existsSync(inputPath)) {
+let { path: inputPath, tried: inputTried } = resolveUserFileArg(inputArg, { repoRoot: root });
+if (!inputPath) {
   // Try repo-root-relative as a convenience
   const repoRel = join(root, inputArg);
   if (existsSync(repoRel)) {
     inputPath = repoRel;
   } else {
-    fail(`Input file not found:\n  ${inputPath}\n  ${repoRel}`);
+    fail(`Input file not found. Looked in:\n  ${[...inputTried, repoRel].join("\n  ")}`);
   }
 }
 

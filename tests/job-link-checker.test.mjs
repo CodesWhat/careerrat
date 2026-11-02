@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   checkUrlLiveness,
   extractApplyControlsFromHtml,
+  isUnreachable,
 } from "../src/core/liveness/job-link-checker.mjs";
 
 const SPA_RESPONSE = async () =>
@@ -127,4 +128,20 @@ test("liveness rejects a DNS name resolving to loopback before fetch", async () 
   assert.equal(result.result, "uncertain");
   assert.equal(result.code, "unsafe_url");
   assert.equal(called, false);
+});
+
+test("a network failure is reported as unreachable, a read page is not", async () => {
+  const down = await checkUrlLiveness("https://jobs.example.com/1", {
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed");
+    },
+    resolveHost: publicResolver,
+  });
+  assert.equal(down.result, "uncertain");
+  assert.equal(isUnreachable(down), true);
+  const read = await checkUrlLiveness("https://jobs.example.com/1", {
+    fetchImpl: SPA_RESPONSE,
+    resolveHost: publicResolver,
+  });
+  assert.equal(isUnreachable(read), false);
 });

@@ -87,6 +87,15 @@ export function extractApplyControlsFromHtml(html = "") {
     .filter((label) => APPLY_PATTERNS.some((pattern) => pattern.test(label)));
 }
 
+// True when the check never got an answer from the site (network failure or
+// timeout), as opposed to reading the page and being unsure about it.
+export function isUnreachable(result) {
+  return (
+    result?.result === "uncertain" &&
+    ["fetch_failed", "navigation_error", "timeout"].includes(result.code)
+  );
+}
+
 export async function checkUrlLiveness(
   url,
   { fetchImpl = fetch, resolveHost, timeoutMs = 15000, maxBytes = LIVENESS_MAX_BYTES } = {}

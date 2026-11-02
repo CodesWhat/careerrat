@@ -328,3 +328,19 @@ test("EPERM on the liveness check does not abort shutdown of other workers", {
   );
   assert.equal(isGone(child.pid), true);
 });
+test("why the AI steps did not run is kept on the run and told to the agent", async (t) => {
+  const ctx = fixture(t);
+  const result = await api.runTerminalSearchWorker({
+    ...ctx,
+    ensureAiRuntime: async () => ({
+      selected: null,
+      reason:
+        "No signed-in Claude or Codex was found. Sign in to one of them, then run the search again.",
+    }),
+    execute: async ({ runId }) =>
+      sourcingRunComplete({ ...ctx, id: runId, summary: { new: 1, errorCount: 0 } }).run,
+  });
+  const saved = JSON.parse(readFileSync(result.handoffPath, "utf8"));
+  assert.match(saved.aiNote, /No signed-in Claude or Codex/);
+  assert.match(saved.nextAction, /AI steps did not run/);
+});

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureInstalledRuntimeSelection } from "../core/ai/ensure-runtime-selection.mjs";
 import { closeAll } from "../core/db/connection.mjs";
 import { sourcingRunLatest } from "../core/db/verbs/sourcing-runs.mjs";
 import { startManualSearchRun } from "../core/onboarding/first-search-run.mjs";
@@ -37,6 +38,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
       const outcome = await runTerminalSearchWorker({
         ...ctx,
         runId: id,
+        ensureAiRuntime: ensureInstalledRuntimeSelection,
         signal: controller.signal,
         onReady: (run) => process.send?.({ ready: true, run }),
       });

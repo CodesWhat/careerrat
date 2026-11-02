@@ -519,8 +519,8 @@ to `completed[]`. Otherwise leave the field false and continue without mentionin
 Run these commands in sequence. Fix any failure before proceeding to the next.
 
 1. Run `careerrat ingest --check --json`. Inspect the JSON output to identify any fields with placeholder values or schema errors. Fix each one before continuing.
-2. Run `node src/cli/lint-placeholders.mjs candidate/` to confirm no template placeholder strings remain.
-3. Run `careerrat ingest --write-config`. Confirm:
+2. Run `careerrat lint-placeholders candidate/` to confirm no template placeholder strings remain.
+3. Run `careerrat ingest --write-config`. On a workspace that already has searches it keeps them (and their run history) and only adds missing ones. Confirm:
    - `config/search-sources.yml` was written with N search definitions (domain-appropriate, NOT hardcoded tech boards).
    - `candidate/AGENTS.md` was written.
    - Neither file contains `current_base` data — verify by grepping: `grep -i current_base candidate/AGENTS.md config/search-sources.yml`.

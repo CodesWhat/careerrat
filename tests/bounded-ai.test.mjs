@@ -496,9 +496,32 @@ test("runBoundedAI maps generic provider errors to a safe 502 manual envelope", 
   assert.equal(result.status, 502);
   assert.equal(result.body.ok, false);
   assert.equal(result.body.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
-  assert.equal(result.body.ai.used, true);
+  assert.equal(result.body.ai.used, false, "a failed call produced no AI output");
   assert.equal(result.body.manual.available, true);
   assertNoSensitiveFields(result.body);
+});
+
+test("runBoundedAI keeps a safe cause so a rate limit and a bad key look different", async () => {
+  const run = (error) =>
+    runBoundedAI({
+      labels: LABELS,
+      schema: SEED_SCHEMA,
+      manual: MANUAL,
+      invoke: async () => {
+        throw error;
+      },
+    });
+  const limited = await run(
+    Object.assign(new Error(`429 Too Many Requests ${FORBIDDEN_TEXT}`), { status: 429 })
+  );
+  assert.match(limited.body.error.message, /rate limited, HTTP 429/);
+  assert.match(limited.body.error.detail, /rate limited/);
+  const signedOut = await run(new Error(`Not logged in. Please sign in. ${FORBIDDEN_TEXT}`));
+  assert.match(signedOut.body.error.detail, /not signed in/);
+  const missing = await run(Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" }));
+  assert.match(missing.body.error.detail, /could not be started, ENOENT/);
+  for (const result of [limited, signedOut, missing]) assertNoSensitiveFields(result.body);
+  assert.doesNotMatch(JSON.stringify(limited.body), new RegExp(FORBIDDEN_TEXT));
 });
 
 test("runBoundedAI failure envelopes omit raw prompts, model text, and sensitive source content", async () => {
@@ -558,7 +581,7 @@ test("runBoundedAI native-preferred mode maps provider failures to a safe 502 ma
   assert.equal(result.status, 502);
   assert.equal(result.body.ok, false);
   assert.equal(result.body.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
-  assert.equal(result.body.ai.used, true);
+  assert.equal(result.body.ai.used, false);
   assert.equal(result.body.ai.mode, "native");
   assert.equal(result.body.manual.available, true);
   assertNoSensitiveFields(result.body);

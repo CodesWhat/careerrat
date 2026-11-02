@@ -124,7 +124,18 @@ if (checkOnly) {
   const ok = (state === "symlink-ok" || state === "copy") && missing.length === 0;
   result = { ok, mode: "check", shim: state, skills: source, missing };
 } else {
-  const shim = installShim();
+  let shim;
+  try {
+    shim = installShim();
+  } catch (error) {
+    // A read-only or locked install can't take the shim. Say so plainly: a stack
+    // trace under --soft was swallowed by callers, leaving an agent that starts
+    // with no CareerRat skills and no message.
+    const msg = `Could not install skills into .claude/skills: ${error.message}`;
+    if (asJson) console.log(JSON.stringify({ ok: false, error: msg }, null, 2));
+    else console.error(msg);
+    process.exit(soft ? 0 : 1);
+  }
   const installed = listSkills(CLAUDE_SKILLS);
   const missing = source.filter((s) => !installed.includes(s));
   result = {

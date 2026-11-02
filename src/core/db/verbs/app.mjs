@@ -294,6 +294,15 @@ export function appSetStatus({
   restore = false,
 } = {}) {
   if (!to) throw new Error("appSetStatus: to is required");
+  // Any string used to be stored; the tracker then drew the unknown status as
+  // "Applied" and only `verify` warned about it.
+  if (!isKnownStatusLabel(to)) {
+    const error = new Error(
+      `appSetStatus: "${to}" is not a status the tracker recognizes (the same check \`data verify\` uses).`
+    );
+    error.code = "BAD_STATUS";
+    throw error;
+  }
   if (appliedAt != null && Number.isNaN(Date.parse(appliedAt))) {
     const error = new Error("appSetStatus: appliedAt must be an ISO date or datetime");
     error.code = "BAD_APPLIED_AT";

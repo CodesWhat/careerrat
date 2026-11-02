@@ -216,7 +216,7 @@ If a comp re-anchor is accepted, use `careerrat gate comp-target <N> --write` or
 
 **(c) Re-rank write-back**
 
-**DB workspaces:** never hand-edit `workspace/tracker.json`. Apply each accepted re-rank through the owning verbs — `careerrat data app set-status` for status changes, `careerrat data app set-fields` for `priority` and the `followUp` clears, `careerrat data comm upsert` / `comm append-message` for the comm-side clears and the note (`node src/cli/data.mjs --help` for exact syntax).
+**DB workspaces:** never hand-edit `workspace/tracker.json`. Apply each accepted re-rank through the owning verbs — `careerrat data app set-status` for status changes, `careerrat data app set-fields` for `priority` and the `followUp` clears, `careerrat data comm upsert` / `comm append-message` for the comm-side clears and the note (`careerrat data --help` for exact syntax).
 
 **Legacy workspaces:** edit `workspace/tracker.json` directly for any accepted re-rank changes (update `priority` or `status` fields on the affected rows).
 
@@ -288,8 +288,8 @@ Run in sequence:
 1. `careerrat tracker --verify` — schema check passes with zero errors.
 2. `npm run verify:tracker` — tracker integrity check (foundations-spec §6, distinct from schema check above).
 3. `careerrat tracker` — create a deduplicated recovery checkpoint under `workspace/.snapshots/`; the source write itself refreshes the live app.
-4. `node src/cli/lint-placeholders.mjs candidate/learnings/` — belt-and-suspenders final sweep for placeholder strings in learning files. (`careerrat learnings append` already lints each entry on write; this is a backstop for the whole directory.)
-5. If `candidate/writing-style.md` was changed: `node src/cli/lint-placeholders.mjs candidate/writing-style.md`.
+4. `careerrat lint-placeholders candidate/learnings/` — belt-and-suspenders final sweep for placeholder strings in learning files. (`careerrat learnings append` already lints each entry on write; this is a backstop for the whole directory.)
+5. If `candidate/writing-style.md` was changed: `careerrat lint-placeholders candidate/writing-style.md`.
 
 All steps must pass before declaring the skill complete.
 

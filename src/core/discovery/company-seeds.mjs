@@ -234,8 +234,15 @@ export async function fillManualDomainHints({
 }) {
   const hintless = seeds.filter((seed) => !seed.domain_hint);
   if (hintless.length === 0) return { seeds, ai: { used: false } };
-  if (!executionPlan && resolveAIRoute(env, { repoRoot }).type === "none") {
-    return { seeds, ai: { used: false } };
+  if (!executionPlan) {
+    const route = resolveAIRoute(env, { repoRoot });
+    if (route.type === "none") {
+      return {
+        seeds,
+        ai: { used: false },
+        failure: route.error || "No AI is set up for this workspace.",
+      };
+    }
   }
 
   const safeContext = context || buildCompanySeedContext({ repoRoot, env });
@@ -266,7 +273,13 @@ export async function fillManualDomainHints({
     ],
   });
 
-  if (!fillResult.body?.ok) return { seeds, ai: fillResult.body?.ai || { used: false } };
+  if (!fillResult.body?.ok) {
+    return {
+      seeds,
+      ai: fillResult.body?.ai || { used: false },
+      failure: fillResult.body?.error?.message || "The AI could not fill in company websites.",
+    };
+  }
 
   const hints = new Map();
   for (const company of fillResult.body.data?.companies || []) {

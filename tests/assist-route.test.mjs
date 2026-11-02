@@ -320,8 +320,8 @@ test("POST /api/assist/suggest: provider failures return safe envelopes without 
     assert.equal(status, 502);
     assert.equal(body.ok, false);
     assert.equal(body.code, "AI_PROVIDER_FAILED");
-    assert.equal(body.ai.used, true);
-    assertAssistLabels(body, "titles");
+    assert.equal(body.ai.used, false);
+    assertAssistLabels(body, "titles", { used: false });
     assert.equal(body.manual.available, true);
     assertNoLegacySuggestionFields(body);
     assertNoSensitiveRouteEnvelope(body);

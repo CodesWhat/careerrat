@@ -676,11 +676,10 @@ test("prepareFirstSearchSources degrades gracefully when AI domain-hint fill fai
       },
     });
 
-    assert.deepEqual(result.companyBoardResolution.aiHintFill, {
-      requested: 1,
-      hinted: 0,
-      resolved: 0,
-    });
+    const { failure, ...fill } = result.companyBoardResolution.aiHintFill;
+    assert.deepEqual(fill, { requested: 1, hinted: 0, resolved: 0 });
+    // The reason the rescue found nothing is kept, not swallowed.
+    assert.match(failure, /AI provider request failed|did not match/, label);
     assert.equal(result.companyBoardResolution.promoted, 0);
     assert.deepEqual(result.sourcedScan.tracked_companies, []);
   }

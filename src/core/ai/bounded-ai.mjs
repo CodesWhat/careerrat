@@ -1,4 +1,5 @@
 import { callAI } from "./call-ai.mjs";
+import { sanitizeFailureCause } from "./failure-cause.mjs";
 import {
   buildCorrectiveAddendum,
   parseStructuredJson,
@@ -92,6 +93,8 @@ function normalizeError(error) {
   const input = typeof error === "object" ? error : { message: error };
   const message = trimString(input.message) || "Bounded AI request failed.";
   const output = { message };
+  const detail = trimString(input.detail);
+  if (detail) output.detail = detail;
   const details = normalizeDetails(input.details || input.errors);
   if (details) output.details = details;
   return output;
@@ -477,14 +480,21 @@ export async function runBoundedAI({
       });
     }
 
+    const cause = sanitizeFailureCause(err);
     return makeBoundedAIEnvelope({
       ok: false,
       status: 502,
       code: BOUNDED_AI_CODES.AI_PROVIDER_FAILED,
-      error: { message: "AI provider request failed." },
+      error: {
+        // The real cause, scrubbed. "Request failed" alone hid whether the key
+        // was bad, the quota was spent or the runtime was missing.
+        message: cause ? `AI provider request failed: ${cause}` : "AI provider request failed.",
+        ...(cause ? { detail: cause } : {}),
+      },
+      // The call produced no output, so no AI result exists to label as AI.
       ai: aiMetadata({
         labels: normalizedLabels,
-        used: true,
+        used: false,
         mode: failureMode,
         retried: false,
         model: fallbackModel,

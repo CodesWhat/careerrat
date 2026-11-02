@@ -46,6 +46,11 @@ function saveHandoff(ctx, run, result) {
   if (resultPath) writePrivateJson(resultPath, result);
   const health = searchRunHealth(run);
   const unhealthy = health && health.status !== "ok";
+  // Why the AI steps (like finding company websites) didn't run or didn't help.
+  const aiNote =
+    run.progress?.aiUnavailableReason ||
+    run.summary?.companyBoardResolution?.aiHintFill?.failure ||
+    null;
   const handoff = {
     schemaVersion: 1,
     runId: run.id,
@@ -54,6 +59,7 @@ function saveHandoff(ctx, run, result) {
     completedAt: run.completedAt,
     summary: run.summary,
     health,
+    ...(aiNote ? { aiNote } : {}),
     resultPath,
     jobs: (result?.offers || []).map((offer) => ({
       id: offer.id,
@@ -69,7 +75,7 @@ function saveHandoff(ctx, run, result) {
         ? "Inspect the error and any saved partial results before retrying this search."
         : unhealthy
           ? `Tell the user this search was ${health.status}: ${health.message}. Report the grouped error reasons, then use the saved results below, and don't call the search a success.`
-          : "Read the canonical sourced jobs and use evaluate-job on the strongest matches before apply-job.",
+          : `Read the canonical sourced jobs and use evaluate-job on the strongest matches before apply-job.${aiNote ? ` Tell the user the AI steps did not run: ${aiNote}` : ""}`,
   };
   writePrivateJson(path, handoff);
   return path;
@@ -96,6 +102,7 @@ export async function runTerminalSearchWorker({
   runId,
   onReady = () => {},
   execute = runFirstSearchInBackground,
+  ensureAiRuntime = null,
   maxMs = 20 * 60 * 1000,
   checkMs = 1000,
   signal,
@@ -150,6 +157,21 @@ export async function runTerminalSearchWorker({
       id: runId,
       progress: { workerPid: process.pid, workerSurface: "terminal" },
     });
+    // Make an installed signed-in AI CLI usable for this run, and keep the
+    // reason on the run when there isn't one, so the summary can say why the
+    // AI steps were skipped.
+    try {
+      const ai = ensureAiRuntime ? await ensureAiRuntime({ repoRoot, env }) : null;
+      if (ai?.reason) {
+        sourcingRunProgress({ ...ctx, id: runId, progress: { aiUnavailableReason: ai.reason } });
+      }
+    } catch (error) {
+      sourcingRunProgress({
+        ...ctx,
+        id: runId,
+        progress: { aiUnavailableReason: `AI check failed: ${error?.message || "unknown error"}` },
+      });
+    }
     onReady(initial);
     if (signal?.aborted) interrupted();
     if (!controller.signal.aborted) {

@@ -132,7 +132,7 @@ These already exist — skills must stop calling them "future work":
 | Incremental delta | `npm run delta:sourced -- --source <provider> --repo-new-only --write` |
 | Tracker integrity | `npm run verify:tracker` |
 | Outcome analysis | `node scripts/analyze-outcomes.mjs --summary` (and no-flag for full JSON) |
-| Placeholder lint | `node src/cli/lint-placeholders.mjs <path>` |
+| Placeholder lint | `careerrat lint-placeholders <path>` |
 | Writing-style calibrate | `npm run calibrate:style` |
 | Evaluate a saved job | `careerrat evaluate <path-to-job.md>` (exit 0=KEEP, 2=REVIEW, 1=CUT) |
 | List/build searches | `careerrat searches` / `--from-targeting` / `--add-url` / `--add-query` |

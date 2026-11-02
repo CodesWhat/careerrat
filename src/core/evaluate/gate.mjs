@@ -56,8 +56,12 @@ export function parseSavedJob(markdown) {
   );
   const gnMatch = rest.match(/(?:^|\n)#{1,2}[ \t]*Gate Notes[ \t]*\r?\n([\s\S]*?)(?=\n#\s|$)/);
 
-  const body = jdMatch ? jdMatch[1].trim() : "";
   const gateNotes = gnMatch ? gnMatch[1].trim() : "";
+  // A saved job without a "# Job Description" heading used to score from the
+  // title alone, and the hard-cut checks never saw the posting. Without the
+  // heading, everything after the frontmatter (minus the Gate Notes section)
+  // is the posting.
+  const body = jdMatch ? jdMatch[1].trim() : (gnMatch ? rest.replace(gnMatch[0], "") : rest).trim();
 
   return { frontmatter, body, gateNotes };
 }

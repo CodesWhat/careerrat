@@ -208,7 +208,7 @@ Read `candidate/writing-style.md`.
 
 Then check `workspace/writing-samples/` for any files modified AFTER `writing-style.md` was last written (compare file mtimes; treat absent mtimes as newer).
 
-- If `writing-style.md` is absent OR newer samples exist: run `npm run calibrate:style`, wait for it to finish, then read the updated `candidate/writing-style.md` before drafting.
+- If `writing-style.md` is absent OR newer samples exist: run `npm run calibrate:style`, wait for it to finish, then read the updated `candidate/writing-style.md` before drafting. If it reports "Not calibrated" (no writing samples yet), draft in a plain, neutral voice and ask the user for a few samples; don't treat the style as set.
 - If `writing-style.md` is current: proceed.
 
 ---
@@ -334,7 +334,7 @@ Per-type requirements:
 - **follow-up:** Mirror prior thread tone. Do not re-litigate prior exchanges; advance to next action.
 - **note:** Factual summary only, no outbound artifact.
 
-Run `node src/cli/lint-placeholders.mjs <draft-path>` if the draft is saved to a file before presenting it to the user.
+Run `careerrat lint-placeholders <draft-path>` if the draft is saved to a file before presenting it to the user.
 
 ---
 

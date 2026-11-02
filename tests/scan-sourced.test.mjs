@@ -2949,3 +2949,32 @@ test("CLI rejects removed compatibility flags instead of silently ignoring them"
     assert.match(result.stderr, /unknown option/i);
   }
 });
+
+test("a scan where every source fetch fails reports failed health, not a clean empty run", async () => {
+  const repoRoot = tempRepo();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot);
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+      configPath,
+      write: false,
+    });
+    assert.equal(summary.scanned, 0);
+    assert.ok(summary.errors.length > 0);
+    assert.equal(summary.health.status, "failed");
+    const lines = [];
+    const original = console.log;
+    console.log = (...args) => lines.push(args.join(" "));
+    try {
+      printSummary(summary, summary.offers, {}, 5);
+    } finally {
+      console.log = original;
+    }
+    assert.match(lines.join("\n"), /Scan health: failed/);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});

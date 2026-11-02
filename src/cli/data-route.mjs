@@ -329,10 +329,15 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env, workspa
 
   addRoute("POST", "/api/data/calendar/busy", async (req, res) => {
     await withBodyVerb(req, res, (body) => {
-      if (!Array.isArray(body?.blocks) || body.blocks.length === 0) {
-        throw badRequest("body.blocks must be a non-empty array");
+      if (!Array.isArray(body?.blocks) || (body.blocks.length === 0 && !body.window)) {
+        throw badRequest("body.blocks must be a non-empty array (or empty with a body.window)");
       }
-      return calendarBusyUpsert({ ...pathCtx, blocks: body.blocks, source: body.source });
+      return calendarBusyUpsert({
+        ...pathCtx,
+        blocks: body.blocks,
+        source: body.source,
+        window: body.window,
+      });
     });
   });
 

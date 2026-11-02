@@ -102,6 +102,7 @@ const CLIS = {
   plugins: "src/cli/plugins.mjs",
   learnings: "src/cli/learnings.mjs",
   "status-map": "src/cli/status-map.mjs",
+  "lint-placeholders": "src/cli/lint-placeholders.mjs",
   export: "src/cli/export.mjs",
   restore: "src/cli/restore.mjs",
   "install-skills": "scripts/install-skills.mjs",
@@ -876,6 +877,7 @@ Commands:
   activity    Read/append/prune the local app Activity Pulse feed
   evidence    Read/validate/add evidence claims
   analytics   Refresh + inspect the persisted outcome-analytics block (--write)
+  lint-placeholders  Check drafts for unfilled placeholders (exit 1 on a hit, 2 on a bad path)
   strategy-review  Stamp the "last reviewed" marker after a strategy review
   status-map  Normalize a raw ATS status label to the canonical tracker status
   export      Render a tailored artifact / packet to PDF or DOCX
