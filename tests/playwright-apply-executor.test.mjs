@@ -80,6 +80,9 @@ function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
         const action = { op: "setInputFiles", index, files };
         actions.push(action);
         onAction?.(action);
+        // A real file input keeps the files it was given, unless the site
+        // rejects them (modelled by rejectsFiles).
+        if (controls[index] && !controls[index].rejectsFiles) controls[index].fileAttached = true;
       },
     };
   }
@@ -2309,3 +2312,286 @@ for (const fileAttached of [false, true]) {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Apply honesty: required detection, uploads, and what gets reported.
+// ---------------------------------------------------------------------------
+
+test("collectControls: a label ending in an asterisk is required even without the required attribute", () => {
+  const ask = new StubElement("textarea", { "aria-label": "Why do you want to work here? *" });
+  const plain = new StubElement("textarea", { "aria-label": "Anything else?" });
+  const root = new StubElement("div", { id: "root" }).append(ask, plain);
+  const stub = createDomStub(root);
+
+  const controls = withDomGlobals(stub, () => collectControls([ask, plain]));
+
+  assert.equal(controls[0].required, true);
+  assert.equal(controls[1].required, false);
+});
+
+test("collectControls: an upload whose group heading ends in an asterisk is required", () => {
+  const legend = new StubElement("legend", {}, { text: "Upload your CV *" });
+  const input = new StubElement("input", { type: "file" });
+  const fieldset = new StubElement("fieldset").append(legend, input);
+  const root = new StubElement("div", { id: "root" }).append(fieldset);
+  const stub = createDomStub(root);
+
+  const [control] = withDomGlobals(stub, () => collectControls([input]));
+
+  assert.equal(control.fileInput, true);
+  assert.equal(control.required, true);
+});
+
+test("snapshot asks for custom contenteditable textboxes as well as native controls", async () => {
+  const selectors = [];
+  const fakeContext = {
+    async newPage() {
+      return {
+        async goto() {},
+        url: () => GREENHOUSE_URL,
+        locator(selector) {
+          selectors.push(selector);
+          if (selector === "body") return { innerText: async () => "" };
+          return { evaluateAll: async () => [], nth: () => ({}) };
+        },
+      };
+    },
+    async close() {},
+  };
+  const ops = createPlaywrightOps({ launchImpl: async () => fakeContext, profileDir: "/tmp/p" });
+  try {
+    const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+    await ops.snapshot({ pageId });
+  } finally {
+    await ops.close();
+  }
+  const controlSelector = selectors.find((selector) => selector !== "body");
+  assert.match(controlSelector, /contenteditable/);
+  assert.match(controlSelector, /role='textbox'/);
+});
+
+const HONESTY_CONFIG = {
+  profile: { candidate: { full_name: "Alex Doe" } },
+  honesty: {},
+  "form-defaults": {},
+};
+
+function honestyDriver({ controls, bodyText = "", saveScreenshotImpl, onAction }) {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-honesty-"));
+  mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "workspace", "tailored", "resume.pdf"),
+    buildMinimalPdf(["Resume"]).bytes
+  );
+  const { launchImpl, actions } = createFakeBrowser({ controls, bodyText, onAction });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+  const execute = createApplyDriver({
+    ops,
+    providerLabel: "playwright",
+    repoRoot,
+    env: {},
+    mayRunImpl: () => ({ allowed: true }),
+    candidateConfigGetImpl: () => HONESTY_CONFIG,
+    loadAnswerMapImpl: async () => new Map(),
+    captureQuestionsImpl: async ({ questions }) => ({
+      questions,
+      excluded: [],
+      demographicSectionPresent: false,
+    }),
+    saveScreenshotImpl: saveScreenshotImpl || (() => "workspace/captures/shot.png"),
+    confirmationTimeoutMs: 0,
+  });
+  const run = (extra = {}) =>
+    execute({
+      applicationId: "app-honesty",
+      application: {
+        id: "app-honesty",
+        artifacts: { resumePdf: "workspace/tailored/resume.pdf" },
+      },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+      submitMode: "auto",
+      prepareOnly: false,
+      ...extra,
+    });
+  return { run, actions, cleanup: () => rmSync(repoRoot, { recursive: true, force: true }) };
+}
+
+const SUBMIT = { role: "button", name: "Submit application" };
+
+test("auto-submit does not press Submit while a visible field has no label", async () => {
+  const { run, actions, cleanup } = honestyDriver({
+    controls: [
+      { role: "textbox", name: "First Name", required: true },
+      { role: "textbox", name: "", required: false },
+      SUBMIT,
+    ],
+  });
+  try {
+    const result = await run();
+    assert.equal(result.state, "blocked", "stops for the person instead of submitting");
+    assert.ok(result.session.unresolved.some((item) => /Unlabeled field/.test(item.label)));
+    assert.equal(
+      actions.filter((a) => a.op === "click" && a.index === 2).length,
+      0,
+      "Submit was never clicked"
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a required resume input labelled 'Upload your resume' is attached", async () => {
+  const { run, actions, cleanup } = honestyDriver({
+    controls: [
+      { role: "textbox", name: "First Name", required: true },
+      { role: "button", name: "Upload your resume", fileInput: true, required: true },
+      SUBMIT,
+    ],
+  });
+  try {
+    const result = await run();
+    assert.equal(result.session.uploadedCount, 1);
+    assert.equal(actions.filter((a) => a.op === "setInputFiles").length, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a required upload CareerRat has no file for stops Submit and is listed", async () => {
+  const { run, actions, cleanup } = honestyDriver({
+    controls: [
+      { role: "textbox", name: "First Name", required: true },
+      { role: "button", name: "Official transcript", fileInput: true, required: true },
+      SUBMIT,
+    ],
+  });
+  try {
+    const result = await run();
+    assert.equal(result.state, "blocked");
+    assert.ok(result.session.unresolved.some((item) => item.label === "Official transcript"));
+    assert.equal(actions.filter((a) => a.op === "click" && a.index === 2).length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("an upload the page did not keep is not counted as attached", async () => {
+  const { run, actions, cleanup } = honestyDriver({
+    controls: [
+      { role: "textbox", name: "First Name", required: true },
+      {
+        role: "button",
+        name: "Resume",
+        fileInput: true,
+        required: true,
+        rejectsFiles: true,
+      },
+      SUBMIT,
+    ],
+  });
+  try {
+    const result = await run();
+    assert.equal(result.session.uploadedCount, 0, "a rejected file isn't reported as attached");
+    assert.ok(result.session.unresolved.some((item) => item.label === "Resume"));
+    assert.equal(actions.filter((a) => a.op === "click" && a.index === 2).length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a required essay that mentions 'race conditions' is not skipped as self-ID and blocks Submit while blank", async () => {
+  const { run, cleanup } = honestyDriver({
+    controls: [
+      { role: "textbox", name: "First Name", required: true },
+      {
+        role: "textbox",
+        name: "Describe a time you debugged race conditions in production",
+        required: true,
+      },
+      SUBMIT,
+    ],
+  });
+  try {
+    const result = await run();
+    assert.equal(result.state, "blocked");
+    assert.ok(
+      result.session.unresolved.some((item) => /race conditions/.test(item.label) && item.required)
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a required self-identification question stays unresolved instead of vanishing", async () => {
+  const { run, cleanup } = honestyDriver({
+    controls: [
+      { role: "textbox", name: "First Name", required: true },
+      { role: "textbox", name: "What is your gender?", required: true },
+      SUBMIT,
+    ],
+  });
+  try {
+    const result = await run();
+    assert.equal(result.state, "blocked");
+    assert.ok(result.session.unresolved.some((item) => item.label === "What is your gender?"));
+  } finally {
+    cleanup();
+  }
+});
+
+test("a confirmed submission is still reported when the screenshot cannot be saved", async () => {
+  const { run, cleanup } = honestyDriver({
+    controls: [],
+    bodyText: "Thank you for applying. We received your application.",
+    saveScreenshotImpl: () => {
+      throw new Error("disk full");
+    },
+  });
+  try {
+    // A confirmation URL is what lets a freshly opened page count.
+    const result = await run({ postingUrl: `${GREENHOUSE_URL}/thank-you` });
+    assert.equal(result.state, "submitted");
+    assert.equal(result.verified, true);
+    assert.equal(result.session.confirmationScreenshotSaved, false);
+    assert.ok(!result.artifacts.some((a) => a.kind === "submission_confirmation"));
+  } finally {
+    cleanup();
+  }
+});
+
+test("receipt wording on a page we just opened is not a confirmed submission", async () => {
+  const { run, cleanup } = honestyDriver({
+    controls: [],
+    bodyText: "About the process\nYour application has been submitted to our recruiting team.",
+  });
+  try {
+    const result = await run();
+    assert.notEqual(result.state, "submitted");
+    assert.notEqual(result.verified, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a missing browser is reported with the command that installs it", async () => {
+  const execute = createConfiguredApplyExecutor({
+    repoRoot: "/tmp/unused",
+    env: {},
+    loadAutomationImpl: () => ({ data: { session: { provider: "playwright" } } }),
+    launchImpl: async () => {
+      throw new Error(
+        "browserType.launchPersistentContext: Executable doesn't exist at /home/x/.cache/ms-playwright/chromium-1/chrome. Looks like Playwright was just installed or updated. Please run: npx playwright install"
+      );
+    },
+  });
+  assert.ok(execute, "playwright executor is configured");
+  const result = await execute({
+    applicationId: "a",
+    application: { id: "a" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+  assert.equal(result.state, "unavailable");
+  assert.match(result.reason, /npx playwright install chromium/);
+});

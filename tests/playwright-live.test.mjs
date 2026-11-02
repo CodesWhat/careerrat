@@ -477,3 +477,45 @@ test("real Chromium groups unwrapped native radios by form owner and name withou
     rmSync(profileDir, { recursive: true, force: true });
   }
 });
+
+test("real Chromium: asterisk labels, custom textboxes and unlabeled fields are seen as required", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
+}, async () => {
+  const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-profile-"));
+  const pageDir = mkdtempSync(join(tmpdir(), "careerrat-live-page-"));
+  writeFileSync(
+    join(pageDir, "form.html"),
+    `<!doctype html><form>
+      <label for="why">Why do you want to work here? *</label><textarea id="why"></textarea>
+      <span id="q">Tell us about a project *</span>
+      <div role="textbox" contenteditable="true" aria-labelledby="q" style="min-height:20px"></div>
+      <input type="text">
+      <button type="button">Submit application</button>
+    </form>`
+  );
+  const { url: baseUrl, close: closeServer } = await startFixtureServer(pageDir);
+  const ops = createPlaywrightOps({
+    profileDir,
+    headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
+  });
+  try {
+    const { pageId } = await ops.openTab({ url: `${baseUrl}/form.html` });
+    const { refs } = await ops.snapshot({ pageId });
+    const entries = Object.values(refs);
+    const why = entries.find((entry) => entry.name === "Why do you want to work here? *");
+    assert.equal(why?.required, true, "asterisk label counts as required");
+    const custom = entries.find((entry) => entry.name === "Tell us about a project *");
+    assert.equal(custom?.role, "textbox", "the contenteditable textbox is collected");
+    assert.equal(custom?.required, true);
+    assert.ok(
+      entries.some((entry) => entry.role === "textbox" && entry.name === ""),
+      "the unlabeled input is collected with an empty name"
+    );
+  } finally {
+    await ops.close();
+    await closeServer();
+    rmSync(profileDir, { recursive: true, force: true });
+    rmSync(pageDir, { recursive: true, force: true });
+  }
+});

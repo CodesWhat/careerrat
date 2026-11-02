@@ -152,7 +152,7 @@ After building, eyeball the output: page count reasonable, fonts render, no non-
 Fill the form completely. What happens next depends on the submit mode (`auto` or
 `manual`; absent means `auto`). `careerrat automation status` shows it.
 
-- **`submit: auto` (default).** CareerRat presses the final Submit control itself,
+- **`submit: auto` (default).** In the browser app, CareerRat presses the final Submit control itself,
   once, only when every required field is answered, every required upload is
   attached, exactly one positively labelled submit control exists, and the
   evaluate gate is KEEP or a user-approved REVIEW. It then waits for a
@@ -162,7 +162,10 @@ Fill the form completely. What happens next depends on the submit mode (`auto` o
   it was submitted automatically with no confirmation page seen) and `nextAction`
   (check the site, then record it as Applied if it went through), never retry the
   click, and never pass `submitted-unverified` to `app set-status`. When auto
-  declines to click, say why and hand the form over.
+  declines to click, say why and hand the form over. These checks are enforced by
+  the browser app's apply driver only. When you drive the browser yourself (the
+  terminal app), nothing enforces them for you: check every one before you press
+  Submit, and stop and say why if any fails.
 - **`submit: manual`** (set with `careerrat automation submit manual --write`). Stop
   at the final submit control. Show a summary of what will be submitted and return or
   focus the retained supervised browser page. The user presses Submit themselves,
@@ -228,7 +231,7 @@ interaction to confirm page state.
 
 **ATS detection:** call `hostnameToPortal(url)` (from `src/core/apply/form-fill.mjs`) on the application URL to identify the ATS. Use the matching `PORTAL_RECIPE` from that module as the canonical field-mapping reference for that platform. If the hostname is unknown, `genericMatch` applies — the patterns below are drawn from those generic defaults and the known recipes.
 
-**Site gotchas (check FIRST):** call `portalQuirks(url)` (from `src/core/apply/form-fill.mjs`) and apply every returned quirk before and during the fill — it returns the platform's known traps (`PORTAL_RECIPES[portal].quirks` plus `DOMAIN_QUIRKS` for no-recipe hosts like Workday). Two cases change your whole approach: (1) `portal: "aggregator"` means the URL is a job board, **not** the apply form — extract the outbound "Apply on …" link, navigate to the real ATS, and re-run detection there; (2) Workday quirks mean account creation / RTF rejection — expect a manual-apply halt. This list is the durable home for per-site gotchas; when you learn a new reliable one, add it to the recipe's `quirks` (or `DOMAIN_QUIRKS`) so the next run inherits it, rather than relearning it.
+**Site gotchas (check FIRST):** read `PORTAL_RECIPES[hostnameToPortal(url)].quirks` (both exported from `src/core/apply/form-fill.mjs`) and apply every quirk listed before and during the fill. That is the platform's list of known traps; a host with no recipe has none. Two cases change your whole approach: (1) `portal: "aggregator"` means the URL is a job board, **not** the apply form — extract the outbound "Apply on …" link, navigate to the real ATS, and re-run detection there; (2) Workday quirks mean account creation / RTF rejection — expect a manual-apply halt. This list is the durable home for per-site gotchas; when you learn a new reliable one, add it to the recipe's `quirks` so the next run inherits it, rather than relearning it.
 
 **Field confirmation before fill:** call `buildFillPlan` with `formDefaults`, `profile`, and `honesty`. Treat `requiresConfirmation: true` as a hard pause, but do not create a pause just because a field is custom or unfamiliar. The resolver now fills configured `screening_answers`, routine availability/location questions, and honesty-backed tool yes/no questions before returning `skip`.
 
@@ -291,7 +294,7 @@ After Submit (CareerRat's click in auto mode, or the user's report in manual mod
 and confirm the application advanced past the submit step. Never open the posting
 in a new profile for this verification, and never click Submit as part of checking:
 
-1. Read the current URL and page text. Check both the URL path (segments: `/confirmation`, `/thank-you`, `/submitted`, `/complete`, `/success`) AND the visible page text ("Application received", "We got your application", "Thanks for applying", or similar) — a match on either constitutes a confirmation signal. `confirmationCheck(pageText, currentUrl)` in `src/core/apply/form-fill.mjs` encodes this logic; mirror that dual-signal check when evaluating manually.
+1. Read the current URL and page text. Check both the URL path (segments: `/confirmation`, `/thank-you`, `/submitted`, `/complete`, `/success`) AND the visible page text ("Application received", "We got your application", "Thanks for applying", or similar) — a match on either constitutes a confirmation signal. `confirmationCheck({ pageText, currentUrl, refs })` in `src/core/apply/form-fill.mjs` (one options object) encodes this logic; mirror that dual-signal check when evaluating manually.
 2. **Verification-code protocol (M17):** if the page shows an emailed verification-code prompt (detected by `submitGuard`/BLOCKER_SIGNALS in `form-fill.mjs` — phrases such as "verification code", "enter the code", "check your email"), handle it through the narrow mail-access path:
    - Run `careerrat automation status --json` and inspect `capabilities.mail_access`.
    - Infer the mail platform from the recipient address when obvious using `inferMailAccessPlatformFromEmail()` from `src/core/automation/mail-access.mjs`: `gmail.com` / `googlemail.com` → `gmail`; `outlook.com` / `hotmail.com` / `live.com` / `msn.com` → `outlook`; other real email domains → `webmail`. If there is no recipient address, ask the user which provider holds the code. Use `webmail` for any provider other than Gmail/Outlook.
@@ -336,7 +339,6 @@ Locate the application row in `workspace/tracker.json`:
 The matched (or newly created) row must end up with:
 
 - `status: "awaiting"`
-- `submittedDate: <today ISO date>`
 - `channel: <source — e.g. "direct", "referral", "LinkedIn", "job board name">`
 - `note: <ATS/system + "submitted" — one clause, ≤60 chars, e.g. "Greenhouse — submitted, confirmation received.">` (singular `note`, the app-level field — **not** `notes`, which is a `conversations[]` field; this is search/internal text and is never rendered on a card)
 - `statusNote: <present-tense live state, ≤120 chars, e.g. "Applied via Greenhouse — awaiting review.">` (this is what the jobs card shows)
@@ -361,7 +363,7 @@ Apply the write per mode:
      careerrat data app set-fields <id> --data-file <patch.json>
      ```
 
-     A shallow-merge patch (one level) carrying every field `set-status` doesn't cover: `submittedDate`, `channel`, `note` (the internal one-liner — **not** the same as `set-status`'s `--note`, which writes `statusNote`), `link`, `compNote` / `roleFit.why[]` / `roleFit.risks[]` (Content Register routing), and `artifacts: {jd, coverLetter, resume, resumeNote}` (merges one level into the existing `artifacts` object). Use `--data-file` rather than an inline `--data` string given the JD-body and cover-letter text length. Not outcome-changing — the preceding `set-status` call already refreshed analytics.
+     A shallow-merge patch (one level) carrying every field `set-status` doesn't cover (`set-status` already stamps `appliedAt` when the row moves to an applied status): `channel`, `note` (the internal one-liner — **not** the same as `set-status`'s `--note`, which writes `statusNote`), `link`, `compNote` / `roleFit.why[]` / `roleFit.risks[]` (Content Register routing), and `artifacts: {jd, coverLetter, resume, resumeNote}` (merges one level into the existing `artifacts` object). Use `--data-file` rather than an inline `--data` string given the JD-body and cover-letter text length. Not outcome-changing — the preceding `set-status` call already refreshed analytics.
 
      `app register-artifact <id> --kind resume --path "<resume filename>" --note "<tailoring approach>"` is the more purpose-built verb for a single artifact (it stamps `artifacts.resume` + `artifacts.resumeGeneratedAt` + `artifacts.resumeNote` in one call) and is a reasonable substitute for the `resume`/`resumeNote` piece of the patch above — it fits well because a résumé filename is a short, path-like value. It's a poorer fit for `artifacts.jd` / `artifacts.coverLetter`, which hold full body **text** (not a path) that's awkward to pass through a single `--path` argv token, so those two stay in the `set-fields` patch. Don't run both against the same `artifacts` key in the same turn — pick one path per field.
 - **Legacy workspace (no DB):** edit the matched (or newly created) row directly with the fields above, in one `tracker.json` write.

@@ -136,17 +136,38 @@ function questionCaptureNeedsRefresh(questionCapture, fields) {
   return savedCount !== fields.length;
 }
 
+// Label matching for uploads folds accents first: "Résumé" would otherwise
+// lose its letters in normalizeLabel and never read as a resume.
+function normalizeUploadLabel(label) {
+  return normalizeLabel(
+    String(label || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+  );
+}
+
 function uploadKind(label) {
-  const normalized = normalizeLabel(label);
+  const normalized = normalizeUploadLabel(label);
   if (/\b(resume|curriculum vitae|cv)\b/.test(normalized)) return "resume";
   if (/\bcover letter\b/.test(normalized)) return "coverLetter";
   return null;
 }
 
-function directUploadKind(label) {
-  const normalized = normalizeLabel(label);
+// Buttons that mention a resume without being a place to attach one.
+const NOT_AN_UPLOAD_CONTROL =
+  /\b(?:remove|delete|clear|download|view|preview|replace|autofill|auto fill|import|parse)\b/;
+
+function directUploadKind(label, { fileInput = false } = {}) {
+  const normalized = normalizeUploadLabel(label);
   if (/^(?:resume(?: cv)?|curriculum vitae|cv)(?: required)?$/.test(normalized)) return "resume";
   if (/^cover letter(?: required)?$/.test(normalized)) return "coverLetter";
+  if (NOT_AN_UPLOAD_CONTROL.test(normalized)) return null;
+  // A real file input is an upload whatever its label says around "resume"
+  // ("Upload your resume", "CV / Resume (PDF)"). A plain button needs an upload
+  // verb up front so a link that only mentions a resume isn't mistaken for one.
+  if (fileInput || /^(?:upload|attach|add|choose|select|browse)\b/.test(normalized)) {
+    return uploadKind(normalized);
+  }
   return null;
 }
 
@@ -178,9 +199,13 @@ function parsedSnapshotNodes(snapshotResult) {
 
 export function uploadTargetsFromSnapshot(snapshotResult = {}) {
   const targets = new Map();
+  const refs =
+    snapshotResult.refs && typeof snapshotResult.refs === "object" ? snapshotResult.refs : {};
   for (const node of parsedSnapshotNodes(snapshotResult)) {
     if (node.role !== "button" || !node.ref) continue;
-    const directKind = directUploadKind(node.label);
+    const directKind = directUploadKind(node.label, {
+      fileInput: refs[node.ref]?.fileInput === true,
+    });
     if (!directKind && !/^(attach|upload(?: file)?)$/i.test(node.label)) continue;
     let context = node.parent;
     while (context && !uploadKind(context.label)) context = context.parent;
@@ -190,7 +215,7 @@ export function uploadTargetsFromSnapshot(snapshotResult = {}) {
       ref: node.ref,
       kind,
       label: context?.label || node.label,
-      required: Boolean(node.required || context?.required),
+      required: Boolean(node.required || context?.required || refs[node.ref]?.required === true),
     };
     const existing = targets.get(kind);
     if (!existing || (node.stateKnown && !existing.stateKnown)) {
@@ -198,6 +223,34 @@ export function uploadTargetsFromSnapshot(snapshotResult = {}) {
     }
   }
   return [...targets.values()].map(({ stateKnown: _stateKnown, ...target }) => target);
+}
+
+// Required file inputs that are still empty and that no resume/cover-letter
+// rule claims ("Transcript", "Writing sample"). CareerRat has nothing to attach,
+// so pressing Submit would send an incomplete application. They are reported
+// instead of skipped.
+export function unrecognizedRequiredUploads(snapshotResult = {}) {
+  const refs =
+    snapshotResult.refs && typeof snapshotResult.refs === "object" ? snapshotResult.refs : {};
+  const nodes = new Map(parsedSnapshotNodes(snapshotResult).map((node) => [node.ref, node]));
+  const found = [];
+  for (const [ref, entry] of Object.entries(refs)) {
+    if (entry?.fileInput !== true || entry.fileAttached === true || entry.disabled === true)
+      continue;
+    const node = nodes.get(ref);
+    const name = String(entry.name || "").trim();
+    if (directUploadKind(name, { fileInput: true })) continue;
+    let context = node?.parent || null;
+    while (context && !uploadKind(context.label)) context = context.parent;
+    if (context) continue;
+    if (!(entry.required === true || node?.required)) continue;
+    found.push({
+      ref,
+      label: name || String(node?.parent?.label || "").trim() || "A required file upload",
+      required: true,
+    });
+  }
+  return found;
 }
 
 function selectValueFromSnapshot(value, snapshot) {
@@ -700,6 +753,7 @@ async function fillStep({
   let uploadedCount = 0;
   const uploadedKinds = [];
   const uploadedFiles = [];
+  const uploadRecords = [];
   for (const target of uploadTargetsFromSnapshot(snapshot)) {
     throwIfAborted(signal);
     const file = uploads[target.kind];
@@ -730,6 +784,15 @@ async function fillStep({
       uploadedCount += 1;
       uploadedKinds.push(target.kind);
       uploadedFiles.push({ label: String(target.label || target.kind), name: basename(file) });
+      const freshEntry = freshSnapshot.refs?.[freshTarget.ref];
+      uploadRecords.push({
+        kind: target.kind,
+        label: target.label,
+        required: target.required,
+        fileName: basename(file),
+        inputName: String(freshEntry?.name || ""),
+        fileInput: freshEntry?.fileInput === true,
+      });
     } catch (error) {
       throwIfAborted(signal);
       unresolved.push({
@@ -740,6 +803,15 @@ async function fillStep({
     }
   }
 
+  for (const item of unrecognizedRequiredUploads(snapshot)) {
+    if (unresolved.some((seen) => seen.label === item.label)) continue;
+    unresolved.push({
+      label: item.label,
+      required: true,
+      reason: "CareerRat doesn't know which file this upload wants, so it didn't guess.",
+    });
+  }
+
   const finalSnapshot = await browserOp(ops, "snapshot", { pageId }, signal);
   if (!isTrustedOrigin(finalSnapshot.origin)) {
     return untrustedFormStepResult({
@@ -747,6 +819,28 @@ async function fillStep({
       filledCount,
       uploadedCount,
       unresolved,
+    });
+  }
+  // An upload only counts if the page kept the file: the input still holds it,
+  // or the file name now shows on the page. A site that rejects a file (wrong
+  // type, too big) clears the input, and the application would go out without it.
+  const finalPageText = String(finalSnapshot.pageText || "").toLowerCase();
+  for (const record of uploadRecords) {
+    if (!record.fileInput) continue;
+    const inputs = Object.values(finalSnapshot.refs || {}).filter(
+      (entry) => entry?.fileInput === true && String(entry.name || "") === record.inputName
+    );
+    if (!inputs.length || inputs.some((entry) => entry.fileAttached === true)) continue;
+    if (finalPageText.includes(record.fileName.toLowerCase())) continue;
+    uploadedCount -= 1;
+    const kindIndex = uploadedKinds.lastIndexOf(record.kind);
+    if (kindIndex >= 0) uploadedKinds.splice(kindIndex, 1);
+    const fileIndex = uploadedFiles.findIndex((file) => file.name === record.fileName);
+    if (fileIndex >= 0) uploadedFiles.splice(fileIndex, 1);
+    unresolved.push({
+      label: record.label,
+      required: record.required,
+      reason: "The page did not keep the attached file.",
     });
   }
   const finalFields = renderedFieldsFromSnapshot(finalSnapshot);
@@ -808,6 +902,35 @@ async function fillStep({
         reason: "The required field is still blank in the live form.",
       });
     }
+  }
+  // A required question CareerRat deliberately never answers (self-ID) still
+  // blocks Submit if the form wants it and it's empty.
+  for (const step of plan) {
+    if (step.action !== "exclude" || !step.required) continue;
+    const finalField = finalFields.find(
+      (field) => field.id === step.id && field.type === step.type && field.label === step.label
+    );
+    if (finalField?.stateKnown === true && String(finalField.value || "").trim()) continue;
+    if (unresolved.some((item) => item.label === step.label)) continue;
+    unresolved.push({
+      label: step.label,
+      required: true,
+      reason: "CareerRat doesn't answer this kind of question. Answer it yourself.",
+    });
+  }
+  // A visible field with no label can't be matched to anything, so it can't be
+  // filled, and it might be required. Never treat it as fine.
+  let unlabeledCount = 0;
+  for (const entry of Object.values(finalSnapshot.refs || {})) {
+    const role = String(entry?.role || "").toLowerCase();
+    if (!FIELD_ROLES.has(role) || entry?.field === false || entry?.disabled === true) continue;
+    if (String(entry?.name || "").trim()) continue;
+    unlabeledCount += 1;
+    unresolved.push({
+      label: `Unlabeled field ${unlabeledCount}`,
+      required: true,
+      reason: "This field has no label, so CareerRat can't tell what it asks and didn't guess.",
+    });
   }
   const guard = submitGuard({
     pageText: finalSnapshot.pageText,
@@ -914,11 +1037,12 @@ function stepSessionFields(stepIndex) {
   return { stepIndex };
 }
 
-function confirmationFromSnapshot(snapshot) {
+function confirmationFromSnapshot(snapshot, { allowProse = true } = {}) {
   return confirmationCheck({
     pageText: snapshot.pageText,
     currentUrl: snapshot.origin,
     refs: snapshot.refs,
+    allowProse,
   });
 }
 
@@ -965,28 +1089,40 @@ async function submittedResult({
   signal,
 }) {
   throwIfAborted(signal);
-  const screenshot = await browserOp(ops, "screenshot", { pageId }, signal);
-  throwIfAborted(signal);
-  const path = saveScreenshotImpl({
-    repoRoot,
-    env,
-    applicationId,
-    data: screenshot.data,
-    format: screenshot.format,
-  });
+  // The application is already in and the confirmation was seen. A screenshot
+  // that can't be taken or saved must not turn that into "couldn't open the
+  // application", which would send the person to apply a second time.
+  let path = null;
+  try {
+    const screenshot = await browserOp(ops, "screenshot", { pageId }, signal);
+    throwIfAborted(signal);
+    path = saveScreenshotImpl({
+      repoRoot,
+      env,
+      applicationId,
+      data: screenshot.data,
+      format: screenshot.format,
+    });
+  } catch {
+    throwIfAborted(signal);
+  }
   return {
     available: true,
     verified: true,
     state: "submitted",
     confirmation: confirmation.signal,
     currentUrl: snapshot.origin,
-    session: { provider: providerLabel },
+    session: { provider: providerLabel, ...(path ? {} : { confirmationScreenshotSaved: false }) },
     artifacts: [
-      {
-        kind: "submission_confirmation",
-        title: "Verified submission confirmation",
-        path,
-      },
+      ...(path
+        ? [
+            {
+              kind: "submission_confirmation",
+              title: "Verified submission confirmation",
+              path,
+            },
+          ]
+        : []),
       ...(packet && (packet.answers.length || packet.attachments.length)
         ? [
             {
@@ -1087,7 +1223,7 @@ export function createApplyDriver({
         latest = await browserOp(ops, "snapshot", { pageId }, signal);
         const confirmation = confirmationFromSnapshot(latest);
         if (confirmation.submitted) {
-          return submittedResult({
+          return await submittedResult({
             ops,
             pageId,
             snapshot: latest,
@@ -1361,7 +1497,14 @@ export function createApplyDriver({
       };
     }
     trustRetainedOrigin(retainedSession, snapshot.origin);
-    let confirmation = confirmationFromSnapshot(snapshot);
+    // A page we only just opened can't be a receipt for something we did: an FAQ
+    // sentence like "your application has been submitted to our team" on a
+    // posting would otherwise record a job as Applied. Receipt wording only
+    // counts once this tab has held the form (or Submit was pressed on it);
+    // a confirmation URL always counts.
+    let confirmation = confirmationFromSnapshot(snapshot, {
+      allowProse: retainedSession.formSeen === true || retainedSession.submitAttempted === true,
+    });
     if (confirmation.submitted) {
       return submittedResult({
         ops,
@@ -1636,6 +1779,7 @@ export function createApplyDriver({
         isTrustedOrigin: (value) => retainedOriginIsTrusted(retainedSession, value),
         signal,
       });
+      retainedSession.formSeen = true;
       totalFilledCount += result.filledCount;
       totalUploadedCount += result.uploadedCount;
       for (const kind of result.uploadedKinds || []) attachedKinds.add(kind);
@@ -1793,9 +1937,12 @@ export function createApplyDriver({
         // Required uploads in the fresh snapshot that this run never attached
         // (including one an answer revealed after the fill pass) are unresolved.
         const lateUploads = autoSubmit
-          ? uploadTargetsFromSnapshot(preAdvanceSnapshot).filter(
-              (target) => target.required && !attachedKinds.has(target.kind)
-            )
+          ? [
+              ...uploadTargetsFromSnapshot(preAdvanceSnapshot).filter(
+                (target) => target.required && !attachedKinds.has(target.kind)
+              ),
+              ...unrecognizedRequiredUploads(preAdvanceSnapshot),
+            ]
           : [];
         const handoffUnresolved = lateUploads.length
           ? [

@@ -786,6 +786,12 @@ function printStatus(asJson) {
     for (const e of status.errors) console.log(`  ${e.path || "(root)"}: ${e.message}`);
     console.log("");
   }
+  if (status.ignoredFile) {
+    console.log(
+      `WARNING: ${status.ignoredFile} is NOT being used. This workspace keeps its automation settings in the database, so edits to that file do nothing. Use \`careerrat automation submit <auto|manual> --write\` and \`enable\`/\`disable\` instead.`
+    );
+    console.log("");
+  }
   console.log(
     "Every capability is on unless you turn it off. Turn one off: `careerrat automation disable <capability> [platform] --write`."
   );
