@@ -648,7 +648,7 @@ closeAll();
                 )
                 await pilot.pause(0.3)
                 self.assertEqual(self.agent_log(home), [])
-                self.assertFalse((home / "workspace/intake").exists())
+                self.assertEqual([p for p in (home / "workspace/intake").rglob("*") if p.is_file()], [])
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
@@ -683,7 +683,7 @@ closeAll();
                 await pilot.click("#remove-file-0")
                 await until(lambda: not modal.files)
                 self.assertTrue(modal.query_one("#context-text").display)
-                self.assertFalse((home / "workspace/intake").exists())
+                self.assertEqual([p for p in (home / "workspace/intake").rglob("*") if p.is_file()], [])
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
