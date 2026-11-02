@@ -7,7 +7,7 @@ import { personExists, personRoot, validatePersonName } from "../paths/people.mj
 // evidence, search runs, board-profiles browser profile, AI key) and their generated
 // documents folder. A backup of both is written next to the people directory first, so
 // a purge is recoverable until the operator deletes the backup.
-export const PEOPLE_BACKUP_DIR = "people-backups";
+const PEOPLE_BACKUP_DIR = "people-backups";
 
 function stamp(now) {
   return now.toISOString().replace(/[:.]/g, "-");

@@ -9,7 +9,7 @@
 //
 // Pure of the network: `fetchImpl`, `now`, `sleep` and `random` are injected.
 
-export const HOST_THROTTLE_DEFAULTS = {
+const HOST_THROTTLE_DEFAULTS = {
   maxConcurrent: 2,
   minSpacingMs: 100,
   maxRetries: 3,

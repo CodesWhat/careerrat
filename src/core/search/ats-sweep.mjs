@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { userPath } from "../paths/workspace.mjs";
 
-export const SWEEP_DEFAULT_MAX_BOARDS = 150;
+const SWEEP_DEFAULT_MAX_BOARDS = 150;
 const DAY_MS = 86400000;
 
 // provider -> board URL for a slug, in the shape inferProvider() recognizes.
@@ -77,7 +77,7 @@ export function parseSlugList(text, { format } = {}) {
   return { slugs, dropped };
 }
 
-export function sweepSlugFilePath(pathCtx) {
+function sweepSlugFilePath(pathCtx) {
   for (const name of ["config/ats-sweep-slugs.json", "config/ats-sweep-slugs.txt"]) {
     const path = userPath(pathCtx, name);
     if (existsSync(path)) return path;
@@ -128,7 +128,7 @@ export function boardIdentityFromUrl(url) {
   return null;
 }
 
-export function companyNameFromSlug(slug) {
+function companyNameFromSlug(slug) {
   return String(slug)
     .split(/[-_]+/)
     .filter(Boolean)

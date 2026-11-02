@@ -22,7 +22,7 @@ export function safeCompanySegment(value) {
 // owner's own company folders sit directly in ~/Documents/careerrat, and a company
 // would have to be literally named "_people" to meet it, so a person named like one of
 // the owner's companies no longer shares a folder with it.
-export const PEOPLE_DOCUMENTS_DIR = "_people";
+const PEOPLE_DOCUMENTS_DIR = "_people";
 
 // Where one person's generated documents live (unless a downloads directory is set).
 export function personDocumentsRoot(person) {

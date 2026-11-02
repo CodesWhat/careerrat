@@ -10,7 +10,7 @@ import { assessLegitimacy, resolveLegitimacyConfig } from "../evaluate/legitimac
 const DAY_MS = 86400000;
 
 // Rank points subtracted from the score when sorting. Score itself is untouched.
-export const DEMOTION_POINTS = {
+const DEMOTION_POINTS = {
   strong: 15,
   mild: 5,
   veryOld: 10,

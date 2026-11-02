@@ -8,8 +8,8 @@
 // built from the candidate's own targeting, with no built-in preference.
 import { runBoundedAI } from "../ai/bounded-ai.mjs";
 
-export const AI_RERANK_DEFAULT_TOP_N = 20;
-export const AI_RERANK_MAX_TOP_N = 50;
+const AI_RERANK_DEFAULT_TOP_N = 20;
+const AI_RERANK_MAX_TOP_N = 50;
 const NOTE_MAX = 160;
 const EXCERPT_MAX = 500;
 

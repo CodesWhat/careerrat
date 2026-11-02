@@ -29,10 +29,10 @@ import { listPeople } from "../people/roster.mjs";
 import { loadCandidateConfig } from "../profile/config-store.mjs";
 import { postingIdentityKeys } from "../scoring/sourced-identity.mjs";
 
-export const SHARED_CACHE_DB = "postings-cache.db";
-export const SHARED_CACHE_SETTINGS = "shared-cache.json";
-export const SHARED_CACHE_PROVENANCE = "shared-cache";
-export const DEFAULT_FRESHNESS_HOURS = 6;
+const SHARED_CACHE_DB = "postings-cache.db";
+const SHARED_CACHE_SETTINGS = "shared-cache.json";
+const SHARED_CACHE_PROVENANCE = "shared-cache";
+const DEFAULT_FRESHNESS_HOURS = 6;
 const SCHEMA_VERSION = 1;
 
 const SCHEMA = `
@@ -115,7 +115,7 @@ function stable(value) {
   return value;
 }
 
-export function sharedSourceKey(kind, entry) {
+function sharedSourceKey(kind, entry) {
   const digest = createHash("sha256")
     .update(JSON.stringify(stable(entry || {})))
     .digest("hex")
@@ -123,12 +123,12 @@ export function sharedSourceKey(kind, entry) {
   return `${kind}:${digest}`;
 }
 
-export function sharedPostingKey(offer) {
+function sharedPostingKey(offer) {
   const keys = postingIdentityKeys(offer);
   return keys.find((key) => key.startsWith("req:")) || keys[0] || null;
 }
 
-export function scrubOfferForCache(offer) {
+function scrubOfferForCache(offer) {
   const { bodyText, ...rest } = offer;
   const scrubbed = {};
   for (const [key, value] of Object.entries(rest)) {
@@ -142,7 +142,7 @@ export function sharedCachePath(base) {
   return join(base, SHARED_CACHE_DB);
 }
 
-export function readSharedCacheSettings({ base, env = process.env } = {}) {
+function readSharedCacheSettings({ base, env = process.env } = {}) {
   let enabled = true;
   let freshnessHours = DEFAULT_FRESHNESS_HOURS;
   const file = join(base, SHARED_CACHE_SETTINGS);
@@ -165,7 +165,7 @@ export function readSharedCacheSettings({ base, env = process.env } = {}) {
   return { enabled, freshnessHours, freshnessMs: freshnessHours * 3600000 };
 }
 
-export function openSharedCacheDb(base) {
+function openSharedCacheDb(base) {
   mkdirSync(base, { recursive: true, mode: 0o700 });
   const path = sharedCachePath(base);
   const created = !existsSync(path);
@@ -187,7 +187,7 @@ export function openSharedCacheDb(base) {
 
 // A fetch result is only cacheable when it is complete: no errors, no truncation
 // warnings, no login wall. Anything else says nothing reliable about the board.
-export function isCacheableResult(result) {
+function isCacheableResult(result) {
   return (
     Array.isArray(result?.offers) &&
     (result.errors || []).length === 0 &&
@@ -196,7 +196,7 @@ export function isCacheableResult(result) {
   );
 }
 
-export function createSharedCache(db) {
+function createSharedCache(db) {
   const selectSource = db.prepare("SELECT fetched_at FROM sources WHERE source_key = ?");
   const selectOffers = db.prepare(
     "SELECT offer_json, body FROM postings WHERE source_key = ? AND closed = 0 ORDER BY rowid"
@@ -296,7 +296,7 @@ export function createSharedCache(db) {
 
 // Per-scan view of the cache: applies the freshness window, keeps the counters
 // the scan summary reports, and collects the postings new to the cache.
-export function createRunCache({ cache, base, settings, now = new Date(), bypassReads = false }) {
+function createRunCache({ cache, base, settings, now = new Date(), bypassReads = false }) {
   const stats = { hits: 0, fetched: 0, stored: 0, storeErrors: 0 };
   const newPostings = [];
   return {
