@@ -1,0 +1,432 @@
+{
+  "_meta": {
+    "purpose": "Synthetic senior product designer candidate with a seniority ladder; Chicago or remote US.",
+    "grades": "3 exact target, 2 adjacent or good, 1 stretch, 0 wrong. Duplicates of an already-listed posting are grade 0.",
+    "synthetic": true
+  },
+  "name": "senior-product-designer",
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Product Design",
+        "priority": "primary",
+        "titles": ["Senior Product Designer", "Staff Product Designer", "Lead Product Designer"],
+        "seniority_ladder": [
+          {
+            "rank": 1,
+            "titles": ["Junior Product Designer", "Associate Product Designer"]
+          },
+          {
+            "rank": 2,
+            "titles": ["Product Designer"]
+          },
+          {
+            "rank": 3,
+            "titles": ["Senior Product Designer", "Sr. Product Designer"]
+          },
+          {
+            "rank": 4,
+            "titles": [
+              "Staff Product Designer",
+              "Lead Product Designer",
+              "Principal Product Designer"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Design Systems",
+        "priority": "secondary",
+        "titles": ["Senior Design Systems Designer"]
+      }
+    ],
+    "keep_signals": ["design systems", "user research", "prototyping", "B2B SaaS"],
+    "cut_signals": ["Graphic Designer", "Marketing Designer", "Recruiter"]
+  },
+  "profile": {
+    "candidate": {
+      "full_name": "Jordan Example",
+      "domain": "design"
+    },
+    "compensation": {
+      "currency": "USD",
+      "target_base": 165000,
+      "minimum_base": 140000
+    },
+    "location": {
+      "home": "Chicago, IL",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "postings": [
+    {
+      "id": "pd-01",
+      "title": "Senior Product Designer",
+      "company": "Alder & Finch",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/alder-finch/senior-product-designer-pd-01",
+      "comp": "$150,000 - $185,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $150,000 - $185,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pd-02",
+      "title": "Senior Product Designer",
+      "company": "Meridian Health",
+      "location": "Chicago, IL (Hybrid)",
+      "url": "https://jobs.example.test/meridian-health/senior-product-designer-pd-02",
+      "comp": "$155,000 - $190,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $155,000 - $190,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pd-03",
+      "title": "Staff Product Designer",
+      "company": "Quarry Labs",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/quarry-labs/staff-product-designer-pd-03",
+      "comp": "$175,000 - $215,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $175,000 - $215,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pd-04",
+      "title": "Lead Product Designer",
+      "company": "Sundial",
+      "location": "Remote (US)",
+      "url": "https://jobs.example.test/sundial/lead-product-designer-pd-04",
+      "comp": "$165,000 - $200,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $165,000 - $200,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pd-05",
+      "title": "Sr. Product Designer, Growth",
+      "company": "Harbor Point",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/harbor-point/sr-product-designer-growth-pd-05",
+      "comp": "$150,000 - $180,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $150,000 - $180,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pd-06",
+      "title": "Senior Product Designer, Payments",
+      "company": "Marlin Pay",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/marlin-pay/senior-product-designer-payments-pd-06",
+      "comp": "$160,000 - $195,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $160,000 - $195,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pd-07",
+      "title": "Principal Product Designer",
+      "company": "Tamarack",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tamarack/principal-product-designer-pd-07",
+      "comp": "$185,000 - $230,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $185,000 - $230,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "pd-08",
+      "title": "Senior UX Designer",
+      "company": "Cedarwood",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cedarwood/senior-ux-designer-pd-08",
+      "comp": "$145,000 - $175,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $145,000 - $175,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pd-09",
+      "title": "Senior Interaction Designer",
+      "company": "Pinecrest",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/pinecrest/senior-interaction-designer-pd-09",
+      "comp": "$150,000 - $180,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $150,000 - $180,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pd-10",
+      "title": "Senior Design Systems Designer",
+      "company": "Alder & Finch",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/alder-finch/senior-design-systems-designer-pd-10",
+      "comp": "$155,000 - $185,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $155,000 - $185,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pd-11",
+      "title": "Senior Product Experience Designer",
+      "company": "Brookside",
+      "location": "Remote, US",
+      "url": "https://jobs.example.test/brookside/senior-product-experience-designer-pd-11",
+      "comp": "$150,000 - $180,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $150,000 - $180,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pd-12",
+      "title": "Senior Designer, Product",
+      "company": "Opal Street",
+      "location": "Chicago, IL (Hybrid)",
+      "url": "https://jobs.example.test/opal-street/senior-designer-product-pd-12",
+      "comp": "$145,000 - $175,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $145,000 - $175,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pd-13",
+      "title": "Senior UX Researcher & Designer",
+      "company": "Fernhill",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/fernhill/senior-ux-researcher-designer-pd-13",
+      "comp": "$150,000 - $180,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $150,000 - $180,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pd-14",
+      "title": "Design Lead, Mobile Product",
+      "company": "Stillwater",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/stillwater/design-lead-mobile-product-pd-14",
+      "comp": "$165,000 - $200,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $165,000 - $200,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "pd-15",
+      "title": "Product Designer",
+      "company": "Cedarwood",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cedarwood/product-designer-pd-15",
+      "comp": "$120,000 - $145,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $120,000 - $145,000 per year.",
+      "grade": 1,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "pd-16",
+      "title": "Product Designer",
+      "company": "Opal Street",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/opal-street/product-designer-pd-16",
+      "comp": "$125,000 - $150,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $125,000 - $150,000 per year.",
+      "grade": 1,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "pd-17",
+      "title": "Design Manager, Product",
+      "company": "Sundial",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/sundial/design-manager-product-pd-17",
+      "comp": "$180,000 - $220,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $180,000 - $220,000 per year.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "pd-18",
+      "title": "Senior Brand Designer",
+      "company": "Pinecrest",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/pinecrest/senior-brand-designer-pd-18",
+      "comp": "$130,000 - $160,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $130,000 - $160,000 per year.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "pd-19",
+      "title": "Senior Product Designer",
+      "company": "Boxwood",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/boxwood/senior-product-designer-pd-19",
+      "comp": "$95,000 - $115,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $95,000 - $115,000 per year.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "pd-20",
+      "title": "Senior Product Designer",
+      "company": "Thistle",
+      "location": "Singapore",
+      "url": "https://jobs.example.test/thistle/senior-product-designer-pd-20",
+      "comp": "",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "pd-21",
+      "title": "Senior Product Designer",
+      "company": "Nettle & Co",
+      "location": "Austin, TX (On-site)",
+      "url": "https://jobs.example.test/nettle-co/senior-product-designer-pd-21",
+      "comp": "$150,000 - $185,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $150,000 - $185,000 per year.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "pd-22",
+      "title": "Senior Product Designer",
+      "company": "Linden Row",
+      "location": "London, United Kingdom",
+      "url": "https://jobs.example.test/linden-row/senior-product-designer-pd-22",
+      "comp": "",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "pd-23",
+      "title": "Junior Product Designer",
+      "company": "Brookside",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/brookside/junior-product-designer-pd-23",
+      "comp": "$75,000 - $95,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $75,000 - $95,000 per year.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "pd-24",
+      "title": "Associate Product Designer",
+      "company": "Fernhill",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/fernhill/associate-product-designer-pd-24",
+      "comp": "$80,000 - $100,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $80,000 - $100,000 per year.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "pd-25",
+      "title": "Senior Graphic Designer",
+      "company": "Stillwater",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/stillwater/senior-graphic-designer-pd-25",
+      "comp": "$110,000 - $135,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $110,000 - $135,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "pd-26",
+      "title": "Senior Marketing Designer",
+      "company": "Harbor Point",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/harbor-point/senior-marketing-designer-pd-26",
+      "comp": "$120,000 - $145,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $120,000 - $145,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "pd-27",
+      "title": "Technical Recruiter, Design",
+      "company": "Tamarack",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tamarack/technical-recruiter-design-pd-27",
+      "comp": "$110,000 - $140,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $110,000 - $140,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "pd-28",
+      "title": "Senior Software Engineer",
+      "company": "Quarry Labs",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/quarry-labs/senior-software-engineer-pd-28",
+      "comp": "$170,000 - $210,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $170,000 - $210,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "pd-29",
+      "title": "Senior Product Manager",
+      "company": "Meridian Health",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/meridian-health/senior-product-manager-pd-29",
+      "comp": "$165,000 - $200,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $165,000 - $200,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "pd-30",
+      "title": "Senior Accountant",
+      "company": "Boxwood",
+      "location": "Chicago, IL",
+      "url": "https://jobs.example.test/boxwood/senior-accountant-pd-30",
+      "comp": "$90,000 - $110,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $90,000 - $110,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "pd-31",
+      "title": "Senior Product Designer",
+      "company": "Alder & Finch",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/alder-finch/repost-senior-product-designer-pd-31",
+      "comp": "$150,000 - $185,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $150,000 - $185,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "pd-32",
+      "title": "Staff Product Designer",
+      "company": "Quarry Labs",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/quarry-labs/repost-staff-product-designer-pd-32",
+      "comp": "$175,000 - $215,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $175,000 - $215,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "pd-33",
+      "title": "Lead Product Designer",
+      "company": "Sundial",
+      "location": "Remote (US)",
+      "url": "https://jobs.example.test/sundial/repost-lead-product-designer-pd-33",
+      "comp": "$165,000 - $200,000",
+      "bodyText": "You will lead end-to-end product design for a core surface, run research, and partner closely with engineering and product management. Base salary range: $165,000 - $200,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    }
+  ]
+}

@@ -1,0 +1,425 @@
+{
+  "_meta": {
+    "purpose": "Synthetic staff frontend engineer candidate; remote US or Denver.",
+    "grades": "3 exact target, 2 adjacent or good, 1 stretch, 0 wrong. Duplicates of an already-listed posting are grade 0.",
+    "synthetic": true
+  },
+  "name": "staff-frontend-engineer",
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Staff Frontend",
+        "priority": "primary",
+        "titles": [
+          "Staff Frontend Engineer",
+          "Principal Frontend Engineer",
+          "Staff Software Engineer, Frontend"
+        ]
+      },
+      {
+        "name": "Web Platform",
+        "priority": "secondary",
+        "titles": ["Staff Web Platform Engineer", "Staff UI Engineer"]
+      }
+    ],
+    "keep_signals": ["design systems", "web performance", "React", "TypeScript"],
+    "cut_signals": ["Sales Engineer", "Recruiter", "Developer Advocate"]
+  },
+  "profile": {
+    "candidate": {
+      "full_name": "Sam Example",
+      "domain": "software engineering"
+    },
+    "compensation": {
+      "currency": "USD",
+      "target_base": 235000,
+      "minimum_base": 200000
+    },
+    "location": {
+      "home": "Denver, CO",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "postings": [
+    {
+      "id": "fe-01",
+      "title": "Staff Frontend Engineer",
+      "company": "Lumen Works",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/lumen-works/staff-frontend-engineer-fe-01",
+      "comp": "$215,000 - $260,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $215,000 - $260,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "fe-02",
+      "title": "Principal Frontend Engineer",
+      "company": "Fathom Labs",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/fathom-labs/principal-frontend-engineer-fe-02",
+      "comp": "$230,000 - $280,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $230,000 - $280,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "fe-03",
+      "title": "Staff Software Engineer, Frontend",
+      "company": "Brightloop",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/brightloop/staff-software-engineer-frontend-fe-03",
+      "comp": "$220,000 - $265,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $220,000 - $265,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "fe-04",
+      "title": "Staff Frontend Engineer, Design Systems",
+      "company": "Northwind Apps",
+      "location": "Remote (US)",
+      "url": "https://jobs.example.test/northwind-apps/staff-frontend-engineer-design-systems-fe-04",
+      "comp": "$210,000 - $250,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $210,000 - $250,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "fe-05",
+      "title": "Senior Staff Frontend Engineer",
+      "company": "Cobalt Cloud",
+      "location": "Denver, CO (Hybrid)",
+      "url": "https://jobs.example.test/cobalt-cloud/senior-staff-frontend-engineer-fe-05",
+      "comp": "$240,000 - $290,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $240,000 - $290,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "fe-06",
+      "title": "Staff Frontend Engineer (React)",
+      "company": "Tessellate",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tessellate/staff-frontend-engineer-react-fe-06",
+      "comp": "$205,000 - $245,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $205,000 - $245,000 per year.",
+      "grade": 3,
+      "kind": "exact"
+    },
+    {
+      "id": "fe-07",
+      "title": "Staff UI Engineer",
+      "company": "Quillstone",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/quillstone/staff-ui-engineer-fe-07",
+      "comp": "$210,000 - $250,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $210,000 - $250,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "fe-08",
+      "title": "Staff Web Platform Engineer",
+      "company": "Ridgeline Data",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/ridgeline-data/staff-web-platform-engineer-fe-08",
+      "comp": "$220,000 - $260,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $220,000 - $260,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "fe-09",
+      "title": "Staff Design Engineer",
+      "company": "Papertrail Studio",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/papertrail-studio/staff-design-engineer-fe-09",
+      "comp": "$200,000 - $240,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $200,000 - $240,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "fe-10",
+      "title": "Staff Full Stack Engineer (Frontend Focus)",
+      "company": "Marlin Pay",
+      "location": "Remote, US",
+      "url": "https://jobs.example.test/marlin-pay/staff-full-stack-engineer-frontend-focus-fe-10",
+      "comp": "$215,000 - $255,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $215,000 - $255,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "fe-11",
+      "title": "Principal Software Engineer, Web",
+      "company": "Evergreen Health",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/evergreen-health/principal-software-engineer-web-fe-11",
+      "comp": "$225,000 - $270,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $225,000 - $270,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "fe-12",
+      "title": "Lead Frontend Engineer",
+      "company": "Kestrel Logistics",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/kestrel-logistics/lead-frontend-engineer-fe-12",
+      "comp": "$195,000 - $235,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $195,000 - $235,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "fe-13",
+      "title": "Staff Engineer, Web Performance",
+      "company": "Auric Systems",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/auric-systems/staff-engineer-web-performance-fe-13",
+      "comp": "$220,000 - $265,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $220,000 - $265,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "fe-14",
+      "title": "Frontend Architect",
+      "company": "Silverpine",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/silverpine/frontend-architect-fe-14",
+      "comp": "$210,000 - $250,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $210,000 - $250,000 per year.",
+      "grade": 2,
+      "kind": "adjacent-title"
+    },
+    {
+      "id": "fe-15",
+      "title": "Senior Frontend Engineer",
+      "company": "Brightloop",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/brightloop/senior-frontend-engineer-fe-15",
+      "comp": "$170,000 - $200,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $170,000 - $200,000 per year.",
+      "grade": 1,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "fe-16",
+      "title": "Senior Frontend Engineer",
+      "company": "Hollow Oak",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/hollow-oak/senior-frontend-engineer-fe-16",
+      "comp": "$175,000 - $205,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $175,000 - $205,000 per year.",
+      "grade": 1,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "fe-17",
+      "title": "Frontend Engineering Manager",
+      "company": "Larkspur",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/larkspur/frontend-engineering-manager-fe-17",
+      "comp": "$210,000 - $250,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $210,000 - $250,000 per year.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "fe-18",
+      "title": "Staff Mobile Engineer (React Native)",
+      "company": "Tidewater",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/tidewater/staff-mobile-engineer-react-native-fe-18",
+      "comp": "$215,000 - $255,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $215,000 - $255,000 per year.",
+      "grade": 1,
+      "kind": "stretch"
+    },
+    {
+      "id": "fe-19",
+      "title": "Staff Frontend Engineer",
+      "company": "Granite Row",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/granite-row/staff-frontend-engineer-fe-19",
+      "comp": "$140,000 - $165,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $140,000 - $165,000 per year.",
+      "grade": 0,
+      "kind": "below-comp"
+    },
+    {
+      "id": "fe-20",
+      "title": "Staff Frontend Engineer",
+      "company": "Ironbridge",
+      "location": "Berlin, Germany",
+      "url": "https://jobs.example.test/ironbridge/staff-frontend-engineer-fe-20",
+      "comp": "",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "fe-21",
+      "title": "Staff Frontend Engineer",
+      "company": "Foxglove",
+      "location": "San Jose, CA (On-site)",
+      "url": "https://jobs.example.test/foxglove/staff-frontend-engineer-fe-21",
+      "comp": "$230,000 - $270,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $230,000 - $270,000 per year.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "fe-22",
+      "title": "Staff Frontend Engineer",
+      "company": "Wrenfield",
+      "location": "Remote - UK",
+      "url": "https://jobs.example.test/wrenfield/staff-frontend-engineer-fe-22",
+      "comp": "",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product.",
+      "grade": 0,
+      "kind": "location"
+    },
+    {
+      "id": "fe-23",
+      "title": "Junior Frontend Developer",
+      "company": "Pebble & Co",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/pebble-co/junior-frontend-developer-fe-23",
+      "comp": "$85,000 - $105,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $85,000 - $105,000 per year.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "fe-24",
+      "title": "Frontend Engineer Intern",
+      "company": "Pebble & Co",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/pebble-co/frontend-engineer-intern-fe-24",
+      "comp": "",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product.",
+      "grade": 0,
+      "kind": "wrong-seniority"
+    },
+    {
+      "id": "fe-25",
+      "title": "Staff Backend Engineer",
+      "company": "Cobalt Cloud",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/cobalt-cloud/staff-backend-engineer-fe-25",
+      "comp": "$225,000 - $270,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $225,000 - $270,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "fe-26",
+      "title": "Staff Data Engineer",
+      "company": "Ridgeline Data",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/ridgeline-data/staff-data-engineer-fe-26",
+      "comp": "$220,000 - $260,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $220,000 - $260,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "fe-27",
+      "title": "Staff Security Engineer",
+      "company": "Auric Systems",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/auric-systems/staff-security-engineer-fe-27",
+      "comp": "$230,000 - $275,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $230,000 - $275,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "fe-28",
+      "title": "Staff Sales Engineer",
+      "company": "Quillstone",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/quillstone/staff-sales-engineer-fe-28",
+      "comp": "$190,000 - $240,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $190,000 - $240,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "fe-29",
+      "title": "Developer Advocate, Frontend",
+      "company": "Papertrail Studio",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/papertrail-studio/developer-advocate-frontend-fe-29",
+      "comp": "$160,000 - $190,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $160,000 - $190,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "fe-30",
+      "title": "Technical Recruiter, Frontend Engineering",
+      "company": "Larkspur",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/larkspur/technical-recruiter-frontend-engineering-fe-30",
+      "comp": "$120,000 - $150,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $120,000 - $150,000 per year.",
+      "grade": 0,
+      "kind": "excluded-function"
+    },
+    {
+      "id": "fe-31",
+      "title": "QA Automation Engineer",
+      "company": "Hollow Oak",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/hollow-oak/qa-automation-engineer-fe-31",
+      "comp": "$130,000 - $160,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $130,000 - $160,000 per year.",
+      "grade": 0,
+      "kind": "wrong-function"
+    },
+    {
+      "id": "fe-32",
+      "title": "Staff Frontend Engineer",
+      "company": "Lumen Works",
+      "location": "Remote - US",
+      "url": "https://jobs.example.test/lumen-works/repost-staff-frontend-engineer-fe-32",
+      "comp": "$215,000 - $260,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $215,000 - $260,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "fe-33",
+      "title": "Principal Frontend Engineer",
+      "company": "Fathom Labs",
+      "location": "Denver, CO",
+      "url": "https://jobs.example.test/fathom-labs/repost-principal-frontend-engineer-fe-33",
+      "comp": "$230,000 - $280,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $230,000 - $280,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    },
+    {
+      "id": "fe-34",
+      "title": "Staff Software Engineer, Frontend",
+      "company": "Brightloop",
+      "location": "Remote, United States",
+      "url": "https://jobs.example.test/brightloop/repost-staff-software-engineer-frontend-fe-34",
+      "comp": "$220,000 - $265,000",
+      "bodyText": "You will own the architecture of our customer-facing web application, mentor engineers, and partner with design and product. Base salary range: $220,000 - $265,000 per year.",
+      "grade": 0,
+      "kind": "duplicate"
+    }
+  ]
+}
