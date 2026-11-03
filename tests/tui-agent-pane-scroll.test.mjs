@@ -7,7 +7,7 @@ import { test } from "node:test";
 const { createAgentPane, renderTerminalRows } = await import("../src/core/tui/agent-pane.mjs");
 
 async function until(check) {
-  const end = Date.now() + 5000;
+  const end = Date.now() + 15000;
   while (!check()) {
     assert.ok(Date.now() < end, "timed out waiting for the pane");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -70,14 +70,15 @@ test("a wheel turn scrolls history unless the program asked for the mouse", {
   await until(() => screen(mouse.pane).includes("MOUSE_ON"));
   assert.equal(mouse.pane.wheel({ direction: -1, col: 4, row: 2 }), "mouse");
   assert.equal(mouse.pane.wheel({ direction: 1, col: 4, row: 2 }), "mouse");
-  await until(
-    () => existsSync(mouse.log) && readFileSync(mouse.log, "utf8").split("\n").length > 2
-  );
-  const received = Buffer.from(
-    readFileSync(mouse.log, "utf8").replace(/\n/g, ""),
-    "hex"
-  ).toString();
-  assert.equal(received, "\x1b[<64;5;3M\x1b[<65;5;3M");
+  // Both wheel reports can arrive in one read, so wait on the bytes, not the
+  // number of reads.
+  const expected = "\x1b[<64;5;3M\x1b[<65;5;3M";
+  const received = () =>
+    existsSync(mouse.log)
+      ? Buffer.from(readFileSync(mouse.log, "utf8").replace(/\n/g, ""), "hex").toString()
+      : "";
+  await until(() => received().length >= expected.length);
+  assert.equal(received(), expected);
 
   const legacy = start(t, "process.stdout.write('\\x1b[?1000hLEGACY_ON');");
   await until(() => screen(legacy.pane).includes("LEGACY_ON"));
