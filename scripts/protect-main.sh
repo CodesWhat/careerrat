@@ -100,12 +100,12 @@ read -r -d '' DESIRED <<'JSON' || true
           { "context": "dependency-review" },
           { "context": "web-build" },
           { "context": "website-build" },
-          { "context": "website-browser-checks" },
           { "context": "windows-package-smoke" },
           { "context": "browser-application-prep" },
           { "context": "qlty" },
           { "context": "knip" },
-          { "context": "tests" }
+          { "context": "tests" },
+          { "context": "website-browser-checks" }
         ]
     } }
   ],
