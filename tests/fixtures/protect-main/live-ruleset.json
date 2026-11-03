@@ -63,6 +63,9 @@
             "context": "website-build"
           },
           {
+            "context": "website-browser-checks"
+          },
+          {
             "context": "windows-package-smoke"
           },
           {

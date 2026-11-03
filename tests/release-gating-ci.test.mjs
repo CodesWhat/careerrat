@@ -1234,6 +1234,7 @@ test("all deterministic product builds are declared as protected contexts", asyn
   for (const context of [
     "web-build",
     "website-build",
+    "website-browser-checks",
     "windows-package-smoke",
     "browser-application-prep",
   ]) {
