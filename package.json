@@ -78,6 +78,7 @@
     "scripts/capture-search-sources.mjs",
     "scripts/check-install-scripts.mjs",
     "scripts/check-job-links.mjs",
+    "scripts/check-lockfile.mjs",
     "scripts/delta-sourced.mjs",
     "scripts/install-skills.mjs",
     "scripts/lib/live-search-receipts.mjs",
