@@ -40,20 +40,20 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of October 31, 2026:** v0.22.0 is the latest release. CareerRat installs
-from npm and runs in your browser, on your machine, with the AI CLI you already
-use. Terminal sessions stay optional. v0.19.2 was the last release with a Mac
-app.
+**As of November 2, 2026:** v0.23.0 is the latest release. CareerRat installs
+from npm and runs on your machine, in your terminal, with the AI CLI you already
+use. v0.19.2 was the last release with a Mac app.
 
-New in v0.22.0:
+New in v0.23.0:
 
-- Separate each person's search with `careerrat people` and `--for <name>`.
-- Grounded candidate knowledge changes have a saved history and Undo. Honesty
-  changes that loosen a boundary still need confirmation.
-- Browser capabilities are on by default, with individual off switches. A
-  disabled capability produces a clear note instead of a repeated prompt.
-- Resume uploads reject incomplete extraction, and company discovery pins
-  validated public DNS addresses and bounds response downloads.
+- `careerrat start` now opens the terminal workspace.
+- Run it for other people with `--for <name>`. Each person gets their own
+  separate workspace.
+- Much better job search: more sources, related job titles, dead job boards
+  skipped, and closed jobs detected.
+- The agent never presses Submit unless CareerRat's checks pass first.
+- Send a roundup to the people you run it for, once they've agreed to get one.
+- Needs Node 24.22.1 or newer and Python 3.11 or newer.
 
 Automatic submission, introduced in v0.21.0:
 
