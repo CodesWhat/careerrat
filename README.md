@@ -14,6 +14,7 @@
   <br>
   <a href="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/careerrat"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/careerrat?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
+  <a href="https://codecov.io/gh/CodesWhat/careerrat/tree/dev%2Fv0.23"><img src="https://codecov.io/gh/CodesWhat/careerrat/branch/dev%2Fv0.23/graph/badge.svg" alt="Codecov"></a>
   <br>
   <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/dm/careerrat" alt="npm downloads"></a>
 </p>
