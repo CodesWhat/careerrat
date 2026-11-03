@@ -109,6 +109,7 @@ const CLIS = {
   "strategy-review": "src/cli/strategy-review.mjs",
   analytics: "src/cli/analytics.mjs",
   outcomes: "src/cli/outcomes.mjs",
+  "recruiter-check": "src/cli/recruiter-check.mjs",
   evidence: "src/cli/evidence.mjs",
   gate: "src/cli/gate.mjs",
   plugins: "src/cli/plugins.mjs",
@@ -957,6 +958,7 @@ Commands:
   activity    Read/append/prune the local app Activity Pulse feed
   evidence    Read/validate/add evidence claims
   analytics   Refresh + inspect the persisted outcome-analytics block (--write)
+  recruiter-check  Flag outreach that may not be a real recruiter (domain mismatch, no posting, run-code asks)
   outcomes    Honest outcome rates: in-flight excluded, sample floor, fit band vs outcome
   lint-placeholders  Check drafts for unfilled placeholders (exit 1 on a hit, 2 on a bad path)
   strategy-review  Stamp the "last reviewed" marker after a strategy review
