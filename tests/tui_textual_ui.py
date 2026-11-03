@@ -550,9 +550,8 @@ closeAll();
                     )
                 await pilot.click("#apply")
                 await until(lambda: "harbor" in app.query_one("#request", Input).value)
-                self.assertIn(
-                    "Press Enter", app.query_one("#request", Input).placeholder
-                )
+                self.assertTrue(app.query_one("#request", Input).display)
+
                 await until(lambda: isinstance(app.screen, MODULE.RequestText))
                 await pilot.press("escape")
                 await until(lambda: not isinstance(app.screen, MODULE.RequestText))
@@ -1556,6 +1555,10 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.errors, [])
 
 
+def change_plain(text):
+    return text.plain
+
+
 def fake_change(number, reverted=False):
     return {
         "messageId": f"m{number}",
@@ -1637,13 +1640,16 @@ class PolishTest(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(button("next-change").disabled)
                 self.assertEqual(self.shown(app, "confirm-undo", "cancel-undo"), [])
                 self.assertIn("Change 1 of 3", str(app.query_one("#changes-position").render()))
+                body = str(app.query_one("#changes-text", Static).render())
+                self.assertIn("Change 1: unset → unset", body)
+                self.assertNotIn("m1", body)
                 app.update_changes(view, state("m2:0"))
                 self.assertFalse(button("previous-change").disabled)
                 self.assertFalse(button("next-change").disabled)
                 app.update_changes(view, state("m3:0"))
                 self.assertTrue(button("next-change").disabled)
                 self.assertTrue(button("preview-undo").disabled)
-                self.assertIn("already undone", str(app.query_one("#changes-position").render()))
+                self.assertIn("already undone", str(app.query_one("#changes-text").render()))
                 app.update_changes(view, state("m2:0", pending={"preview": True}))
                 self.assertEqual(
                     self.shown(
@@ -1732,7 +1738,9 @@ class PolishTest(unittest.IsolatedAsyncioTestCase):
                 sent = []
 
                 async def record(message):
-                    sent.append(message)
+                    # The running-search poll may ask for a refresh meanwhile.
+                    if message.get("op") != "refresh":
+                        sent.append(message)
 
                 app.send = record
                 await pilot.click("#search")
@@ -1761,7 +1769,9 @@ class PolishTest(unittest.IsolatedAsyncioTestCase):
                 sent = []
 
                 async def record(message):
-                    sent.append(message)
+                    # The running-search poll may ask for a refresh meanwhile.
+                    if message.get("op") != "refresh":
+                        sent.append(message)
 
                 app.send = record
                 await pilot.click("#cancel-run-0")
@@ -1789,6 +1799,64 @@ class PolishTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sent[-1], {"op": "request", "action": "review"})
                 await pilot.press("ctrl+q")
 
+    async def test_changes_read_as_a_title_and_a_dim_line_not_json(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+            app = await self.start(folder)
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                entry = {
+                    "kind": "knowledge_write",
+                    "target": "candidate_config:targeting",
+                    "op": "set",
+                    "path": "fit_bands.fit_floor",
+                    "label": "Fit floor",
+                    "before": 62,
+                    "after": 80,
+                    "source": {"kind": "settings.apply"},
+                }
+                change = {"messageId": "abc-123", "index": 4, "at": "2026-11-03T15:40:04.131Z", "entry": entry}
+                text = change_plain(MODULE.change_text(change))
+                lines = text.split("\n")
+                self.assertEqual(lines[0], "Fit floor: 62 → 80")
+                self.assertRegex(lines[1], r"^[A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M · Targeting · by you$")
+                for raw in ("abc-123", "messageId", "knowledge_write", "{"):
+                    self.assertNotIn(raw, text)
+                undo = change_plain(MODULE.change_text(change, undo=True))
+                self.assertEqual(undo.split("\n")[0], "Undo will set Fit floor back to 62.")
+                added = {**entry, "label": "Keep signals", "before": ["a"], "after": ["a", "b" * 80]}
+                self.assertTrue(
+                    MODULE.change_title(added).startswith("Added bbbb")
+                    and MODULE.change_title(added).endswith("… to Keep signals")
+                )
+                self.assertEqual(
+                    MODULE.undo_title({**added, "after": ["a", "b"]}),
+                    "Undo will remove b from Keep signals.",
+                )
+                self.assertEqual(
+                    MODULE.change_title({**entry, "before": None, "beforeAbsent": True}),
+                    "Fit floor: unset → 80",
+                )
+                self.assertEqual(
+                    MODULE.undo_title({**entry, "beforeAbsent": True, "before": None}),
+                    "Undo will clear Fit floor.",
+                )
+                await pilot.press("ctrl+q")
+
+    async def test_one_status_line_carries_the_hint_only_when_nothing_else_is_said(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+            app = await self.start(folder)
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                self.assertFalse(app.query_one("#request", Input).display)
+                self.assertEqual(app.query_one("#request", Input).placeholder, "")
+                hint = "Requests insert text only; press Enter in the agent to run."
+                await until(lambda: hint in str(app.query_one("#message", Static).render()))
+                app.update_status(
+                    {"searchRuns": [fake_run("completed", summary={"new": 1})]}, {"message": "Undo cancelled."}
+                )
+                self.assertNotIn(hint, str(app.query_one("#message", Static).render()))
+                await pilot.press("ctrl+q")
+
     async def test_kitty_keys_map_to_a_newline_and_plain_enter_still_submits(self):
         from textual._xterm_parser import XTermParser
 
@@ -1809,6 +1877,91 @@ class PolishTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 MODULE.key_bytes(got, character), "\r" if key == "enter" else "\n", key
             )
+
+    @unittest.skipIf(sys.platform == "win32", "Unix outer-PTY proof")
+    def test_enter_variants_reach_the_agent_through_a_real_terminal(self):
+        """Bytes a terminal sends for Shift+Enter, through a real outer PTY to a stub agent."""
+        import fcntl
+        import pty
+        import select
+        import struct
+        import termios
+
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-enter-") as folder:
+            home = Path(folder)
+            (home / "workspace").mkdir()
+            log = home / "keys.log"
+            stub = home / "claude"
+            stub.write_text(
+                f"#!{shutil.which('node')}\n"
+                "import fs from 'node:fs';\n"
+                "process.stdin.setRawMode(true);process.stdin.resume();process.stdout.write('STUB_READY');\n"
+                "process.stdin.on('data',b=>fs.appendFileSync(process.env.CAREERRAT_HOME+'/keys.log',b.toString('hex')+'\\n'));\n"
+            )
+            stub.chmod(0o700)
+            terminal, application = pty.openpty()
+            fcntl.ioctl(application, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
+            process = subprocess.Popen(
+                [sys.executable, "-I", str(ROOT / "src/core/tui/textual-app.py"), "--agent", "claude"],
+                env={
+                    **os.environ,
+                    "CAREERRAT_HOME": folder,
+                    "CAREERRAT_NODE": shutil.which("node"),
+                    "PATH": folder + os.pathsep + os.environ["PATH"],
+                    "TERM": "xterm-ghostty",
+                },
+                stdin=application,
+                stdout=application,
+                stderr=application,
+                start_new_session=True,
+            )
+            os.close(application)
+            output = b""
+
+            def pump(seconds, until_check=None):
+                nonlocal output
+                end = time.time() + seconds
+                while time.time() < end:
+                    if until_check and until_check():
+                        return True
+                    ready, _, _ = select.select([terminal], [], [], 0.05)
+                    if ready:
+                        try:
+                            output += os.read(terminal, 65536)
+                        except OSError:
+                            return False
+                return until_check() if until_check else False
+
+            def logged():
+                return log.read_text().split() if log.exists() else []
+
+            try:
+                self.assertTrue(pump(20, lambda: b"STUB_READY" in output), output[-300:])
+                self.assertIn(b"\x1b[>", output)  # the kitty keyboard protocol is switched on
+                os.write(terminal, b"\x1b[17~")  # F6: focus the agent
+                pump(0.5)
+                for sequence, expected in (
+                    (b"\x1b[13;2u", "0a"),  # Shift+Enter, kitty protocol
+                    (b"\x1b[13;2;13u", "0a"),  # the same with associated text
+                    (b"\x1b\r", "1b0d"),  # Shift+Enter bound to ESC CR, kept as alt+enter
+                    (b"\n", "0a"),  # Ctrl+J
+                    (b"\r", "0d"),  # plain Enter still submits
+                ):
+                    before = len(logged())
+                    os.write(terminal, sequence)
+                    self.assertTrue(
+                        pump(5, lambda: len(logged()) > before), f"{sequence!r} never arrived"
+                    )
+                    self.assertEqual(logged()[-1], expected, repr(sequence))
+                os.write(terminal, b"\x11")
+                pump(10, lambda: process.poll() is not None)
+                self.assertEqual(process.poll(), 0)
+                self.assertIn(b"\x1b[<u", output)  # and switched off again on exit
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                os.close(terminal)
 
     def test_textual_enables_and_restores_the_kitty_disambiguate_flag(self):
         import inspect

@@ -10,6 +10,7 @@ import shutil
 import signal
 import sys
 import time
+from datetime import datetime
 
 from rich.text import Text
 from textual import events
@@ -72,6 +73,34 @@ FUNCTION_KEYS = {
 }
 # xterm's modifier parameter: 1 + shift(1) + alt(2) + ctrl(4).
 MODIFIER_BITS = {"shift": 1, "alt": 2, "meta": 2, "ctrl": 4}
+
+
+def keep_alt_enter():
+    """Report ESC + CR as alt+enter.
+
+    Textual's parser drops the ESC when the next key has a multi-character name,
+    so a terminal that sends Shift+Enter as ESC CR (a Ghostty keybind, or any
+    meta-sends-escape terminal) delivered a plain Enter, which submits.
+    """
+    try:
+        from textual._xterm_parser import XTermParser
+    except ImportError:
+        return
+    original = XTermParser._sequence_to_key_events
+    if getattr(original, "keeps_alt_enter", False):
+        return
+
+    def sequence_to_key_events(self, sequence, alt=False):
+        if alt and sequence == "\r":
+            yield events.Key("alt+enter", None)
+            return
+        yield from original(self, sequence, alt)
+
+    sequence_to_key_events.keeps_alt_enter = True
+    XTermParser._sequence_to_key_events = sequence_to_key_events
+
+
+keep_alt_enter()
 
 
 def key_bytes(key, character=None):
@@ -284,6 +313,134 @@ def suggested_action(row):
         for value in (gate.get("gate"), row.get("fitBucket"), evaluation.get("gate"))
     }
     return "" if action.lower() in verdicts else action
+
+
+TARGET_NAMES = {
+    "evidence": "Evidence",
+    "learning": "Learning",
+    "rows:rerank": "Job ranking",
+}
+# Who made a recorded change, from the source the write logged.
+WRITER_NAMES = {
+    "settings.apply": "you",
+    "screening.answer-confirm": "you",
+    "knowledge.revert": "an undo",
+}
+VALUE_LIMIT = 48
+
+
+def target_name(target):
+    target = clean(target)
+    if target in TARGET_NAMES:
+        return TARGET_NAMES[target]
+    tail = target.split(":", 1)[-1].replace("_", " ").strip()
+    return tail[:1].upper() + tail[1:] if tail else ""
+
+
+def value_text(value):
+    """A saved value in a few readable words; long ones are clipped."""
+    if value is None:
+        return "unset"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, list):
+        text = ", ".join(value_text(item) for item in value)
+    elif isinstance(value, dict):
+        text = f"{len(value)} field{'' if len(value) == 1 else 's'}"
+    else:
+        text = " ".join(clean(value).split())
+    return text if len(text) <= VALUE_LIMIT else text[: VALUE_LIMIT - 1].rstrip() + "…"
+
+
+def change_label(entry):
+    label = clean(entry.get("label"))
+    if label:
+        return label
+    path = clean(entry.get("path")).split(".")[-1].replace("_", " ")
+    return (path[:1].upper() + path[1:]) if path else clean(entry.get("id")) or "This value"
+
+
+def change_value(entry, key):
+    return None if entry.get(f"{key}Absent") else entry.get(key)
+
+
+def list_changes(before, after):
+    if isinstance(before, list) and isinstance(after, list):
+        return (
+            [item for item in after if item not in before],
+            [item for item in before if item not in after],
+        )
+    return None
+
+
+def change_title(entry):
+    """One line saying what a recorded change did."""
+    label = change_label(entry)
+    before, after = change_value(entry, "before"), change_value(entry, "after")
+    lists = list_changes(before, after)
+    if lists and (bool(lists[0]) != bool(lists[1])):
+        added, removed = lists
+        return f"Added {value_text(added)} to {label}" if added else f"Removed {value_text(removed)} from {label}"
+    if entry.get("op") == "add" and isinstance(after, dict):
+        return f"Added {label}"
+    if entry.get("op") == "remove" and isinstance(before, dict):
+        return f"Removed {label}"
+    if isinstance(before, list) and isinstance(after, list):
+        return f"{label}: {len(before)} items → {len(after)} items"
+    return f"{label}: {value_text(before)} → {value_text(after)}"
+
+
+def undo_title(entry):
+    """What confirming an Undo will do, in the same words."""
+    label = change_label(entry)
+    before, after = change_value(entry, "before"), change_value(entry, "after")
+    lists = list_changes(before, after)
+    if lists and (bool(lists[0]) != bool(lists[1])):
+        added, removed = lists
+        return (
+            f"Undo will remove {value_text(added)} from {label}."
+            if added
+            else f"Undo will add {value_text(removed)} back to {label}."
+        )
+    if entry.get("op") == "add" and isinstance(after, dict):
+        return f"Undo will remove {label}."
+    if entry.get("op") == "remove" and isinstance(before, dict):
+        return f"Undo will add {label} back."
+    if before is None:
+        return f"Undo will clear {label}."
+    return f"Undo will set {label} back to {value_text(before)}."
+
+
+def change_time(value):
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        return ""
+    return f"{moment:%b} {moment.day}, {moment.hour % 12 or 12}:{moment:%M} {moment:%p}"
+
+
+def change_text(change, undo=False):
+    """A recorded change as a title and one dim line, with no ids or raw fields."""
+    entry = change.get("entry") or {}
+    source = entry.get("source") if isinstance(entry.get("source"), dict) else {}
+    kind = clean(source.get("kind"))
+    meta = [
+        change_time(change.get("at")),
+        target_name(entry.get("target")),
+        f"by {WRITER_NAMES.get(kind, 'the agent')}" if kind and kind != "unknown" else "",
+        "already undone" if change.get("reverted") else "",
+    ]
+    companions = len(entry.get("companions") or [])
+    text = Text(undo_title(entry) if undo else change_title(entry), style="bold")
+    text.append("\n" + " · ".join(part for part in meta if part), style="dim")
+    if companions:
+        text.append(
+            f"\nAlso updated {companions} related setting{'' if companions == 1 else 's'}.",
+            style="dim",
+        )
+    if undo:
+        text.append("\nConfirm Undo to apply it, or Cancel to keep the change.", style="dim")
+    return text
 
 
 def run_started(run):
@@ -807,7 +964,7 @@ class CareerRatApp(App):
     .run-buttons Button { margin-right: 1; }
     #native { row-span: 2; height: 1fr; border: round $primary; }
     #native:focus { border: double $accent; }
-    #request { margin: 0 1; border: none; height: 1; background: $surface; padding: 0 1; }
+    #request { margin: 0 1; border: none; height: 1; background: $surface; padding: 0 1; display: none; }
     #request:focus { background: $accent-muted; }
     #message { height: 1; padding: 0 2; color: $text-muted; }
     #agent-status { height: auto; padding: 0 2; color: $text; background: $warning-muted; display: none; }
@@ -935,7 +1092,6 @@ class CareerRatApp(App):
         yield Input(
             id="request",
             disabled=True,
-            placeholder="Requests insert text only. Press Enter in the agent to run.",
         )
         yield Static("", id="agent-status", markup=False)
         yield Static("Connecting to saved workspace…", id="message", markup=False)
@@ -1454,17 +1610,22 @@ class CareerRatApp(App):
         position = self.query_one("#changes-position", Static)
         position.display = bool(change) and not pending
         if change:
-            position.update(
-                f"Change {index + 1} of {len(changes)}"
-                + (" · already undone" if change.get("reverted") else "")
-            )
+            position.update(f"Change {index + 1} of {len(changes)}")
         text = self.query_one("#changes-text", Static)
         text.display = bool(pending or change)
-        text.update(
-            json.dumps(pending or change, indent=2, ensure_ascii=False)
-            if pending or change
-            else ""
-        )
+        if pending:
+            known = next(
+                (
+                    item
+                    for item in changes
+                    if (item["messageId"], item["index"])
+                    == (pending.get("messageId"), pending.get("index"))
+                ),
+                {},
+            )
+            text.update(change_text({**known, **pending}, undo=True))
+        else:
+            text.update(change_text(change) if change else "")
         self.query_one("#changes-empty").display = not (pending or change)
 
     def update_activity(self, view):
@@ -1506,7 +1667,7 @@ class CareerRatApp(App):
             or (
                 self.search_status_line(run)
                 if run
-                else "Click a job to inspect it. Requests wait for Enter in the native agent."
+                else "Click a job to inspect it. Requests insert text only; press Enter in the agent to run."
             )
         )
 
@@ -1682,6 +1843,11 @@ class CareerRatApp(App):
             and self.snapshot["state"].get(field) != event.value
         ):
             await self.send({"op": "view", field: event.value})
+
+    def on_input_changed(self, event):
+        # The inserted request only takes a row while there is one to read.
+        if event.input.id == "request":
+            event.input.display = bool(event.value)
 
     async def on_button_pressed(self, event):
         name = event.button.id
