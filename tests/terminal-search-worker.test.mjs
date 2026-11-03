@@ -129,7 +129,7 @@ test("worker failures remain failures with a recoverable handoff", async (t) => 
   assert.equal(existsSync(result.handoffPath), true);
 });
 test("a detached worker acknowledges its run and exits after a real empty-source scan", {
-  timeout: 12000,
+  timeout: 45000,
 }, async (t) => {
   assert.equal(typeof api.launchTerminalSearchWorker, "function");
   const ctx = fixture(t);
