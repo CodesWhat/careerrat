@@ -1,0 +1,4 @@
+GATE: REVIEW - OE-bucket: verify opportunity before applying
+FIT: med 80 - critical care, icu | caveats: none | priority: oe
+COMP: OE-bucket - opportunistic-engagement bucket; comp not gating
+ACTION: manual

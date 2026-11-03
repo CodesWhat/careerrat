@@ -459,3 +459,71 @@ test("snapshots carry summary rows and the selected job arrives as one detail ev
   await session.dispatch({ op: "select", id: "harbor" });
   assert.equal(events.filter((event) => event.type === "detail").at(-1).id, "harbor");
 });
+
+test("Search jobs starts the background worker and never writes to the agent PTY", {
+  timeout: 9000,
+}, async (t) => {
+  const childCode =
+    "process.stdin.setRawMode(true);process.stdin.resume();process.stdout.write('AGENT_READY');process.stdin.on('data',b=>process.stdout.write(' GOT:'+b.toString()));";
+  const started = [];
+  const cancelled = [];
+  const { events, session } = await fixture(
+    t,
+    { command: process.execPath, args: ["-e", childCode] },
+    {},
+    {
+      search: {
+        start: async (options) => {
+          started.push(options);
+          return { ok: true, detached: true, run: { id: "run-1", status: "running" } };
+        },
+        cancel: (options) => {
+          cancelled.push(options.id);
+          return { ok: true };
+        },
+      },
+    }
+  );
+  await session.dispatch({ op: "resize", cols: 70, rows: 18 });
+  await until(() => screen(events).includes("AGENT_READY"));
+  await session.dispatch({ op: "search-start" });
+  assert.equal(started.length, 1);
+  assert.ok(started[0].env.CAREERRAT_TUI_SESSION, "the worker is owned by this TUI session");
+  const sent = events.find((event) => event.type === "search-started");
+  assert.equal(sent.run.id, "run-1");
+  assert.equal(sent.reused, false);
+  assert.equal(
+    events.some((event) => event.type === "request"),
+    false
+  );
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(screen(events).includes("GOT:"), false);
+  await session.dispatch({ op: "search-cancel", id: "run-1" });
+  assert.deepEqual(cancelled, ["run-1"]);
+  await assert.rejects(session.dispatch({ op: "search-cancel" }), /run id/);
+});
+
+test("a search that cannot start says so instead of failing the session", async (t) => {
+  const { events, session } = await fixture(
+    t,
+    null,
+    {},
+    {
+      search: {
+        start: async () => {
+          throw new Error("No sources are configured");
+        },
+        cancel: () => ({}),
+      },
+    }
+  );
+  await session.dispatch({ op: "search-start" });
+  assert.match(
+    events.find((event) => event.type === "notice").message,
+    /Search did not start: No sources are configured/
+  );
+  assert.equal(
+    events.some((event) => event.type === "search-started"),
+    false
+  );
+});

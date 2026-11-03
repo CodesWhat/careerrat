@@ -123,7 +123,7 @@ test("refreshUpdateCacheInBackground forces Electron's detached child into Node 
 
     const pathCtx = {
       repoRoot,
-      env: { ...process.env, CAREERRAT_HOME: careerratHome },
+      env: { ...process.env, CAREERRAT_HOME: careerratHome, CAREERRAT_NO_UPDATE_CHECK: "" },
     };
     refreshUpdateCacheInBackground(pathCtx, repoRoot);
 

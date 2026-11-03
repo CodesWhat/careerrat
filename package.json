@@ -1,6 +1,6 @@
 {
   "name": "careerrat",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "private": false,
   "packageManager": "npm@12.0.2",
   "publishConfig": {
@@ -78,6 +78,7 @@
     "scripts/capture-search-sources.mjs",
     "scripts/check-install-scripts.mjs",
     "scripts/check-job-links.mjs",
+    "scripts/check-lockfile.mjs",
     "scripts/delta-sourced.mjs",
     "scripts/install-skills.mjs",
     "scripts/lib/live-search-receipts.mjs",
@@ -137,9 +138,13 @@
     "status:map": "node src/cli/status-map.mjs",
     "export": "node src/cli/export.mjs",
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
+    "fact-check": "node src/cli/fact-check.mjs",
     "check:install-scripts": "node scripts/check-install-scripts.mjs",
+    "check:lockfile": "node scripts/check-lockfile.mjs",
     "bench:search": "node scripts/eval/search-bench.mjs",
+    "eval:golden": "node scripts/eval/golden-verdicts.mjs",
     "test": "node --test --test-concurrency=2 --import ./tests/helpers/isolate-home.mjs 'tests/**/*.test.mjs'",
+    "test:website-browser": "node --test --test-concurrency=1 apps/website/browser-checks/smoke.mjs",
     "test:coverage": "node -e \"require('node:fs').mkdirSync('coverage',{recursive:true})\" && node --test --test-concurrency=2 --import ./tests/helpers/isolate-home.mjs --experimental-test-coverage --test-coverage-exclude='tests/**' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'tests/**/*.test.mjs'",
     "scan:sourced": "node scripts/scan-sourced.mjs",
     "delta:sourced": "node scripts/delta-sourced.mjs",
@@ -176,7 +181,7 @@
     "yaml": "2.9.0"
   },
   "allowScripts": {
-    "node-pty@1.1.0": true,
+    "@homebridge/node-pty-prebuilt-multiarch@0.15.0": true,
     "electron-winstaller@5.4.0": true,
     "fsevents@2.3.2": true,
     "fsevents@2.3.3": true,
@@ -195,7 +200,7 @@
     "htmlparser2": "^12.0.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
-    "node-pty": "1.1.0",
+    "@homebridge/node-pty-prebuilt-multiarch": "0.15.0",
     "playwright": "1.62.1",
     "sanitize-html": "^2.17.4",
     "string-width": "8.3.0",

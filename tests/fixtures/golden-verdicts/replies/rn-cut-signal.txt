@@ -1,0 +1,4 @@
+GATE: CUT - cut signal(s) found in JD: mandatory overtime
+FIT: med 75 - critical care, ventilator, icu | caveats: mandatory overtime | priority: primary
+COMP: clear - band $90,000–$100,000 clears floor $82,000
+ACTION: cut

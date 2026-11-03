@@ -1,0 +1,5 @@
+GATE: REVIEW - comp below floor: band max $46,000 < floor $58,000
+FIT: med 80 - algebra, geometry | caveats: none | priority: primary
+COMP: below-floor - band max $46,000 < floor $58,000
+COMP ANCHOR: $68,000 - your target base: JD band is below your floor, so anchor up or pass
+ACTION: hold

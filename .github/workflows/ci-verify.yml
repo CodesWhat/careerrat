@@ -1,6 +1,6 @@
 name: ci
 
-# Eight jobs. Every job is declared as a required context in
+# Nine jobs. Every job is declared as a required context in
 # scripts/protect-main.sh so deterministic product builds and real-browser
 # application preparation fail closed with the core test gates.
 #
@@ -57,7 +57,7 @@ jobs:
         with:
           node-version: "^24.22.1"
       - name: Structure guards (chat-first shell, CSS foundation, YAML, and release versions)
-        run: node --test tests/static-dashboard-retirement.test.mjs tests/chat-first-foundation-style.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs
+        run: node --test tests/static-dashboard-retirement.test.mjs tests/chat-first-foundation-style.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs tests/check-lockfile.test.mjs
 
   # Full suite (`npm test`, i.e. `node --test 'tests/**/*.test.mjs'`) — the real gate,
   # not just the structure-guards subset. A handful of integration tests self-skip
@@ -343,6 +343,88 @@ jobs:
         run: npm rebuild --ignore-scripts
       - name: Build the marketing site and docs (apps/website, apps/docs)
         run: npm run build --workspace apps/website
+
+  # Renders the built marketing site and the docs export it embeds under /docs
+  # in real Chromium, WebKit and Firefox at a desktop and a phone width. Every
+  # page must load with no console errors or failed requests, the nav and CTAs
+  # must lead to the install docs, and every internal link and anchor must
+  # resolve. website-build above only proves the build exits 0; this proves the
+  # output renders. Source: apps/website/browser-checks/smoke.mjs (CR117).
+  website-browser-checks:
+    name: website-browser-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Harden the runner (audit browser and system dependency downloads)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "^24.22.1"
+      - name: Activate the repository-pinned npm release
+        run: |
+          set -euo pipefail
+          corepack enable npm
+          EXPECTED_NPM="$(node -p "require('./package.json').packageManager")"
+          if ! printf '%s' "$EXPECTED_NPM" | grep -Eq '^npm@[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::packageManager must pin an exact npm version, found '$EXPECTED_NPM'."
+            exit 1
+          fi
+          actual_npm="npm@$(npm --version)"
+          if [ "$actual_npm" != "$EXPECTED_NPM" ]; then
+            echo "::error::Corepack activated $actual_npm instead of $EXPECTED_NPM."
+            exit 1
+          fi
+          echo "TRUSTED_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - name: Install dependencies (scripts held back until allowScripts is checked)
+        run: npm ci --ignore-scripts --no-bin-links
+      - name: Check allowScripts coverage (root package.json vs package-lock.json)
+        run: '"$TRUSTED_NODE" scripts/check-install-scripts.mjs'
+      # npm rebuild has no root lifecycle phase (it skips prepublish,
+      # preprepare, prepare, and postprepare) and only runs `prepare` for
+      # Link nodes, so it never replays a regular Git dependency's approved
+      # prepare hook either. `npm ci --strict-allow-scripts` is the pinned
+      # npm's real strict install path instead: a second full `npm ci` that
+      # replays every lifecycle phase a normal `npm ci` runs, and turns any
+      # unreviewed install script into a hard failure rather than a warning
+      # (npm 12.0.2 docs/content/commands/npm-ci.md, `strict-allow-scripts`:
+      # "If true, turn the install-script policy from a warning into a hard
+      # error: any dependency with install scripts that is not covered by
+      # allowScripts will fail the install instead of being blocked with a
+      # warning"). `--no-bin-links` stays on through this step too (Codex
+      # review /tmp/codex-305-r7.md, finding 1): without it, this reinstall
+      # would recreate every dependency's bin symlinks before its own
+      # approved script runs, so a scriptless, unreviewed package that ships
+      # a `bin.node` entry could sit ahead of the real interpreter on PATH
+      # for an approved postinstall that invokes bare `node`.
+      - name: Run approved install scripts (fails closed on anything unreviewed)
+        run: npm ci --strict-allow-scripts --no-dangerously-allow-all-scripts --no-ignore-scripts --no-bin-links
+      # Bin links only, no scripts: with the strict install above still
+      # `--no-bin-links`, nothing on PATH points at a dependency's own bin
+      # until this step runs. `npm rebuild` is npm's own documented tool for
+      # exactly this split (npm 12.0.2 docs/content/commands/npm-rebuild.md,
+      # Description: "Installing with --ignore-scripts and --no-bin-links,
+      # to explicitly choose which packages to build and/or link bins.").
+      # It operates on the tree already on disk rather than reinstalling, so
+      # it can't discard anything the approved postinstall above just
+      # wrote, and passing --ignore-scripts here is verified against
+      # @npmcli/arborist's rebuild builder (lib/arborist/rebuild.js#build):
+      # every lifecycle queue (preinstall/install/postinstall/prepare) is
+      # gated behind `if (!this.options.ignoreScripts)`, while bin linking
+      # runs unconditionally when bin-links is enabled, so this step cannot
+      # re-run a script, reviewed or not.
+      - name: Materialize dependency bin links (scripts already ran; this only links)
+        run: npm rebuild --ignore-scripts
+      - name: Install the real Chromium, WebKit and Firefox test browsers
+        run: npx playwright install --with-deps chromium webkit firefox
+      - name: Build the marketing site and docs (apps/website, apps/docs)
+        run: npm run build --workspace apps/website
+      - name: Render the built site in all three browsers at desktop and phone widths
+        run: npm run test:website-browser
 
   # Builds the real Windows installer on every PR/push and drives it through
   # silent install, packaged Electron mount, PDF export, bundled Playwright

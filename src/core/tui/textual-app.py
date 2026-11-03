@@ -10,6 +10,7 @@ import shutil
 import signal
 import sys
 import time
+from datetime import datetime
 
 from rich.text import Text
 from textual import events
@@ -72,6 +73,34 @@ FUNCTION_KEYS = {
 }
 # xterm's modifier parameter: 1 + shift(1) + alt(2) + ctrl(4).
 MODIFIER_BITS = {"shift": 1, "alt": 2, "meta": 2, "ctrl": 4}
+
+
+def keep_alt_enter():
+    """Report ESC + CR as alt+enter.
+
+    Textual's parser drops the ESC when the next key has a multi-character name,
+    so a terminal that sends Shift+Enter as ESC CR (a Ghostty keybind, or any
+    meta-sends-escape terminal) delivered a plain Enter, which submits.
+    """
+    try:
+        from textual._xterm_parser import XTermParser
+    except ImportError:
+        return
+    original = XTermParser._sequence_to_key_events
+    if getattr(original, "keeps_alt_enter", False):
+        return
+
+    def sequence_to_key_events(self, sequence, alt=False):
+        if alt and sequence == "\r":
+            yield events.Key("alt+enter", None)
+            return
+        yield from original(self, sequence, alt)
+
+    sequence_to_key_events.keeps_alt_enter = True
+    XTermParser._sequence_to_key_events = sequence_to_key_events
+
+
+keep_alt_enter()
 
 
 def key_bytes(key, character=None):
@@ -142,6 +171,7 @@ def format_messages(messages):
     )
 
 
+RUN_LABELS = {"manual-search": "Search", "first-search": "First search"}
 JOB_COLUMNS = ["Company", "Role", "Status", "Fit", "Pay"]
 # Columns that keep a set width; the rest share what is left.
 FIXED_WIDTHS = {"Status": 12, "Fit": 10, "Pay": 14}
@@ -283,6 +313,186 @@ def suggested_action(row):
         for value in (gate.get("gate"), row.get("fitBucket"), evaluation.get("gate"))
     }
     return "" if action.lower() in verdicts else action
+
+
+TARGET_NAMES = {
+    "evidence": "Evidence",
+    "learning": "Learning",
+    "rows:rerank": "Job ranking",
+}
+# Who made a recorded change, from the source the write logged.
+WRITER_NAMES = {
+    "settings.apply": "you",
+    "screening.answer-confirm": "you",
+    "knowledge.revert": "an undo",
+}
+VALUE_LIMIT = 48
+
+
+def target_name(target):
+    target = clean(target)
+    if target in TARGET_NAMES:
+        return TARGET_NAMES[target]
+    tail = target.split(":", 1)[-1].replace("_", " ").strip()
+    return tail[:1].upper() + tail[1:] if tail else ""
+
+
+def value_text(value):
+    """A saved value in a few readable words; long ones are clipped."""
+    if value is None:
+        return "unset"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, list):
+        text = ", ".join(value_text(item) for item in value)
+    elif isinstance(value, dict):
+        text = f"{len(value)} field{'' if len(value) == 1 else 's'}"
+    else:
+        text = " ".join(clean(value).split())
+    return text if len(text) <= VALUE_LIMIT else text[: VALUE_LIMIT - 1].rstrip() + "…"
+
+
+def change_label(entry):
+    label = clean(entry.get("label"))
+    if label:
+        return label
+    path = clean(entry.get("path")).split(".")[-1].replace("_", " ")
+    return (path[:1].upper() + path[1:]) if path else clean(entry.get("id")) or "This value"
+
+
+def change_value(entry, key):
+    return None if entry.get(f"{key}Absent") else entry.get(key)
+
+
+def list_changes(before, after):
+    if isinstance(before, list) and isinstance(after, list):
+        return (
+            [item for item in after if item not in before],
+            [item for item in before if item not in after],
+        )
+    return None
+
+
+def change_title(entry):
+    """One line saying what a recorded change did."""
+    label = change_label(entry)
+    before, after = change_value(entry, "before"), change_value(entry, "after")
+    lists = list_changes(before, after)
+    if lists and (bool(lists[0]) != bool(lists[1])):
+        added, removed = lists
+        return f"Added {value_text(added)} to {label}" if added else f"Removed {value_text(removed)} from {label}"
+    if entry.get("op") == "add" and isinstance(after, dict):
+        return f"Added {label}"
+    if entry.get("op") == "remove" and isinstance(before, dict):
+        return f"Removed {label}"
+    if isinstance(before, list) and isinstance(after, list):
+        return f"{label}: {len(before)} items → {len(after)} items"
+    return f"{label}: {value_text(before)} → {value_text(after)}"
+
+
+def undo_title(entry):
+    """What confirming an Undo will do, in the same words."""
+    label = change_label(entry)
+    before, after = change_value(entry, "before"), change_value(entry, "after")
+    lists = list_changes(before, after)
+    if lists and (bool(lists[0]) != bool(lists[1])):
+        added, removed = lists
+        return (
+            f"Undo will remove {value_text(added)} from {label}."
+            if added
+            else f"Undo will add {value_text(removed)} back to {label}."
+        )
+    if entry.get("op") == "add" and isinstance(after, dict):
+        return f"Undo will remove {label}."
+    if entry.get("op") == "remove" and isinstance(before, dict):
+        return f"Undo will add {label} back."
+    if before is None:
+        return f"Undo will clear {label}."
+    return f"Undo will set {label} back to {value_text(before)}."
+
+
+def change_time(value):
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        return ""
+    return f"{moment:%b} {moment.day}, {moment.hour % 12 or 12}:{moment:%M} {moment:%p}"
+
+
+def change_text(change, undo=False):
+    """A recorded change as a title and one dim line, with no ids or raw fields."""
+    entry = change.get("entry") or {}
+    source = entry.get("source") if isinstance(entry.get("source"), dict) else {}
+    kind = clean(source.get("kind"))
+    meta = [
+        change_time(change.get("at")),
+        target_name(entry.get("target")),
+        f"by {WRITER_NAMES.get(kind, 'the agent')}" if kind and kind != "unknown" else "",
+        "already undone" if change.get("reverted") else "",
+    ]
+    companions = len(entry.get("companions") or [])
+    text = Text(undo_title(entry) if undo else change_title(entry), style="bold")
+    text.append("\n" + " · ".join(part for part in meta if part), style="dim")
+    if companions:
+        text.append(
+            f"\nAlso updated {companions} related setting{'' if companions == 1 else 's'}.",
+            style="dim",
+        )
+    if undo:
+        text.append("\nConfirm Undo to apply it, or Cancel to keep the change.", style="dim")
+    return text
+
+
+def run_started(run):
+    value = run.get("started_at") or run.get("startedAt")
+    if isinstance(value, (int, float)):
+        value = time.strftime("%Y-%m-%d %H:%M", time.localtime(value / 1000 if value > 1e11 else value))
+    return value.replace("T", " ")[:16] if isinstance(value, str) else ""
+
+
+def run_text(run):
+    """Two lines for an Activity row: what it is and where it stands, then the detail."""
+    progress = run.get("progress") or {}
+    health = run.get("health") or {}
+    label = RUN_LABELS.get(run.get("purpose"), "Background run")
+    status = run.get("status") or "unknown"
+    head = f"{label} · {status}"
+    if status == "running":
+        head += (
+            f" · {progress.get('completedSources') or 0}/{progress.get('totalSources') or '?'} sources"
+            f" · {progress.get('foundCount') or 0} found"
+        )
+    else:
+        head += f" · {(run.get('summary') or {}).get('new') or 0} new"
+    started = run_started(run)
+    detail = " · ".join(
+        part
+        for part in (
+            f"Started {started}" if started else "",
+            health.get("message") if status != "running" else "",
+            (run.get("error") or {}).get("message") if isinstance(run.get("error"), dict) else "",
+        )
+        if part
+    )
+    return Text(head, style="bold") + (Text("\n" + detail, style="dim") if detail else Text(""))
+
+
+def search_finished_line(run):
+    """The one status line when a search stops."""
+    error = run.get("error") if isinstance(run.get("error"), dict) else {}
+    if error.get("code") == "SEARCH_CANCELLED":
+        return "Search cancelled. See Activity."
+    if run.get("status") != "completed":
+        return f"Search {run.get('status')}: {error.get('message') or 'see Activity for the reason'}. See Activity."
+    new = (run.get("summary") or {}).get("new") or 0
+    failed = (run.get("health") or {}).get("failed") or 0
+    line = f"Search finished: {new} new job{'' if new == 1 else 's'}"
+    if failed:
+        line += f", {failed} source{'' if failed == 1 else 's'} failed"
+    line += ". See Activity."
+    if new:
+        line += " Review new matches there to ask the agent."
+    return line
 
 
 def job_detail_text(job):
@@ -473,6 +683,19 @@ class NativePane(Widget):
         self.app.schedule_agent_resize()
 
 
+RUN_SLOTS = 6
+
+
+class RunButton(Button):
+    """A button in one Activity row; the row's run id is filled in on each snapshot."""
+
+    def __init__(self, label, action, slot, **kwargs):
+        super().__init__(label, compact=True, **kwargs)
+        self.action_name = action
+        self.slot = slot
+        self.run_id = None
+
+
 class JobsTable(DataTable):
     def on_resize(self, event):
         self.app.render_jobs()
@@ -480,7 +703,9 @@ class JobsTable(DataTable):
 
 class RemoveFile(Button):
     def __init__(self, index, name):
-        super().__init__("Remove", id=f"remove-file-{index}", classes="remove-file")
+        super().__init__(
+            "Remove", id=f"remove-file-{index}", classes="remove-file", compact=True
+        )
         self.index = index
         self.tooltip = f"Remove {name}"
 
@@ -493,13 +718,12 @@ class ContextCapture(ModalScreen):
     CSS = """
     ContextCapture { align: center middle; background: $background 70%; }
     #capture-dialog { width: 85%; height: 70%; padding: 1 2; border: round $accent; background: $surface; }
-    #attachments { height: auto; max-height: 12; overflow-y: auto; }
-    .attachment { height: 3; }
-    .attachment Static { width: 1fr; padding: 1 1; }
-    .remove-file { min-width: 10; }
+    #attachments { height: auto; max-height: 12; overflow-y: auto; margin: 1 0; }
+    .attachment { height: 1; }
+    .attachment Static { width: 1fr; padding: 0 1 0 0; text-overflow: ellipsis; text-wrap: nowrap; }
     #context-text { height: 1fr; margin: 1 0; }
     #capture-error { height: auto; color: $error; }
-    #capture-buttons { height: 3; }
+    #capture-buttons { height: 1; }
     """
 
     def __init__(self, prefill=""):
@@ -510,7 +734,7 @@ class ContextCapture(ModalScreen):
         self.request_id = None
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="capture-dialog"):
+        with Vertical(id="capture-dialog", classes="dialog"):
             yield Static(
                 "Add context: paste a JD, transcript, notes or a local file path.\nCareerRat saves a private copy before asking the agent to use it.",
                 markup=False,
@@ -519,8 +743,10 @@ class ContextCapture(ModalScreen):
             yield TextArea(id="context-text")
             yield Static("", id="capture-error", markup=False)
             with Horizontal(id="capture-buttons"):
-                yield Button("Save context", id="save-context", variant="primary")
-                yield Button("Cancel", id="cancel-context")
+                yield Button(
+                    "Save context", id="save-context", variant="primary", compact=True
+                )
+                yield Button("Cancel", id="cancel-context", compact=True)
 
     async def on_mount(self):
         self.query_one("#attachments").display = False
@@ -607,6 +833,7 @@ class JobDocument(ModalScreen):
     JobDocument { align: center middle; background: $background 70%; }
     #document-dialog { width: 90%; height: 90%; padding: 1 2; border: round $accent; background: $surface; }
     #jd-viewer { height: 1fr; margin: 1 0; }
+    #document-buttons { height: 1; }
     """
 
     def __init__(self, document):
@@ -615,7 +842,7 @@ class JobDocument(ModalScreen):
 
     def compose(self) -> ComposeResult:
         artifact = self.document["artifact"]
-        with Vertical(id="document-dialog"):
+        with Vertical(id="document-dialog", classes="dialog"):
             yield Static(
                 f"{self.document.get('company') or ''} · {self.document.get('role') or ''}\nSaved JD · {artifact['completeness']}",
                 markup=False,
@@ -626,7 +853,8 @@ class JobDocument(ModalScreen):
                 open_links=False,
                 id="jd-viewer",
             )
-            yield Button("Close", id="close-document")
+            with Horizontal(id="document-buttons"):
+                yield Button("Close", id="close-document", compact=True)
 
     def action_close(self):
         self.dismiss()
@@ -643,7 +871,7 @@ class RequestText(ModalScreen):
     RequestText { align: center middle; background: $background 70%; }
     #request-dialog { width: 85%; height: 60%; padding: 1 2; border: round $accent; background: $surface; }
     #request-body { height: 1fr; margin: 1 0; }
-    #request-buttons { height: 3; }
+    #request-buttons { height: 1; }
     """
     BINDINGS = [Binding("escape", "close", "Close")]
 
@@ -653,15 +881,17 @@ class RequestText(ModalScreen):
         self.reason = reason
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="request-dialog"):
+        with Vertical(id="request-dialog", classes="dialog"):
             yield Static(
                 f"{self.reason}\nThis is the request CareerRat would have sent. Copy it into your own agent to run it.",
                 markup=False,
             )
             yield TextArea(self.text, read_only=True, id="request-body")
             with Horizontal(id="request-buttons"):
-                yield Button("Copy request", id="copy-request", variant="primary")
-                yield Button("Close", id="close-request")
+                yield Button(
+                    "Copy request", id="copy-request", variant="primary", compact=True
+                )
+                yield Button("Close", id="close-request", compact=True)
 
     def on_mount(self):
         self.query_one("#request-body", TextArea).focus()
@@ -703,10 +933,12 @@ class CareerRatApp(App):
     #actions { width: 1fr; }
     #filters { width: 1fr; align-horizontal: right; }
     #toolbar.wide #filters { width: auto; }
-    #toolbar Button { min-width: 0; margin-right: 1; background: $surface; color: $foreground; text-style: none; }
-    #toolbar Button.-primary { background: $primary-muted; color: $text; }
-    #toolbar Button:hover { background: $surface-lighten-2; }
-    #toolbar Button:focus { background: $accent-muted; color: $text; text-style: bold; }
+    #toolbar Button, #inspector Button, .dialog Button { min-width: 0; margin-right: 1; background: $surface; color: $foreground; text-style: none; }
+    #toolbar Button.-primary, #inspector Button.-primary, .dialog Button.-primary { background: $primary-muted; color: $text; }
+    #toolbar Button:hover, #inspector Button:hover, .dialog Button:hover { background: $surface-lighten-2; }
+    #toolbar Button:focus, #inspector Button:focus, .dialog Button:focus { background: $accent-muted; color: $text; text-style: bold; }
+    #toolbar Button:disabled, #inspector Button:disabled, .dialog Button:disabled { color: $text-disabled; background: $surface; text-style: none; }
+    #toolbar .group-label { color: $text-muted; margin-right: 1; }
     #toolbar Label { color: $text-muted; margin-right: 1; height: 1; }
     #toolbar Select { margin-right: 2; height: 1; }
     #toolbar Select > SelectCurrent { background: $surface; }
@@ -721,10 +953,18 @@ class CareerRatApp(App):
     #inspector { height: 1fr; border: round $secondary; }
     TabPane { padding: 0 1; overflow-y: auto; }
     #open-jd { margin-bottom: 1; }
-    .change-controls { height: 3; }
+    .empty { width: 100%; color: $text-muted; text-align: center; margin-top: 1; }
+    #change-controls { height: 1; margin-bottom: 1; }
+    #change-controls Button { margin-right: 1; }
+    #changes-position { color: $text-muted; height: auto; }
+    #activity-empty { margin-top: 1; }
+    .run { height: auto; margin-bottom: 1; display: none; }
+    .run-text { height: auto; }
+    .run-buttons { height: 1; }
+    .run-buttons Button { margin-right: 1; }
     #native { row-span: 2; height: 1fr; border: round $primary; }
     #native:focus { border: double $accent; }
-    #request { margin: 0 1; border: none; height: 1; background: $surface; padding: 0 1; }
+    #request { margin: 0 1; border: none; height: 1; background: $surface; padding: 0 1; display: none; }
     #request:focus { background: $accent-muted; }
     #message { height: 1; padding: 0 2; color: $text-muted; }
     #agent-status { height: auto; padding: 0 2; color: $text; background: $warning-muted; display: none; }
@@ -750,6 +990,7 @@ class CareerRatApp(App):
         self.stopping = False
         self.updating = False
         self.job_ids = []
+        self.run_status = {}
         self.table_signature = None
         self.rendered_ids = []
         self.rendered_rows = []
@@ -767,6 +1008,7 @@ class CareerRatApp(App):
         with Horizontal(id="toolbar"):
             with Horizontal(id="actions"):
                 yield Button("Search jobs", id="search", variant="primary", compact=True)
+                yield Label("Agent:", classes="group-label")
                 yield Button("Review matches", id="review", compact=True)
                 yield Button("Apply selected", id="apply", compact=True)
                 yield Button("Add context", id="context", compact=True)
@@ -818,18 +1060,38 @@ class CareerRatApp(App):
                 with TabPane("Workspace", id="workspace-history"):
                     yield Static(id="workspace-history-text", markup=False)
                 with TabPane("Changes", id="changes"):
-                    with Horizontal(classes="change-controls"):
-                        yield Button("Previous", id="previous-change")
-                        yield Button("Next", id="next-change")
-                        yield Button("Preview Undo", id="preview-undo")
-                    with Horizontal(classes="change-controls"):
-                        yield Button("Confirm Undo", id="confirm-undo", disabled=True)
-                        yield Button("Cancel", id="cancel-undo")
+                    with Horizontal(id="change-controls"):
+                        yield Button("Previous", id="previous-change", compact=True)
+                        yield Button("Next", id="next-change", compact=True)
+                        yield Button("Preview Undo", id="preview-undo", compact=True)
+                        yield Button("Confirm Undo", id="confirm-undo", compact=True)
+                        yield Button("Cancel", id="cancel-undo", compact=True)
+                    yield Static(id="changes-position", markup=False)
                     yield Static(id="changes-text", markup=False)
+                    yield Static(
+                        "No recorded changes.\nChanges you or the agent make show up here, with Undo.",
+                        id="changes-empty",
+                        classes="empty",
+                        markup=False,
+                    )
+                with TabPane("Activity", id="activity"):
+                    yield Static(
+                        "No background work yet.\nSearch jobs runs here, and you can cancel it from this tab.",
+                        id="activity-empty",
+                        classes="empty",
+                        markup=False,
+                    )
+                    for slot in range(RUN_SLOTS):
+                        with Vertical(id=f"run-{slot}", classes="run"):
+                            yield Static(id=f"run-{slot}-text", classes="run-text", markup=False)
+                            with Horizontal(classes="run-buttons"):
+                                yield RunButton("Cancel", "cancel", slot, id=f"cancel-run-{slot}")
+                                yield RunButton(
+                                    "Review new matches", "review", slot, id=f"review-run-{slot}"
+                                )
         yield Input(
             id="request",
             disabled=True,
-            placeholder="Requests insert text only. Press Enter in the agent to run.",
         )
         yield Static("", id="agent-status", markup=False)
         yield Static("Connecting to saved workspace…", id="message", markup=False)
@@ -846,6 +1108,16 @@ class CareerRatApp(App):
                 loop.add_signal_handler(name, self.exit)
         self.write_terminal("\x1b[22;0t\x1b]2;CareerRat\x07")
         self.render_jobs()
+        for button_id, tip in {
+            "search": "Starts the background search of your configured sources. No agent involved; progress shows in Activity.",
+            "review": "Asks the agent to evaluate the first active jobs in this view. Text is inserted, you press Enter in the agent.",
+            "apply": "Asks the agent to apply to the selected job. Text is inserted, you press Enter in the agent.",
+            "context": "Save a JD, transcript, notes or file, then ask the agent to use it.",
+            "refresh": "Read the saved workspace again.",
+        }.items():
+            self.query_one(f"#{button_id}", Button).tooltip = tip
+        self.set_interval(2.0, self.poll_runs)
+        self.update_changes({}, {})
         for select_id, options in {
             "status": [("Active", "active"), ("All statuses", "all")],
             "currency": [("USD", "USD")],
@@ -1109,6 +1381,14 @@ class CareerRatApp(App):
                 self.query_one(NativePane).focus()
             else:
                 self.push_screen(RequestText(value["text"], reason))
+        elif kind == "search-started":
+            self.query_one("#inspector", TabbedContent).active = "activity"
+            self.show_message(
+                "A search is already running. See Activity."
+                if value.get("reused")
+                else "Search started in the background. Progress is in Activity.",
+                hold=HOLD_SECONDS,
+            )
         elif kind == "document":
             self.push_screen(JobDocument(value))
         elif kind == "intake-preview":
@@ -1297,32 +1577,97 @@ class CareerRatApp(App):
         selected = next((job for job in jobs if job["id"] == self.selected_id), None)
         self.show_selected(selected, view)
         self.update_workspace_history(view)
+        self.update_activity(view)
         self.update_status(view, state)
 
-    def update_status(self, view, state):
+    def set_text(self, widget_id, text, empty=False):
+        """Show text in a pane; an empty-state message reads as one dim, centered line."""
+        widget = self.query_one(f"#{widget_id}", Static)
+        widget.update(text)
+        widget.set_class(empty, "empty")
+
+    def update_changes(self, view, state):
         changes = view.get("changes", [])
+        ref = state.get("changeRef")
         change = next(
-            (
-                item
-                for item in changes
-                if f"{item['messageId']}:{item['index']}" == state.get("changeRef")
-            ),
-            None,
+            (item for item in changes if f"{item['messageId']}:{item['index']}" == ref),
+            changes[0] if changes else None,
         )
         pending = state.get("pendingUndo")
-        self.query_one("#changes-text", Static).update(
-            json.dumps(pending or change, indent=2, ensure_ascii=False)
-            if pending or change
-            else "No recorded changes."
-        )
-        self.query_one("#confirm-undo", Button).disabled = not bool(pending)
+        index = next((i for i, item in enumerate(changes) if item is change), -1)
+        browsing = bool(changes) and not pending
+        self.query_one("#change-controls").display = bool(changes) or bool(pending)
+        for name, shown, off in (
+            ("previous-change", browsing, index <= 0),
+            ("next-change", browsing, index >= len(changes) - 1),
+            ("preview-undo", browsing, bool(change and change.get("reverted"))),
+            ("confirm-undo", bool(pending), False),
+            ("cancel-undo", bool(pending), False),
+        ):
+            button = self.query_one(f"#{name}", Button)
+            button.display = shown
+            button.disabled = off
+        position = self.query_one("#changes-position", Static)
+        position.display = bool(change) and not pending
+        if change:
+            position.update(f"Change {index + 1} of {len(changes)}")
+        text = self.query_one("#changes-text", Static)
+        text.display = bool(pending or change)
+        if pending:
+            known = next(
+                (
+                    item
+                    for item in changes
+                    if (item["messageId"], item["index"])
+                    == (pending.get("messageId"), pending.get("index"))
+                ),
+                {},
+            )
+            text.update(change_text({**known, **pending}, undo=True))
+        else:
+            text.update(change_text(change) if change else "")
+        self.query_one("#changes-empty").display = not (pending or change)
+
+    def update_activity(self, view):
+        runs = view.get("searchRuns") or []
+        self.query_one("#activity-empty").display = not runs
+        for slot in range(RUN_SLOTS):
+            run = runs[slot] if slot < len(runs) else None
+            self.query_one(f"#run-{slot}").display = run is not None
+            if run is None:
+                continue
+            running = run.get("status") == "running"
+            new = (run.get("summary") or {}).get("new") or 0
+            self.query_one(f"#run-{slot}-text", Static).update(run_text(run))
+            for name, shown in (
+                ("cancel", running),
+                ("review", run.get("status") == "completed" and new > 0),
+            ):
+                button = self.query_one(f"#{name}-run-{slot}", RunButton)
+                button.display = shown
+                button.run_id = run["id"]
+        statuses = {run["id"]: run.get("status") for run in runs}
+        for run in runs:
+            if self.run_status.get(run["id"]) == "running" and run.get("status") != "running":
+                self.show_message(search_finished_line(run), hold=HOLD_SECONDS)
+        self.run_status = statuses
+        tab = self.query_one("#inspector", TabbedContent).get_tab("activity")
+        tab.label = "Activity ●" if "running" in statuses.values() else "Activity"
+
+    async def poll_runs(self):
+        # A running search writes its own progress; ask for it while one runs.
+        if "running" in self.run_status.values() and not self.stopping:
+            await self.send({"op": "refresh"})
+
+    def update_status(self, view, state):
+        self.update_changes(view, state)
         run = next(iter(view.get("searchRuns", [])), None)
         self.show_status(
             state.get("message")
             or (
                 self.search_status_line(run)
                 if run
-                else "Click a job to inspect it. Requests wait for Enter in the native agent."
+                else "Click a job to inspect it. Requests insert text only; press Enter in the agent to run."
             )
         )
 
@@ -1372,7 +1717,7 @@ class CareerRatApp(App):
         text = "\n".join(lines)
         if messages:
             text += "\n\n" + format_messages(sorted_messages(messages))
-        self.query_one("#workspace-history-text", Static).update(text)
+        self.set_text("workspace-history-text", text, empty=not messages)
 
     def show_selected(self, summary, view):
         """Show the selected job from its saved detail, or say it is loading."""
@@ -1380,7 +1725,7 @@ class CareerRatApp(App):
             self.query_one("#requirements", DataTable).display = False
             self.query_one("#open-jd", Button).display = False
             for name in ("details", "history-text", "assessment-summary"):
-                self.query_one(f"#{name}", Static).update("Loading…")
+                self.set_text(name, "Loading…", empty=True)
             return
         self.update_details(self.detail["job"] if summary else None, view)
 
@@ -1392,21 +1737,24 @@ class CareerRatApp(App):
             jd_button.display = False
             report.display = False
             total = (view or {}).get("total", 0)
-            self.query_one("#details", Static).update(
+            self.set_text(
+                "details",
                 f"No active jobs. Pick All statuses in the status list to see all {total} saved jobs."
                 if total and (self.snapshot or {}).get("state", {}).get("stage") == "active"
-                else "No jobs in this view."
+                else "No jobs in this view.",
+                empty=True,
             )
-            self.query_one("#history-text", Static).update("No selected job.")
-            self.query_one("#assessment-summary", Static).update("No selected job.")
+            self.set_text("history-text", "No selected job.", empty=True)
+            self.set_text("assessment-summary", "No selected job.", empty=True)
             return
         row = selected["record"]
         evaluation = row.get("evaluation") or {}
         requirements = evaluation.get("requirements") or []
         report.display = bool(requirements)
         jd_button.display = has_saved_jd(row)
-        self.query_one("#assessment-summary", Static).update(
-            fit_report_text(row, selected.get("fit") or {}, bool(requirements))
+        self.set_text(
+            "assessment-summary",
+            fit_report_text(row, selected.get("fit") or {}, bool(requirements)),
         )
         for item in requirements:
             item = item or {}
@@ -1427,13 +1775,13 @@ class CareerRatApp(App):
                 ),
                 height=None,
             )
-        self.query_one("#details", Static).update(job_detail_text(selected))
+        self.set_text("details", job_detail_text(selected))
         messages = sorted_messages(
             ((selected.get("thread") or {}).get("messages") or [])
             + (selected.get("contextMessages") or [])
         )
         calls = row.get("conversations") or []
-        self.query_one("#history-text", Static).update(
+        history = (
             format_messages(messages)
             + (
                 "\n\nCalls and interviews\n"
@@ -1459,7 +1807,9 @@ class CareerRatApp(App):
                 if calls
                 else ""
             )
-            or "No saved conversation yet."
+        )
+        self.set_text(
+            "history-text", history or "No saved conversation yet.", empty=not history
         )
 
     async def on_data_table_row_highlighted(self, event):
@@ -1494,15 +1844,27 @@ class CareerRatApp(App):
         ):
             await self.send({"op": "view", field: event.value})
 
+    def on_input_changed(self, event):
+        # The inserted request only takes a row while there is one to read.
+        if event.input.id == "request":
+            event.input.display = bool(event.value)
+
     async def on_button_pressed(self, event):
         name = event.button.id
-        if name == "context":
+        if isinstance(event.button, RunButton):
+            if event.button.action_name == "cancel" and event.button.run_id:
+                await self.send({"op": "search-cancel", "id": event.button.run_id})
+            elif event.button.action_name == "review":
+                await self.send({"op": "request", "action": "review"})
+        elif name == "search":
+            await self.send({"op": "search-start"})
+        elif name == "context":
             self.push_screen(ContextCapture())
         elif name == "open-jd" and self.selected_id:
             await self.send({"op": "document", "id": self.selected_id})
         elif name == "refresh":
             await self.send({"op": "refresh"})
-        elif name in ("search", "review", "apply"):
+        elif name in ("review", "apply"):
             await self.send({"op": "request", "action": name})
         elif name in (
             "previous-change",
@@ -1543,7 +1905,10 @@ class CareerRatApp(App):
             yield SystemCommand(label, help_text, callback)
 
     async def action_request(self, name):
-        await self.send({"op": "request", "action": name})
+        if name == "search":
+            await self.send({"op": "search-start"})
+        else:
+            await self.send({"op": "request", "action": name})
 
     def action_add_context(self):
         self.push_screen(ContextCapture())

@@ -1,0 +1,52 @@
+{
+  "profile": {
+    "candidate": {
+      "full_name": "Maya Okafor",
+      "email": "maya@example.test"
+    },
+    "compensation": {
+      "currency": "USD",
+      "minimum_base": 82000,
+      "target_base": 95000
+    },
+    "location": {
+      "home": "Columbus, OH",
+      "remote": false,
+      "hybrid": true,
+      "onsite": true,
+      "relocation": []
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "ICU",
+        "priority": "primary",
+        "titles": ["ICU Registered Nurse", "Critical Care Nurse"]
+      },
+      {
+        "name": "Step-down",
+        "priority": "secondary",
+        "titles": ["Progressive Care Nurse", "Step-Down Nurse"]
+      },
+      {
+        "name": "Informatics",
+        "priority": "oe",
+        "titles": ["Nursing Informatics Specialist"]
+      }
+    ],
+    "keep_signals": ["critical care", "ventilator", "icu", "night differential"],
+    "cut_signals": [
+      "mandatory overtime",
+      "agency travel only",
+      "float to any unit without orientation"
+    ],
+    "excluded_companies": ["Lakeshore Staffing Partners"],
+    "degree_policy": ""
+  },
+  "honesty": {}
+}

@@ -59,6 +59,23 @@
         }
       }
     },
+    "ai_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Controls the read-only AI review pass that runs once on a generated document. Cover letters and application answers are reviewed by default; every accepted edit must still pass the fact check, and a failed review keeps the draft unchanged and notes why. Résumés are never reviewed. Absent = the defaults below.",
+      "properties": {
+        "cover_letter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the review pass on generated cover letters. false = keep the first draft."
+        },
+        "answers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the review pass on generated application answers. false = keep the first draft."
+        }
+      }
+    },
     "comp_estimate": {
       "type": "object",
       "additionalProperties": false,

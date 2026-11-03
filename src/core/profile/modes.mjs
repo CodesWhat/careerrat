@@ -96,6 +96,9 @@ export function normalizeModes(input, { schema } = {}) {
     ...(typeof input.application_mode === "string"
       ? { application_mode: input.application_mode }
       : {}),
+    ...(input.ai_review && typeof input.ai_review === "object" && !Array.isArray(input.ai_review)
+      ? { ai_review: input.ai_review }
+      : {}),
   };
   return { valid: validation.valid, errors: validation.errors, data };
 }
@@ -137,6 +140,14 @@ export function loadModes({ root = DEFAULT_ROOT } = {}) {
     path: display,
     source,
   };
+}
+
+// The AI review pass is on for cover letters and answers unless modes.yml turns
+// it off. Résumés are never reviewed, so any other kind is always false.
+export function aiReviewEnabled(modes = {}, kind) {
+  if (kind !== "cover_letter" && kind !== "answers") return false;
+  const setting = modes?.ai_review ?? modes?.data?.ai_review;
+  return setting?.[kind] !== false;
 }
 
 export function computeAllows(operation, modes = {}, { explicit = false } = {}) {

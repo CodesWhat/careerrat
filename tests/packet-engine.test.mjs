@@ -648,7 +648,7 @@ test("a location sentence using current base is not treated as private compensat
   const { validatePacketEvidenceIds } = await loadGenerateModule();
 
   const result = validatePacketEvidenceIds({
-    context: PACKET_CONTEXT,
+    context: { ...PACKET_CONTEXT, factSources: ["Austin, TX"] },
     proposals: [
       {
         kind: "answer",

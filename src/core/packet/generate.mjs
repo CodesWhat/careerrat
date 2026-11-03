@@ -10,12 +10,16 @@ import {
   validateAtsSafe,
 } from "../documents/tailor.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
+import { aiReviewEnabled, loadModes } from "../profile/modes.mjs";
+import { aiTellMessages, findAiTellsInTexts } from "./ai-tells.mjs";
 import { draftPacketAnswers as draftPacketAnswersCore } from "./answers.mjs";
 import { buildPacketContext } from "./context.mjs";
 import { selectPacketStories } from "./deep-ingest-sources.mjs";
 import { exportPacketArtifacts as exportPacketArtifactsDefault } from "./exports.mjs";
+import { checkArtifactFacts, factViolationMessages } from "./fact-check.mjs";
 import { packetProvenanceForContext } from "./provenance.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
+import { reviewArtifact as reviewArtifactDefault } from "./reviewer.mjs";
 import {
   packetCoverLetterProposalSchema,
   packetResumeProposalSchema,
@@ -377,6 +381,10 @@ export function validatePacketEvidenceIds({
     const privateIssue = privateLeakMessage(text);
     if (privateIssue) issues.push(privateIssue);
     if (needsUser(text)) issues.push("user confirmation is required");
+    else {
+      const facts = checkArtifactFacts({ texts: text, context });
+      if (!facts.ok) issues.push(`unverified facts: ${factViolationMessages(facts).join("; ")}`);
+    }
     const missing = ids.filter((id) => !allowed.has(id));
     if (!ids.length && !needsUser(text)) issues.push("confirmed evidence ID is required");
     if (missing.length) issues.push(`missing evidence IDs: ${missing.join(", ")}`);
@@ -550,6 +558,20 @@ export function validateResumeProposal({ context = {}, proposal = {} } = {}) {
   const leakIssue = privateLeakMessage(leakText);
   if (leakIssue) violations.push(leakIssue);
 
+  // CR103: numbers, tools, employers and names must come from the candidate's
+  // own material, not from the model.
+  const factTexts = [
+    proposal.summary,
+    ...(proposal.experience || []).flatMap((entry) =>
+      (entry.roles || []).flatMap((role) => role.bullets || [])
+    ),
+    ...(proposal.sections || []).flatMap((section) => section.bullets || []),
+    ...(proposal.education || []),
+  ];
+  violations.push(
+    ...factViolationMessages(checkArtifactFacts({ texts: factTexts, context, label: "resume" }))
+  );
+
   return { ok: violations.length === 0, violations };
 }
 
@@ -599,19 +621,43 @@ function buildResumeProposalFromAiData(data = {}) {
 // violations validateResumeProposal found, verbatim, plus the rejected draft
 // for context, and instructs the model to fix ONLY those facts against the
 // candidate's real source résumé rather than rewriting the whole thing.
-function resumeGroundingCorrectionMessage({ violations, priorData }) {
-  return {
-    role: "user",
-    content: [
+function resumeGroundingCorrectionMessage({ violations, styleIssues = [], priorData }) {
+  const lines = [];
+  if (violations.length) {
+    lines.push(
       "The résumé draft you returned failed grounding validation against sourceResume.text:",
       ...violations.map((violation) => `- ${violation}`),
-      "",
-      "Your previous draft:",
-      JSON.stringify(priorData),
-      "",
-      "Fix ONLY the facts listed above so they match sourceResume.text exactly — do not change anything else. Return the corrected JSON matching packetResumeProposalSchema.",
-    ].join("\n"),
-  };
+      ""
+    );
+  }
+  if (styleIssues.length) {
+    lines.push(
+      "These phrases read as AI-written. Reword them plainly, the way the candidate would say it, without adding any fact:",
+      ...styleIssues.map((issue) => `- ${issue}`),
+      ""
+    );
+  }
+  lines.push(
+    "Your previous draft:",
+    JSON.stringify(priorData),
+    "",
+    violations.length
+      ? "Fix the facts listed above so they match sourceResume.text exactly, fix the phrasing listed above if any, and do not change anything else. Return the corrected JSON matching packetResumeProposalSchema."
+      : "Fix ONLY the phrasing listed above and do not change anything else. Return the corrected JSON matching packetResumeProposalSchema."
+  );
+  return { role: "user", content: lines.join("\n") };
+}
+
+// The prose a reader sees in a résumé proposal: summary and bullets. Company,
+// title, dates and skill items are data, not prose.
+function resumeStyleTexts(proposal = {}) {
+  return [
+    proposal.summary,
+    ...(proposal.experience || []).flatMap((entry) =>
+      (entry.roles || []).flatMap((role) => role.bullets || [])
+    ),
+    ...(proposal.sections || []).flatMap((section) => section.bullets || []),
+  ].filter(Boolean);
 }
 
 export async function draftResumeProposal({
@@ -675,6 +721,7 @@ export async function draftResumeProposal({
 
   let proposal = buildResumeProposalFromAiData(aiResult.body.data);
   let validation = validateResumeProposal({ context, proposal });
+  let styleIssues = aiTellMessages(findAiTellsInTexts(resumeStyleTexts(proposal)));
 
   if (!validation.ok) {
     // One correction pass: ask the model to fix ONLY the flagged facts
@@ -685,6 +732,7 @@ export async function draftResumeProposal({
       ...baseMessages,
       resumeGroundingCorrectionMessage({
         violations: validation.violations,
+        styleIssues,
         priorData: aiResult.body.data,
       }),
     ]);
@@ -707,6 +755,31 @@ export async function draftResumeProposal({
     aiResult = retryResult;
     proposal = retryProposal;
     validation = retryValidation;
+    styleIssues = aiTellMessages(findAiTellsInTexts(resumeStyleTexts(proposal)));
+  } else if (styleIssues.length) {
+    // The facts are fine, only the phrasing reads as AI-written. One style
+    // retry; unlike a grounding failure it is never fatal. A failed or
+    // ungrounded retry keeps the draft that already passed validation.
+    try {
+      const styleRetry = await runResumeAI([
+        ...baseMessages,
+        resumeGroundingCorrectionMessage({
+          violations: [],
+          styleIssues,
+          priorData: aiResult.body.data,
+        }),
+      ]);
+      if (styleRetry.body?.ok) {
+        const styleProposal = buildResumeProposalFromAiData(styleRetry.body.data);
+        if (validateResumeProposal({ context, proposal: styleProposal }).ok) {
+          aiResult = styleRetry;
+          proposal = styleProposal;
+          styleIssues = aiTellMessages(findAiTellsInTexts(resumeStyleTexts(proposal)));
+        }
+      }
+    } catch {
+      // Keep the validated draft; the remaining phrasing is reported below.
+    }
   }
 
   // Lenient skills pass: unlike company/title/dates (hard facts that must
@@ -744,8 +817,17 @@ export async function draftResumeProposal({
         },
       ]
     : [];
+  const styleGap = styleIssues.length
+    ? [
+        {
+          kind: "resume",
+          code: "AI_SOUNDING_PHRASING",
+          message: `phrasing still reads as AI-written: ${styleIssues.slice(0, 5).join("; ")}`,
+        },
+      ]
+    : [];
 
-  return { proposal: cleanedProposal, ai: aiResult.body.ai, gaps: skillsGap };
+  return { proposal: cleanedProposal, ai: aiResult.body.ai, gaps: [...skillsGap, ...styleGap] };
 }
 
 function questionLabelById(capture) {
@@ -1095,6 +1177,142 @@ function packetReviewState({ validation, coverLetter, answers, skippedAnswersGap
   return { gaps, warnings };
 }
 
+const REVIEW_DELIMITER = "\n\n=====\n\n";
+
+// One review pass over a set of texts. They go to the reviewer as one draft so
+// it sees the whole artifact, then come back split on the same delimiter. A
+// review that changes the number of parts is discarded as a whole, so an edit
+// can never merge or drop a block. Never throws: any failure leaves the draft
+// as it was and says why.
+async function reviewTexts({
+  kind,
+  label,
+  texts,
+  context,
+  review,
+  call,
+  repoRoot,
+  env,
+  executionPlan,
+  signal,
+}) {
+  const note = (message, code) => ({ kind, code, message });
+  try {
+    const result = await review({
+      repoRoot,
+      env,
+      context,
+      kind: label,
+      text: texts.join(REVIEW_DELIMITER),
+      call,
+      executionPlan,
+      signal,
+    });
+    if (!result?.ok) {
+      return {
+        texts,
+        applied: 0,
+        note: note(
+          `AI review of the ${label} was unavailable (${result?.error || "no reason given"}); the first draft is unchanged.`,
+          "REVIEW_UNAVAILABLE"
+        ),
+      };
+    }
+    const parts = String(result.text ?? "").split(REVIEW_DELIMITER);
+    if (parts.length !== texts.length) {
+      return {
+        texts,
+        applied: 0,
+        note: note(
+          `AI review of the ${label} changed its structure, so none of its edits were used; the first draft is unchanged.`,
+          "REVIEW_DISCARDED"
+        ),
+      };
+    }
+    return { texts: parts, applied: result.accepted?.length || 0, note: null };
+  } catch (err) {
+    return {
+      texts,
+      applied: 0,
+      note: note(
+        `AI review of the ${label} failed (${err?.message || "unknown error"}); the first draft is unchanged.`,
+        "REVIEW_FAILED"
+      ),
+    };
+  }
+}
+
+// Cover letters and application answers get one review pass after generation.
+// Résumés never do. Every accepted edit already passed the fact check inside
+// reviewArtifact; the gaps and evidence ids on each block are left alone.
+async function reviewGeneratedArtifacts({
+  enabled,
+  coverLetter,
+  answers,
+  skipAnswers,
+  context,
+  review,
+  reviewCall,
+  repoRoot,
+  env,
+  executionPlan,
+  signal,
+}) {
+  const notes = [];
+  const summary = {
+    coverLetter: { reviewed: false, applied: 0 },
+    answers: { reviewed: false, applied: 0 },
+  };
+  const common = { context, review, call: reviewCall, repoRoot, env, executionPlan, signal };
+
+  const blocks = Array.isArray(coverLetter?.blocks) ? coverLetter.blocks : [];
+  const reviewable = blocks
+    .map((block, index) => ({ block, index }))
+    .filter(({ block }) => cleanText(block?.text) && !needsUser(block.text));
+  if (enabled.coverLetter && reviewable.length) {
+    const result = await reviewTexts({
+      ...common,
+      kind: "coverLetter",
+      label: "cover letter",
+      texts: reviewable.map(({ block }) => block.text),
+    });
+    summary.coverLetter = { reviewed: !result.note, applied: result.applied };
+    if (result.note) notes.push(result.note);
+    else {
+      reviewable.forEach(({ block }, i) => {
+        block.text = result.texts[i];
+      });
+    }
+  }
+
+  const rows = skipAnswers ? [] : Array.isArray(answers?.answers) ? answers.answers : [];
+  const reviewableAnswers = rows.filter(
+    (row) =>
+      row &&
+      !row.disclosure &&
+      !row.deterministic &&
+      !row.skipped &&
+      cleanText(row.answer) &&
+      !needsUser(row.answer)
+  );
+  if (enabled.answers && reviewableAnswers.length) {
+    const result = await reviewTexts({
+      ...common,
+      kind: "answers",
+      label: "application answers",
+      texts: reviewableAnswers.map((row) => String(row.answer)),
+    });
+    summary.answers = { reviewed: !result.note, applied: result.applied };
+    if (result.note) notes.push(result.note);
+    else {
+      reviewableAnswers.forEach((row, i) => {
+        row.answer = result.texts[i];
+      });
+    }
+  }
+  return { notes, summary };
+}
+
 export async function generatePacket({
   repoRoot,
   env = process.env,
@@ -1112,6 +1330,9 @@ export async function generatePacket({
   coverLetterCall,
   resumeCall,
   packetAnswersCall,
+  reviewArtifact: reviewArtifactImpl = reviewArtifactDefault,
+  reviewCall,
+  modes,
   executionPlan,
   signal,
 } = {}) {
@@ -1198,6 +1419,31 @@ export async function generatePacket({
         executionPlan,
         signal,
       });
+  // modes.yml#ai_review turns the pass off per kind; absent = on for both.
+  let reviewModes = modes;
+  if (!reviewModes && repoRoot) {
+    try {
+      reviewModes = loadModes({ root: repoRoot }).data;
+    } catch {
+      reviewModes = {};
+    }
+  }
+  const review = await reviewGeneratedArtifacts({
+    enabled: {
+      coverLetter: aiReviewEnabled(reviewModes, "cover_letter"),
+      answers: aiReviewEnabled(reviewModes, "answers"),
+    },
+    coverLetter,
+    answers,
+    skipAnswers,
+    context: packetContext,
+    review: reviewArtifactImpl,
+    reviewCall,
+    repoRoot,
+    env,
+    executionPlan,
+    signal,
+  });
   const sources = buildSourceArtifacts({
     context: packetContext,
     questionCapture: capture,
@@ -1260,7 +1506,11 @@ export async function generatePacket({
     skippedAnswersGap,
   });
   const gaps = reviewState.gaps;
-  const warnings = [...reviewState.warnings, ...gapObjects(resumeProposal?.gaps)];
+  const warnings = [
+    ...reviewState.warnings,
+    ...gapObjects(resumeProposal?.gaps),
+    ...gapObjects(review.notes),
+  ];
   const provenance = packetProvenanceForContext(packetContext);
   if (repoRoot && !provenance) {
     gaps.push({
@@ -1335,6 +1585,7 @@ export async function generatePacket({
     manifest,
     sources,
     gaps: finalGaps,
+    review: review.summary,
     manual: { required: !finalUploadReady },
   };
 }

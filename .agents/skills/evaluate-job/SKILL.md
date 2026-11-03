@@ -189,6 +189,23 @@ Emit only when not clear:
 LEGITIMACY: suspect - <signals>
 ```
 
+### Recruiter outreach on the role
+
+When the role reached you through a recruiter message (not a board listing), also run
+`careerrat recruiter-check --sender <from address> --company-domain <the company's own
+domain> --posting found|missing [--body-file <message>] --json`. Look the role up on the
+company's own careers page first and pass what you found; omit `--posting` if you could
+not check. It flags a sender domain that does not match the company, no matching public
+posting, a free-mail sender, a request to pay anything, and a request to download, install
+or run code (the fake "coding test" that carries malware). Same rule as above: a flag,
+never an auto-cut. A `suspect` result goes to `GATE: REVIEW`, `ACTION: manual`, and you
+emit:
+
+```text
+RECRUITER SIGNAL: suspect - <signals>
+Do not run, install or open any code, repository, archive or file this contact sends until you have confirmed them through the company's own careers page or main switchboard.
+```
+
 ---
 
 ## STEP 4 — BODY-READ GATE

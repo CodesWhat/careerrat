@@ -1,0 +1,4 @@
+GATE: CUT - company/title matches excluded list: "Brightline Solar Crew"
+FIT: high 85 - commercial, conduit, overtime paid | caveats: none | priority: primary
+COMP: clear - band $76,000–$90,000 clears floor $72,000
+ACTION: cut

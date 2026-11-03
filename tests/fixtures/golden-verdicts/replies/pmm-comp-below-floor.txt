@@ -1,0 +1,5 @@
+GATE: REVIEW - comp below floor: band max $95,000 < floor $120,000
+FIT: high 85 - positioning, messaging, b2b saas | caveats: none | priority: primary
+COMP: below-floor - band max $95,000 < floor $120,000
+COMP ANCHOR: $148,000 - your target base: JD band is below your floor, so anchor up or pass
+ACTION: hold

@@ -85,6 +85,7 @@ const SOURCE_TEXT = [
   "Applied AI Engineer | 2022 - 2024",
   "Solutions Engineer | 2020 - 2022",
   "OpenAI API, RAG, and SQLite",
+  "B.S. Computer Science, Example University",
 ].join("\n");
 
 function aiSuccess(data, ai = { used: true }) {

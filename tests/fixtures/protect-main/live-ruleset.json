@@ -76,6 +76,9 @@
           },
           {
             "context": "tests"
+          },
+          {
+            "context": "website-browser-checks"
           }
         ]
       }

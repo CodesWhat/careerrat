@@ -6,6 +6,32 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-03
+
+### Added
+
+- The terminal workspace has an Activity tab. It shows each search's progress, the number of jobs found and the run's health, with Cancel while a search runs and "Review new matches" when it finishes.
+- Search jobs in the terminal workspace starts the background search straight away. Review matches, Apply selected and Add context are marked as agent actions.
+- Generated résumés, cover letters and answers are fact-checked. A number, tool, employer or name that isn't in your résumé, profile, evidence or stories is rejected. `careerrat fact-check` checks outreach drafts the same way.
+- Cover letters and answers get one review pass that can't add facts. Phrasing that sounds machine-written (stock words, em dashes, "not just X but Y") is flagged and rewritten. You can turn the review off in modes.
+- `careerrat outcomes` gives honest outcome rates. In-flight jobs are left out, no percentage is shown below five finished outcomes, and results are broken down by fit band.
+- `careerrat recruiter-check` flags outreach that looks fake: a sender domain that doesn't match the company, no public posting, a request for payment, or a request to run code.
+- `careerrat rules` turns your corrections into writing rules. Undo removes a rule.
+- Indeed is used through its official connector when it's already connected. CareerRat doesn't scrape it.
+
+### Changed
+
+- The terminal component now ships ready-made builds, so installing on Linux no longer needs a compiler.
+- The Changes tab shows each change in plain words, like "Fit floor: 62 → 80", with one compact row of controls.
+
+### Fixed
+
+- Shift+Enter in Ghostty, set up the way Claude Code configures it, now reaches the agent as a newline instead of Enter.
+- A Word file that expands to a huge size is rejected before it's read.
+- Uploading résumé A, then B, then A again leaves A as your current résumé.
+- A background search that's slow to start on a busy machine is no longer reported as failed.
+- A source whose page cap you set yourself no longer marks every search as degraded.
+
 ## [0.23.0] - 2026-11-02
 
 ### Security

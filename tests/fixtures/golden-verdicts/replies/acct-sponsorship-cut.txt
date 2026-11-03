@@ -1,0 +1,4 @@
+GATE: CUT - authorization mismatch: sponsorship required but JD states no sponsorship offered
+FIT: high 85 - month-end close, gaap, netsuite | caveats: none | priority: primary
+COMP: clear - band $95,000–$110,000 clears floor $85,000
+ACTION: cut

@@ -1,0 +1,4 @@
+GATE: CUT - cut signal(s) found in JD: cold calling quota
+FIT: med 75 - positioning, launch, b2b saas | caveats: cold calling quota | priority: primary
+COMP: clear - band $125,000–$150,000 clears floor $120,000
+ACTION: cut

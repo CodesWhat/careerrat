@@ -746,7 +746,7 @@ function printEnvironment() {
   );
   if (tuiAgentPane && !tuiAgentPane.ok)
     console.log(
-      "- Terminal workspace agent chat: the native terminal helper (node-pty) did not load. On Linux, install make and a C++ compiler (for example `sudo apt install build-essential`), then run `npm i -g careerrat` again."
+      "- Terminal workspace agent chat: the native terminal helper (node-pty) did not load. It ships prebuilt for macOS, Linux and Windows; on another platform or architecture, install make and a C++ compiler (on Debian or Ubuntu: `sudo apt install build-essential`), then run `npm i -g careerrat` again."
     );
   if (agentsAvailable === null) console.log("- Agent: skipped (--guidance-only).");
   else if (agentsAvailable.length)

@@ -316,6 +316,7 @@ const DEPENDENCY_JOB_IDS = [
   "tests",
   "web-build",
   "website-build",
+  "website-browser-checks",
   "windows-package-smoke",
   "browser-application-prep",
   "knip",
@@ -1233,6 +1234,7 @@ test("all deterministic product builds are declared as protected contexts", asyn
   for (const context of [
     "web-build",
     "website-build",
+    "website-browser-checks",
     "windows-package-smoke",
     "browser-application-prep",
   ]) {
@@ -1241,6 +1243,23 @@ test("all deterministic product builds are declared as protected contexts", asyn
   }
   assert.doesNotMatch(workflow, /web-build, website-build, and windows-package-smoke[^\n]*don't/i);
   assert.doesNotMatch(workflow, /Non-gating for now/i);
+});
+
+test("website-browser-checks renders the built site in all three engines", async () => {
+  const workflow = await source(".github/workflows/ci-verify.yml");
+  const job = workflow.slice(
+    workflow.indexOf("  website-browser-checks:"),
+    workflow.indexOf("  windows-package-smoke:")
+  );
+  assert.match(job, /name:\s*website-browser-checks/);
+  assert.match(job, /playwright install --with-deps chromium webkit firefox/);
+  assert.match(job, /npm run build --workspace apps\/website/);
+  assert.match(job, /npm run test:website-browser/);
+  const pkg = JSON.parse(await source("package.json"));
+  assert.match(pkg.scripts["test:website-browser"], /apps\/website\/browser-checks\/smoke\.mjs/);
+  const smoke = await source("apps/website/browser-checks/smoke.mjs");
+  for (const engine of ["chromium", "webkit", "firefox"]) assert.match(smoke, new RegExp(engine));
+  assert.match(smoke, /phone:\s*\{/);
 });
 
 test("windows-package-smoke filters to win32-gated cases before building the installer", async () => {

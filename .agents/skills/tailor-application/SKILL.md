@@ -229,6 +229,12 @@ Treat these as invalid placeholders: `[Company]`, `[Role]`, `{candidate}`,
 template residue. (`NEEDS YOU` is the STEP 6 unanswered-question marker — resolving
 it with the user, not deleting it, is the fix.)
 
+Also run `careerrat fact-check <draft-path> --company "<Company>" --role "<Role>"` on every
+saved résumé, cover letter, answers and outreach draft. It exits 1 when the draft adds a
+number, tool, employer or name that is absent from the source résumé and evidence. Fix the
+draft from evidence, or leave a `NEEDS YOU` marker; never add the fact to evidence just to
+pass the check.
+
 **Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0, or its only findings are `NEEDS YOU` markers,
 write the produced artifact paths back to the application row in a single
 `tracker.json` write before proceeding to STEP 8 or STEP 12:

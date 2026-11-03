@@ -8,12 +8,15 @@ import {
   activityAppend,
   appRegisterArtifact,
   appRegisterPacketArtifacts,
+  candidateArtifactGet,
   candidateConfigGet,
   candidateConfigPatch,
+  deepIngestConfirmedForGeneration,
 } from "../db/verbs.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { draftPacketAnswers } from "./answers.mjs";
 import { buildPacketContext } from "./context.mjs";
+import { filterClaimableStories } from "./deep-ingest-sources.mjs";
 import { capturePacketQuestions } from "./questions.mjs";
 
 const DURABLE_QUESTION_PATTERNS = [
@@ -63,12 +66,23 @@ function readApplication({ repoRoot, env, applicationId }) {
 
 function candidateAnswerContext({ repoRoot, env }) {
   const config = candidateConfigGet({ repoRoot, env });
+  // The fact check (CR103) needs the same source material the packet context
+  // carries: the imported résumé and the confirmed story bank.
+  const sourceResume = candidateArtifactGet({
+    repoRoot,
+    env,
+    id: "source-resume",
+    kind: "source-resume",
+  });
+  const deepIngest = deepIngestConfirmedForGeneration({ repoRoot, env });
   return {
     candidate: config.profile || {},
     profile: config.profile || {},
     targeting: config.targeting || {},
     evidence: config.evidence || { claims: [] },
     honesty: config.honesty || {},
+    ...(sourceResume ? { sourceResume } : {}),
+    storiesLearnings: filterClaimableStories(deepIngest.storyBank),
   };
 }
 

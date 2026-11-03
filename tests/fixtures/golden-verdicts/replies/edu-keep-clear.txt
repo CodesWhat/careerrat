@@ -1,0 +1,5 @@
+GATE: KEEP - fit high (score 90); comp clear
+FIT: high 90 - algebra, geometry, ap calculus, curriculum | caveats: none | priority: primary
+COMP: clear - band $62,000–$74,000 clears floor $58,000
+COMP ANCHOR: $68,000 - your target base
+ACTION: apply-now

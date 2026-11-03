@@ -1,0 +1,5 @@
+GATE: KEEP - fit high (score 90); comp clear
+FIT: high 90 - commercial, conduit, union scale, overtime paid | caveats: none | priority: primary
+COMP: clear - band $78,000–$92,000 clears floor $72,000
+COMP ANCHOR: $88,000 - your target base
+ACTION: apply-now
