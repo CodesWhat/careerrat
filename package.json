@@ -137,6 +137,7 @@
     "status:map": "node src/cli/status-map.mjs",
     "export": "node src/cli/export.mjs",
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
+    "fact-check": "node src/cli/fact-check.mjs",
     "check:install-scripts": "node scripts/check-install-scripts.mjs",
     "bench:search": "node scripts/eval/search-bench.mjs",
     "test": "node --test --test-concurrency=2 --import ./tests/helpers/isolate-home.mjs 'tests/**/*.test.mjs'",

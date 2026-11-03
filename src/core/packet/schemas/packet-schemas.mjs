@@ -483,3 +483,27 @@ export function validatePacketGateRequest(input) {
     jobUrl: String(input?.jobUrl || input?.sourceUrl || "").trim(),
   };
 }
+
+// CR106: a reviewer proposes exact-substring edits. Nothing here writes; the
+// caller runs every edit through the CR103 fact check before applying it.
+export const packetReviewProposalSchema = {
+  type: "object",
+  required: ["edits"],
+  additionalProperties: false,
+  properties: {
+    edits: {
+      type: "array",
+      maxItems: 20,
+      items: {
+        type: "object",
+        required: ["find", "replace", "reason"],
+        additionalProperties: false,
+        properties: {
+          find: { type: "string" },
+          replace: { type: "string" },
+          reason: { type: "string" },
+        },
+      },
+    },
+  },
+};

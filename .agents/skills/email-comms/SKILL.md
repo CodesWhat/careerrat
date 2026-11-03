@@ -345,6 +345,8 @@ Per-type requirements:
 
 Run `careerrat lint-placeholders <draft-path>` if the draft is saved to a file before presenting it to the user.
 
+For outreach and any draft that states candidate facts, also run `careerrat fact-check <draft-path> --company "<Company>"`. Exit 1 means the draft names a number, tool, employer or person absent from the candidate's résumé and evidence: remove it or ask the user before presenting.
+
 ---
 
 ## STEP 6 — Capture

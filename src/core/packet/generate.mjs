@@ -14,6 +14,7 @@ import { draftPacketAnswers as draftPacketAnswersCore } from "./answers.mjs";
 import { buildPacketContext } from "./context.mjs";
 import { selectPacketStories } from "./deep-ingest-sources.mjs";
 import { exportPacketArtifacts as exportPacketArtifactsDefault } from "./exports.mjs";
+import { checkArtifactFacts, factViolationMessages } from "./fact-check.mjs";
 import { packetProvenanceForContext } from "./provenance.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
 import {
@@ -377,6 +378,10 @@ export function validatePacketEvidenceIds({
     const privateIssue = privateLeakMessage(text);
     if (privateIssue) issues.push(privateIssue);
     if (needsUser(text)) issues.push("user confirmation is required");
+    else {
+      const facts = checkArtifactFacts({ texts: text, context });
+      if (!facts.ok) issues.push(`unverified facts: ${factViolationMessages(facts).join("; ")}`);
+    }
     const missing = ids.filter((id) => !allowed.has(id));
     if (!ids.length && !needsUser(text)) issues.push("confirmed evidence ID is required");
     if (missing.length) issues.push(`missing evidence IDs: ${missing.join(", ")}`);
@@ -549,6 +554,20 @@ export function validateResumeProposal({ context = {}, proposal = {} } = {}) {
   ].join("\n");
   const leakIssue = privateLeakMessage(leakText);
   if (leakIssue) violations.push(leakIssue);
+
+  // CR103: numbers, tools, employers and names must come from the candidate's
+  // own material, not from the model.
+  const factTexts = [
+    proposal.summary,
+    ...(proposal.experience || []).flatMap((entry) =>
+      (entry.roles || []).flatMap((role) => role.bullets || [])
+    ),
+    ...(proposal.sections || []).flatMap((section) => section.bullets || []),
+    ...(proposal.education || []),
+  ];
+  violations.push(
+    ...factViolationMessages(checkArtifactFacts({ texts: factTexts, context, label: "resume" }))
+  );
 
   return { ok: violations.length === 0, violations };
 }

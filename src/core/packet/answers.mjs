@@ -4,6 +4,7 @@ import { candidateConfigGet } from "../db/verbs.mjs";
 import { buildShortAnswer, forbiddenWordingFor } from "../documents/tailor.mjs";
 import { ATTESTATION_NEEDS_YOU_REASON, isAttestationQuestion } from "./attestation.mjs";
 import { resolveDisclosureAnswer } from "./disclosure.mjs";
+import { checkArtifactFacts, factViolationMessages } from "./fact-check.mjs";
 import { buildPromptVisibleSources } from "./generate.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
 import { packetAnswerProposalSchema } from "./schemas/packet-schemas.mjs";
@@ -215,6 +216,12 @@ function normalizeAnswer({ proposal, question, context, allowedEvidenceIds, forb
     return question.required === false
       ? optionalSkippedAnswer(question)
       : needsYouAnswer(question, "confirm evidence for this answer");
+  }
+  const facts = checkArtifactFacts({ texts: answer, context });
+  if (!facts.ok) {
+    return question.required === false
+      ? optionalSkippedAnswer(question)
+      : needsYouAnswer(question, `confirm these facts: ${factViolationMessages(facts).join("; ")}`);
   }
   try {
     return {
