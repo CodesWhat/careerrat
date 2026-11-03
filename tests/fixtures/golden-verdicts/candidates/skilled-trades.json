@@ -1,0 +1,47 @@
+{
+  "profile": {
+    "candidate": {
+      "full_name": "Luis Moreno",
+      "email": "luis@example.test"
+    },
+    "compensation": {
+      "currency": "USD",
+      "minimum_base": 72000,
+      "target_base": 88000
+    },
+    "location": {
+      "home": "Phoenix, AZ",
+      "remote": false,
+      "hybrid": true,
+      "onsite": true,
+      "relocation": []
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Electrician",
+        "priority": "primary",
+        "titles": ["Journeyman Electrician", "Commercial Electrician"]
+      },
+      {
+        "name": "Foreman",
+        "priority": "stretch",
+        "titles": ["Electrical Foreman"]
+      }
+    ],
+    "keep_signals": ["commercial", "conduit", "union scale", "overtime paid"],
+    "cut_signals": [
+      "residential service calls only",
+      "commission only",
+      "own tools and truck required"
+    ],
+    "excluded_companies": ["Brightline Solar Crew"],
+    "degree_policy": ""
+  },
+  "honesty": {}
+}

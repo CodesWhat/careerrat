@@ -1,0 +1,5 @@
+GATE: REVIEW - comp below floor: band max $56,000 < floor $72,000
+FIT: high 85 - commercial, conduit, overtime paid | caveats: none | priority: primary
+COMP: below-floor - band max $56,000 < floor $72,000
+COMP ANCHOR: $88,000 - your target base: JD band is below your floor, so anchor up or pass
+ACTION: hold

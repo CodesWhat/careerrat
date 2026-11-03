@@ -1,0 +1,4 @@
+GATE: CUT - company/title matches excluded list: "Dyson Mining Group"
+FIT: med 80 - postgres, api design | caveats: none | priority: primary
+COMP: clear - band $180,000–$210,000 clears floor $170,000
+ACTION: cut

@@ -1,0 +1,5 @@
+GATE: KEEP - fit high (score 90); comp clear
+FIT: high 90 - distributed systems, postgres, api design, observability | caveats: none | priority: primary
+COMP: clear - band $190,000–$230,000 clears floor $170,000
+COMP ANCHOR: $200,000 - your target base
+ACTION: apply-now

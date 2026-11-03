@@ -1,0 +1,5 @@
+GATE: KEEP - fit high (score 90); comp clear
+FIT: high 90 - critical care, ventilator, icu, night differential | caveats: none | priority: primary
+COMP: clear - band $88,000–$102,000 clears floor $82,000
+COMP ANCHOR: $95,000 - your target base
+ACTION: apply-now

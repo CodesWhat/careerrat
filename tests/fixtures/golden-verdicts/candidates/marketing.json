@@ -1,0 +1,48 @@
+{
+  "profile": {
+    "candidate": {
+      "full_name": "Priya Nair",
+      "email": "priya@example.test"
+    },
+    "compensation": {
+      "currency": "USD",
+      "minimum_base": 120000,
+      "target_base": 145000
+    },
+    "location": {
+      "home": "Chicago, IL",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false,
+      "relocation": []
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "PMM",
+        "priority": "primary",
+        "titles": ["Product Marketing Manager", "Senior Product Marketing Manager"]
+      },
+      {
+        "name": "Growth",
+        "priority": "secondary",
+        "titles": ["Growth Marketing Manager", "Lifecycle Marketing Manager"]
+      },
+      {
+        "name": "Brand",
+        "priority": "oe",
+        "titles": ["Brand Strategist"]
+      }
+    ],
+    "keep_signals": ["positioning", "launch", "messaging", "b2b saas"],
+    "cut_signals": ["cold calling quota", "multi-level marketing", "pay-to-play"],
+    "excluded_companies": ["Vantage Leads Inc"],
+    "degree_policy": ""
+  },
+  "honesty": {}
+}

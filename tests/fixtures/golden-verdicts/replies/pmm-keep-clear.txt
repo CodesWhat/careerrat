@@ -1,0 +1,5 @@
+GATE: KEEP - fit high (score 90); comp clear
+FIT: high 90 - positioning, launch, messaging, b2b saas | caveats: none | priority: primary
+COMP: clear - band $140,000–$165,000 clears floor $120,000
+COMP ANCHOR: $145,000 - your target base
+ACTION: apply-now

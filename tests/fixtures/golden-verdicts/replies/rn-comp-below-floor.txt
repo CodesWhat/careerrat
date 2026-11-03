@@ -1,0 +1,5 @@
+GATE: REVIEW - comp below floor: band max $70,000 < floor $82,000
+FIT: med 75 - critical care | caveats: none | priority: secondary
+COMP: below-floor - band max $70,000 < floor $82,000
+COMP ANCHOR: $95,000 - your target base: JD band is below your floor, so anchor up or pass
+ACTION: hold

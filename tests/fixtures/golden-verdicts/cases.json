@@ -1,0 +1,422 @@
+[
+  {
+    "id": "swe-keep-clear",
+    "field": "software-engineering",
+    "candidate": "software-engineering",
+    "job": "jobs/swe-keep-clear.md",
+    "intent": "KEEP",
+    "expected": {
+      "gate": "KEEP",
+      "fitTier": "high",
+      "fitScore": 90,
+      "comp": "clear",
+      "action": "apply-now"
+    }
+  },
+  {
+    "id": "swe-cut-signal",
+    "field": "software-engineering",
+    "candidate": "software-engineering",
+    "job": "jobs/swe-cut-signal.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "med",
+      "fitScore": 70,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "swe-excluded-company",
+    "field": "software-engineering",
+    "candidate": "software-engineering",
+    "job": "jobs/swe-excluded-company.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "med",
+      "fitScore": 80,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "swe-comp-below-floor",
+    "field": "software-engineering",
+    "candidate": "software-engineering",
+    "job": "jobs/swe-comp-below-floor.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "med",
+      "fitScore": 80,
+      "comp": "below-floor",
+      "action": "hold"
+    }
+  },
+  {
+    "id": "swe-no-comp",
+    "field": "software-engineering",
+    "candidate": "software-engineering",
+    "job": "jobs/swe-no-comp.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "med",
+      "fitScore": 80,
+      "comp": "review",
+      "action": "manual"
+    }
+  },
+  {
+    "id": "rn-keep-clear",
+    "field": "nursing",
+    "candidate": "nursing",
+    "job": "jobs/rn-keep-clear.md",
+    "intent": "KEEP",
+    "expected": {
+      "gate": "KEEP",
+      "fitTier": "high",
+      "fitScore": 90,
+      "comp": "clear",
+      "action": "apply-now"
+    }
+  },
+  {
+    "id": "rn-cut-signal",
+    "field": "nursing",
+    "candidate": "nursing",
+    "job": "jobs/rn-cut-signal.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "med",
+      "fitScore": 75,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "rn-excluded-company",
+    "field": "nursing",
+    "candidate": "nursing",
+    "job": "jobs/rn-excluded-company.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "rn-comp-below-floor",
+    "field": "nursing",
+    "candidate": "nursing",
+    "job": "jobs/rn-comp-below-floor.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "med",
+      "fitScore": 75,
+      "comp": "below-floor",
+      "action": "hold"
+    }
+  },
+  {
+    "id": "rn-oe-bucket-review",
+    "field": "nursing",
+    "candidate": "nursing",
+    "job": "jobs/rn-oe-bucket-review.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "med",
+      "fitScore": 80,
+      "comp": "OE-bucket",
+      "action": "manual"
+    }
+  },
+  {
+    "id": "elec-keep-clear",
+    "field": "skilled-trades",
+    "candidate": "skilled-trades",
+    "job": "jobs/elec-keep-clear.md",
+    "intent": "KEEP",
+    "expected": {
+      "gate": "KEEP",
+      "fitTier": "high",
+      "fitScore": 90,
+      "comp": "clear",
+      "action": "apply-now"
+    }
+  },
+  {
+    "id": "elec-cut-signal",
+    "field": "skilled-trades",
+    "candidate": "skilled-trades",
+    "job": "jobs/elec-cut-signal.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "stretch",
+      "fitScore": 50,
+      "comp": "review",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "elec-excluded-company",
+    "field": "skilled-trades",
+    "candidate": "skilled-trades",
+    "job": "jobs/elec-excluded-company.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "elec-comp-below-floor",
+    "field": "skilled-trades",
+    "candidate": "skilled-trades",
+    "job": "jobs/elec-comp-below-floor.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "below-floor",
+      "action": "hold"
+    }
+  },
+  {
+    "id": "elec-foreman-title",
+    "field": "skilled-trades",
+    "candidate": "skilled-trades",
+    "job": "jobs/elec-foreman-title.md",
+    "intent": "KEEP",
+    "expected": {
+      "gate": "KEEP",
+      "fitTier": "high",
+      "fitScore": 90,
+      "comp": "clear",
+      "action": "apply-now"
+    }
+  },
+  {
+    "id": "pmm-keep-clear",
+    "field": "marketing",
+    "candidate": "marketing",
+    "job": "jobs/pmm-keep-clear.md",
+    "intent": "KEEP",
+    "expected": {
+      "gate": "KEEP",
+      "fitTier": "high",
+      "fitScore": 90,
+      "comp": "clear",
+      "action": "apply-now"
+    }
+  },
+  {
+    "id": "pmm-cut-signal",
+    "field": "marketing",
+    "candidate": "marketing",
+    "job": "jobs/pmm-cut-signal.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "med",
+      "fitScore": 75,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "pmm-excluded-company",
+    "field": "marketing",
+    "candidate": "marketing",
+    "job": "jobs/pmm-excluded-company.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "med",
+      "fitScore": 80,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "pmm-comp-below-floor",
+    "field": "marketing",
+    "candidate": "marketing",
+    "job": "jobs/pmm-comp-below-floor.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "below-floor",
+      "action": "hold"
+    }
+  },
+  {
+    "id": "pmm-no-comp",
+    "field": "marketing",
+    "candidate": "marketing",
+    "job": "jobs/pmm-no-comp.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "review",
+      "action": "manual"
+    }
+  },
+  {
+    "id": "acct-keep-clear",
+    "field": "accounting",
+    "candidate": "accounting",
+    "job": "jobs/acct-keep-clear.md",
+    "intent": "KEEP",
+    "expected": {
+      "gate": "KEEP",
+      "fitTier": "high",
+      "fitScore": 90,
+      "comp": "clear",
+      "action": "apply-now"
+    }
+  },
+  {
+    "id": "acct-sponsorship-cut",
+    "field": "accounting",
+    "candidate": "accounting",
+    "job": "jobs/acct-sponsorship-cut.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "acct-cut-signal",
+    "field": "accounting",
+    "candidate": "accounting",
+    "job": "jobs/acct-cut-signal.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "stretch",
+      "fitScore": 60,
+      "comp": "review",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "acct-excluded-company",
+    "field": "accounting",
+    "candidate": "accounting",
+    "job": "jobs/acct-excluded-company.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "med",
+      "fitScore": 80,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "acct-comp-below-floor",
+    "field": "accounting",
+    "candidate": "accounting",
+    "job": "jobs/acct-comp-below-floor.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "below-floor",
+      "action": "hold"
+    }
+  },
+  {
+    "id": "edu-keep-clear",
+    "field": "education",
+    "candidate": "education",
+    "job": "jobs/edu-keep-clear.md",
+    "intent": "KEEP",
+    "expected": {
+      "gate": "KEEP",
+      "fitTier": "high",
+      "fitScore": 90,
+      "comp": "clear",
+      "action": "apply-now"
+    }
+  },
+  {
+    "id": "edu-cut-signal",
+    "field": "education",
+    "candidate": "education",
+    "job": "jobs/edu-cut-signal.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "stretch",
+      "fitScore": 60,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "edu-excluded-company",
+    "field": "education",
+    "candidate": "education",
+    "job": "jobs/edu-excluded-company.md",
+    "intent": "CUT",
+    "expected": {
+      "gate": "CUT",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "clear",
+      "action": "cut"
+    }
+  },
+  {
+    "id": "edu-comp-below-floor",
+    "field": "education",
+    "candidate": "education",
+    "job": "jobs/edu-comp-below-floor.md",
+    "intent": "REVIEW",
+    "expected": {
+      "gate": "REVIEW",
+      "fitTier": "med",
+      "fitScore": 80,
+      "comp": "below-floor",
+      "action": "hold"
+    }
+  },
+  {
+    "id": "edu-admin-title",
+    "field": "education",
+    "candidate": "education",
+    "job": "jobs/edu-admin-title.md",
+    "intent": "KEEP",
+    "expected": {
+      "gate": "KEEP",
+      "fitTier": "high",
+      "fitScore": 85,
+      "comp": "clear",
+      "action": "apply-now"
+    }
+  }
+]

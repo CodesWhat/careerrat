@@ -1,0 +1,4 @@
+GATE: CUT - cut signal(s) found in JD: residential service calls only, own tools and truck required
+FIT: stretch 50 - title matches bucket "Electrician" | caveats: residential service calls only, own tools and truck required | priority: primary
+COMP: review - base range overlaps your $72,000 floor
+ACTION: cut
