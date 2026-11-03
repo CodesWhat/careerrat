@@ -27,6 +27,7 @@ import {
 } from "../src/core/onboarding/first-search-run.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { buildWellfoundUrl } from "../src/core/providers/wellfound.mjs";
+import { searchRunHealth } from "../src/core/search/search-health.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 
 const cleanupRoots = [];
@@ -606,6 +607,23 @@ test("prepareFirstSearchSources uses AI domain hints to promote a bare tracked c
   );
 });
 
+test("prepareFirstSearchSources counts a hinted company whose lookup threw as failed", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  setTrackedCompanies(repoRoot, ["Neutral Labs"]);
+  const result = await prepareFirstSearchSources({
+    repoRoot,
+    env: aiRouteEnv(),
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed");
+    },
+    call: async () =>
+      domainHintResponse([{ name: "Neutral Labs", domain_hint: "https://93.184.216.10/careers" }]),
+  });
+  assert.equal(result.companyBoardResolution.resolved, 0);
+  assert.equal(result.companyBoardResolution.failed, 1);
+});
+
 test("prepareFirstSearchSources skips AI rescue after a cache-hinted company attempt", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
@@ -652,6 +670,7 @@ test("prepareFirstSearchSources skips AI rescue when no companies are tracked", 
     attempted: 0,
     resolved: 0,
     promoted: 0,
+    failed: 0,
   });
 });
 
@@ -676,11 +695,10 @@ test("prepareFirstSearchSources degrades gracefully when AI domain-hint fill fai
       },
     });
 
-    assert.deepEqual(result.companyBoardResolution.aiHintFill, {
-      requested: 1,
-      hinted: 0,
-      resolved: 0,
-    });
+    const { failure, ...fill } = result.companyBoardResolution.aiHintFill;
+    assert.deepEqual(fill, { requested: 1, hinted: 0, resolved: 0 });
+    // The reason the rescue found nothing is kept, not swallowed.
+    assert.match(failure, /AI provider request failed|did not match/, label);
     assert.equal(result.companyBoardResolution.promoted, 0);
     assert.deepEqual(result.sourcedScan.tracked_companies, []);
   }
@@ -1229,7 +1247,7 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.status, "completed");
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
-  assert.equal(latest.run.summary.deterministicSources.attempted, 6);
+  assert.equal(latest.run.summary.deterministicSources.attempted, 8);
 });
 
 test("the shared worker can own deterministic terminal settlement", async () => {
@@ -1875,4 +1893,63 @@ test("a superseded background search cannot write stale watermarks, offers, or c
   const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
   assert.equal(latest.id, replacement.run.id);
   assert.equal(latest.status, "running");
+});
+
+test("a completed run keeps the scan-time health when sources were not searchable", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot, { domain: "operations" });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [
+        {
+          label: "Empty RSS",
+          source_type: "rss",
+          rssUrl: "https://example.test/empty.xml",
+          enabled: true,
+        },
+        {
+          provider: "hiringcafe",
+          source_type: "browser",
+          label: "Browser only board",
+          url: "https://hiring.cafe/?q=bar",
+          enabled: true,
+        },
+        {
+          provider: "linkedin",
+          platform: "linkedin",
+          source_type: "browser",
+          auth: true,
+          label: "LinkedIn NYC",
+          url: "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+          enabled: true,
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+  const started = await startFirstSearchRun({ repoRoot, env: {} });
+  await runFirstSearchInBackground({
+    repoRoot,
+    env: {},
+    runId: started.run.id,
+    fetchImpl: async () =>
+      new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
+  });
+
+  const { run } = sourcingRunLatest({ repoRoot, purpose: "first-search" });
+  assert.equal(run.status, "completed");
+  const skippedLabels = run.summary.notSearchable.sources.map((source) => source.label);
+  assert.ok(skippedLabels.includes("Browser only board"));
+  assert.ok(skippedLabels.includes("LinkedIn NYC"));
+  const health = searchRunHealth(run);
+  assert.equal(health.notSearchable, run.summary.notSearchable.count);
+  assert.equal(health.attempted, run.summary.attemptedSources);
+  assert.equal(health.readable, run.summary.attemptedSources);
+  assert.ok(run.summary.attemptedSources < run.summary.deterministicSources.attempted);
+  assert.deepEqual(health, run.summary.health);
 });

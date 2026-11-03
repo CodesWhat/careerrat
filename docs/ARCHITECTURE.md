@@ -40,9 +40,9 @@ Routes are grouped below by cluster.
 ### Apply Cycle
 
 - "Apply", "submit", or a JD URL with apply intent → `apply-job`
-  (`apply-job` must run or verify `evaluate-job` as step zero; LinkedIn Easy Apply
-  postings can use authenticated form preparation, switchable with the
-  `authenticated_apply_preparation` capability; final submission follows `submit` in `automation.yml`: auto by default, manual to stop for the user)
+  (`apply-job` must run or verify `evaluate-job` as step zero; LinkedIn postings
+  apply at the employer's own link, or open the LinkedIn page and wait for the
+  person (never applied through LinkedIn); on employer forms, final submission follows `submit` in `automation.yml`: auto by default, manual to stop for the user)
 - "Gate", "should I apply", or a JD URL without apply intent → `evaluate-job`
 - "Find jobs", "source", "search", "refresh queue" → `search-jobs`
 - "Set up searches", "build search config" → `setup-searches`
@@ -379,3 +379,39 @@ and verified atomically.
 Reusable skills, scripts, templates, and schemas are public-safe.
 
 See [DATA_CONTRACT.md](DATA_CONTRACT.md).
+
+### Textual development workspace
+
+Textual is the selected terminal UI. The source integration uses the Inspector
+layout: clickable saved jobs and details beside a native Claude or Codex pane.
+`textual-app.py` owns widgets; `textual-bridge.mjs` carries ordered JSON messages
+to `textual-session.mjs`. Canonical jobs, intake, recorded Undo, background-search
+ownership and the existing PTY/emulator stay in Node. Browsing never initializes
+or migrates a workspace. Action buttons insert requests without pressing Enter.
+Add context saves a private capture before generating its agent request; ordinary
+agent paste remains terminal input.
+
+`careerrat tui` opens Textual; use `--no-agent` for saved jobs only or
+`--agent claude` / `--agent codex` for a particular native CLI. First launch
+creates a private Python environment under the resolved internal data directory.
+Python 3.11+ with venv is required; `CAREERRAT_TUI_PYTHON` can select the bootstrap
+interpreter. `careerrat tui setup` prepares the environment without opening a UI.
+Dependencies are version- and hash-locked in `src/core/tui/requirements.txt` and
+installed from wheels only. A completed environment is reused without contacting
+pip. Setup failures remove incomplete environments; global Python packages and
+workspace data are untouched. The source development launcher uses this same
+entry.
+
+Tests run with `python tests/tui_textual_ui.py` in an environment containing the
+locked dependencies, alongside the Node suite. CI creates its own temporary
+Python environment. Its UI tests include first installation and the normal CLI
+in an actual outer terminal, without model calls.
+
+Default `careerrat start` opens the Textual workspace with the same agent
+selection as `careerrat tui`. A first run with unfinished candidate setup seeds the
+agent with an `ingest-profile` request (decided from `careerrat doctor`). Without a
+terminal, or without Python 3.11+, it exits non-zero and opens no browser. The
+browser workspace is reachable only through `careerrat start --browser` (and
+`careerrat tracker-dev`), kept so `careerrat update` can restart a running local app
+until the browser product is retired. Packaged Linux checks pass on Debian
+bookworm with `make` and a C++ compiler; Windows has unit coverage only.

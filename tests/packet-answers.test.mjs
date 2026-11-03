@@ -649,7 +649,12 @@ test("draftPacketAnswers fills onboarding facts locally and only blocks on requi
     },
   });
 
-  assert.deepEqual(seenQuestions, ["preferences", "policy"]);
+  // The AI-use policy question is an attestation: never sent to the AI, always NEEDS YOU.
+  assert.deepEqual(seenQuestions, ["preferences"]);
+  assert.match(
+    result.answers.find((answer) => answer.questionId === "policy").answer,
+    /^NEEDS YOU\b/
+  );
   assert.equal(result.answers.find((answer) => answer.questionId === "first_name").answer, "Alex");
   assert.equal(
     result.answers.find((answer) => answer.questionId === "email").answer,

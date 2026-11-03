@@ -97,15 +97,41 @@ function writeDedupeKey(record) {
   return `${record.provider}\0${record.eventId || ""}\0${record.eventIso || ""}\0${record.title.toLowerCase()}`;
 }
 
-export function calendarBusyUpsert({ repoRoot, env, blocks, source } = {}) {
-  if (!Array.isArray(blocks) || blocks.length === 0) {
-    throw new Error("calendarBusyUpsert: blocks must be a non-empty array");
+// `window` ({ startIso, endIso }) makes the ingest authoritative for that span:
+// stored blocks overlapping it are dropped first, so a cancelled or moved
+// meeting disappears and a calendar that is free all week can be recorded as
+// an empty list. Without a window the call only ever adds (the old behavior).
+function parseReplaceWindow(window) {
+  if (window === undefined || window === null) return null;
+  const startIso = String(window.startIso || "").trim();
+  const endIso = String(window.endIso || "").trim();
+  assertIso("window.startIso", startIso);
+  assertIso("window.endIso", endIso);
+  if (Date.parse(endIso) <= Date.parse(startIso)) {
+    throw new Error("calendarBusyUpsert: window.endIso must be after window.startIso");
+  }
+  return { start: Date.parse(startIso), end: Date.parse(endIso) };
+}
+
+export function calendarBusyUpsert({ repoRoot, env, blocks, source, window } = {}) {
+  const replaceWindow = parseReplaceWindow(window);
+  if (!Array.isArray(blocks) || (blocks.length === 0 && !replaceWindow)) {
+    throw new Error(
+      "calendarBusyUpsert: blocks must be a non-empty array (an empty list needs a window to replace)"
+    );
   }
 
   return runVerb({ repoRoot, env }, (db) => {
     const ingestedAt = nowIso();
     const merged = new Map();
     for (const existing of readKvArray(db, CALENDAR_BUSY_KEY)) {
+      if (
+        replaceWindow &&
+        Date.parse(existing.startIso) < replaceWindow.end &&
+        Date.parse(existing.endIso) > replaceWindow.start
+      ) {
+        continue;
+      }
       const normalized = normalizeBlock(existing, {
         ingestedAt: existing.ingestedAt || ingestedAt,
         source: existing.source || null,

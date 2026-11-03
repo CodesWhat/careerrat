@@ -6,6 +6,7 @@
  * Produces recipes/plans the agent executes.
  */
 
+import { isAttestationQuestion } from "../packet/attestation.mjs";
 import { classifySelfIdentificationQuestion } from "../packet/questions.mjs";
 import { CANDIDATE_DEFAULTS } from "../profile/candidate-defaults.mjs";
 
@@ -232,46 +233,6 @@ export const PORTAL_RECIPES = {
     },
     notes: "SmartRecruiters uses a stepped wizard; resume upload is a distinct step.",
   },
-  // [#M12] LinkedIn Easy Apply modal recipe
-  linkedin: {
-    labelMap: {
-      "first name": "first_name",
-      "last name": "last_name",
-      "full name": "full_name",
-      email: "email",
-      "email address": "email",
-      phone: "phone",
-      "phone number": "phone",
-      "mobile phone number": "phone",
-      location: "location",
-      city: "location",
-      linkedin: "linkedin",
-      "linkedin profile": "linkedin",
-      github: "github",
-      portfolio: "portfolio",
-      website: "portfolio",
-      "are you legally authorized to work": "work_authorization",
-      "authorized to work": "work_authorization",
-      "will you now or in the future require sponsorship": "requires_sponsorship",
-      "require sponsorship": "requires_sponsorship",
-      "visa sponsorship": "requires_sponsorship",
-      "how did you hear": "source",
-      "current company": "current_employer",
-      "current employer": "current_employer",
-      "current title": "current_title",
-      "current job title": "current_title",
-      "expected salary": "expected_base",
-      "desired salary": "expected_base",
-      "salary expectations": "expected_base",
-      gender: "eeo",
-      race: "eeo",
-      ethnicity: "eeo",
-      veteran: "eeo",
-      disability: "eeo",
-    },
-    notes:
-      "LinkedIn Easy Apply is a MULTI-STEP MODAL (Contact info → Resume → Additional questions → Review → Submit application), not a single page. Fields appear progressively per modal step.",
-  },
   // NOTE: Workday, iCIMS, and Rippling have no recipe here — they are
   // known-unsupported portals (non-standard DOM / server-side rendering).
   // This gap is deliberate. Add a recipe when a reliable label-map is confirmed.
@@ -303,64 +264,30 @@ export function hostnameToPortal(url) {
   if (/jobs(?:\.eu)?\.lever\.co$/.test(h)) return "lever";
   if (/apply\.workable\.com$/.test(h)) return "workable";
   if (/(?:careers|jobs)\.smartrecruiters\.com$/.test(h)) return "smartrecruiters";
-  if (/(?:^|\.)linkedin\.com$/.test(h)) return "linkedin";
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// isEasyApply
-// ---------------------------------------------------------------------------
-
 /**
- * Returns true when the URL is a LinkedIn Easy Apply job/apply view.
- * Host-gated: must be linkedin.com. Handles malformed URLs without throwing.
- *
- * @param {string} url
- * @returns {boolean}
- */
-export function isEasyApply(url) {
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (!/(?:^|\.)linkedin\.com$/.test(parsed.hostname)) return false;
-  const path = parsed.pathname;
-  return (
-    path.includes("/jobs/") ||
-    path.includes("/jobs/view/") ||
-    path.includes("/job-apply/") ||
-    parsed.searchParams.has("easyApplyModal") ||
-    parsed.searchParams.has("apply")
-  );
-}
-
-/**
- * The automation platform a posting URL runs under: LinkedIn Easy Apply,
- * a known ATS portal, or the generic external_ats bucket.
+ * The automation platform a posting URL runs under: a known ATS portal or the
+ * generic external_ats bucket. LinkedIn is not an apply platform; CareerRat
+ * never applies through a LinkedIn session (see linkedin-link.mjs).
  *
  * @param {string} url
  * @returns {string}
  */
 export function applicationPlatformForUrl(url) {
-  return isEasyApply(url) ? "linkedin" : hostnameToPortal(url) || "external_ats";
+  return hostnameToPortal(url) || "external_ats";
 }
 
 // ---------------------------------------------------------------------------
-// EASY_APPLY_ADVANCE_LABELS
+// ADVANCE_LABELS
 // ---------------------------------------------------------------------------
 
-// Named for the LinkedIn Easy Apply modal this vocabulary was first written
-// against, but findAdvanceButtonRef (and the multi-step loop in
-// apply-driver.mjs that calls it) is no longer LinkedIn-gated. The same
-// needle list now also drives page-to-page advancement on any paginated ATS
-// form (Workday-style wizards, SmartRecruiters' stepped resume-upload flow,
-// etc). Kept under its original name rather than renamed, since every one of
-// these needles is itself generic wizard vocabulary, not LinkedIn-specific
-// copy.
+// Generic wizard vocabulary that drives page-to-page advancement on any
+// paginated ATS form (Workday-style wizards, SmartRecruiters' stepped
+// resume-upload flow, etc).
 /** Button-text substrings (lowercase) that advance a multi-step apply form to the next page. */
-const EASY_APPLY_ADVANCE_LABELS = [
+const ADVANCE_LABELS = [
   "next",
   "continue",
   "review",
@@ -372,7 +299,7 @@ const EASY_APPLY_ADVANCE_LABELS = [
 /**
  * Fail-safe disqualifier tokens for findAdvanceButtonRef: a normalized label
  * containing ANY of these tokens anywhere is never treated as an advance
- * button, even when it also matches an EASY_APPLY_ADVANCE_LABELS needle (e.g.
+ * button, even when it also matches an ADVANCE_LABELS needle (e.g.
  * "Submit and continue", "Review and submit"). A needle-list scan against an
  * exact final-submit label is not enough — that only catches the exact final
  * label, not every submit-flavored variant. Over-blocking is deliberate: a
@@ -451,50 +378,6 @@ export function isSsoOrAccountLabel(rawLabel) {
 }
 
 // ---------------------------------------------------------------------------
-// EASY_APPLY_STEPS
-// ---------------------------------------------------------------------------
-
-// LinkedIn Easy Apply's own named-section vocabulary, used only to label
-// session.stepKey when the flow actually IS Easy Apply (apply-driver.mjs's
-// stepSessionFields). A generic multi-step ATS (Workday, etc.) advances
-// through the SAME loop but reports stepKey: null instead of borrowing these
-// labels, since a Workday page 2 isn't necessarily "Resume" just because
-// Easy Apply's page 2 usually is.
-/** Ordered modal sections in the LinkedIn Easy Apply flow. */
-export const EASY_APPLY_STEPS = [
-  {
-    key: "contact",
-    label: "Contact info",
-    note: "Name, email, phone, and location fields.",
-  },
-  {
-    key: "resume",
-    label: "Resume",
-    note: "Upload or select a resume; modal-first upload pattern.",
-  },
-  {
-    key: "work_auth",
-    label: "Work authorization & sponsorship",
-    note: "work_authorization and requires_sponsorship questions.",
-  },
-  {
-    key: "questions",
-    label: "Additional/screening questions",
-    note: "Use configured/profile/honesty context first; ask only for genuinely unsupported answers.",
-  },
-  {
-    key: "review",
-    label: "Review your application",
-    note: "Use preconfigured current_employer and current_title values unless the page asks for new disclosure.",
-  },
-  {
-    key: "submit",
-    label: "Submit application",
-    note: "Final submission stays with the candidate; CareerRat stops here.",
-  },
-];
-
-// ---------------------------------------------------------------------------
 // findAdvanceButtonRef
 // ---------------------------------------------------------------------------
 
@@ -530,7 +413,7 @@ export function findAdvanceButtonRef(snapshot) {
     if (!label) continue;
     if (ADVANCE_DISQUALIFY_TOKENS.some((token) => label.includes(token))) continue;
     if (isSsoOrAccountLabel(entry?.name)) continue;
-    if (EASY_APPLY_ADVANCE_LABELS.some((needle) => label.includes(needle))) return ref;
+    if (ADVANCE_LABELS.some((needle) => label.includes(needle))) return ref;
   }
   return null;
 }
@@ -963,20 +846,33 @@ function genericMatch(normalized) {
     return "full_name";
   }
   if (normalized.includes("email")) return "email";
-  if (normalized.includes("phone")) return "phone";
+  // "Phone extension" / "Phone type" are different questions from the number.
+  if (/\bphone\b/.test(normalized) && !/\b(?:extension|ext|type|country|code)\b/.test(normalized)) {
+    return "phone";
+  }
   // "relocation" contains the substring "location" but is a screening
   // preference, not the candidate's current city. Leave it for
   // resolveScreeningAnswer instead of filling the home address here.
   if (normalized.includes("relocat")) return null;
-  if (/(^| )location( |$)/.test(normalized) || normalized === "city") return "location";
+  // "Location of your current office" or "Company location" asks about somewhere
+  // else, not the candidate's home city.
+  if (
+    (/(^| )location( |$)/.test(normalized) &&
+      !/\blocation of\b|\b(?:office|company|employer|team|job|role) location\b/.test(normalized)) ||
+    normalized === "city"
+  ) {
+    return "location";
+  }
   if (normalized.includes("linkedin")) return "linkedin";
   if (normalized.includes("github")) return "github";
   if (
     normalized.includes("portfolio") ||
     normalized.includes("personal website") ||
-    (normalized.includes("website") &&
+    (/\bwebsite\b/.test(normalized) &&
       !normalized.includes("linkedin") &&
-      !normalized.includes("github"))
+      !normalized.includes("github") &&
+      // "Company website" is the employer's site, not the candidate's.
+      !/\b(?:company|employer|organization|organisation|business|current)\b/.test(normalized))
   ) {
     return "portfolio";
   }
@@ -1006,7 +902,9 @@ function genericMatch(normalized) {
   ) {
     return "current_title";
   }
-  if (normalized.includes("source") || normalized.includes("how did you hear")) {
+  // "open source" and "source code" are about the work, not how they found the job.
+  const withoutWorkSource = normalized.replace(/\bopen source\b|\bsource (?:code|control)\b/g, " ");
+  if (/\bsource\b/.test(withoutWorkSource) || normalized.includes("how did you hear")) {
     return "source";
   }
   if (
@@ -1040,6 +938,10 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
   const label = fieldLabel(question);
   const normalized = normalizeLabel(label);
   if (!normalized) return { action: "skip", value: null, reason: "empty_question" };
+
+  if (isAttestationQuestion(label)) {
+    return { action: "skip", value: null, reason: "attestation_needs_person" };
+  }
 
   if (isCurrentCompLabel(normalized)) {
     return { action: "skip", value: null, reason: "private_current_compensation" };
@@ -1394,6 +1296,11 @@ export function buildFillPlan({ fields = [], formDefaults, profile, honesty, por
     const label = fieldLabel(field);
     const normalized = normalizeLabel(label);
 
+    // Truthfulness and AI-use attestations are the person's to answer, never filled.
+    if (isAttestationQuestion(label)) {
+      return { label, canonicalField: null, value: null, action: "skip" };
+    }
+
     const voluntary = resolveVoluntarySelfIdentification(field, formDefaults);
     if (voluntary) return voluntary;
 
@@ -1479,10 +1386,6 @@ const CONFIRMATION_SIGNALS = [
   "application submitted",
   "application complete",
   "thanks for applying",
-  // [#M12] LinkedIn Easy Apply confirmation phrases
-  "your application was sent",
-  "application sent to",
-  "application sent",
 ];
 
 // [#8] URL path segments that indicate a confirmation page
@@ -1498,10 +1401,15 @@ const CONFIRMATION_URL_SEGMENTS = [
 /**
  * Detect a post-submit confirmation page.
  *
- * @param {{ pageText?: string, currentUrl?: string, refs?: Record<string, object> }} opts
+ * @param {{ pageText?: string, currentUrl?: string, refs?: Record<string, object>, allowProse?: boolean }} opts
  * @returns {{ submitted: boolean, signal: string|null }}
  */
-export function confirmationCheck({ pageText = "", currentUrl, refs = {} } = {}) {
+export function confirmationCheck({
+  pageText = "",
+  currentUrl,
+  refs = {},
+  allowProse = true,
+} = {}) {
   const activeApplication = Object.values(refs || {}).some((entry) => {
     if (entry?.disabled === true) return false;
     if (entry?.fileInput === true) {
@@ -1513,8 +1421,7 @@ export function confirmationCheck({ pageText = "", currentUrl, refs = {} } = {})
     if (role === "button") {
       if (["continue browsing jobs", "review application status"].includes(label)) return false;
       return (
-        isApplicationSubmitLabel(label) ||
-        EASY_APPLY_ADVANCE_LABELS.some((needle) => label.includes(needle))
+        isApplicationSubmitLabel(label) || ADVANCE_LABELS.some((needle) => label.includes(needle))
       );
     }
     if (entry?.field === false) return false;
@@ -1547,6 +1454,10 @@ export function confirmationCheck({ pageText = "", currentUrl, refs = {} } = {})
       }
     }
   }
+
+  // Callers that haven't seen the form yet pass allowProse: false so a sentence
+  // of ordinary page text can't pass for a receipt.
+  if (!allowProse) return { submitted: false, signal: null };
 
   // Receipt statements must stand on their own, rather than occur inside
   // quoted examples or instructions describing what a future submit will show.

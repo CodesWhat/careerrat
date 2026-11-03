@@ -1,6 +1,6 @@
 {
   "name": "careerrat",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "private": false,
   "packageManager": "npm@12.0.2",
   "publishConfig": {
@@ -24,7 +24,7 @@
     "apps/*"
   ],
   "engines": {
-    "node": ">=24.15.0"
+    "node": "^24.22.1 || >=26.12.1"
   },
   "files": [
     "bin",
@@ -82,6 +82,7 @@
     "scripts/install-skills.mjs",
     "scripts/lib/live-search-receipts.mjs",
     "scripts/scan-sourced.mjs",
+    "scripts/update-check.mjs",
     "scripts/verify-live-search-receipts.mjs",
     "scripts/verify-tracker.mjs",
     "AGENTS.md",
@@ -137,7 +138,9 @@
     "export": "node src/cli/export.mjs",
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
     "check:install-scripts": "node scripts/check-install-scripts.mjs",
-    "test": "node --test --test-concurrency=2 'tests/**/*.test.mjs'",
+    "bench:search": "node scripts/eval/search-bench.mjs",
+    "test": "node --test --test-concurrency=2 --import ./tests/helpers/isolate-home.mjs 'tests/**/*.test.mjs'",
+    "test:coverage": "node -e \"require('node:fs').mkdirSync('coverage',{recursive:true})\" && node --test --test-concurrency=2 --import ./tests/helpers/isolate-home.mjs --experimental-test-coverage --test-coverage-exclude='tests/**' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'tests/**/*.test.mjs'",
     "scan:sourced": "node scripts/scan-sourced.mjs",
     "delta:sourced": "node scripts/delta-sourced.mjs",
     "capture:board": "node scripts/capture-board-snapshot.mjs",
@@ -173,6 +176,7 @@
     "yaml": "2.9.0"
   },
   "allowScripts": {
+    "node-pty@1.1.0": true,
     "electron-winstaller@5.4.0": true,
     "fsevents@2.3.2": true,
     "fsevents@2.3.3": true,
@@ -187,11 +191,14 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
+    "@xterm/headless": "6.0.0",
     "htmlparser2": "^12.0.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
+    "node-pty": "1.1.0",
     "playwright": "1.62.1",
     "sanitize-html": "^2.17.4",
+    "string-width": "8.3.0",
     "undici": "^8.0.0"
   }
 }

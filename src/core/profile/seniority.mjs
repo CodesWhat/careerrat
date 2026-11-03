@@ -126,6 +126,76 @@ function targetRank(bucket, levels) {
   return ranks.length > 0 ? Math.min(...ranks) : null;
 }
 
+// Optional per-bucket ceiling: ranks strictly above it are too senior for this
+// candidate (the ladder lists them so they can be recognized and cut).
+function seniorityCeiling(bucket) {
+  const ceiling = bucket?.seniority_ceiling;
+  return Number.isInteger(ceiling) ? ceiling : null;
+}
+
+// Generic level words, used only when a ladder is configured and the title is
+// not on it. Ladder entries always win; this just stops "VP, X" or "New Grad X"
+// from falling through as unknown rank in any field.
+const EXECUTIVE_LEVEL_PHRASES = [
+  "vp",
+  "svp",
+  "evp",
+  "vice president",
+  "chief",
+  "head of",
+  "director",
+  "ceo",
+  "cfo",
+  "coo",
+  "cto",
+  "cio",
+  "cmo",
+  "cro",
+  "cpo",
+  "chro",
+  "ciso",
+].map((phrase) => titleWords(phrase));
+
+const ENTRY_LEVEL_PHRASES = [
+  "intern",
+  "internship",
+  "new grad",
+  "new graduate",
+  "graduate program",
+  "residency",
+  "apprentice",
+  "apprenticeship",
+  "entry level",
+  "junior",
+  "jr",
+  "associate",
+].map((phrase) => titleWords(phrase));
+
+function phrasesIn(words, phrases) {
+  return phrases.filter((phrase) => containsContiguousSequence(words, phrase));
+}
+
+// "above" | "below" | null. A word the candidate's own target titles use is
+// theirs (a Director candidate who never listed a ladder rank for it still
+// wants Directors), and so is any word the ladder itself lists.
+function genericLevel(title, targeting, ceiling) {
+  const words = titleWords(title);
+  const own = [];
+  for (const bucket of Array.isArray(targeting?.role_buckets) ? targeting.role_buckets : []) {
+    for (const target of compactTitles(bucket?.titles)) own.push(titleWords(target));
+    for (const level of validLevels(bucket)) {
+      for (const listed of level.titles) own.push(titleWords(listed));
+    }
+  }
+  const unowned = (phrases) =>
+    phrasesIn(words, phrases).filter(
+      (phrase) => !own.some((target) => containsContiguousSequence(target, phrase))
+    );
+  if (ceiling != null && unowned(EXECUTIVE_LEVEL_PHRASES).length > 0) return "above";
+  if (unowned(ENTRY_LEVEL_PHRASES).length > 0) return "below";
+  return null;
+}
+
 export function relativeSeniority(title, targeting = {}) {
   const decisions = [];
   for (const bucket of Array.isArray(targeting?.role_buckets) ? targeting.role_buckets : []) {
@@ -133,17 +203,36 @@ export function relativeSeniority(title, targeting = {}) {
     const minimumRank = targetRank(bucket, levels);
     if (minimumRank == null) continue;
     const actualLevel = matchingLevel(title, levels);
-    if (!actualLevel) continue;
+    const ceiling = seniorityCeiling(bucket);
+    if (!actualLevel) {
+      const generic = genericLevel(title, targeting, ceiling);
+      if (generic) {
+        decisions.push({
+          bucket: String(bucket?.name || ""),
+          rank: null,
+          targetRank: minimumRank,
+          fallback: true,
+          classification: generic === "above" ? "above-target" : "below-target",
+        });
+      }
+      continue;
+    }
     decisions.push({
       bucket: String(bucket?.name || ""),
       rank: actualLevel.rank,
       targetRank: minimumRank,
-      classification: actualLevel.rank < minimumRank ? "below-target" : "at-or-above-target",
+      classification:
+        actualLevel.rank < minimumRank
+          ? "below-target"
+          : ceiling != null && actualLevel.rank > ceiling
+            ? "above-target"
+            : "at-or-above-target",
     });
   }
 
   return (
     decisions.find((decision) => decision.classification === "at-or-above-target") ||
+    decisions.find((decision) => decision.classification === "above-target") ||
     decisions[0] || { classification: "unclassified" }
   );
 }

@@ -79,6 +79,26 @@ export function loadAIPreferences({ repoRoot, env = process.env } = {}) {
   }
 }
 
+// Doctor's view of ai-preferences.json: loadAIPreferences falls back to the
+// defaults for a file it can't use, which looks like "never set".
+export function inspectAIPreferencesFile({ repoRoot, env = process.env } = {}) {
+  const path = userPath({ repoRoot, env }, AI_PREFERENCES_RELPATH);
+  if (!existsSync(path)) return { path, status: "missing", error: null };
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    return { path, status: "invalid", error: `not valid JSON (${error.message})` };
+  }
+  return persistedPreferences(parsed)
+    ? { path, status: "ok", error: null }
+    : {
+        path,
+        status: "invalid",
+        error: "unrecognized contents (expected version 1 with quality, reasoning and updatedAt)",
+      };
+}
+
 export function writeAIPreferences({
   repoRoot,
   env = process.env,

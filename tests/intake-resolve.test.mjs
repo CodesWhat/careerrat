@@ -1839,6 +1839,34 @@ test("plain aggregator page: keeps its job body but hands application work to an
   assert.match(result.bodyText, /Build reliable distributed systems/);
 });
 
+test("LinkedIn public page: resolves the employer link from the hidden externalApply wrapper", async () => {
+  const linkedinUrl = "https://www.linkedin.com/jobs/view/4123456789";
+  const employerUrl = "https://careers.example-employer.com/jobs/staff-engineer/apply";
+  const wrapped = `https://www.linkedin.com/jobs/view/externalApply/4123456789?url=${encodeURIComponent(employerUrl)}&amp;urlHash=abc`;
+  const html = `<html><body><h1>Staff Engineer</h1><p>${"Build reliable distributed systems and platform tooling. ".repeat(20)}</p><code id="applyUrl" style="display: none"><!--"${wrapped}"--></code></body></html>`;
+
+  const result = await resolveJobUrl(linkedinUrl, {
+    fetchImpl: async () => htmlResponse(html, { finalUrl: linkedinUrl }),
+    resolveHost: publicResolver,
+    employerLinkLookup: true,
+  });
+
+  assert.equal(result.url, employerUrl);
+  assert.equal(result.sourceUrl, linkedinUrl);
+
+  // Without the lookup flag a LinkedIn page is never fetched.
+  let fetched = 0;
+  const deferred = await resolveJobUrl(linkedinUrl, {
+    fetchImpl: async () => {
+      fetched += 1;
+      return htmlResponse(html, { finalUrl: linkedinUrl });
+    },
+    resolveHost: publicResolver,
+  });
+  assert.equal(deferred.bodyFetchStatus, "deferred");
+  assert.equal(fetched, 0);
+});
+
 test("plain aggregator page: decodes only one mixed escaping layer in an embedded application URL", async () => {
   const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
   const applicationUrl =
@@ -1914,7 +1942,7 @@ test("plain fetch: short/shell body -> deferred (insufficient_content)", async (
     resolveHost: publicResolver,
   });
   assert.equal(result.bodyFetchStatus, "deferred");
-  assert.match(result.reason, /insufficient content/);
+  assert.match(result.reason, /almost no content/);
 });
 
 test("plain fetch: bot-wall interstitial -> deferred (bot_challenge)", async () => {
@@ -1973,4 +2001,44 @@ test("plain fetch: a network error -> deferred with the error message", async ()
   });
   assert.equal(result.bodyFetchStatus, "deferred");
   assert.match(result.reason, /fetch failed: ECONNRESET/);
+});
+
+const LONG_ERROR_PAGE = `<html><body>${"Sorry, something went wrong on our side. ".repeat(20)}</body></html>`;
+
+test("plain fetch: a 500 error page is not a resolved job description", async () => {
+  const result = await resolveJobUrl("https://example-startup.com/careers/eng-500", {
+    fetchImpl: async () => htmlResponse(LONG_ERROR_PAGE, { status: 500 }),
+    resolveHost: publicResolver,
+  });
+  assert.equal(result.bodyFetchStatus, "deferred");
+  assert.equal(result.unreachable, true);
+  assert.match(result.reason, /HTTP 500/);
+  assert.equal(result.bodyText, undefined);
+});
+
+test("plain fetch: a 404 page is reported as a closed job, not a saved description", async () => {
+  const result = await resolveJobUrl("https://example-startup.com/careers/eng-404", {
+    fetchImpl: async () => htmlResponse(LONG_ERROR_PAGE, { status: 404 }),
+    resolveHost: publicResolver,
+  });
+  assert.equal(result.bodyFetchStatus, "deferred");
+  assert.equal(result.liveness.result, "expired");
+  assert.equal(result.bodyText, undefined);
+});
+
+test("hydrateJobOffer: a failed fetch reads as unreachable, not as a posting-identity rejection", async () => {
+  const hydrated = await hydrateJobOffer(
+    { url: "https://example-startup.com/careers/eng-down", title: "Engineer", company: "Acme" },
+    {
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+      resolveHost: publicResolver,
+      requirePostingIdentity: true,
+    }
+  );
+  assert.equal(hydrated.bodyFetchStatus, "deferred");
+  assert.equal(hydrated.bodyFetchUnreachable, true);
+  assert.doesNotMatch(hydrated.bodyFetchReason, /does not identify/);
+  assert.match(hydrated.bodyFetchReason, /reach/);
 });

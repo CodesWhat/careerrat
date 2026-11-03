@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   checkUrlLiveness,
   extractApplyControlsFromHtml,
+  isUnreachable,
 } from "../src/core/liveness/job-link-checker.mjs";
 
 const SPA_RESPONSE = async () =>
@@ -127,4 +128,55 @@ test("liveness rejects a DNS name resolving to loopback before fetch", async () 
   assert.equal(result.result, "uncertain");
   assert.equal(result.code, "unsafe_url");
   assert.equal(called, false);
+});
+
+test("a network failure is reported as unreachable, a read page is not", async () => {
+  const down = await checkUrlLiveness("https://jobs.example.com/1", {
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed");
+    },
+    resolveHost: publicResolver,
+  });
+  assert.equal(down.result, "uncertain");
+  assert.equal(isUnreachable(down), true);
+  const read = await checkUrlLiveness("https://jobs.example.com/1", {
+    fetchImpl: SPA_RESPONSE,
+    resolveHost: publicResolver,
+  });
+  assert.equal(isUnreachable(read), false);
+});
+
+test("checkUrlLiveness: a thin 403 page is uncertain, not expired", async () => {
+  const result = await checkUrlLiveness("https://jobs.example.com/role", {
+    fetchImpl: async () => new Response("Forbidden", { status: 403 }),
+    resolveHost: publicResolver,
+  });
+  assert.equal(result.result, "uncertain");
+  assert.equal(result.code, "http_error");
+});
+
+test("checkUrlLiveness: a thin 200 page is uncertain, not expired", async () => {
+  const result = await checkUrlLiveness("https://jobs.example.com/role", {
+    fetchImpl: async () =>
+      new Response("<html><body>Careers</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    resolveHost: publicResolver,
+  });
+  assert.equal(result.result, "uncertain");
+  assert.equal(result.code, "thin_content");
+});
+
+test("checkUrlLiveness: network failure keeps the underlying cause in the reason", async () => {
+  const result = await checkUrlLiveness("https://jobs.example.com/role", {
+    fetchImpl: async () => {
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("x"), { code: "ENOTFOUND" }),
+      });
+    },
+    resolveHost: publicResolver,
+  });
+  assert.equal(result.code, "fetch_failed");
+  assert.match(result.reason, /ENOTFOUND/);
 });

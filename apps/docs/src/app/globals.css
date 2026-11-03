@@ -34,6 +34,8 @@
  * backdrop-filters are added.
  */
 :root {
+  /* wider docs on large laptop screens (fleet docs width, 2026-11-02) */
+  --fd-layout-width: 1600px;
   /* canvas #ececea */
   --background: 60 5% 92%;
   /* ink #17171a */

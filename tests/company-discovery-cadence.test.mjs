@@ -200,3 +200,19 @@ test("company discovery fingerprints ignore object key insertion order", () => {
 
   assert.equal(first, second);
 });
+
+test("a batch where a scan failed is retried the next day, not paused for a week", () => {
+  const repoRoot = setupRepo();
+  putBatch(repoRoot, {
+    rejected: [{ proposalId: "proposal-1", company: { name: "Down Co" }, reason: "scan-failed" }],
+    counts: { seeds: 1, proposals: 0, rejected: 1 },
+  });
+  const state = companyDiscoveryCadenceState({
+    repoRoot,
+    env: {},
+    now: new Date("2026-08-11T13:00:00.000Z"),
+  });
+
+  assert.equal(state.due, true);
+  assert.equal(state.reason, "scan-failed-retry");
+});

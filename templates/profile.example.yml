@@ -32,6 +32,7 @@ location:
   hybrid: true
   onsite: false
   commute_radius_miles: 25
+  commute_cities: []     # suburbs/towns of the home metro that count as local, as job boards write them ("Newark, NJ")
   relocation: []
   travel_tolerance: "low"
 

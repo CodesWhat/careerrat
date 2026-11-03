@@ -18,7 +18,8 @@
 //   --add-url "<url>"       Append a search from a pasted URL (hiring.cafe filters preserved).
 //       [--label "<l>"]
 //   --add-provider "<id>"   Append a deterministic Career Ops provider source.
-//       [--query "<q>"] [--url "<url>"] [--label "<l>"]
+//       [--query "<q>"] [--url "<url>"] [--label "<l>"] [--country "<code>"] [--location "<place>"]
+//       (usajobs and adzuna need a --query; adzuna also needs a --country)
 //   --enable <selector>     Enable a search by index or label.
 //   --disable <selector>    Disable a search by index or label.
 //   --json                  Machine-readable output for the current mode.
@@ -32,6 +33,11 @@ import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { buildSearchSources } from "../core/profile/generate-search-sources.mjs";
 import { formatErrors } from "../core/profile/schema-validator.mjs";
+import {
+  hasCredentials,
+  KEYED_PROVIDER_IDS,
+  KEYED_PROVIDERS,
+} from "../core/providers/keyed-credentials.mjs";
 import {
   CAREER_OPS_PROVIDER_PARITY,
   CAREER_OPS_UPSTREAM,
@@ -92,6 +98,13 @@ function runProviders() {
   const result = {
     upstream: CAREER_OPS_UPSTREAM,
     providers: CAREER_OPS_PROVIDER_PARITY,
+    keyed: KEYED_PROVIDER_IDS.map((id) => ({
+      id,
+      label: KEYED_PROVIDERS[id].label,
+      env: KEYED_PROVIDERS[id].vars,
+      signup: KEYED_PROVIDERS[id].signup,
+      configured: hasCredentials(id, process.env),
+    })),
   };
   if (json) {
     console.log(JSON.stringify(result, null, 2));
@@ -102,6 +115,11 @@ function runProviders() {
   console.log(implemented.map((provider) => provider.id).join(", "));
   for (const provider of result.providers.filter((entry) => entry.status !== "implemented")) {
     console.log(`\n${provider.id}: ${provider.status} - ${provider.reason}`);
+  }
+  console.log("\nAPI-key providers (free key, read from the environment):");
+  for (const entry of result.keyed) {
+    const state = entry.configured ? "key set" : `not set, needs ${entry.env.join(" and ")}`;
+    console.log(`- ${entry.id} (${entry.label}): ${state}. Sign up: ${entry.signup}`);
   }
   return 0;
 }
@@ -137,7 +155,7 @@ function runFromTargeting() {
     );
     return 1;
   }
-  const baseline = buildSearchSources(targeting, profile);
+  const baseline = buildSearchSources(targeting, profile, { env: process.env });
   // Board-wide aggregator entries (RemoteOK/Remotive/Working Nomads) are seeded
   // unconditionally by buildSearchSources — even for an unfinished onboarding
   // with no role_buckets — so they alone must not satisfy this "targeting has
@@ -209,6 +227,8 @@ function runAddProvider() {
       query: optValue("--query") || undefined,
       url: optValue("--url") || undefined,
       label: optValue("--label") || undefined,
+      country: optValue("--country") || undefined,
+      location: optValue("--location") || undefined,
     });
   } catch (err) {
     console.error(err.message);
@@ -373,6 +393,7 @@ Usage:
   careerrat searches --add-query "<q>" [--label "<l>"]
   careerrat searches --add-url "<url>" [--label "<l>"]    Import a pasted URL (hiring.cafe filters preserved)
   careerrat searches --add-provider "<id>" [--query "<q>"] [--url "<url>"] [--label "<l>"]
+                                                          (usajobs/adzuna: --query, adzuna also --country <us|gb|ca|...>)
   careerrat searches --enable <index or label>            Enable a search
   careerrat searches --disable <index or label>           Disable a search
   careerrat searches --json                               Machine-readable output for any mode

@@ -8,9 +8,8 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { patchRecordedCandidateConfig } from "../core/agent/recorded-config-write.mjs";
 import { dbExists } from "../core/db/connection.mjs";
-import { candidateConfigPatch } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { atomicWriteFile } from "../core/profile/gate-writer.mjs";
 import {
@@ -22,6 +21,7 @@ import {
   MODE_ROUTES,
   MODES_REL_PATH,
   MODES_TEMPLATE_PATH,
+  USAGE_OPERATIONS,
 } from "../core/profile/modes.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -70,6 +70,14 @@ if (cmd === "status") {
 if (cmd === "allows") {
   const operation = opts.positional[1];
   if (!operation) fail("Usage: modes allows <operation>");
+  // The library treats an unknown operation as "run" so callers never block on a
+  // new name. At the CLI that turned a typo or a renamed operation in a skill
+  // into a quiet "run", so the usage-mode gate never held anything back.
+  if (!Object.hasOwn(USAGE_OPERATIONS, operation)) {
+    fail(
+      `unknown operation "${operation}". Known operations: ${Object.keys(USAGE_OPERATIONS).join(", ")}`
+    );
+  }
   const modes = loadModes({ root: opts.root });
   if (!modes.valid) {
     if (opts.json) {
@@ -134,7 +142,14 @@ if (dbExists(pathCtx)) {
     }
     process.exit(0);
   }
-  candidateConfigPatch({ ...pathCtx, name: "modes", patch: { [route.path]: value } });
+  const saved = patchRecordedCandidateConfig({
+    ...pathCtx,
+    name: "modes",
+    patch: { [route.path]: value },
+    writes: [{ path: route.path, label: route.label }],
+    writer: `modes.${type}`,
+  });
+  result.history = saved.history;
   result.written = true;
   if (opts.json) console.log(JSON.stringify(result, null, 2));
   else console.log(`Written to SQLite candidate modes: ${route.path}: ${value}`);

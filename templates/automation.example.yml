@@ -1,4 +1,6 @@
 # Browser automation — EXAMPLE (copy to candidate/automation.yml, which is gitignored).
+# Only used by a legacy file workspace. A workspace that keeps its settings in the
+# database ignores this file; use `careerrat automation ... --write` there.
 #
 # ON BY DEFAULT. Every capability below is on for every platform it applies to.
 # Set a capability's `enabled` or a single platform to false to turn it off; a
@@ -63,7 +65,10 @@ capabilities:
 
   # Phase 4 — authenticated form preparation across supported ATS forms.
   # Fill and advance safely, halt on captcha / 2FA / application limits, and
-  # follow the `submit` setting at the final submit control.
+  # follow the `submit` setting at the final submit control. LinkedIn is not
+  # here: CareerRat never applies through a LinkedIn session. It uses the
+  # employer's own link, or opens the LinkedIn page for you to apply. A
+  # `linkedin:` line left in an older file is ignored.
   authenticated_apply_preparation:
     enabled: true
     platforms:
@@ -72,7 +77,6 @@ capabilities:
       ashby: true
       workable: true
       smartrecruiters: true
-      linkedin: true
       external_ats: true
 
   # Phase 5 (M13) — LinkedIn profile optimizer. TWO separately-gated capabilities:

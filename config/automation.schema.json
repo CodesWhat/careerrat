@@ -16,7 +16,7 @@
       "enum": ["basic", "advanced"]
     },
     "submit": {
-      "description": "auto lets the agent press the final Submit once the form is complete and verifies the confirmation page. manual stops before Submit for a person to press. Absent means auto.",
+      "description": "auto lets the agent press the final Submit once the form is complete and verifies the confirmation page. manual stops before Submit for a person to press. Absent means auto. Does not apply to LinkedIn: CareerRat never applies through LinkedIn, so nothing there is submitted automatically.",
       "enum": ["auto", "manual"],
       "default": "auto"
     },
@@ -46,6 +46,7 @@
           }
         },
         "authenticated_apply_preparation": {
+          "description": "Fill employer application forms. platforms.linkedin is deprecated and ignored: CareerRat never applies through a LinkedIn session. Older files that still carry it stay valid.",
           "type": "object",
           "additionalProperties": true,
           "properties": {

@@ -131,3 +131,105 @@ describe("titlesBelowTarget", () => {
     assert.deepEqual(titles, ["Platform Engineer"]);
   });
 });
+
+describe("relativeSeniority generic level fallback", () => {
+  const withCeiling = {
+    role_buckets: [
+      {
+        name: "Engineering",
+        titles: ["Platform Engineer"],
+        seniority_ceiling: 30,
+        seniority_ladder: [
+          { rank: 20, titles: ["Platform Engineer"] },
+          { rank: 30, titles: ["Staff Platform Engineer"] },
+        ],
+      },
+    ],
+  };
+
+  it("treats executive words as above the ceiling when the ladder does not list them", () => {
+    for (const title of [
+      "VP, Customer Success",
+      "Vice President of Operations",
+      "SVP Sales",
+      "Chief Revenue Officer",
+      "CFO",
+      "Head of Support",
+      "Director of Operations",
+    ]) {
+      assert.equal(relativeSeniority(title, withCeiling).classification, "above-target", title);
+    }
+  });
+
+  it("treats entry-level words as below the lowest wanted rank", () => {
+    for (const title of [
+      "Summer Intern",
+      "New Grad RN Residency - ICU",
+      "Graduate Program, Finance",
+      "Apprentice Technician",
+      "Junior Analyst",
+      "Entry-Level Associate",
+      "Associate Analyst",
+    ]) {
+      assert.equal(relativeSeniority(title, withCeiling).classification, "below-target", title);
+    }
+  });
+
+  it("lets ladder entries win over the fallback", () => {
+    const ladder = {
+      role_buckets: [
+        {
+          titles: ["Associate Product Manager"],
+          seniority_ceiling: 40,
+          seniority_ladder: [
+            { rank: 10, titles: ["Associate Product Manager"] },
+            { rank: 20, titles: ["Product Manager"] },
+            { rank: 40, titles: ["Director of Product"] },
+            { rank: 50, titles: ["VP of Product"] },
+          ],
+        },
+      ],
+    };
+    assert.equal(
+      relativeSeniority("Associate Product Manager", ladder).classification,
+      "at-or-above-target"
+    );
+    assert.equal(
+      relativeSeniority("Director of Product", ladder).classification,
+      "at-or-above-target"
+    );
+    assert.equal(relativeSeniority("VP of Product", ladder).classification, "above-target");
+    // The ladder uses "associate" and "director", so those words are the candidate's.
+    assert.equal(
+      relativeSeniority("Associate Director, Growth", ladder).classification,
+      "unclassified"
+    );
+  });
+
+  it("skips executive words when no ceiling is configured, but still cuts entry level", () => {
+    const noCeiling = {
+      role_buckets: [{ ...withCeiling.role_buckets[0], seniority_ceiling: undefined }],
+    };
+    assert.equal(
+      relativeSeniority("VP, Customer Success", noCeiling).classification,
+      "unclassified"
+    );
+    assert.equal(relativeSeniority("Intern, Platform", noCeiling).classification, "below-target");
+  });
+
+  it("does nothing without a ladder", () => {
+    const bare = { role_buckets: [{ titles: ["Platform Engineer"] }] };
+    assert.equal(relativeSeniority("VP, Customer Success", bare).classification, "unclassified");
+  });
+
+  it("does not match level words inside other words", () => {
+    assert.equal(
+      relativeSeniority("Internal Tools Engineer", withCeiling).classification,
+      "unclassified"
+    );
+    assert.equal(
+      relativeSeniority("Directory Services Engineer", withCeiling).classification,
+      "unclassified"
+    );
+  });
+});

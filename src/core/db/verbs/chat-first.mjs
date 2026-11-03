@@ -11,6 +11,7 @@ import { PLAIN_ENGLISH_AGENT_VOICE } from "../../ai/agent-voice.mjs";
 import { runBoundedAI } from "../../ai/bounded-ai.mjs";
 import { assertAIExecutionPlanForRuntime } from "../../ai/operation-policy.mjs";
 import { applicationPlatformForUrl } from "../../apply/form-fill.mjs";
+import { isLinkedInUrl } from "../../apply/linkedin-link.mjs";
 import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
@@ -357,6 +358,13 @@ function hydrateJobThread(db, thread) {
       thread.id
     ),
   };
+}
+
+export function jobThreadGet({ repoRoot, env, applicationId } = {}) {
+  const db = requireDb({ repoRoot, env });
+  const application = applicationRequired(db, applicationId);
+  const thread = readJobThread(db, application.id);
+  return { ok: true, thread: thread ? hydrateJobThread(db, thread) : null };
 }
 
 function derivedThreadCheckpoint(db, thread, at) {
@@ -4215,7 +4223,8 @@ function packetQuestionOptions(manifest, questionId) {
 
 function applicationPlatformFromApplication(application) {
   const url = String(application?.link || application?.url || application?.sourceUrl || "").trim();
-  return url ? applicationPlatformForUrl(url) : null;
+  // LinkedIn is not an apply platform: CareerRat never applies through it.
+  return url && !isLinkedInUrl(url) ? applicationPlatformForUrl(url) : null;
 }
 
 function packetReviewFromApplication(application) {

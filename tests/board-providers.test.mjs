@@ -43,6 +43,8 @@ test("fetchRemoteOk drops metadata and invalid rows while mapping valid postings
       company: "Example Labs",
       location: "Remote, US",
       postedAt: new Date(epoch * 1000).toISOString(),
+      bodyText: "",
+      bodyPartial: true,
     },
     {
       title: "Solutions Engineer",
@@ -50,6 +52,8 @@ test("fetchRemoteOk drops metadata and invalid rows while mapping valid postings
       company: "Board Label",
       location: "",
       postedAt: "2026-07-12T18:30:00.000Z",
+      bodyText: "",
+      bodyPartial: true,
     },
     {
       title: "Platform Engineer",
@@ -57,6 +61,8 @@ test("fetchRemoteOk drops metadata and invalid rows while mapping valid postings
       company: "Board Label",
       location: "",
       postedAt: null,
+      bodyText: "",
+      bodyPartial: true,
     },
   ]);
 });
@@ -119,6 +125,8 @@ test("fetchRemotive maps its jobs envelope", async () => {
       company: "Example Cloud",
       location: "Americas",
       postedAt: "2026-07-14T09:15:00.000Z",
+      bodyText: "",
+      bodyPartial: true,
     },
   ]);
 });
@@ -151,6 +159,8 @@ test("fetchWorkingNomads maps array postings", async () => {
       company: "Example Robotics",
       location: "Remote",
       postedAt: "2026-07-15T12:00:00.000Z",
+      bodyText: "",
+      bodyPartial: true,
     },
   ]);
 });
@@ -159,5 +169,37 @@ test("fetchWorkingNomads rejects non-array responses", async () => {
   await assert.rejects(
     fetchWorkingNomads({}, async () => ({ jobs: [] })),
     /expected a JSON array/i
+  );
+});
+
+test("board feeds keep the description they already carry and mark missing ones partial", async () => {
+  const { fetchRemotive } = await import("../src/core/providers/remotive.mjs");
+  const feed = {
+    jobs: [
+      {
+        title: "Role A",
+        url: "https://example.test/a",
+        company_name: "Acme",
+        description: "<p>Build <b>reliable</b> systems.</p>",
+      },
+      { title: "Role B", url: "https://example.test/b", company_name: "Acme" },
+    ],
+  };
+  const offers = await fetchRemotive({}, async () => ({
+    ok: true,
+    status: 200,
+    json: async () => feed,
+  }));
+  assert.equal(offers[0].bodyText, "Build reliable systems.");
+  assert.equal(offers[0].bodyPartial, false);
+  assert.equal(offers[1].bodyText, "");
+  assert.equal(offers[1].bodyPartial, true);
+});
+
+test("board feeds report an HTTP failure instead of an unexpected-response error", async () => {
+  const { fetchRemoteOk } = await import("../src/core/providers/remoteok.mjs");
+  await assert.rejects(
+    fetchRemoteOk({}, async () => ({ ok: false, status: 429, json: async () => ({}) })),
+    /HTTP 429/
   );
 });

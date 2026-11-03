@@ -57,16 +57,11 @@ export const CAPABILITIES = {
   authenticated_apply_preparation: {
     phase: 4,
     label: "Authenticated apply preparation",
-    summary: "fill the modal, then submit or stop per the submit setting",
-    platforms: [
-      "greenhouse",
-      "lever",
-      "ashby",
-      "workable",
-      "smartrecruiters",
-      "linkedin",
-      "external_ats",
-    ],
+    summary: "fill the employer's application form, then submit or stop per the submit setting",
+    // LinkedIn is not listed on purpose: CareerRat never applies through a
+    // LinkedIn session. Old configs that still carry platforms.linkedin load
+    // fine and the value is ignored.
+    platforms: ["greenhouse", "lever", "ashby", "workable", "smartrecruiters", "external_ats"],
   },
   profile_optimize: {
     phase: 5,
@@ -224,6 +219,9 @@ export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) 
       data: normalizeAutomationConfig(data),
       path: display,
       source,
+      // A leftover automation.yml has no effect here. Surfacing it keeps someone
+      // who set `submit: manual` in the file from believing it is in force.
+      ignoredFile: existsSync(path) ? display : null,
     };
   }
   if (!existsSync(path)) {
@@ -413,6 +411,7 @@ export function automationStatus({
     valid: loaded.valid,
     errors: loaded.errors,
     readError: loaded.readError || null,
+    ignoredFile: loaded.ignoredFile || null,
     submit,
     liveCount,
     capabilities,

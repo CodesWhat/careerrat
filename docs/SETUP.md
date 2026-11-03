@@ -7,7 +7,7 @@ drafts and next steps do not depend on one terminal session's history.
 
 ## Prerequisites
 
-- Node.js >= 24.15
+- Node.js >= 24.22.1
 - A supported coding-agent CLI on your PATH:
   - Claude Code:  `npm install -g @anthropic-ai/claude-code`  (<https://claude.com/claude-code>)
   - Codex:        `npm install -g @openai/codex`               (<https://github.com/openai/codex>)
@@ -42,28 +42,29 @@ npm link
 careerrat start
 ```
 
-That scaffolds your workspace and opens the local app at
-<http://localhost:7777/app>. Choose your AI engine on the page, then continue
-chatting there. Paste a job posting and say "evaluate this", or try the bundled
-sample under `examples/sample-jobs/`. A terminal agent is optional.
+Needs Node.js 24.22.1 or newer and Python 3.11 or newer (with `venv`). On Linux,
+also `make` and a C++ compiler (`sudo apt install build-essential`), because the
+native terminal dependency is built during `npm install`.
+
+`careerrat start` scaffolds your workspace and opens the terminal workspace: saved
+jobs beside a native Claude Code or Codex chat. The first launch builds a private
+Python environment (about a minute, needs internet); `careerrat tui setup` does it
+ahead of time. On a new install the agent starts on `ingest-profile`. Paste a job
+posting and say "evaluate this", or try the bundled sample under
+`examples/sample-jobs/`.
 
 `start` does the whole arc in one shot:
 
 1. Scaffolds `.careerrat/candidate/` and `.careerrat/workspace/` directories (idempotent).
-2. Seeds `.careerrat/workspace/tracker.json` from the demo template if absent,
-   preserving existing work.
-3. Starts or reuses the local app with event-driven data updates.
-4. Opens the browser workspace. If the browser cannot open automatically, the
-   launcher prints the address.
+2. Installs the skill shim so the agent can run the skills.
+3. Opens the Textual workspace with the first agent it finds (Claude Code, then
+   Codex), or the one you name: `careerrat start claude` or `careerrat start codex`.
 
-To work in a terminal agent too, name it explicitly: `careerrat start claude`
-or `careerrat start codex`. This also installs the skill shim and sends the
-doctor-driven starter message. Omitting the name keeps the conversation in the
-browser; the page still uses your selected local AI engine.
+It needs a real terminal and exits with an error otherwise. It never opens a browser.
 
-Flags: `--no-agent` (browser only), `--no-dashboard` (terminal only, detecting a
-supported agent when unnamed), `--no-open` (serve without opening a tab),
-`--agent <name>` (alias for the positional), `--port <n>`.
+Flags: `--no-agent` (workspace only, no chat), `--agent <name>` (alias for the
+positional), `--browser` (legacy: serve the browser workspace, with `--no-open` and
+`--port <n>`), `--no-dashboard` (legacy: terminal agent session without the workspace).
 
 ## Exported Files
 
@@ -152,14 +153,14 @@ filling, or submitting.
 
 ## Dashboard
 
-`careerrat start` brings the dashboard up. To run it separately:
+The browser dashboard is the legacy surface. `careerrat start --browser` brings it up. To run it separately:
 
 ```bash
 careerrat tracker        # snapshot tracker.json for recovery
 careerrat tracker-dev    # live-updating app server on :7777
 ```
 
-`careerrat start [agent]` runs that dashboard as a separate local process and
+`careerrat start --browser` runs that dashboard as a separate local process and
 writes `.careerrat/internal/tracker-dev.pid` plus `.careerrat/internal/tracker-dev.log`, so the page
 stays available while the launched agent works.
 

@@ -7,13 +7,14 @@
 //   careerrat evaluate --help
 //
 // Reads candidate/targeting.yml, candidate/profile.yml, candidate/honesty.yml.
-import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { dbExists } from "../core/db/connection.mjs";
 import { deepIngestConfirmedForGeneration } from "../core/db/verbs/index.mjs";
 import { evaluateGate, parseSavedJob, renderGateBlock } from "../core/evaluate/gate.mjs";
+import { resolveUserFileArg } from "../core/paths/user-file-arg.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
 
@@ -32,9 +33,9 @@ if (!jobArg) {
   process.exit(1);
 }
 
-const jobPath = isAbsolute(jobArg) ? jobArg : join(process.cwd(), jobArg);
-if (!existsSync(jobPath)) {
-  console.error(`Job file not found: ${jobPath}`);
+const { path: jobPath, tried: jobTried } = resolveUserFileArg(jobArg, { repoRoot: root });
+if (!jobPath) {
+  console.error(`Job file not found. Looked in:\n  ${jobTried.join("\n  ")}`);
   process.exit(1);
 }
 
@@ -64,6 +65,11 @@ if (dbExists({ repoRoot: root })) {
 }
 
 const job = parseSavedJob(readFileSync(jobPath, "utf8"));
+if (!job.body) {
+  console.error(
+    "WARNING: this file has no job text, so the verdict below is scored from the title alone and the cut signals saw nothing."
+  );
+}
 const result = evaluateGate({
   job,
   targeting,

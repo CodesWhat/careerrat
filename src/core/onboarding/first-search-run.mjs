@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { runSourcedScan } from "../../../scripts/scan-sourced.mjs";
+import { sanitizeFailureCause } from "../ai/failure-cause.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import { companyBoardResolutionGet } from "../db/verbs/company-discovery.mjs";
 import { companyAtsUpsert, sourceConfigGet, sourceConfigPut } from "../db/verbs/source-config.mjs";
@@ -21,6 +22,7 @@ import {
   isBoardProviderSupported,
   isCompanyProviderSupported,
 } from "../scoring/sourced-scanner.mjs";
+import { summarizeSearchHealth } from "../search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../search/source-login-preflight.mjs";
 import { createSearchExecutionId } from "../search/unified-job-search.mjs";
 
@@ -705,7 +707,8 @@ async function resolveAndPromoteCompanyBoard({ repoRoot, env, fetchImpl, name, h
   } catch {
     // One company's resolution failure/timeout never sinks the batch — it
     // just stays unresolved until a later first/manual search retries it.
-    return { resolved: false, promoted: false };
+    // It is counted as failed so a network outage doesn't read as "no match".
+    return { resolved: false, promoted: false, failed: true };
   }
 }
 
@@ -741,14 +744,20 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
     timer = setTimeout(() => resolve(timedOut), COMPANY_BOARD_AI_HINT_TIMEOUT_MS);
   });
   let filled;
+  // Why the rescue found nothing, so a search summary can say so instead of
+  // looking the same as "the AI had no answers".
+  let failure = null;
   try {
     const outcome = await Promise.race([
       fillManualDomainHints({ repoRoot, env, seeds, call }),
       timeout,
     ]);
     filled = outcome === timedOut ? null : outcome;
-  } catch {
+    if (outcome === timedOut) failure = "The AI took too long to answer.";
+    else failure = outcome?.failure || null;
+  } catch (error) {
     filled = null;
+    failure = sanitizeFailureCause(error) || "The AI step failed.";
   } finally {
     clearTimeout(timer);
   }
@@ -760,6 +769,8 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
     attempted: 0,
     resolved: 0,
     promoted: 0,
+    ...(failure ? { failure: String(failure).slice(0, 300) } : {}),
+    failed: 0,
   };
   if (!hintedSeeds.length) return outcome;
 
@@ -781,6 +792,7 @@ async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names
       });
       if (result.resolved) outcome.resolved += 1;
       if (result.promoted) outcome.promoted += 1;
+      if (result.failed) outcome.failed += 1;
     }
   }
   await Promise.all(
@@ -802,7 +814,7 @@ async function backfillCompanyBoards({
   candidateConfig,
   sourcedScan,
 }) {
-  const summary = { attempted: 0, resolved: 0, promoted: 0 };
+  const summary = { attempted: 0, resolved: 0, promoted: 0, failed: 0 };
   const known = knownCompanyNames(sourcedScan);
   const pending = trackedCompanyNames(candidateConfig).filter(
     (name) => !known.has(name.toLowerCase())
@@ -834,6 +846,7 @@ async function backfillCompanyBoards({
       });
       if (result.resolved) summary.resolved += 1;
       if (result.promoted) summary.promoted += 1;
+      if (result.failed) summary.failed += 1;
     }
   }
 
@@ -855,10 +868,12 @@ async function backfillCompanyBoards({
     summary.attempted += rescue.attempted;
     summary.resolved += rescue.resolved;
     summary.promoted += rescue.promoted;
+    summary.failed += rescue.failed || 0;
     summary.aiHintFill = {
       requested: rescue.requested,
       hinted: rescue.hinted,
       resolved: rescue.resolved,
+      ...(rescue.failure ? { failure: rescue.failure } : {}),
     };
   }
 
@@ -874,9 +889,20 @@ function currentSourceConfigs(pathCtx) {
 
 function normalizeRunSummary(summary = {}, deterministicSources) {
   const errors = Array.isArray(summary.errors) ? summary.errors : [];
+  const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
   const loginRequests = Array.isArray(summary.loginRequests) ? summary.loginRequests : [];
+  // The scan knows which configured sources it could actually search. The
+  // pre-scan deterministic count includes browser-only and login-backed ones,
+  // so prefer the scan's own attempted count and health over recomputing.
+  const attemptedSources = Number.isFinite(Number(summary.attemptedSources))
+    ? Number(summary.attemptedSources)
+    : deterministicSources.attempted;
+  const notSearchable =
+    summary.notSearchable && typeof summary.notSearchable === "object"
+      ? clone(summary.notSearchable)
+      : undefined;
   return {
-    attemptedSources: deterministicSources.attempted,
+    attemptedSources,
     scanned: Number(summary.scanned || 0),
     new: Number(summary.new || 0),
     qualified: Number(summary.qualified || 0),
@@ -890,6 +916,12 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     rejectionSamples: clone(summary.rejectionSamples || {}),
     errorCount: errors.length,
     errors: clone(errors),
+    warnings: clone(warnings),
+    ...(notSearchable ? { notSearchable } : {}),
+    health:
+      summary.health && typeof summary.health === "object"
+        ? clone(summary.health)
+        : summarizeSearchHealth({ errors, warnings, attemptedSources, notSearchable }),
     loginRequests: clone(loginRequests),
     sourceCoverage: clone(Array.isArray(summary.sourceCoverage) ? summary.sourceCoverage : []),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
@@ -1064,7 +1096,9 @@ export function healSearchSourceConfig({ repoRoot, env = process.env, config = n
     };
   }
 
-  const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
+  const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile, {
+    env: process.env,
+  });
   const merged = mergeSearchSources(current.data, generated);
   const after = countDeterministicSources({
     searchSources: merged,
@@ -1109,7 +1143,9 @@ export function prepareDeterministicSearchSources({
   const previousGeneratedTitleFilter = generatedTitleFilterState(current.data);
   const previousGeneratedLocationFilter = generatedLocationFilterState(current.data);
   if (hasConfiguredTargetTitles(candidateConfig)) {
-    const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
+    const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile, {
+      env: process.env,
+    });
     const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
     sources = sourceConfigPut({
       ...pathCtx,

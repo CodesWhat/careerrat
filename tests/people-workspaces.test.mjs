@@ -88,10 +88,13 @@ test("with no person selected, paths are unchanged", (t) => {
   );
 });
 
-test("documents go to ~/Documents/careerrat/<name> for a person unless the downloads dir is set", () => {
+test("documents go to ~/Documents/careerrat/_people/<name> for a person unless the downloads dir is set", () => {
   const application = { id: "x", company: "Acme" };
   const person = jobDocumentPaths({ application, env: { CAREERRAT_PERSON: "alice" } });
-  assert.equal(person.active, join(homedir(), "Documents", "careerrat", "alice", "Acme", "job-x"));
+  assert.equal(
+    person.active,
+    join(homedir(), "Documents", "careerrat", "_people", "alice", "Acme", "job-x")
+  );
   const explicit = jobDocumentPaths({
     application,
     env: { CAREERRAT_PERSON: "alice", CAREERRAT_DOWNLOADS_DIR: "/tmp/docs" },
@@ -120,6 +123,14 @@ test("people add creates the root and prints the next command; list reports each
   ]);
   const text = cli(base, ["people", "list"]);
   assert.match(text.stdout, /alice\s+setup not finished/);
+});
+
+test("start --new creates the person's workspace instead of rejecting the flag", (t) => {
+  const base = tempBase(t);
+  const result = cli(base, ["--for", "alice", "start", "--new", "--no-agent", "--no-dashboard"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /Unknown option/);
+  assert.ok(existsSync(join(base, "people", "alice")));
 });
 
 test("people list on an empty base says how to add someone", (t) => {

@@ -569,6 +569,27 @@ async function applyRefresh({
     };
   }
 
+  // The refresh scan itself failed (not "no roles"): keep the good proposal
+  // the reviewer already has instead of rejecting it on a transport error.
+  if (gated?.rejected?.reason === "scan-failed") {
+    return {
+      data: {
+        decision: decisionRecord({
+          request,
+          status: "refresh-failed",
+          now,
+          extra: {
+            refreshReason: REFRESH_REASONS.EXPLICIT_REFRESH,
+            note: "CareerRat couldn't reach this company's job board, so the proposal was left as it was.",
+          },
+        }),
+        refreshedProposal: null,
+        rejected: null,
+      },
+      meta: { version: batch.version },
+    };
+  }
+
   const rejected = {
     ...(gated?.rejected || {
       proposalId: proposal.proposalId,

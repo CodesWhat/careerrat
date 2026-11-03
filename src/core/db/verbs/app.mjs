@@ -163,12 +163,22 @@ function interviewLogisticsNote(at, who) {
   return `Interview: ${formatted}${firstName ? ` with ${firstName}` : ""}`.slice(0, 60);
 }
 
-// appUpsert({row}) — full-row insert/replace (capture-intake shape): a brand
-// new application row, or a wholesale replace of an existing one by id.
-export function appUpsert({ repoRoot, env, row } = {}) {
+// appUpsert({row, replace?}) — full-row insert/replace (capture-intake shape).
+// Callers that must never wipe an existing row (the CLI) pass `replace: false`,
+// which refuses an existing id: a replace drops every field the new row doesn't
+// carry (status, history, artifacts).
+export function appUpsert({ repoRoot, env, row, replace = true } = {}) {
   if (!row?.id) throw new Error("appUpsert: row.id is required");
   return runApplicationOutcome({ repoRoot, env }, row.id, (db) => {
     const existed = Boolean(getRow(db, "applications", row.id));
+    if (existed && !replace) {
+      const error = new Error(
+        `application "${row.id}" already exists. Upsert would replace the whole row and drop its other fields. ` +
+          "Use 'app set-fields' to change fields, or pass --replace to overwrite it on purpose."
+      );
+      error.code = "APPLICATION_EXISTS";
+      throw error;
+    }
     putRow(db, "applications", row.id, row);
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
@@ -235,6 +245,19 @@ function reconcileSubmitGates(db, application) {
   });
 }
 
+const STAGES_THAT_IMPLY_APPLIED = new Set([
+  "applied",
+  "screen",
+  "interview",
+  "final",
+  "offer",
+  "accepted",
+]);
+
+// Outcome words that look like a status to the stage matcher ("submitted-unverified"
+// contains "submitted") but are only ever a result of one run, never a status.
+const NOT_A_STATUS = /unverified/i;
+
 function applyStatusUpdate(app, { to, note, round, appliedAt, followUpDueAt, clearInterview, at }) {
   const from = app.status;
   const wasInterview = classifyStage(from).id === "interview";
@@ -253,6 +276,11 @@ function applyStatusUpdate(app, { to, note, round, appliedAt, followUpDueAt, cle
     updated.conversations = conversations;
   }
   if (appliedAt != null) updated.appliedAt = String(appliedAt);
+  // Moving to a status that means "sent" stamps the date, or the follow-up
+  // reminders that count days since applying never fire for this row.
+  if (appliedAt == null && !app.appliedAt && STAGES_THAT_IMPLY_APPLIED.has(classifyStage(to).id)) {
+    updated.appliedAt = at || nowIso();
+  }
   if (to === "applied") {
     updated.nextAction = null;
     updated.nextActionDue = null;
@@ -273,6 +301,7 @@ export function appSetStatus({
   appliedAt,
   followUpDueAt,
   clearInterview,
+  restore = false,
 } = {}) {
   if (!to) throw new Error("appSetStatus: to is required");
   if (appliedAt != null && Number.isNaN(Date.parse(appliedAt))) {
@@ -280,7 +309,26 @@ export function appSetStatus({
     error.code = "BAD_APPLIED_AT";
     throw error;
   }
+  if (followUpDueAt != null && Number.isNaN(Date.parse(followUpDueAt))) {
+    const error = new Error("appSetStatus: followUpDueAt must be an ISO date or datetime");
+    error.code = "BAD_FOLLOW_UP_DUE";
+    throw error;
+  }
   return runApplicationOutcome({ repoRoot, env }, id, (db) => {
+    // `restore` puts back a status the row already held (rerank undo), so the
+    // label is trusted. Anything else must be a known stage, including any
+    // custom stage configured in tracker.stages.
+    if (!restore) {
+      const stagesRow = db.prepare("SELECT data FROM kv WHERE key = 'stages'").get();
+      const customStages = stagesRow ? JSON.parse(stagesRow.data) : undefined;
+      if (!isKnownStatusLabel(to, customStages) || NOT_A_STATUS.test(String(to))) {
+        const error = new Error(
+          `appSetStatus: "${to}" is not a status CareerRat knows. Use one of: applied, manual-apply, awaiting, screen, interview, final, offer, accepted, rejected, withdrawn, reviewed-hold, or a stage from tracker.stages.`
+        );
+        error.code = "BAD_STATUS";
+        throw error;
+      }
+    }
     const app = requireApp(db, id);
     const { from, updated } = applyStatusUpdate(app, {
       to,
@@ -738,6 +786,11 @@ export function appPersistEvaluation({ repoRoot, env, id, evaluation, projection
 // "supersedes interviewAt once a follow-on is booked"). Not outcome-changing.
 export function appScheduleInterview({ repoRoot, env, id, at, round, note, who } = {}) {
   if (!at) throw new Error("appScheduleInterview: at is required");
+  if (Number.isNaN(Date.parse(at))) {
+    const error = new Error("appScheduleInterview: at must be an ISO date or datetime");
+    error.code = "BAD_INTERVIEW_AT";
+    throw error;
+  }
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
     const isFutureAlready =

@@ -2389,7 +2389,7 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(status, 502);
       assert.equal(body.ok, false);
       assert.equal(body.code, "AI_PROVIDER_FAILED");
-      assert.equal(body.ai.used, true);
+      assert.equal(body.ai.used, false);
       assert.equal(body.manual.available, true);
       assertNoSensitiveRouteEnvelope(body);
     } finally {
@@ -2453,7 +2453,7 @@ describe("POST /api/onboard/resume-ai", () => {
         assert.equal(status, 502);
         assert.equal(body.ok, false);
         assert.equal(body.code, "AI_PROVIDER_FAILED");
-        assert.equal(body.ai.used, true);
+        assert.equal(body.ai.used, false);
         assert.equal(body.manual.available, true);
         assert.equal(JSON.stringify(body).includes(message), false);
         assertNoSensitiveRouteEnvelope(body);

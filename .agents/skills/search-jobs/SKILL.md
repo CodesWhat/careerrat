@@ -43,6 +43,8 @@ Finish with **exactly one** fenced ` ```json ` block matching `config/ai-web-sea
 
 ## STEP 0 — Prerequisites
 
+Check adjacency config first. Run `careerrat doctor` (or read `candidate/targeting.yml` and `candidate/profile.yml`) and look for a "Targeting is missing adjacency config" note: no non-primary role bucket and no `role_families`, or no `profile.location.commute_cities` for a hybrid or on-site candidate. Targeting saved before title lanes shipped usually lacks all of it, and a scan without it drops related titles and nearby towns without saying so. When it is missing, do not scan yet. Propose the additions yourself from the candidate's field, following the ingest-profile instructions (secondary bucket of adjacent titles, `role_families`, seniority ladder and ceiling on the primary bucket, commute cities), show them to the candidate, and save only what they confirm. If they decline, scan anyway; the scan summary will say it ran without adjacency config.
+
 Read all gate files before touching anything else:
 
 1. `candidate/targeting.yml` — `role_buckets`, `keep_signals`, `cut_signals`, `excluded_companies`, `fit_bands`, `degree_policy`
@@ -102,6 +104,39 @@ an automatic or background sweep, omit `--explicit`. If the verdict is `downshif
 fewer enabled sources or a narrower recency window. If it is `run`, proceed normally.
 
 ## STEP 1 — Full sweep
+
+In a terminal workspace (`CAREERRAT_SURFACE=tui`) with an existing database,
+start or reuse the configured-source scan with `careerrat search start --json`.
+Keep its exact returned run ID and continue the conversation while the worker
+runs. Inspect `careerrat search status --id <run-id> --json` for progress and
+completion. On completion, read the handoff and its complete `resultPath` JSON,
+including all `offers[]`; don't substitute the bounded TUI summary for the result.
+If the user cancels, use `careerrat search cancel --id <run-id> --json` and retain
+any saved partial results. Source errors and login requests need honest follow-up.
+Status and the saved handoff carry a `health` block (`ok`, `degraded` or `failed`)
+with failed and skipped source counts and the error reasons grouped by count. A
+`completed` run with `degraded` or `failed` health is not a success: say so in plain
+words, give the counts and the top reasons, and then work from the partial results.
+Sources that can't run in the terminal (browser-only, or login-backed with no session)
+are left out before the run, so they never produce error rows or count toward the
+failed share. The summary carries `notSearchable` (`count` plus `sources[]` with a
+label and reason), and `health.notSearchable` has the count. List them once as "not
+searchable from the terminal" with the reason; they don't mean the network is broken.
+If every source was non-runnable, health is `failed` and says nothing was searched.
+A source whose URL answers 404, or whose board an ATS says doesn't exist, is dead. The
+summary carries `deadSources` (`count` plus `sources[]` with `label`, `kind`, `url`, `reason`
+and `action`), and the terminal summary lists them under "Dead sources". They stay in
+`errors[]` too. Tell the user which ones and the next step: remove the source, or re-resolve
+the company's board. Nothing remembers a dead source between runs yet, so it will show up
+again until it's removed.
+Sources that need a free API key (USAJobs: `USAJOBS_API_KEY` and `USAJOBS_USER_AGENT`;
+Adzuna: `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`) read it from the environment CareerRat runs in.
+With the key missing, that source's error row names the variables and the signup page. Say
+so plainly and point the user at `careerrat searches --providers`, which shows which keys are
+set. Don't treat it as a network failure and don't ask the user to paste a key into chat.
+Don't start a second foreground scan while the same worker is active. Additional
+agent-led search and AI Web Search still follow this skill's owning sections.
+The commands below remain the legacy/foreground entry, with no implicit migration.
 
 Run the full sourced sweep against all enabled sources since their `lastRunAt` watermarks:
 

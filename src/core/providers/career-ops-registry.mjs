@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { guardedFetch } from "../net/public-http-fetch.mjs";
@@ -8,6 +9,33 @@ const MAX_TIMEOUT_MS = 60_000;
 const DEFAULT_USER_AGENT =
   "CareerRat/0.7 (+https://github.com/CodesWhat/careerrat; deterministic job source)";
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+// Vendored providers report truncation, partial pages and ignored settings with
+// console.error, which the terminal search worker discards. Route those lines
+// into the caller's own sink while a provider runs, so they reach the run
+// health instead of vanishing. AsyncLocalStorage keeps concurrent sources from
+// seeing each other's warnings. The original console.error still runs.
+const warningScope = new AsyncLocalStorage();
+const MAX_WARNING_LENGTH = 300;
+const MAX_WARNINGS_PER_SOURCE = 20;
+if (!console.error.__careerratWarningCapture) {
+  const original = console.error.bind(console);
+  const capturing = (...args) => {
+    const sink = warningScope.getStore();
+    if (sink && sink.length < MAX_WARNINGS_PER_SOURCE) {
+      const text = args
+        .map((arg) => (typeof arg === "string" ? arg : String(arg?.message ?? arg)))
+        .join(" ")
+        .replace(/^(?:[\s\u26A0]|\uFE0F)+/u, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) sink.push(text.slice(0, MAX_WARNING_LENGTH));
+    }
+    return original(...args);
+  };
+  capturing.__careerratWarningCapture = true;
+  console.error = capturing;
+}
 
 const implementedIds = CAREER_OPS_PROVIDER_PARITY.filter(
   (entry) => entry.status === "implemented"
@@ -134,6 +162,17 @@ function keywordList(entry = {}) {
 function prepareProviderEntry(providerId, entry = {}) {
   const normalized = { ...normalizeEntry(entry), provider: providerId };
   const keywords = keywordList(normalized);
+  // `searches --add-provider X --query Q` stores only `query`. Most adapters
+  // read `keywords` or `searchKeywords`, so copy it there when they're unset or
+  // the query would be silently ignored.
+  if (keywords.length > 0) {
+    if (!Array.isArray(normalized.keywords) || normalized.keywords.length === 0) {
+      normalized.keywords = keywords;
+    }
+    if (!String(normalized.searchKeywords || "").trim()) {
+      normalized.searchKeywords = keywords.join(" ");
+    }
+  }
   if (providerId === "arbeitsagentur" && keywords.length > 0) {
     normalized.arbeitsagentur = {
       ...normalized.arbeitsagentur,
@@ -361,10 +400,10 @@ export async function fetchCareerOpsProvider(providerId, entry, options = {}) {
   const provider = PROVIDERS.get(normalizedId);
   if (!provider) throw new Error(`unsupported Career Ops provider: ${normalizedId || providerId}`);
   const fetchImpl = options.fetchImpl || fetch;
-  const jobs = await provider.fetch(
-    prepareProviderEntry(normalizedId, entry),
-    createContext(fetchImpl, options)
-  );
+  const sink = Array.isArray(options.warnings) ? options.warnings : null;
+  const run = () =>
+    provider.fetch(prepareProviderEntry(normalizedId, entry), createContext(fetchImpl, options));
+  const jobs = await (sink ? warningScope.run(sink, run) : run());
   if (!Array.isArray(jobs)) {
     throw new Error(`Career Ops provider "${normalizedId}" returned a non-array result`);
   }

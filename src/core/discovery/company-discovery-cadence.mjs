@@ -4,6 +4,9 @@ import { companyProposalBatchLatest } from "../db/verbs/company-discovery.mjs";
 import { buildCompanySeedContext } from "./company-context.mjs";
 
 export const COMPANY_DISCOVERY_CADENCE_DAYS = 7;
+// A batch where a company's scan failed (network down, board error) saw
+// nothing, so it is retried soon instead of waiting out the weekly cadence.
+const COMPANY_DISCOVERY_SCAN_RETRY_DAYS = 1;
 
 function clone(value, fallback) {
   return value == null ? fallback : JSON.parse(JSON.stringify(value));
@@ -97,13 +100,19 @@ export function companyDiscoveryCadenceState({
   }
 
   const createdAt = dateValue(batch.createdAt);
+  const scanFailed = (Array.isArray(batch.rejected) ? batch.rejected : []).some(
+    (entry) => entry?.reason === "scan-failed"
+  );
   const dueAt = new Date(createdAt.getTime());
-  dueAt.setUTCDate(dueAt.getUTCDate() + COMPANY_DISCOVERY_CADENCE_DAYS);
+  dueAt.setUTCDate(
+    dueAt.getUTCDate() +
+      (scanFailed ? COMPANY_DISCOVERY_SCAN_RETRY_DAYS : COMPANY_DISCOVERY_CADENCE_DAYS)
+  );
   if (dateValue(now).getTime() >= dueAt.getTime()) {
     return {
       status: "due",
       due: true,
-      reason: "weekly-cadence",
+      reason: scanFailed ? "scan-failed-retry" : "weekly-cadence",
       dueAt: dueAt.toISOString(),
       batchId: batch.batchId,
       pendingCount: 0,

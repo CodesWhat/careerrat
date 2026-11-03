@@ -83,6 +83,11 @@ const STAGE_RULES = [
 
 const TERMINAL_STAGES = new Set(["rejected", "withdrawn"]);
 
+/** True for a closed-out stage id (rejected, withdrawn). */
+export function isTerminalStage(stageId) {
+  return TERMINAL_STAGES.has(stageId);
+}
+
 /**
  * Merge the canonical STAGE_LADDER with caller-supplied custom stages.
  * A custom stage with an existing id overrides that rung; a new id mints one.
@@ -151,13 +156,26 @@ export function classifyStage(status, customStages) {
  * a label matching no rule is worth surfacing as a likely typo.
  *
  * @param {string} status raw status text
+ * @param {Array} [customStages] optional custom stage defs (tracker.stages)
  * @returns {boolean}
  */
-export function isKnownStatusLabel(status) {
+export function isKnownStatusLabel(status, customStages) {
   const s = String(status == null ? "" : status)
     .toLowerCase()
     .trim();
   if (!s) return false;
+  if (Array.isArray(customStages)) {
+    for (const c of customStages) {
+      if (!c?.id) continue;
+      const pats = Array.isArray(c.patterns) ? c.patterns : [];
+      if (
+        s === String(c.id).toLowerCase() ||
+        pats.some((p) => s.includes(String(p).toLowerCase()))
+      ) {
+        return true;
+      }
+    }
+  }
   return STAGE_RULES.some(([, subs]) => subs.some((sub) => s.includes(sub)));
 }
 

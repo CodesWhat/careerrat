@@ -17,7 +17,7 @@
 //   node src/cli/stories.mjs path [--json]
 //   node src/cli/stories.mjs check [--json]
 //   node src/cli/stories.mjs gaps [--competencies "a,b,c"] [--json]
-//   node src/cli/stories.mjs match <jd-file.md.json> | --signals "a,b,c" [--competencies "..."] [--limit N] [--json]
+//   node src/cli/stories.mjs match <jd-file.md|jd-file.md.json> | --signals "a,b,c" [--competencies "..."] [--limit N] [--json]
 //   node src/cli/stories.mjs add --file FILE [--write] [--json]
 //   node src/cli/stories.mjs sync-enrichment [--write] [--json]
 //   node src/cli/stories.mjs --help
@@ -35,6 +35,7 @@ import {
   computeStoryEnrichment,
   computeStoryWrite,
   coverageGaps,
+  deriveJobSignals,
   loadStories,
   matchStories,
   STORIES_REL_PATH,
@@ -42,6 +43,7 @@ import {
   validateStories,
   writeStories,
 } from "../core/interview/story-bank.mjs";
+import { resolveUserFileArg } from "../core/paths/user-file-arg.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { formatErrors, validate } from "../core/profile/schema-validator.mjs";
@@ -249,16 +251,22 @@ function cmdMatch(rest) {
   if (opts.signals) {
     jobSignals = splitList(opts.signals);
   } else if (jdArg) {
-    const path = existsSync(jdArg) ? jdArg : join(opts.root, jdArg);
-    if (!existsSync(path)) fail(`JD file not found: ${jdArg}`);
+    const { path, tried } = resolveUserFileArg(jdArg, { repoRoot: opts.root });
+    if (!path) fail(`JD file not found. Looked in: ${tried.join(", ")}`);
     try {
-      const job = JSON.parse(readFileSync(path, "utf8"));
-      jobSignals = Array.isArray(job.signals) ? job.signals : [];
+      const raw = readFileSync(path, "utf8");
+      if (/\.json$/i.test(path)) {
+        const job = JSON.parse(raw);
+        jobSignals = Array.isArray(job.signals) ? job.signals : [];
+      } else {
+        // A saved job (.md): use the story bank's own signals that the JD mentions.
+        jobSignals = deriveJobSignals({ stories, text: raw });
+      }
     } catch (err) {
       fail(`could not read JD signals from ${jdArg}: ${err.message}`);
     }
   } else {
-    fail('match needs a <jd-file.md.json> or --signals "a,b,c".');
+    fail('match needs a <jd-file.md> or --signals "a,b,c".');
   }
   const competencies = opts.competencies ? splitList(opts.competencies) : [];
   const limit = Number.isInteger(opts.limit) ? opts.limit : 6;
@@ -511,7 +519,7 @@ Usage:
   node src/cli/stories.mjs path [--json]
   node src/cli/stories.mjs check [--json]
   node src/cli/stories.mjs gaps [--competencies "a,b,c"] [--json]
-  node src/cli/stories.mjs match <jd-file.md.json> | --signals "a,b,c" [--competencies "..."] [--limit N] [--json]
+  node src/cli/stories.mjs match <jd-file.md|jd-file.md.json> | --signals "a,b,c" [--competencies "..."] [--limit N] [--json]
   node src/cli/stories.mjs add --file FILE [--write] [--json]
   node src/cli/stories.mjs sync-enrichment [--write] [--json]
 
@@ -520,7 +528,7 @@ Commands:
   path             Print the bank path + story count.
   check            Validate every story against evidence.yml (trace + STAR+R + lint + comp). Exit 1 on any issue.
   gaps             Show behavioural competencies no story covers yet.
-  match            Rank stories for a JD's signals (from a JD .md.json or --signals).
+  match            Rank stories for a JD's signals (from a saved JD .md, a .md.json, or --signals).
   add              Add/replace one story. DRY RUN by default; pass --write to commit (atomic upsert by id).
   sync-enrichment  Mirror story open_questions into tracker.storyEnrichment (the dashboard's
                    "give me more context" action). DRY RUN by default; --write to persist.

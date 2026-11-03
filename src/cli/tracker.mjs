@@ -26,6 +26,7 @@ import {
   summarizeTracker,
 } from "../core/tracker/dashboard.mjs";
 import { listSnapshots, snapshotTracker } from "../core/tracker/tracker-snapshot.mjs";
+import { exitOnUnknownFlags } from "./unknown-flags.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
 const pathCtx = { repoRoot: root };
@@ -33,6 +34,11 @@ const TRACKER_PATH = userPath(pathCtx, "workspace/tracker.json");
 const SCHEMA_PATH = join(root, "config/tracker.schema.json");
 
 const args = process.argv.slice(2);
+exitOnUnknownFlags(
+  args,
+  ["--json", "--help", "-h", "--verify", "--snapshots", "--summary", "--followups"],
+  "tracker"
+);
 const json = args.includes("--json");
 
 if (args.includes("--help") || args.includes("-h")) {
@@ -197,5 +203,6 @@ Usage:
 
 Reads workspace/tracker.json (seed from templates/tracker.json).
 Snapshots: workspace/.snapshots/tracker-<timestamp>.json, newest-20 kept.
-Recovery: copy a snapshot back over workspace/tracker.json to restore.`);
+Recovery: on a database workspace, tracker.json is regenerated from the database, so copying a snapshot back does nothing.
+Use 'careerrat data backup' and 'careerrat data restore' instead. (Without a database, 'careerrat restore' restores a snapshot.)`);
 }

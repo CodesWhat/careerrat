@@ -19,6 +19,7 @@ import { dbExists, dbFilePath } from "../core/db/connection.mjs";
 import {
   candidateConfigGet,
   candidateSetupInitialize,
+  sourceConfigGet,
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
@@ -34,14 +35,17 @@ import {
   loadCandidateDoc,
 } from "../core/profile/config-store.mjs";
 import { renderLocalAgents } from "../core/profile/generate-agents.mjs";
-import { buildSearchSources } from "../core/profile/generate-search-sources.mjs";
+import {
+  buildSearchSources,
+  mergeGeneratedSearchSources,
+} from "../core/profile/generate-search-sources.mjs";
 import {
   deriveEvidenceSeed,
   deriveProfileSeed,
   parseResume,
 } from "../core/profile/resume-parser.mjs";
 import { formatErrors } from "../core/profile/schema-validator.mjs";
-import { stringifyYaml } from "../core/profile/yaml.mjs";
+import { parseYaml, stringifyYaml } from "../core/profile/yaml.mjs";
 
 const args = process.argv.slice(2);
 const installRoot = join(fileURLToPath(new URL("../..", import.meta.url)));
@@ -192,7 +196,13 @@ function runWriteConfig() {
     const targeting = config.targeting;
 
     const wrote = exportCandidateCompatibilityFiles(config);
-    const sources = buildSearchSources(targeting, profile);
+    const generated = buildSearchSources(targeting, profile, { env: process.env });
+    const existing = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+    const {
+      merged: sources,
+      kept,
+      added,
+    } = mergeGeneratedSearchSources(existing.stored ? existing.data : null, generated);
     sourceConfigPut({ ...pathCtx, name: "search-sources", data: sources });
     const searchConfigPath = userPath(pathCtx, "config/search-sources.yml");
     mkdirSync(dirname(searchConfigPath), { recursive: true });
@@ -211,7 +221,9 @@ function runWriteConfig() {
           {
             mode: "db",
             wrote,
-            searches: sources.searches.length,
+            searches: (sources.searches ?? sources.sources).length,
+            keptExisting: kept,
+            added,
           },
           null,
           2
@@ -221,7 +233,10 @@ function runWriteConfig() {
     }
     console.log("Wrote:");
     for (const path of wrote) console.log(`- ${path}`);
-    console.log(`Searches: ${sources.searches.length}`);
+    console.log(`Searches: ${(sources.searches ?? sources.sources).length}`);
+    if (kept > 0) {
+      console.log(`Kept your ${kept} existing searches and their run history; added ${added} new.`);
+    }
     return 0;
   }
 
@@ -234,8 +249,20 @@ function runWriteConfig() {
     return 1;
   }
 
-  const sources = buildSearchSources(targeting, profile);
+  const generated = buildSearchSources(targeting, profile, { env: process.env });
   const searchConfigPath = userPath(pathCtx, "config/search-sources.yml");
+  let existingFile = null;
+  if (existsSync(searchConfigPath)) {
+    try {
+      existingFile = parseYaml(readFileSync(searchConfigPath, "utf8"));
+    } catch {
+      console.error(
+        `${displayPath(pathCtx, "config/search-sources.yml")} is not valid YAML. Fix or move it before running --write-config.`
+      );
+      return 1;
+    }
+  }
+  const { merged: sources } = mergeGeneratedSearchSources(existingFile, generated);
   mkdirSync(dirname(searchConfigPath), { recursive: true });
   writeFileSync(searchConfigPath, `${stringifyYaml(sources)}\n`);
 
@@ -253,7 +280,7 @@ function runWriteConfig() {
       JSON.stringify(
         {
           wrote,
-          searches: sources.searches.length,
+          searches: (sources.searches ?? sources.sources).length,
         },
         null,
         2
@@ -262,7 +289,7 @@ function runWriteConfig() {
     return 0;
   }
   console.log("Wrote:");
-  console.log(`- ${wrote[0]} (${sources.searches.length} searches)`);
+  console.log(`- ${wrote[0]} (${(sources.searches ?? sources.sources).length} searches)`);
   console.log(`- ${wrote[1]} (personalized router)`);
   return 0;
 }

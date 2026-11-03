@@ -1,5 +1,6 @@
 import { Parser } from "htmlparser2";
 import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
+import { checkAtsLiveness } from "./ats-liveness.mjs";
 import { APPLY_PATTERNS, classifyLiveness, primaryPostingText } from "./liveness-core.mjs";
 
 const LIVENESS_MAX_BYTES = 1024 * 1024;
@@ -87,9 +88,24 @@ export function extractApplyControlsFromHtml(html = "") {
     .filter((label) => APPLY_PATTERNS.some((pattern) => pattern.test(label)));
 }
 
+// True when the check never got an answer from the site (network failure or
+// timeout), as opposed to reading the page and being unsure about it.
+export function isUnreachable(result) {
+  return (
+    result?.result === "uncertain" &&
+    ["fetch_failed", "navigation_error", "timeout"].includes(result.code)
+  );
+}
+
 export async function checkUrlLiveness(
   url,
-  { fetchImpl = fetch, resolveHost, timeoutMs = 15000, maxBytes = LIVENESS_MAX_BYTES } = {}
+  {
+    fetchImpl = fetch,
+    resolveHost,
+    timeoutMs = 15000,
+    maxBytes = LIVENESS_MAX_BYTES,
+    atsNative = true,
+  } = {}
 ) {
   let parsed;
   try {
@@ -104,6 +120,17 @@ export async function checkUrlLiveness(
       reason: `unsupported protocol ${parsed.protocol}`,
       url,
     };
+  }
+
+  // Ask the ATS's own job endpoint first. It only answers when the ATS gives
+  // a definitive yes/gone; any failure falls through to the page check below.
+  if (atsNative) {
+    try {
+      const ats = await checkAtsLiveness(url, { fetchImpl, resolveHost, timeoutMs });
+      if (ats) return ats;
+    } catch {
+      // fall back to the page check
+    }
   }
 
   try {
@@ -129,7 +156,7 @@ export async function checkUrlLiveness(
       bodyText: htmlToText(html),
       applyControls: extractApplyControlsFromHtml(html),
     });
-    if (classified.code === "insufficient_content" && isSpaJobHost(parsed.hostname)) {
+    if (classified.code === "thin_content" && isSpaJobHost(parsed.hostname)) {
       return {
         url,
         result: "uncertain",

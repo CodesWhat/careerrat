@@ -203,7 +203,7 @@ hand off to `email-comms` instead.
 Run:
 
 ```sh
-node src/cli/lint-placeholders.mjs workspace/tailored/
+careerrat lint-placeholders workspace/tailored/
 ```
 
 Fix every finding before continuing. The command exits 1 on any hit.

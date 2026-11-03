@@ -229,7 +229,7 @@ function runRemove() {
     } else {
       console.log(`Not found: "${name}" is not in the tracked list.`);
     }
-    return 0;
+    return 1;
   }
 
   if (!write) {

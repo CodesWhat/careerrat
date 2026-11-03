@@ -30,6 +30,8 @@ import { migration016 } from "./migrations/016-app-operations.mjs";
 import { migration017 } from "./migrations/017-remove-retired-form-fields.mjs";
 import { migration018 } from "./migrations/018-search-executions.mjs";
 import { migration019 } from "./migrations/019-artifact-reservations.mjs";
+import { migration020 } from "./migrations/020-search-liveness.mjs";
+import { migration021 } from "./migrations/021-posting-sightings.mjs";
 
 // Add new migrations here, in ascending id order, as the schema evolves.
 export const ALL_MIGRATIONS = [
@@ -52,6 +54,8 @@ export const ALL_MIGRATIONS = [
   migration017,
   migration018,
   migration019,
+  migration020,
+  migration021,
 ];
 
 function readUserVersion(db) {
@@ -77,6 +81,14 @@ export function runMigrations(db, migrations = ALL_MIGRATIONS) {
   assertSequential(migrations);
 
   const from = readUserVersion(db);
+  const latest = migrations.length ? migrations[migrations.length - 1].id : 0;
+  if (from > latest && !process.env.CAREERRAT_ALLOW_NEWER_DB) {
+    throw new Error(
+      `this database was written by a newer CareerRat (schema ${from}, this build knows up to ${latest}). ` +
+        "Update CareerRat before opening it, or an older build could damage it. " +
+        "Set CAREERRAT_ALLOW_NEWER_DB=1 to open it anyway."
+    );
+  }
   const pending = migrations.filter((migration) => migration.id > from);
   const applied = [];
 

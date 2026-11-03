@@ -210,3 +210,26 @@ test("company proposals fall back from a blank nested floor currency", () => {
   assert.equal(result.proposal.confidenceTier, "borderline");
   assert.ok(result.proposal.reviewReasons.some((reason) => /comp|currency/i.test(reason)));
 });
+
+test("buildCompanyProposal reports a failed scan as scan-failed, not as no matching roles", () => {
+  const resolution = {
+    ok: true,
+    companyName: "Acme AI",
+    atsProvider: "lever",
+    jobBoardUrl: "https://jobs.lever.co/acme",
+    careersUrl: "https://jobs.lever.co/acme",
+  };
+  const failed = buildCompanyProposal(
+    proposalArgs({
+      resolution,
+      scanResult: { offers: [], errors: [{ company: "Acme AI", error: "fetch failed" }] },
+    })
+  );
+  assert.equal(failed.rejected.reason, "scan-failed");
+  assert.equal(failed.rejected.scanSummary.status, "scan-failed");
+
+  const empty = buildCompanyProposal(
+    proposalArgs({ resolution, scanResult: { offers: [], errors: [] } })
+  );
+  assert.equal(empty.rejected.reason, "no-current-role-signal");
+});

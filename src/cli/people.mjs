@@ -2,7 +2,9 @@
 // careerrat people — one workspace per person, switched by name.
 //
 //   node src/cli/people.mjs list [--json]
-//   node src/cli/people.mjs add <name>
+//   node src/cli/people.mjs add <name> [--authorized-by <who>] [--purpose <text>]
+//   node src/cli/people.mjs remove <name> --purge --yes
+//   careerrat --for <name> people contact show|set|opt-in|opt-out
 //   node src/cli/people.mjs --help
 //
 // A person lives at <data root>/people/<name>/. Use `careerrat --for <name> <command>`
@@ -11,11 +13,22 @@
 import { fileURLToPath } from "node:url";
 import {
   createPersonRoot,
+  currentPerson,
   peopleBase,
   personExists,
   personRoot,
   validatePersonName,
 } from "../core/paths/people.mjs";
+import { recordAuthorization } from "../core/people/authorization.mjs";
+import {
+  activeOptIn,
+  ContactError,
+  optIn,
+  optOut,
+  readContact,
+  setContact,
+} from "../core/people/contact.mjs";
+import { purgePerson } from "../core/people/purge.mjs";
 import { listPeople } from "../core/people/roster.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -25,9 +38,20 @@ function printHelp() {
 
   list [--json]   Show everyone with a workspace and whether their setup is done
   add <name>      Create a workspace for a person (lowercase letters, numbers, hyphens)
+                  and record who authorized you to run their search and what it is for:
+                  --authorized-by <who>  --purpose <text>
+  remove <name> --purge --yes
+                  Delete that person's data root, browser profile and generated documents
+                  after writing a backup to <data root>/people-backups/. Refuses without --yes.
+
+  contact show | set [--email <a>] [--phone <p>] [--timezone <tz>] [--quiet-hours 21:00-08:00]
+          | opt-in email --evidence "<how they agreed>" | opt-out email
+                  With --for: the address CareerRat may notify, and their yes/no per channel.
+                  Notifications fail closed without an opt-in.
 
 Each person keeps their own profile, evidence, tracker and documents.
-Run any command for them with: careerrat --for <name> <command>`);
+Run any command for them with: careerrat --for <name> <command>
+Docs: Running CareerRat for someone else.`);
 }
 
 function fail(message) {
@@ -52,7 +76,7 @@ function cmdList(json) {
   }
 }
 
-function cmdAdd(name, json) {
+function cmdAdd(name, json, { authorizedBy, purpose }) {
   try {
     validatePersonName(name);
   } catch (err) {
@@ -61,25 +85,148 @@ function cmdAdd(name, json) {
   const base = peopleBase({ repoRoot: ROOT });
   const existed = personExists(base, name);
   const root = existed ? personRoot(base, name) : createPersonRoot(base, name);
+  // A new person always gets a note. An existing one only gets another when the
+  // operator is stating who authorized it or what for.
+  const record =
+    !existed || authorizedBy || purpose
+      ? recordAuthorization({ base, name, authorizedBy, purpose }).record
+      : null;
   const next = `careerrat start --for ${name}`;
   if (json) {
-    console.log(JSON.stringify({ ok: true, name, root, created: !existed, next }, null, 2));
+    console.log(
+      JSON.stringify(
+        { ok: true, name, root, created: !existed, authorization: record, next },
+        null,
+        2
+      )
+    );
     return;
   }
   console.log(existed ? `${name} already has a workspace at ${root}` : `Created ${root}`);
+  if (record) {
+    console.log(
+      `Authorization noted: by ${record.authorizedBy}, for ${record.purpose}, ${record.authorizedAt}`
+    );
+    if (record.authorizedBy === "not stated" || record.purpose === "not stated") {
+      console.log(
+        `Record it properly: careerrat people add ${name} --authorized-by "<who>" --purpose "<what for>"`
+      );
+    }
+  }
   console.log(`Next: ${next}`);
 }
 
-const args = process.argv.slice(2);
-const json = args.includes("--json");
-const positional = args.filter((arg) => !arg.startsWith("-"));
-if (args.includes("--help") || args.includes("-h") || positional.length === 0) {
+function cmdRemove(name, json, { purge, yes }) {
+  try {
+    validatePersonName(name);
+  } catch (err) {
+    fail(err.message);
+  }
+  if (!purge) fail(`remove deletes data. Run: careerrat people remove ${name} --purge --yes`);
+  if (!yes) {
+    fail(
+      `refusing to purge ${name} without --yes. This deletes their data root, browser profile and generated documents (a backup is written first).`
+    );
+  }
+  const base = peopleBase({ repoRoot: ROOT });
+  let result;
+  try {
+    result = purgePerson({ base, name });
+  } catch (err) {
+    fail(err.message);
+  }
+  if (json) {
+    console.log(JSON.stringify({ ok: true, name, ...result }, null, 2));
+    return;
+  }
+  for (const path of result.removed) console.log(`Removed ${path}`);
+  if (result.documentsSkipped) {
+    console.log(`Left ${result.documentsSkipped} alone (CAREERRAT_DOWNLOADS_DIR is set).`);
+  }
+  console.log(`Backup: ${result.backup}`);
+}
+
+function cmdContact(action, channel, json, opts) {
+  const name = currentPerson(process.env);
+  if (!name) fail("contact needs a person. Try: careerrat --for <name> people contact show");
+  const base = peopleBase({ repoRoot: ROOT });
+  if (!personExists(base, name)) fail(`No workspace for "${name}".`);
+  try {
+    if (action === "set") {
+      const changes = {
+        email: opts.email,
+        phone: opts.phone,
+        timezone: opts.timezone,
+        quietHours: opts.quietHours,
+      };
+      if (Object.values(changes).every((value) => value === undefined)) {
+        fail("contact set needs --email, --phone, --timezone or --quiet-hours.");
+      }
+      setContact({ base, name, ...changes });
+    } else if (action === "opt-in") {
+      optIn({ base, name, channel: channel || "email", evidence: opts.evidence });
+    } else if (action === "opt-out") {
+      optOut({ base, name, channel: channel || "email" });
+    } else if (action !== "show") {
+      fail(`unknown contact command "${action}". Use show, set, opt-in or opt-out.`);
+    }
+  } catch (err) {
+    if (err instanceof ContactError) fail(err.message);
+    throw err;
+  }
+  const contact = readContact(base, name);
+  const emailOptIn = activeOptIn(contact, "email");
+  if (json) {
+    console.log(JSON.stringify({ ok: true, name, contact, emailOptIn }, null, 2));
+    return;
+  }
+  console.log(`${name}`);
+  console.log(`  email:       ${contact.email || "not set"}`);
+  console.log(`  phone:       ${contact.phone || "not set"}`);
+  console.log(`  timezone:    ${contact.timezone || "not set"}`);
+  console.log(`  quiet hours: ${contact.quietHours.start}-${contact.quietHours.end}`);
+  console.log(
+    emailOptIn
+      ? `  email opt-in: yes, ${emailOptIn.optedInAt} (${emailOptIn.evidence})`
+      : "  email opt-in: no"
+  );
+}
+
+function parseArgs(args) {
+  const out = { json: false, purge: false, yes: false, help: false, positional: [] };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--json") out.json = true;
+    else if (arg === "--purge") out.purge = true;
+    else if (arg === "--yes" || arg === "-y") out.yes = true;
+    else if (arg === "--help" || arg === "-h") out.help = true;
+    else if (arg === "--authorized-by" || arg === "--purpose") {
+      const value = args[++i];
+      if (!value?.trim() || value.startsWith("--")) fail(`${arg} needs a value.`);
+      out[arg === "--purpose" ? "purpose" : "authorizedBy"] = value;
+    } else if (["--email", "--phone", "--timezone", "--quiet-hours", "--evidence"].includes(arg)) {
+      const value = args[++i];
+      if (!value?.trim() || value.startsWith("--")) fail(`${arg} needs a value.`);
+      out[arg.slice(2).replace(/-(\w)/g, (_, c) => c.toUpperCase())] = value;
+    } else if (arg.startsWith("-")) fail(`unknown option "${arg}".`);
+    else out.positional.push(arg);
+  }
+  return out;
+}
+
+const parsed = parseArgs(process.argv.slice(2));
+const { json, positional } = parsed;
+if (parsed.help || positional.length === 0) {
   printHelp();
-  process.exit(positional.length === 0 && !args.includes("--help") && !args.includes("-h") ? 1 : 0);
+  process.exit(positional.length === 0 && !parsed.help ? 1 : 0);
 }
 const [sub, name] = positional;
-if (sub === "list") cmdList(json);
+if (sub === "contact") cmdContact(positional[1] || "show", positional[2], json, parsed);
+else if (sub === "list") cmdList(json);
 else if (sub === "add") {
   if (!name) fail("add needs a name. Try: careerrat people add <name>");
-  cmdAdd(name, json);
-} else fail(`unknown command "${sub}". Use list or add.`);
+  cmdAdd(name, json, parsed);
+} else if (sub === "remove") {
+  if (!name) fail("remove needs a name. Try: careerrat people remove <name> --purge --yes");
+  cmdRemove(name, json, parsed);
+} else fail(`unknown command "${sub}". Use list, add, remove or contact.`);

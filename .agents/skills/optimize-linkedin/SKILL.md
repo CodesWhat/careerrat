@@ -257,6 +257,10 @@ present and correct (quote it back to the user). The before→after document fro
 stays in `~/Documents/careerrat/` as the record of the pass — write it regardless of whether
 anything was applied.
 
+If the field was not already approved in the app, record the user's live yes first
+(`careerrat data linkedin-proposals approve --batch <id> --surface <surfaceId> --version <n>`);
+`mark-applied` only works on an approved surface.
+
 For each field verified live, flip its batch decision to applied so the in-app card stops
 showing it as approved-but-unwritten:
 
@@ -270,7 +274,7 @@ attempt alone.
 Every decision bumps the batch version, and the command above prints the updated batch
 in its response. Each subsequent `mark-applied` call must use the `version` from the
 PREVIOUS call's output, never the original batch's version — re-read the current version
-via `careerrat data linkedin-proposals latest --status null` if you lost track of it.
+via `careerrat data linkedin-proposals latest --status any` if you lost track of it.
 
 Then log one event to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md), actor `agent`:

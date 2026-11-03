@@ -1,14 +1,8 @@
 #!/usr/bin/env node
-// Node version guard — same minimum as bin/careerrat.mjs.
-{
-  const major = parseInt(process.versions.node.split(".")[0], 10);
-  if (major < 18) {
-    process.stderr.write(
-      `careerrat requires Node.js >= 18 (you have ${process.versions.node}). Please upgrade.\n`
-    );
-    process.exit(1);
-  }
-}
+// Node version guard, same floor as bin/careerrat.mjs.
+import { requirePatchedNode } from "../core/runtime/node-floor.mjs";
+
+requirePatchedNode();
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +14,8 @@ import {
   readDiscoverySkips,
   readSetupState,
 } from "../core/agent-guidance.mjs";
+import { inspectAiConfigFile } from "../core/ai/ai-config.mjs";
+import { inspectAIPreferencesFile } from "../core/ai/ai-preferences.mjs";
 import {
   detectInstalledRuntimes,
   installedRuntimeExecutionIdentity,
@@ -34,22 +30,29 @@ import { automationStatus, loadAutomation } from "../core/automation/consent.mjs
 import { detectSession } from "../core/automation/session.mjs";
 import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
+import { fetchPublicHttpText } from "../core/net/public-http-fetch.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
+import { describeAiRoute } from "../core/people/ai-route.mjs";
 import { verifyBundledPlugins } from "../core/plugins/index.mjs";
 import { checkTemplateLeftovers } from "../core/profile/candidate-setup.mjs";
 import { candidateConfigSource, loadCandidateConfig } from "../core/profile/config-store.mjs";
 import { loadEvidence } from "../core/profile/evidence-writer.mjs";
 import { listLearnings } from "../core/profile/learnings.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
+import { targetingAdjacencyGaps } from "../core/profile/targeting-adjacency.mjs";
 import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
 import { parseConfig } from "../core/providers/search-sources.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
 import { pendingSourceLoginRequests } from "../core/search/source-login-preflight.mjs";
+import { ptyStatus } from "../core/tui/pty-status.mjs";
+import { textualPythonStatus } from "../core/tui/python-runtime.mjs";
+import { exitOnUnknownFlags } from "./unknown-flags.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
 const pathCtx = { repoRoot: root };
 const userPaths = resolveUserPaths(pathCtx);
 const args = process.argv.slice(2);
+exitOnUnknownFlags(args, ["--json", "--guidance-only", "--network"], "doctor");
 const json = args.includes("--json");
 // Skips runtime detection (and the fingerprint hashing it does for every
 // discovered executable — hundreds of MB across Claude and Codex) and
@@ -60,6 +63,9 @@ const guidanceOnly = args.includes("--guidance-only");
 // Matches companies.mjs's PUBLIC_PROVIDER_COUNT: excludes local-parser, the
 // one adopted id that is not a public network source adapter.
 const PUBLIC_PROVIDER_COUNT = CAREER_OPS_UPSTREAM.providerCount - 1;
+// One small, stable public JSON endpoint for `doctor --network`. It goes through
+// the same fetch every source scan uses, so a pass here means scans can reach out.
+const NETWORK_PROBE_URL = "https://boards-api.greenhouse.io/v1/boards/cloudflare";
 
 const userPrereqs = [
   {
@@ -345,7 +351,24 @@ const setup = setupState
     };
 
 const searchReadiness = loadSearchReadiness();
+const targetingAdjacency = loadTargetingAdjacency();
 const companyAtsReadiness = loadCompanyAtsReadiness();
+// Checks that look outside the data files. The terminal workspace and the agent
+// are reported but don't fail doctor, since the browser app works without them.
+// The network probe only runs when asked for, and then it does gate the result.
+const tuiRuntime = textualPythonStatus({ repoRoot: root });
+const tuiAgentPane = guidanceOnly ? null : ptyStatus();
+const agentsAvailable = guidanceOnly
+  ? null
+  : installedRuntimes.filter((runtime) => runtime.available && runtime.supported).map((r) => r.id);
+const network = args.includes("--network") ? await probeNetwork() : null;
+// Which AI access this workspace's work runs on. For someone else's workspace this is
+// the operator's key or subscription unless the person has their own key stored.
+const aiRoute = describeAiRoute({
+  repoRoot: root,
+  env: process.env,
+  runtimeAvailable: guidanceOnly ? null : agentsAvailable.length > 0,
+});
 const agentGuidance = buildAgentGuidance({
   missingUser,
   candidateConfigSource: candidateSource,
@@ -364,12 +387,21 @@ const result = {
     missingSystem.length === 0 &&
     modes.valid &&
     pluginVerification.ok &&
+    searchReadiness.valid &&
+    companyAtsReadiness.valid &&
+    (network ? network.ok : true) &&
     (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
   missingSystem,
   templateLeftovers,
   skillsNotDiscoverable,
   workspaceDirs,
+  targetingAdjacency: {
+    checked: targetingAdjacency.checked,
+    missingAdjacentTitles: targetingAdjacency.missingAdjacentTitles,
+    missingCommuteCities: targetingAdjacency.missingCommuteCities,
+    nextAction: targetingAdjacency.nextAction,
+  },
   learnings: { count: learnings.length, families: learnings.map((l) => l.family) },
   storyBank: { exists: storyBank.exists, count: storyBank.stories.length },
   evidenceBank: { exists: evidenceBank.exists, count: evidenceBank.claims.length },
@@ -426,8 +458,14 @@ const result = {
   plugins: {
     bundled: pluginVerification.plugins.length,
     runnable: pluginVerification.plugins.length - invalidPlugins.length,
+    verified: pluginVerification.plugins.length - invalidPlugins.length,
     invalid: invalidPlugins.map((p) => ({ name: p.name, errors: p.errors })),
     error: pluginVerification.error,
+  },
+  environment: {
+    tui: { ready: tuiRuntime.ready, agentPane: tuiAgentPane },
+    agents: agentsAvailable === null ? null : { available: agentsAvailable },
+    network,
   },
   setup,
   candidateSetup: candidateSetupReadiness,
@@ -438,7 +476,15 @@ const result = {
     completedSteps: discoveryCompleted,
   },
   agentGuidance,
+  // Warning only (never flips result.ok): a config file CareerRat can't read is
+  // otherwise silently replaced by defaults.
+  aiFiles: {
+    config: inspectAiConfigFile({ root }),
+    preferences: inspectAIPreferencesFile(pathCtx),
+  },
   dataRoot: userPaths.dataRoot,
+  person: aiRoute.person,
+  aiRoute: { kind: aiRoute.kind, label: aiRoute.label, borrowed: aiRoute.borrowed },
 };
 
 if (json) {
@@ -450,12 +496,29 @@ console.log("careerrat doctor");
 console.log("================");
 console.log("");
 console.log(`User data root: ${userPaths.dataRoot}`);
+if (aiRoute.person) console.log(`Workspace for: ${aiRoute.person}`);
+console.log(`AI route: ${aiRoute.label}`);
+if (aiRoute.borrowed) {
+  console.log(
+    `  ${aiRoute.person} has no AI key of their own, so their work runs on the operator's AI access.`
+  );
+}
 console.log("");
 
 if (missingSystem.length > 0) {
   console.log("System files missing:");
   for (const path of missingSystem) console.log(`- ${path}`);
   console.log("");
+}
+
+{
+  const unreadable = Object.values(result.aiFiles).filter(({ status }) => status === "invalid");
+  if (unreadable.length > 0) {
+    console.log("AI settings files CareerRat could not read (defaults are in use):");
+    for (const file of unreadable) console.log(`- ${file.path}: ${file.error}`);
+    console.log("  fix: correct or delete the file.");
+    console.log("");
+  }
 }
 
 if (skillsNotDiscoverable.length > 0) {
@@ -578,8 +641,12 @@ if (guidanceOnly) {
 console.log("");
 
 {
-  const runnable = pluginVerification.plugins.length - invalidPlugins.length;
-  console.log(`Plugins: ${pluginVerification.plugins.length} bundled, ${runnable} runnable.`);
+  const verified = pluginVerification.plugins.length - invalidPlugins.length;
+  // "Verified" means the manifest and entry check out. Nothing in CareerRat calls
+  // a plugin yet, so this is not a claim that any plugin is in use.
+  console.log(
+    `Plugins: ${pluginVerification.plugins.length} bundled, ${verified} verified (nothing calls plugins yet).`
+  );
   if (pluginVerification.error) {
     console.log(`- ${pluginVerification.error}`);
   }
@@ -621,10 +688,15 @@ if (candidateSetupReadiness) {
 console.log("Search readiness:");
 printSearchReadiness(searchReadiness);
 printCompanyAtsReadiness(companyAtsReadiness);
+printTargetingAdjacency(targetingAdjacency);
 console.log("");
 
 console.log("Discovery pipeline:");
 printDiscoveryPipeline(searchReadiness, companyAtsReadiness, discoverySkips);
+console.log("");
+
+console.log("Environment:");
+printEnvironment();
 console.log("");
 
 console.log("Agent guidance:");
@@ -633,6 +705,13 @@ console.log("");
 
 if (result.ok) {
   console.log("All required files are present and CareerRat skills are available.");
+} else if (network && !network.ok) {
+  console.log(
+    "CareerRat files are fine, but the network check failed. Source scans can't reach out."
+  );
+} else if (!searchReadiness.valid || !companyAtsReadiness.valid) {
+  console.log("CareerRat scaffold is present, but a saved source config is invalid.");
+  console.log("Fix the config named under Search readiness above.");
 } else if (!modes.valid) {
   console.log("CareerRat scaffold is present, but candidate/modes.yml is invalid.");
   console.log("Run `careerrat modes status` for details.");
@@ -646,6 +725,45 @@ if (result.ok) {
 
 process.exit(result.ok ? 0 : 1);
 
+async function probeNetwork() {
+  const url = String(process.env.CAREERRAT_DOCTOR_PROBE_URL || "").trim() || NETWORK_PROBE_URL;
+  const host = new URL(url).hostname;
+  try {
+    const fetched = await fetchPublicHttpText(url, { timeoutMs: 10_000 });
+    if (!fetched.ok) return { ok: false, host, reason: fetched.reason || fetched.code };
+    if (fetched.status >= 400) return { ok: false, host, reason: `HTTP ${fetched.status}` };
+    return { ok: true, host, reason: null };
+  } catch (err) {
+    return { ok: false, host, reason: err.message };
+  }
+}
+
+function printEnvironment() {
+  console.log(
+    tuiRuntime.ready
+      ? "- Terminal workspace: ready."
+      : "- Terminal workspace: not set up yet - run `careerrat tui setup` (needs Python 3.11+)."
+  );
+  if (tuiAgentPane && !tuiAgentPane.ok)
+    console.log(
+      "- Terminal workspace agent chat: the native terminal helper (node-pty) did not load. On Linux, install make and a C++ compiler (for example `sudo apt install build-essential`), then run `npm i -g careerrat` again."
+    );
+  if (agentsAvailable === null) console.log("- Agent: skipped (--guidance-only).");
+  else if (agentsAvailable.length)
+    console.log(`- Agent: ${agentsAvailable.join(", ")} found on this machine.`);
+  else
+    console.log(
+      "- Agent: none found. Install Claude Code or Codex to run skills from the terminal."
+    );
+  if (network) {
+    console.log(
+      network.ok
+        ? `- Network: reached ${network.host} through CareerRat's own fetch.`
+        : `- Network: could not reach ${network.host} (${network.reason}). Source scans will fail until this works.`
+    );
+  } else console.log("- Network: not checked. Run `careerrat doctor --network` to test it.");
+}
+
 function loadCandidateSetupReadiness() {
   if (candidateSource !== "db") return null;
   try {
@@ -653,6 +771,27 @@ function loadCandidateSetupReadiness() {
   } catch {
     return null;
   }
+}
+
+function loadTargetingAdjacency() {
+  try {
+    const config = loadCandidateConfig(pathCtx);
+    return targetingAdjacencyGaps(config.targeting, config.profile);
+  } catch {
+    return targetingAdjacencyGaps(null, null);
+  }
+}
+
+function printTargetingAdjacency(adjacency) {
+  if (adjacency.gaps.length === 0) return;
+  console.log("- Targeting is missing adjacency config, so recall will be low:");
+  if (adjacency.missingAdjacentTitles) {
+    console.log("  no related titles (no secondary role bucket and no role_families).");
+  }
+  if (adjacency.missingCommuteCities) {
+    console.log("  no commute cities for an on-site or hybrid candidate.");
+  }
+  console.log(`  Next action: ${adjacency.nextAction}.`);
 }
 
 function loadSearchReadiness() {
@@ -704,6 +843,18 @@ function loadSearchReadiness() {
 }
 
 function summarizeSearchReadiness(config, { exists }) {
+  if (config?.searches !== undefined && !Array.isArray(config.searches)) {
+    return {
+      exists,
+      valid: false,
+      total: 0,
+      enabled: 0,
+      pendingLogin: 0,
+      withLastRun: 0,
+      providers: [],
+      error: "searches must be a list",
+    };
+  }
   const searches = Array.isArray(config?.searches) ? config.searches : [];
   const enabled = searches.filter((search) => search.enabled !== false);
   return {

@@ -19,6 +19,10 @@
           "notes": { "type": "string" },
           "fit_signals": { "type": "array", "items": { "type": "string" } },
           "down_signals": { "type": "array", "items": { "type": "string" } },
+          "seniority_ceiling": {
+            "type": "integer",
+            "description": "Optional. With a seniority_ladder, ranks strictly above this are too senior and are cut. Omit to cut nothing above the target."
+          },
           "seniority_ladder": {
             "type": "array",
             "minItems": 2,
@@ -95,6 +99,32 @@
             "mode": { "type": "string", "enum": ["daily", "every-3-days", "weekly", "manual"] },
             "recommended_from": { "type": "string", "enum": ["default", "history"] },
             "saved_at": { "type": "string" }
+          }
+        },
+        "ats_sweep": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Reverse ATS sweep over the operator's config/ats-sweep-slugs list. On when the list exists; set enabled false to skip it.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "max_boards": { "type": "integer", "minimum": 1, "description": "Boards scanned per run; a longer list rotates daily. Defaults to 150." }
+          }
+        },
+        "shared_cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Shared public-posting cache. Set receive false to stop other people's scans from adding matching postings to this workspace. Default on.",
+          "properties": {
+            "receive": { "type": "boolean" }
+          }
+        },
+        "ai_rerank": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Opt-in. When enabled, the top results get an AI fit note and suggested order. Never filters or hides a result.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "top_n": { "type": "integer", "minimum": 1, "maximum": 50 }
           }
         },
         "ai_prompts": {

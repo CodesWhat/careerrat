@@ -11,6 +11,8 @@ role_buckets:
       - "Forward Deployed Engineer"
       - "Applied AI Engineer"
     notes: "Roles where the candidate's core edge is central."
+    # Optional. Ranks strictly above this are cut (the ladder must list them).
+    seniority_ceiling: 30
     # Optional. Each rank is explicit; list order never implies seniority.
     seniority_ladder:
       - rank: 30
@@ -82,6 +84,9 @@ fit_bands:                # single source for FIT thresholds; omit to use defaul
                           # so low-fit roles never reach manual triage. Omit to disable.
 
 search_preferences:
+  # ai_rerank:           # OPTIONAL, off by default. Adds an AI fit note to the top results.
+  #   enabled: true      # Never filters, hides or reorders a result; needs a configured AI route.
+  #   top_n: 20          # how many top results get a note (1 to 50)
   presentation_cap_per_company: 5
   posting_age:
     mode: "since-last-run" # default: only scan since the prior successful source run

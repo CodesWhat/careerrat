@@ -20,14 +20,9 @@
 // not applicable to private/local scanning, but don't redistribute this feed
 // publicly without one.
 
-const FEED_URL = "https://remoteok.com/api";
+import { feedBody, fetchFeedJson } from "./board-feed.mjs";
 
-async function fetchJsonBody(url, fetchImpl) {
-  const res = await fetchImpl(url);
-  if (typeof res === "string") return JSON.parse(res);
-  if (res && typeof res.json === "function") return await res.json();
-  return res;
-}
+const FEED_URL = "https://remoteok.com/api";
 
 function toIsoDate(value) {
   if (value == null || value === "") return null;
@@ -42,7 +37,7 @@ function toIsoDate(value) {
  * @returns {Promise<Array<{title: string, url: string, company: string, location: string, postedAt: string|null}>>}
  */
 export async function fetchRemoteOk(entry = {}, fetchImpl = fetch) {
-  const data = await fetchJsonBody(FEED_URL, fetchImpl);
+  const data = await fetchFeedJson("remoteok", FEED_URL, fetchImpl);
   if (!Array.isArray(data)) {
     throw new Error(
       `remoteok: unexpected API response: expected a JSON array, got ${data === null ? "null" : typeof data}`
@@ -68,5 +63,6 @@ export async function fetchRemoteOk(entry = {}, fetchImpl = fetch) {
           : entry.label || entry.name || "RemoteOK",
       location: typeof job.location === "string" ? job.location.trim() : "",
       postedAt: toIsoDate(job.epoch != null ? job.epoch * 1000 : job.date),
+      ...feedBody(job.description),
     }));
 }

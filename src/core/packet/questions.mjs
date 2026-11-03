@@ -51,8 +51,29 @@ function normalizeQuestion(question, fallbackId) {
   };
 }
 
+// Phrases that contain a self-ID keyword but are about the work, not the person
+// answering ("race conditions", "veteran-owned", "users with a disability").
+const NOT_ABOUT_THE_PERSON = [
+  /\brace conditions?\b/g,
+  /\b(?:veteran|minority|women|woman|black|disabled)[- ]owned\b/g,
+  /\bgender[- ](?:inclusive|neutral|equity|diverse|bias)\b/g,
+  /\b(?:users?|customers?|people|patients|students|employees) with (?:a |an )?(?:disabilit\w*|disabled)\b/g,
+  /\baccessib\w+ (?:for|of) \w+ with (?:a |an )?disabilit\w*/g,
+];
+
+// An open essay prompt ("Describe a time you...") is a work question. It only
+// counts as self-ID when it asks about the person's own protected trait.
+const ESSAY_PROMPT =
+  /^(?:please )?(?:describe|tell (?:us|me)|explain|share|walk (?:us|me)|discuss|write|give (?:us|me) an example)\b/;
+const OWN_TRAIT =
+  /\byour (?:gender|race|ethnicity|ethnic|sexual orientation|disability|veteran|religion|marital|age)\b/;
+
 export function classifySelfIdentificationQuestion(label) {
-  const text = cleanText(label).toLowerCase();
+  let text = cleanText(label).toLowerCase();
+  for (const pattern of NOT_ABOUT_THE_PERSON) text = text.replace(pattern, " ");
+  if (ESSAY_PROMPT.test(text) && !OWN_TRAIT.test(text)) {
+    return { excluded: false, reason: null };
+  }
   const patterns = [
     ["disability", /\b(disability|disabled|reasonable accommodation)\b/],
     ["veteran", /\b(veteran|armed forces|military status)\b/],

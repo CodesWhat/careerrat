@@ -1,6 +1,6 @@
 ---
 name: apply-job
-description: End-to-end job application workflow. Gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including supervised LinkedIn Easy Apply preparation), submits when the application is complete and verified (or stops for the user in manual mode), verifies the result, and updates the tracker.
+description: End-to-end job application workflow. Gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the employer's ATS form (LinkedIn postings go to the employer's own link, or wait for you), submits when the application is complete and verified (or stops for the user in manual mode), verifies the result, and updates the tracker.
 ---
 
 # apply-job
@@ -118,7 +118,7 @@ Apply priority logic:
 
 ## STEP 4 — Tailor
 
-Check if `workspace/writing-samples/` contains files newer than `candidate/writing-style.md`. If so: run `npm run calibrate:style` first, then confirm it completed before continuing.
+Check if `workspace/writing-samples/` contains files newer than `candidate/writing-style.md`. If so: run `npm run calibrate:style` first, then confirm it completed before continuing. If it reports "Not calibrated" (no writing samples yet), draft in a plain, neutral voice and ask the user for a few samples; don't treat the style as set.
 
 Read: `candidate/writing-style.md`, `candidate/honesty.yml`, `candidate/evidence.yml`. Then run `careerrat learnings read "<role>"` (the helper resolves the family from `targeting.yml` and exits 0 silently if no file exists yet — a missing file is normal).
 
@@ -127,8 +127,8 @@ Invoke `tailor-application` to produce `workspace/tailored/<Company>_<Role>.md` 
 Run placeholder lint on every produced artifact:
 
 ```
-node src/cli/lint-placeholders.mjs workspace/tailored/<Company>_<Role>.md
-node src/cli/lint-placeholders.mjs workspace/tailored/<Company>_<Role>_cover.md
+careerrat lint-placeholders workspace/tailored/<Company>_<Role>.md
+careerrat lint-placeholders workspace/tailored/<Company>_<Role>_cover.md
 ```
 
 Block on any lint hit — do not proceed to Build until lint is clean.
@@ -149,24 +149,47 @@ After building, eyeball the output: page count reasonable, fonts render, no non-
 
 ## STEP 6: Submission
 
-Fill the form completely. What happens next depends on the submit mode (`auto` or
-`manual`; absent means `auto`). `careerrat automation status` shows it.
+Fill the form completely, then stop. **You never click the final Submit control
+yourself, in any submit mode, on any site.** Not with a click, not with Enter in
+a field, not by evaluating script that submits the form. Submitting goes through
+one command, which reads the live form in the session browser, runs CareerRat's
+submit checks, and presses Submit only when they all pass:
 
-- **`submit: auto` (default).** CareerRat presses the final Submit control itself,
-  once, only when every required field is answered, every required upload is
-  attached, exactly one positively labelled submit control exists, and the
-  evaluate gate is KEEP or a user-approved REVIEW. It then waits for a
-  confirmation page. If the page is seen, record Applied. If not, the outcome is
-  `submitted-unverified`. That is recorded on the operation result, not as an
-  application status: keep the application's current status, set `statusNote` (that
-  it was submitted automatically with no confirmation page seen) and `nextAction`
-  (check the site, then record it as Applied if it went through), never retry the
-  click, and never pass `submitted-unverified` to `app set-status`. When auto
-  declines to click, say why and hand the form over.
-- **`submit: manual`** (set with `careerrat automation submit manual --write`). Stop
-  at the final submit control. Show a summary of what will be submitted and return or
-  focus the retained supervised browser page. The user presses Submit themselves,
-  then reports back.
+```bash
+careerrat apply submit <application-id> --page <session-browser-page-id> --json
+```
+
+`--page` is the page id of the tab you filled (the one `orca tab create` returned).
+Run it once the form is filled and every upload is attached. Read the JSON:
+
+- `state: "submitted"`: the site showed a confirmation page. Go to STEP 9 and record Applied.
+- `state: "submitted-unverified"`: Submit was pressed and no confirmation page was seen. Keep the
+  application's current status (the command already set `statusNote` and `nextAction`), never run
+  the command or click again, and never pass `submitted-unverified` to `app set-status`. Tell the
+  user to check the site.
+- `state: "refused"` (exit 1): nothing was pressed. `reasons[]` names each failed check by `code`
+  with a plain `message` and, where relevant, the `items` (field or upload labels) that are
+  missing. The command has already set the job to `manual-apply` with a note of what's missing.
+  Do **not** work around the refusal, do not click Submit, and do not re-run the command hoping
+  it passes without changing the form. Tell the user what's missing, return or focus the retained
+  supervised browser page, and let them finish and press Submit themselves. You may fix a refusal
+  that is yours to fix (a blank required field you can truthfully answer, an upload not yet
+  attached) and run the command again, once.
+
+The checks the command runs (the same ones the browser app's apply driver enforces): the submit
+mode is `auto` (`careerrat automation status`; `submit: manual` is set with
+`careerrat automation submit manual --write` and always refuses, so the person presses Submit),
+the posting is not on LinkedIn (never auto-submitted), Submit was not already pressed once, the
+evaluate gate is KEEP or a user-approved REVIEW, no `NEEDS YOU` answer is open, the page is the
+posting's own site or a known ATS, no captcha, verification-code, attestation or other human
+step is showing, no required field is blank, every required upload is attached, and exactly one
+positively labelled submit-application control exists. Only the Orca session browser can be
+reached from the command; with any other provider it refuses with `SESSION_UNREACHABLE` and the
+person submits.
+
+`submit: manual` means the same thing for you as a refusal: show a summary of what will be
+submitted, return or focus the retained supervised browser page, and let the user press Submit
+themselves, then report back.
 
 Either way, never treat an executor's claim of submission as permission to mark
 the application Applied. Only a seen confirmation page or the user's report does that.
@@ -228,7 +251,7 @@ interaction to confirm page state.
 
 **ATS detection:** call `hostnameToPortal(url)` (from `src/core/apply/form-fill.mjs`) on the application URL to identify the ATS. Use the matching `PORTAL_RECIPE` from that module as the canonical field-mapping reference for that platform. If the hostname is unknown, `genericMatch` applies — the patterns below are drawn from those generic defaults and the known recipes.
 
-**Site gotchas (check FIRST):** call `portalQuirks(url)` (from `src/core/apply/form-fill.mjs`) and apply every returned quirk before and during the fill — it returns the platform's known traps (`PORTAL_RECIPES[portal].quirks` plus `DOMAIN_QUIRKS` for no-recipe hosts like Workday). Two cases change your whole approach: (1) `portal: "aggregator"` means the URL is a job board, **not** the apply form — extract the outbound "Apply on …" link, navigate to the real ATS, and re-run detection there; (2) Workday quirks mean account creation / RTF rejection — expect a manual-apply halt. This list is the durable home for per-site gotchas; when you learn a new reliable one, add it to the recipe's `quirks` (or `DOMAIN_QUIRKS`) so the next run inherits it, rather than relearning it.
+**Site gotchas (check FIRST):** read `PORTAL_RECIPES[hostnameToPortal(url)].quirks` (both exported from `src/core/apply/form-fill.mjs`) and apply every quirk listed before and during the fill. That is the platform's list of known traps; a host with no recipe has none. Two cases change your whole approach: (1) `portal: "aggregator"` means the URL is a job board, **not** the apply form — extract the outbound "Apply on …" link, navigate to the real ATS, and re-run detection there; (2) Workday quirks mean account creation / RTF rejection — expect a manual-apply halt. This list is the durable home for per-site gotchas; when you learn a new reliable one, add it to the recipe's `quirks` so the next run inherits it, rather than relearning it.
 
 **Field confirmation before fill:** call `buildFillPlan` with `formDefaults`, `profile`, and `honesty`. Treat `requiresConfirmation: true` as a hard pause, but do not create a pause just because a field is custom or unfamiliar. The resolver now fills configured `screening_answers`, routine availability/location questions, and honesty-backed tool yes/no questions before returning `skip`.
 
@@ -245,105 +268,53 @@ interaction to confirm page state.
 
 Do not fabricate values. Read honesty constraints from `candidate/honesty.yml` throughout the fill (STEP 10 governs this continuously).
 
-If the posting is a LinkedIn Easy Apply (`isEasyApply(url)` returns true, or `hostnameToPortal(url) === "linkedin"` and the user explicitly asks to apply via LinkedIn), branch to STEP 7b instead of submitting here.
+If the posting is on LinkedIn (`linkedin.com`), do not apply through LinkedIn. Branch to STEP 7b instead of filling or submitting here.
 
 ---
 
-## STEP 7b — Authenticated supervised apply (LinkedIn Easy Apply)
+## STEP 7b — LinkedIn postings (employer link, or you apply)
 
-Enter this step when `isEasyApply(url)` returns true OR `hostnameToPortal(url) === "linkedin"` and the user explicitly asked to apply via LinkedIn. Standard ATS postings proceed through STEP 7 unchanged.
+CareerRat never applies through LinkedIn. LinkedIn's User Agreement bans automation and restricts accounts that use it. That covers Easy Apply and every other apply control on linkedin.com. There is no setting that turns this back on, and an old `submit: auto` or `platforms.linkedin` value in `automation.yml` changes nothing here. Enter this step whenever the posting URL is on `linkedin.com`. All earlier gates (limits, `evaluate-job`, honesty) still apply before this step.
 
-### Capability check
+### 1. Look for the employer's own application link
 
-Run:
+Check these in order and stop at the first real one:
 
-```
-careerrat automation status --json
-```
+1. The saved job record (`applyUrl`, `externalApplyUrl`, `link`, `url`, `sourceUrl`). A `linkedin.com/jobs/view/externalApply/...?url=` link holds the employer's link in its `url` value.
+2. The JD you already captured.
+3. The posting's public page, read the same way intake reads any public page (`resolveJobUrl(url, { employerLinkLookup: true })`). No login, no session browser, no clicks. Do not click Apply on LinkedIn to find the link.
 
-Inspect `capabilities.authenticated_apply_preparation`. The applicable platform is `linkedin`. `allowed: true` means neither the `authenticated_apply_preparation` capability switch nor LinkedIn's switch is turned off. This is the verdict from `mayRun()` in `src/core/automation/consent.mjs`; never re-derive it in prose. This capability is on by default.
+If you find one (an `https` link that is not on `linkedin.com`):
 
-If `capabilities.authenticated_apply_preparation` does not show `allowed: true` for `linkedin`, tell the operator it is turned off, give the commands that turn it on, and **skip the browser step** (do not open a browser). If `readError` is set, say the automation settings file can't be read and name it. Do not ask for consent or permission to turn it on.
+- Save it on the job: `careerrat data app set-fields <id> --data '{"link":"<employer link>"}'`. The LinkedIn address stays in `sourceMeta.linkedinUrl`.
+- Go back to STEP 7 and continue the normal ATS flow at that link. The usual submit rules in STEP 6 apply to that employer site.
 
-1. Capability switch: `careerrat automation enable authenticated_apply_preparation --write`
-2. LinkedIn: `careerrat automation enable authenticated_apply_preparation linkedin --write`
+### 2. No employer link, or Easy Apply only
 
-This step is always user-initiated and must never run on a schedule or unattended.
+Do this and stop:
 
-### Session browser + live DOM
+1. Open the LinkedIn job page in the person's browser (just open the tab). Make no clicks. Do not open the Easy Apply modal. Do not fill, upload or submit anything on linkedin.com.
+2. Record that the job is waiting on the person:
 
-Open the job posting URL in the session browser tool-agnostically. Keep the provider on
-`auto` unless the user explicitly changes it; CareerRat resolves the current session
-browser and reuses its signed-in session (see `docs/BROWSER.md`). Snapshot or read the
-current page state before each action. Drive the live DOM turn by turn — no hardcoded
-selectors, same model as STEP 7.
+   ```bash
+   careerrat data app set-status <id> manual-apply
+   careerrat data app set-fields <id> --data '{"statusNote":"Waiting on you: apply on LinkedIn, then tell CareerRat you applied.","nextAction":"Apply on LinkedIn, then tell me when you've applied"}'
+   ```
 
-If you encounter a login wall, captcha, platform 2FA / two-step-verification prompt, or any unexpected interstitial at any point: **halt immediately** — do not attempt to bypass or automate around it. Write the blocked state to the tracker row (`status: "manual-apply"`, note: `"manual-apply: LinkedIn 2FA / two-step-verification prompt — resume at <url>"` or similar), report to the user, and offer re-entry at the top of STEP 7b Fill once cleared. If the interstitial specifically says an emailed verification code was sent, use the STEP 8 verification-code protocol below instead of treating it as generic 2FA.
+   (Legacy workspace with no DB: set `status: "manual-apply"` with the same note and next action on the tracker row.) Keep any existing status that is already `applied` or later.
+3. Tell the person: the page is open, you can't apply for them on LinkedIn, and you're waiting for them to say they applied.
 
-### Walk the Easy Apply modal
-
-1. **Open the modal.** Click the "Easy Apply" button on the posting page. Snapshot the page to confirm the modal opened before proceeding.
-
-2. **Step through `EASY_APPLY_STEPS`** (Contact info → Resume → Work authorization → Additional questions → Review → Submit). For each modal page:
-
-   a. Snapshot the visible fields.
-
-   b. Build the fill plan using the existing `buildFillPlan` / `resolveFieldValue` / `resolveScreeningAnswer` logic with `portal: "linkedin"` (`PORTAL_RECIPES.linkedin` from `src/core/apply/form-fill.mjs`). Pass `formDefaults`, `profile`, and `honesty`.
-
-   c. Apply the same `requiresConfirmation` rule from STEP 7. Preconfigured `current_employer` and `current_title` values are normal fill values unless the config asks for confirmation or the page requests a new disclosure. **Never read or echo `profile.compensation.current_base` in any field.**
-
-   d. Fill resolved fields. For the resume upload page, use the modal-first upload pattern documented in STEP 7 (open the Attach/Upload control within the modal before triggering the file action — direct upload without the modal fails silently).
-
-   e. **Employer-custom screening questions:** use the screening answer posture above. If a safe resolved value exists from configured answers, profile, honesty, evidence, the tailored artifacts, or the JD, fill it and continue. If no safe value exists after checking those sources, mark that question `NEEDS YOU`, flag it on the job thread for the operator, leave the rest of the form filled, and do not submit while it is open. STEP 10 honesty rules apply continuously here.
-
-   f. Advance to the next page by clicking a button whose visible text matches an entry in `EASY_APPLY_ADVANCE_LABELS` (from `src/core/apply/form-fill.mjs`). Snapshot after advancing to confirm the page changed.
-
-3. **Submit-safety gate — honor STEP 6 exactly.**
-
-   After filling the entire modal through the Review page, follow STEP 6. In
-   `submit: auto`, CareerRat presses the final submit button (visible text like
-   "Submit application" or "Submit") once, only when STEP 6's conditions hold. In
-   `submit: manual`, stop at it, show a summary, return focus to the retained page,
-   and leave the click to the user. Never click it from a later agent turn or retry
-   it.
-
-   **Immediately halt** on captcha, platform 2FA / two-step-verification prompt,
-   an application-limit blocker, or a required exercise that cannot be completed
-   in the modal. On halt:
-   - **DB workspace (same composition as STEP 6's DB branch):**
-
-     ```
-     careerrat data app set-status <id> manual-apply
-     careerrat data app set-fields <id> --data '{"note":"manual-apply: <blocker type> — <url>"}'
-     ```
-
-     (e.g. `"manual-apply: captcha — <url>"`, `"manual-apply: LinkedIn application limit reached — <url>"`). `manual-apply` is ACTIVE and stays visible on the dashboard. Then apply the same comm-thread write-back as STEP 6 (patch locally + `comm upsert`, then `comm append-message` with the block reason and URL; do NOT flip `comm.status` to `waiting`; rewrite `comm.nextAction`, advance `comm.nextActionDue` by one day).
-   - **Legacy workspace (no DB):** Set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type and the apply URL (e.g. `"manual-apply: captcha — <url>"`, `"manual-apply: LinkedIn application limit reached — <url>"`) to the tracker row immediately. `manual-apply` is ACTIVE and stays visible on the dashboard.
-     - **Comm-thread write-back (blocker case — same rule as STEP 6):** in the same `tracker.json` write, check for a backing comm thread (`jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due`). If one exists: append a `note`-direction entry to `comm.messages[]` with the block reason and URL, rewrite `comm.nextAction` to describe the manual step, and advance `comm.nextActionDue` by one day. Do NOT flip `comm.status` to `waiting`. Write atomically.
-   - Report what was found and ask the user how to proceed.
-   - **Re-entry point:** when the user clears the blocker, resume at STEP 7b Fill — re-read the current page state via the session browser before continuing.
-
-### Verify
-
-After Submit (CareerRat's click in auto mode, the user's in manual mode), continue into **STEP 8**. The LinkedIn Easy Apply
-success signal is the "Your application was sent" / "Application sent"
-confirmation modal. Screenshot it. Never trust its absence. If the confirmation
-modal does not appear, do not mark the application as submitted. Report what the
-page shows and ask the user.
-
-### Tracker
-
-After STEP 8 confirms submission, continue into **STEP 9** with `channel: "LinkedIn"`.
+Nothing is recorded as applied until the person says so. When they do, record it with the normal outcome path (`application.record-external`, or `careerrat data app set-status <id> applied`) and continue into **STEP 9** with `channel: "LinkedIn"`.
 
 ---
 
 ## STEP 8 — Verify
 
-After Submit (CareerRat's click in auto mode, or the user's report in manual mode), read the retained supervised browser page
+After Submit (the `careerrat apply submit` click, or the user's report after a refusal or in manual mode), read the retained supervised browser page
 and confirm the application advanced past the submit step. Never open the posting
 in a new profile for this verification, and never click Submit as part of checking:
 
-1. Read the current URL and page text. Check both the URL path (segments: `/confirmation`, `/thank-you`, `/submitted`, `/complete`, `/success`) AND the visible page text ("Application received", "We got your application", "Thanks for applying", or similar) — a match on either constitutes a confirmation signal. `confirmationCheck(pageText, currentUrl)` in `src/core/apply/form-fill.mjs` encodes this logic; mirror that dual-signal check when evaluating manually.
+1. Read the current URL and page text. Check both the URL path (segments: `/confirmation`, `/thank-you`, `/submitted`, `/complete`, `/success`) AND the visible page text ("Application received", "We got your application", "Thanks for applying", or similar) — a match on either constitutes a confirmation signal. `confirmationCheck({ pageText, currentUrl, refs })` in `src/core/apply/form-fill.mjs` (one options object) encodes this logic; mirror that dual-signal check when evaluating manually.
 2. **Verification-code protocol (M17):** if the page shows an emailed verification-code prompt (detected by `submitGuard`/BLOCKER_SIGNALS in `form-fill.mjs` — phrases such as "verification code", "enter the code", "check your email"), handle it through the narrow mail-access path:
    - Run `careerrat automation status --json` and inspect `capabilities.mail_access`.
    - Infer the mail platform from the recipient address when obvious using `inferMailAccessPlatformFromEmail()` from `src/core/automation/mail-access.mjs`: `gmail.com` / `googlemail.com` → `gmail`; `outlook.com` / `hotmail.com` / `live.com` / `msn.com` → `outlook`; other real email domains → `webmail`. If there is no recipient address, ask the user which provider holds the code. Use `webmail` for any provider other than Gmail/Outlook.
@@ -380,7 +351,7 @@ Locate the application row in `workspace/tracker.json`:
 
 - Match `applications[]` entry by `id` field first; if no `id`, match by `company` + `role` (case-insensitive).
 - If no matching row exists: create a new entry in `applications[]` with at minimum `company`, `role`, and `id` (generate a short slug, e.g. `<company-slug>-<role-slug>`). Do not halt — the row must exist before writing status.
-  - **DB workspace:** create it with `careerrat data app upsert --data '{"id":"<slug>","company":"<Company>","role":"<Role>"}'` (full-row insert/replace), then continue with the field writes below against that same `<id>`.
+  - **DB workspace:** create it with `careerrat data app upsert --data '{"id":"<slug>","company":"<Company>","role":"<Role>"}'` (it refuses an id that already exists, so an existing row is never wiped; for an existing row use `app set-fields`), then continue with the field writes below against that same `<id>`.
   - **Legacy workspace (no DB):** create the entry directly in the `tracker.json` edit below.
 
 **`app.note` validation (run before writing the row):** `note` is the INTERNAL submission one-liner — ≤60 chars, one topic, ATS/system + "submitted" only (e.g. `"Greenhouse — submitted, confirmation received."`). It must NOT contain application-form answer text, work-arrangement Q&A (onsite/hybrid/remote phrases), interview-loop descriptions, or language copied from the JD or form fields. Anything that fails this check routes to `statusNote` (live state text), `compNote` (comp intel), or is dropped entirely. A polluted `note` produces phantom interview Focus cards on the dashboard — prevent it here.
@@ -388,7 +359,6 @@ Locate the application row in `workspace/tracker.json`:
 The matched (or newly created) row must end up with:
 
 - `status: "awaiting"`
-- `submittedDate: <today ISO date>`
 - `channel: <source — e.g. "direct", "referral", "LinkedIn", "job board name">`
 - `note: <ATS/system + "submitted" — one clause, ≤60 chars, e.g. "Greenhouse — submitted, confirmation received.">` (singular `note`, the app-level field — **not** `notes`, which is a `conversations[]` field; this is search/internal text and is never rendered on a card)
 - `statusNote: <present-tense live state, ≤120 chars, e.g. "Applied via Greenhouse — awaiting review.">` (this is what the jobs card shows)
@@ -413,7 +383,7 @@ Apply the write per mode:
      careerrat data app set-fields <id> --data-file <patch.json>
      ```
 
-     A shallow-merge patch (one level) carrying every field `set-status` doesn't cover: `submittedDate`, `channel`, `note` (the internal one-liner — **not** the same as `set-status`'s `--note`, which writes `statusNote`), `link`, `compNote` / `roleFit.why[]` / `roleFit.risks[]` (Content Register routing), and `artifacts: {jd, coverLetter, resume, resumeNote}` (merges one level into the existing `artifacts` object). Use `--data-file` rather than an inline `--data` string given the JD-body and cover-letter text length. Not outcome-changing — the preceding `set-status` call already refreshed analytics.
+     A shallow-merge patch (one level) carrying every field `set-status` doesn't cover (`set-status` already stamps `appliedAt` when the row moves to an applied status): `channel`, `note` (the internal one-liner — **not** the same as `set-status`'s `--note`, which writes `statusNote`), `link`, `compNote` / `roleFit.why[]` / `roleFit.risks[]` (Content Register routing), and `artifacts: {jd, coverLetter, resume, resumeNote}` (merges one level into the existing `artifacts` object). Use `--data-file` rather than an inline `--data` string given the JD-body and cover-letter text length. Not outcome-changing — the preceding `set-status` call already refreshed analytics.
 
      `app register-artifact <id> --kind resume --path "<resume filename>" --note "<tailoring approach>"` is the more purpose-built verb for a single artifact (it stamps `artifacts.resume` + `artifacts.resumeGeneratedAt` + `artifacts.resumeNote` in one call) and is a reasonable substitute for the `resume`/`resumeNote` piece of the patch above — it fits well because a résumé filename is a short, path-like value. It's a poorer fit for `artifacts.jd` / `artifacts.coverLetter`, which hold full body **text** (not a path) that's awkward to pass through a single `--path` argv token, so those two stay in the `set-fields` patch. Don't run both against the same `artifacts` key in the same turn — pick one path per field.
 - **Legacy workspace (no DB):** edit the matched (or newly created) row directly with the fields above, in one `tracker.json` write.

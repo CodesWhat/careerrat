@@ -1723,3 +1723,66 @@ test("an open question does not hide a different blocking packet gap", async () 
   assert.equal(applyCalls, 0);
   assert.equal(result.messages.at(-1).metadata.state, "blocked");
 });
+
+const LINKEDIN_JOB = "https://www.linkedin.com/jobs/view/4123456789/?easyApplyModal=true";
+
+test("prepare-submit on a LinkedIn job with an employer link applies at that link and saves it", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, { link: LINKEDIN_JOB });
+  setSubmitMode(repoRoot, "manual");
+  const calls = [];
+  const resolved = [];
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent({}, repoRoot),
+    resolveJobUrlImpl: async (url) => {
+      resolved.push(url);
+      return { url: "https://job-boards.greenhouse.io/example/jobs/123", sourceUrl: url };
+    },
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return { available: true, verified: false, state: "awaiting-submit", session: {} };
+    },
+  });
+
+  assert.deepEqual(resolved, [LINKEDIN_JOB]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].postingUrl, "https://job-boards.greenhouse.io/example/jobs/123");
+  const saved = readApplication(repoRoot);
+  assert.equal(saved.link, "https://job-boards.greenhouse.io/example/jobs/123");
+  assert.equal(saved.sourceMeta.linkedinUrl, LINKEDIN_JOB);
+});
+
+test("prepare-submit on an Easy Apply only LinkedIn job opens the page, records waiting, and never marks it applied", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot, { link: LINKEDIN_JOB });
+  // An old config that still asks for auto must change nothing.
+  setSubmitMode(repoRoot, "auto");
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent({}, repoRoot),
+    resolveJobUrlImpl: async (url) => ({ url, bodyFetchStatus: "resolved" }),
+    applyJobImpl: async (input) => {
+      calls.push(input);
+      return { available: true, verified: false, state: "waiting-on-person" };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].postingUrl, LINKEDIN_JOB);
+  assert.equal(calls[0].prepareOnly, true);
+  assert.equal(calls[0].submitMode, "manual");
+  const saved = readApplication(repoRoot);
+  assert.equal(saved.status, "manual-apply");
+  assert.notEqual(saved.status, "applied");
+  assert.match(saved.nextAction, /Apply on LinkedIn/);
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "waiting-on-person");
+  assert.equal(last.metadata.submissionVerified, false);
+  assert.equal(last.artifacts[0].url, LINKEDIN_JOB);
+});

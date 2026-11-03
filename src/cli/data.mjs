@@ -16,11 +16,13 @@
 //
 // Usage:
 //   node src/cli/data.mjs status [--json]
-//   node src/cli/data.mjs init [--demo] [--json]
-//   node src/cli/data.mjs import [--source <dir>] [--json]
+//   node src/cli/data.mjs init [--demo [--force]] [--json]
+//   node src/cli/data.mjs import [--source <dir>] [--force-candidate] [--json]
 //   node src/cli/data.mjs export [--json]
 //   node src/cli/data.mjs verify [--json]
-//   node src/cli/data.mjs app upsert --data <json> | --data-file <path>
+//   node src/cli/data.mjs backup [--keep <n>] [--json]
+//   node src/cli/data.mjs restore [<number|name> --yes] [--json]
+//   node src/cli/data.mjs app upsert --data <json> | --data-file <path> [--replace]
 //   node src/cli/data.mjs app set-status <id> <to> [--note <t>] [--follow-up-due <iso>] [--clear-interview|--no-clear-interview]
 //   node src/cli/data.mjs app set-fields <id> --data <json> | --data-file <path>
 //   node src/cli/data.mjs app schedule-interview <id> --at <iso> [--round <t>] [--note <t>]
@@ -30,13 +32,15 @@
 //   node src/cli/data.mjs comm upsert --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
-//   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path>
+//   node src/cli/data.mjs comm handoff <id> [--deliver-to-person [--now]]
+//   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path> [--window <startIso>..<endIso>]
 //   node src/cli/data.mjs calendar write --data <json> | --data-file <path>
 //   node src/cli/data.mjs source watermark --data <json|json-array> | --data-file <path> [--at <iso>]
 //   node src/cli/data.mjs relationship leads upsert --data <json-array> | --data-file <path>
 //   node src/cli/data.mjs relationship lead set-status <id> <review|approved|rejected> [--at <iso>] [--follow-up-due <iso>] [--note <t>]
 //   node src/cli/data.mjs linkedin-proposals record --data <json> | --data-file <path> [--write]
-//   node src/cli/data.mjs linkedin-proposals latest [--status <s>]
+//   node src/cli/data.mjs linkedin-proposals latest [--status <pending|reviewed|any>]
+//   node src/cli/data.mjs linkedin-proposals approve --batch <id> --surface <surfaceId> --version <n> [--reason <t>]
 //   node src/cli/data.mjs linkedin-proposals mark-applied --batch <id> --surface <surfaceId> --version <n> [--reason <t>]
 //   node src/cli/data.mjs candidate init|get
 //   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>
@@ -61,7 +65,15 @@
 // default: this install).
 
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { recordedKnowledgeChanges } from "../core/agent/knowledge-changes.mjs";
+import { undoWorkspaceKnowledge } from "../core/agent/knowledge-history.mjs";
+import { mergeRecordedCandidateEvidence } from "../core/agent/recorded-evidence-write.mjs";
+import { workspaceMessageAppend, workspaceThreadRead } from "../core/agent/workspace-thread.mjs";
+import { deliverDraftToPerson } from "../core/comms/deliver-draft.mjs";
+import { buildSendLinks, resolveRecipient } from "../core/comms/recipient.mjs";
+import { createBackup, listBackups, restoreBackup } from "../core/db/backup.mjs";
 import { dbExists, dbFilePath, NO_DATABASE_MESSAGE, openDb } from "../core/db/connection.mjs";
 import { seedDemo } from "../core/db/demo-seed.mjs";
 import { exportToTracker } from "../core/db/export-to-tracker.mjs";
@@ -79,7 +91,6 @@ import {
   candidateApplicationLimitUpsert,
   candidateConfigGet,
   candidateConfigPatch,
-  candidateEvidenceMerge,
   candidateSetupInitialize,
   commAppendMessage,
   commMarkSent,
@@ -97,6 +108,8 @@ import {
   intakeList,
   intakeOne,
   intakeUpdate,
+  jobThreadGet,
+  jobThreadMessageAppend,
   linkedinProposalBatchLatest,
   linkedinProposalBatchPreflight,
   linkedinProposalBatchPut,
@@ -107,8 +120,10 @@ import {
   sourcedUpsertBatch,
   sourceWatermarkUpsert,
 } from "../core/db/verbs.mjs";
+import { currentPerson, peopleBase } from "../core/paths/people.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { sanitizeCandidateConfigForAgent } from "../core/profile/config-store.mjs";
+import { validate } from "../core/profile/schema-validator.mjs";
 import { loadTrackerData, validateTrackerData } from "../core/tracker/tracker-data.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -120,6 +135,13 @@ function parseArgs(argv) {
     if (a === "--json") opts.json = true;
     else if (a === "--help" || a === "-h") opts.help = true;
     else if (a === "--demo") opts.demo = true;
+    else if (a === "--force") opts.force = true;
+    else if (a === "--deliver-to-person") opts.deliverToPerson = true;
+    else if (a === "--now") opts.now = true;
+    else if (a === "--force-candidate") opts.forceCandidate = true;
+    else if (a === "--yes") opts.yes = true;
+    else if (a === "--keep") opts.keep = Number.parseInt(argv[++i], 10);
+    else if (a === "--replace") opts.replace = true;
     else if (a === "--clear-interview") opts.clearInterview = true;
     else if (a === "--no-clear-interview") opts.clearInterview = false;
     else if (a === "--write") opts.write = true;
@@ -130,6 +152,7 @@ function parseArgs(argv) {
       opts.version = /^[1-9]\d*$/.test(rawVersion ?? "") ? Number(rawVersion) : Number.NaN;
     } else if (a === "--root") opts.root = argv[++i];
     else if (a === "--source") opts.source = argv[++i];
+    else if (a === "--window") opts.window = argv[++i];
     else if (a === "--data") opts.data = argv[++i];
     else if (a === "--data-file") opts.dataFile = argv[++i];
     else if (a === "--note") opts.note = argv[++i];
@@ -206,14 +229,26 @@ try {
     case "verify":
       cmdVerify();
       break;
+    case "backup":
+      cmdBackup();
+      break;
+    case "restore":
+      cmdRestore(sub);
+      break;
     case "app":
       cmdApp(sub, rest);
+      break;
+    case "thread":
+      cmdThread(sub, rest);
+      break;
+    case "changes":
+      await cmdChanges(sub, rest);
       break;
     case "sourced":
       cmdSourced(sub, rest);
       break;
     case "comm":
-      cmdComm(sub, rest);
+      await cmdComm(sub, rest);
       break;
     case "calendar":
       cmdCalendar(sub, rest);
@@ -246,7 +281,7 @@ try {
       fail(`unknown command "${verb}". See --help.`);
   }
 } catch (err) {
-  fail(err?.message || String(err));
+  fail(err?.message || String(err), err?.errors);
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +320,7 @@ function cmdStatus() {
 
 function cmdInit() {
   if (opts.demo) {
-    const result = seedDemo(pathCtx);
+    const result = seedDemo({ ...pathCtx, force: opts.force });
     printResult(result, `Seeded demo data → ${dbDisplayPath()}`);
     return;
   }
@@ -297,7 +332,11 @@ function cmdInit() {
 }
 
 function cmdImport() {
-  const result = importFromTracker({ ...pathCtx, sourceDir: opts.source });
+  const result = importFromTracker({
+    ...pathCtx,
+    sourceDir: opts.source,
+    forceCandidate: opts.forceCandidate,
+  });
   // Immediately export back out so workspace/tracker.json reflects the db
   // right away — most importantly when --source points somewhere other than
   // this workspace's own tracker.json, where nothing would otherwise write
@@ -306,6 +345,52 @@ function cmdImport() {
   printResult(
     { ...result, exported },
     `Imported → ${dbDisplayPath()} (${JSON.stringify(result.counts)})${result.warnings.map((w) => `\n  note: ${w}`).join("")}`
+  );
+}
+
+function cmdBackup() {
+  const result = createBackup(pathCtx, opts.keep ? { keep: opts.keep } : {});
+  printResult(
+    { ok: true, ...result },
+    `Backed up → ${result.path}${result.pruned.length ? ` (removed ${result.pruned.length} older)` : ""}`
+  );
+}
+
+function cmdRestore(selector) {
+  const backups = listBackups(pathCtx);
+  if (!selector) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify(
+          { ok: true, backups: backups.map(({ name, size, mtime }) => ({ name, size, mtime })) },
+          null,
+          2
+        )
+      );
+      return;
+    }
+    if (!backups.length) {
+      console.log("No backups yet. Run 'careerrat data backup' to make one.");
+      return;
+    }
+    console.log("Backups (newest first):");
+    backups.forEach((b, i) => {
+      console.log(`  ${i + 1}. ${b.name}  (${new Date(b.mtime).toISOString().slice(0, 19)} UTC)`);
+    });
+    console.log("");
+    console.log("Restore one with: careerrat data restore <number|name> --yes");
+    return;
+  }
+  if (!opts.yes) {
+    fail(
+      "restore replaces your current database with that backup (the current one is saved first). Add --yes to go ahead"
+    );
+  }
+  const result = restoreBackup(pathCtx, selector);
+  exportToTracker(pathCtx);
+  printResult(
+    { ok: true, ...result },
+    `Restored ${result.restored}.${result.safetyCopy ? ` Your previous database was saved as ${result.safetyCopy}.` : ""}`
   );
 }
 
@@ -322,6 +407,18 @@ function cmdVerify() {
   const trackerPath = userPath(pathCtx, "workspace/tracker.json");
   const data = loadTrackerData(trackerPath);
   const result = validateTrackerData(data);
+  // Also hold the exported file to config/tracker.schema.json, the same check
+  // `careerrat tracker --verify` runs. Without it `data verify` passed rows
+  // (communications, mostly) that `tracker --verify` rejected.
+  const schemaResult = validate(
+    JSON.parse(readFileSync(trackerPath, "utf8")),
+    JSON.parse(readFileSync(join(ROOT, "config/tracker.schema.json"), "utf8"))
+  );
+  if (!schemaResult.valid) {
+    for (const error of schemaResult.errors) {
+      result.errors.push(`schema ${error.path || "(root)"}: ${error.message}`);
+    }
+  }
 
   if (opts.json) {
     console.log(
@@ -347,10 +444,65 @@ function cmdVerify() {
 // app <sub>
 // ---------------------------------------------------------------------------
 
+function cmdThread(sub, rest) {
+  const [id] = rest;
+  if (!id || rest.length !== 1) fail("thread requires read|append <application-id|workspace>");
+  if (sub === "read") {
+    return printResult(
+      id === "workspace"
+        ? workspaceThreadRead(pathCtx)
+        : jobThreadGet({ ...pathCtx, applicationId: id })
+    );
+  }
+  if (sub === "append") {
+    const payload = readPayload("thread append");
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      fail("thread append requires a message object");
+    const { role = "assistant", kind = "text", text, metadata, artifacts, id: messageId } = payload;
+    const message = { role, kind, text, metadata, artifacts, id: messageId, now: opts.at };
+    return printResult(
+      id === "workspace"
+        ? workspaceMessageAppend({ ...pathCtx, ...message })
+        : jobThreadMessageAppend({ ...pathCtx, ...message, applicationId: id })
+    );
+  }
+  fail(`unknown thread action "${sub}". See --help.`);
+}
+
+async function cmdChanges(sub, rest) {
+  if (sub === "list") {
+    if (rest.length) fail("changes list takes no positional arguments");
+    const { messages } = workspaceThreadRead(pathCtx);
+    const changes = recordedKnowledgeChanges(messages);
+    return printResult({ ok: true, changes });
+  }
+  if (sub === "undo") {
+    const [messageId, rawIndex] = rest;
+    const index = Number(rawIndex);
+    if (
+      !messageId ||
+      rest.length !== 2 ||
+      !/^\d+$/.test(rawIndex || "") ||
+      !Number.isSafeInteger(index)
+    )
+      fail("changes undo requires <message-id> <nonnegative-artifact-index>");
+    const undone = undoWorkspaceKnowledge({ ...pathCtx, messageId, index });
+    const outcome = undone?.operationResult;
+    if (outcome && outcome.ok === false) {
+      fail(`undo refused: ${outcome.reason || "unknown reason"}`);
+    }
+    // Only the outcome, not the whole workspace thread (it carries claim text and config values).
+    return printResult({ ok: true, operationResult: outcome ?? null }, "Undone.");
+  }
+  fail(`unknown changes action "${sub}". See --help.`);
+}
+
 function cmdApp(sub, rest) {
   switch (sub) {
     case "upsert":
-      return printResult(appUpsert({ ...pathCtx, row: readPayload("app upsert") }));
+      return printResult(
+        appUpsert({ ...pathCtx, row: readPayload("app upsert"), replace: opts.replace === true })
+      );
     case "set-status": {
       const [id, to] = rest;
       if (!id || !to) fail("app set-status requires <id> <to>");
@@ -417,6 +569,43 @@ function cmdSourced(sub, rest) {
 // comm <sub>
 // ---------------------------------------------------------------------------
 
+// comm handoff <id> [--deliver-to-person [--now]] (CR123): without the flag, print the
+// compose links for the reviewed draft (nothing is sent). With it, in a person's
+// workspace, email the draft to that person's opted-in address only.
+async function cmdCommHandoff(id) {
+  if (!opts.deliverToPerson) {
+    const row = openDb(pathCtx).prepare("SELECT data FROM communications WHERE id = ?").get(id);
+    if (!row) return fail(`no communication "${id}".`);
+    const comm = JSON.parse(row.data);
+    if (!comm.draft?.body) return fail("draft a reply and review it before handing it off.");
+    const recipient = resolveRecipient(comm);
+    const links =
+      recipient.state === "ready"
+        ? buildSendLinks({ to: recipient.to, subject: comm.draft.subject, body: comm.draft.body })
+        : null;
+    return printResult({ id, recipient, links, sent: false });
+  }
+  const name = currentPerson(process.env);
+  if (!name) {
+    return fail(
+      "--deliver-to-person only works in a person's workspace. Try: careerrat --for <name> comm handoff <id> --deliver-to-person"
+    );
+  }
+  try {
+    const result = await deliverDraftToPerson({
+      repoRoot: opts.root,
+      env: opts.env,
+      base: peopleBase({ repoRoot: opts.root, env: opts.env }),
+      name,
+      id,
+      ignoreQuietHours: opts.now === true,
+    });
+    return printResult({ id, delivered: true, to: result.entry.to, subject: result.subject });
+  } catch (err) {
+    return fail(err?.message || String(err));
+  }
+}
+
 function cmdComm(sub, rest) {
   switch (sub) {
     case "upsert":
@@ -433,6 +622,11 @@ function cmdComm(sub, rest) {
       if (!id) fail("comm mark-sent requires <id>");
       return printResult(commMarkSent({ ...pathCtx, id, at: opts.at, summary: opts.summary }));
     }
+    case "handoff": {
+      const [id] = rest;
+      if (!id) fail("comm handoff requires <id>");
+      return cmdCommHandoff(id);
+    }
     default:
       return fail(`unknown "comm" command "${sub}". See --help.`);
   }
@@ -442,6 +636,16 @@ function cmdComm(sub, rest) {
 // calendar <sub>
 // ---------------------------------------------------------------------------
 
+// --window <startIso>..<endIso>: the span this ingest covers in full.
+function parseCalendarWindow(raw) {
+  if (raw === undefined) return undefined;
+  const [startIso, endIso, ...extra] = String(raw).split("..");
+  if (!startIso || !endIso || extra.length) {
+    fail("--window must look like <startIso>..<endIso>");
+  }
+  return { startIso: startIso.trim(), endIso: endIso.trim() };
+}
+
 function cmdCalendar(sub, _rest) {
   switch (sub) {
     case "busy":
@@ -450,6 +654,7 @@ function cmdCalendar(sub, _rest) {
           ...pathCtx,
           blocks: readPayload("calendar busy"),
           source: opts.source,
+          window: parseCalendarWindow(opts.window),
         })
       );
     case "write":
@@ -531,6 +736,22 @@ function cmdRelationship(sub, rest) {
 // top-level catch below, same as every other verb's errors.
 // ---------------------------------------------------------------------------
 
+// `--status null` and `--status any` mean "any status" (the verb's null).
+// Anything else must be a real status: a bare string used to pass through and
+// match no row, which looked exactly like "no batch recorded".
+function parseLinkedinProposalStatus(raw) {
+  const statuses = ["pending", "reviewed"];
+  if (raw === undefined) return "pending";
+  const value = String(raw).trim().toLowerCase();
+  if (value === "null" || value === "any") return null;
+  if (!statuses.includes(value)) {
+    fail(
+      `linkedin-proposals --status must be one of ${statuses.join(", ")}, or "any" (got ${JSON.stringify(raw)})`
+    );
+  }
+  return value;
+}
+
 function cmdLinkedinProposals(sub, _rest) {
   switch (sub) {
     case "record":
@@ -538,14 +759,18 @@ function cmdLinkedinProposals(sub, _rest) {
     case "latest":
       return printResult({
         ok: true,
-        batch: linkedinProposalBatchLatest({ ...pathCtx, status: opts.status ?? "pending" }),
+        batch: linkedinProposalBatchLatest({
+          ...pathCtx,
+          status: parseLinkedinProposalStatus(opts.status),
+        }),
       });
+    case "approve":
     case "mark-applied":
       if (!opts.batch || !opts.surface) {
-        fail("linkedin-proposals mark-applied requires --batch <id> --surface <surfaceId>");
+        fail(`linkedin-proposals ${sub} requires --batch <id> --surface <surfaceId>`);
       }
       if (!Number.isSafeInteger(opts.version) || opts.version < 1) {
-        fail("linkedin-proposals mark-applied requires --version <n>");
+        fail(`linkedin-proposals ${sub} requires --version <n>`);
       }
       return printResult({
         ok: true,
@@ -553,7 +778,7 @@ function cmdLinkedinProposals(sub, _rest) {
           ...pathCtx,
           batchId: opts.batch,
           surfaceId: opts.surface,
-          action: "applied",
+          action: sub === "approve" ? "approve" : "applied",
           version: opts.version,
           reason: opts.reason,
         }),
@@ -620,11 +845,19 @@ function cmdCandidate(sub, rest) {
       ) {
         fail("voluntary self-identification is managed only in local Application defaults");
       }
-      return printResult(candidateConfigPatch({ ...pathCtx, name, patch }));
+      const result = candidateConfigPatch({ ...pathCtx, name, patch });
+      return printResult({
+        ...result,
+        data: sanitizeCandidateConfigForAgent({ [name]: result.data })[name],
+      });
     }
     case "evidence":
       return printResult(
-        candidateEvidenceMerge({ ...pathCtx, claims: readPayload("candidate evidence") })
+        mergeRecordedCandidateEvidence({
+          ...pathCtx,
+          claims: readPayload("candidate evidence"),
+          writer: "data candidate evidence",
+        })
       );
     case "limits": {
       const [action] = rest;
@@ -837,9 +1070,31 @@ function printResult(result, humanLine) {
   console.log(humanLine || JSON.stringify(result));
 }
 
-function fail(msg) {
-  if (opts.json) console.log(JSON.stringify({ ok: false, error: msg }, null, 2));
-  else console.error(`data: ${msg}`);
+// Schema failures carry err.errors (path + message); without them a caller
+// can't tell which field to fix.
+function describeErrors(errors) {
+  if (!Array.isArray(errors)) return "";
+  return errors
+    .map((e) => {
+      if (typeof e === "string") return e;
+      const where = e?.path || e?.instancePath || "";
+      return `${where ? `${where}: ` : ""}${e?.message || JSON.stringify(e)}`;
+    })
+    .join("; ");
+}
+
+function fail(msg, errors) {
+  const detail = describeErrors(errors);
+  const full = detail ? `${msg}: ${detail}` : msg;
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        { ok: false, error: full, ...(Array.isArray(errors) ? { errors } : {}) },
+        null,
+        2
+      )
+    );
+  } else console.error(`data: ${full}`);
   process.exit(1);
 }
 
@@ -847,13 +1102,20 @@ function printHelp() {
   console.log(`careerrat data: sqlite-backed data layer (M6)
 
 Usage:
+  node src/cli/data.mjs thread read <application-id|workspace> [--json]
+  node src/cli/data.mjs thread append <application-id|workspace> --data <json> | --data-file <path>
+  node src/cli/data.mjs changes list [--json]
+  node src/cli/data.mjs changes undo <message-id> <artifact-index> [--json]
+
   node src/cli/data.mjs status [--json]
-  node src/cli/data.mjs init [--demo] [--json]
-  node src/cli/data.mjs import [--source <dir>] [--json]
+  node src/cli/data.mjs init [--demo [--force]] [--json]
+  node src/cli/data.mjs import [--source <dir>] [--force-candidate] [--json]
   node src/cli/data.mjs export [--json]
   node src/cli/data.mjs verify [--json]
+  node src/cli/data.mjs backup [--keep <n>] [--json]
+  node src/cli/data.mjs restore [<number|name> --yes] [--json]
 
-  node src/cli/data.mjs app upsert --data <json> | --data-file <path>
+  node src/cli/data.mjs app upsert --data <json> | --data-file <path> [--replace]
   node src/cli/data.mjs app set-status <id> <to> [--note <t>] [--follow-up-due <iso>] [--clear-interview|--no-clear-interview]
   node src/cli/data.mjs app set-fields <id> --data <json> | --data-file <path>
   node src/cli/data.mjs app schedule-interview <id> --at <iso> [--round <t>] [--note <t>]
@@ -865,8 +1127,9 @@ Usage:
   node src/cli/data.mjs comm upsert --data <json> | --data-file <path>
   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
+  node src/cli/data.mjs comm handoff <id> [--deliver-to-person [--now]]
 
-  node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path>
+  node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path> [--window <startIso>..<endIso>]
   node src/cli/data.mjs calendar write --data <json> | --data-file <path>
 
   node src/cli/data.mjs source watermark --data <json|json-array> | --data-file <path> [--at <iso>]

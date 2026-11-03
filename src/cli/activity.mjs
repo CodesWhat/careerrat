@@ -213,6 +213,13 @@ function cmdPrune() {
       );
     process.exit(0);
   }
+  if (dbExists({ repoRoot: opts.root })) {
+    // activity.jsonl is regenerated from the database on the next write, so
+    // trimming it would report success and then quietly undo itself.
+    fail(
+      "prune can't run on a database workspace: the feed lives in the database and activity.jsonl is regenerated from it"
+    );
+  }
   const res = pruneActivity({ root: opts.root, max: opts.max || 500 });
   if (opts.json) console.log(JSON.stringify(res, null, 2));
   else console.log(`Pruned: kept ${res.kept}, dropped ${res.dropped}.`);
@@ -249,13 +256,16 @@ function cmdBackfill() {
     process.exit(0);
   }
 
+  const useDb = dbExists({ repoRoot: opts.root });
   let written = 0;
   let deduped = 0;
   const refused = [];
   // Append oldest-first so the file stays chronological (append-order = time-order),
   // matching how live skill appends accrue. `derived` is newest-first, so reverse.
   for (const event of [...derived].reverse()) {
-    const res = appendActivity(event, { root: opts.root });
+    const res = useDb
+      ? activityAppend({ repoRoot: opts.root, event })
+      : appendActivity(event, { root: opts.root });
     if (!res.ok) refused.push({ title: event.title, error: res.error });
     else if (res.deduped) deduped += 1;
     else written += 1;
@@ -270,7 +280,7 @@ function cmdBackfill() {
     );
     for (const r of refused) console.error(`  refused: ${r.title}: ${r.error}`);
   }
-  process.exit(0);
+  process.exit(refused.length ? 1 : 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -40,6 +40,8 @@ import {
   candidateConfigPatch,
   candidateSetupInitialize,
   companyAtsUpsert,
+  companyBoardResolutionGet,
+  companyBoardResolutionUpsert,
   sourceConfigGet,
   sourceConfigPut,
   sourcedUpsertBatch,
@@ -308,6 +310,7 @@ test("source acquisition uses a bounded worker pool instead of fetching boards s
       repoRoot,
       configPath,
       write: false,
+      hostThrottle: false,
       fetchImpl: async (url) => {
         const slug = new URL(String(url)).pathname.split("/").filter(Boolean).at(-1);
         started += 1;
@@ -361,6 +364,7 @@ test("offer liveness verification uses bounded concurrency", async () => {
       repoRoot,
       configPath,
       write: false,
+      hostThrottle: false,
       verify: true,
       fetchImpl: async (url) => {
         if (String(url).includes("api.lever.co")) {
@@ -771,6 +775,92 @@ test("DB mode write:true stamps a successful company-board watermark", async () 
   }
 });
 
+function boardResolution(over = {}) {
+  return {
+    company_key: "acme",
+    company_name: "Acme",
+    company_domain: "jobs.lever.co",
+    careers_url: "https://jobs.lever.co/acme",
+    job_board_url: "https://jobs.lever.co/acme",
+    ats_provider: "lever",
+    api_url: "https://api.lever.co/v0/postings/acme",
+    confidence: "high",
+    provenance: [],
+    first_resolved_at: "2026-10-30T00:00:00.000Z",
+    last_verified_at: new Date().toISOString(),
+    last_scan_result: { status: "resolved" },
+    failure_count: 0,
+    zero_job_count: 0,
+    next_refresh_reason: null,
+    status: "supported_ats",
+    proposed_action: "approve-supported-ats",
+    promotable: true,
+    ...over,
+  };
+}
+
+test("a dead company board feeds back into its resolution and says the board wasn't found", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    });
+    companyBoardResolutionUpsert({ repoRoot, resolution: boardResolution() });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () => new Response("Not Found", { status: 404, statusText: "Not Found" }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: true,
+    });
+
+    assert.match(summary.errors[0].error, /HTTP 404/);
+    assert.match(summary.errors[0].error, /job board wasn't found/);
+    const row = companyBoardResolutionGet({ repoRoot, companyKey: "acme" }).resolution;
+    assert.equal(row.last_scan_result.status, "http-404");
+    assert.equal(row.failure_count, 1);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a company board that keeps returning zero jobs counts up, and a good scan resets it", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    });
+    companyBoardResolutionUpsert({ repoRoot, resolution: boardResolution() });
+    const empty = async () =>
+      new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    const opts = {
+      repoRoot,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: true,
+    };
+
+    await runSourcedScan({ ...opts, fetchImpl: empty });
+    await runSourcedScan({ ...opts, fetchImpl: empty });
+    assert.equal(
+      companyBoardResolutionGet({ repoRoot, companyKey: "acme" }).resolution.zero_job_count,
+      2
+    );
+
+    await runSourcedScan({ ...opts, fetchImpl: leverFetchStub() });
+    const row = companyBoardResolutionGet({ repoRoot, companyKey: "acme" }).resolution;
+    assert.equal(row.zero_job_count, 0);
+    assert.equal(row.last_scan_result.status, "success");
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("DB mode scoring uses SQLite targeting when candidate YAML is absent", async () => {
   const repoA = tempRepo();
   const repoB = tempRepo();
@@ -1100,6 +1190,66 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
     const lastRunAt = stored.searches[0].recency.lastRunAt;
     assert.match(lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a provider warning reaches the run health and holds back the source watermark", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "builtin",
+            source_type: "board",
+            label: "Short board",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () => new Response("", { status: 200 }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: true,
+    });
+
+    assert.equal(summary.warnings.length, 1);
+    assert.match(summary.warnings[0].warning, /nothing to scan/);
+    assert.equal(summary.health.status, "degraded");
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(stored.searches[0].recency.lastRunAt, undefined);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a scan where every source fails reports failed health for the CLI exit code", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: searchSourcesFixture() });
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: false,
+    });
+    assert.equal(summary.errors.length, 1);
+    assert.equal(summary.health.status, "failed");
+    assert.equal(summary.attemptedSources, 1);
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -2478,6 +2628,31 @@ test("printSummary stays silent about failures when the batch is clean", () => {
   );
 });
 
+test("printSummary prints the adjacency note when the scan ran without adjacency config", () => {
+  const base = {
+    coldFamilies: [],
+    scanned: 1,
+    new: 1,
+    filteredTitle: 0,
+    filteredLocation: 0,
+    duplicates: 0,
+    ok: true,
+    failed: 0,
+    failedIds: [],
+    errors: [],
+  };
+  const note =
+    "Ran without adjacency config: no related titles. Related roles may be missed; run search setup to add related titles.";
+  const withNote = captureConsoleLog(() =>
+    printSummary({ ...base, adjacencyNote: note }, [], {}, 0)
+  );
+  assert.equal(withNote.filter((line) => line === note).length, 1);
+  const without = captureConsoleLog(() =>
+    printSummary({ ...base, adjacencyNote: null }, [], {}, 0)
+  );
+  assert.ok(!without.some((line) => line.includes("adjacency config")));
+});
+
 test("printSummary reports a bounded (max 10) failure-id sample when the batch is not ok", () => {
   const failedIds = Array.from({ length: 14 }, (_, index) => `sourced-acme-${index}`);
   const summary = {
@@ -2947,5 +3122,217 @@ test("CLI rejects removed compatibility flags instead of silently ignoring them"
     );
     assert.notEqual(result.status, 0, `${flag} must not remain a silent no-op`);
     assert.match(result.stderr, /unknown option/i);
+  }
+});
+
+test("a scan where every source fetch fails reports failed health, not a clean empty run", async () => {
+  const repoRoot = tempRepo();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot);
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () => {
+        throw new TypeError("fetch failed");
+      },
+      configPath,
+      write: false,
+    });
+    assert.equal(summary.scanned, 0);
+    assert.ok(summary.errors.length > 0);
+    assert.equal(summary.health.status, "failed");
+    const lines = [];
+    const original = console.log;
+    console.log = (...args) => lines.push(args.join(" "));
+    try {
+      printSummary(summary, summary.offers, {}, 5);
+    } finally {
+      console.log = original;
+    }
+    assert.match(lines.join("\n"), /Scan health: failed/);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("browser-only and login-backed sources are left out of a terminal scan, not errored", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          ...searchSourcesFixture().searches,
+          {
+            provider: "hiringcafe",
+            source_type: "browser",
+            label: "Browser only board",
+            url: "https://hiring.cafe/?q=bar",
+            enabled: true,
+          },
+          {
+            provider: "linkedin",
+            platform: "linkedin",
+            source_type: "browser",
+            auth: true,
+            label: "LinkedIn NYC",
+            url: "https://www.linkedin.com/jobs/search/?keywords=bar%20manager",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async () =>
+        new Response("<rss><channel></channel></rss>", {
+          status: 200,
+          headers: { "content-type": "application/rss+xml" },
+        }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: false,
+    });
+    assert.equal(summary.attemptedSources, 1);
+    assert.equal(summary.sourceCoverage.length, 1);
+    assert.equal(summary.errors.length, 0);
+    assert.equal(summary.notSearchable.count, 2);
+    assert.deepEqual(summary.notSearchable.sources.map((s) => s.label).sort(), [
+      "Browser only board",
+      "LinkedIn NYC",
+    ]);
+    assert.notEqual(
+      summary.notSearchable.sources[0].reason,
+      summary.notSearchable.sources[1].reason
+    );
+    assert.equal(summary.health.attempted, 1);
+    assert.equal(summary.health.readable, 1);
+    assert.equal(summary.health.failed, 0);
+    assert.equal(summary.health.notSearchable, 2);
+    assert.equal(summary.health.status, "ok");
+
+    const lines = [];
+    const log = console.log;
+    console.log = (line) => lines.push(String(line));
+    try {
+      printSummary(summary, summary.offers, {}, 5);
+    } finally {
+      console.log = log;
+    }
+    const out = lines.join("\n");
+    assert.match(out, /Not searchable from the terminal \(2\)/);
+    assert.equal(out.match(/LinkedIn NYC/g).length, 1);
+    assert.doesNotMatch(out, /Errors:/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a scan where every source is non-runnable says so instead of reading as success", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "hiringcafe",
+            source_type: "browser",
+            label: "Browser only board",
+            url: "https://hiring.cafe/?q=bar",
+            enabled: true,
+          },
+        ],
+      },
+    });
+    const summary = await runSourcedScan({ repoRoot, write: false });
+    assert.equal(summary.attemptedSources, 0);
+    assert.equal(summary.errors.length, 0);
+    assert.equal(summary.health.status, "failed");
+    assert.match(summary.health.message, /None of the 1 sources can be searched from the terminal/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a 429 with Retry-After is retried inside the scan and reported in requestStats", async () => {
+  const repoRoot = tempRepo();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot, {
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    });
+    let calls = 0;
+    const summary = await runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      hostThrottle: { minSpacingMs: 0, sleep: async () => {} },
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1)
+          return new Response("slow down", { status: 429, headers: { "retry-after": "1" } });
+        return new Response(
+          JSON.stringify([
+            {
+              text: "Platform Engineer",
+              hostedUrl: "https://jobs.lever.co/acme/role-1",
+              categories: { location: "Remote - US" },
+              descriptionPlain: "Build reliable platform infrastructure and developer tooling.",
+            },
+          ]),
+          { status: 200 }
+        );
+      },
+    });
+    assert.equal(summary.scanned, 1);
+    assert.equal(summary.requestStats.rateLimited, 1);
+    assert.equal(summary.requestStats.retried, 1);
+    assert.equal(calls, 2);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("the rerank hook annotates results without removing any and reports its status", async () => {
+  const repoRoot = tempRepo();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot, {
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+    });
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify([
+          {
+            text: "Platform Engineer",
+            hostedUrl: "https://jobs.lever.co/acme/role-1",
+            categories: { location: "Remote - US" },
+            descriptionPlain: "Build reliable platform infrastructure and developer tooling.",
+          },
+        ]),
+        { status: 200 }
+      );
+    const baseline = await runSourcedScan({ repoRoot, configPath, write: false, fetchImpl });
+    assert.equal(baseline.aiRerank, undefined, "off by default: no AI status in the summary");
+    const summary = await runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      fetchImpl,
+      rerankImpl: async ({ kept }) => ({
+        kept: kept.map((offer) => ({ ...offer, aiNote: "Worth a look." })),
+        aiRerank: { status: "ok", message: "noted", annotated: kept.length, suggestedOrder: [] },
+      }),
+    });
+    assert.equal(summary.offers.length, baseline.offers.length);
+    assert.equal(summary.offers[0].aiNote, "Worth a look.");
+    assert.equal(summary.aiRerank.status, "ok");
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
   }
 });

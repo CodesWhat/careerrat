@@ -671,3 +671,26 @@ test("keeps the resolution deadline active during DNS lookup", async () => {
     { code: "COMPANY_BOARD_FETCH_TIMEOUT" }
   );
 });
+
+test("a cached board on a shared ATS host is not handed to a different company", async () => {
+  const repoRoot = setupRepo();
+  const lookupHost = lookupHostFor({ "jobs.lever.co": "54.211.1.10" });
+  const first = await resolveCompanyBoard({
+    repoRoot,
+    seed: { name: "Acme AI", domain_hint: "https://jobs.lever.co/acme" },
+    fetchImpl: rejectingFetch(),
+    lookupHost,
+    now: NOW,
+  });
+  const second = await resolveCompanyBoard({
+    repoRoot,
+    seed: { name: "Other Co", domain_hint: "https://jobs.lever.co/otherco" },
+    fetchImpl: rejectingFetch(),
+    lookupHost,
+    now: NOW,
+  });
+
+  assert.equal(first.jobBoardUrl, "https://jobs.lever.co/acme");
+  assert.equal(second.jobBoardUrl, "https://jobs.lever.co/otherco");
+  assert.equal(second.companyKey, "other-co");
+});

@@ -86,6 +86,7 @@ export function commCaptureInbound({
   artifactPath,
   sourceId,
   at,
+  acknowledgment = false,
 } = {}) {
   const cleanChannel = clean(channel) || "email";
   if (!["email", "linkedin", "portal", "phone", "sms", "other"].includes(cleanChannel)) {
@@ -132,7 +133,10 @@ export function commCaptureInbound({
         channel: cleanChannel,
       });
     if (!existing && id === `comm-${cleanChannel}` && linkedApplicationId) {
-      id = slugifyThreadId({ company: linkedApplicationId, channel: cleanChannel });
+      id = slugifyThreadId({
+        company: linkedApplicationId,
+        channel: cleanChannel,
+      });
     }
     if (!existing) {
       const baseId = id;
@@ -157,7 +161,7 @@ export function commCaptureInbound({
       ...(from ? { from } : {}),
       ...(cleanSubject ? { subject: cleanSubject } : {}),
       ...(cleanArtifactPath ? { artifactPath: cleanArtifactPath } : {}),
-      nextAction: "Review and reply",
+      nextAction: acknowledgment ? "awaiting-response" : "Review and reply",
     };
     existingMessages.push(message);
 
@@ -165,7 +169,8 @@ export function commCaptureInbound({
       ...(existing || {}),
       id,
       threadId: existing?.threadId || id,
-      status: existing?.status === "blocked" ? "blocked" : "needs-reply",
+      status:
+        existing?.status === "blocked" ? "blocked" : acknowledgment ? "waiting" : "needs-reply",
       summary: cleanSummary,
       channel: cleanChannel,
       messages: existingMessages,
@@ -178,7 +183,7 @@ export function commCaptureInbound({
       participants: mergeParticipant(existing?.participants, participant),
     };
     if (updated.status !== "blocked") {
-      updated.nextAction = "Review and reply";
+      updated.nextAction = acknowledgment ? "awaiting-response" : "Review and reply";
       delete updated.nextActionDue;
     }
 
@@ -210,11 +215,36 @@ export function commCaptureInbound({
 
 // commUpsert({row}) — full-row insert/replace, same "capture-intake" shape as
 // appUpsert.
+const MESSAGE_DIRECTIONS = new Set(["inbound", "outbound-draft", "outbound-sent", "note"]);
+
+// Messages are stored as given, and a bad direction or timestamp only showed up
+// later when `tracker --verify` rejected the exported file. Refuse them here.
+function assertMessagesValid(messages) {
+  if (messages === undefined) return;
+  if (!Array.isArray(messages)) throw new Error("commUpsert: row.messages must be an array");
+  messages.forEach((message, index) => {
+    if (!message || typeof message !== "object") {
+      throw new Error(`commUpsert: messages[${index}] must be an object`);
+    }
+    if (!MESSAGE_DIRECTIONS.has(message.direction)) {
+      throw new Error(
+        `commUpsert: messages[${index}].direction must be one of ${[...MESSAGE_DIRECTIONS].join(", ")}`
+      );
+    }
+    if (message.at !== undefined && Number.isNaN(Date.parse(message.at))) {
+      throw new Error(`commUpsert: messages[${index}].at must be a date-time`);
+    }
+  });
+}
+
 export function commUpsert({ repoRoot, env, row } = {}) {
   if (!row?.id) throw new Error("commUpsert: row.id is required");
+  assertMessagesValid(row.messages);
   return runVerb({ repoRoot, env }, (db) => {
     const existed = Boolean(getRow(db, "communications", row.id));
-    putRow(db, "communications", row.id, row, { application_id: resolveApplicationId(db, row) });
+    putRow(db, "communications", row.id, row, {
+      application_id: resolveApplicationId(db, row),
+    });
     if (
       resolveApplicationId(db, row) &&
       Array.isArray(row.messages) &&
@@ -230,7 +260,11 @@ export function commUpsert({ repoRoot, env, row } = {}) {
     const event = logActivityEvent(db, {
       type: "message",
       title: `${row.company || row.id}: thread ${existed ? "updated" : "opened"}`,
-      refs: { applicationId: row.applicationId || null, company: row.company, role: row.role },
+      refs: {
+        applicationId: row.applicationId || null,
+        company: row.company,
+        role: row.role,
+      },
     });
     return { id: row.id, meta, event };
   });
@@ -270,7 +304,11 @@ export function commAppendMessage({ repoRoot, env, id, message } = {}) {
     const event = logActivityEvent(db, {
       type: "message",
       title: `${comm.company || id}: ${message.direction || "message"} logged`,
-      refs: { applicationId: comm.applicationId || null, company: comm.company, role: comm.role },
+      refs: {
+        applicationId: comm.applicationId || null,
+        company: comm.company,
+        role: comm.role,
+      },
     });
     return { id, meta, event };
   });
@@ -328,7 +366,11 @@ export function commSetDraft({ repoRoot, env, id, draft, summary, at } = {}) {
       type: "message",
       title: `${comm.company || id}: reply drafted`,
       summary: "A reply is ready for review; nothing was sent.",
-      refs: { applicationId: comm.applicationId || null, company: comm.company, role: comm.role },
+      refs: {
+        applicationId: comm.applicationId || null,
+        company: comm.company,
+        role: comm.role,
+      },
       tags: ["operation:communication:draft"],
     });
     return { id, draft: normalizedDraft, meta, event };
@@ -391,7 +433,10 @@ export function commMarkSent({
     const sentAt = at || new Date().toISOString();
     const evidence = String(deliveryEvidence || "").trim();
     const messages = Array.isArray(comm.messages) ? comm.messages.slice() : [];
-    const sentMessage = sentMessageFromDraft(comm.draft, { at: sentAt, summary });
+    const sentMessage = sentMessageFromDraft(comm.draft, {
+      at: sentAt,
+      summary,
+    });
     if (evidence) sentMessage.deliveryEvidence = evidence;
     messages.push(sentMessage);
     const updated = {

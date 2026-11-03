@@ -12,7 +12,10 @@ The primary entry point. Run as `careerrat <command> [args] [--flags]`.
 | `start [agent]` | Scaffold workspace, install skills, boot dashboard, launch agent |
 | `start claude` | Same, with Claude Code as the agent |
 | `start codex` | Same, with Codex as the agent |
-| `people list` / `people add <name>` | List or create per-person workspaces. These work on the shared roster. `--for <name>` applies to workspace commands |
+| `people list` / `people add <name>` / `people remove <name> --purge --yes` | List, create (with an authorization note) or purge per-person workspaces. These work on the shared roster. `--for <name>` applies to workspace commands; `--new` creates the person first. See [Running CareerRat for someone else](/guides/running-for-someone-else) |
+| `--for <name> people contact show\|set\|opt-in\|opt-out` | Record the address CareerRat may notify, their timezone and quiet hours, and their per-channel yes. Notifications fail without an opt-in |
+| `--for <name> roundup [--since <date>] [--send] [--now]` | Print a person's job-search roundup, or email it to their registered address. See [Running CareerRat for someone else](/guides/running-for-someone-else) |
+| `--for <name> comm handoff <id> --deliver-to-person` | Email a reviewed recruiter-reply draft to the person, never the recruiter. `comm mark-sent <id>` records their send |
 | `init` | Scaffold workspace only (no agent, no dashboard) |
 | `doctor` | Environment health check, scaffold state, skills discoverability |
 | `next` | Show the next agent task from doctor guidance |
@@ -33,6 +36,7 @@ The primary entry point. Run as `careerrat <command> [args] [--flags]`.
 | `questions` | Fetch a job's real application-form questions, no browser |
 | `data` | sqlite-backed data layer: status, init, import, export, verify, plus per-domain verbs |
 | `health` | Record the company-health skill's role-scoped rating |
+| `apply` | Submit gate for agent-filled forms: checks the live form and presses Submit only when every check passes |
 | `gate` | Safely update gate data such as comp floors and exclusions |
 | `learnings` | Read or append per-role-family learnings |
 | `status-map` | Inspect ATS status normalization |
@@ -83,8 +87,8 @@ developing from a source checkout or running lower-level maintenance tools.
 | `capture:search-sources` | Bulk-capture board listing pages |
 | `capture:board` | Capture a single board page |
 | `analyze:outcomes` | Read outcome analytics from tracker |
-| `check:jobs` | Check liveness of sourced job links |
-| `scan:sourced` | Scan configured sourced rows |
+| `check:jobs` | Check whether saved job links are still open, using the job board's own API first, and list jobs closed since the last check |
+| `scan:sourced` | Scan configured sources. Boards that return not found on two runs in a row are skipped until a 14-day re-check; `--recheck-dead` checks them now |
 | `delta:sourced` | Show sourced-row deltas |
 | `calibrate:style` | Build writing-style calibration artifacts |
 
@@ -94,5 +98,5 @@ developing from a source checkout or running lower-level maintenance tools.
 | -------- | ------- | ------- |
 | `CAREERRAT_HOME` | `<repo root>/.careerrat` | Override location of `.careerrat/` (holding `candidate/` and `workspace/`) |
 | `CAREERRAT_PERSON` | *(unset)* | Run in the workspace at `<data root>/people/<name>/`, same as `--for <name>` |
-| `CAREERRAT_DOWNLOADS_DIR` | `~/Documents/careerrat` (`~/Documents/careerrat/<name>` with a person) | Where exported documents go |
+| `CAREERRAT_DOWNLOADS_DIR` | `~/Documents/careerrat` (`~/Documents/careerrat/_people/<name>` with a person) | Where exported documents go |
 | `NEXT_PUBLIC_SITE_URL` | *(unset)* | Docs-site base URL for metadata |

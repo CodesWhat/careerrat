@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
-
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE, parseChatAnswerMode } from "../ai/chat-answer-mode.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { hostnameToPortal, REQUIRED_FIELDS_UNANSWERED } from "../apply/form-fill.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
+import { isLinkedInUrl, resolveEmployerApplyLink } from "../apply/linkedin-link.mjs";
 import {
   automationStatus,
   CAPABILITIES,
@@ -157,10 +157,10 @@ import {
   FILED_ISSUE_URL_RE,
   ISSUE_REPORT_COMP_LEAK_MARKER,
 } from "./issue-report.mjs";
+import { revertSavedKnowledge } from "./knowledge-history.mjs";
 import {
   buildKnowledgeWriteEntry,
   configWriteEntries,
-  revertKnowledgeWrite,
   undoNextAction,
 } from "./knowledge-write-log.mjs";
 import { linkedinStagingEntries } from "./linkedin-write-log.mjs";
@@ -1797,7 +1797,7 @@ async function evaluateApplicationRequest({
     evaluation,
     gate,
     gateLabel,
-    text: `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`,
+    text: evaluationSummaryText(application, evaluation, gateLabel),
     artifact: {
       kind: "job_evaluation",
       title: `${applicationLabel(application)}: ${gateLabel}`,
@@ -1805,6 +1805,21 @@ async function evaluateApplicationRequest({
       evaluation,
     },
   };
+}
+
+// A verdict the AI never produced (no AI set up, or the call failed) is
+// stored as a manual-review placeholder. It must not read as "Evaluated: Review".
+// A genuine AI "review" verdict also carries manual.required, but it has a score.
+function evaluationHasNoVerdict(evaluation) {
+  return evaluation?.manual?.required === true && evaluation.fitScore == null;
+}
+
+function evaluationSummaryText(application, evaluation, gateLabel) {
+  if (evaluationHasNoVerdict(evaluation)) {
+    const reason = String(evaluation.manual.reason || "").trim();
+    return `Could not evaluate ${applicationLabel(application)}${reason ? `: ${reason}` : "."} Nothing was scored; it needs your manual review.`;
+  }
+  return `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`;
 }
 
 function persistedEvaluationResult(application, applicationId) {
@@ -1816,7 +1831,7 @@ function persistedEvaluationResult(application, applicationId) {
     evaluation,
     gate,
     gateLabel,
-    text: `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`,
+    text: evaluationSummaryText(application, evaluation, gateLabel),
     artifact: {
       kind: "job_evaluation",
       title: `${applicationLabel(application)}: ${gateLabel}`,
@@ -1826,7 +1841,13 @@ function persistedEvaluationResult(application, applicationId) {
   };
 }
 
-function evaluationNextActions(gate, applicationId, fitRisks = [], evaluatedAt = null) {
+function evaluationNextActions(
+  gate,
+  applicationId,
+  fitRisks = [],
+  evaluatedAt = null,
+  manualRequired = false
+) {
   if (gate === "keep") {
     return [
       {
@@ -1846,6 +1867,9 @@ function evaluationNextActions(gate, applicationId, fitRisks = [], evaluatedAt =
       entityId: applicationId,
     }),
   ];
+  // No AI verdict exists to approve or to coach on, and its only "risk" is the
+  // reason the AI didn't run.
+  if (manualRequired) return actions;
   if (gate === "review") {
     actions.push({
       label: "Approve review and prepare",
@@ -2546,53 +2570,6 @@ function saveCoachingDraft({ repoRoot, env, applicationId, gapId, coveredIds }) 
 function coachingRefusalReason(error) {
   const message = String(error?.message || "CareerRat could not save it.");
   return message.replace(/^CareerRat could not save this evidence claim:\s*/, "");
-}
-
-// After an Undo removed a coaching-saved claim: reopen its gap, but only a gap
-// that is still the one this save closed. Returns a note for the undo summary.
-function reopenCoachingGap({ repoRoot, env, entry, setFields = appSetFields }) {
-  const applicationId = entry.source?.applicationId;
-  let application;
-  try {
-    application = applicationForIntent({ repoRoot, env, id: applicationId });
-  } catch {
-    return "The job it came from is gone, so there was no gap to reopen.";
-  }
-  const plan = application.coachingPlan;
-  const matching = (Array.isArray(plan?.gaps) ? plan.gaps : []).filter(
-    (g) => g?.status === "closed" && g.savedClaimId === entry.id
-  );
-  if (!matching.length) {
-    return "The coaching gap changed since, so it was left as it is.";
-  }
-  const ids = new Set(matching.map((g) => g.id));
-  const many = matching.length > 1;
-  const open = many ? "The coaching gaps are open again." : "The coaching gap is open again.";
-  try {
-    setFields({
-      repoRoot,
-      env,
-      id: applicationId,
-      patch: {
-        coachingPlan: {
-          ...plan,
-          gaps: plan.gaps.map((g) => {
-            if (!ids.has(g.id)) return g;
-            const { savedClaimId: _saved, ...rest } = g;
-            return { ...rest, status: "open" };
-          }),
-        },
-      },
-    });
-  } catch (error) {
-    // The claim is already gone, so the undo stands either way. An export
-    // failure after the commit still reopened the gap.
-    if (error?.committed === true) return open;
-    return many
-      ? "The coaching gaps stayed closed, so reopen them from the plan."
-      : "The coaching gap stayed closed, so reopen it from the plan.";
-  }
-  return open;
 }
 
 function communicationLabel(comm) {
@@ -5202,7 +5179,8 @@ async function executeWorkspaceIntentCore({
               evaluated.gate,
               captured.applicationId,
               evaluated.evaluation.fitRisks,
-              evaluated.evaluation.evaluatedAt
+              evaluated.evaluation.evaluatedAt,
+              evaluationHasNoVerdict(evaluated.evaluation)
             ),
           },
           now,
@@ -5319,7 +5297,8 @@ async function executeWorkspaceIntentCore({
             evaluated.gate,
             normalized.entity.id,
             evaluated.evaluation.fitRisks,
-            evaluated.evaluation.evaluatedAt
+            evaluated.evaluation.evaluatedAt,
+            evaluationHasNoVerdict(evaluated.evaluation)
           ),
         },
         now,
@@ -6307,6 +6286,15 @@ async function executeWorkspaceIntentCore({
         throw actionError(
           operation?.body?.error?.message || "The coaching plan could not be built.",
           operation?.body?.code || "COACHING_PLAN_FAILED"
+        );
+      }
+      // A plan the AI never produced (no AI set up, or the call failed) is only
+      // a placeholder where every gap reads "no honest close path yet". Saving
+      // it would show that as the real answer, so report why instead.
+      if (plan.manual?.required) {
+        throw actionError(
+          `The coaching plan was not built: ${plan.manual.reason || "the AI could not produce one."}`,
+          plan.manual.code || "COACHING_PLAN_NO_AI"
         );
       }
       appSetFields({
@@ -7438,33 +7426,12 @@ async function executeWorkspaceIntentCore({
     if (normalized.type === "knowledge.revert") {
       const messageId = String(input.messageId || "").trim();
       const index = Number(input.index);
-      const stored = workspaceThreadRead({ repoRoot, env }).messages.find(
-        (message) =>
-          message?.id === messageId &&
-          (message.kind === "action_result" || message.kind === "action_error")
-      );
-      const entry =
-        stored && Number.isInteger(index) && index >= 0 ? stored.artifacts?.[index] : null;
-      if (entry?.kind !== "knowledge_write") {
-        throw actionError(
-          "CareerRat couldn't find that change to undo.",
-          "KNOWLEDGE_REVERT_INVALID"
-        );
-      }
-      const existing = workspaceThreadRead({ repoRoot, env }).messages.flatMap((message) =>
-        (message.artifacts || []).filter((artifact) => artifact?.kind === "knowledge_write")
-      );
-      const reverted = revertKnowledgeWrite({
+      const reverted = revertSavedKnowledge({
         repoRoot,
         env,
-        entry,
         messageId,
         index,
-        existing,
-        afterRevert: (done) =>
-          done.target === "evidence" && done.source?.kind === "coaching"
-            ? reopenCoachingGap({ repoRoot, env, entry: done, setFields: appSetFieldsImpl })
-            : undefined,
+        setFields: appSetFieldsImpl,
       });
       if (!reverted.ok) {
         return appendActionResult({
@@ -9267,9 +9234,43 @@ async function executeWorkspaceIntentCore({
 
     const prepareSubmit = normalized.type === "job.prepare-submit";
     const resumeApplicationSession = prepareSubmit || input.resumeSession === true;
-    const postingUrl = safeExternalHttpUrl(
+    let postingUrl = safeExternalHttpUrl(
       application.link || application.url || application.sourceUrl
     );
+    // LinkedIn postings are applied to on the employer's own link. CareerRat
+    // never applies through a LinkedIn session, so a LinkedIn link with no
+    // employer link behind it waits for the person (see the branch below).
+    let linkedinWaitUrl = null;
+    if (postingUrl && isLinkedInUrl(postingUrl)) {
+      const { employerUrl } = await resolveEmployerApplyLink({
+        application,
+        linkedinUrl: postingUrl,
+        resolveJobUrlImpl,
+        signal,
+      });
+      if (employerUrl) {
+        appSetFields({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+          patch: {
+            link: employerUrl,
+            sourceMeta: {
+              ...(application.sourceMeta || {}),
+              linkedinUrl: postingUrl,
+            },
+          },
+        });
+        application = applicationForIntent({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+        });
+        postingUrl = employerUrl;
+      } else {
+        linkedinWaitUrl = postingUrl;
+      }
+    }
     if (!postingUrl) {
       return appendActionResult({
         repoRoot,
@@ -9320,7 +9321,8 @@ async function executeWorkspaceIntentCore({
                 evaluated.gate,
                 normalized.entity.id,
                 evaluated.evaluation.fitRisks,
-                evaluated.evaluation.evaluatedAt
+                evaluated.evaluation.evaluatedAt,
+                evaluationHasNoVerdict(evaluated.evaluation)
               ),
             },
             now,
@@ -9361,7 +9363,8 @@ async function executeWorkspaceIntentCore({
               evaluated.gate,
               normalized.entity.id,
               evaluated.evaluation.fitRisks,
-              evaluated.evaluation.evaluatedAt
+              evaluated.evaluation.evaluatedAt,
+              evaluationHasNoVerdict(evaluated.evaluation)
             ),
           },
           now,
@@ -9455,7 +9458,8 @@ async function executeWorkspaceIntentCore({
                 evaluated.gate,
                 normalized.entity.id,
                 evaluated.evaluation.fitRisks,
-                evaluated.evaluation.evaluatedAt
+                evaluated.evaluation.evaluatedAt,
+                evaluationHasNoVerdict(evaluated.evaluation)
               ),
             },
             now,
@@ -9553,6 +9557,90 @@ async function executeWorkspaceIntentCore({
     const applySafetyBlockReason = resumeApplicationSession
       ? applicationApplySafetyBlockReason({ repoRoot, env, application })
       : null;
+    if (linkedinWaitUrl && !applySafetyBlockReason) {
+      // No employer link and nothing to click for the person: open the page,
+      // touch nothing in it, and wait. Nothing is recorded as applied.
+      let opened = false;
+      if (typeof applyJobImpl === "function") {
+        const waiting = await applyJobImpl({
+          repoRoot,
+          env,
+          applicationId: normalized.entity.id,
+          application,
+          postingUrl: linkedinWaitUrl,
+          questionCapture,
+          input: { ...input, prepareOnly: true, submitMode: "manual" },
+          prepareOnly: true,
+          submitMode: "manual",
+          signal,
+        });
+        opened = waiting?.state === "waiting-on-person" && waiting?.available !== false;
+      }
+      const waitingNote = "Waiting on you: apply on LinkedIn, then tell CareerRat you applied.";
+      const alreadyPast = new Set([
+        "applied",
+        "awaiting",
+        "interview",
+        "offer",
+        "rejected",
+        "withdrawn",
+      ]);
+      if (!alreadyPast.has(String(application.status || "").toLowerCase())) {
+        appSetStatus({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+          to: "manual-apply",
+          note: waitingNote,
+        });
+      }
+      appSetFields({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        patch: {
+          statusNote: waitingNote,
+          nextAction: "Apply on LinkedIn, then tell me when you've applied",
+        },
+      });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `${
+          opened
+            ? "CareerRat opened the LinkedIn job page and made no clicks."
+            : "Open the job on LinkedIn to apply."
+        } LinkedIn doesn't allow apps to apply for you and there's no employer link on this job, so it's waiting on you. It was not marked Applied.`,
+        artifacts: [
+          {
+            kind: "application_handoff",
+            title: `${applicationLabel(application)}: LinkedIn job`,
+            applicationId: normalized.entity.id,
+            url: linkedinWaitUrl,
+            submissionVerified: false,
+            questionCapture,
+            executorAvailable: opened,
+          },
+        ],
+        metadata: {
+          state: "waiting-on-person",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          nextActions: [
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+          ],
+        },
+        now,
+      });
+    }
     if (typeof applyJobImpl !== "function" && (!prepareSubmit || !applySafetyBlockReason)) {
       return appendActionResult({
         repoRoot,

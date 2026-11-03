@@ -100,6 +100,103 @@ test("doctor surfaces missing company ATS discovery separately from broad search
   }
 });
 
+function doctorJson(home, args = [], extraEnv = {}) {
+  const result = spawnSync(process.execPath, ["src/cli/doctor.mjs", "--json", ...args], {
+    cwd: ROOT,
+    env: { ...process.env, CAREERRAT_HOME: home, CAREERRAT_NO_UPDATE_CHECK: "1", ...extraEnv },
+    encoding: "utf8",
+  });
+  return { status: result.status, report: JSON.parse(result.stdout) };
+}
+
+test("doctor says when targeting has no related titles or commute cities", () => {
+  const home = tempHome();
+  try {
+    seedCandidateFiles(home);
+    writeFileSync(
+      join(home, "candidate", "targeting.yml"),
+      "role_buckets:\n  - name: Core\n    priority: primary\n    titles:\n      - Registered Nurse\n",
+      "utf8"
+    );
+    writeFileSync(
+      join(home, "candidate", "profile.yml"),
+      "location:\n  home: Denver, CO\n  hybrid: true\n",
+      "utf8"
+    );
+
+    const text = runCli("src/cli/doctor.mjs", [], home);
+    assert.match(text.stdout, /Targeting is missing adjacency config/);
+    assert.match(text.stdout, /no related titles/);
+    assert.match(text.stdout, /no commute cities/);
+    assert.match(text.stdout, /Next action: run search setup to add related titles/);
+
+    const { report } = doctorJson(home);
+    assert.equal(report.targetingAdjacency.missingAdjacentTitles, true);
+    assert.equal(report.targetingAdjacency.missingCommuteCities, true);
+
+    writeFileSync(
+      join(home, "candidate", "targeting.yml"),
+      "role_buckets:\n  - name: Core\n    priority: primary\n    titles:\n      - Registered Nurse\n  - name: Near\n    priority: secondary\n    titles:\n      - Charge Nurse\n",
+      "utf8"
+    );
+    writeFileSync(
+      join(home, "candidate", "profile.yml"),
+      "location:\n  home: Denver, CO\n  hybrid: true\n  commute_cities:\n    - Aurora, CO\n",
+      "utf8"
+    );
+    const fixed = runCli("src/cli/doctor.mjs", [], home);
+    assert.doesNotMatch(fixed.stdout, /missing adjacency config/);
+    assert.equal(doctorJson(home).report.targetingAdjacency.nextAction, null);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor fails on an invalid search config instead of calling the setup fine", () => {
+  const home = tempHome();
+  try {
+    seedCandidateFiles(home);
+    mkdirSync(join(home, "config"), { recursive: true });
+    const config = join(home, "config", "search-sources.yml");
+    writeFileSync(config, "searches:\n  - provider: HiringCafe\n    label: A\n    enabled: true\n");
+    const good = doctorJson(home);
+    assert.equal(good.report.discovery.broadSources.valid, true);
+    assert.equal(good.status, 0, JSON.stringify(good.report.missingUser));
+
+    // A config whose searches is not a list used to be read as zero searches.
+    writeFileSync(config, "searches: not-a-list\n");
+    const bad = doctorJson(home);
+    assert.equal(bad.report.discovery.broadSources.valid, false);
+    assert.equal(bad.report.ok, false);
+    assert.equal(bad.status, 1);
+
+    // A config that doesn't parse at all.
+    writeFileSync(config, "searches: [unclosed\n");
+    assert.equal(doctorJson(home).status, 1);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports the terminal workspace and agent, and --network fails when it can't reach out", () => {
+  const home = tempHome();
+  try {
+    const unchecked = doctorJson(home);
+    assert.equal(unchecked.report.environment.network, null);
+    assert.equal(typeof unchecked.report.environment.tui.ready, "boolean");
+
+    // A host that can never resolve, through the same fetch source scans use.
+    const probe = doctorJson(home, ["--network"], {
+      CAREERRAT_DOCTOR_PROBE_URL: "https://no-such-host.invalid/",
+    });
+    assert.equal(probe.report.environment.network.ok, false);
+    assert.equal(probe.report.ok, false);
+    assert.equal(probe.status, 1);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("doctor prints the ordered post-onboarding discovery pipeline", () => {
   const home = tempHome();
   try {
@@ -589,8 +686,23 @@ test("careerrat start refuses an unaccepted detected agent command", () => {
       PATH: binDir,
     });
 
-    assert.equal(result.status, 0);
+    // Asking for a named agent that can't be launched is a failure, not a quiet success.
+    assert.equal(result.status, 1);
     assert.match(result.stdout, /Couldn't find "hermes"/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("careerrat start rejects an unknown option instead of ignoring it", () => {
+  const home = tempHome();
+  try {
+    const result = runCareerRat(["start", "--no-agent", "--no-dashboard", "--bogus-flag"], home);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Unknown option for start: --bogus-flag/);
+    const missing = runCareerRat(["start", "--no-dashboard", "--agent"], home);
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /--agent needs a name/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

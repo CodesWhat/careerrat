@@ -6,6 +6,138 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-02
+
+### Security
+
+- Raised the minimum Node.js to 24.22.1 for the Brotli decoder fix (CVE-2026-111497).
+  `careerrat` now refuses to start on an unpatched Node (older 24.x, any 25.x, or
+  26.x before 26.12.1) and prints the upgrade step.
+
+### Added
+
+- `careerrat start` now opens the terminal workspace: a clickable Textual view
+  beside native Claude or Codex chat, with status and pay controls, saved
+  requirement reports, captured job descriptions, conversation history and a
+  guarded Undo. It needs Python 3.11+ with venv; the first launch installs
+  hash-locked dependencies in a private environment.
+- Run CareerRat for other people. Each person gets an isolated workspace, with
+  `--for <name>` on any command, a recorded authorization, a purge command, and
+  guards on the AI route and attestations.
+- Operator-run roundups for the people you run CareerRat for. Each person has a
+  contact and consent record, and nothing is sent without it. Roundups go out by
+  Resend or SMTP. Recruiter-reply drafts go to the person, never to the
+  recruiter, and employer mail stays draft-only.
+- Shared posting cache for multi-person setups. A board is fetched once, reused by
+  other people's scans inside a 6 hour window, and new postings are matched
+  against each person's own targeting and saved to their workspace as
+  `shared-cache`. The scan summary lists "Also matched for" counts. Opt out per
+  person or turn it off globally (docs/SOURCES.md).
+- More job sources. Search can use USAJobs (free key) and Adzuna (paid key) when
+  their keys are set, and new searches also include Himalayas, Jobicy and, for
+  tech roles, Hacker News "Who is hiring". A missing key is reported on that
+  source instead of returning nothing.
+- Related titles. Search shows titles close to your target (like "Staff UI
+  Engineer" when you target "Staff Frontend Engineer"). They rank below exact
+  matches, and wrong-seniority or excluded titles are still cut.
+- A job board that comes back not found on two runs in a row is skipped until a
+  14-day re-check. `scan:sourced --recheck-dead` checks them right away, and each
+  run lists dead sources with the next step.
+- `check:jobs` asks Greenhouse, Lever, Ashby, Workable and SmartRecruiters directly
+  whether a saved job is still open, and lists jobs closed since the last check. A
+  job is only marked closed when the board says it's gone.
+- ATS sweep: drop a `config/ats-sweep-slugs.txt` (or `.json`) of employer board
+  slugs in the workspace and scans also check those boards for roles that match
+  your targeting. No slug data is bundled.
+- Optional AI rerank (`search_preferences.ai_rerank.enabled` in targeting.yml, off
+  by default): the top results get a short fit note and a suggested order from
+  your AI. It never filters, hides or reorders results, and says so plainly when
+  no AI is set up.
+- Scans go easy on each host: a concurrency cap, a minimum gap between requests,
+  and a wait-and-retry on 429 or 503 that follows Retry-After. The scan summary
+  reports how many requests were rate limited.
+- Scans rank ghost-looking and reposted postings lower with a visible reason
+  (evergreen wording, very old, or the same role showing up under new links across
+  scans). They are never cut.
+- Configured-source searches can run in bounded background workers. Add context
+  captures dropped files privately before handoff; text, Markdown, DOCX and email
+  share the existing extractor. Unsupported formats retain their original file for
+  follow-up.
+- `careerrat data backup` and `careerrat data restore` save and bring back the
+  database. A restore saves your current database first and needs `--yes`.
+- CLI commands read and append durable job or workspace history, list recorded
+  knowledge changes, and undo them through the existing stale-write checks.
+  Settings and evidence commands record supported changes and their guarded Undo
+  in the same transaction.
+- `npm run bench:search` breaks cut good postings down by reason, and
+  `-- --why <id>` explains one posting's path (title decision, score, the stage
+  that cut it or its rank).
+- `careerrat doctor` and the scan summary say when your targeting has no related
+  titles or commute cities, which lowers recall for workspaces set up on older
+  versions. Run search setup to add related titles.
+
+### Changed
+
+- CareerRat no longer applies through LinkedIn, Easy Apply included, because
+  LinkedIn's User Agreement bans automation. A LinkedIn job now applies at the
+  employer's own link when one is found. Otherwise CareerRat opens the LinkedIn
+  page, clicks nothing, and marks the job as waiting on you until you say you
+  applied. The `linkedin` apply setting is retired; older settings files that
+  still have it load fine and are ignored.
+- Search cuts generic wrong-seniority titles (VP, Chief, Head of, Director,
+  intern, new grad, residency, junior, associate) when your targeting has a
+  seniority ladder, unless the ladder lists them.
+- A title that is only adjacent to a target title is scored lower and says
+  "adjacent to target title" instead of claiming a match.
+
+### Fixed
+
+- Applying no longer presses Submit with a required question or upload left
+  unanswered. Fields marked only with an asterisk, custom text boxes, fields with
+  no label, and upload buttons worded like "Upload your resume" are now counted.
+  A required upload CareerRat has no file for stops the run and is listed, and a
+  file the site didn't keep no longer counts as attached.
+- Typing a dropdown answer that contains a line break no longer risks pressing
+  Enter and submitting the application form early. Line breaks become a space.
+- Essay questions that only mention words like "race conditions" or
+  "veteran-owned" are no longer skipped as self-identification questions, and a
+  required self-identification question now stops auto-submit instead of
+  vanishing.
+- Form filling no longer puts your phone number in "Phone extension", your
+  portfolio in "Company website", or your how-did-you-hear answer in "open
+  source" questions.
+- A job page that just mentions a submitted application is no longer recorded
+  as Applied. A confirmed submission is still reported if the confirmation
+  screenshot can't be saved, instead of saying the application never opened.
+- `data app set-status` rejects statuses CareerRat doesn't know (including
+  `submitted-unverified`) and records the applied date, so follow-up reminders
+  fire. `automation status` warns when a leftover `automation.yml` is being
+  ignored, and a missing browser now says to run `npx playwright install chromium`.
+- Job links that answer with a block, rate limit or server error, or that load as
+  a nearly empty page, are no longer called "closed". `--verify` and `check:jobs`
+  keep them and say they could not be checked. `check:jobs` also prints a summary
+  and exits 1 when no link could be checked.
+- A pasted job link that returns an error page is no longer saved as the job
+  description. A 404 reads as a closed job, and a site that could not be reached
+  reads as unreachable, not as "does not identify one specific job posting".
+  Network errors now keep their cause.
+- Sources that came back short (cut off, partial pages, ignored settings) now
+  count against search health, are listed in the run summary, and keep their
+  last-run time so the next search covers the gap. `scan:sourced` exits 3 when
+  half or more of the sources failed, or when only browser-only sources were left
+  to read.
+- Company boards that return an error or no jobs are remembered and looked up
+  again. A company on a shared job-board host no longer picks up another
+  company's cached board.
+- A company check that could not reach the board is retried the next day and no
+  longer rejects a good pending suggestion on Refresh.
+- Careers pages that could not be fetched are reported as unreachable, and company
+  lookups that fail are counted instead of vanishing.
+- `careerrat ingest --write-config` keeps your saved searches and their last-run
+  times.
+- A stored `--query` now reaches providers that read keywords, and the RemoteOK,
+  Remotive and Working Nomads feeds keep the job description they already return.
+
 ## [0.22.0] - 2026-10-31
 
 ### Added
@@ -19,6 +151,39 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- The terminal workspace now says when the agent stops, can't be found, or can't
+  load its skills, in a line that stays on screen. Requests with no agent open a
+  box you can read and copy, instead of a greyed-out line. Status messages and
+  notices stay up long enough to read, and an idle workspace no longer re-reads
+  your saved jobs over and over.
+- A damaged saved database now shows its real error in the terminal workspace and
+  exits with a failure code, instead of opening empty.
+- Read saved JD works for jobs whose description was saved as text, not a file. A
+  dropped PDF or image that couldn't be read now says "Saved, but not read yet".
+- `careerrat doctor` fails on an invalid saved search or company config, reports
+  whether the terminal workspace and an agent are ready, and `--network` checks
+  that source scans can reach the internet. `check:jobs` says when no link could
+  be checked and exits with a failure.
+- `careerrat start` rejects unknown options and exits with a failure when the agent
+  you named isn't installed. `companies --remove` of a name that isn't tracked
+  exits with a failure.
+- The update check script is now included in the npm package, so the "newer
+  version available" notice can work for installed copies.
+- `data init --demo` now refuses to run over a workspace that already has data
+  (use `--force` to override), so sample jobs can't replace your profile.
+- `data import` keeps the candidate settings already saved in the database
+  instead of reverting them to old YAML files (`--force-candidate` overrides).
+- A database written by a newer CareerRat is refused instead of silently opened.
+- `data app set-status`, `schedule-interview` and `--follow-up-due` reject
+  unknown statuses and invalid dates. `data app upsert` and `sourced promote`
+  refuse to overwrite an existing application (`--replace` is explicit).
+- `evidence add --write` says so and exits 1 when the claim was a duplicate.
+  `data changes undo` exits 1 when the undo is refused. `data candidate patch`
+  errors name the bad field.
+- `activity backfill` writes to the database, and `activity prune` says it
+  can't run on a database workspace instead of trimming a generated file.
+- Help text for `automation` and `tracker` no longer says defaults are off or
+  that copying a snapshot back restores a database workspace.
 - Incomplete resume extractions fail clearly and can be retried instead of
   silently saving a title without the source resume's experience.
 - Workspace import accepts YAML flow collections and migrates retired settings.
@@ -28,6 +193,44 @@ All notable changes to CareerRat are documented here. This project follows
   downloads by size and a deadline that includes reading the response body.
 - Updated dependencies with security fixes for schema validation, test tooling,
   and the retained desktop build tools.
+- The update notice works for npm installs: the background update check script
+  now ships in the package.
+- Re-running `careerrat ingest --write-config` keeps your hand-added searches and
+  each search's run history. It only adds searches that are missing.
+- `careerrat lint-placeholders` fails on a path that doesn't exist or a file type
+  it can't read, instead of saying no placeholders were found. It also catches
+  bracketed fill-ins like `[Hiring Manager]`, and skills now call it as a normal
+  `careerrat` command.
+- The older `npm run scan:sourced` and `npm run check:jobs` exit with an error when
+  every source or link couldn't be reached, instead of reporting a clean run.
+- The terminal workspace tells you when CareerRat skills couldn't be installed for
+  the agent, instead of starting with none and saying nothing.
+- Commands the skills name now work as written: `careerrat evaluate`, `questions`
+  and `export` find `workspace/...` files, `stories match` reads a saved job file,
+  `linkedin-proposals latest --status any` and `approve` work from a terminal, and
+  an unknown `modes allows` operation, a mistyped `tracker` or `doctor` option, or
+  an unrecognized `app set-status` value is rejected instead of ignored. A test
+  checks every command, option and script the skills name against the real CLI.
+- `careerrat data verify` also checks the tracker file against its schema, and
+  saving a conversation with an unknown message direction or bad timestamp is
+  refused, so `data verify` and `tracker --verify` agree.
+- `careerrat evaluate` reads a saved job that has no "Job Description" heading from
+  the text after the header, and warns when a file has no job text at all.
+- When an AI call fails, the message says why in plain words (rate limited, not
+  signed in, program not found) without echoing anything the provider sent back,
+  and a failed call is no longer labeled as AI output.
+- A coaching plan or job evaluation that the AI never produced is no longer saved
+  or shown as a real result. CareerRat says it could not evaluate, and doesn't
+  offer Coach or Approve on it.
+- Calendar busy times can be re-ingested with `--window <start>..<end>`, which
+  replaces what was stored for that span, so cancelled meetings clear and a free
+  calendar can be recorded.
+- A search started from the terminal now finds an installed, signed-in Claude or
+  Codex, and the search summary says why the AI steps didn't run when they didn't.
+- With no writing samples, the style calibration says "not calibrated" and exits
+  with an error rather than saving a placeholder that later drafts treat as set.
+- `careerrat doctor` reports an unreadable AI settings file, and counts plugins as
+  verified rather than runnable.
 
 ### Changed
 

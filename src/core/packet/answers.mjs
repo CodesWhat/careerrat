@@ -2,6 +2,7 @@ import { runBoundedAI } from "../ai/bounded-ai.mjs";
 import { buildFillPlan, hostnameToPortal } from "../apply/form-fill.mjs";
 import { candidateConfigGet } from "../db/verbs.mjs";
 import { buildShortAnswer, forbiddenWordingFor } from "../documents/tailor.mjs";
+import { ATTESTATION_NEEDS_YOU_REASON, isAttestationQuestion } from "./attestation.mjs";
 import { resolveDisclosureAnswer } from "./disclosure.mjs";
 import { buildPromptVisibleSources } from "./generate.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
@@ -304,6 +305,12 @@ function partitionDeterministicAnswers({
   const portal = hostnameToPortal(applicationUrl);
   const plans = buildFillPlan({ fields: questions, formDefaults, profile, honesty, portal });
   for (const [index, question] of questions.entries()) {
+    // Truthfulness and AI-use attestations are never answered for the person, not
+    // from saved answers and not by the AI batch.
+    if (isAttestationQuestion(question.label)) {
+      deterministic.push(needsYouAnswer(question, ATTESTATION_NEEDS_YOU_REASON));
+      continue;
+    }
     const resolved = resolveDisclosureAnswer(question, { formDefaults, profile });
     if (resolved) {
       deterministic.push(disclosureAnswerEntry(question, resolved, { honesty, forbidden }));

@@ -89,14 +89,18 @@ webmail access, can be switched off. They are
 
 The authenticated capabilities are live and each has an off-switch: `status_polling`
 (**`sync-status`** skill), `messaging` (**`ingest-messages`** skill), and
-`authenticated_apply_preparation` (**supervised LinkedIn Easy Apply preparation**,
-which follows the `submit` setting at the final Submit),
+`authenticated_apply_preparation` (**supervised employer-form preparation**, which
+follows the `submit` setting at the final Submit; never LinkedIn, where the person applies),
 `profile_optimize` / `profile_apply` (**`optimize-linkedin`**), and `mail_access`
 (generic `webmail` for one recent verification-code message; Gmail/Outlook for
 verification-code reads and `ingest-mail` webmail reads).
 
-The switchboard is `.careerrat/candidate/automation.yml` (gitignored; schema
-`config/automation.schema.json`, template `templates/automation.example.yml`). A
+The switchboard is `.careerrat/candidate/automation.yml` in a legacy file workspace
+(gitignored; schema `config/automation.schema.json`, template
+`templates/automation.example.yml`). A workspace that keeps its settings in the
+database ignores that file: change settings with `careerrat automation submit`,
+`enable` and `disable` (`careerrat automation status` warns if a stray file is
+there). A
 capability runs on a platform unless its global switch or that platform's per-capability
 switch is explicitly `false`. There is no consent step or setup mode. Query it
 with `mayRun()` in `src/core/automation/consent.mjs`; never hardcode the

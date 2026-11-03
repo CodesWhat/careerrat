@@ -3,9 +3,12 @@ title: Your First Job
 description: A 5-minute path to confirm the whole loop is working.
 ---
 
-Once CareerRat is up (via `careerrat start`, or the Mac app) and your agent is
-live, use it the way a real candidate would. Here is the fastest path to confirm the full stack — CLI, skills,
-agent reasoning, and the live dashboard — is working end to end.
+Once the CareerRat terminal workspace is open (run `careerrat start`; it needs
+Python 3.11 or newer) and your agent is live in the chat, use it the way a real
+candidate would. Here is the fastest path to confirm the whole stack, including
+the CLI, skills, agent reasoning, and your saved jobs, is working end to end. On
+a brand new install the chat starts with setup on its own, so step 1 may already
+be underway.
 
 ## The 5-step test loop
 
@@ -60,15 +63,13 @@ Copy any recruiter message (even a generic one) and paste it. Say:
 The agent routes to the `email-comms` skill, drafts a reply in your writing style,
 and tracks the thread.
 
-### 5. Check the dashboard
+### 5. Check your saved jobs
 
-Open `http://localhost:7777` and watch the application appear, move through the
-funnel, and accumulate activity. Quick local actions write through the same
-canonical data layer as the CLI; longer work opens the owning skill in Ask. Each
-step shows as a live activity line, an icon and a plain-language label like
-"Reading files: resume.pdf" or "Searching the web", with a spinner that settles
-once the step finishes. The assistant only speaks to ask a question or hand you
-a result.
+Look at the jobs list on the left of the workspace and watch the application
+appear and change status. Click a job to see its details. Press F6 to move
+between the jobs and the chat. Everything the agent does writes through the same
+canonical data layer as the CLI, so the list stays in step with the chat. The
+assistant only speaks to ask a question or hand you a result.
 
 If all five land, CareerRat is working end to end.
 

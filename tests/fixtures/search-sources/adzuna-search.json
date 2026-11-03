@@ -1,0 +1,41 @@
+{
+  "count": 3,
+  "mean": 70000,
+  "results": [
+    {
+      "id": "4400000001",
+      "title": "Operations Coordinator",
+      "description": "Coordinate daily operations across two sites and keep schedules on track...",
+      "redirect_url": "https://www.adzuna.com/land/ad/4400000001?se=example",
+      "created": "2026-10-28T09:15:00Z",
+      "company": {
+        "display_name": "Example Logistics",
+        "__CLASS__": "Adzuna::API::Response::Company"
+      },
+      "location": {
+        "display_name": "Chicago, Cook County",
+        "area": ["US", "Illinois", "Cook County", "Chicago"]
+      },
+      "salary_min": 52000,
+      "salary_max": 61000,
+      "salary_is_predicted": "0"
+    },
+    {
+      "id": "4400000002",
+      "title": "Office Manager",
+      "description": "Run the front office.",
+      "redirect_url": "https://www.adzuna.com/land/ad/4400000002?se=example",
+      "created": "2026-10-27T12:00:00Z",
+      "company": { "display_name": "Example Dental" },
+      "location": { "display_name": "Austin, Travis County" },
+      "salary_min": 48000,
+      "salary_max": 48000,
+      "salary_is_predicted": "1"
+    },
+    {
+      "id": "4400000003",
+      "title": "Row Without A Link",
+      "redirect_url": ""
+    }
+  ]
+}

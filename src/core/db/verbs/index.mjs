@@ -61,6 +61,7 @@ export {
   deepIngestPromptDismiss,
   deepIngestThreadOpen,
   ensureJobThreadInDb,
+  jobThreadGet,
   jobThreadMessageAppend,
   jobThreadSetArchived,
   jobThreadSetPinned,
@@ -131,6 +132,7 @@ export {
   linkedinProposalBatchPut,
   linkedinProposalDecide,
 } from "./linkedin-proposals.mjs";
+export { postingSightingsLoad, postingSightingsRecord } from "./posting-sightings.mjs";
 export {
   PUBLIC_INTEL_REVIEW_ACTIONS,
   publicBoardIntelUpsert,
@@ -159,6 +161,13 @@ export {
   searchExecutionListRecoverable,
   searchExecutionSetLane,
 } from "./search-executions.mjs";
+export {
+  deadBoardList,
+  deadBoardPrune,
+  deadBoardRecord,
+  jobLinkCheckLast,
+  jobLinkCheckRecord,
+} from "./search-liveness.mjs";
 export { ExportFailedError, kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
 export {
   skillChatDecisionSet,

@@ -55,7 +55,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Structure guards (chat-first shell, CSS foundation, YAML, and release versions)
         run: node --test tests/static-dashboard-retirement.test.mjs tests/chat-first-foundation-style.test.mjs tests/yaml.test.mjs tests/release-consistency.test.mjs
 
@@ -84,14 +84,22 @@ jobs:
             api.anthropic.com:443
             github.com:443
             jobs.lever.co:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            nodejs.org:443
             registry.npmjs.org:443
             wellfound.com:443
+            api.codecov.io:443
+            cli.codecov.io:443
+            ingest.codecov.io:443
+            keybase.io:443
+            storage.googleapis.com:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
@@ -146,8 +154,26 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
+      # Same suite as `npm test`, plus Node's built-in coverage written to
+      # coverage/lcov.info for the Codecov upload below.
       - name: Core test suite
-        run: npm test
+        run: npm run test:coverage
+      # Reporting only. Codecov's statuses are informational (codecov.yml) and
+      # this step never fails the required "tests" job: fork PRs and runs with
+      # no CODECOV_TOKEN secret simply skip or fail the upload quietly.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/lcov.info
+          disable_search: true
+          fail_ci_if_error: false
+        continue-on-error: true
+      - name: Textual interface tests (isolated Python environment, no model calls)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/careerrat-textual"
+          "$RUNNER_TEMP/careerrat-textual/bin/python" -m pip install --require-hashes --only-binary=:all: -r src/core/tui/requirements.txt
+          "$RUNNER_TEMP/careerrat-textual/bin/python" tests/tui_textual_ui.py
       - name: Web UI test suite
         run: npm --workspace apps/web test
 
@@ -164,13 +190,14 @@ jobs:
           # (Stable baseline, 152 runs since the endpoint set last changed).
           allowed-endpoints: >
             github.com:443
+            nodejs.org:443
             registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
@@ -252,13 +279,14 @@ jobs:
           # stable baseline).
           allowed-endpoints: >
             github.com:443
+            nodejs.org:443
             registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail
@@ -333,7 +361,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
           package-manager-cache: false
       - name: Activate the repository-pinned npm release
         shell: bash
@@ -436,7 +464,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
           package-manager-cache: false
       - name: Activate the repository-pinned npm release
         run: |
@@ -577,7 +605,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Setup Qlty
         uses: qltysh/qlty-action/install@08a0a862c159eae9b9003081da6663d96efef637 # v2.3.0
       - name: Qlty check (changed files vs origin/main)
@@ -600,13 +628,14 @@ jobs:
           # baseline, 152 runs since the endpoint set last changed).
           allowed-endpoints: >
             github.com:443
+            nodejs.org:443
             registry.npmjs.org:443
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: "^24.22.1"
       - name: Activate the repository-pinned npm release
         run: |
           set -euo pipefail

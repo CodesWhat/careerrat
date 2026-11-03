@@ -165,3 +165,4 @@ workspace/setup-state.json
 !workspace/legacy/.gitkeep
 .vercel
 .env*
+coverage/

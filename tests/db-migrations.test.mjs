@@ -56,7 +56,7 @@ test("re-running against a db already at the latest version is a no-op", () => {
 
 test("migration 010-019 preserve workspace state through artifact reservations", () => {
   assert.deepEqual(
-    ALL_MIGRATIONS.slice(-10).map((migration) => [migration.id, migration.name]),
+    ALL_MIGRATIONS.slice(9, 19).map((migration) => [migration.id, migration.name]),
     [
       [10, "workspace-agent"],
       [11, "linkedin-profile-proposals"],

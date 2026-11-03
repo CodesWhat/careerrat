@@ -6,16 +6,10 @@
 //   careerrat restore <name>      restore by exact filename (e.g. tracker-2026-06-20T14-30-00-000Z.json)
 //   careerrat restore <index>     restore by 1-based index from the "list" output (newest = 1)
 
-// Node version guard — same minimum as bin/careerrat.mjs.
-{
-  const major = parseInt(process.versions.node.split(".")[0], 10);
-  if (major < 18) {
-    process.stderr.write(
-      `careerrat requires Node.js >= 18 (you have ${process.versions.node}). Please upgrade.\n`
-    );
-    process.exit(1);
-  }
-}
+// Node version guard, same floor as bin/careerrat.mjs.
+import { requirePatchedNode } from "../core/runtime/node-floor.mjs";
+
+requirePatchedNode();
 
 import { copyFileSync, existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
@@ -30,7 +24,8 @@ const pathCtx = { repoRoot: root, env: process.env };
 
 if (dbExists(pathCtx)) {
   console.error(
-    "CareerRat's database is canonical for this workspace. JSON tracker snapshots cannot safely restore it, so nothing was changed."
+    "CareerRat's database is canonical for this workspace. JSON tracker snapshots cannot safely restore it, so nothing was changed.\n" +
+      "Use 'careerrat data backup' to make a backup and 'careerrat data restore' to list and restore one."
   );
   process.exit(1);
 }

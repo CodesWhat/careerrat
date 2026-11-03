@@ -416,6 +416,39 @@ test("refresh forces resolver refresh, rescans, reruns the gate, preserves captu
   assert.equal(stored.proposals[0].version, 2);
 });
 
+test("refresh keeps the pending proposal when the refresh scan itself failed", async () => {
+  const repoRoot = setupRepo();
+  putBatch(repoRoot, pendingBatch());
+  const server = bootServer(repoRoot, {
+    resolveCompanyBoard: async () => ({
+      ok: true,
+      companyName: "Acme AI",
+      companyDomain: "acme.example",
+      careersUrl: "https://jobs.lever.co/acme",
+      jobBoardUrl: "https://jobs.lever.co/acme",
+      atsProvider: "lever",
+      provenance: [{ source: "refresh", url: "https://jobs.lever.co/acme" }],
+    }),
+    scanCompaniesImpl: async () => ({
+      offers: [],
+      errors: [{ company: "Acme AI", error: "fetch failed" }],
+    }),
+  });
+
+  const { status, body } = await postJson(
+    server,
+    "/api/discovery/company-proposal-decisions",
+    decisionRequest({ action: "refresh" })
+  );
+
+  assert.equal(status, 200);
+  assert.equal(body.data.decision.status, "refresh-failed");
+  assert.equal(body.data.rejected, null);
+  const stored = companyProposalBatchGet({ repoRoot, batchId: "batch-acme" }).batch;
+  assert.equal(stored.proposals.length, 1);
+  assert.equal(stored.proposals[0].proposalId, "proposal-acme");
+});
+
 test("refresh returns rejected metadata when the refreshed gate rejects the proposal", async () => {
   const repoRoot = setupRepo();
   putBatch(repoRoot, pendingBatch());

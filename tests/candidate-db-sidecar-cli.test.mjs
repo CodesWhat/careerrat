@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
-import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs.mjs";
+import {
+  candidateConfigGet,
+  candidateConfigPatch,
+  sourceConfigGet,
+  sourceConfigPut,
+} from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 const repo = join(import.meta.dirname, "..");
@@ -159,6 +164,70 @@ test("careerrat data candidate CLI hides and refuses voluntary self-identificati
   assert.equal(stored["form-defaults"].voluntary_self_identification.enabled, true);
 });
 
+test("candidate get hides stored current pay while preserving target pay and canonical data", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { current_base: 124321, minimum_base: 180000 } },
+  });
+  const visible = dataCli(repoRoot, ["candidate", "get"]);
+  assert.equal(visible.profile.compensation.minimum_base, 180000);
+  assert.equal(Object.hasOwn(visible.profile.compensation, "current_base"), false);
+  assert.doesNotMatch(JSON.stringify(visible), /124321/);
+  assert.equal(candidateConfigGet({ repoRoot }).profile.compensation.current_base, 124321);
+});
+
+test("candidate patch responses exclude private defaults and current pay already stored in the document", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  candidateConfigPatch({
+    repoRoot,
+    name: "form-defaults",
+    patch: {
+      voluntary_self_identification: {
+        enabled: true,
+        default_action: "leave_blank",
+        confirmed_at: "2026-08-26T12:00:00Z",
+        answers: {
+          "race ethnicity": {
+            value: "private patch answer",
+            confirmed_at: "2026-08-26T12:00:00Z",
+          },
+        },
+      },
+    },
+  });
+  const visible = dataCli(repoRoot, [
+    "candidate",
+    "patch",
+    "form-defaults",
+    "--data",
+    JSON.stringify({ expected_base: 190000 }),
+  ]);
+  assert.equal(visible.data.expected_base, 190000);
+  assert.doesNotMatch(JSON.stringify(visible), /124321|private patch answer/);
+  assert.equal(Object.hasOwn(visible.data, "voluntary_self_identification"), false);
+  const stored = candidateConfigGet({ repoRoot })["form-defaults"];
+  assert.equal(stored.voluntary_self_identification.enabled, true);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { compensation: { current_base: 124321, minimum_base: 180000 } },
+  });
+  const profile = dataCli(repoRoot, [
+    "candidate",
+    "patch",
+    "profile",
+    "--data",
+    JSON.stringify({ compensation: { target_base: 200000 } }),
+  ]);
+  assert.equal(profile.data.compensation.target_base, 200000);
+  assert.equal(profile.data.compensation.minimum_base, 180000);
+  assert.doesNotMatch(JSON.stringify(profile), /124321/);
+});
+
 test("careerrat automation writes DB candidate automation in DB mode and does not scaffold YAML", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["candidate", "init"]);
@@ -285,4 +354,41 @@ test("careerrat ingest --write-config exports DB candidate setup to compatibilit
     readFileSync(userPath({ repoRoot }, "candidate/application-limits.yml"), "utf8"),
     /OpenAI/
   );
+});
+
+test("careerrat ingest --write-config keeps curated searches and their run watermarks", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+  dataCli(repoRoot, [
+    "candidate",
+    "patch",
+    "targeting",
+    "--data",
+    JSON.stringify({ role_buckets: [{ name: "AI Platform", titles: ["AI Platform Engineer"] }] }),
+  ]);
+  jsonCli(["src/cli/ingest.mjs", "--root", repoRoot, "--write-config", "--json"]);
+
+  const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  stored.searches.push({
+    provider: "Curated Feed",
+    source_type: "rss",
+    label: "Curated feed",
+    rssUrl: "https://example.test/curated.xml",
+    enabled: true,
+    recency: { mode: "since-last-run", lastRunAt: "2026-10-30T00:00:00.000Z" },
+  });
+  const generatedWithWatermark = stored.searches.find((entry) => entry.provider !== "Curated Feed");
+  generatedWithWatermark.recency = {
+    ...generatedWithWatermark.recency,
+    lastRunAt: "2026-10-31T00:00:00.000Z",
+  };
+  sourceConfigPut({ repoRoot, name: "search-sources", data: stored });
+
+  jsonCli(["src/cli/ingest.mjs", "--root", repoRoot, "--write-config", "--json"]);
+
+  const after = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+  const curated = after.searches.find((entry) => entry.provider === "Curated Feed");
+  assert.equal(curated?.recency?.lastRunAt, "2026-10-30T00:00:00.000Z");
+  const generated = after.searches.find((entry) => entry.provider !== "Curated Feed");
+  assert.equal(generated.recency.lastRunAt, "2026-10-31T00:00:00.000Z");
 });

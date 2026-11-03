@@ -1,0 +1,141 @@
+---
+title: Running CareerRat for someone else
+description: Set up a separate workspace for a friend or family member, keep it isolated, and know whose AI access it uses.
+---
+
+You can run CareerRat for another person. Each person gets their own workspace,
+so what one person saves never shows up in another's. `--for <name>` is the switch.
+
+## Set someone up
+
+```bash
+careerrat people add david --authorized-by "David" --purpose "help with his job search"
+careerrat --for david start
+careerrat --for david tui
+careerrat people list
+```
+
+`--for <name>` works on every command. Add `--new` to create the workspace on the
+spot: `careerrat --for david --new start`.
+
+Adding a person writes a short authorization note in their data: who authorized
+you, what it is for, when, and who recorded it. Leave the flags off and it says
+"not stated". Run `people add` again with the flags to add the real answer; the
+earlier entries stay.
+
+## What stays separate
+
+Each person has their own database, evidence, tracker, search runs, browser
+profile, generated documents and saved AI key. Documents go to
+`~/Documents/careerrat/_people/<name>/`. A background search started for one person can
+only read and write that person's workspace. `careerrat --for david tui` opens
+their saved jobs and puts their name in the header.
+
+An explicit `CAREERRAT_DOWNLOADS_DIR` is shared on purpose, so set a different
+one per person if you use it.
+
+## Whose AI is it
+
+Run `careerrat --for david doctor`. It shows the AI route for that workspace:
+
+- **their own key**: an API key saved in their workspace. This is the clean case.
+- **your key**: an `ANTHROPIC_API_KEY` exported in your shell.
+- **your subscription**: an AI command line tool installed and signed in on your computer.
+- **none**: no key and no tool. AI steps are skipped.
+
+If it isn't their own key, a background search for them prints a warning before
+it runs. It doesn't stop. Whether your plan or key may be used for someone else's
+work is between you and the provider's terms, so check that before you rely on it.
+
+## Questions only they can answer
+
+CareerRat never answers a question that asks the applicant to vouch for their
+answers ("I certify this is true") or to say whether AI helped prepare the
+application. Those always come back as NEEDS YOU, even when a saved answer
+exists. The person answers them themselves.
+
+## Keeping them in the loop
+
+CareerRat can email the person a roundup of what happened, and email them a draft
+reply to a recruiter to send themselves. You run both by command. Nothing is
+scheduled.
+
+CareerRat never sends mail to an employer or recruiter. Those stay drafts. The only
+mail CareerRat sends is to the person whose workspace it is, at the address you
+record for them, after they said yes.
+
+### Record their address and their yes
+
+```bash
+careerrat --for david people contact set --email david@example.com --timezone America/Chicago
+careerrat --for david people contact opt-in email --evidence "said yes on a call, Nov 2"
+careerrat --for david people contact show
+```
+
+Quiet hours default to 21:00-08:00 in their timezone; change them with
+`--quiet-hours 22:00-07:00`. Without an opt-in, any notification fails with
+`NOTIFY_NO_OPT_IN`. If they ask you to stop, run
+`careerrat --for david people contact opt-out email`. Replying STOP to a message
+doesn't reach CareerRat yet, so it's on you to run that when they ask. Removing the
+person deletes the contact record, the opt-in and the send log with the rest.
+
+### The roundup
+
+```bash
+careerrat --for david roundup                 # print it, send nothing
+careerrat --for david roundup --since 2026-10-26
+careerrat --for david roundup --send          # email it to their registered address
+```
+
+It lists the applications CareerRat verified in the window, status changes, and any
+questions still waiting on them as a numbered list. It never includes pay, SSN, date
+of birth or background-check links; a question that touches those is replaced with a
+plain "open CareerRat to answer it". The window starts at the last roundup sent, or
+seven days back. A second `--send` in the same window does nothing. During their quiet
+hours `--send` refuses and tells you when to rerun; `--now` sends anyway.
+
+### Recruiter reply drafts
+
+```bash
+careerrat --for david comm handoff <communication id> --deliver-to-person
+careerrat --for david comm mark-sent <communication id>
+```
+
+The first emails the reviewed draft to David ("Draft reply to `<recruiter>` for you to
+send"), never to the recruiter. After he sends it from his own mailbox, `mark-sent`
+records it as a supervised send.
+
+### One-time mail setup
+
+Sending needs a mail provider and a sending subdomain of its own, so roundups don't
+share a reputation with anything else. You do this once, for you, not per person.
+
+1. Pick a sending subdomain, for example `mail.careerrat.com`, and a from address on
+   it, for example `updates@mail.careerrat.com`.
+2. Create an account with a provider. Resend is the simplest: add the subdomain
+   there and it gives you the DNS records. Any SMTP service works too.
+3. Publish the DNS records on the subdomain: SPF (authorize the provider), DKIM (the
+   keys the provider gives you) and DMARC (a TXT at `_dmarc.mail.careerrat.com`, start
+   with `p=none`). Wait for the provider to show the domain as verified.
+4. Set the environment before you run `--send`:
+
+| Variable | Meaning |
+| --- | --- |
+| `CAREERRAT_MAIL_FROM` | The from address on your sending subdomain |
+| `RESEND_API_KEY` | Resend API key. If set, Resend is used |
+| `CAREERRAT_SMTP_HOST`, `CAREERRAT_SMTP_PORT`, `CAREERRAT_SMTP_USER`, `CAREERRAT_SMTP_PASS` | SMTP instead of Resend. Port 465 uses TLS, anything else upgrades with STARTTLS |
+| `CAREERRAT_OPERATOR_NAME` | The name messages are signed with ("CareerRat, run by Scott"). Defaults to the account that added the person |
+
+With none of this set, `--send` stops and prints this list. The message goes from
+your provider to the person's mail server, so it passes through that provider.
+
+## Removing someone
+
+```bash
+careerrat people remove david --purge --yes
+```
+
+This deletes their data root (including the browser profile) and their generated
+documents. A backup of both is written to `<data root>/people-backups/` first, so
+delete that folder too if the goal is to remove everything. Without `--yes` it
+refuses and changes nothing. A custom `CAREERRAT_DOWNLOADS_DIR` is left alone.

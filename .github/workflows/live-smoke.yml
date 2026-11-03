@@ -1,0 +1,53 @@
+name: live-smoke
+
+# Fetches one stable public tenant per main job provider (Greenhouse, Lever,
+# Ashby, Remotive) through the shipped default fetch and fails on zero jobs or
+# any error. A broken fetch layer once failed every public source while the
+# whole unit suite stayed green, because those tests inject their own fetch.
+#
+# Non-gating on purpose. It runs on a schedule and on demand, never on a pull
+# request, and is not a required status check: a provider outage or a tenant
+# going away should page a human, not freeze a merge. A red run means either
+# CareerRat's fetch is broken or a tenant changed; the log names which provider.
+
+on:
+  schedule:
+    - cron: "40 7 * * 2" # weekly, Tuesday 07:40 UTC (off-peak, distinct from the other crons in this repo)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (block all outbound calls except the allowlist)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          # checkout, setup-node, npm ci, and the four provider APIs the script
+          # calls. The API hosts come from the script's own tenants; adjust this
+          # list when a provider or tenant changes.
+          allowed-endpoints: >
+            github.com:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            boards-api.greenhouse.io:443
+            api.lever.co:443
+            api.ashbyhq.com:443
+            remotive.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install dependencies (install scripts stay off; the smoke only needs the sources)
+        run: npm ci --ignore-scripts --no-bin-links
+      - name: Fetch one public tenant per main provider
+        run: node scripts/smoke-live.mjs

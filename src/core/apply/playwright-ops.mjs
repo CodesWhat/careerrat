@@ -22,7 +22,8 @@ import { resolvePublicHttpTarget } from "../net/public-http-fetch.mjs";
 import { abortableDelay, runAbortable, throwIfAborted } from "./cancellation.mjs";
 import { uniqueVoluntaryDeclineOption } from "./form-fill.mjs";
 
-const CONTROL_SELECTOR = "input, textarea, select, button, [role='button']";
+const CONTROL_SELECTOR =
+  "input, textarea, select, button, [role='button'], [contenteditable]:not([contenteditable='false'])[role='textbox']";
 const MAX_PAGE_TEXT = 20_000;
 // Bounds every Playwright action selectOption() takes (native-select attempt,
 // then each step of the combobox fallback) so a control that can't actually
@@ -366,6 +367,29 @@ export function collectControls(elements) {
     return scopedIds.get(scopeKey);
   }
 
+  // Forms mark required fields with a trailing asterisk or "(required)" in the
+  // label far more often than with the required attribute, and a script-checked
+  // form never sets the attribute at all.
+  function labelSaysRequired(text) {
+    return /(?:\*|\(required\)|\[required\]|\brequired)\s*$/i.test(String(text || "").trim());
+  }
+
+  // Greenhouse's react-select renders a zero-opacity, tabindex=-1 text input
+  // (class "requiredInput") next to the real combobox purely for native
+  // required-validation. It's never user-facing, so it must not count as an
+  // unlabeled field. Also covers inputs nested in a react-select container
+  // that has its own label.
+  function isDecorativeInput(el) {
+    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return false;
+    const inputType = (el.getAttribute("type") || "text").toLowerCase();
+    if (["button", "submit", "reset", "file", "checkbox", "radio"].includes(inputType))
+      return false;
+    if (el.getAttribute("tabindex") === "-1") return true;
+    if (Number(window.getComputedStyle(el).opacity) === 0) return true;
+    const container = el.closest("[class*='select__container'], [class*='react-select']");
+    return Boolean(container && container.parentElement?.querySelector("label"));
+  }
+
   const controls = [];
   elements.forEach((el, index) => {
     const isFileInput =
@@ -383,22 +407,29 @@ export function collectControls(elements) {
       ? el.closest("fieldset") || el.closest("[role='radiogroup']")
       : null;
     const choiceGroup = isNativeRadio ? choiceGroupId(el, choiceRoot) : null;
+    const name = accessibleName(el);
+    const groupLabel =
+      role === "button"
+        ? nearestGroupLabel(el)
+        : isNativeRadio
+          ? nearestGroupLabel(el, { nativeChoice: true })
+          : null;
     controls.push({
       index,
       role,
-      name: accessibleName(el),
-      required: el.required === true || el.getAttribute("aria-required") === "true",
+      name,
+      required:
+        el.required === true ||
+        el.getAttribute("aria-required") === "true" ||
+        labelSaysRequired(name) ||
+        ((isNativeRadio || isFileInput) && labelSaysRequired(groupLabel)),
       fileInput: isFileInput,
       fileAttached: isFileInput && (el.files?.length || 0) > 0,
       disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
-      groupLabel:
-        role === "button"
-          ? nearestGroupLabel(el)
-          : isNativeRadio
-            ? nearestGroupLabel(el, { nativeChoice: true })
-            : null,
+      groupLabel,
       choiceGroup,
       checked: isNativeRadio && el.checked === true,
+      ...(isDecorativeInput(el) ? { decorative: true } : {}),
       ...(role === "button" && structuredProgressHasRemainingStep(el) ? { advanceSafe: true } : {}),
     });
   });
@@ -668,6 +699,15 @@ function comboboxHandoffError(name) {
   return new Error(
     `${subject} couldn't be set automatically. Please switch to the open browser window and choose the correct option yourself.`
   );
+}
+
+// Agent-supplied dropdown values get typed key by key. A raw CR/LF (or Unicode
+// line/paragraph separator) is an Enter keypress and implicitly submits the
+// form, so collapse every line break run to one space before typing.
+function collapseLineSeparators(value) {
+  return String(value ?? "")
+    .replace(/[ \t]*[\r\n\v\f\u2028\u2029\u0085]+[ \t]*/g, " ")
+    .trim();
 }
 
 // createPlaywrightOps — bundled-Playwright implementation of the provider-neutral
@@ -1015,6 +1055,7 @@ export function createPlaywrightOps({
             ? { fileInput: true, fileAttached: Boolean(control.fileAttached) }
             : {}),
           ...(control.disabled === true ? { disabled: true } : {}),
+          ...(control.decorative === true ? { decorative: true } : {}),
           ...(control.advanceSafe === true ? { advanceSafe: true } : {}),
         };
       }
@@ -1084,7 +1125,7 @@ export function createPlaywrightOps({
       const { locator, name } = resolveRef(pageId, ref);
       const stringValue = String(value);
       const candidateValues = [stringValue, ...(Array.isArray(optionAliases) ? optionAliases : [])]
-        .map((candidate) => String(candidate || "").trim())
+        .map(collapseLineSeparators)
         .filter(
           (candidate, index, candidates) =>
             candidate &&
