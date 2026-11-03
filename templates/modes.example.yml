@@ -38,6 +38,16 @@ company_health:
   manual_always: true
   recheck_days: 14
 
+# ai_review — a read-only AI review pass that runs once on a generated cover letter
+# or set of application answers. Edits apply only when they pass the fact check; a
+# failed review keeps the draft and notes why. Résumés are never reviewed.
+# Absent = both on.
+#   cover_letter - review generated cover letters
+#   answers      - review generated application answers
+ai_review:
+  cover_letter: true
+  answers: true
+
 # comp_estimate — staleness of the comparables-based comp estimate (compEstimate)
 # persisted on tracker rows. Absent = the default shown here.
 #   recheck_days  - re-estimate a cached compEstimate once its asOf is older than
