@@ -161,6 +161,18 @@ If the type is ambiguous, ask one clarifying question before proceeding.
 
 ---
 
+### Fake-recruiter check (inbound recruiter and cold-outreach messages)
+
+For an `inbound-recruiter-reply` or any unsolicited recruiter message, run
+`careerrat recruiter-check --sender <from address> --company-domain <the company's own
+domain, if known> --posting found|missing [--body-file <message>] --json` before drafting.
+Look the role up on the company's own careers page and pass what you found; omit
+`--posting` if you could not check. It is a flag, never a verdict. On `suspect`:
+
+- Tell the person plainly, with the `RECRUITER SIGNAL: suspect - <signals>` line.
+- Always include: "Do not run, install or open any code, repository, archive or file this contact sends until you have confirmed them through the company's own careers page or main switchboard."
+- Draft only a short verify-first reply (ask them to confirm through the company's careers page or from a company address). Share no resume, phone number, ID or payment detail, and never offer to run their code.
+
 ## STEP 1 — Match to tracker thread
 
 **Mode detection** (same check as the entry-point branches above): run `careerrat
