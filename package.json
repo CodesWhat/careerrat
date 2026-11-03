@@ -142,6 +142,7 @@
     "bench:search": "node scripts/eval/search-bench.mjs",
     "eval:golden": "node scripts/eval/golden-verdicts.mjs",
     "test": "node --test --test-concurrency=2 --import ./tests/helpers/isolate-home.mjs 'tests/**/*.test.mjs'",
+    "test:website-browser": "node --test --test-concurrency=1 apps/website/browser-checks/smoke.mjs",
     "test:coverage": "node -e \"require('node:fs').mkdirSync('coverage',{recursive:true})\" && node --test --test-concurrency=2 --import ./tests/helpers/isolate-home.mjs --experimental-test-coverage --test-coverage-exclude='tests/**' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'tests/**/*.test.mjs'",
     "scan:sourced": "node scripts/scan-sourced.mjs",
     "delta:sourced": "node scripts/delta-sourced.mjs",
