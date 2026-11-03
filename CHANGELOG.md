@@ -6,6 +6,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-02
+
 ### Security
 
 - Raised the minimum Node.js to 24.22.1 for the Brotli decoder fix (CVE-2026-111497).
@@ -14,54 +16,65 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
-- Shared posting cache for multi-person setups. A board is fetched once, reused by other
-  people's scans inside a 6 hour window, and new postings are matched against every other
-  person's own targeting and saved to their workspace as `shared-cache`. The scan summary
-  lists "Also matched for" counts. Opt out per person or turn it off globally (docs/SOURCES.md).
-
-### Fixed
-
-- Search now cuts generic wrong-seniority titles (VP, Chief, Head of, Director, intern,
-  new grad, residency, junior, associate) when your targeting has a seniority ladder,
-  unless the ladder lists them.
-- `careerrat doctor` and the scan summary now say when your targeting has no related
-  titles or commute cities, which lowers recall for workspaces set up on older
-  versions. Run search setup to add related titles.
-- Search now shows titles close to your target (like "Staff UI Engineer" when you
-  target "Staff Frontend Engineer") instead of dropping them. They rank below exact
+- `careerrat start` now opens the terminal workspace: a clickable Textual view
+  beside native Claude or Codex chat, with status and pay controls, saved
+  requirement reports, captured job descriptions, conversation history and a
+  guarded Undo. It needs Python 3.11+ with venv; the first launch installs
+  hash-locked dependencies in a private environment.
+- Run CareerRat for other people. Each person gets an isolated workspace, with
+  `--for <name>` on any command, a recorded authorization, a purge command, and
+  guards on the AI route and attestations.
+- Operator-run roundups for the people you run CareerRat for. Each person has a
+  contact and consent record, and nothing is sent without it. Roundups go out by
+  Resend or SMTP. Recruiter-reply drafts go to the person, never to the
+  recruiter, and employer mail stays draft-only.
+- Shared posting cache for multi-person setups. A board is fetched once, reused by
+  other people's scans inside a 6 hour window, and new postings are matched
+  against each person's own targeting and saved to their workspace as
+  `shared-cache`. The scan summary lists "Also matched for" counts. Opt out per
+  person or turn it off globally (docs/SOURCES.md).
+- More job sources. Search can use USAJobs (free key) and Adzuna (paid key) when
+  their keys are set, and new searches also include Himalayas, Jobicy and, for
+  tech roles, Hacker News "Who is hiring". A missing key is reported on that
+  source instead of returning nothing.
+- Related titles. Search shows titles close to your target (like "Staff UI
+  Engineer" when you target "Staff Frontend Engineer"). They rank below exact
   matches, and wrong-seniority or excluded titles are still cut.
-- Typing a dropdown answer that contains a line break no longer risks pressing
-  Enter and submitting the application form early. Line breaks become a space.
-
-### Added
-
-- `npm run bench:search` now breaks cut good postings down by reason, and `-- --why <id>` explains one posting's path (title decision, score, the stage that cut it or its rank).
-- ATS sweep: drop a `config/ats-sweep-slugs.txt` (or `.json`) of employer board slugs in the workspace and scans also check those boards for roles that match your targeting. No slug data is bundled.
-- Optional AI rerank (`search_preferences.ai_rerank.enabled` in targeting.yml, off by default): the top results get a short fit note and a suggested order from your AI. It never filters, hides or reorders results, and says so plainly when no AI is set up.
-- Scans now go easy on each host: a concurrency cap, a minimum gap between requests, and a wait-and-retry on 429 or 503 that follows Retry-After. The scan summary reports how many requests were rate limited.
-- Scans rank ghost-looking and reposted postings lower with a visible reason (evergreen wording, very old, or the same role showing up under new links across scans). They are never cut.
-- Search can use USAJobs (free key) and Adzuna (paid key) when their keys are set, and new
-  searches also include Himalayas, Jobicy and, for tech roles, Hacker News "Who is
-  hiring". A missing key is reported on that source instead of returning nothing.
 - A job board that comes back not found on two runs in a row is skipped until a
   14-day re-check. `scan:sourced --recheck-dead` checks them right away, and each
   run lists dead sources with the next step.
 - `check:jobs` asks Greenhouse, Lever, Ashby, Workable and SmartRecruiters directly
   whether a saved job is still open, and lists jobs closed since the last check. A
   job is only marked closed when the board says it's gone.
+- ATS sweep: drop a `config/ats-sweep-slugs.txt` (or `.json`) of employer board
+  slugs in the workspace and scans also check those boards for roles that match
+  your targeting. No slug data is bundled.
+- Optional AI rerank (`search_preferences.ai_rerank.enabled` in targeting.yml, off
+  by default): the top results get a short fit note and a suggested order from
+  your AI. It never filters, hides or reorders results, and says so plainly when
+  no AI is set up.
+- Scans go easy on each host: a concurrency cap, a minimum gap between requests,
+  and a wait-and-retry on 429 or 503 that follows Retry-After. The scan summary
+  reports how many requests were rate limited.
+- Scans rank ghost-looking and reposted postings lower with a visible reason
+  (evergreen wording, very old, or the same role showing up under new links across
+  scans). They are never cut.
+- Configured-source searches can run in bounded background workers. Add context
+  captures dropped files privately before handoff; text, Markdown, DOCX and email
+  share the existing extractor. Unsupported formats retain their original file for
+  follow-up.
 - `careerrat data backup` and `careerrat data restore` save and bring back the
   database. A restore saves your current database first and needs `--yes`.
 - CLI commands read and append durable job or workspace history, list recorded
   knowledge changes, and undo them through the existing stale-write checks.
-- `careerrat tui` opens a clickable Textual workspace beside native Claude or
-  Codex chat, with status/pay controls, saved requirement reports, captured JDs,
-  conversation history and guarded Undo. Python 3.11+ with venv is required; first
-  launch installs hash-locked dependencies in a private environment.
-- Configured-source searches can run in bounded background workers. Add context
-  captures dropped files privately before handoff; text, Markdown, DOCX and email share the
-  existing extractor. Unsupported formats retain their original file for follow-up.
-- DB-backed settings and evidence commands record supported changes and their
-  guarded Undo in the same transaction.
+  Settings and evidence commands record supported changes and their guarded Undo
+  in the same transaction.
+- `npm run bench:search` breaks cut good postings down by reason, and
+  `-- --why <id>` explains one posting's path (title decision, score, the stage
+  that cut it or its rank).
+- `careerrat doctor` and the scan summary say when your targeting has no related
+  titles or commute cities, which lowers recall for workspaces set up on older
+  versions. Run search setup to add related titles.
 
 ### Changed
 
@@ -71,6 +84,11 @@ All notable changes to CareerRat are documented here. This project follows
   page, clicks nothing, and marks the job as waiting on you until you say you
   applied. The `linkedin` apply setting is retired; older settings files that
   still have it load fine and are ignored.
+- Search cuts generic wrong-seniority titles (VP, Chief, Head of, Director,
+  intern, new grad, residency, junior, associate) when your targeting has a
+  seniority ladder, unless the ladder lists them.
+- A title that is only adjacent to a target title is scored lower and says
+  "adjacent to target title" instead of claiming a match.
 
 ### Fixed
 
@@ -79,6 +97,8 @@ All notable changes to CareerRat are documented here. This project follows
   no label, and upload buttons worded like "Upload your resume" are now counted.
   A required upload CareerRat has no file for stops the run and is listed, and a
   file the site didn't keep no longer counts as attached.
+- Typing a dropdown answer that contains a line break no longer risks pressing
+  Enter and submitting the application form early. Line breaks become a space.
 - Essay questions that only mention words like "race conditions" or
   "veteran-owned" are no longer skipped as self-identification questions, and a
   required self-identification question now stops auto-submit instead of
@@ -93,28 +113,30 @@ All notable changes to CareerRat are documented here. This project follows
   `submitted-unverified`) and records the applied date, so follow-up reminders
   fire. `automation status` warns when a leftover `automation.yml` is being
   ignored, and a missing browser now says to run `npx playwright install chromium`.
-- Job links that answer with a block, rate limit or server error, or that load as a nearly
-  empty page, are no longer called "closed". `--verify` and `check:jobs` keep them and say
-  they could not be checked. `check:jobs` also prints a summary and exits 1 when no
-  link could be checked.
-- A pasted job link that returns an error page is no longer saved as the job description.
-  A 404 reads as a closed job, and a site that could not be reached reads as unreachable,
-  not as "does not identify one specific job posting". Network errors now keep their cause.
-- A title that is only adjacent to a target title is scored lower and says "adjacent to
-  target title" instead of claiming a match.
-- Sources that came back short (cut off, partial pages, ignored settings) now count against
-  search health, are listed in the run summary, and keep their last-run time so the next
-  search covers the gap. `scan:sourced` exits 3 when half or more of the
-  sources failed, or when only browser-only sources were left to read.
-- Company boards that return an error or no jobs are remembered and looked up again. A
-  company on a shared job-board host no longer picks up another company's cached board.
-- A company check that could not reach the board is retried the next day and no longer
-  rejects a good pending suggestion on Refresh.
-- Careers pages that could not be fetched are reported as unreachable, and company lookups
-  that fail are counted instead of vanishing.
-- `careerrat ingest --write-config` keeps your saved searches and their last-run times.
-- A stored `--query` now reaches providers that read keywords, and the RemoteOK, Remotive
-  and Working Nomads feeds keep the job description they already return.
+- Job links that answer with a block, rate limit or server error, or that load as
+  a nearly empty page, are no longer called "closed". `--verify` and `check:jobs`
+  keep them and say they could not be checked. `check:jobs` also prints a summary
+  and exits 1 when no link could be checked.
+- A pasted job link that returns an error page is no longer saved as the job
+  description. A 404 reads as a closed job, and a site that could not be reached
+  reads as unreachable, not as "does not identify one specific job posting".
+  Network errors now keep their cause.
+- Sources that came back short (cut off, partial pages, ignored settings) now
+  count against search health, are listed in the run summary, and keep their
+  last-run time so the next search covers the gap. `scan:sourced` exits 3 when
+  half or more of the sources failed, or when only browser-only sources were left
+  to read.
+- Company boards that return an error or no jobs are remembered and looked up
+  again. A company on a shared job-board host no longer picks up another
+  company's cached board.
+- A company check that could not reach the board is retried the next day and no
+  longer rejects a good pending suggestion on Refresh.
+- Careers pages that could not be fetched are reported as unreachable, and company
+  lookups that fail are counted instead of vanishing.
+- `careerrat ingest --write-config` keeps your saved searches and their last-run
+  times.
+- A stored `--query` now reaches providers that read keywords, and the RemoteOK,
+  Remotive and Working Nomads feeds keep the job description they already return.
 
 ## [0.22.0] - 2026-10-31
 
