@@ -41,9 +41,19 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of November 2, 2026:** v0.23.0 is the latest release. CareerRat installs
+**As of November 3, 2026:** v0.24.0 is the latest release. CareerRat installs
 from npm and runs on your machine, in your terminal, with the AI CLI you already
 use. v0.19.2 was the last release with a Mac app.
+
+New in v0.24.0:
+
+- An Activity tab shows background searches as they run, and Search jobs starts
+  one straight away.
+- Résumés, cover letters and answers are fact-checked, and wording that sounds
+  machine-written gets rewritten.
+- Honest outcome rates, fake-recruiter warnings, and your corrections saved as
+  writing rules.
+- Installs on Linux without a compiler.
 
 New in v0.23.0:
 
