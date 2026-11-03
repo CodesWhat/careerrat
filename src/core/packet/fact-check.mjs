@@ -193,7 +193,7 @@ function flattenStrings(value, out = []) {
 // deliberately NOT here: a JD naming Kubernetes does not make the candidate a
 // Kubernetes user. The target company and role are allowed, because a letter
 // has to name them.
-export function factSourceText(context = {}) {
+function factSourceText(context = {}) {
   const profile = context.profile || context.candidate || {};
   const { compensation: _comp, ...profileRest } = profile;
   const parts = [

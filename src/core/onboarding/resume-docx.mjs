@@ -36,7 +36,7 @@ function stripUnsafeControlCharacters(text) {
 // bytes actually produced by decompression, which stops as soon as one is hit.
 export const DOCX_MAX_ENTRIES = 500;
 export const DOCX_MAX_ENTRY_BYTES = 6 * 1024 * 1024;
-export const DOCX_MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+const DOCX_MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 
 function inflateEntryBounded(entry, maxBytes) {
   return new Promise((resolve, reject) => {
@@ -56,7 +56,7 @@ function inflateEntryBounded(entry, maxBytes) {
   });
 }
 
-export async function assertDocxArchiveWithinLimits(buffer) {
+async function assertDocxArchiveWithinLimits(buffer) {
   const zip = await JSZip.loadAsync(buffer);
   const entries = Object.values(zip.files).filter((entry) => !entry.dir);
   if (Object.keys(zip.files).length > DOCX_MAX_ENTRIES) {

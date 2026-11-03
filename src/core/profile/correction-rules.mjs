@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import { findCompLeak } from "./comp-guard.mjs";
 
 export const MAX_RULES_PER_SESSION = 5;
-export const RULE_KINDS = ["prefer", "avoid"];
+const RULE_KINDS = ["prefer", "avoid"];
 const MAX_RULE_CHARS = 200;
 const MAX_QUOTE_CHARS = 500;
 
@@ -36,11 +36,11 @@ function normalizeSpace(value) {
     .trim();
 }
 
-export function isFactClaim(rule) {
+function isFactClaim(rule) {
   return FACT_PATTERNS.some((re) => re.test(rule));
 }
 
-export function ruleId({ session, kind, rule }) {
+function ruleId({ session, kind, rule }) {
   return `rule-${createHash("sha1")
     .update(`${session}\n${kind}\n${rule.toLowerCase()}`)
     .digest("hex")

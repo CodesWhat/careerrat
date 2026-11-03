@@ -9,7 +9,7 @@ import {
   isApplied,
 } from "./dashboard-data.js";
 
-export const OUTCOME_SAMPLE_FLOOR = 5;
+const OUTCOME_SAMPLE_FLOOR = 5;
 
 const BANDS = [
   { id: "high", label: "High fit (80+)" },
