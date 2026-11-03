@@ -84,6 +84,9 @@ closeAll();
                 )
                 await until(lambda: app.snapshot["state"].get("pendingUndo"))
                 self.assertFalse(app.query_one("#confirm-undo", Button).disabled)
+                self.assertTrue(app.query_one("#confirm-undo", Button).display)
+                self.assertTrue(app.query_one("#cancel-undo", Button).display)
+                self.assertFalse(app.query_one("#preview-undo", Button).display)
                 await pilot.click("#confirm-undo")
                 await until(
                     lambda: "undone" in app.snapshot["state"].get("message", "").lower()
@@ -959,11 +962,13 @@ closeAll();
             )
             async with app.run_test(size=(160, 50)) as pilot:
                 await until(lambda: app.snapshot)
-                await pilot.click("#search")
+                await pilot.click("#jobs", offset=(10, 2))
+                await until(lambda: app.selected_id == "long-name")
+                await pilot.click("#apply")
                 await until(lambda: isinstance(app.screen, MODULE.RequestText))
                 box = app.screen.query_one("#request-body", MODULE.TextArea)
                 self.assertTrue(box.read_only)
-                self.assertIn("search-jobs", box.text)
+                self.assertIn("apply-job", box.text)
                 self.assertIn("No agent is running.", str(app.query_one("#message", Static).render()))
                 await pilot.click("#copy-request")
                 self.assertEqual(app.clipboard, box.text)
@@ -1399,7 +1404,7 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
                 table = app.query_one("#jobs", DataTable)
                 await until(lambda: table.row_count == 2)
                 self.assertTrue(table.has_focus)
-                for key, name in (("s", "search"), ("v", "review"), ("a", "apply")):
+                for key, name in (("v", "review"), ("a", "apply")):
                     await pilot.press(key)
                     await until(lambda: isinstance(app.screen, MODULE.RequestText))
                     self.assertIn(
@@ -1549,6 +1554,271 @@ class JobsTableTest(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(app.query_one("#open-jd", Button).display)
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
+
+
+def fake_change(number, reverted=False):
+    return {
+        "messageId": f"m{number}",
+        "index": 0,
+        "at": "2026-11-01T10:00:00Z",
+        "reverted": reverted,
+        "entry": {"label": f"Change {number}"},
+    }
+
+
+def fake_run(status="running", **extra):
+    return {
+        "id": "run-1",
+        "purpose": "manual-search",
+        "status": status,
+        "started_at": "2026-11-02T09:30:00Z",
+        "progress": {"completedSources": 4, "totalSources": 12, "foundCount": 3},
+        **extra,
+    }
+
+
+class PolishTest(unittest.IsolatedAsyncioTestCase):
+    async def start(self, folder):
+        (Path(folder) / "workspace").mkdir(exist_ok=True)
+        app = MODULE.CareerRatApp(
+            env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+        )
+        return app
+
+    def shown(self, app, *ids):
+        return [i for i in ids if app.query_one(f"#{i}", Button).display]
+
+    async def test_changes_tab_with_no_changes_is_one_dim_message_and_no_buttons(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+            app = await self.start(folder)
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.click("#--content-tab-changes")
+                empty = app.query_one("#changes-empty", Static)
+                self.assertTrue(empty.display)
+                self.assertTrue(empty.has_class("empty"))
+                text = str(empty.render())
+                self.assertIn("No recorded changes.", text)
+                self.assertIn("Changes you or the agent make show up here, with Undo.", text)
+                self.assertFalse(app.query_one("#change-controls").display)
+                self.assertEqual(
+                    self.shown(
+                        app,
+                        "previous-change",
+                        "next-change",
+                        "preview-undo",
+                        "confirm-undo",
+                        "cancel-undo",
+                    ),
+                    [],
+                )
+                self.assertFalse(app.query_one("#changes-text", Static).display)
+                await pilot.press("ctrl+q")
+
+    async def test_change_buttons_follow_position_and_preview_state(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+            app = await self.start(folder)
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                await pilot.click("#--content-tab-changes")
+                changes = [fake_change(1), fake_change(2), fake_change(3, reverted=True)]
+                view = {"changes": changes}
+
+                def state(ref, pending=None):
+                    return {"changeRef": ref, "pendingUndo": pending}
+
+                button = lambda i: app.query_one(f"#{i}", Button)
+                app.update_changes(view, state("m1:0"))
+                self.assertEqual(
+                    self.shown(app, "previous-change", "next-change", "preview-undo"),
+                    ["previous-change", "next-change", "preview-undo"],
+                )
+                self.assertTrue(button("previous-change").disabled)
+                self.assertFalse(button("next-change").disabled)
+                self.assertEqual(self.shown(app, "confirm-undo", "cancel-undo"), [])
+                self.assertIn("Change 1 of 3", str(app.query_one("#changes-position").render()))
+                app.update_changes(view, state("m2:0"))
+                self.assertFalse(button("previous-change").disabled)
+                self.assertFalse(button("next-change").disabled)
+                app.update_changes(view, state("m3:0"))
+                self.assertTrue(button("next-change").disabled)
+                self.assertTrue(button("preview-undo").disabled)
+                self.assertIn("already undone", str(app.query_one("#changes-position").render()))
+                app.update_changes(view, state("m2:0", pending={"preview": True}))
+                self.assertEqual(
+                    self.shown(
+                        app,
+                        "previous-change",
+                        "next-change",
+                        "preview-undo",
+                        "confirm-undo",
+                        "cancel-undo",
+                    ),
+                    ["confirm-undo", "cancel-undo"],
+                )
+                self.assertFalse(app.query_one("#changes-empty").display)
+                await pilot.press("ctrl+q")
+
+    async def test_the_change_controls_stay_on_one_row_inside_the_pane(self):
+        for size in ((160, 50), (120, 40)):
+            with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+                app = await self.start(folder)
+                async with app.run_test(size=size) as pilot:
+                    await until(lambda: app.snapshot)
+                    await pilot.click("#--content-tab-changes")
+                    view = {"changes": [fake_change(1), fake_change(2)]}
+                    for pending in (None, {"preview": True}):
+                        app.update_changes(view, {"changeRef": "m1:0", "pendingUndo": pending})
+                        await pilot.pause()
+                        pane = app.query_one("#changes").region
+                        visible = [
+                            b for b in app.query_one("#change-controls").query(Button) if b.display
+                        ]
+                        self.assertTrue(visible)
+                        for widget in visible:
+                            region = widget.region
+                            self.assertEqual(region.height, 1, widget.id)
+                            self.assertEqual(region.y, visible[0].region.y, widget.id)
+                            self.assertLessEqual(region.right, pane.right, f"{widget.id} {size}")
+                            self.assertGreaterEqual(region.x, pane.x, widget.id)
+                    await pilot.press("ctrl+q")
+
+    async def test_empty_tabs_read_as_one_dim_centered_message(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+            app = await self.start(folder)
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                for widget_id, phrase in (
+                    ("details", "No jobs in this view."),
+                    ("assessment-summary", "No selected job."),
+                    ("history-text", "No selected job."),
+                    ("workspace-history-text", "No workspace history yet."),
+                ):
+                    widget = app.query_one(f"#{widget_id}", Static)
+                    self.assertIn(phrase, str(widget.render()), widget_id)
+                    self.assertTrue(widget.has_class("empty"), widget_id)
+                await pilot.press("ctrl+q")
+
+    async def test_no_tab_or_dialog_uses_a_tall_button(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+            app = await self.start(folder)
+            for size in ((160, 50), (120, 40)):
+                async with app.run_test(size=size) as pilot:
+                    await until(lambda: app.snapshot)
+                    for button in app.query("#inspector Button"):
+                        self.assertTrue(button.has_class("-textual-compact"), button.id)
+                    for opener in (
+                        lambda: app.push_screen(MODULE.ContextCapture()),
+                        lambda: app.push_screen(MODULE.RequestText("text", "reason")),
+                    ):
+                        opener()
+                        await pilot.pause()
+                        dialog = app.screen.query_one(".dialog")
+                        for button in app.screen.query(Button):
+                            self.assertEqual(button.region.height, 1, button.id)
+                            self.assertTrue(
+                                dialog.region.contains_region(button.region), button.id
+                            )
+                        await pilot.press("escape")
+                        await pilot.pause()
+                    await pilot.press("ctrl+q")
+                app = await self.start(folder)
+
+    async def test_search_jobs_starts_the_background_worker_not_the_agent(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+            app = await self.start(folder)
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                sent = []
+
+                async def record(message):
+                    sent.append(message)
+
+                app.send = record
+                await pilot.click("#search")
+                await pilot.press("s")
+                self.assertEqual(sent, [{"op": "search-start"}] * 2)
+                self.assertIn("background", str(app.query_one("#search").tooltip).lower())
+                await pilot.press("ctrl+q")
+
+    async def test_activity_lists_a_running_then_finished_search_and_cancels_it(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-polish-") as folder:
+            app = await self.start(folder)
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                self.assertTrue(app.query_one("#activity-empty").display)
+                app.update_activity({"searchRuns": [fake_run()]})
+                await pilot.click("#--content-tab-activity")
+                self.assertFalse(app.query_one("#activity-empty").display)
+                text = str(app.query_one("#run-0-text", Static).render())
+                self.assertIn("Search · running · 4/12 sources · 3 found", text)
+                self.assertIn("Started 2026-11-02 09:30", text)
+                self.assertTrue(app.query_one("#cancel-run-0", Button).display)
+                self.assertFalse(app.query_one("#review-run-0", Button).display)
+                self.assertEqual(
+                    str(app.query_one("#inspector").get_tab("activity").label), "Activity ●"
+                )
+                sent = []
+
+                async def record(message):
+                    sent.append(message)
+
+                app.send = record
+                await pilot.click("#cancel-run-0")
+                self.assertEqual(sent, [{"op": "search-cancel", "id": "run-1"}])
+                done = fake_run(
+                    "completed",
+                    summary={"new": 3},
+                    health={"status": "degraded", "message": "2 of 8 sources failed", "failed": 2},
+                )
+                app.update_activity({"searchRuns": [done]})
+                await pilot.pause()
+                self.assertIn(
+                    "Search finished: 3 new jobs, 2 sources failed. See Activity.",
+                    str(app.query_one("#message", Static).render()),
+                )
+                self.assertFalse(app.query_one("#cancel-run-0", Button).display)
+                self.assertTrue(app.query_one("#review-run-0", Button).display)
+                self.assertEqual(
+                    str(app.query_one("#inspector").get_tab("activity").label), "Activity"
+                )
+                self.assertIn("2 of 8 sources failed", str(app.query_one("#run-0-text").render()))
+                # Offered, never sent for the user.
+                self.assertEqual(sent, [{"op": "search-cancel", "id": "run-1"}])
+                await pilot.click("#review-run-0")
+                self.assertEqual(sent[-1], {"op": "request", "action": "review"})
+                await pilot.press("ctrl+q")
+
+    async def test_kitty_keys_map_to_a_newline_and_plain_enter_still_submits(self):
+        from textual._xterm_parser import XTermParser
+
+        def reported(sequence):
+            parser = XTermParser()
+            keys = list(parser.feed(sequence)) + list(parser.tick())
+            return [(event.key, event.character) for event in keys]
+
+        for sequence, key in (
+            ("\x1b[13;2u", "shift+enter"),
+            ("\x1b[13;130u", "shift+enter"),
+            ("\x1b[13;5u", "ctrl+enter"),
+            ("\n", "ctrl+j"),
+            ("\r", "enter"),
+        ):
+            (got, character), = reported(sequence)
+            self.assertEqual(got, key, repr(sequence))
+            self.assertEqual(
+                MODULE.key_bytes(got, character), "\r" if key == "enter" else "\n", key
+            )
+
+    def test_textual_enables_and_restores_the_kitty_disambiguate_flag(self):
+        import inspect
+        from textual.drivers import linux_driver
+
+        start = inspect.getsource(linux_driver.LinuxDriver.start_application_mode)
+        stop = inspect.getsource(linux_driver.LinuxDriver.stop_application_mode)
+        self.assertIn("KITTY_DISAMBIGUATE_ESCAPE_CODES", start)
+        self.assertIn("\\x1b[>", start)
+        self.assertIn("\\x1b[<u", stop)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,10 @@ import {
   sourcingRunGet,
   sourcingRunProgress,
 } from "../db/verbs/sourcing-runs.mjs";
-import { runFirstSearchInBackground } from "../onboarding/first-search-run.mjs";
+import {
+  runFirstSearchInBackground,
+  startManualSearchRun,
+} from "../onboarding/first-search-run.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { searchRunHealth } from "./search-health.mjs";
 
@@ -297,6 +300,17 @@ export async function launchTerminalSearchWorker({ repoRoot, env = process.env, 
     }
     throw error;
   }
+}
+
+// What `careerrat search start` does: reuse a running manual search or start a
+// new run and hand it to a detached worker. The TUI's Search jobs button calls
+// this too, so both go through one path.
+export async function startTerminalSearch({ repoRoot, env = process.env } = {}) {
+  const ctx = { repoRoot, env };
+  const started = await startManualSearchRun(ctx);
+  return started.reused
+    ? { ...terminalSearchStatus({ ...ctx, id: started.run.id }), reused: true }
+    : await launchTerminalSearchWorker({ ...ctx, runId: started.run.id });
 }
 
 export async function stopTerminalSessionSearches({

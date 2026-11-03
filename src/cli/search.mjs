@@ -4,12 +4,11 @@ import { ensureInstalledRuntimeSelection } from "../core/ai/ensure-runtime-selec
 import { closeAll } from "../core/db/connection.mjs";
 import { registerDbHolder } from "../core/db/holders.mjs";
 import { sourcingRunLatest } from "../core/db/verbs/sourcing-runs.mjs";
-import { startManualSearchRun } from "../core/onboarding/first-search-run.mjs";
 import { borrowedAiWarning } from "../core/people/ai-route.mjs";
 import {
   cancelTerminalSearch,
-  launchTerminalSearchWorker,
   runTerminalSearchWorker,
+  startTerminalSearch,
   terminalSearchStatus,
 } from "../core/search/terminal-search-worker.mjs";
 
@@ -58,10 +57,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     // whose AI access it will use before it starts. stderr keeps --json clean.
     const aiWarning = borrowedAiWarning(ctx);
     if (aiWarning) console.error(aiWarning);
-    const started = await startManualSearchRun(ctx);
-    result = started.reused
-      ? { ...terminalSearchStatus({ ...ctx, id: started.run.id }), reused: true }
-      : await launchTerminalSearchWorker({ ...ctx, runId: started.run.id });
+    result = await startTerminalSearch(ctx);
   } else if (command === "status") {
     result = id
       ? terminalSearchStatus({ ...ctx, id })
