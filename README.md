@@ -14,6 +14,7 @@
   <br>
   <a href="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml"><img src="https://github.com/CodesWhat/careerrat/actions/workflows/ci-verify.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://securityscorecards.dev/viewer/?uri=github.com/CodesWhat/careerrat"><img src="https://img.shields.io/ossf-scorecard/github.com/CodesWhat/careerrat?label=openssf+scorecard&style=flat" alt="OpenSSF Scorecard"></a>
+  <a href="https://codecov.io/gh/CodesWhat/careerrat/tree/dev%2Fv0.23"><img src="https://codecov.io/gh/CodesWhat/careerrat/branch/dev%2Fv0.23/graph/badge.svg" alt="Codecov"></a>
   <br>
   <a href="https://www.npmjs.com/package/careerrat"><img src="https://img.shields.io/npm/dm/careerrat" alt="npm downloads"></a>
 </p>
@@ -108,9 +109,10 @@ you pick it.
 ### Install
 
 You need Node.js 24.22.1 or newer and Python 3.11 or newer (with `venv`, which
-some Linux systems package separately, for example `python3-venv`). On Linux you
-also need `make` and a C++ compiler, because one dependency is built during
-install. On Debian or Ubuntu: `sudo apt install build-essential python3 python3-venv`.
+some Linux systems package separately, for example `python3-venv`). On Debian or
+Ubuntu: `sudo apt install python3 python3-venv`. The terminal helper ships
+prebuilt for macOS, Linux (x64, arm64, glibc and musl) and Windows, so no
+compiler is needed.
 
 ```bash
 npm i -g careerrat
@@ -508,11 +510,8 @@ choose the agent, or `--no-agent` to browse saved jobs. F6 switches focus;
 Ctrl+Q closes the workspace and its agent.
 
 First launch needs Python 3.11 or newer with venv support. On Windows it looks
-for the `py -3` launcher, then `python`. Linux also needs make and a C++
-compiler for the native terminal dependency (`apt install build-essential` on
-Debian or Ubuntu); without them `npm i -g careerrat` fails while building it, and
-`careerrat doctor` reports when that helper is missing. The build fetches
-Node headers from nodejs.org. CareerRat installs
+for the `py -3` launcher, then `python`. The native terminal dependency ships prebuilt for macOS, Linux and Windows, so
+no compiler is needed; `careerrat doctor` reports when that helper is missing. CareerRat installs
 hash-locked Textual dependencies in a private environment. `careerrat tui setup`
 prepares it ahead of time; `CAREERRAT_TUI_PYTHON` selects a Python interpreter.
 Your global Python packages and candidate data stay separate from that runtime.

@@ -395,6 +395,24 @@ function normalizeOffer(job = {}, providerId) {
   };
 }
 
+// Workday, Eightfold and Phenom stop at `max_pages` and say so. When the entry
+// sets `max_pages` itself, that cap is a choice the user made, not a surprise,
+// so the line is informational: it goes to `options.notices` instead of the
+// warnings that keep run health degraded and keep the result out of the shared
+// cache on every run. An unset cap still warns so the first hit is seen.
+const CAP_PROVIDER_IDS = new Set(["workday", "eightfold", "phenom"]);
+const CAP_WARNING = /truncated at (?:max_pages=\d+|\d+ pages) \(/;
+
+export function splitAcknowledgedCapNotices(providerId, entry, warnings) {
+  const acknowledged =
+    CAP_PROVIDER_IDS.has(providerId) && Number.isInteger(entry?.max_pages) && entry.max_pages > 0;
+  if (!acknowledged) return { warnings, notices: [] };
+  return {
+    warnings: warnings.filter((text) => !CAP_WARNING.test(text)),
+    notices: warnings.filter((text) => CAP_WARNING.test(text)),
+  };
+}
+
 export async function fetchCareerOpsProvider(providerId, entry, options = {}) {
   const normalizedId = normalizeProviderId(providerId);
   const provider = PROVIDERS.get(normalizedId);
@@ -406,6 +424,11 @@ export async function fetchCareerOpsProvider(providerId, entry, options = {}) {
   const jobs = await (sink ? warningScope.run(sink, run) : run());
   if (!Array.isArray(jobs)) {
     throw new Error(`Career Ops provider "${normalizedId}" returned a non-array result`);
+  }
+  if (sink) {
+    const split = splitAcknowledgedCapNotices(normalizedId, entry, [...sink]);
+    sink.splice(0, sink.length, ...split.warnings);
+    if (Array.isArray(options.notices)) options.notices.push(...split.notices);
   }
   return jobs.map((job) => normalizeOffer(job, normalizedId));
 }

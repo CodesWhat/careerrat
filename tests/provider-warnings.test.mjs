@@ -56,3 +56,22 @@ test("a stored --query reaches providers that read searchKeywords", async () => 
   assert.ok(bodies.length > 0, "provider should have made a request");
   assert.match(bodies[0], /"SearchTerm":"data analyst"/);
 });
+
+test("an acknowledged max_pages cap is a notice, not a warning", async () => {
+  const { splitAcknowledgedCapNotices } = await import(
+    "../src/core/providers/career-ops-registry.mjs"
+  );
+  const cap =
+    "workday: Acme truncated at max_pages=5 (500 of 900 jobs) — raise max_pages on this entry for more";
+  const other = "workday: Acme truncated at 2 of 5 pages after 3 attempts (100 jobs): boom";
+  for (const provider of ["workday", "eightfold", "phenom"]) {
+    const set = splitAcknowledgedCapNotices(provider, { max_pages: 5 }, [cap, other]);
+    assert.deepEqual(set.warnings, [other]);
+    assert.deepEqual(set.notices, [cap]);
+    const unset = splitAcknowledgedCapNotices(provider, {}, [cap, other]);
+    assert.deepEqual(unset.warnings, [cap, other]);
+    assert.deepEqual(unset.notices, []);
+  }
+  const nonCap = splitAcknowledgedCapNotices("greenhouse", { max_pages: 5 }, [cap]);
+  assert.deepEqual(nonCap.warnings, [cap]);
+});

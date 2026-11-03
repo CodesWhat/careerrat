@@ -7,7 +7,7 @@
     "an independent commit target. Roll this at each dev-line cut; a stale",
     "pattern matches nothing and silently stops producing PRs."
   ],
-  "baseBranchPatterns": ["dev/v0.16"],
+  "baseBranchPatterns": ["dev/v0.23"],
   "prConcurrentLimit": 2,
   "prHourlyLimit": 1,
   "lockFileMaintenance": {
