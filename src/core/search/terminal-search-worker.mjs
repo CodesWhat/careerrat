@@ -215,6 +215,10 @@ export async function runTerminalSearchWorker({
   return { ok: true, run, handoffPath: saveHandoff(ctx, run, outcome?.value) };
 }
 
+// A cold worker loads the whole scanner before it can answer, which takes
+// well over 10 s on a busy machine. Only a worker that never starts should fail.
+const WORKER_ACK_TIMEOUT_MS = 30_000;
+
 export async function launchTerminalSearchWorker({ repoRoot, env = process.env, runId } = {}) {
   const ctx = { repoRoot, env };
   const { run } = sourcingRunGet({ ...ctx, id: runId });
@@ -240,7 +244,7 @@ export async function launchTerminalSearchWorker({ repoRoot, env = process.env, 
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => finish(new Error("Search worker did not acknowledge startup")),
-        10_000
+        WORKER_ACK_TIMEOUT_MS
       );
       function onExit() {
         finish(new Error("Search worker exited before acknowledging startup"));
