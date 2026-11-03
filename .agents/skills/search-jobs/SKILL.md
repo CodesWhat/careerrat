@@ -202,6 +202,15 @@ Verify the salary-band integer renders the expected floor on the live page befor
 
 **Safety:** halt immediately and ask the user if you encounter a captcha, a 2FA prompt, a login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge. Keep all scraped pages and screenshots under `workspace/` only. Once the user enables a source, it participates in normal searches like every other enabled source.
 
+### Indeed through the official connector (only when already connected)
+
+Indeed's own MCP connector is the only sanctioned way to read Indeed beyond the saved browser source. It is in beta and available only through Claude connectors, so treat it as optional and never as a requirement.
+
+- **Use it only when it is already connected in this session.** Check the tools you were actually given for an Indeed connector. Do not ask the person to install or connect it, do not walk them through setup, and do not fall back to scraping, a headless browser, JobSpy, or any unofficial Indeed API when it is missing.
+- **When it is absent, skip it without comment mid-run, but note it.** Continue the sweep with the other sources and add one line to the run summary: "Indeed connector not connected; skipped." A missing connector is not an error and never makes the sweep `failed`.
+- **Never read the person's Indeed résumé without saying so first.** The connector can expose the résumé stored on their Indeed account. Searching postings does not need it. If a step would read that résumé, tell the person what you are about to read and why, and wait for a yes. Without a yes, search postings only and do not open the résumé.
+- **Postings go through the same pipeline.** Each result is intake, dedupe, liveness check, coarse triage (STEP 3), JD save (STEP 4) and watermark (STEP 5), like every other source. Record the source as the Indeed connector. Anything the connector returns that you did not need (profile fields, résumé text) stays out of the workspace unless the person said to import it.
+
 ## STEP 2 — Incremental delta (if a prior snapshot exists)
 
 If a previous snapshot exists for a source, run the delta to extract only net-new entries not already in tracker or `workspace/jobs/`:

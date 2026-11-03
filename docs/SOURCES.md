@@ -158,7 +158,7 @@ never written here.
 |---|---|---|---|---|---|
 | HiringCafe | general | aggregator | high | implemented | `src/core/providers/hiringcafe.mjs`; DOM extractor in `capture-search-sources.mjs`; field-neutral shipped default |
 | LinkedIn | general | aggregator | high | implemented | Saved browser source with a point-of-use Yes/No login handoff; participates in normal searches once enabled |
-| Indeed | general | aggregator | high | implemented | Saved browser source with provider-specific result extraction, point-of-use login handoff, and session JD capture |
+| Indeed | general | aggregator | high | implemented | Saved browser source with provider-specific result extraction, point-of-use login handoff, and session JD capture. The official Indeed MCP connector is used by the search-jobs skill only when it is already connected in the session (beta, Claude connectors only); it never reads the person's Indeed résumé without saying so first, and no scraper is used |
 | Glassdoor | general | aggregator | high | implemented | Saved browser source with provider-specific result extraction, point-of-use login handoff, and session JD capture |
 | Google Jobs | general | aggregator | high | planned | structured-data aggregator; field-neutral; no provider impl yet |
 | Wellfound | tech/software | aggregator | high | implemented | `src/core/providers/wellfound.mjs`; SPA browser source; tech-domain only |
