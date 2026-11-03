@@ -10,6 +10,7 @@
 // cannot sneak in a number, tool, employer or name the candidate never had.
 
 import { runBoundedAI } from "../ai/bounded-ai.mjs";
+import { aiTellMessages, findAiTells } from "./ai-tells.mjs";
 import { checkArtifactFacts, factViolationMessages } from "./fact-check.mjs";
 import { buildPromptVisibleSources } from "./generate.mjs";
 import { packetReviewProposalSchema } from "./schemas/packet-schemas.mjs";
@@ -23,7 +24,7 @@ const REVIEW_LABELS = Object.freeze({
 });
 
 const REVIEW_SYSTEM =
-  "You are a read-only reviewer of a job-application draft. Propose at most 20 small edits that make the draft clearer, tighter and more specific to the target role. Each edit is an exact substring of the draft to find, its replacement, and a one-sentence reason. Use ONLY facts already in the draft or in sourceResume.text, candidateProfile and confirmedEvidence.claims. Never add a number, tool, employer, name or claim that is not in those sources; an edit that does will be rejected by code. Never touch placeholders or NEEDS YOU markers. Return no edits when the draft is already good.";
+  "You are a read-only reviewer of a job-application draft. Propose at most 20 small edits that make the draft clearer, tighter and more specific to the target role. Each edit is an exact substring of the draft to find, its replacement, and a one-sentence reason. Use ONLY facts already in the draft or in sourceResume.text, candidateProfile and confirmedEvidence.claims. Never add a number, tool, employer, name or claim that is not in those sources; an edit that does will be rejected by code. Never touch placeholders or NEEDS YOU markers. Return no edits when the draft is already good. If styleGoals is present, make it read like a person wrote it: fix each listed phrase with the plainer wording, by rewording only, never by adding a fact.";
 
 function countOccurrences(haystack, needle) {
   if (!needle) return 0;
@@ -63,6 +64,11 @@ export function applyReviewEdits({ text, edits = [], context = {} } = {}) {
       ]);
       continue;
     }
+    // A style fix must not introduce a new tell of its own.
+    if (findAiTells(replace).length > findAiTells(find).length) {
+      reject(["edit adds AI-sounding phrasing"]);
+      continue;
+    }
     const facts = checkArtifactFacts({ texts: replace, context });
     if (!facts.ok) {
       reject(factViolationMessages(facts));
@@ -95,6 +101,7 @@ export async function reviewArtifact({
   if (!draft.trim()) {
     return { ok: true, text: draft, accepted: [], rejected: [], ai: { used: false } };
   }
+  const styleGoals = aiTellMessages(findAiTells(draft));
   const result = await runAI({
     labels: REVIEW_LABELS,
     schema: packetReviewProposalSchema,
@@ -112,7 +119,11 @@ export async function reviewArtifact({
           `Review this ${kind} draft against the sources.`,
           "",
           JSON.stringify(
-            { sources: buildPromptVisibleSources(context, null, { purpose: "resume" }), draft },
+            {
+              sources: buildPromptVisibleSources(context, null, { purpose: "resume" }),
+              draft,
+              ...(styleGoals.length ? { styleGoals } : {}),
+            },
             null,
             2
           ),

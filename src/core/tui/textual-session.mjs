@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { registerDbHolder } from "../db/holders.mjs";
 import { readSavedJobDescription } from "../jobs/job-description.mjs";
-import { stopTerminalSessionSearches } from "../search/terminal-search-worker.mjs";
+import { borrowedAiWarning } from "../people/ai-route.mjs";
+import {
+  cancelTerminalSearch,
+  startTerminalSearch,
+  stopTerminalSessionSearches,
+} from "../search/terminal-search-worker.mjs";
 import { withCareerratShim } from "./cli-shim.mjs";
 import { createDataWatch } from "./data-watch.mjs";
 import { applyTuiUndo } from "./history.mjs";
@@ -18,6 +23,7 @@ export async function createTextualSession({
   agent = null,
   agentIssue = null,
   emit,
+  search = { start: startTerminalSearch, cancel: cancelTerminalSearch },
 }) {
   const ctx = { repoRoot, env };
   const sessionId = randomUUID();
@@ -202,6 +208,36 @@ export async function createTextualSession({
         if (next.effect?.type === "agent-request") request(next.effect.text, next.effect.notice);
         else if (next.effect?.type === "notice")
           send({ type: "notice", message: next.effect.text });
+        break;
+      }
+      // Search jobs is deterministic background work: it never touches the agent.
+      case "search-start": {
+        const warning = borrowedAiWarning(ctx);
+        if (warning) send({ type: "notice", message: warning });
+        let result;
+        try {
+          result = await search.start({
+            ...ctx,
+            env: { ...env, CAREERRAT_TUI_SESSION: sessionId },
+          });
+        } catch (error) {
+          send({ type: "notice", message: `Search did not start: ${error.message}` });
+          refresh();
+          break;
+        }
+        send({ type: "search-started", reused: Boolean(result.reused), run: result.run });
+        refresh();
+        break;
+      }
+      case "search-cancel": {
+        if (typeof message.id !== "string" || !message.id)
+          throw new TypeError("Search cancel needs a run id");
+        try {
+          search.cancel({ ...ctx, id: message.id });
+        } catch (error) {
+          send({ type: "notice", message: `Search was not cancelled: ${error.message}` });
+        }
+        refresh();
         break;
       }
       case "inspect": {
