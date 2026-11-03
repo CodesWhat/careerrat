@@ -1,5 +1,5 @@
+import pty from "@homebridge/node-pty-prebuilt-multiarch";
 import headless from "@xterm/headless";
-import pty from "node-pty";
 import {
   killProcessTreeByPid,
   resolveWindowsCommandInterpreter,

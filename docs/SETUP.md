@@ -42,9 +42,8 @@ npm link
 careerrat start
 ```
 
-Needs Node.js 24.22.1 or newer and Python 3.11 or newer (with `venv`). On Linux,
-also `make` and a C++ compiler (`sudo apt install build-essential`), because the
-native terminal dependency is built during `npm install`.
+Needs Node.js 24.22.1 or newer and Python 3.11 or newer (with `venv`). The native terminal
+dependency ships prebuilt for macOS, Linux and Windows, so no compiler is needed.
 
 `careerrat start` scaffolds your workspace and opens the terminal workspace: saved
 jobs beside a native Claude Code or Codex chat. The first launch builds a private

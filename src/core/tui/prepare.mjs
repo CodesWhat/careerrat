@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 const require = createRequire(import.meta.url);
 
 export function preparePtyHelpers({
-  moduleRoot = dirname(require.resolve("node-pty/package.json")),
+  moduleRoot = dirname(require.resolve("@homebridge/node-pty-prebuilt-multiarch/package.json")),
   platform = process.platform,
   arch = process.arch,
 } = {}) {

@@ -19,7 +19,6 @@ and the local app has no telemetry. CareerRat is free to self-host and MIT licen
 
 - Node.js >= 24
 - Python >= 3.11 with `venv` (the terminal workspace builds a private environment on first run)
-- Linux only: `make` and a C++ compiler (`apt install build-essential`)
 - A supported coding-agent CLI on PATH, Claude Code or Codex (CareerRat runs *through* you):
   - Claude Code: `npm install -g @anthropic-ai/claude-code` (<https://claude.com/claude-code>)
   - Codex: `npm install -g @openai/codex` (<https://github.com/openai/codex>)

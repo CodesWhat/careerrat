@@ -139,6 +139,7 @@
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
     "fact-check": "node src/cli/fact-check.mjs",
     "check:install-scripts": "node scripts/check-install-scripts.mjs",
+    "check:lockfile": "node scripts/check-lockfile.mjs",
     "bench:search": "node scripts/eval/search-bench.mjs",
     "eval:golden": "node scripts/eval/golden-verdicts.mjs",
     "test": "node --test --test-concurrency=2 --import ./tests/helpers/isolate-home.mjs 'tests/**/*.test.mjs'",
@@ -179,7 +180,7 @@
     "yaml": "2.9.0"
   },
   "allowScripts": {
-    "node-pty@1.1.0": true,
+    "@homebridge/node-pty-prebuilt-multiarch@0.15.0": true,
     "electron-winstaller@5.4.0": true,
     "fsevents@2.3.2": true,
     "fsevents@2.3.3": true,
@@ -198,7 +199,7 @@
     "htmlparser2": "^12.0.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
-    "node-pty": "1.1.0",
+    "@homebridge/node-pty-prebuilt-multiarch": "0.15.0",
     "playwright": "1.62.1",
     "sanitize-html": "^2.17.4",
     "string-width": "8.3.0",
