@@ -66,6 +66,43 @@ function put(db, operation) {
   return operationById(db, operation.id);
 }
 
+function canonicalSourcePath(db) {
+  const row = db.prepare("SELECT data FROM candidate_artifacts WHERE id = 'source-resume'").get();
+  if (!row) return null;
+  try {
+    return JSON.parse(row.data)?.path ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// A completed extraction is only "already saved" while its upload is the
+// canonical source résumé. After A, B, A the digest lookup finds A's completed
+// operation but B owns the source résumé and profile, so replay A's stored
+// result through the same writer the original completion used.
+function reactivateCompleted(db, previous) {
+  const result = clone(previous.result) || {};
+  const artifact = clone(previous.artifact) || {
+    path: previous.uploadPath,
+    filename: previous.filename,
+    source: result.source === "docx" ? "docx" : "resume-ai",
+    ...(result.extraction ? { extraction: result.extraction } : {}),
+    text: result.fullText,
+  };
+  db.prepare(
+    `INSERT INTO candidate_artifacts (id, kind, data, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, data=excluded.data, updated_at=excluded.updated_at`
+  ).run(
+    "source-resume",
+    "source-resume",
+    JSON.stringify({ ...artifact, savedAt: new Date().toISOString() }),
+    new Date().toISOString()
+  );
+  applyCandidateResumeSeedInDb(db, result);
+  const now = nowAfter(previous.updatedAt);
+  return put(db, { ...previous, artifact, updatedAt: now });
+}
+
 function nowAfter(previous) {
   const now = Date.now();
   const previousMs = Date.parse(previous || "");
@@ -119,6 +156,16 @@ export function resumeExtractionStart({
           }))) ||
       (ACTIVE_STATUSES.has(previous?.status) && previous.ownerId === owner)
     ) {
+      if (
+        previous.status === "completed" &&
+        canonicalSourcePath(db) !== (previous.artifact?.path ?? previous.uploadPath)
+      ) {
+        return {
+          ok: true,
+          reused: true,
+          operation: reactivateCompleted(db, previous),
+        };
+      }
       return { ok: true, reused: true, operation: previous };
     }
     // latestByDigest must see the replacement even when its predecessor's
@@ -132,7 +179,10 @@ export function resumeExtractionStart({
       status: "queued",
       ownerId: owner,
       executionPlan: clone(frozenExecutionPlan),
-      progress: { phase: "queued", message: "Resume saved. Waiting to read it." },
+      progress: {
+        phase: "queued",
+        message: "Resume saved. Waiting to read it.",
+      },
       lease: { heartbeatAt: now },
       result: null,
       error: null,
@@ -205,9 +255,13 @@ export function resumeExtractionComplete({
       const operation = put(db, {
         ...current,
         status: "completed",
-        progress: { phase: "completed", message: "Resume added to your profile." },
+        progress: {
+          phase: "completed",
+          message: "Resume added to your profile.",
+        },
         lease: { heartbeatAt: now },
         result: savedResult,
+        artifact: clone(artifact),
         ai: clone(ai),
         manual: clone(manual),
         error: null,
@@ -232,7 +286,10 @@ export function resumeExtractionFail({ repoRoot, env, id, ownerId, error } = {})
     const operation = put(db, {
       ...current,
       status: "failed",
-      progress: { phase: "failed", message: "CareerRat stopped reading this resume." },
+      progress: {
+        phase: "failed",
+        message: "CareerRat stopped reading this resume.",
+      },
       lease: { heartbeatAt: now },
       result: null,
       error: {

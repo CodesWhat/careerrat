@@ -21,6 +21,9 @@ if (realHome) {
     if (existsSync(cache)) process.env.PLAYWRIGHT_BROWSERS_PATH = cache;
   }
   process.env.CAREERRAT_TEST_REAL_HOME = realHome;
+  // CLI children would start a detached update check that writes into this
+  // home after the test exits; tests never want the network check anyway.
+  process.env.CAREERRAT_NO_UPDATE_CHECK = "1";
   process.env.HOME = fakeHome;
   process.env.USERPROFILE = fakeHome;
   process.on("exit", () => {

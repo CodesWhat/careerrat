@@ -1,0 +1,4 @@
+GATE: CUT - cut signal(s) found in JD: crypto exchange
+FIT: med 70 - distributed systems, postgres | caveats: crypto exchange | priority: primary
+COMP: clear - band $200,000–$240,000 clears floor $170,000
+ACTION: cut

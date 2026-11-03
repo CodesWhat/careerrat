@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import JSZip from "jszip";
 import mammoth from "mammoth";
 import { plainTextFromHtml } from "../src/core/deep-ingest/source-normalize.mjs";
 import { extractPublicCareersPage } from "../src/core/discovery/public-page-extractor.mjs";
@@ -8,6 +9,12 @@ import { compileSingleStarGlob } from "../src/core/fs/single-star-glob.mjs";
 import { extractDocxResumeMarkdown } from "../src/core/onboarding/resume-docx.mjs";
 import { trimEdgeCharacter } from "../src/core/text/slug.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
+
+async function smallDocx() {
+  const zip = new JSZip();
+  zip.file("word/document.xml", "<w:document/>");
+  return zip.generateAsync({ type: "nodebuffer" });
+}
 
 const publicResolver = async () => [{ address: "93.184.216.34", family: 4 }];
 
@@ -46,7 +53,7 @@ test("DOCX HTML fallback decodes entities once and omits active-content bodies",
   });
 
   try {
-    const text = await extractDocxResumeMarkdown(Buffer.alloc(0));
+    const text = await extractDocxResumeMarkdown(await smallDocx());
     assert.equal(text, "Profile (https://example.test/me)\n&lt;script&gt;");
   } finally {
     mammoth.convertToMarkdown = convertToMarkdown;

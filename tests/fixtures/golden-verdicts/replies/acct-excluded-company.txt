@@ -1,0 +1,4 @@
+GATE: CUT - company/title matches excluded list: "Quickbooks Rescue LLC"
+FIT: med 80 - month-end close, gaap | caveats: none | priority: primary
+COMP: clear - band $88,000–$102,000 clears floor $85,000
+ACTION: cut

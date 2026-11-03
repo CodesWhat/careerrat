@@ -1,0 +1,4 @@
+GATE: CUT - company/title matches excluded list: "Sunrise Charter Network"
+FIT: high 85 - algebra, geometry, curriculum | caveats: none | priority: primary
+COMP: clear - band $61,000–$72,000 clears floor $58,000
+ACTION: cut

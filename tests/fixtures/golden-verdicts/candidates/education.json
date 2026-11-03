@@ -1,0 +1,48 @@
+{
+  "profile": {
+    "candidate": {
+      "full_name": "Grace Lindqvist",
+      "email": "grace@example.test"
+    },
+    "compensation": {
+      "currency": "USD",
+      "minimum_base": 58000,
+      "target_base": 68000
+    },
+    "location": {
+      "home": "Portland, OR",
+      "remote": false,
+      "hybrid": true,
+      "onsite": true,
+      "relocation": []
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Math",
+        "priority": "primary",
+        "titles": ["High School Math Teacher", "Algebra Teacher"]
+      },
+      {
+        "name": "Instructional",
+        "priority": "secondary",
+        "titles": ["Instructional Coach"]
+      },
+      {
+        "name": "Admin",
+        "priority": "stretch",
+        "titles": ["Assistant Principal"]
+      }
+    ],
+    "keep_signals": ["algebra", "geometry", "ap calculus", "curriculum"],
+    "cut_signals": ["coaching stipend only", "no benefits", "long-term substitute"],
+    "excluded_companies": ["Sunrise Charter Network"],
+    "degree_policy": ""
+  },
+  "honesty": {}
+}

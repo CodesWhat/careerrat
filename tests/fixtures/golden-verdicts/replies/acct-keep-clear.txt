@@ -1,0 +1,5 @@
+GATE: KEEP - fit high (score 90); comp clear
+FIT: high 90 - month-end close, gaap, netsuite, audit support | caveats: none | priority: primary
+COMP: clear - band $92,000–$108,000 clears floor $85,000
+COMP ANCHOR: $100,000 - your target base
+ACTION: apply-now

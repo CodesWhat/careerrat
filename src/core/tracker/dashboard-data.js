@@ -430,6 +430,10 @@ function isApplied(app) {
   return (STAGE_ORDER[classifyStage(app.status)] ?? 0) >= STAGE_ORDER.applied;
 }
 
+// Shared with src/core/tracker/outcome-rates.mjs (the CLI/TUI outcome rates), so the
+// stage vocabulary has one definition and the rates survive the web app's removal.
+export { classifyStage, deepestRoundStage, isActive, isAdvanced, isApplied };
+
 function daysBetween(dueDate, now) {
   const due = Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate());
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
