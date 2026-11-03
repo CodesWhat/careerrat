@@ -114,6 +114,7 @@ const CLIS = {
   learnings: "src/cli/learnings.mjs",
   "status-map": "src/cli/status-map.mjs",
   "lint-placeholders": "src/cli/lint-placeholders.mjs",
+  "fact-check": "src/cli/fact-check.mjs",
   export: "src/cli/export.mjs",
   restore: "src/cli/restore.mjs",
   "install-skills": "scripts/install-skills.mjs",
@@ -957,6 +958,7 @@ Commands:
   evidence    Read/validate/add evidence claims
   analytics   Refresh + inspect the persisted outcome-analytics block (--write)
   lint-placeholders  Check drafts for unfilled placeholders (exit 1 on a hit, 2 on a bad path)
+  fact-check  Reject a draft with a number, tool or name missing from your material (exit 1)
   strategy-review  Stamp the "last reviewed" marker after a strategy review
   status-map  Normalize a raw ATS status label to the canonical tracker status
   export      Render a tailored artifact / packet to PDF or DOCX
