@@ -1,0 +1,4 @@
+GATE: CUT - company/title matches excluded list: "Lakeshore Staffing Partners"
+FIT: high 85 - critical care, ventilator, icu | caveats: none | priority: primary
+COMP: clear - band $92,000–$104,000 clears floor $82,000
+ACTION: cut

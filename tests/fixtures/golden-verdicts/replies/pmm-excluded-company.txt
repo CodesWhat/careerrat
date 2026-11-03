@@ -1,0 +1,4 @@
+GATE: CUT - company/title matches excluded list: "Vantage Leads Inc"
+FIT: med 80 - launch, messaging | caveats: none | priority: secondary
+COMP: clear - band $120,000–$140,000 clears floor $120,000
+ACTION: cut

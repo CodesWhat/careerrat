@@ -1,0 +1,5 @@
+GATE: REVIEW - comp below floor: band max $130,000 < floor $170,000
+FIT: med 80 - postgres, api design | caveats: none | priority: primary
+COMP: below-floor - band max $130,000 < floor $170,000
+COMP ANCHOR: $200,000 - your target base: JD band is below your floor, so anchor up or pass
+ACTION: hold

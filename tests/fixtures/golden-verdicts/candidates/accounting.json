@@ -1,0 +1,43 @@
+{
+  "profile": {
+    "candidate": {
+      "full_name": "Tomasz Kowal",
+      "email": "tomasz@example.test"
+    },
+    "compensation": {
+      "currency": "USD",
+      "minimum_base": 85000,
+      "target_base": 100000
+    },
+    "location": {
+      "home": "Toronto, ON",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false,
+      "relocation": []
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": true
+    }
+  },
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Senior Accountant",
+        "priority": "primary",
+        "titles": ["Senior Accountant", "Staff Accountant"]
+      },
+      {
+        "name": "Controller",
+        "priority": "stretch",
+        "titles": ["Assistant Controller", "Controller"]
+      }
+    ],
+    "keep_signals": ["month-end close", "gaap", "netsuite", "audit support"],
+    "cut_signals": ["tax season only", "seasonal contract", "commission based"],
+    "excluded_companies": ["Quickbooks Rescue LLC"],
+    "degree_policy": ""
+  },
+  "honesty": {}
+}

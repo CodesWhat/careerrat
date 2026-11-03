@@ -1,0 +1,4 @@
+GATE: CUT - cut signal(s) found in JD: coaching stipend only, no benefits
+FIT: stretch 60 - algebra, geometry | caveats: coaching stipend only, no benefits | priority: primary
+COMP: clear - band $60,000–$70,000 clears floor $58,000
+ACTION: cut

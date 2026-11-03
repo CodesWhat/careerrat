@@ -1,0 +1,53 @@
+{
+  "profile": {
+    "candidate": {
+      "full_name": "Sam Rivera",
+      "email": "sam@example.test"
+    },
+    "compensation": {
+      "currency": "USD",
+      "minimum_base": 170000,
+      "target_base": 200000
+    },
+    "location": {
+      "home": "Denver, CO",
+      "remote": true,
+      "hybrid": true,
+      "onsite": false,
+      "relocation": []
+    },
+    "authorization": {
+      "work_authorized": true,
+      "requires_sponsorship": false
+    }
+  },
+  "targeting": {
+    "role_buckets": [
+      {
+        "name": "Backend",
+        "priority": "primary",
+        "titles": ["Staff Backend Engineer", "Senior Backend Engineer", "Backend Engineer"]
+      },
+      {
+        "name": "Platform",
+        "priority": "secondary",
+        "titles": ["Platform Engineer", "Site Reliability Engineer"]
+      },
+      {
+        "name": "Management",
+        "priority": "stretch",
+        "titles": ["Engineering Manager"]
+      },
+      {
+        "name": "Exploration",
+        "priority": "oe",
+        "titles": ["Developer Advocate"]
+      }
+    ],
+    "keep_signals": ["distributed systems", "postgres", "api design", "observability"],
+    "cut_signals": ["on-call 24/7", "unpaid trial project", "crypto exchange"],
+    "excluded_companies": ["Dyson Mining Group"],
+    "degree_policy": ""
+  },
+  "honesty": {}
+}

@@ -1,0 +1,8 @@
+{
+  "source": "seed",
+  "note": "Seeded from the deterministic gate's rendered block (renderGateBlock), not a live model. Replace with `npm run eval:golden -- --record`.",
+  "recordedAt": "2026-11-02T00:00:00Z",
+  "runtime": null,
+  "cases": 30,
+  "partial": false
+}

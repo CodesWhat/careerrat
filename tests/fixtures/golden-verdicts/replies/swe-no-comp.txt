@@ -1,0 +1,5 @@
+GATE: REVIEW - comp unknown: no comp posted in JD
+FIT: med 80 - distributed systems, observability | caveats: none | priority: secondary
+COMP: review - no comp in JD
+COMP ANCHOR: $200,000 - your target base
+ACTION: manual
