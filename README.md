@@ -172,7 +172,8 @@ starts the first location-aware search while the rest of setup continues.
 
 From there, ask it to find roles, evaluate a posting, tailor an application,
 prepare an interview, or pick up a saved thread. Click a job to see its details,
-and use the Search, Review and Apply buttons to send a request to the chat.
+Search jobs starts a background search directly. Review and Apply insert a
+request into the chat for you to send.
 Press F6 to move between the jobs and the chat, and Ctrl+Q to quit. Use
 `careerrat start --no-agent` to browse saved jobs without starting a chat.
 
@@ -319,10 +320,9 @@ Deep ingest gets its own durable thread, and mock interviews keep their session
 and debrief. Changes records supported settings and evidence edits, with a preview-first
 Undo for each recorded change.
 
-Searches and intake continue in the background when you move between tabs.
-Activity shows their progress. If CareerRat or your computer stops mid-run,
-CareerRat marks the interrupted work for a clear retry instead of reporting a
-false success.
+Searches continue in the background when you move between tabs. Activity shows
+their progress. If CareerRat or your computer stops mid-run, the saved run shows
+the interruption. Use Search jobs to retry with another search.
 
 CareerRat stores canonical candidate state, conversations, missions, mock
 sessions, and pipeline records in local SQLite. Job descriptions, research,
@@ -529,8 +529,9 @@ history beside native agent chat. Use `--agent claude` or `--agent codex` to
 choose the agent, or `--no-agent` to browse saved jobs. Keys: F6 switches
 between jobs and agent, `s` starts a background search, `v` reviews matches, `a`
 applies to the selected job, `c` adds context, F5 refreshes, F1 opens the command
-palette, Shift+Enter adds a new line in the agent, and Ctrl+Q closes the
-workspace and its agent. The full tour is in
+palette, Ctrl+J adds a new line in the agent, and Ctrl+Q closes the workspace
+and its agent. Shift+Enter also adds a new line in terminals that distinguish it
+from Enter; other terminals may submit the prompt. The full tour is in
 [The terminal workspace](https://careerrat.com/docs/getting-started/terminal-workspace).
 
 First launch needs Python 3.11 or newer with venv support. On Windows it looks
@@ -540,8 +541,8 @@ hash-locked Textual dependencies in a private environment. `careerrat tui setup`
 prepares it ahead of time; `CAREERRAT_TUI_PYTHON` selects a Python interpreter.
 Your global Python packages and candidate data stay separate from that runtime.
 
-Search, Review and Apply insert a request into the agent. Review it and press
-Enter there to run it. Add context saves pasted documents or local files before
+Search jobs starts the background worker directly. Review and Apply insert a
+request into the agent; review it and press Enter there to run it. Add context saves pasted documents or local files before
 generating its request. Read saved JD opens the captured posting locally.
 Windows is untested end to end so far.
 

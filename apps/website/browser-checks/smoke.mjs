@@ -247,6 +247,32 @@ for (const browserName of Object.keys(BROWSERS)) {
         }
       });
 
+      test("header install link keeps readable contrast on hover", async () => {
+        const { context, page } = await openPage(browserName, viewport);
+        try {
+          await page.goto(`${origin}/`, { waitUntil: "load" });
+          const install = page.getByRole("navigation", { name: "Main navigation" })
+            .getByRole("link", { name: /Get CareerRat/ });
+          await install.hover();
+          const contrast = await install.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const luminance = (color) => {
+              const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number).map((n) => {
+                const c = n / 255;
+                return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+              });
+              return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+            };
+            const text = luminance(style.color);
+            const background = luminance(style.backgroundColor);
+            return (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05);
+          });
+          assert.ok(contrast >= 4.5, `hover text contrast is ${contrast.toFixed(2)}:1`);
+        } finally {
+          await context.close();
+        }
+      });
+
       test("home nav and CTAs lead to the install docs", async () => {
         const { context, page, problems } = await openPage(browserName, viewport);
         try {

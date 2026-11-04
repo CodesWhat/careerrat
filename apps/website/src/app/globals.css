@@ -130,7 +130,7 @@ button {
   color: var(--muted);
 }
 
-.site-nav__links > a:hover,
+.site-nav__links > a:not(.button):hover,
 .footer a:hover {
   color: var(--cyan);
 }
@@ -255,6 +255,7 @@ button {
 }
 
 .quick-start code span {
+  user-select: none;
   color: var(--green);
 }
 

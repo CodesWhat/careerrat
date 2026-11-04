@@ -31,9 +31,9 @@ environment, which takes about a minute. After that it opens right away.
   the right of the toolbar filter by status (Active or All statuses), set the pay
   basis, and sort by pay.
 - **The agent** is the native Claude Code or Codex session on the right. It is
-  the real tool, running beside your jobs. When you pick a job and use a toolbar
-  action, the request lands in the agent's input and you press Enter there to
-  send it.
+  the real tool, running beside your jobs. Review and Apply put a request in
+  the agent's input, and you press Enter there to send it. Search jobs starts a
+  background worker directly.
 - **The Inspector** sits under the table. Its tabs show what CareerRat knows
   about the selected job and what is happening in the background.
 
@@ -46,7 +46,7 @@ environment, which takes about a minute. After that it opens right away.
 | History | The conversations, emails, and notes tied to this job. |
 | Workspace | Skill results that belong to your search as a whole, apart from any one job. |
 | Changes | Edits you or the agent made to your settings, each with a preview-first Undo. |
-| Activity | Background work, with progress and a Cancel button while it runs. |
+| Activity | Background searches, with progress and a Cancel button while they run. |
 
 ![The Fit report tab, listing each requirement with the evidence and a match](./tui-fit.png)
 
@@ -60,9 +60,11 @@ a search is running.
 
 ![The Activity tab with a search running and an earlier search finished](./tui-activity.png)
 
-When a search finishes, **Review new matches** asks the agent to evaluate what
-it found. If CareerRat or your computer stops in the middle of a search, the next
-launch shows the interrupted run with a retry instead of calling it finished.
+When a search finishes, **Review new matches** asks the agent to evaluate the
+first five active jobs in the current view. Those may include older jobs; the
+action is not limited to that search's results. If CareerRat or your computer
+stops in the middle of a search, the next launch shows the interrupted run. Use
+**Search jobs** to retry with another search.
 
 ## Changes and Undo
 
@@ -83,7 +85,8 @@ reverted, then **Confirm Undo** to apply it or **Cancel** to keep the change.
 | c | Add context: save a posting, transcript, notes, or a file, then ask the agent to use it |
 | F5 | Read the saved workspace again |
 | F1 | Open the command palette |
-| Shift+Enter | New line in the agent's input |
+| Ctrl+J | New line in the agent's input |
+| Shift+Enter | New line when the terminal distinguishes it from Enter; otherwise it may submit |
 | Ctrl+Q | Quit the workspace and its agent |
 
 The letter keys work while the jobs table has focus. When the agent has focus,

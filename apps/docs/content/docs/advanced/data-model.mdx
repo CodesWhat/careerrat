@@ -101,8 +101,9 @@ Roles discovered by `search-jobs` before the gate runs. Each entry has
 ### communications[]
 
 Recruiter and hiring threads. Each has `status`, `messages[]`, `draft`, and
-`nextActionDue`. The workspace's next steps derive from these
-fields, not from the Activity Pulse.
+`nextActionDue`. These fields preserve the thread's follow-up state. The terminal
+workspace displays the application's `nextAction`; it does not derive that field
+from communications or the Activity Pulse.
 
 ## The database is the authority
 

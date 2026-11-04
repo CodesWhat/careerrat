@@ -55,16 +55,16 @@ function socialCardSvg() {
       <rect width="1200" height="630" fill="#242933" />
       <rect x="40" y="40" width="1120" height="550" rx="6" fill="#2e3440" stroke="#485466" stroke-width="2" />
       <path d="M40 106H1160" stroke="#485466" stroke-width="2" />
-      <text x="76" y="84" font-size="22" letter-spacing="0" fill="#88c0d0">&gt; CareerRat</text>
-      <text x="1118" y="82" text-anchor="end" font-size="17" letter-spacing="0.04em" fill="#b9a1bf">TERMINAL WORKSPACE</text>
+      <text x="76" y="84" font-size="22" style="letter-spacing: 0" fill="#88c0d0">&gt; CareerRat</text>
+      <text x="1118" y="82" text-anchor="end" font-size="17" style="letter-spacing: 0.04em" fill="#b9a1bf">TERMINAL WORKSPACE</text>
       <text x="80" y="225" font-size="78" fill="#eceff4">Your job hunt.</text>
       <text x="80" y="322" font-size="78" fill="#88c0d0">In your terminal.</text>
-      <text x="84" y="386" font-size="25" letter-spacing="0" fill="#b2bdce">Find jobs. Apply with your real experience. Track what happens.</text>
+      <text x="84" y="386" font-size="25" style="letter-spacing: 0" fill="#b2bdce">Find jobs. Apply with your real experience. Track what happens.</text>
       <rect x="80" y="439" width="1040" height="64" rx="4" fill="#242933" stroke="#485466" />
-      <text x="102" y="481" font-size="24" letter-spacing="0" fill="#a3be8c">$</text>
-      <text x="132" y="481" font-size="24" letter-spacing="0" fill="#eceff4">npm i -g careerrat</text>
-      <text x="84" y="551" font-size="18" letter-spacing="0" fill="#b2bdce">CLAUDE CODE / CODEX</text>
-      <text x="1118" y="551" text-anchor="end" font-size="18" letter-spacing="0" fill="#b2bdce">careerrat.com</text>
+      <text x="102" y="481" font-size="24" style="letter-spacing: 0" fill="#a3be8c">$</text>
+      <text x="132" y="481" font-size="24" style="letter-spacing: 0" fill="#eceff4">npm i -g careerrat</text>
+      <text x="84" y="551" font-size="18" style="letter-spacing: 0" fill="#b2bdce">CLAUDE CODE / CODEX</text>
+      <text x="1118" y="551" text-anchor="end" font-size="18" style="letter-spacing: 0" fill="#b2bdce">careerrat.com</text>
     </svg>
   `);
 }
