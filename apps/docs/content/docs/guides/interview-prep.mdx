@@ -35,13 +35,13 @@ company, and the role-family learning file. It produces:
   private `current_base`)
 
 The packet is saved to `.careerrat/workspace/interview-prep/` and exported to
-`~/Downloads/careerrat/<Company>/`. The job's Workspace tab lists it, and you can
-ask the agent to open it.
+`~/Downloads/careerrat/<Company>/`. The agent records the packet in the job's
+History and can open it for you.
 
 ## Interview scheduling
 
-When a role has a scheduled interview, it shows in the job's details. The
-agent (via `schedule-meeting`) writes the structured datetime to `interviewAt` in
+The agent (via `schedule-meeting`) saves a scheduled interview's structured
+datetime to `interviewAt` in
 the tracker. `interview-prep` reads that field to determine when prep is relevant;
 it does not overwrite an already-booked future datetime.
 
