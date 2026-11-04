@@ -78,7 +78,7 @@ test("operational docs do not advertise the retired static tracker dashboard", (
     "docs/ARCHITECTURE.md",
     "docs/SETUP.md",
     "docs/foundations-spec.md",
-    "apps/docs/content/docs/getting-started/dashboard.mdx",
+    "apps/docs/content/docs/getting-started/terminal-workspace.mdx",
     "apps/docs/content/docs/advanced/data-model.mdx",
     "apps/docs/content/docs/advanced/agent-contract.mdx",
     "apps/docs/content/docs/guides/applying.mdx",

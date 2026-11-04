@@ -150,16 +150,17 @@ actions ask for their own concrete capability only when that action is needed.
 Both require `apply-job` to run or verify `evaluate-job` before tailoring,
 filling, or submitting.
 
-## Dashboard
+## Legacy browser workspace
 
-The browser dashboard is the legacy surface. `careerrat start --browser` brings it up. To run it separately:
+The terminal workspace is the product surface. The browser workspace is a legacy
+surface that is being retired. `careerrat start --browser` brings it up. To run it separately:
 
 ```bash
 careerrat tracker        # snapshot tracker.json for recovery
 careerrat tracker-dev    # live-updating app server on :7777
 ```
 
-`careerrat start --browser` runs that dashboard as a separate local process and
+`careerrat start --browser` runs that workspace as a separate local process and
 writes `.careerrat/internal/tracker-dev.pid` plus `.careerrat/internal/tracker-dev.log`, so the page
 stays available while the launched agent works.
 

@@ -385,94 +385,43 @@ button {
   padding-block: 4px;
 }
 
-.chat-demo {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.terminal-shot {
   margin: 14px 0 0;
   border-radius: var(--radius-panel);
   background: var(--white);
-  padding: 22px 26px;
+  padding: 14px;
 }
 
-.chat-demo__user {
-  align-self: flex-end;
-  max-width: 62%;
-  color: var(--ink);
-  background: var(--tint-cool-2);
-  border-radius: 18px 4px 18px 18px;
-  padding: 11px 15px;
-  font-size: 14px;
-  line-height: 1.55;
+.hero .terminal-shot {
+  width: 100%;
+  margin-top: 26px;
+  text-align: left;
 }
 
-.chat-demo__agent-row {
-  display: flex;
-  max-width: 78%;
-  align-items: flex-start;
-  gap: 9px;
-}
-
-.chat-demo__avatar {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
+.terminal-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
   border-radius: 10px;
-  background: var(--sky);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
 }
 
-.chat-demo__agent {
-  border-radius: 4px 18px 18px 18px;
-  background: var(--tint-cool);
-  padding: 12px 15px;
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.activity-list {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.activity-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 1.5px solid var(--line-warm-2);
-  border-radius: var(--radius-pill);
-  background: var(--white);
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.2;
-  padding: 4px 12px;
-}
-
-.activity-pill--running {
-  color: var(--ink);
-}
-
-.activity-spinner {
-  animation: spin 1s linear infinite;
-}
-
-.chat-demo__caption {
+.terminal-shot__caption {
   margin: 0;
-  padding-top: 2px;
+  padding: 10px 6px 2px;
   color: var(--slate);
   font-size: 12.5px;
   line-height: 1.6;
+}
+
+.terminal-shots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.terminal-shots .terminal-shot {
+  margin: 0;
 }
 
 .guardrails-card {
@@ -757,12 +706,6 @@ button {
   border-radius: 7px;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (max-width: 760px) {
   .site-shell {
     padding-inline: 10px;
@@ -817,16 +760,8 @@ button {
     min-height: 220px;
   }
 
-  .chat-demo {
-    padding: 20px 16px;
-  }
-
-  .chat-demo__user {
-    max-width: 82%;
-  }
-
-  .chat-demo__agent-row {
-    max-width: 94%;
+  .terminal-shots {
+    grid-template-columns: 1fr;
   }
 
   .guardrails-card {
@@ -879,11 +814,6 @@ button {
 
   .button-row .button {
     width: 100%;
-  }
-
-  .chat-demo__user,
-  .chat-demo__agent-row {
-    max-width: 100%;
   }
 
   .feature-card {

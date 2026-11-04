@@ -264,7 +264,7 @@ test("public docs explain durable background work without claiming interrupted w
   const paths = {
     readme: "README.md",
     website: "apps/website/src/app/page.tsx",
-    dashboard: "apps/docs/content/docs/getting-started/dashboard.mdx",
+    workspace: "apps/docs/content/docs/getting-started/terminal-workspace.mdx",
     runtime: "docs/CHAT_FIRST_RUNTIME.md",
   };
   const copy = Object.fromEntries(
@@ -290,7 +290,9 @@ test("website explains the first-run handoff and keeps step 03 short", async () 
   assert.match(page, /questions in plain English/i);
   assert.match(page, /what would make one job worth applying to before another/i);
   assert.match(page, /Search opens when setup is ready/i);
-  assert.match(page, /CAPTCHAs and Submit stay with you/i);
+  assert.match(page, /CAPTCHAs stay with you/i);
+  assert.match(page, /submits only after its checks pass/i);
+  assert.match(page, /manual mode to press Submit yourself/i);
 });
 
 test("website moves the supervised apply boundary into its own guardrails block", async () => {
@@ -355,6 +357,60 @@ test("public copy keeps local Application defaults and plain-English onboarding 
 
   assert.match(copy.architecture, /excluded from AI drafting/i);
   assert.match(copy.architecture, /explicit saved local policy or exact answer/i);
+});
+
+test("website shows the terminal workspace with real screenshots, not the old browser app", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+  const flat = normalizeWhitespace(page);
+
+  assert.match(
+    flat,
+    /It runs in your terminal, with your saved jobs on one side and your agent on the other\./
+  );
+  assert.match(flat, /The workspace opens in your terminal with your agent beside your jobs/);
+  assert.match(flat, /Search jobs runs in the background/);
+  assert.doesNotMatch(page, /Example CareerRat conversation|Read evidence-bank\.md|localhost:7777/);
+  assert.doesNotMatch(page, /visible app browser/);
+  assert.doesNotMatch(page, /\u2014/, "no em dashes in website copy");
+
+  for (const shot of ["main", "fit", "activity"]) {
+    assert.match(page, new RegExp(`/screenshots/tui-${shot}\\.png`));
+  }
+  for (const shot of ["main", "fit", "activity", "changes"]) {
+    const meta = await sharp(`apps/website/public/screenshots/tui-${shot}.png`).metadata();
+    assert.equal(meta.width, 1600, `${shot} screenshot width`);
+  }
+  for (const shot of ["main", "fit", "activity", "changes"]) {
+    await access(`apps/docs/content/docs/getting-started/tui-${shot}.png`);
+  }
+  await assert.rejects(access("assets/screenshots/chat-activity.gif"));
+});
+
+test("docs tour the terminal workspace instead of the browser app", async () => {
+  const meta = JSON.parse(
+    await readFile("apps/docs/content/docs/getting-started/meta.json", "utf8")
+  );
+  assert.ok(meta.pages.includes("terminal-workspace"));
+  assert.ok(!meta.pages.includes("dashboard"));
+  const oldTour = await readFile("apps/docs/content/docs/getting-started/dashboard.mdx", "utf8");
+  assert.match(oldTour, /\[The terminal workspace\]\(\/getting-started\/terminal-workspace\)/);
+
+  const tour = normalizeWhitespace(
+    await readFile("apps/docs/content/docs/getting-started/terminal-workspace.mdx", "utf8")
+  );
+  assert.match(tour, /^---\s+title: The terminal workspace/);
+  for (const tab of ["Job details", "Fit report", "History", "Workspace", "Changes", "Activity"]) {
+    assert.match(tour, new RegExp(`\\| ${tab} \\|`));
+  }
+  for (const key of ["F6", "F5", "F1", "Shift\\+Enter", "Ctrl\\+Q"]) {
+    assert.match(tour, new RegExp(`\\| ${key} \\|`));
+  }
+  assert.match(tour, /\| s \| Search jobs/);
+  assert.match(tour, /\| v \| Review matches/);
+  assert.match(tour, /\| a \| Apply/);
+  assert.match(tour, /\| c \| Add context/);
+  assert.match(tour, /legacy and is being retired/);
+  assert.doesNotMatch(tour, /\u2014/);
 });
 
 test("website sections keep a calm vertical rhythm", async () => {
@@ -478,11 +534,8 @@ test("website uses the approved text mark, natural chat colors, and house footer
   assert.match(page, /className="brand-mark"[\s\S]*Career[\s\S]*Rat\./);
   assert.doesNotMatch(page, /🐀|chat-activity(?:-pending)?\.(?:png|gif)/);
   assert.match(styles, /\.brand-mark\s*\{[^}]*background:\s*var\(--sky\)/s);
-  assert.match(
-    styles,
-    /\.chat-demo__user\s*\{[^}]*color:\s*var\(--ink\)[^}]*background:\s*var\(--tint-cool-2\)/s
-  );
-  assert.doesNotMatch(styles, /\.chat-demo__user\s*\{[^}]*background:\s*var\(--ink\)/s);
+  assert.match(styles, /\.terminal-shot\s*\{[^}]*background:\s*var\(--white\)/s);
+  assert.doesNotMatch(styles, /\.chat-demo|\.activity-pill/);
   assert.match(page, /<Footer \/>/);
   assert.match(footer, /className="codeswhat-badge"/);
   assert.match(footer, /CODE_SIGNING_POLICY\.md/);

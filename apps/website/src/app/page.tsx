@@ -1,4 +1,4 @@
-import { ArrowRight, ClipboardList, FileUp, LoaderCircle, Lock, Radar, Target } from "lucide-react";
+import { ArrowRight, ClipboardList, Lock, Radar, Target } from "lucide-react";
 import { Footer } from "@/components/Footer";
 import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
@@ -44,7 +44,7 @@ const features = [
   },
   {
     title: "On your machine",
-    copy: "Your workspace lives on your machine. Only the context a task needs goes to the AI provider you picked, under its terms. It keeps working in the background as you move between views, and if something gets interrupted, you get a clear retry instead of losing your place.",
+    copy: "Your workspace lives on your machine. Only the context a task needs goes to the AI provider you picked, under its terms. Searches keep running in the background while you move between tabs, and if something gets interrupted, you get a clear retry instead of losing your place.",
     Icon: Lock,
   },
 ];
@@ -90,7 +90,8 @@ export default function Home() {
           <h1 id="hero-title">Your job hunt, run by a rat.</h1>
           <p className="hero__copy">
             CareerRat turns the AI CLI you already have into a personal recruiter. It rates the jobs
-            worth chasing, applies with your real experience, and tracks what happens.
+            worth chasing, applies with your real experience, and tracks what happens. It runs in
+            your terminal, with your saved jobs on one side and your agent on the other.
           </p>
           <div className="button-row">
             <TrackedCtaLink
@@ -104,6 +105,19 @@ export default function Home() {
               See how it works
             </a>
           </div>
+          <figure className="terminal-shot">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/screenshots/tui-main.png"
+              alt="The CareerRat terminal workspace: a table of saved jobs with fit and pay on the left, details for the selected job below it, and the agent chat on the right."
+              width={1600}
+              height={1031}
+              decoding="async"
+            />
+            <figcaption className="terminal-shot__caption">
+              The terminal workspace, shown with demo jobs. Run careerrat start to open yours.
+            </figcaption>
+          </figure>
         </section>
 
         <section className="section" id="how-it-works" aria-labelledby="how-title">
@@ -113,7 +127,10 @@ export default function Home() {
             <article className="step-card">
               <span className="step-card__number">01</span>
               <h3>Open it</h3>
-              <p>It finds the AI CLI on your machine and sets itself up. No account, no forms.</p>
+              <p>
+                Run careerrat start. It finds the AI CLI on your machine and sets itself up. No
+                account, no forms.
+              </p>
               <span className="status-pill status-pill--active">LOCAL AI CLI · READY</span>
             </article>
             <article className="step-card">
@@ -130,50 +147,50 @@ export default function Home() {
               <h3>It hunts, you decide</h3>
               {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
               <p>
-                Search opens when setup is ready. It looks in built-in job boards, and finds specialist boards and employer pages on its own as it learns. Nothing counts until Evaluate reads the full posting. You review any missing answers before it fills anything, and CAPTCHAs and Submit stay with you.
+                Search opens when setup is ready. It looks in built-in job boards, and finds specialist boards and employer pages on its own as it learns. Nothing counts until Evaluate reads the full posting. You review any missing answers before it fills anything, and CAPTCHAs stay with you. CareerRat submits only after its checks pass; choose manual mode to press Submit yourself.
               </p>
               <span className="status-pill">SWEEP · 9 CUT · 12 RANKED</span>
             </article>
           </div>
 
-          <figure className="chat-demo" aria-labelledby="chat-demo-title">
-            <h3 id="chat-demo-title" className="visually-hidden">
-              Example CareerRat conversation
-            </h3>
-            <div className="chat-demo__user">what should the Cyberdyne staff role pay?</div>
-            <div className="chat-demo__agent-row">
-              <span className="chat-demo__avatar" aria-hidden="true">
-                CR
-              </span>
-              <div className="chat-demo__agent">
-                Checking now. I&apos;ll compare the posting against your floor of $210k.
-                <ul className="activity-list" aria-label="Agent activity">
-                  <li className="activity-pill activity-pill--running">
-                    <LoaderCircle className="activity-spinner" aria-hidden="true" size={13} />
-                    Searching the web
-                  </li>
-                  <li className="activity-pill">
-                    <FileUp aria-hidden="true" size={13} />
-                    Read evidence-bank.md
-                  </li>
-                  <li className="activity-pill">
-                    <Radar aria-hidden="true" size={13} />
-                    Compared 4 sources
-                  </li>
-                </ul>
-              </div>
-            </div>
-            <figcaption className="chat-demo__caption">
-              You watch it read, search, and write as it works.
-            </figcaption>
-          </figure>
+          <div className="terminal-shots">
+            <figure className="terminal-shot terminal-shot--small">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/screenshots/tui-fit.png"
+                alt="The Fit report tab listing each requirement from a posting with the evidence from your record and a strong, partial, or gap match."
+                width={1600}
+                height={1031}
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption className="terminal-shot__caption">
+                The Fit report checks the posting against your must-haves, one requirement at a
+                time.
+              </figcaption>
+            </figure>
+            <figure className="terminal-shot terminal-shot--small">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/screenshots/tui-activity.png"
+                alt="The Activity tab showing a search running in the background with sources checked and jobs found so far, above a finished search with a Review new matches button."
+                width={1600}
+                height={1031}
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption className="terminal-shot__caption">
+                Search jobs runs in the background. Keep working while Activity shows its progress.
+              </figcaption>
+            </figure>
+          </div>
 
           <div className="guardrails-card">
             <p className="eyebrow">What stays in your hands</p>
             <ul className="guardrails-list">
               {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
               <li>
-                When a saved job site is added or first used and a login is needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that exact search in the visible app browser; No skips it and keeps searching elsewhere.
+                When a saved job site is added or first used and a login is needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that exact search in a visible browser window; No skips it and keeps searching elsewhere.
               </li>
               {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
               <li>
@@ -219,8 +236,9 @@ export default function Home() {
               <p className="eyebrow">Get CareerRat</p>
               <h2 id="get-title">One install, and you&apos;re talking.</h2>
               <p className="download-card__copy">
-                Run npm i -g careerrat, then careerrat start. It opens in your terminal, and you say
-                hi. Setup is a conversation, not a form. Open source under MIT.
+                Run npm i -g careerrat, then careerrat start. The workspace opens in your terminal
+                with your agent beside your jobs, and you say hi. Setup is a conversation, not a
+                form. Open source under MIT.
               </p>
               <TrackedCtaLink className="button button--lime" href={INSTALL_URL} placement="get">
                 Install with npm

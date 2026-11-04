@@ -111,7 +111,7 @@ test("architecture docs describe the exact packaged runtime boundaries", async (
     /and OpenAI Codex are the[\s\S]{0,60}complete CareerRat product/i,
     /allowlisted process\s+environment/i,
     /app never silently switches engines/i,
-    /only HTML product surface/i,
+    /terminal workspace is the product surface/i,
   ]);
 
   assert.doesNotMatch(architecture, /Codex\s+\d+\.\d+|Codex on its current release/i);

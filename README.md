@@ -179,17 +179,33 @@ Press F6 to move between the jobs and the chat, and Ctrl+Q to quit. Use
 `careerrat start` needs a real terminal window. It will not run from a script or
 a pipe.
 
+### What it looks like
+
+`careerrat start` opens your saved jobs on the left and your agent on the right.
+Pick a job and the details, a requirement-by-requirement fit report, its history,
+and the changes you've made appear under the table. These screenshots use demo
+jobs and a stand-in agent transcript.
+
+![The CareerRat terminal workspace: saved jobs with fit and pay, the selected job's details, and the agent chat beside them](apps/website/public/screenshots/tui-main.png)
+
+The Fit report checks the posting against your must-haves:
+
+![The Fit report tab listing each requirement with the evidence and a match](apps/website/public/screenshots/tui-fit.png)
+
+Search jobs runs in the background, and the Activity tab shows its progress while
+you keep working:
+
+![The Activity tab with a search running and an earlier search finished](apps/website/public/screenshots/tui-activity.png)
+
 <details>
-<summary>Windows, and the desktop window</summary>
+<summary>Windows</summary>
 
 The Windows x64 installer passed build, install, launch, export, and uninstall
 QA. A public Windows installer will ship only after SignPath Foundation signing
 is available; SignPath requires project reputation CareerRat does not yet have.
 See [Windows status](docs/WINDOWS.md).
 
-CareerRat opens at a designed desktop size of 1280 by 860. The window is
-resizable, maximizable, and supports full screen, with a minimum working size of
-1100 by 680. There is no mobile app, no Intel Mac build, and no Linux build.
+There is no mobile app and no Intel Mac build.
 
 </details>
 
@@ -198,16 +214,14 @@ resizable, maximizable, and supports full screen, with a minimum working size of
 <h2 align="center" id="recent-updates">Recent Updates</h2>
 
 <details open>
-<summary><strong>v0.20.0 highlights</strong></summary>
+<summary><strong>v0.24.0 highlights</strong></summary>
 
-- `careerrat start` opens the browser workspace on its own. Terminal sessions
-  with Claude Code or Codex are still there when you ask for them.
-- Saved exports go to `Documents/careerrat`, one folder per job. Closed jobs
-  move to an archive and come back when reopened.
-- Today's conversation points at your next application and asks for outcomes
-  like rejections and interview invites.
-- PDF export works from an npm install.
-- CareerRat now ships through npm only. The Mac app ended at v0.19.2.
+- The terminal workspace has an Activity tab. Search jobs runs in the background
+  and shows its progress there.
+- Résumés, cover letters and answers are fact-checked before you see them.
+- Honest outcome rates and fake-recruiter warnings.
+- Installs on Linux without a compiler.
+- CareerRat ships through npm only. The Mac app ended at v0.19.2.
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
 
@@ -232,8 +246,8 @@ tips, commission, and cash bonuses, or both. Equity and benefits never count as
 cash earnings.
 
 The search stays together in one local workspace: conversations, jobs, recruiter
-threads, missions, files, follow-ups, interviews, and outcomes. You can leave a
-thread, come back later, and CareerRat restores the relevant state without
+threads, missions, files, follow-ups, interviews, and outcomes. You can close the
+terminal, come back later, and CareerRat restores the relevant state without
 depending on one AI vendor's session history. CareerRat owns those workflows and
 threads, so the execution layer stays provider-neutral.
 
@@ -290,28 +304,25 @@ application work begins.
   approved. It then waits for a confirmation page. If it doesn't see one, the
   application is marked submitted-unverified, never retried, and you're asked to
   check the site. Run `careerrat automation submit manual --write` and CareerRat
-  fills the form and stops for you to press Submit. If you still run the v0.19.2 Mac app, it checks for signed updates, downloads
-  them in place, and waits for an explicit **Restart and install**.
+  fills the form and stops for you to press Submit.
 
 ### One workspace for the whole search
 
-The app uses one desktop shell with three working areas: the left rail holds
-conversation threads, research, Deep ingest, mock interviews, and the current
-view; the conversation stays in the center, so job-search actions and skill
-results return there instead of opening a second product; the right panel shows
-structured profile or job facts as the conversation discovers them, with whole
-sections opening in focused editors when needed.
+The terminal workspace has three working areas. The saved jobs table is on the
+left, with status, fit and pay, and filters for status and pay. Your Claude Code
+or Codex agent is on the right, so job-search actions and skill results come
+back to the same chat. Under the table, the Inspector has tabs for Job details,
+the Fit report, History, Workspace, Changes, and Activity.
 
-Search, Pipeline, Files, People, and Schedule are alternate views of the same
-local state. Missions turn longer work into resumable, ordered steps with clear
-user gates. Deep ingest gets its own durable thread. Mock interviews preserve the
-session and debrief. "Needs You" groups actions such as reviewing several
-prepared applications into one focused handoff.
+Missions turn longer work into resumable, ordered steps with clear user gates.
+Deep ingest gets its own durable thread, and mock interviews keep their session
+and debrief. Changes records supported settings and evidence edits, with a preview-first
+Undo for each recorded change.
 
-Searches and intake continue in the background when you navigate to another view.
-Returning to the view or reloading restores the durable run status. If the app or
-computer stops mid-run, CareerRat marks the interrupted work for a clear retry
-instead of reporting a false success.
+Searches and intake continue in the background when you move between tabs.
+Activity shows their progress. If CareerRat or your computer stops mid-run,
+CareerRat marks the interrupted work for a clear retry instead of reporting a
+false success.
 
 CareerRat stores canonical candidate state, conversations, missions, mock
 sessions, and pipeline records in local SQLite. Job descriptions, research,
@@ -330,7 +341,7 @@ Your workspace stays on your machine and can be exported.
   and privacy terms.
 - Search, research, and browser skills fetch the public or authenticated pages
   needed for the task you started.
-- The v0.19.2 Mac app checks GitHub's `latest-mac.yml` SHA-512 checksum metadata at most
+- The Mac app (final release v0.19.2, no longer updated) checked GitHub's `latest-mac.yml` SHA-512 checksum metadata at most
   once a day. It sends no candidate data and no unique installation or device
   identifier. When a newer version exists, it downloads the signed and notarized
   app update. Nothing installs until you choose **Restart and install**.
@@ -347,7 +358,7 @@ Read the full [privacy documentation](https://careerrat.com/docs/advanced/privac
 
 ### 28 skills, one workflow
 
-The app and terminal flow share the same public skill definitions. You never
+The terminal workspace and the CLI share the same public skill definitions. You never
 have to know their names; Paul routes to the right one for what you ask.
 
 <details>
@@ -466,7 +477,7 @@ threads fold into the same workspace as the rest of your search.
 <h2 align="center" id="built-with">Built With</h2>
 
 [![Node engine](https://img.shields.io/node/v/careerrat)](https://nodejs.org/)
-[![Electron](https://img.shields.io/badge/Electron_44-47848F?logo=electron&logoColor=fff)](https://www.electronjs.org/)
+[![Textual](https://img.shields.io/badge/Textual-1B1B1B?logo=python&logoColor=fff)](https://textual.textualize.io/)
 [![React](https://img.shields.io/badge/React_19-149eca?logo=react&logoColor=fff)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite_8-646CFF?logo=vite&logoColor=fff)](https://vite.dev/)
 [![Biome](https://img.shields.io/badge/Biome_2.5-60a5fa?logo=biome&logoColor=fff)](https://biomejs.dev/)
@@ -489,8 +500,7 @@ terminal workspace, on the same canonical skills and local data.
 
 ### Install from npm
 
-Needs Node.js 24.22.1 or newer and Python 3.11 or newer. Linux also needs
-`make` and a C++ compiler.
+Needs Node.js 24.22.1 or newer and Python 3.11 or newer. No compiler is needed.
 
 ```bash
 npm i -g careerrat
@@ -509,15 +519,19 @@ careerrat next          # show the next useful agent-led workflow
 careerrat doctor        # verify setup, data, skills, and runtime health
 careerrat update        # update an npm installation without touching user data
 careerrat tracker       # write a recovery snapshot and summary
-careerrat tracker-dev   # serve the legacy browser workspace at localhost:7777
+careerrat tracker-dev   # legacy: serve the browser workspace at localhost:7777
 ```
 
 ### Textual workspace
 
 `careerrat start` (also `careerrat tui`) opens clickable saved jobs, details, requirement reports and
 history beside native agent chat. Use `--agent claude` or `--agent codex` to
-choose the agent, or `--no-agent` to browse saved jobs. F6 switches focus;
-Ctrl+Q closes the workspace and its agent.
+choose the agent, or `--no-agent` to browse saved jobs. Keys: F6 switches
+between jobs and agent, `s` starts a background search, `v` reviews matches, `a`
+applies to the selected job, `c` adds context, F5 refreshes, F1 opens the command
+palette, Shift+Enter adds a new line in the agent, and Ctrl+Q closes the
+workspace and its agent. The full tour is in
+[The terminal workspace](https://careerrat.com/docs/getting-started/terminal-workspace).
 
 First launch needs Python 3.11 or newer with venv support. On Windows it looks
 for the `py -3` launcher, then `python`. The native terminal dependency ships prebuilt for macOS, Linux and Windows, so
