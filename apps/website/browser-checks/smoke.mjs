@@ -8,7 +8,7 @@
 // page also has its nav and CTAs clicked, ending on the install docs page.
 import assert from "node:assert/strict";
 import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -218,6 +218,29 @@ for (const browserName of Object.keys(BROWSERS)) {
             assert.ok(overflow <= 1, `${pathname}: ${overflow}px horizontal overflow at ${viewName}`);
             await checkLinks(page, pathname);
             assert.deepEqual(problems, [], `${pathname}: browser problems`);
+            const screenshotDir = process.env.WEBSITE_SCREENSHOT_DIR;
+            if (
+              screenshotDir &&
+              browserName === "chromium" &&
+              ["/", "/docs/getting-started/terminal-workspace/"].includes(pathname)
+            ) {
+              await mkdir(screenshotDir, { recursive: true });
+              const name = pathname === "/" ? "home" : "terminal-guide";
+              for (const img of await page.locator("img").all()) {
+                await img.scrollIntoViewIfNeeded();
+                await img.evaluate((element) =>
+                  element.src.startsWith(location.origin) ? element.decode() : undefined
+                );
+              }
+              await page.evaluate(() => window.scrollTo(0, 0));
+              if (name === "home") {
+                await page.screenshot({ path: join(screenshotDir, `${name}-${viewName}-fold.png`) });
+              }
+              await page.screenshot({
+                path: join(screenshotDir, `${name}-${viewName}.png`),
+                fullPage: true,
+              });
+            }
           }
         } finally {
           await context.close();

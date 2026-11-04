@@ -52,25 +52,19 @@ function socialCardSvg() {
   return Buffer.from(`
     <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
       ${typeStyle("-0.04em")}
-      <rect width="1200" height="630" fill="#edf5fb" />
-      <rect x="36" y="36" width="1128" height="558" rx="46" fill="#fdfcf7" />
-      <rect x="76" y="76" width="360" height="478" rx="42" fill="${SKY}" />
-      <text x="108" y="292" font-size="102" textLength="296" lengthAdjust="spacingAndGlyphs" fill="${INK}">Career</text>
-      <text x="108" y="415" font-size="124" textLength="270" lengthAdjust="spacingAndGlyphs" fill="${INK}">Rat.</text>
-
-      <rect x="500" y="91" width="172" height="43" rx="22" fill="#e6fa8d" />
-      <text x="524" y="121" font-size="18" letter-spacing="0.08em" fill="${INK}">LOCAL-FIRST</text>
-      <text x="500" y="223" font-size="66" fill="${INK}">Your AI CLI,</text>
-      <text x="500" y="296" font-size="66" fill="${INK}">working your</text>
-      <text x="500" y="369" font-size="66" fill="${INK}">job search.</text>
-      <text x="500" y="432" font-size="25" letter-spacing="-0.01em" fill="#55584a">Rate jobs. Build honest applications.</text>
-      <text x="500" y="466" font-size="25" letter-spacing="-0.01em" fill="#55584a">Track every outcome.</text>
-
-      <rect x="500" y="505" width="166" height="45" rx="23" fill="#edf5fb" stroke="#d7dee4" stroke-width="2" />
-      <text x="526" y="535" font-size="18" letter-spacing="0.02em" fill="${INK}">CLAUDE CODE</text>
-      <rect x="680" y="505" width="105" height="45" rx="23" fill="#edf5fb" stroke="#d7dee4" stroke-width="2" />
-      <text x="704" y="535" font-size="18" letter-spacing="0.02em" fill="${INK}">CODEX</text>
-      <text x="1030" y="537" font-size="19" text-anchor="end" letter-spacing="0" fill="#55584a">careerrat.com</text>
+      <rect width="1200" height="630" fill="#242933" />
+      <rect x="40" y="40" width="1120" height="550" rx="6" fill="#2e3440" stroke="#485466" stroke-width="2" />
+      <path d="M40 106H1160" stroke="#485466" stroke-width="2" />
+      <text x="76" y="84" font-size="22" letter-spacing="0" fill="#88c0d0">&gt; CareerRat</text>
+      <text x="1118" y="82" text-anchor="end" font-size="17" letter-spacing="0.04em" fill="#b9a1bf">TERMINAL WORKSPACE</text>
+      <text x="80" y="225" font-size="78" fill="#eceff4">Your job hunt.</text>
+      <text x="80" y="322" font-size="78" fill="#88c0d0">In your terminal.</text>
+      <text x="84" y="386" font-size="25" letter-spacing="0" fill="#b2bdce">Find jobs. Apply with your real experience. Track what happens.</text>
+      <rect x="80" y="439" width="1040" height="64" rx="4" fill="#242933" stroke="#485466" />
+      <text x="102" y="481" font-size="24" letter-spacing="0" fill="#a3be8c">$</text>
+      <text x="132" y="481" font-size="24" letter-spacing="0" fill="#eceff4">npm i -g careerrat</text>
+      <text x="84" y="551" font-size="18" letter-spacing="0" fill="#b2bdce">CLAUDE CODE / CODEX</text>
+      <text x="1118" y="551" text-anchor="end" font-size="18" letter-spacing="0" fill="#b2bdce">careerrat.com</text>
     </svg>
   `);
 }

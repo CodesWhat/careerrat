@@ -31,7 +31,8 @@ test("website hero leads with the CareerRat pitch", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
 
-  assert.match(page, /Your job hunt, run by a rat\./);
+  assert.match(page, /Your job hunt\./);
+  assert.match(page, /In your terminal\./);
   assert.match(page, /CareerRat turns the AI CLI you already have into a personal recruiter/);
   assert.doesNotMatch(page, /Mac app/);
   assert.doesNotMatch(page, new RegExp(LEGACY_BRAND, "i"));
@@ -363,10 +364,7 @@ test("website shows the terminal workspace with real screenshots, not the old br
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const flat = normalizeWhitespace(page);
 
-  assert.match(
-    flat,
-    /It runs in your terminal, with your saved jobs on one side and your agent on the other\./
-  );
+  assert.match(flat, /Your saved jobs on one side\. Your agent on the other\./);
   assert.match(flat, /The workspace opens in your terminal with your agent beside your jobs/);
   assert.match(flat, /Search jobs runs in the background/);
   assert.doesNotMatch(page, /Example CareerRat conversation|Read evidence-bank\.md|localhost:7777/);
@@ -411,16 +409,6 @@ test("docs tour the terminal workspace instead of the browser app", async () => 
   assert.match(tour, /\| c \| Add context/);
   assert.match(tour, /legacy and is being retired/);
   assert.doesNotMatch(tour, /\u2014/);
-});
-
-test("website sections keep a calm vertical rhythm", async () => {
-  const styles = await readFile("apps/website/src/app/globals.css", "utf8");
-
-  assert.match(styles, /\.section\s*\{[^}]*padding-top:\s*120px/s);
-  assert.match(
-    styles,
-    /@media \(max-width:\s*760px\)[\s\S]*?\.section\s*\{[^}]*padding-top:\s*88px/s
-  );
 });
 
 test("public surfaces keep the provider-neutral installed-runtime contract aligned", async () => {
@@ -504,25 +492,16 @@ test("search docs reserve capability gates for separate private-account workflow
   );
 });
 
-test("website provides a keyboard skip link and preserves approved button variants", async () => {
+test("website provides a keyboard skip link", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
 
   assert.match(page, /className="skip-link" href="#main-content"/);
   assert.match(page, /<main id="main-content">/);
   assert.match(styles, /\.skip-link:focus-visible\s*\{[^}]*transform:\s*translate\(-50%,\s*0\)/s);
-  assert.match(styles, /\.site-nav__cta\s*\{[^}]*font-weight:\s*700/s);
-  assert.match(
-    styles,
-    /\.button--white\.button--large,\s*\.button--outline\.button--large\s*\{[^}]*font-weight:\s*700/s
-  );
-  assert.match(
-    styles,
-    /\.button--lime\.button--large,\s*\.button--ink\.button--large\s*\{[^}]*padding-inline:\s*24px/s
-  );
 });
 
-test("website uses the approved text mark, natural chat colors, and house footer", async () => {
+test("website keeps the text mark and house footer", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const styles = await readFile("apps/website/src/app/globals.css", "utf8");
   const iconBuild = await readFile("apps/website/scripts/generate-brand-icons.mjs", "utf8");
@@ -533,14 +512,11 @@ test("website uses the approved text mark, natural chat colors, and house footer
 
   assert.match(page, /className="brand-mark"[\s\S]*Career[\s\S]*Rat\./);
   assert.doesNotMatch(page, /🐀|chat-activity(?:-pending)?\.(?:png|gif)/);
-  assert.match(styles, /\.brand-mark\s*\{[^}]*background:\s*var\(--sky\)/s);
-  assert.match(styles, /\.terminal-shot\s*\{[^}]*background:\s*var\(--white\)/s);
   assert.doesNotMatch(styles, /\.chat-demo|\.activity-pill/);
   assert.match(page, /<Footer \/>/);
   assert.match(footer, /className="codeswhat-badge"/);
   assert.match(footer, /CODE_SIGNING_POLICY\.md/);
   assert.match(footer, /label:\s*"Code signing policy"/);
-  assert.match(styles, /\.codeswhat-badge\s*\{[^}]*background:\s*var\(--cream\)/s);
   assert.doesNotMatch(
     styles,
     /\.js\s+\.reveal\s*\{[^}]*opacity:\s*0/s,
@@ -699,7 +675,7 @@ test("deployed sites bundle fonts without Google build-time fetches", async () =
   assert.doesNotMatch(combined, /next\/font\/google|fonts\.(?:googleapis|gstatic)\.com/);
   assert.match(websiteLayout, /next\/font\/local/);
   assert.match(websiteLayout, /@fontsource\/figtree/);
-  assert.doesNotMatch(websiteLayout, /GeistVF|GeistMonoVF|@fontsource\/archivo/);
+  assert.doesNotMatch(websiteLayout, /next\/font\/google/);
   assert.match(docsLayout, /next\/font\/local/);
 });
 

@@ -6,7 +6,7 @@ const INSTALL_URL = "/docs/getting-started/install";
 const STAR_HISTORY_URL =
   "https://www.star-history.com/?repos=codeswhat%2Fcareerrat&type=date&legend=top-left";
 const STAR_HISTORY_CHART =
-  "https://api.star-history.com/chart?repos=codeswhat/careerrat&type=date&legend=top-left";
+  "https://api.star-history.com/chart?repos=codeswhat/careerrat&type=date&legend=top-left&theme=dark";
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
   if (compact) {
@@ -74,7 +74,7 @@ export default function Home() {
               GitHub
             </a>
             <TrackedCtaLink
-              className="button button--lime site-nav__cta"
+              className="button button--primary site-nav__cta"
               href="#get"
               placement="header"
             >
@@ -86,24 +86,50 @@ export default function Home() {
 
       <main id="main-content">
         <section className="hero" id="top" aria-labelledby="hero-title">
-          <BrandMark />
-          <h1 id="hero-title">Your job hunt, run by a rat.</h1>
-          <p className="hero__copy">
-            CareerRat turns the AI CLI you already have into a personal recruiter. It rates the jobs
-            worth chasing, applies with your real experience, and tracks what happens. It runs in
-            your terminal, with your saved jobs on one side and your agent on the other.
-          </p>
-          <div className="button-row">
-            <TrackedCtaLink
-              className="button button--lime button--large"
-              href={INSTALL_URL}
-              placement="hero"
-            >
-              Install with npm <ArrowRight aria-hidden="true" size={17} strokeWidth={2.2} />
-            </TrackedCtaLink>
-            <a className="button button--white button--large" href="#how-it-works">
-              See how it works
-            </a>
+          <div className="hero__intro">
+            <div className="hero__heading">
+              <p className="eyebrow">CareerRat / Terminal workspace</p>
+              <h1 id="hero-title">
+                Your job hunt.
+                <br />
+                <span>In your terminal.</span>
+              </h1>
+              <p className="hero__copy">
+                CareerRat turns the AI CLI you already have into a personal recruiter. It rates the
+                jobs worth chasing, applies with your real experience, and tracks what happens. Your
+                saved jobs on one side. Your agent on the other.
+              </p>
+              <div className="button-row">
+                <TrackedCtaLink
+                  className="button button--primary button--large"
+                  href={INSTALL_URL}
+                  placement="hero"
+                >
+                  Install with npm <ArrowRight aria-hidden="true" size={17} strokeWidth={2.2} />
+                </TrackedCtaLink>
+                <a className="button button--secondary button--large" href="#how-it-works">
+                  See how it works
+                </a>
+              </div>
+            </div>
+            <div className="quick-start">
+              <p className="panel-label">Start here</p>
+              <pre>
+                <code>
+                  <span aria-hidden="true">$ </span>npm i -g careerrat{"\n"}
+                  <span aria-hidden="true">$ </span>careerrat start
+                </code>
+              </pre>
+              <p>
+                Bring Claude Code or Codex.
+                <br />
+                Your workspace stays on your machine.
+              </p>
+              <div className="quick-start__meta">
+                <span>MIT licensed</span>
+                <span>Local SQLite</span>
+              </div>
+            </div>
           </div>
           <figure className="terminal-shot">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -121,7 +147,7 @@ export default function Home() {
         </section>
 
         <section className="section" id="how-it-works" aria-labelledby="how-title">
-          <p className="eyebrow">How it works</p>
+          <p className="eyebrow">01 / How it works</p>
           <h2 id="how-title">Rate. Apply. Track.</h2>
           <div className="steps-grid">
             <article className="step-card">
@@ -209,7 +235,7 @@ export default function Home() {
         </section>
 
         <section className="section" aria-labelledby="features-title">
-          <p className="eyebrow">Their side has agents. Now yours does.</p>
+          <p className="eyebrow">02 / Your side of the table</p>
           <h2 id="features-title">An agent for your side of the table.</h2>
           <p className="section__intro">
             Companies screen you with software. CareerRat aligns your experience to the role, gets
@@ -233,14 +259,14 @@ export default function Home() {
         <section className="section" id="get" aria-labelledby="get-title">
           <div className="download-card">
             <div>
-              <p className="eyebrow">Get CareerRat</p>
+              <p className="eyebrow">03 / Get CareerRat</p>
               <h2 id="get-title">One install, and you&apos;re talking.</h2>
               <p className="download-card__copy">
                 Run npm i -g careerrat, then careerrat start. The workspace opens in your terminal
                 with your agent beside your jobs, and you say hi. Setup is a conversation, not a
                 form. Open source under MIT.
               </p>
-              <TrackedCtaLink className="button button--lime" href={INSTALL_URL} placement="get">
+              <TrackedCtaLink className="button button--primary" href={INSTALL_URL} placement="get">
                 Install with npm
               </TrackedCtaLink>
               <p className="download-card__note">
@@ -276,7 +302,7 @@ export default function Home() {
         </section>
 
         <section className="section" id="star-history" aria-labelledby="star-history-title">
-          <p className="eyebrow">Open source</p>
+          <p className="eyebrow">04 / Open source</p>
           <h2 id="star-history-title">Star history</h2>
           <a
             className="star-history"
@@ -284,7 +310,6 @@ export default function Home() {
             target="_blank"
             rel="noopener noreferrer"
           >
-            {/* Light-only: this site has no dark theme, so no dark variant is served. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={STAR_HISTORY_CHART}
@@ -304,7 +329,7 @@ export default function Home() {
             <p>Install it and start talking.</p>
             <div className="button-row">
               <TrackedCtaLink
-                className="button button--ink button--large"
+                className="button button--primary button--large"
                 href={INSTALL_URL}
                 placement="final"
               >
