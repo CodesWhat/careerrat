@@ -81,8 +81,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ececea" },
-    { media: "(prefers-color-scheme: dark)", color: "#131316" },
+    { media: "(prefers-color-scheme: light)", color: "#eceff4" },
+    { media: "(prefers-color-scheme: dark)", color: "#242933" },
   ],
 };
 
@@ -96,7 +96,7 @@ export default function RootLayout({
       <body
         className={`${ibmPlexSans.className} ${ibmPlexMono.variable} ${archivo.variable}`}
       >
-        <RootProvider>
+        <RootProvider theme={{ defaultTheme: "dark", enableSystem: false }}>
           <DocsLayout
             tree={source.pageTree}
             nav={{

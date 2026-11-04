@@ -21,7 +21,7 @@ procedure. You talk to the agent; the agent drives the skills. CareerRat owns
 the durable workflows and threads, while direct and ACP adapters let the
 selected local engine execute them.
 
-The CLI (`careerrat`) scaffolds the workspace, serves the local app, checks
+The CLI (`careerrat`) scaffolds the workspace, opens the terminal workspace, checks
 health, and exposes validated config helpers. It does not do job-search work.
 The agent does.
 
@@ -56,9 +56,9 @@ The loop compounds: learnings from interview debriefs and rejections feed back
 into evaluation and tailoring so each pass is sharper than the last.
 
 Longer searches and intake operations are owned by CareerRat rather than the
-current page. They keep running when you move between views, restore their
-durable status after reload, and surface a retry if the app restarts before the
-work finishes.
+current tab. They keep running in the background when you move between tabs,
+restore their durable status when you reopen the workspace, and surface a retry
+if CareerRat restarts before the work finishes.
 
 ## What "local by default" means
 

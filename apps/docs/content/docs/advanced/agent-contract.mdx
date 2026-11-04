@@ -74,7 +74,7 @@ Legacy JSON-only workspaces follow the separate Tracker Write Contract in
 
 - Every generated artifact (résumé, cover letter, email) must be complete — no
   templates, no `[Placeholder]` tokens.
-- Artifacts land in two places: the tracker record (for dashboard access) and
+- Artifacts land in two places: the tracker record (for workspace access) and
   `~/Downloads/careerrat/<Company>/` (convenience copy).
 - Placeholder lint runs before any artifact is marked build-ready. An unresolved
   bracket blocks the build.
@@ -106,7 +106,7 @@ and get different behavior.
 
 Interview rounds are named by type, never numbered:
 
-| `conversations[].kind` | Rung shown |
+| `conversations[].kind` | Round label |
 |------------------------|------------|
 | `recruiter screen` | Screen |
 | `assessment` | Assessment |
@@ -116,5 +116,6 @@ Interview rounds are named by type, never numbered:
 | `final` | Final |
 | `offer` | Offer |
 
-The dashboard derives an application's pipeline rung from the deepest `kind` it
-can classify. "Round 2" is never written.
+The terminal workspace derives the displayed pipeline stage from the
+application's `status`. Conversation kinds describe the saved interview rounds;
+they do not advance that stage. "Round 2" is never written.

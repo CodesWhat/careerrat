@@ -6,6 +6,11 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- The website and docs use the terminal workspace's Nord palette, compact borders and monospace details. The homepage leads with the workspace and install commands, and the social preview matches.
+- The website, README and docs now show the terminal workspace, with demo screenshots of saved jobs, the Fit report, Changes and Activity. The old workspace tour URL links to the new tour.
+
 ## [0.24.0] - 2026-11-03
 
 ### Added
