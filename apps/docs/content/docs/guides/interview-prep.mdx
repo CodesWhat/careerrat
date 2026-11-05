@@ -39,8 +39,9 @@ The Markdown packet and its exported PDF are saved together in the resolved
 
 ## Interview scheduling
 
-The agent (via `schedule-meeting`) saves the first round's structured datetime
-to `interviewAt` in the tracker and follow-on rounds to `nextInterviewAt`.
+In database-backed workspaces, `schedule-meeting` saves a booked round's
+structured datetime to `nextInterviewAt` while `interviewAt` is still in the
+future. Otherwise it saves the datetime to `interviewAt`, replacing any past value.
 `interview-prep` reads those fields to determine when prep is relevant; it does
 not overwrite an already-booked future datetime.
 
