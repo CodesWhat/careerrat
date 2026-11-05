@@ -14,13 +14,13 @@ offer — paste the signal into the agent and say what happened:
 
 The agent routes to `track-outcomes`, which is **the only writer of status
 transitions** in `.careerrat/workspace/tracker.json`. No other skill promotes a role through
-the pipeline. This keeps the dashboard's funnel and stage ladder accurate.
+the pipeline. This keeps the funnel and stage ladder accurate.
 
 ## What track-outcomes does
 
 - Classifies the incoming signal (rejection, advance, offer, withdrawal, etc.)
 - Executes the status transition on the application row
-- Updates the stage in the tracker and refreshes the live dashboard
+- Updates the stage in the tracker and refreshes the terminal workspace
 - Appends a durable learning entry to the role-family learning file when there is
   a lesson worth keeping (rejection signal, comp intel heard, what worked)
 - Checks reevaluation thresholds and hands off to `reevaluate-strategy` if they
@@ -49,7 +49,7 @@ You can also trigger it manually:
 
 The skill reads the full funnel, rejection notes, interview transcripts, and wins.
 It recommends concrete tuning — targeting cut/keep signals, comp anchoring, fit
-calibration, channel mix, writing-style — and logs the review so the dashboard's
+calibration, channel mix, writing-style — and logs the review so the
 strategy-review nudge stays quiet until enough new outcomes accumulate.
 
 ## Learning memory

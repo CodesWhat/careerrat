@@ -293,10 +293,11 @@ checks decide what the app can actually offer.
 Visible chat handoffs are separate from app-default actions. They are explicit
 user-selected sessions, not hidden fallbacks from local API errors.
 
-The React product at `/app` is the only HTML product surface. First-run state,
-workspace operations, and agent-led handoffs all stay inside that shell.
+The terminal workspace is the product surface. First-run state, workspace
+operations, and agent-led handoffs all stay inside it. The React product at `/app`
+is the legacy browser surface, reachable only through `careerrat start --browser`.
 
-The chat-first shell persists threads and missions independently of any one AI
+The runtime persists threads and missions independently of any one AI
 vendor. See [CHAT_FIRST_RUNTIME.md](CHAT_FIRST_RUNTIME.md).
 
 ### Skill Contract Layer

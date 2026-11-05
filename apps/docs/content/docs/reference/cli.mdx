@@ -9,22 +9,22 @@ The primary entry point. Run as `careerrat <command> [args] [--flags]`.
 
 | Command | What it does |
 |---------|-------------|
-| `start [agent]` | Scaffold workspace, install skills, boot dashboard, launch agent |
+| `start [agent]` | Scaffold workspace, install skills, open the terminal workspace, launch agent |
 | `start claude` | Same, with Claude Code as the agent |
 | `start codex` | Same, with Codex as the agent |
 | `people list` / `people add <name>` / `people remove <name> --purge --yes` | List, create (with an authorization note) or purge per-person workspaces. These work on the shared roster. `--for <name>` applies to workspace commands; `--new` creates the person first. See [Running CareerRat for someone else](/guides/running-for-someone-else) |
 | `--for <name> people contact show\|set\|opt-in\|opt-out` | Record the address CareerRat may notify, their timezone and quiet hours, and their per-channel yes. Notifications fail without an opt-in |
 | `--for <name> roundup [--since <date>] [--send] [--now]` | Print a person's job-search roundup, or email it to their registered address. See [Running CareerRat for someone else](/guides/running-for-someone-else) |
 | `--for <name> comm handoff <id> --deliver-to-person` | Email a reviewed recruiter-reply draft to the person, never the recruiter. `comm mark-sent <id>` records their send |
-| `init` | Scaffold workspace only (no agent, no dashboard) |
+| `init` | Scaffold workspace only (no agent, no terminal workspace) |
 | `doctor` | Environment health check, scaffold state, skills discoverability |
 | `next` | Show the next agent task from doctor guidance |
 | `ingest` | Guided candidate setup (profile, targeting, evidence, etc.) |
 | `searches` | Build and curate the search-source config |
 | `companies` | Manage tracked employer ATS boards |
 | `evaluate` | Run the body-read gate on a saved job |
-| `tracker` | One-shot dashboard snapshot, summary, follow-ups, or `--verify` |
-| `tracker-dev` | Live-updating local app server on `:7777` |
+| `tracker` | One-shot tracker snapshot, summary, follow-ups, or `--verify` |
+| `tracker-dev` | Legacy: live-updating browser workspace on `:7777` |
 | `modes` | Show or change optional usage and application modes |
 | `automation` | Show or switch browser-automation capabilities on and off |
 | `activity` | Read, append, or prune Activity Pulse events |
@@ -50,10 +50,11 @@ The primary entry point. Run as `careerrat <command> [args] [--flags]`.
 
 | Flag | Effect |
 |------|--------|
-| `--no-agent` | Scaffold + local app only |
-| `--no-dashboard` | Agent only, no local app server |
-| `--agent <name>` | Override with a compatible agent command |
-| `--port <n>` | Local app port (default 7777) |
+| `--no-agent` | Open the terminal workspace without starting a chat |
+| `--agent <name>` | Use `claude` or `codex` |
+| `--browser` | Legacy: serve the browser workspace instead |
+| `--no-dashboard` | Legacy: terminal agent session without the workspace |
+| `--port <n>` | Legacy browser workspace port (default 7777, needs `--browser`) |
 
 ## npm scripts (source checkout)
 

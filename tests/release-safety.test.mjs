@@ -195,7 +195,7 @@ test("public docs describe the app as an active client over canonical data", asy
   for (const path of [
     "README.md",
     "AGENTS.md",
-    "apps/docs/content/docs/getting-started/dashboard.mdx",
+    "apps/docs/content/docs/getting-started/terminal-workspace.mdx",
     "apps/docs/content/docs/getting-started/first-job.mdx",
   ]) {
     const text = await readText(path);

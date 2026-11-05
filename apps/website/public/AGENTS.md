@@ -9,7 +9,7 @@
 
 ## What CareerRat is
 
-A chat-first, local-first job-search tracker. It helps one person rate, apply to, and track
+A local-first job-search tracker that runs in the terminal. It helps one person rate, apply to, and track
 roles — from their own data, on their own machine, driven by their own AI agent (you). It
 isn't a site you log into; it's a set of skills you run locally. There is no CareerRat account
 or hosted candidate database. Workspace state stays local, the selected CLI uses its provider,
@@ -41,14 +41,14 @@ posting and say "evaluate this", or try the bundled sample under `examples/sampl
 
 The loop is **paste → route → tune**: the user pastes something (a job description, a
 recruiter email, a LinkedIn URL), you classify it and run the owning skill, the tracker and
-dashboard update. To get going:
+the terminal workspace update. To get going:
 
 1. **Onboard** — run `ingest-profile` (or `careerrat ingest`) to read the user's resume and
    generate their `candidate/*.yml` config plus a personalized `candidate/AGENTS.md`.
 2. **Vet a job** — when the user pastes a JD, run `evaluate-job` before anything else.
 3. **Apply** — `apply-job` (it verifies `evaluate-job` first, then `tailor-application`).
 4. **Comms** — recruiter message → `email-comms`; scheduling a call → `schedule-meeting`.
-5. **Track** — outcomes land on the dashboard at <http://localhost:7777>.
+5. **Track** — outcomes show up in the terminal workspace.
 
 After install, **read the repo's own `AGENTS.md`** (the long one). It is the source of
 truth for intent routing, the body-read and submit-safety gates, and tracker write-back.

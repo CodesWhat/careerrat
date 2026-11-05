@@ -63,7 +63,7 @@ Also gitignored:
 ## tracker.json structure
 
 `tracker.json` is a generated compatibility export and useful inspection
-snapshot. The app and writing skills use canonical SQLite operations in new
+snapshot. The workspace and writing skills use canonical SQLite operations in new
 workspaces. Its exported top-level shape is:
 
 ```json
@@ -101,13 +101,14 @@ Roles discovered by `search-jobs` before the gate runs. Each entry has
 ### communications[]
 
 Recruiter and hiring threads. Each has `status`, `messages[]`, `draft`, and
-`nextActionDue`. The dashboard's Next Steps and CTA queue derives from these
-fields, not from the Activity Pulse.
+`nextActionDue`. These fields preserve the thread's follow-up state. The terminal
+workspace displays the application's `nextAction`; it does not derive that field
+from communications or the Activity Pulse.
 
 ## The database is the authority
 
 New workspaces use `.careerrat/db/careerrat.db` as the canonical source of truth.
-The app, CLI, and skills share its validated write operations. `tracker.json` and
+The terminal workspace, CLI, and skills share its validated write operations. `tracker.json` and
 `activity.jsonl` are regenerated compatibility exports, so do not hand-edit them
 in a database-backed workspace.
 
@@ -118,4 +119,5 @@ careerrat tracker --verify
 ```
 
 Legacy JSON-only workspaces remain supported until the user explicitly imports
-them. Run `careerrat tracker-dev` for the live app.
+them. The terminal workspace reads this database directly, so it stays current
+without a separate server.

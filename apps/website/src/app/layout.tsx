@@ -35,6 +35,12 @@ const figtree = localFont({
   display: "swap",
 });
 
+const mono = localFont({
+  src: "./fonts/GeistMonoVF.woff2",
+  variable: "--font-mono",
+  display: "swap",
+});
+
 const siteDescription =
   "CareerRat is a personal recruiter built on your AI CLI. Rate jobs before you apply, use your real experience, and track every outcome.";
 
@@ -76,14 +82,14 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#edf5fb",
+  themeColor: "#242933",
   width: "device-width",
   initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={figtree.variable}>
+    <html lang="en" className={`${figtree.variable} ${mono.variable}`}>
       <body>{children}</body>
     </html>
   );

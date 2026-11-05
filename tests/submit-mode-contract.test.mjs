@@ -51,7 +51,7 @@ const PROSE_FILES = [
   ".agents/skills/tailor-application/SKILL.md",
   ".agents/skills/ingest-profile/SKILL.md",
   "apps/docs/content/docs/advanced/browser-automation.mdx",
-  "apps/docs/content/docs/getting-started/dashboard.mdx",
+  "apps/docs/content/docs/getting-started/terminal-workspace.mdx",
   "apps/docs/content/docs/getting-started/install.mdx",
   "apps/docs/content/docs/guides/applying.mdx",
   "apps/docs/content/docs/reference/disclaimer.mdx",

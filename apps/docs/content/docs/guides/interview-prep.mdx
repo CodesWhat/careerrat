@@ -35,13 +35,13 @@ company, and the role-family learning file. It produces:
   private `current_base`)
 
 The packet is saved to `.careerrat/workspace/interview-prep/` and exported to
-`~/Downloads/careerrat/<Company>/`. The dashboard Focus card links directly to it
-via "Open dossier."
+`~/Downloads/careerrat/<Company>/`. The agent records the packet in the job's
+History and can open it for you.
 
-## Focus card and interview scheduling
+## Interview scheduling
 
-When a role has a scheduled interview, it appears on the dashboard Focus card. The
-agent (via `schedule-meeting`) writes the structured datetime to `interviewAt` in
+The agent (via `schedule-meeting`) saves a scheduled interview's structured
+datetime to `interviewAt` in
 the tracker. `interview-prep` reads that field to determine when prep is relevant;
 it does not overwrite an already-booked future datetime.
 

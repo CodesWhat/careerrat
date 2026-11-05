@@ -16,9 +16,9 @@ CareerRat's canonical candidate state and local artifacts live on your machine:
 No CareerRat-operated server receives your data. The package is code + skills,
 not a service.
 
-## The packaged desktop app checks for updates
+## The retired Mac app checked for updates
 
-The packaged Mac app checks GitHub's `latest-mac.yml` release metadata once a
+The Mac app (final release v0.19.2, no longer updated) checked GitHub's `latest-mac.yml` release metadata once a
 day. The request carries no candidate data or account identifier. It sends no
 unique installation or device identifier, and it sends no cookies. When a newer
 release is available, the app downloads the signed and notarized app update.
@@ -32,7 +32,7 @@ Nothing installs during a normal quit. CareerRat waits for you to choose
 updater runs. Turn automatic checks and downloads off any time from Settings;
 manual **Check for Updates…** still works while that preference is off.
 
-This update path is desktop-only. It never runs in the browser dev app, and it has
+This update path existed only in the Mac app. It never runs in the terminal workspace, and it has
 nothing to do with the npm CLI's own `careerrat update`, which continues to
 check the npm registry for CLI users.
 
