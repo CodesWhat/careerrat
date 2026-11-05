@@ -6,6 +6,11 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The public website serves robots.txt, a sitemap of its public pages and docs, and an llms.txt documentation index.
+- The docs home page title names CareerRat Docs once.
+
 ## [0.24.1] - 2026-11-04
 
 ### Changed

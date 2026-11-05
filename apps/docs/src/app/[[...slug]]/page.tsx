@@ -31,7 +31,7 @@ export async function generateMetadata(props: { params: Promise<{ slug?: string[
   if (!page) notFound();
 
   return {
-    title: page.data.title,
+    title: params.slug?.length ? page.data.title : { absolute: page.data.title },
     description: page.data.description,
   };
 }
