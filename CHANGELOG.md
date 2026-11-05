@@ -8,6 +8,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Corrected the terminal docs for legacy storage, browser-backed search, History, interview packets and dates, native build fallback, and which artifacts are fact-checked.
+
 - The public website serves robots.txt, a sitemap of its public pages and docs, and an llms.txt documentation index.
 - The docs home page title names CareerRat Docs once.
 

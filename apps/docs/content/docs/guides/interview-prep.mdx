@@ -34,16 +34,15 @@ company, and the role-family learning file. It produces:
 - Comp/logistics scripts using your `target_base` and `minimum_base` (never your
   private `current_base`)
 
-The packet is saved to `.careerrat/workspace/interview-prep/` and exported to
-`~/Downloads/careerrat/<Company>/`. The agent records the packet in the job's
-History and can open it for you.
+The Markdown packet and its exported PDF are saved together in the resolved
+`workspace/interview-prep/` directory. Ask the agent to open the packet for you.
 
 ## Interview scheduling
 
-The agent (via `schedule-meeting`) saves a scheduled interview's structured
-datetime to `interviewAt` in
-the tracker. `interview-prep` reads that field to determine when prep is relevant;
-it does not overwrite an already-booked future datetime.
+The agent (via `schedule-meeting`) saves the first round's structured datetime
+to `interviewAt` in the tracker and follow-on rounds to `nextInterviewAt`.
+`interview-prep` reads those fields to determine when prep is relevant; it does
+not overwrite an already-booked future datetime.
 
 ## Behavioral story bank
 

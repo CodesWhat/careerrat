@@ -53,7 +53,8 @@ New in v0.24.0:
   machine-written gets rewritten.
 - Honest outcome rates, fake-recruiter warnings, and your corrections saved as
   writing rules.
-- Installs on Linux without a compiler.
+- Prebuilt terminal helpers cover supported Linux architectures. Other platforms
+  may need native build tools.
 
 New in v0.23.0:
 
@@ -219,9 +220,11 @@ There is no mobile app and no Intel Mac build.
 
 - The terminal workspace has an Activity tab. Search jobs runs in the background
   and shows its progress there.
-- Résumés, cover letters and answers are fact-checked before you see them.
+- Saved résumés and cover letters are fact-checked. One-off chat answers are not
+  automatically checked.
 - Honest outcome rates and fake-recruiter warnings.
-- Installs on Linux without a compiler.
+- Prebuilt terminal helpers cover supported Linux architectures. Other platforms
+  may need native build tools.
 - CareerRat ships through npm only. The Mac app ended at v0.19.2.
 
 Full history in [CHANGELOG.md](CHANGELOG.md).
@@ -271,11 +274,9 @@ leads clearly unverified, then checks readable full postings against location,
 office-day, compensation, seniority, eligibility, and fit rules before treating
 them as verified.
 
-When a saved job site is added or first used and login is needed, CareerRat asks
-"Do you want to log into LinkedIn so I can use it?" with Yes and No buttons. Yes
-opens that exact saved search in CareerRat's visible browser. No skips the site
-and keeps searching everywhere else. There is no separate search permission or
-Settings checklist.
+The terminal search worker skips browser-backed saved searches and does not
+open a login window for them. Public sources and AI open-web discovery can
+still run. Ask the agent to research login-gated sites separately.
 
 Those partial discoveries are not presented as proven jobs. Search labels them
 **AI · unverified** and preserves the visible title, company, location, pay,
