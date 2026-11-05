@@ -1,0 +1,14 @@
+# CareerRat
+
+> CareerRat is an MIT-licensed job-search workspace that runs in your terminal beside Claude Code or Codex.
+
+It finds and evaluates roles, prepares applications from your actual experience, and tracks outcomes. Candidate records and artifacts are stored locally. Relevant context goes through the selected AI CLI under its provider's terms. CareerRat itself is free; the AI provider may charge for usage.
+
+## Product documentation
+
+- [Install and first run](https://careerrat.com/docs/getting-started/install/): requirements, npm installation, and starting the workspace.
+- [The terminal workspace](https://careerrat.com/docs/getting-started/terminal-workspace/): saved jobs, native agent chat, Inspector tabs, background search, and keyboard controls.
+- [Applying to jobs](https://careerrat.com/docs/guides/applying/): evaluation, application preparation, and submission checks and modes.
+- [Privacy](https://careerrat.com/docs/advanced/privacy/): local storage and external provider boundaries.
+- [CLI reference](https://careerrat.com/docs/reference/cli/): supported commands and flags.
+- [Source repository](https://github.com/CodesWhat/careerrat): source code, license, releases, and issue reporting.

@@ -13,7 +13,7 @@ owns the body-read gate.
 - ATS sources: use public or reverse-discovered company job APIs where stable.
 - Aggregators: collect broad matches, preserve their source labels, and dedupe
   against canonical job URLs.
-- Login-backed sources: use saved browser sessions and participate in normal
+- In the legacy browser workspace, login-backed sources use saved browser sessions and participate in normal
   searches once enabled. When a source is added or first used and login is
   needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” (or
   names the actual site). Yes opens that exact saved search in the visible app

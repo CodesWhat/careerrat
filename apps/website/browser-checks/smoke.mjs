@@ -126,6 +126,36 @@ after(async () => {
   await new Promise((ok) => server.close(ok));
 });
 
+test("crawl discovery files list the public HTML pages", async () => {
+  const robots = await fetch(`${origin}/robots.txt`);
+  assert.equal(robots.status, 200, "robots.txt is available");
+  assert.match(await robots.text(), /Sitemap: https:\/\/careerrat\.com\/sitemap\.xml/);
+
+  const sitemap = await fetch(`${origin}/sitemap.xml`);
+  assert.equal(sitemap.status, 200, "sitemap.xml is available");
+  const xml = await sitemap.text();
+  const locations = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => new URL(match[1]));
+  assert.ok(locations.length > 1, "sitemap includes the site and docs");
+  assert.ok(locations.every((url) => url.origin === "https://careerrat.com"));
+  const actual = locations.map((url) => url.pathname).sort();
+  const expected = paths.filter((path) => !/(?:^|\/)(?:404|_not-found)\/?$/.test(path));
+  assert.deepEqual(actual, expected, "sitemap lists each public page exactly once");
+});
+
+test("llms.txt points to existing product documentation", async () => {
+  const response = await fetch(`${origin}/llms.txt`);
+  assert.equal(response.status, 200, "llms.txt is available");
+  const text = await response.text();
+  assert.match(text, /^# CareerRat/m);
+  const links = [...text.matchAll(/\]\((https:\/\/careerrat\.com[^)]+)\)/g)];
+  assert.ok(links.length >= 3, "llms.txt links to product documentation");
+  for (const [, href] of links) {
+    const link = new URL(href);
+    const found = await resolveRequest(link.pathname);
+    assert.equal(found.status, 200, `${href} resolves in the static export`);
+  }
+});
+
 async function browserFor(name) {
   if (!launched.has(name)) launched.set(name, await BROWSERS[name].launch());
   return launched.get(name);
@@ -303,6 +333,7 @@ for (const browserName of Object.keys(BROWSERS)) {
             page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Docs" }).click(),
           ]);
           assert.ok(await page.locator("h1").first().isVisible(), "docs home has no heading");
+          assert.equal(await page.title(), "CareerRat Docs", "docs home title names the product once");
           assert.deepEqual(problems, [], "browser problems during navigation");
         } finally {
           await context.close();

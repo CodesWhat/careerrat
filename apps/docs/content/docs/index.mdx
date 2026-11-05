@@ -18,8 +18,9 @@ or separate cloud service.
 ## Quick start
 
 **Install CareerRat.** You need Node.js 24.22.1 or newer and Python 3.11 or
-newer. No compiler is needed; the terminal helper ships prebuilt for macOS, Linux and
-Windows.
+newer. The terminal helper ships prebuilt for selected macOS, Linux and Windows
+architectures. If a prebuild is missing or cannot load, installation falls back
+to `node-gyp rebuild` and needs a compiler and native build tools.
 
 ```bash
 npm i -g careerrat
@@ -61,11 +62,10 @@ in Search as an **AI · unverified** lead instead of disappearing. **Evaluate**
 later verifies the live posting, captures the full description, and applies the
 candidate's hard rules before tailoring or form preparation.
 
-When a saved site is added or first used and login is needed, CareerRat asks “Do
-you want to log into LinkedIn so I can use it?” with Yes and No choices. Yes
-opens that exact search in a visible browser window. No skips it and keeps
-searching the other sources. Job-site search does not have a separate permission
-checklist in Settings.
+The terminal search worker skips browser-backed saved searches and does not
+open a login window for them. Built-in public sources and AI open-web discovery
+can still run. Ask the agent to research a login-gated site separately when
+you need results from it.
 
 You can also paste a job posting and say **"evaluate this"**. CareerRat returns a
 verdict on whether to keep or cut it, how well it fits, whether the pay clears
