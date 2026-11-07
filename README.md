@@ -49,8 +49,9 @@ New in v0.24.0:
 
 - An Activity tab shows background searches as they run, and Search jobs starts
   one straight away.
-- Résumés, cover letters and answers are fact-checked, and wording that sounds
-  machine-written gets rewritten.
+- Saved résumés, cover letters and packet answers are fact-checked. One-off chat
+  answers are not automatically checked. Cover letters and packet answers also
+  get a wording review.
 - Honest outcome rates, fake-recruiter warnings, and your corrections saved as
   writing rules.
 - Prebuilt terminal helpers cover supported Linux architectures. Other platforms
@@ -122,8 +123,9 @@ you pick it.
 You need Node.js 24.22.1 or newer and Python 3.11 or newer (with `venv`, which
 some Linux systems package separately, for example `python3-venv`). On Debian or
 Ubuntu: `sudo apt install python3 python3-venv`. The terminal helper ships
-prebuilt for macOS, Linux (x64, arm64, glibc and musl) and Windows, so no
-compiler is needed.
+prebuilt for supported macOS, Linux (x64, arm64, glibc and musl) and Windows
+architectures. If a prebuild is missing or cannot load, installation falls back
+to `node-gyp rebuild` and needs native build tools.
 
 ```bash
 npm i -g careerrat
@@ -501,7 +503,9 @@ terminal workspace, on the same canonical skills and local data.
 
 ### Install from npm
 
-Needs Node.js 24.22.1 or newer and Python 3.11 or newer. No compiler is needed.
+Needs Node.js 24.22.1 or newer and Python 3.11 or newer. The terminal helper
+uses a prebuild when one is available and compatible; otherwise installation
+needs native build tools.
 
 ```bash
 npm i -g careerrat
@@ -536,8 +540,10 @@ from Enter; other terminals may submit the prompt. The full tour is in
 [The terminal workspace](https://careerrat.com/docs/getting-started/terminal-workspace).
 
 First launch needs Python 3.11 or newer with venv support. On Windows it looks
-for the `py -3` launcher, then `python`. The native terminal dependency ships prebuilt for macOS, Linux and Windows, so
-no compiler is needed; `careerrat doctor` reports when that helper is missing. CareerRat installs
+for the `py -3` launcher, then `python`. The native terminal dependency has
+prebuilds for supported macOS, Linux and Windows architectures. A missing or
+incompatible prebuild needs native build tools; `careerrat doctor` reports when
+the helper is missing. CareerRat installs
 hash-locked Textual dependencies in a private environment. `careerrat tui setup`
 prepares it ahead of time; `CAREERRAT_TUI_PYTHON` selects a Python interpreter.
 Your global Python packages and candidate data stay separate from that runtime.
