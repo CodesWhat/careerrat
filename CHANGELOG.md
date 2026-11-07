@@ -8,10 +8,12 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Security
 
+- The updater rejects nested and differently named workspace marker files instead of treating them as safe package content.
 - The direct legacy server entry point refuses unpatched Node.js versions before starting, matching the main CLI guard.
 
 ### Fixed
 
+- Blank packet cut signals no longer force every job into review. Profile string limits count Unicode code points, and the skill-shape evaluator refuses a missing lane name before discovering AI runtimes.
 - Native form selects preserve exact option values, including internal line separators and case-sensitive aliases.
 - Qualified the remaining README install and fact-checking claims and refreshed the public roadmap to reflect the shipped terminal workspace.
 

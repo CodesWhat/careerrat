@@ -639,3 +639,14 @@ test("validate: maxLength violation on a nested property reports the property's 
   assert.ok(error, `expected an error at fitSummary, got: ${JSON.stringify(result.errors)}`);
   assert.equal(error.message, "must have at most 10 characters");
 });
+
+for (const [data, limits, valid] of [
+  ["😀", { minLength: 2 }, false],
+  ["😀", { maxLength: 1 }, true],
+  ["😀a", { minLength: 2, maxLength: 2 }, true],
+  ["😀ab", { maxLength: 2 }, false],
+]) {
+  test(`string limits count Unicode code points: ${data} ${JSON.stringify(limits)}`, () => {
+    assert.equal(validate(data, { type: "string", ...limits }).valid, valid);
+  });
+}
