@@ -216,7 +216,7 @@ export default function Home() {
             <ul className="guardrails-list">
               {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
               <li>
-                When a saved job site is added or first used and a login is needed, CareerRat asks “Do you want to log into LinkedIn so I can use it?” Yes opens that exact search in a visible browser window; No skips it and keeps searching elsewhere.
+                The terminal search worker skips browser-backed saved searches and does not open a login window for them. Ask the agent to research login-gated sites separately.
               </li>
               {/* biome-ignore format: keep on one line so test-pinned phrases stay contiguous */}
               <li>

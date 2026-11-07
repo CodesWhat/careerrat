@@ -193,7 +193,7 @@ test("public copy keeps AI discovery broad and evaluation honest", async () => {
   assert.match(copy.website, /roles you set/i);
 });
 
-test("public copy explains job-site login as one point-of-use choice", async () => {
+test("public copy separates terminal source limits from legacy browser login", async () => {
   const paths = {
     readme: "README.md",
     website: "apps/website/src/app/page.tsx",
@@ -209,6 +209,13 @@ test("public copy explains job-site login as one point-of-use choice", async () 
   );
 
   for (const name of Object.keys(paths)) {
+    if (["readme", "website", "docsIndex", "firstJob"].includes(name)) {
+      assert.match(copy[name], /terminal search worker skips browser-backed saved searches/i);
+      assert.match(copy[name], /does not\s+open a login window/i);
+      assert.doesNotMatch(copy[name], /Do\s+you\s+want\s+to\s+log\s+into/i);
+      continue;
+    }
+    assert.match(copy[name], /legacy browser workspace/i);
     assert.match(
       copy[name],
       /Do\s+you\s+want\s+to\s+log\s+into\s+[^?]+?\s+so\s+I\s+can\s+use\s+it\?/i,

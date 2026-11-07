@@ -119,5 +119,6 @@ careerrat tracker --verify
 ```
 
 Legacy JSON-only workspaces remain supported until the user explicitly imports
-them. The terminal workspace reads this database directly, so it stays current
-without a separate server.
+them. The terminal workspace reads `db/careerrat.db` under the data root when
+that database exists. Before import, it reads the resolved
+`workspace/tracker.json` instead. Both modes stay current without a separate server.
