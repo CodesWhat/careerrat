@@ -13,6 +13,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Privacy and source documentation now distinguish canonical SQLite storage, compatibility exports and legacy paths.
 - Blank packet cut signals no longer force every job into review. Profile string limits count Unicode code points, and the skill-shape evaluator refuses a missing lane name before discovering AI runtimes.
 - Native form selects preserve exact option values, including internal line separators and case-sensitive aliases.
 - Qualified the remaining README install and fact-checking claims and refreshed the public roadmap to reflect the shipped terminal workspace.

@@ -39,9 +39,12 @@ constitute fraud and is solely your responsibility.
 
 ## Data Privacy
 
-Your candidate data (profile, evidence, compensation) is stored **locally** on
-your machine inside the `.careerrat/candidate/` directory, which is gitignored by default.
-CareerRat does not transmit your personal data to any CareerRat-operated server.
+Your candidate data (profile, evidence, compensation) stays **locally** on your
+machine. New workspaces use SQLite at `.careerrat/db/careerrat.db` as the
+canonical store; `.careerrat/candidate/` and `.careerrat/workspace/` contain
+compatibility exports. Legacy JSON-only workspaces keep those files as their
+source of truth. These paths use your configured data root and are gitignored
+by default. CareerRat does not transmit your personal data to any CareerRat-operated server.
 Data may be sent to third-party AI provider APIs through the selected local AI
 runtime in the course of generating tailored content. Review that provider's
 privacy policy before use.
