@@ -13,6 +13,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Company renames move the job's Documents folder after the saved update, including archived jobs. Destination conflicts preserve both folders and report that the canonical update committed.
 - Privacy and source documentation now distinguish canonical SQLite storage, compatibility exports and legacy paths.
 - Blank packet cut signals no longer force every job into review. Profile string limits count Unicode code points, and the skill-shape evaluator refuses a missing lane name before discovering AI runtimes.
 - Native form selects preserve exact option values, including internal line separators and case-sensitive aliases.
