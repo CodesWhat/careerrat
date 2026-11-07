@@ -1088,6 +1088,20 @@ test("fillField and clickButton resolve refs from the latest snapshot", async ()
   ]);
 });
 
+test("native select preserves internal line separators in option values", async () => {
+  const { launchImpl, actions } = createFakeBrowser({ controls: FORM_CONTROLS });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+  try {
+    const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+    await ops.snapshot({ pageId });
+    const result = await ops.selectOption({ pageId, ref: "e3", value: " NY\nUS " });
+    assert.equal(result.selectedValue, "NY\nUS");
+    assert.deepEqual(actions, [{ op: "selectOption", index: 2, arg: { label: "NY\nUS" } }]);
+  } finally {
+    await ops.close();
+  }
+});
+
 test("Playwright select stops before another strategy after an in-flight cancellation", async () => {
   const controller = new AbortController();
   const cancellation = new Error("application preparation cancelled");
