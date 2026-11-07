@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { checkNodeVersion } from "../src/core/runtime/node-floor.mjs";
 
 test("24.22.0 is refused with upgrade text", () => {
@@ -54,7 +55,7 @@ for (const [version, expectedStatus] of [
   test(`the direct server CLI handles Node ${version} before serving`, () => {
     const home = mkdtempSync(join(tmpdir(), "careerrat-node-floor-"));
     const entry = new URL("../src/cli/tracker-dev.mjs", import.meta.url);
-    const script = `Object.defineProperty(process.versions,"node",{value:${JSON.stringify(version)}});process.argv=[process.execPath,${JSON.stringify(entry.pathname)},"--help"];await import(${JSON.stringify(entry.href)});`;
+    const script = `Object.defineProperty(process.versions,"node",{value:${JSON.stringify(version)}});process.argv=[process.execPath,${JSON.stringify(fileURLToPath(entry))},"--help"];await import(${JSON.stringify(entry.href)});`;
     try {
       const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
         encoding: "utf8",

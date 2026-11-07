@@ -120,7 +120,8 @@ you pick it.
 
 ### Install
 
-You need Node.js 24.22.1 or newer and Python 3.11 or newer (with `venv`, which
+You need Node.js 24.22.1 or newer within 24.x, or 26.12.1 or newer, and
+Python 3.11 or newer (with `venv`, which
 some Linux systems package separately, for example `python3-venv`). On Debian or
 Ubuntu: `sudo apt install python3 python3-venv`. The terminal helper ships
 prebuilt for supported macOS, Linux (x64, arm64, glibc and musl) and Windows
@@ -503,7 +504,8 @@ terminal workspace, on the same canonical skills and local data.
 
 ### Install from npm
 
-Needs Node.js 24.22.1 or newer and Python 3.11 or newer. The terminal helper
+Needs Node.js 24.22.1 or newer within 24.x, or 26.12.1 or newer, and Python
+3.11 or newer. The terminal helper
 uses a prebuild when one is available and compatible; otherwise installation
 needs native build tools.
 
