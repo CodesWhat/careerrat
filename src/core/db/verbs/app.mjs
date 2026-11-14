@@ -36,10 +36,10 @@ function requireApp(db, id) {
   return requireRow(db, "applications", id, "application");
 }
 
-function reconcileDocumentFolder(pathCtx, id, result) {
+function reconcileDocumentFolder(pathCtx, id, result, previousApplication) {
   try {
     const application = requireApp(requireDb(pathCtx), id);
-    const documentFolder = syncJobDocumentFolder({ ...pathCtx, application });
+    const documentFolder = syncJobDocumentFolder({ ...pathCtx, application, previousApplication });
     return documentFolder ? { ...result, documentFolder } : result;
   } catch (cause) {
     const error = new Error(
@@ -53,21 +53,26 @@ function reconcileDocumentFolder(pathCtx, id, result) {
   }
 }
 
-function runApplicationOutcome(pathCtx, id, fn) {
+function runApplicationOutcome(pathCtx, id, fn, folderContext = {}) {
   let result;
   try {
     result = runVerb(pathCtx, fn);
   } catch (error) {
     if (error.committed) {
       try {
-        error.result = reconcileDocumentFolder(pathCtx, id, error.result);
+        error.result = reconcileDocumentFolder(
+          pathCtx,
+          id,
+          error.result,
+          folderContext.previousApplication
+        );
       } catch (folderError) {
         error.documentFolderError = folderError.message;
       }
     }
     throw error;
   }
-  return reconcileDocumentFolder(pathCtx, id, result);
+  return reconcileDocumentFolder(pathCtx, id, result, folderContext.previousApplication);
 }
 
 const APP_SETTABLE_FIELDS = new Set([
@@ -169,26 +174,33 @@ function interviewLogisticsNote(at, who) {
 // carry (status, history, artifacts).
 export function appUpsert({ repoRoot, env, row, replace = true } = {}) {
   if (!row?.id) throw new Error("appUpsert: row.id is required");
-  return runApplicationOutcome({ repoRoot, env }, row.id, (db) => {
-    const existed = Boolean(getRow(db, "applications", row.id));
-    if (existed && !replace) {
-      const error = new Error(
-        `application "${row.id}" already exists. Upsert would replace the whole row and drop its other fields. ` +
-          "Use 'app set-fields' to change fields, or pass --replace to overwrite it on purpose."
-      );
-      error.code = "APPLICATION_EXISTS";
-      throw error;
-    }
-    putRow(db, "applications", row.id, row);
-    const meta = bumpMeta(db);
-    const event = logActivityEvent(db, {
-      type: existed ? "status_change" : "applied",
-      title: `${row.company || row.id}: ${row.role || "application"} ${existed ? "updated" : "captured"}`,
-      refs: { applicationId: row.id, company: row.company, role: row.role },
-    });
-    const analytics = refreshAnalytics(db);
-    return { id: row.id, meta, event, analytics };
-  });
+  const folderContext = {};
+  return runApplicationOutcome(
+    { repoRoot, env },
+    row.id,
+    (db) => {
+      folderContext.previousApplication = getRow(db, "applications", row.id);
+      const existed = Boolean(folderContext.previousApplication);
+      if (existed && !replace) {
+        const error = new Error(
+          `application "${row.id}" already exists. Upsert would replace the whole row and drop its other fields. ` +
+            "Use 'app set-fields' to change fields, or pass --replace to overwrite it on purpose."
+        );
+        error.code = "APPLICATION_EXISTS";
+        throw error;
+      }
+      putRow(db, "applications", row.id, row);
+      const meta = bumpMeta(db);
+      const event = logActivityEvent(db, {
+        type: existed ? "status_change" : "applied",
+        title: `${row.company || row.id}: ${row.role || "application"} ${existed ? "updated" : "captured"}`,
+        refs: { applicationId: row.id, company: row.company, role: row.role },
+      });
+      const analytics = refreshAnalytics(db);
+      return { id: row.id, meta, event, analytics };
+    },
+    folderContext
+  );
 }
 
 // AGENTS.md's Tracker Write Contract, "On round completion" (transitioning OUT

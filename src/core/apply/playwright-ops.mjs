@@ -1140,7 +1140,7 @@ export function createPlaywrightOps({
         );
 
       for (const candidateValue of nativeCandidates) {
-        for (const arg of [{ label: candidateValue }, candidateValue]) {
+        for (const arg of [{ value: candidateValue }, { label: candidateValue }]) {
           try {
             const selected = await runAbortable(signal, () =>
               locator.selectOption(arg, {

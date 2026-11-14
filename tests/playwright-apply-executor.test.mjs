@@ -50,7 +50,7 @@ function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
         // actually selected — selectOption() now checks that array is
         // non-empty before trusting a native <select> attempt succeeded, so
         // this fake has to return one too instead of resolving `undefined`.
-        return [String(arg?.label ?? arg)];
+        return [String(arg?.value ?? arg?.label ?? arg)];
       },
       async setChecked(checked) {
         const action = { op: "setChecked", index, checked };
@@ -1083,7 +1083,7 @@ test("fillField and clickButton resolve refs from the latest snapshot", async ()
 
   assert.deepEqual(actions, [
     { op: "fill", index: 0, value: "Morgan" },
-    { op: "selectOption", index: 2, arg: { label: "Yes" } },
+    { op: "selectOption", index: 2, arg: { value: "Yes" } },
     { op: "click", index: 3 },
   ]);
 });
@@ -1096,7 +1096,7 @@ test("native select preserves internal line separators in option values", async 
     await ops.snapshot({ pageId });
     const result = await ops.selectOption({ pageId, ref: "e3", value: " NY\nUS " });
     assert.equal(result.selectedValue, "NY\nUS");
-    assert.deepEqual(actions, [{ op: "selectOption", index: 2, arg: { label: "NY\nUS" } }]);
+    assert.deepEqual(actions, [{ op: "selectOption", index: 2, arg: { value: "NY\nUS" } }]);
   } finally {
     await ops.close();
   }
@@ -1128,7 +1128,7 @@ test("Playwright select stops before another strategy after an in-flight cancell
   );
   assert.deepEqual(
     actions.filter((action) => action.op === "selectOption"),
-    [{ op: "selectOption", index: 2, arg: { label: "Yes" } }]
+    [{ op: "selectOption", index: 2, arg: { value: "Yes" } }]
   );
 });
 
@@ -1234,7 +1234,7 @@ function createFakeComboboxBrowser({
       return {
         async selectOption(arg) {
           actions.push({ op: "selectOption", index, arg });
-          return [String(arg?.label ?? arg)];
+          return [String(arg?.value ?? arg?.label ?? arg)];
         },
       };
     }
@@ -1546,7 +1546,7 @@ test("selectOption on a genuine native <select> ref never touches the combobox f
   // untouched when it's not the combobox-shaped control under test.
   await ops.selectOption({ pageId, ref: "e1", value: "whatever" });
 
-  assert.deepEqual(actions, [{ op: "selectOption", index: 0, arg: { label: "whatever" } }]);
+  assert.deepEqual(actions, [{ op: "selectOption", index: 0, arg: { value: "whatever" } }]);
 });
 
 test("selectOption throws a plain-language human-handoff error naming the field when no option matches (P0)", async () => {
@@ -1891,7 +1891,7 @@ test("createApplyDriver reaches awaiting-submit with fields filled over playwrig
     actions.filter((entry) => entry.op !== "click"),
     [
       { op: "fill", index: 0, value: "Morgan" },
-      { op: "selectOption", index: 2, arg: { label: "Yes" } },
+      { op: "selectOption", index: 2, arg: { value: "Yes" } },
     ]
   );
 });

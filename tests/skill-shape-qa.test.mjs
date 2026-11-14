@@ -415,3 +415,9 @@ test("skill-shape-qa carries verified capabilities from the auth probe into live
     },
   ]);
 });
+
+for (const args of [["--lane"], ["--lane", "--list"], ["--lane", "  "]]) {
+  test(`skill-shape QA rejects a missing lane name: ${JSON.stringify(args)}`, () => {
+    assert.throws(() => parseSkillShapeQaArgs(args), /--lane requires a lane name/);
+  });
+}

@@ -356,7 +356,7 @@ export async function evaluatePacketGate({
     // outright disqualifier an excluded company is — so a human still signs
     // off, but the AI can never quietly wave the signal through to KEEP.
     const cutSignals = Array.isArray(context.targeting?.cut_signals)
-      ? context.targeting.cut_signals
+      ? context.targeting.cut_signals.filter((signal) => String(signal ?? "").trim() !== "")
       : [];
     const cutSignalSearchText = [context.app.role, context.job.body].filter(Boolean).join("\n");
     const matchedCutSignals = matchSignals(cutSignalSearchText, cutSignals)

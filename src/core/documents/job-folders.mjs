@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { currentPerson } from "../paths/people.mjs";
@@ -60,17 +60,45 @@ export function jobDocumentPaths({ application, env = process.env }) {
   return { active, archive, archived, path: archived ? archive : active, companyName };
 }
 
-export function syncJobDocumentFolder({ application, env }) {
+function documentEntry(path) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export function syncJobDocumentFolder({ application, previousApplication, env }) {
   const paths = jobDocumentPaths({ application, env });
-  const source = paths.archived ? paths.active : paths.archive;
-  if (!existsSync(source))
-    return existsSync(paths.path)
-      ? { path: paths.path, archived: paths.archived, changed: false }
-      : null;
-  if (!lstatSync(source).isDirectory())
-    throw new Error("The job document folder is not a directory");
-  if (existsSync(paths.path))
-    throw new Error("Both active and archived job folders exist; neither was overwritten");
+  const previous = previousApplication
+    ? jobDocumentPaths({ application: previousApplication, env })
+    : paths;
+  const sources = [];
+  for (const source of new Set([previous.active, previous.archive, paths.active, paths.archive])) {
+    if (source === paths.path) continue;
+    const entry = documentEntry(source);
+    if (
+      entry &&
+      !sources.some(
+        (saved) => entry.ino !== 0 && saved.entry.dev === entry.dev && saved.entry.ino === entry.ino
+      )
+    ) {
+      sources.push({ path: source, entry });
+    }
+  }
+  if (sources.length > 1)
+    throw new Error("Multiple job document folders exist; none was overwritten");
+  const target = documentEntry(paths.path);
+  if (!sources.length)
+    return target ? { path: paths.path, archived: paths.archived, changed: false } : null;
+  const [{ path: source, entry }] = sources;
+  if (!entry.isDirectory()) throw new Error("The job document folder is not a directory");
+  if (target) {
+    if (entry.ino !== 0 && target.dev === entry.dev && target.ino === entry.ino)
+      return { path: paths.path, archived: paths.archived, changed: false };
+    throw new Error("Both source and destination job folders exist; neither was overwritten");
+  }
   mkdirSync(dirname(paths.path), { recursive: true });
   renameSync(source, paths.path);
   // Leave another job's files alone; remove only an empty company directory.

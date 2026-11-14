@@ -151,7 +151,8 @@ domains; domain-specific tags (e.g. `tech/software`, `tech/AI`, `remote`) indica
 ONLY — never one user's discovered boards. The registry currently leans tech/software/AI because
 that is what has been built so far; provider support for other domains (healthcare, finance,
 trades, logistics, etc.) gets added here as it ships. Boards you discover via `research-boards`
-are candidate-specific and persist to your own gitignored `config/search-sources.yml` — they are
+are candidate-specific and persist to your own gitignored `.careerrat/config/search-sources.yml` (or the existing legacy
+`config/search-sources.yml`) — they are
 never written here.
 
 | Board | Domain tag(s) | Type | Confidence | Status | Notes |
