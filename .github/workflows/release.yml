@@ -143,7 +143,18 @@ jobs:
           PRIVATE_SENTINELS: ${{ secrets.CAREERRAT_PERSONAL_SENTINELS }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$PRIVATE_SENTINELS" | jq -e 'type == "array" and length > 0 and all(.[]; type == "string" and test("\\S"))' >/dev/null 2>&1; then
+          if ! node -e '
+            try {
+              const values = JSON.parse(process.env.PRIVATE_SENTINELS || "");
+              if (
+                !Array.isArray(values) ||
+                values.length === 0 ||
+                values.some(value => typeof value !== "string" || !value.trim())
+              ) process.exit(1);
+            } catch {
+              process.exit(1);
+            }
+          ' >/dev/null 2>&1; then
             echo "::error::Private sentinel configuration must be a JSON array of nonempty strings."
             exit 1
           fi

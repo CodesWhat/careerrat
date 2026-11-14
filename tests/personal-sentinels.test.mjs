@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 import { loadPersonalSentinels } from "../scripts/lib/personal-sentinels.mjs";
 
 test("ordinary PRs and forks can run without private configuration", () => {
@@ -131,5 +132,53 @@ test("privacy scan failures do not print the private search patterns", {
     assert.equal(`${result.stdout}${result.stderr}`.includes(privateValue), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("release configuration guard accepts exactly the same JSON as the private loader", {
+  skip: process.platform === "win32",
+}, () => {
+  const workflow = parse(
+    readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")
+  );
+  const guard = workflow.jobs["publish-release"].steps.find(
+    (step) => step.name === "Require private release privacy configuration"
+  );
+  assert.ok(guard?.run);
+  for (const raw of [
+    '["PrivateFixtureForReleaseGate"]',
+    ' \n["Fixture A", "Fixture B"]\t',
+    "",
+    "[]",
+    '[" "]',
+    '["\u2003"]',
+    "[42]",
+    '["Fixture A"] ["Fixture B"]',
+    '\ufeff["Fixture A"]',
+    '["PrivateFixtureForReleaseGate", invalid]',
+  ]) {
+    let accepted = true;
+    try {
+      loadPersonalSentinels({
+        env: { CAREERRAT_PERSONAL_SENTINELS: raw, CAREERRAT_PERSONAL_SENTINELS_REQUIRED: "1" },
+        defaultPath: "/missing/sentinels.json",
+      });
+    } catch {
+      accepted = false;
+    }
+    const result = spawnSync("bash", ["-c", guard.run], {
+      encoding: "utf8",
+      timeout: 5_000,
+      env: { PATH: process.env.PATH, PRIVATE_SENTINELS: raw },
+    });
+    assert.equal(
+      result.status,
+      accepted ? 0 : 1,
+      `release guard disagrees with loader for ${JSON.stringify(raw)}`
+    );
+    assert.equal(
+      `${result.stdout}${result.stderr}`.includes("PrivateFixtureForReleaseGate"),
+      false
+    );
   }
 });
