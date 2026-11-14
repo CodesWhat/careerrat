@@ -563,15 +563,16 @@ test("tracked app files do not contain known production personal sentinels", {
     "Private sentinel configuration is not available in this checkout",
 }, () => {
   const pattern = PERSONAL_SENTINELS.map(escapeEgrep).join("|");
-
+  let output = "";
   try {
-    const output = execFileSync(
+    output = execFileSync(
       "git",
       [
         "grep",
         "-l",
         "-I",
         "-E",
+        "-e",
         pattern,
         "--",
         ".",
@@ -582,11 +583,12 @@ test("tracked app files do not contain known production personal sentinels", {
       ],
       { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
     );
-    assert.fail(`Tracked personal sentinel(s) found:\n${output}`);
   } catch (err) {
-    if (err.status === 1) return;
-    throw err;
+    if (err.status !== 1) {
+      throw new Error("Personal privacy scan could not inspect tracked source.");
+    }
   }
+  assert.equal(output, "", `Tracked personal sentinel(s) found in:\n${output}`);
 });
 
 // M7 — apps/web/dist is gitignored (built fresh, shipped via package.json

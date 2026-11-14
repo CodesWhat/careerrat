@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { loadPersonalSentinels } from "../scripts/lib/personal-sentinels.mjs";
 
 test("ordinary PRs and forks can run without private configuration", () => {
@@ -97,4 +98,38 @@ test("receipt filtering uses the configured private strings for text and objects
     }
   );
   assert.deepEqual(JSON.parse(output), [true, true, false]);
+});
+
+test("privacy scan failures do not print the private search patterns", {
+  skip: process.platform === "win32",
+}, () => {
+  const root = mkdtempSync(join(tmpdir(), "careerrat-privacy-failure-"));
+  try {
+    writeFileSync(join(root, "git"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+    const privateValue = "PrivateFixtureForScanFailure";
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--test",
+        "--test-name-pattern",
+        "tracked app files do not contain known production personal sentinels",
+        "tests/release-safety.test.mjs",
+      ],
+      {
+        cwd: fileURLToPath(new URL("../", import.meta.url)),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          NODE_TEST_CONTEXT: undefined,
+          PATH: `${root}:${process.env.PATH}`,
+          CAREERRAT_PERSONAL_SENTINELS: JSON.stringify([privateValue]),
+        },
+        timeout: 15_000,
+      }
+    );
+    assert.equal(result.status, 1);
+    assert.equal(`${result.stdout}${result.stderr}`.includes(privateValue), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
