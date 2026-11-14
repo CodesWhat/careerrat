@@ -138,6 +138,26 @@ jobs:
           # run 32487926861); nothing here is fetched from github.com.
           allowed-endpoints: >
             api.github.com:443
+      - name: Require private release privacy configuration
+        env:
+          PRIVATE_SENTINELS: ${{ secrets.CAREERRAT_PERSONAL_SENTINELS }}
+        run: |
+          set -euo pipefail
+          if ! node -e '
+            try {
+              const values = JSON.parse(process.env.PRIVATE_SENTINELS || "");
+              if (
+                !Array.isArray(values) ||
+                values.length === 0 ||
+                values.some(value => typeof value !== "string" || !value.trim())
+              ) process.exit(1);
+            } catch {
+              process.exit(1);
+            }
+          ' >/dev/null 2>&1; then
+            echo "::error::Private sentinel configuration must be a JSON array of nonempty strings."
+            exit 1
+          fi
       - name: Create the published release from the changelog
         run: |
           set -euo pipefail

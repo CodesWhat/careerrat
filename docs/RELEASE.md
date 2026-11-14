@@ -46,6 +46,17 @@ Before tagging a release:
    `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
 10. GitHub release created from the tag with changelog notes.
 
+The maintainer's personal privacy sentinels live in the ignored
+`.internal/personal-sentinels.json` file as a nonempty JSON array of strings.
+`CAREERRAT_PERSONAL_SENTINELS_FILE` selects another private file;
+`CAREERRAT_PERSONAL_SENTINELS` supplies the same JSON directly and takes precedence.
+Keep the list out of tracked files. GitHub Actions uses the repository secret
+`CAREERRAT_PERSONAL_SENTINELS` for trusted releases. Release creation refuses a
+missing or invalid list, and npm publishing scans tracked source and built web
+assets before publication. Only the privacy-check step receives the list.
+Ordinary PR and fork CI runs the generic privacy checks and skips the two
+personal-list scans when private configuration is unavailable.
+
 ### Native-runtime search certification
 
 Native Claude and Codex live-search evidence is a separate product-certification

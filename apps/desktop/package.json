@@ -1,7 +1,7 @@
 {
   "name": "@careerrat/desktop",
   "productName": "CareerRat",
-  "version": "0.24.2",
+  "version": "0.24.3",
   "private": true,
   "type": "module",
   "description": "CareerRat desktop app for macOS and Windows.",

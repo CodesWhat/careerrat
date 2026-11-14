@@ -1,39 +1,42 @@
-// Values from the maintainer's real candidate workspace that must never reach a
-// tracked file. Assembled from fragments so this list cannot match itself, and
-// so a careless grep of the repo does not surface them either.
-//
-// Two consumers, one list:
-//   - tests/release-safety.test.mjs scans tracked source and the built
-//     apps/web/dist for any of these.
-//   - scripts/lib/live-search-receipts.mjs drops matching rows out of release
-//     evidence. A live search legitimately turns up public postings from
-//     companies on this list, and committing one trips the guard above even
-//     though nothing personal leaked.
-//
-// This file is itself excluded from that scan; adding a sentinel here without
-// keeping that exclusion in place makes the guard fail on its own source.
-export const PERSONAL_SENTINELS = [
-  ["Scott", "Benson"].join(" "),
-  "Bloomfield",
-  "$" + "145K",
-  "145" + "000",
-  "sctt" + "bnsn",
-  ["Work", "OS"].join(""),
-  ["work", "os"].join(""),
-  "Pw" + "C",
-  "pwc",
-  "workos" + ".com",
-  "pwc" + ".com",
-  "shopify" + ".com",
-  ["Anna", "Meyer"].join(" "),
-  ["Robert", "Choe"].join(" "),
-  ["Alex", "Aberg"].join(" "),
-  ["Juniper", "Square"].join(" "),
-  "Sabri" + "na",
-  "225" + "000",
-  "220" + "000",
-  "225" + "K",
-];
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const DEFAULT_PATH = fileURLToPath(
+  new URL("../../.internal/personal-sentinels.json", import.meta.url)
+);
+
+export function loadPersonalSentinels({ env = process.env, defaultPath = DEFAULT_PATH } = {}) {
+  let raw = env.CAREERRAT_PERSONAL_SENTINELS;
+  if (!raw?.trim()) {
+    try {
+      raw = readFileSync(env.CAREERRAT_PERSONAL_SENTINELS_FILE || defaultPath, "utf8");
+    } catch (error) {
+      if (
+        error.code === "ENOENT" &&
+        !env.CAREERRAT_PERSONAL_SENTINELS_FILE &&
+        env.CAREERRAT_PERSONAL_SENTINELS_REQUIRED !== "1"
+      )
+        return [];
+      throw new Error("Private sentinel configuration is missing or unreadable.");
+    }
+  }
+  let values;
+  try {
+    values = JSON.parse(raw);
+  } catch {
+    throw new Error("Private sentinel configuration must be a JSON array of nonempty strings.");
+  }
+  if (
+    !Array.isArray(values) ||
+    !values.length ||
+    values.some((value) => typeof value !== "string" || !value.trim())
+  ) {
+    throw new Error("Private sentinel configuration must be a JSON array of nonempty strings.");
+  }
+  return [...new Set(values)];
+}
+
+export const PERSONAL_SENTINELS = Object.freeze(loadPersonalSentinels());
 
 export function containsPersonalSentinel(value) {
   const haystack = typeof value === "string" ? value : JSON.stringify(value ?? "");
