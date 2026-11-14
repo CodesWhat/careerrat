@@ -6,6 +6,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.24.3] - 2026-11-13
+
 ### Security
 
 - Personal privacy sentinels now come from private configuration. Trusted releases require that configuration; ordinary PR and fork CI can run without the private list.
