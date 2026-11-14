@@ -49,9 +49,11 @@ New in v0.24.0:
 
 - An Activity tab shows background searches as they run, and Search jobs starts
   one straight away.
-- Saved résumés, cover letters and packet answers are fact-checked. One-off chat
-  answers are not automatically checked. Cover letters and packet answers also
-  get a wording review.
+- Generated résumés, cover letters and AI-drafted packet answers are fact-checked.
+  Review saved and deterministic answers yourself. One-off chat answers aren't
+  automatically checked. Eligible cover-letter and answer drafts may get a wording
+  review when it's enabled in `modes.yml` and available. Deterministic answers are
+  excluded; a failed review leaves the draft unchanged.
 - Honest outcome rates, fake-recruiter warnings, and your corrections saved as
   writing rules.
 - Prebuilt terminal helpers cover supported Linux architectures. Other platforms
