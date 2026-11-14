@@ -84,7 +84,7 @@ test("selectOption still drives a genuine native <select> over a real browser (L
   });
 });
 
-test("native select chooses the original value when a flattened value also exists", {
+test("native select chooses the original value before a normalized label on an earlier option", {
   skip: !LIVE,
 }, async () => {
   await withLiveOps(async (ops) => {
