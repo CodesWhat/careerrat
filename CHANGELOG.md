@@ -8,6 +8,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Security
 
+- Personal privacy sentinels now come from private configuration. Trusted releases require that configuration; ordinary PR and fork CI can run without the private list.
 - The updater rejects nested and differently named workspace marker files instead of treating them as safe package content.
 - The direct legacy server entry point refuses unpatched Node.js versions before starting, matching the main CLI guard.
 

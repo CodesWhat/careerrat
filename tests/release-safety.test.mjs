@@ -557,7 +557,11 @@ test("npm package allowlist names app files, not broad private-data roots", asyn
   assert.ok(!files.some((entry) => entry.includes("search-sources.yml")));
 });
 
-test("tracked app files do not contain known production personal sentinels", () => {
+test("tracked app files do not contain known production personal sentinels", {
+  skip:
+    !PERSONAL_SENTINELS.length &&
+    "Private sentinel configuration is not available in this checkout",
+}, () => {
   const pattern = PERSONAL_SENTINELS.map(escapeEgrep).join("|");
 
   try {
@@ -565,7 +569,7 @@ test("tracked app files do not contain known production personal sentinels", () 
       "git",
       [
         "grep",
-        "-n",
+        "-l",
         "-I",
         "-E",
         pattern,
@@ -575,7 +579,6 @@ test("tracked app files do not contain known production personal sentinels", () 
         ":!candidate/**",
         ":!workspace/**",
         ":!tests/release-safety.test.mjs",
-        ":!scripts/lib/personal-sentinels.mjs",
       ],
       { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
     );
@@ -593,7 +596,11 @@ test("tracked app files do not contain known production personal sentinels", () 
 // the shipped SPA bundle. Skips cleanly when dist hasn't been built in this
 // run (root `npm test` stays build-free — see package.json's own `test`
 // script scoping) rather than failing on a missing optional artifact.
-test("built apps/web/dist (when present) contains no known production personal sentinels", async () => {
+test("built apps/web/dist (when present) contains no known production personal sentinels", {
+  skip:
+    !PERSONAL_SENTINELS.length &&
+    "Private sentinel configuration is not available in this checkout",
+}, async () => {
   const {
     existsSync,
     readdirSync,

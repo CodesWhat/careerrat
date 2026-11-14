@@ -125,6 +125,13 @@ jobs:
           echo "Release gate passed for $release_tag."
       - name: Install locked dependencies
         run: corepack npm ci
+      - name: Build the release web assets
+        run: corepack npm run app:build
+      - name: Check private release privacy boundaries
+        env:
+          CAREERRAT_PERSONAL_SENTINELS: ${{ secrets.CAREERRAT_PERSONAL_SENTINELS }}
+          CAREERRAT_PERSONAL_SENTINELS_REQUIRED: "1"
+        run: node --test --test-name-pattern 'production personal sentinels' tests/release-safety.test.mjs
       - name: Publish to npm (unscoped, public, trusted publishing)
         run: |
           VERSION="$(node -p "require('./package.json').version")"
