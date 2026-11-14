@@ -84,6 +84,18 @@ test("selectOption still drives a genuine native <select> over a real browser (L
   });
 });
 
+test("native select chooses the original value when a flattened value also exists", {
+  skip: !LIVE,
+}, async () => {
+  await withLiveOps(async (ops) => {
+    const { pageId } = await ops.openTab({ url: FIXTURE_URL });
+    const ref = await refFor(ops, pageId, "Exact region");
+    await ops.selectOption({ pageId, ref, value: "NY\nUS" });
+    const after = await ops.snapshot({ pageId });
+    assert.match(after.pageText, /Exact region selected: Original region/);
+  });
+});
+
 test("selectOption drives a real react-select-shaped combobox and prefers the exact match (Greenhouse/Ashby-shape)", {
   skip: !LIVE,
 }, async () => {

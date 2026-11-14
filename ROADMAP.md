@@ -5,7 +5,9 @@ record of what shipped when, is a local file that isn't published.
 
 ## Where things stand
 
-v0.24.0 is the current release, installed from npm and used in the terminal.
+CareerRat ships through npm and runs in the terminal. The
+[latest release](https://github.com/CodesWhat/careerrat/releases/latest) has the
+version and release notes.
 v0.19.2 was the last Mac app release. CareerRat is the tool its author runs
 for the people he is helping with a job search. The source stays public so
 you can read how it works, and `npm install -g careerrat` works if you want
@@ -15,10 +17,9 @@ The theme: agnostic to the job. It should work for anyone.
 
 ## Next
 
-- **TUI-only workspace.** A persistent jobs table with status filters and
-  compensation sorting. Saved job descriptions, job history and recorded changes
-  stay accessible. CareerRat's skills run through the AI CLI; the terminal UI
-  replaces the browser product interface once the replacement is verified.
+- **Finish the TUI transition.** Retire the remaining legacy browser app and
+  desktop distribution code. Preserve employer-site browser automation and the
+  canonical local data, artifacts, job history and Undo.
 
 ## How to read this
 

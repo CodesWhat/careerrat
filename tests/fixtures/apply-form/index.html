@@ -57,6 +57,14 @@
           <option>No</option>
         </select>
 
+        <label for="exact-region">Exact region</label>
+        <select id="exact-region" onchange="document.getElementById('exact-region-result').textContent = 'Exact region selected: ' + this.selectedOptions[0].textContent">
+          <option value="">Choose one</option>
+          <option value="NY US">Flattened region</option>
+          <option value="NY&#10;US">Original region</option>
+        </select>
+        <p id="exact-region-result"></p>
+
         <div class="combobox-field">
           <label id="country-label" for="country-input">Country</label>
           <input

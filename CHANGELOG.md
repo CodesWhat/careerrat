@@ -6,6 +6,15 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Security
+
+- The direct legacy server entry point refuses unpatched Node.js versions before starting, matching the main CLI guard.
+
+### Fixed
+
+- Native form selects preserve exact option values, including internal line separators and case-sensitive aliases.
+- Qualified the remaining README install and fact-checking claims and refreshed the public roadmap to reflect the shipped terminal workspace.
+
 ## [0.24.2] - 2026-11-05
 
 ### Fixed
