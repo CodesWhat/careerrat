@@ -6,6 +6,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Privacy
+
+- careerrat.com and its docs now send no analytics when your browser has Do Not Track or Global Privacy Control turned on. The analytics library's cookieless mode was skipping that check. Events also report the site as `careerrat`, matching the other CodesWhat sites.
+
 ## [0.24.3] - 2026-11-13
 
 ### Security
