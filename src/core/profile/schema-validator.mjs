@@ -77,10 +77,11 @@ function validateNode(data, schema, path, errors) {
 
   // --- string length ---
   if (typeof data === "string") {
-    if (typeof schema.minLength === "number" && data.length < schema.minLength) {
+    const length = Array.from(data).length;
+    if (typeof schema.minLength === "number" && length < schema.minLength) {
       errors.push({ path, message: `must have at least ${schema.minLength} characters` });
     }
-    if (typeof schema.maxLength === "number" && data.length > schema.maxLength) {
+    if (typeof schema.maxLength === "number" && length > schema.maxLength) {
       errors.push({ path, message: `must have at most ${schema.maxLength} characters` });
     }
     if (typeof schema.pattern === "string" && !new RegExp(schema.pattern).test(data)) {

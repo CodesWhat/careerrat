@@ -600,6 +600,23 @@ test("POST /api/packet/gate: a cut_signal match in the JD forces REVIEW without 
   }
 });
 
+test("packet gate ignores blank cut signals without overriding the evaluated verdict", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  candidateConfigPatch({ repoRoot, name: "targeting", patch: { cut_signals: [" ", "\t"] } });
+  let calls = 0;
+  const result = await evaluatePacketGate({
+    repoRoot,
+    body: { applicationId: "app-packet" },
+    runAI: async () => {
+      calls += 1;
+      return { body: { ok: true, ai: { used: true, model: "fixture" }, data: typedGateVerdict() } };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.body.data.gate, "keep");
+});
+
 test("packet gate reserves output budget for model reasoning plus the typed verdict", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);

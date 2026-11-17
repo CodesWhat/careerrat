@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -309,8 +309,7 @@ test("data backup and data restore round-trip the database", (t) => {
 });
 
 function readTrackerText(ctx) {
-  return spawnSync("cat", [join(ctx.home, "workspace", "tracker.json")], { encoding: "utf8" })
-    .stdout;
+  return readFileSync(join(ctx.home, "workspace", "tracker.json"), "utf8");
 }
 
 test("data backup keeps only the newest N and rejects a corrupt backup on restore", (t) => {

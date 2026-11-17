@@ -370,7 +370,12 @@ export function parseSkillShapeQaArgs(argv) {
   const out = { list: false, lane: null, runtime: "all" };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--list") out.list = true;
-    if (argv[i] === "--lane" && argv[i + 1]) out.lane = argv[++i];
+    if (argv[i] === "--lane") {
+      if (!argv[i + 1]?.trim() || argv[i + 1].startsWith("--")) {
+        throw new Error("--lane requires a lane name.");
+      }
+      out.lane = argv[++i];
+    }
     if (argv[i] === "--runtime" && argv[i + 1]) out.runtime = argv[++i];
   }
   if (out.runtime !== "all" && !SUPPORTED_RUNTIME_IDS.has(out.runtime)) {

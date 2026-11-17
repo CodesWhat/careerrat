@@ -59,6 +59,7 @@ import {
 import { resolvePublicHttpTarget, validatePublicHttpUrl } from "../core/net/public-http-fetch.mjs";
 import { resolvePersonSelection } from "../core/paths/people.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
+import { requirePatchedNode } from "../core/runtime/node-floor.mjs";
 import { acquireWorkspaceRuntimeOwnership } from "../core/runtime/workspace-runtime-ownership.mjs";
 import { captureBrowserSearchSource } from "../core/search/browser-source-capture.mjs";
 import { securityHeaders } from "../core/security/browser-policy.mjs";
@@ -826,6 +827,7 @@ export function createDevServer({
 // Boot (CLI entry point only — see the import.meta.url guard at the bottom)
 
 async function main() {
+  requirePatchedNode();
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
     printHelp();

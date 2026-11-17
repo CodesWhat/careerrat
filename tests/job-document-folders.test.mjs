@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -189,4 +197,110 @@ test("ordinary company names keep their existing folder path", () => {
   const env = { CAREERRAT_DOWNLOADS_DIR: join(tmpdir(), "careerrat-segment-docs") };
   const { active } = jobDocumentPaths({ application: { id: "role-a", company: "Acme Corp" }, env });
   assert.equal(active, join(env.CAREERRAT_DOWNLOADS_DIR, "Acme Corp", "job-role-a"));
+});
+
+function savedApplication(ctx) {
+  return JSON.parse(
+    openDb(ctx).prepare("SELECT data FROM applications WHERE id = 'role-a'").get().data
+  );
+}
+
+for (const status of ["interview", "rejected"]) {
+  test(`company rename moves a ${status} folder through reject and reopen`, async (t) => {
+    const ctx = await seeded(t);
+    if (status === "rejected") appSetStatus({ ...ctx, id: "role-a", to: status });
+    const previous = savedApplication(ctx);
+    const before = jobDocumentPaths({ application: previous, env: ctx.env }).path;
+    appUpsert({ ...ctx, row: { ...previous, company: "Beta" } });
+    const renamed = jobDocumentPaths({ application: savedApplication(ctx), env: ctx.env }).path;
+    assert.equal(existsSync(before), false);
+    assert.equal(readFileSync(join(renamed, "Resume.pdf"), "utf8"), "role-a");
+    appSetStatus({ ...ctx, id: "role-a", to: "rejected" });
+    appSetStatus({ ...ctx, id: "role-a", to: "interview" });
+    const root = ctx.env.CAREERRAT_DOWNLOADS_DIR;
+    assert.equal(
+      readFileSync(join(root, "Beta/job-role-a/Interview Notes.md"), "utf8"),
+      "role-a interview notes"
+    );
+    assert.equal(readFileSync(join(root, "Acme/job-role-b/Resume.pdf"), "utf8"), "role-b");
+    assert.equal(readFileSync(ctx.source, "utf8"), "canonical resume");
+    assert.deepEqual(savedApplication(ctx).artifacts, previous.artifacts);
+  });
+}
+
+test("company rename conflicts preserve both folders after the canonical save", async (t) => {
+  const ctx = await seeded(t);
+  const target = join(ctx.env.CAREERRAT_DOWNLOADS_DIR, "Beta/job-role-a/Resume.pdf");
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, "existing destination");
+  assert.throws(
+    () => appUpsert({ ...ctx, row: { ...savedApplication(ctx), company: "Beta" } }),
+    (error) => error.code === "DOCUMENT_FOLDER_SYNC_FAILED" && error.committed === true
+  );
+  assert.equal(readFileSync(target, "utf8"), "existing destination");
+  assert.equal(
+    readFileSync(join(ctx.env.CAREERRAT_DOWNLOADS_DIR, "Acme/job-role-a/Resume.pdf"), "utf8"),
+    "role-a"
+  );
+  assert.equal(savedApplication(ctx).company, "Beta");
+});
+
+test("a rolled-back company rename never moves its folder", async (t) => {
+  const ctx = await seeded(t);
+  openDb(ctx).exec(`CREATE TRIGGER refuse_rename BEFORE UPDATE ON applications
+    BEGIN SELECT RAISE(ABORT, 'fixture rename rollback'); END`);
+  assert.throws(
+    () => appUpsert({ ...ctx, row: { ...savedApplication(ctx), company: "Beta" } }),
+    /fixture rename rollback/
+  );
+  assert.equal(
+    readFileSync(join(ctx.env.CAREERRAT_DOWNLOADS_DIR, "Acme/job-role-a/Resume.pdf"), "utf8"),
+    "role-a"
+  );
+  assert.equal(existsSync(join(ctx.env.CAREERRAT_DOWNLOADS_DIR, "Beta")), false);
+});
+
+test("a committed company rename moves its folder even when the tracker export fails", async (t) => {
+  const ctx = await seeded(t);
+  const previous = savedApplication(ctx);
+  const tracker = join(ctx.repoRoot, "workspace/tracker.json");
+  rmSync(tracker, { force: true });
+  mkdirSync(tracker);
+  assert.throws(
+    () => appUpsert({ ...ctx, row: { ...previous, company: "Beta" } }),
+    (error) =>
+      error.code === "EXPORT_FAILED" &&
+      error.committed === true &&
+      Boolean(error.result.documentFolder)
+  );
+  assert.equal(
+    readFileSync(join(ctx.env.CAREERRAT_DOWNLOADS_DIR, "Beta/job-role-a/Resume.pdf"), "utf8"),
+    "role-a"
+  );
+});
+
+test("company rename refuses a dangling destination link without overwriting it", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const ctx = await seeded(t);
+  const target = join(ctx.env.CAREERRAT_DOWNLOADS_DIR, "Beta/job-role-a");
+  mkdirSync(dirname(target), { recursive: true });
+  symlinkSync(join(ctx.repoRoot, "absent-destination"), target, "dir");
+  assert.throws(
+    () => appUpsert({ ...ctx, row: { ...savedApplication(ctx), company: "Beta" } }),
+    (error) => error.code === "DOCUMENT_FOLDER_SYNC_FAILED" && error.committed === true
+  );
+  assert.equal(
+    readFileSync(join(ctx.env.CAREERRAT_DOWNLOADS_DIR, "Acme/job-role-a/Resume.pdf"), "utf8"),
+    "role-a"
+  );
+});
+
+test("case-only company rename and rejection preserve the job on either filesystem case policy", async (t) => {
+  const ctx = await seeded(t);
+  appUpsert({ ...ctx, row: { ...savedApplication(ctx), company: "acme", status: "rejected" } });
+  const root = ctx.env.CAREERRAT_DOWNLOADS_DIR;
+  assert.equal(readFileSync(join(root, "_archive/acme/job-role-a/Resume.pdf"), "utf8"), "role-a");
+  assert.equal(existsSync(join(root, "Acme/job-role-a")), false);
+  assert.equal(readFileSync(join(root, "Acme/job-role-b/Resume.pdf"), "utf8"), "role-b");
 });

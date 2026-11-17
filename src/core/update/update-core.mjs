@@ -135,7 +135,7 @@ export function findUserDataLeaks(entries) {
       /^\.careerrat\//.test(normalized) ||
       /^\.internal\//.test(normalized) ||
       GENERATED_CONFIG_LEAK_PATHS.has(normalized) ||
-      (/^workspace\//.test(normalized) && !/\.gitkeep$/.test(normalized))
+      (/^workspace\//.test(normalized) && normalized !== "workspace/.gitkeep")
     );
   });
 }

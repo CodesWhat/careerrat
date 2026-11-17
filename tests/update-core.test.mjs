@@ -90,6 +90,16 @@ test("findUserDataLeaks still exempts workspace/.gitkeep regardless of case", ()
   assert.deepEqual(leaks, []);
 });
 
+test("findUserDataLeaks rejects nested and differently named workspace markers", () => {
+  const paths = [
+    "workspace/private/.gitkeep",
+    "workspace/resume.gitkeep",
+    "Workspace/Nested/.GITKEEP",
+    ".\\workspace\\private\\.gitkeep",
+  ];
+  assert.deepEqual(findUserDataLeaks([...paths, "workspace/.gitkeep"]), paths);
+});
+
 test("findUserDataLeaks catches a leading ./ and backslash path-separator variants", () => {
   const leaks = findUserDataLeaks([
     "./candidate/resume.json",

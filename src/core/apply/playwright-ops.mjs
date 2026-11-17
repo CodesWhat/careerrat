@@ -1124,7 +1124,12 @@ export function createPlaywrightOps({
       const target = page(pageId);
       const { locator, name } = resolveRef(pageId, ref);
       const stringValue = String(value);
-      const candidateValues = [stringValue, ...(Array.isArray(optionAliases) ? optionAliases : [])]
+      const nativeCandidates = [stringValue, ...(Array.isArray(optionAliases) ? optionAliases : [])]
+        .map((candidate) => String(candidate ?? "").trim())
+        .filter(
+          (candidate, index, candidates) => candidate && candidates.indexOf(candidate) === index
+        );
+      const candidateValues = nativeCandidates
         .map(collapseLineSeparators)
         .filter(
           (candidate, index, candidates) =>
@@ -1134,8 +1139,8 @@ export function createPlaywrightOps({
             ) === index
         );
 
-      for (const candidateValue of candidateValues) {
-        for (const arg of [{ label: candidateValue }, candidateValue]) {
+      for (const candidateValue of nativeCandidates) {
+        for (const arg of [{ value: candidateValue }, { label: candidateValue }]) {
           try {
             const selected = await runAbortable(signal, () =>
               locator.selectOption(arg, {
