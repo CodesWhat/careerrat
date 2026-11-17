@@ -4041,11 +4041,12 @@ test("guided Claude setup timeout does not release the lock early when bash exit
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });
+    const timedOut = assert.rejects(resultPromise, { code: "ETIMEDOUT" });
 
     const grandchildPid = Number(await waitForFileContent(pidFilePath));
     assert.ok(Number.isInteger(grandchildPid) && grandchildPid > 0, "grandchild pid was recorded");
 
-    await assert.rejects(resultPromise, { code: "ETIMEDOUT" });
+    await timedOut;
     assert.equal(
       await waitUntilProcessDead(grandchildPid),
       true,

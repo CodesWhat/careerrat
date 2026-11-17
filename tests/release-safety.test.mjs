@@ -557,17 +557,22 @@ test("npm package allowlist names app files, not broad private-data roots", asyn
   assert.ok(!files.some((entry) => entry.includes("search-sources.yml")));
 });
 
-test("tracked app files do not contain known production personal sentinels", () => {
+test("tracked app files do not contain known production personal sentinels", {
+  skip:
+    !PERSONAL_SENTINELS.length &&
+    "Private sentinel configuration is not available in this checkout",
+}, () => {
   const pattern = PERSONAL_SENTINELS.map(escapeEgrep).join("|");
-
+  let output = "";
   try {
-    const output = execFileSync(
+    output = execFileSync(
       "git",
       [
         "grep",
-        "-n",
+        "-l",
         "-I",
         "-E",
+        "-e",
         pattern,
         "--",
         ".",
@@ -575,15 +580,15 @@ test("tracked app files do not contain known production personal sentinels", () 
         ":!candidate/**",
         ":!workspace/**",
         ":!tests/release-safety.test.mjs",
-        ":!scripts/lib/personal-sentinels.mjs",
       ],
       { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
     );
-    assert.fail(`Tracked personal sentinel(s) found:\n${output}`);
   } catch (err) {
-    if (err.status === 1) return;
-    throw err;
+    if (err.status !== 1) {
+      throw new Error("Personal privacy scan could not inspect tracked source.");
+    }
   }
+  assert.equal(output, "", `Tracked personal sentinel(s) found in:\n${output}`);
 });
 
 // M7 — apps/web/dist is gitignored (built fresh, shipped via package.json
@@ -593,7 +598,11 @@ test("tracked app files do not contain known production personal sentinels", () 
 // the shipped SPA bundle. Skips cleanly when dist hasn't been built in this
 // run (root `npm test` stays build-free — see package.json's own `test`
 // script scoping) rather than failing on a missing optional artifact.
-test("built apps/web/dist (when present) contains no known production personal sentinels", async () => {
+test("built apps/web/dist (when present) contains no known production personal sentinels", {
+  skip:
+    !PERSONAL_SENTINELS.length &&
+    "Private sentinel configuration is not available in this checkout",
+}, async () => {
   const {
     existsSync,
     readdirSync,
