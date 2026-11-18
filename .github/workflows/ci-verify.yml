@@ -419,8 +419,27 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
+      # Browser binaries are cached per runner OS and resolved Playwright
+      # version, so a stalled download (CR74, 2026-11-17) can only hit a cold
+      # cache, and the install has its own short timeout to fail fast. OS
+      # packages live outside the cache, so a hit still runs install-deps.
+      - name: Resolve the Playwright version from package-lock.json
+        id: playwright-version
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium-webkit-firefox
       - name: Install the real Chromium, WebKit and Firefox test browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
         run: npx playwright install --with-deps chromium webkit firefox
+      - name: Install Playwright OS dependencies (browsers restored from cache)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 8
+        run: npx playwright install-deps chromium webkit firefox
       - name: Build the marketing site and docs (apps/website, apps/docs)
         run: npm run build --workspace apps/website
       - name: Render the built site in all three browsers at desktop and phone widths
@@ -602,8 +621,27 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
+      # Browser binaries are cached per runner OS and resolved Playwright
+      # version, so a stalled download (CR74, 2026-11-17) can only hit a cold
+      # cache, and the install has its own short timeout to fail fast. OS
+      # packages live outside the cache, so a hit still runs install-deps.
+      - name: Resolve the Playwright version from package-lock.json
+        id: playwright-version
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium
       - name: Install the real Chromium test browser
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
         run: npx playwright install --with-deps chromium
+      - name: Install Playwright OS dependencies (browsers restored from cache)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 8
+        run: npx playwright install-deps chromium
       - name: Build the app used by the visual contract
         run: npm run build --workspace apps/web
       - name: Verify application preparation and rendered workspace geometry
