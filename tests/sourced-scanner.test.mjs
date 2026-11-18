@@ -1518,7 +1518,7 @@ test("distinct Hireology requisitions survive even when their job facts match", 
   assert.equal(result.duplicates.length, 0);
 });
 
-test("adjacent engineering titles are shown below exact matches in every mode while blockers stay blocked", () => {
+test("confirmed secondary titles receive target scores in every mode while blockers stay blocked", () => {
   const targeting = {
     role_buckets: [
       { name: "Frontend", priority: "primary", titles: ["Staff Frontend Engineer"] },
@@ -1573,7 +1573,9 @@ test("adjacent engineering titles are shown below exact matches in every mode wh
     );
     for (const title of adjacentTitles) {
       const adjacent = scoreSourcedOffer(makeOffer("a", title), config);
-      assert.ok(adjacent.score < exact.score, `${application_mode} ${title}: ${adjacent.score}`);
+      assert.equal(adjacent.score, exact.score, `${application_mode} ${title}: ${adjacent.score}`);
+      assert.equal(adjacent.gate, exact.gate);
+      assert.match(adjacent.ratingReason, /matches target title/);
     }
     assert.deepEqual(
       result.filteredTitle.map((offer) => offer.qualificationReason),
@@ -1581,6 +1583,30 @@ test("adjacent engineering titles are shown below exact matches in every mode wh
       application_mode
     );
   }
+});
+
+test("confirmed secondary title scores are field-neutral and do not promote generic overlaps", () => {
+  const config = {
+    targeting: {
+      role_buckets: [
+        { priority: "primary", titles: ["Registered Nurse"] },
+        { priority: "secondary", titles: ["Clinical Nurse Specialist"] },
+      ],
+    },
+  };
+  const offer = (title) => ({
+    title,
+    company: "Example Clinic",
+    bodyText: "Support patient care.",
+  });
+  const primary = scoreSourcedOffer(offer("Registered Nurse"), config);
+  const confirmed = scoreSourcedOffer(offer("Clinical Nurse Specialist"), config);
+  const unrelated = scoreSourcedOffer(offer("Clinical Operations Analyst"), config);
+  assert.equal(confirmed.score, primary.score);
+  assert.equal(confirmed.gate, primary.gate);
+  assert.match(confirmed.ratingReason, /matches target title/);
+  assert.ok(unrelated.score < confirmed.score);
+  assert.ok(unrelated.ruleFlags.includes("title-target-mismatch"));
 });
 
 test("frontend targeting does not admit a backend role as an adjacent engineering title", () => {
@@ -3815,7 +3841,7 @@ test("config-driven scorer: nursing offer with config scores differently than wi
   );
 });
 
-test("scoring: a title that is only adjacent to the target is scored lower and worded as adjacent", () => {
+test("scoring: a saved secondary title is scored and worded as a target title", () => {
   const config = {
     targeting: {
       role_buckets: [
@@ -3833,13 +3859,13 @@ test("scoring: a title that is only adjacent to the target is scored lower and w
     bodyText: "A job.",
   });
   const exact = scoreSourcedOffer(offer("Release Engineer"), config);
-  const adjacent = scoreSourcedOffer(offer("Data Engineer"), config);
+  const secondary = scoreSourcedOffer(offer("Data Engineer"), config);
 
   assert.equal(exact.score, 82);
   assert.match(exact.ratingReason, /matches target title: release engineer/);
-  assert.ok(adjacent.score < exact.score, `adjacent ${adjacent.score} vs exact ${exact.score}`);
-  assert.doesNotMatch(adjacent.ratingReason, /matches target title/);
-  assert.match(adjacent.ratingReason, /adjacent to target title: release engineer/);
+  assert.equal(secondary.score, exact.score);
+  assert.match(secondary.ratingReason, /matches target title: data engineer/);
+  assert.doesNotMatch(secondary.ratingReason, /adjacent to target title/);
 });
 
 // ---------------------------------------------------------------------------

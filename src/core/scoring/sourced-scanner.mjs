@@ -294,10 +294,8 @@ function reorderedTitleEquivalent(actualTitle, targetTitle) {
   return words.every((word) => actual.has(word));
 }
 
-// How a title relates to the targets: "target" for a direct match, "adjacent"
-// when it only shares a generic role word or engineering noun with one, or null.
-// Adjacent titles still pass the target filter, but they must not be scored or
-// worded as if they were the target title itself.
+// Explicitly saved primary and secondary titles are confirmed targets. Other
+// candidate-lane neighbors remain adjacent and receive a lower title score.
 function targetRoleTitleMatchKind(actualTitle, targetTitles, targeting) {
   if (targetTitles.length === 0) return "target";
   const standing = relativeSeniority(actualTitle, targeting);
@@ -308,12 +306,11 @@ function targetRoleTitleMatchKind(actualTitle, targetTitles, targeting) {
   const spec = buildLaneSpec(targeting, targetTitles);
   const secondary = new Set(spec.adjacent.map((title) => title.toLowerCase()));
   const actual = String(actualTitle || "").toLowerCase();
-  let adjacent = false;
   for (const targetTitle of targetTitles) {
     const target = String(targetTitle || "").toLowerCase();
     if (secondary.has(target)) {
       if (keywordMatches(actual, target) || reorderedTitleEquivalent(actual, target)) {
-        adjacent = true;
+        return "target";
       }
     } else if (
       keywordMatches(actual, target) ||
@@ -323,7 +320,7 @@ function targetRoleTitleMatchKind(actualTitle, targetTitles, targeting) {
       return "target";
     }
   }
-  return adjacent || adjacentRoleTitleEquivalent(actual, spec) ? "adjacent" : null;
+  return adjacentRoleTitleEquivalent(actual, spec) ? "adjacent" : null;
 }
 
 function targetRoleTitleMatches(actualTitle, targetTitles, targeting) {
@@ -1119,10 +1116,14 @@ function scoreSourcedOfferFromConfig(
       setBase(82, `matches keep signal: ${term}`);
     }
   }
-  for (const term of bucketTitles.filter(Boolean)) {
-    const matchKind = targetRoleTitleMatchKind(title, [term], effectiveTargeting);
-    if (matchKind === "target") setBase(82, `matches target title: ${term}`);
-    else if (matchKind === "adjacent") setBase(70, `adjacent to target title: ${term}`);
+  const titleMatches = bucketTitles
+    .filter(Boolean)
+    .map((term) => ({ term, kind: targetRoleTitleMatchKind(title, [term], effectiveTargeting) }));
+  const matchesTarget = titleMatches.some(({ kind }) => kind === "target");
+  for (const { term, kind } of titleMatches) {
+    if (kind === "target") setBase(82, `matches target title: ${term}`);
+    else if (kind === "adjacent" && !matchesTarget)
+      setBase(70, `adjacent to target title: ${term}`);
   }
 
   // --- Cut signals from targeting.cut_signals ---
