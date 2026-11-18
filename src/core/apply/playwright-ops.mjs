@@ -25,6 +25,9 @@ import { uniqueVoluntaryDeclineOption } from "./form-fill.mjs";
 const CONTROL_SELECTOR =
   "input, textarea, select, button, [role='button'], [contenteditable]:not([contenteditable='false'])[role='textbox']";
 const MAX_PAGE_TEXT = 20_000;
+// The submit guard reads text the display limit above would cut off (a notice
+// after a long posting, or inside an iframe). This only bounds memory.
+const MAX_SAFETY_TEXT = 2_000_000;
 // Bounds every Playwright action selectOption() takes (native-select attempt,
 // then each step of the combobox fallback) so a control that can't actually
 // be driven fails in a few seconds, not Playwright's implicit 30s
@@ -1062,20 +1065,53 @@ export function createPlaywrightOps({
       foldNativeRadioGroups(controlsWithRef, refs);
       latestRefs.set(pageId, refMap);
 
-      let bodyText = "";
+      let fullBodyText = "";
+      let safetyTextIncomplete = false;
       try {
-        bodyText = String(
+        fullBodyText = String(
           (await runAbortable(signal, () => target.locator("body").innerText())) || ""
-        ).slice(0, MAX_PAGE_TEXT);
+        ).slice(0, MAX_SAFETY_TEXT);
       } catch {
         throwIfAborted(signal);
-        bodyText = "";
+        fullBodyText = "";
+        safetyTextIncomplete = true;
+      }
+      const bodyText = fullBodyText.slice(0, MAX_PAGE_TEXT);
+
+      // Guard-only text: the part of the main document past the display limit,
+      // plus every child frame. A frame that can't be read marks the snapshot
+      // incomplete instead of looking clean.
+      const safetyExtras = [];
+      if (fullBodyText.length > MAX_PAGE_TEXT) safetyExtras.push(fullBodyText.slice(MAX_PAGE_TEXT));
+      if (typeof target.frames === "function") {
+        const mainFrame = typeof target.mainFrame === "function" ? target.mainFrame() : null;
+        for (const frame of target.frames()) {
+          if (frame === mainFrame) continue;
+          try {
+            if (typeof frame.isDetached === "function" && frame.isDetached()) continue;
+            const frameText = String(
+              (await runAbortable(signal, () => frame.locator("body").innerText())) || ""
+            ).slice(0, MAX_SAFETY_TEXT);
+            if (frameText.trim()) safetyExtras.push(frameText);
+          } catch {
+            throwIfAborted(signal);
+            safetyTextIncomplete = true;
+          }
+        }
       }
 
       const treeLines = buildUploadTreeLines(controlsWithRef);
-      const pageText = treeLines.length ? `${bodyText}\n${treeLines.join("\n")}` : bodyText;
+      const displayParts = [bodyText, ...safetyExtras, ...treeLines].filter(
+        (part, position) => position === 0 || part
+      );
+      const pageText = displayParts.join("\n");
 
-      return { origin: target.url(), pageText, refs };
+      return {
+        origin: target.url(),
+        pageText,
+        refs,
+        ...(safetyTextIncomplete ? { safetyTextIncomplete: true } : {}),
+      };
     },
 
     async fillField({ pageId, ref, value, signal }) {

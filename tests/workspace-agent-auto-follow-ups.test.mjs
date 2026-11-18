@@ -2,7 +2,8 @@
 // trigger is met. The follow-up is scheduled through an injected scheduler so
 // the tests stay deterministic and never reach an AI route.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -381,4 +382,274 @@ test("an automatic company-health run that only reopens another check says it di
   await h.settle();
   const texts = workspaceThreadRead({ repoRoot, env: {} }).messages.map((message) => message.text);
   assert.ok(texts.some((text) => /Didn't start the automatic company-health check/.test(text)));
+});
+
+// Cost gate recheck: the plan that scheduled a detached run can be stale by the
+// time it executes.
+test("a follow-up scheduled while due skips with a recorded reason when it is no longer due at run time", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot);
+  const pending = [];
+  const h = harness(repoRoot, { scheduleAutoFollowUp: (run) => pending.push(run) });
+
+  await executeWorkspaceIntent({ ...h.base, intent: outcome("interview") });
+  assert.equal(pending.length, 1, "due at schedule time");
+
+  // The job is rejected before the detached run starts.
+  appSetStatus({ repoRoot, env: {}, id: "app-auto", to: "rejected" });
+  await Promise.all(pending.splice(0).map((run) => run()));
+
+  assert.equal(h.healthCalls.length, 0, "no paid work");
+  const thread = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(thread.messages.filter((m) => m.kind === "action_error").length, 0);
+  assert.equal(
+    thread.messages.filter((m) => m.kind === "intent" && m.intent.type === "company.health").length,
+    0
+  );
+  const note = thread.messages.find((m) => m.kind === "status");
+  assert.equal(note.metadata.autoFollowUp.skipped, "no-longer-due");
+  assert.match(note.text, /no longer due/);
+});
+
+// NEEDS YOU auto-resume.
+const QUESTION = "Why do you want to work at Riverside Health?";
+
+function resumeHarness(repoRoot, { applyResult, confirmQuestion = QUESTION } = {}) {
+  const base = harness(repoRoot);
+  const applyCalls = [];
+  const confirmed = [];
+  return {
+    ...base,
+    applyCalls,
+    confirmed,
+    options: {
+      ...base.base,
+      evaluateJobImpl: async ({ body }) => ({
+        status: 200,
+        body: {
+          ok: true,
+          data: {
+            applicationId: body.applicationId,
+            gate: "keep",
+            fitScore: 92,
+            fitReasons: ["Strong fit"],
+            manual: { required: false },
+          },
+        },
+      }),
+      generateDocumentsImpl: async () => ({
+        status: "ready",
+        uploadReady: true,
+        gaps: [],
+        artifacts: {},
+      }),
+      confirmScreeningAnswerImpl: async ({ applicationId, question, answer }) => {
+        confirmed.push(question);
+        return {
+          applicationId,
+          answers: [{ question: question || confirmQuestion, answer, key: "q" }],
+          packetManifest: { uploadReady: true, gaps: [] },
+        };
+      },
+      resolveMissionExecutionPlanImpl: ({ operation }) => ({
+        policyVersion: 1,
+        operation,
+        runtimeId: "codex",
+        adapterVersion: 1,
+        requested: { quality: "best", reasoning: "medium" },
+        resolved: {
+          quality: "best",
+          reasoning: "medium",
+          model: "gpt-5.6-sol",
+          modelSource: "alias",
+          effort: "medium",
+          speedTier: null,
+        },
+        fallback: null,
+      }),
+      saveScreeningAnswerImpl: async (input) => ({ key: input.key, persisted: true }),
+      applyJobImpl: async (input) => {
+        applyCalls.push({ submitMode: input.submitMode, prepareOnly: input.prepareOnly });
+        if (applyResult) return applyResult(input);
+        return input.submitMode === "auto"
+          ? { verified: true, submittedAt: "2026-11-18T12:00:00.000Z" }
+          : { available: true, verified: false, state: "awaiting-submit", session: {} };
+      },
+    },
+  };
+}
+
+const confirmIntent = (question = QUESTION, id = "app-auto") => ({
+  type: "screening.answer-confirm",
+  entity: { type: "application", id },
+  input: { questionId: "q1", question, answer: "I want to care for my community." },
+});
+
+// A packet that already passed the evaluate-job gate, as it is when a job pauses
+// on an open question: current evaluation, JD and provenance on record.
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stableValue(value[key])])
+  );
+}
+
+function pausedOverrides(repoRoot, extra = {}) {
+  const evaluation = {
+    gate: "keep",
+    fitScore: 92,
+    evaluatedAt: "2026-11-18T11:00:00.000Z",
+  };
+  const body = "Care for patients across the Riverside Health network.";
+  const jdPath = "workspace/jobs/riverside-rn.md";
+  mkdirSync(join(repoRoot, "workspace", "jobs"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, jdPath),
+    `---\ncompany: "Riverside Health"\nrole: "Registered Nurse"\n---\n\n# Job Description\n\n${body}\n`,
+    "utf8"
+  );
+  return {
+    status: "reviewed-hold",
+    evaluation,
+    artifacts: { jd: jdPath },
+    packetManifest: {
+      uploadReady: true,
+      gaps: [],
+      provenance: {
+        jd: { path: jdPath, sha256: createHash("sha256").update(body).digest("hex") },
+        evaluation: {
+          evaluatedAt: evaluation.evaluatedAt,
+          sha256: createHash("sha256")
+            .update(JSON.stringify(stableValue(evaluation)))
+            .digest("hex"),
+        },
+      },
+    },
+    ...extra,
+  };
+}
+
+const app = (repoRoot, id = "app-auto") =>
+  JSON.parse(
+    openDb({ repoRoot, env: {} }).prepare("SELECT data FROM applications WHERE id = ?").get(id).data
+  );
+
+test("auto mode: saving the last open answer re-runs the apply and submits once, a second save does not", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot, pausedOverrides(repoRoot));
+  const h = resumeHarness(repoRoot);
+
+  await executeWorkspaceIntent({ ...h.options, intent: confirmIntent() });
+  await h.settle();
+  assert.deepEqual(h.applyCalls, [{ submitMode: "auto", prepareOnly: false }]);
+  assert.equal(app(repoRoot).status, "applied");
+
+  await executeWorkspaceIntent({ ...h.options, intent: confirmIntent() });
+  await h.settle();
+  assert.equal(h.applyCalls.length, 1, "no second submit");
+});
+
+test("auto mode: two saves landing together schedule one resume", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot, pausedOverrides(repoRoot));
+  const pending = [];
+  const h = resumeHarness(repoRoot);
+  const options = { ...h.options, scheduleAutoFollowUp: (run) => pending.push(run) };
+
+  await executeWorkspaceIntent({ ...options, intent: confirmIntent() });
+  await executeWorkspaceIntent({ ...options, intent: confirmIntent() });
+  assert.equal(pending.length, 1);
+  await Promise.all(pending.splice(0).map((run) => run()));
+  assert.equal(h.applyCalls.length, 1);
+});
+
+test("auto mode: an attestation answer re-runs the apply but never submits", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot, pausedOverrides(repoRoot));
+  const h = resumeHarness(repoRoot);
+
+  await executeWorkspaceIntent({
+    ...h.options,
+    intent: confirmIntent("Did you use AI to prepare this application?"),
+  });
+  await h.settle();
+  assert.deepEqual(h.applyCalls, [{ submitMode: "manual", prepareOnly: true }]);
+  assert.equal(app(repoRoot).status, "reviewed-hold");
+  const held = workspaceThreadRead({ repoRoot, env: {} }).messages.find(
+    (m) => m.metadata?.autoResume?.held
+  );
+  assert.match(held.text, /won't press Submit.*vouch for your answers or disclose AI use/);
+});
+
+test("auto mode: a LinkedIn job re-runs the apply but never submits", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot, pausedOverrides(repoRoot, { link: "https://www.linkedin.com/jobs/view/12345/" }));
+  const h = resumeHarness(repoRoot, {});
+
+  await executeWorkspaceIntent({
+    ...h.options,
+    resolveJobUrlImpl: async () => ({ url: null }),
+    intent: confirmIntent(),
+  });
+  await h.settle();
+  assert.notEqual(app(repoRoot).status, "applied");
+  assert.ok(
+    h.applyCalls.every((call) => call.submitMode !== "auto"),
+    "no auto submit on LinkedIn"
+  );
+  const held = workspaceThreadRead({ repoRoot, env: {} }).messages.find(
+    (m) => m.metadata?.autoResume?.held
+  );
+  assert.match(held.text, /LinkedIn/);
+});
+
+test("auto mode: an unresolved required upload re-runs the apply and pauses without submitting", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot, pausedOverrides(repoRoot));
+  const h = resumeHarness(repoRoot, {
+    applyResult: () => ({
+      available: true,
+      verified: false,
+      state: "awaiting-submit",
+      reason: "A required upload is unresolved.",
+      session: {
+        provider: "orca",
+        unresolved: [{ label: "Transcript", required: true, kind: "file" }],
+        blockers: [],
+        submitMode: "auto",
+      },
+    }),
+  });
+
+  await executeWorkspaceIntent({ ...h.options, intent: confirmIntent() });
+  await h.settle();
+  assert.equal(h.applyCalls.length, 1);
+  assert.equal(app(repoRoot).status, "reviewed-hold");
+  const last = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+  assert.equal(last.metadata.state, "awaiting-submit");
+  assert.equal(last.metadata.submissionVerified, false);
+});
+
+test("supervised mode: saving the last answer offers the Resume button and does not re-run", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot, pausedOverrides(repoRoot));
+  candidateConfigPatch({ repoRoot, env: {}, name: "automation", patch: { submit: "manual" } });
+  const h = resumeHarness(repoRoot);
+
+  const result = await executeWorkspaceIntent({ ...h.options, intent: confirmIntent() });
+  await h.settle();
+  assert.equal(h.applyCalls.length, 0);
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.prepare-submit");
+});
+
+test("auto mode with autoFollowUps off (CLI, tests) never re-runs", async () => {
+  const repoRoot = tempRepo();
+  seed(repoRoot, pausedOverrides(repoRoot));
+  const h = resumeHarness(repoRoot);
+  await executeWorkspaceIntent({ ...h.options, autoFollowUps: false, intent: confirmIntent() });
+  await h.settle();
+  assert.equal(h.applyCalls.length, 0);
 });

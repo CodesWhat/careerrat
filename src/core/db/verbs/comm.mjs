@@ -2,7 +2,9 @@
 // outcome-changing, so none of these refresh the analytics block (AGENTS.md's
 // Tracker Write Contract explicitly carves out "pure comms/scheduling writes").
 import { randomUUID } from "node:crypto";
+import { checkDraftFacts } from "../../comms/draft-facts.mjs";
 import { slugifyThreadId } from "../../comms/threads.mjs";
+import { requireDb } from "../connection.mjs";
 import { ensureJobThreadInDb } from "./chat-first.mjs";
 import {
   appIdExists,
@@ -237,9 +239,41 @@ function assertMessagesValid(messages) {
   });
 }
 
+function draftParts(draft) {
+  const source = typeof draft === "string" ? { body: draft } : draft;
+  return { subject: clean(source?.subject), body: clean(source?.body) };
+}
+
+function draftFactsError(draftFacts) {
+  const error = new Error(
+    `This draft names facts that aren't in your résumé or evidence, so it was held: ${draftFacts.messages.join("; ")}`
+  );
+  error.code = "COMMUNICATION_DRAFT_FACTS";
+  error.details = { messages: draftFacts.messages };
+  return error;
+}
+
 export function commUpsert({ repoRoot, env, row } = {}) {
   if (!row?.id) throw new Error("commUpsert: row.id is required");
   assertMessagesValid(row.messages);
+  // A full-row write must not become a side door around commSetDraft: a new or
+  // changed draft body gets the same fact check. Only the draft is checked, never
+  // the inbound messages the row carries.
+  const incoming = draftParts(row.draft);
+  if (incoming.body) {
+    const existing = getRow(requireDb({ repoRoot, env }), "communications", row.id);
+    const previous = draftParts(existing?.draft);
+    if (previous.body !== incoming.body || previous.subject !== incoming.subject) {
+      const draftFacts = checkDraftFacts({
+        repoRoot,
+        env,
+        comm: row,
+        subject: incoming.subject,
+        body: incoming.body,
+      });
+      if (!draftFacts.ok) throw draftFactsError(draftFacts);
+    }
+  }
   return runVerb({ repoRoot, env }, (db) => {
     const existed = Boolean(getRow(db, "communications", row.id));
     putRow(db, "communications", row.id, row, {
@@ -330,9 +364,21 @@ function normalizeDraft(draft) {
 // Persist a generated reply as a reviewable draft and append its durable
 // history in the same transaction. Drafting never claims delivery;
 // commMarkSent remains the only send writer.
-export function commSetDraft({ repoRoot, env, id, draft, summary, at } = {}) {
+export function commSetDraft({ repoRoot, env, id, draft, summary, at, factAllow = [] } = {}) {
   const normalizedDraft = normalizeDraft(draft);
   const messageSummary = String(summary || "Reply drafted for review.").trim();
+  // Canonical storage point (CR103): no caller can persist a draft that names
+  // facts outside the candidate's own material, whatever path produced it.
+  const existing = requireRow(requireDb({ repoRoot, env }), "communications", id, "communication");
+  const draftFacts = checkDraftFacts({
+    repoRoot,
+    env,
+    comm: existing,
+    subject: normalizedDraft.subject,
+    body: normalizedDraft.body,
+    extraAllow: factAllow,
+  });
+  if (!draftFacts.ok) throw draftFactsError(draftFacts);
   return runVerb({ repoRoot, env }, (db) => {
     const comm = requireRow(db, "communications", id, "communication");
     if (comm.status === "closed" || comm.status === "blocked") {

@@ -13,6 +13,7 @@ import {
   findAdvanceButtonRef,
   findSubmitButtonRef,
   hostnameToPortal,
+  limitBlockerReason,
   mapFormDefaults,
   PORTAL_RECIPES,
   resolveFieldValue,
@@ -358,6 +359,46 @@ describe("BLOCKER_SIGNALS", () => {
 // ---------------------------------------------------------------------------
 
 describe("submitGuard", () => {
+  it("blocks restriction and limit headings and short notices", () => {
+    for (const text of [
+      "Account temporarily restricted",
+      '- heading "Account temporarily restricted" [level=2]',
+      "## Account suspended",
+      "Temporarily blocked",
+    ]) {
+      assert.ok(
+        submitGuard({ pageText: `Application form\n${text}\nFirst name` }).blockers.includes(
+          "account restricted"
+        ),
+        text
+      );
+    }
+    for (const text of [
+      "Application limit reached",
+      "You've reached the application limit",
+      "This job has application limits",
+    ]) {
+      assert.ok(
+        submitGuard({ pageText: `Application form\n${text}` }).blockers.includes(
+          "application limit"
+        ),
+        text
+      );
+    }
+  });
+
+  it("does not block on job description prose that only contains the phrases", () => {
+    for (const text of [
+      "We receive too many applications to respond individually.",
+      "You will investigate detected unusual activity and triage alerts.",
+      "Investigate detected unusual activity across our fleet.",
+      "Manage account restricted access policies for customers.",
+      "There is a maximum number of applications we can review per week.",
+    ]) {
+      assert.deepEqual(submitGuard({ pageText: text }).blockers, [], text);
+    }
+  });
+
   it("blocks on pageText containing 'verify you are human'", () => {
     const result = submitGuard({
       pageText: "Please verify you are human to continue.",
@@ -365,6 +406,16 @@ describe("submitGuard", () => {
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
     assert.ok(result.blockers.includes("verify you are human"));
+  });
+
+  it("blocks as page-unreadable when part of the page could not be read", () => {
+    const result = submitGuard({
+      pageText: "Application form",
+      pageSignals: { safetyTextIncomplete: true },
+    });
+    assert.equal(result.canSubmit, false);
+    assert.deepEqual(result.blockers, ["page-unreadable"]);
+    assert.match(limitBlockerReason(result.blockers), /couldn't be read/);
   });
 
   it("blocks on pageText containing 'captcha'", () => {
@@ -409,6 +460,41 @@ describe("submitGuard", () => {
     });
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
+  });
+
+  it("blocks on the Ashby per-employer application limits panel", () => {
+    const result = submitGuard({
+      pageText:
+        "Staff Engineer\nThis job has application limits\nYou can apply 2 times every 90 days.",
+    });
+    assert.equal(result.canSubmit, false);
+    assert.ok(result.blockers.includes("application limit"));
+  });
+
+  it("blocks on reached-limit and account-restriction wording", () => {
+    for (const text of [
+      "You've reached your application limit for this company.",
+      "You've already applied to this employer the maximum number of times.",
+      "Too many applications from this account.",
+    ]) {
+      assert.ok(submitGuard({ pageText: text }).blockers.includes("application limit"), text);
+    }
+    for (const text of [
+      "Your account has been restricted.",
+      "Your account is temporarily restricted",
+      "We\u2019ve restricted your account after unusual activity on your account.",
+    ]) {
+      assert.ok(submitGuard({ pageText: text }).blockers.includes("account restricted"), text);
+    }
+  });
+
+  it("does not trip on job-description prose about limits or restrictions", () => {
+    const result = submitGuard({
+      pageText:
+        "We offer no limits on PTO. Restricted stock units vest over four years. Access to production is restricted to on-call engineers. Our growth has no limits.",
+    });
+    assert.equal(result.canSubmit, true);
+    assert.deepEqual(result.blockers, []);
   });
 
   it("handles no arguments (empty call)", () => {
@@ -1490,5 +1576,158 @@ describe("confirmationCheck final verified receipt cases", () => {
       confirmationCheck({ pageText: "After you click Submit, application submitted" }).submitted,
       false
     );
+  });
+});
+
+describe("tool-derived screening answers need a whole-technology plain experience question", () => {
+  const honesty = {
+    tools: {
+      confirmed: ["Go", "Git", "Python", "C / C++", "C++", "C#", ".NET", "Node.js"],
+      do_not_claim: ["Java", "C"],
+    },
+  };
+  const resolve = (question, h = honesty) => resolveScreeningAnswer(question, { honesty: h });
+
+  it("does not answer from substrings of ordinary words", () => {
+    for (const question of [
+      "Do you hold a security clearance from the US government?",
+      "Are you legitimately based in the US?",
+      "Do you have experience with public cloud infrastructure?",
+    ]) {
+      assert.equal(resolve(question).action, "skip", question);
+    }
+  });
+
+  it("leaves years, level and qualified questions to reviewed answers", () => {
+    for (const question of [
+      "Do you have 10+ years of professional Python experience?",
+      "How many years of Python do you have?",
+      "Do you have at least 5 years of Python?",
+      "Do you have expert-level Python experience?",
+      "Have you owned Python in production?",
+      "Do you have no experience with Python?",
+    ]) {
+      assert.equal(resolve(question).action, "skip", question);
+    }
+  });
+
+  it("keeps Java and JavaScript apart", () => {
+    assert.equal(resolve("Do you have JavaScript experience?").action, "skip");
+    const java = resolve("Do you have Java experience?");
+    assert.equal(java.value, "No");
+    assert.equal(java.source, "honesty.tools.do_not_claim");
+  });
+
+  it("still answers a plain confirmed-tool question", () => {
+    for (const question of [
+      "Do you have Python experience?",
+      "Have you used Python?",
+      "Do you have experience with Git?",
+    ]) {
+      const answer = resolve(question);
+      assert.equal(answer.value, "Yes", question);
+      assert.equal(answer.source, "honesty.tools.confirmed");
+    }
+  });
+
+  it("matches punctuation-sensitive names only as themselves", () => {
+    const only = { tools: { confirmed: ["C++"], do_not_claim: [] } };
+    assert.equal(resolve("Do you have experience with C++?", only).value, "Yes");
+    assert.equal(resolve("Do you have experience with C#?", only).action, "skip");
+    assert.equal(resolve("Do you have experience with C?", only).action, "skip");
+    const net = { tools: { confirmed: [".NET"], do_not_claim: [] } };
+    assert.equal(resolve("Do you have experience with .NET?", net).value, "Yes");
+    assert.equal(resolve("Do you have experience with ASP.NET?", net).action, "skip");
+    const node = { tools: { confirmed: ["Node.js"], do_not_claim: [] } };
+    assert.equal(resolve("Do you have experience with Node.js?", node).value, "Yes");
+    assert.equal(resolve("Do you have experience with Node?", node).action, "skip");
+  });
+
+  it("does not answer when one question names a claimable and a forbidden tool", () => {
+    assert.equal(resolve("Do you have experience with Python or Java?").action, "skip");
+  });
+});
+
+describe("attestation hard stop", () => {
+  it("survives planning as a skip with its reason", () => {
+    const [step] = buildFillPlan({
+      fields: [{ label: "I certify that the information above is true and complete." }],
+      formDefaults: {},
+      profile: {},
+    });
+    assert.equal(step.action, "skip");
+    assert.equal(step.reason, "attestation_needs_person");
+  });
+
+  it("leaves ordinary AI/ML experience questions answerable", () => {
+    const answer = resolveScreeningAnswer("Do you have experience with AI/ML tools?", {
+      honesty: { tools: { confirmed: ["AI/ML tools"], do_not_claim: [] } },
+    });
+    assert.equal(answer.action, "fill");
+    assert.equal(answer.value, "Yes");
+  });
+
+  it("submitGuard blocks on the explicit live-label signal and on certification prose", () => {
+    assert.deepEqual(submitGuard({ pageSignals: { attestation: true } }).blockers, ["attestation"]);
+    const prose = submitGuard({
+      pageText: "I certify that all information provided is true and accurate.",
+    });
+    assert.equal(prose.canSubmit, false);
+    assert.ok(prose.blockers.includes("attestation"));
+    assert.equal(
+      submitGuard({ pageText: "We use AI tools in our hiring process. Apply below." }).canSubmit,
+      true
+    );
+  });
+});
+
+describe("resolveScreeningAnswer work arrangement", () => {
+  const ask = (question, location) => resolveScreeningAnswer(question, { profile: { location } });
+
+  it("answers the asked onsite arrangement, not a negated remote statement", () => {
+    const answer = ask(
+      "This role is not remote. Are you able to work onsite in NYC 5 days a week?",
+      { remote: true, onsite: false }
+    );
+    assert.equal(answer.action, "fill");
+    assert.equal(answer.value, "No");
+    assert.equal(answer.source, "profile.location.onsite");
+  });
+
+  it("handles other negated preambles", () => {
+    const answer = ask("This is not a remote position. Can you work in person in Austin?", {
+      remote: true,
+      onsite: true,
+    });
+    assert.equal(answer.value, "Yes");
+    assert.equal(answer.source, "profile.location.onsite");
+  });
+
+  it("follows reversed preferences", () => {
+    const location = { remote: false, hybrid: false, onsite: true };
+    assert.equal(ask("Are you open to remote work?", location).value, "No");
+    assert.equal(ask("Are you able to work onsite?", location).value, "Yes");
+    assert.equal(
+      ask("This role is not onsite. Are you open to remote work?", location).value,
+      "No"
+    );
+  });
+
+  it("answers hybrid and onsite combinations from the asked arrangement", () => {
+    const location = { remote: true, hybrid: true, onsite: false };
+    assert.equal(ask("The team is not onsite. Are you open to hybrid?", location).value, "Yes");
+    assert.equal(ask("This role is not hybrid. Can you work in office?", location).value, "No");
+  });
+
+  it("leaves ambiguous wording unresolved", () => {
+    const location = { remote: true, hybrid: true, onsite: false };
+    for (const q of [
+      "Are you open to remote or onsite work?",
+      "Are you able to work onsite or hybrid?",
+      "Are you not able to work onsite?",
+      "This role is not remote. Are you comfortable with that?",
+    ]) {
+      assert.equal(ask(q, location).action, "skip", q);
+    }
   });
 });

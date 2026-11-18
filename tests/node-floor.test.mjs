@@ -72,3 +72,23 @@ for (const [version, expectedStatus] of [
     }
   });
 }
+
+test("careerrat doctor refuses Node 24.22.0 and names the upgrade", () => {
+  const home = mkdtempSync(join(tmpdir(), "careerrat-node-floor-doctor-"));
+  const entry = new URL("../src/cli/doctor.mjs", import.meta.url);
+  const script = `Object.defineProperty(process.versions,"node",{value:"24.22.0"});process.argv=[process.execPath,${JSON.stringify(fileURLToPath(entry))},"--guidance-only"];await import(${JSON.stringify(entry.href)});`;
+  try {
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      encoding: "utf8",
+      timeout: 10000,
+      cwd: home,
+      env: { ...process.env, CAREERRAT_HOME: home, CAREERRAT_NO_UPDATE_CHECK: "1" },
+    });
+    assert.equal(result.error, undefined);
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, /24\.22\.1/);
+    assert.match(result.stderr, /Upgrade to Node\.js 24\.22\.1 or newer/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

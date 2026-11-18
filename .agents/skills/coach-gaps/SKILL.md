@@ -44,7 +44,8 @@ Fires **only** when both are true on the application's current typed `evaluation
 Never on `gate: "keep"` (nothing to coach — the role already cleared) and never on
 `gate: "cut"` (nothing to coach toward — comp-floor failures and hard cuts are not a coaching
 problem). It runs on its own the moment such a verdict lands, once per evaluation, in the
-job's thread. The "Coach me on this fit" button next to Re-evaluate in the Jobs drawer's
+job's thread. From the terminal, `careerrat evaluate <job> --write` is what saves that verdict
+(`evaluate-job` STEP 9); without it there is nothing to coach. The "Coach me on this fit" button next to Re-evaluate in the Jobs drawer's
 Evaluate card, or the same request typed in Ask, runs it again on demand. If no AI is set up
 the automatic run is skipped with a short note instead of an error.
 

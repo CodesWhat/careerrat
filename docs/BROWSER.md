@@ -95,12 +95,14 @@ follows the `submit` setting at the final Submit; never LinkedIn, where the pers
 (generic `webmail` for one recent verification-code message; Gmail/Outlook for
 verification-code reads and `ingest-mail` webmail reads).
 
-The switchboard is `.careerrat/candidate/automation.yml` in a legacy file workspace
+Where the switchboard lives depends on the workspace. A workspace that keeps its
+settings in the database (the default now) reads them from there: change them with
+`careerrat automation submit`, `enable` and `disable`. A leftover
+`candidate/automation.yml` in such a workspace is ignored, so editing it changes
+nothing, and `careerrat automation status` warns when one is there. Only a legacy
+file workspace uses `.careerrat/candidate/automation.yml` as the switchboard
 (gitignored; schema `config/automation.schema.json`, template
-`templates/automation.example.yml`). A workspace that keeps its settings in the
-database ignores that file: change settings with `careerrat automation submit`,
-`enable` and `disable` (`careerrat automation status` warns if a stray file is
-there). A
+`templates/automation.example.yml`). A
 capability runs on a platform unless its global switch or that platform's per-capability
 switch is explicitly `false`. There is no consent step or setup mode. Query it
 with `mayRun()` in `src/core/automation/consent.mjs`; never hardcode the

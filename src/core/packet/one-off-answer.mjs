@@ -15,6 +15,7 @@ import {
 } from "../db/verbs.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { draftPacketAnswers } from "./answers.mjs";
+import { isAttestationQuestion } from "./attestation.mjs";
 import { buildPacketContext } from "./context.mjs";
 import { filterClaimableStories } from "./deep-ingest-sources.mjs";
 import { capturePacketQuestions } from "./questions.mjs";
@@ -375,6 +376,13 @@ export async function confirmOneOffScreeningAnswer({
   ) {
     const error = new Error("applicationId and complete reviewed answers are required");
     error.code = "BAD_REQUEST";
+    throw error;
+  }
+  if (reviewedAnswers.some((entry) => isAttestationQuestion(entry.question))) {
+    const error = new Error(
+      "This question asks you to vouch for your answers or disclose AI use. CareerRat can't answer it for you. Answer it yourself on the form."
+    );
+    error.code = "ATTESTATION_NEEDS_PERSON";
     throw error;
   }
   if (reviewedAnswers.some((entry) => needsUser(entry.answer))) {

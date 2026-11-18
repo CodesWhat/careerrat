@@ -58,7 +58,8 @@ Options:
   --root DIR    Repo root (default: the careerrat install).
 
 Reason codes: MANUAL_SUBMIT_MODE, LINKEDIN_NEVER_AUTO_SUBMIT, ALREADY_SUBMITTED,
-GATE_NOT_CLEARED, ANSWER_NEEDED, SESSION_UNREACHABLE, UNTRUSTED_ORIGIN,
+GATE_NOT_CLEARED, ANSWER_NEEDED, SESSION_UNREACHABLE, SUBMIT_ALREADY_CLAIMED,
+UNTRUSTED_ORIGIN,
 HUMAN_CHALLENGE, REQUIRED_FIELDS_BLANK, UPLOAD_MISSING, NO_SUBMIT_BUTTON.
 
 Only the Orca session browser can be reached from this command. With any other
@@ -95,6 +96,14 @@ if (opts.json) {
   console.log(`Next: ${result.nextAction}`);
 } else {
   console.error(`Not submitted: ${result.message}`);
-  console.error("The job is now manual-apply. Hand the form to the person and say what's missing.");
+  if (result.state === "submit-claimed") {
+    console.error(
+      "The job status was not changed. Do not press Submit; check the other run first."
+    );
+  } else {
+    console.error(
+      "The job is now manual-apply. Hand the form to the person and say what's missing."
+    );
+  }
 }
 process.exit(result.ok ? 0 : 1);

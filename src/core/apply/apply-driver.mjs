@@ -4,6 +4,7 @@ import { basename, isAbsolute, join, normalize, relative, sep } from "node:path"
 import { mayRun } from "../automation/consent.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import { validUploadArtifact } from "../documents/artifact-validation.mjs";
+import { isAttestationQuestion } from "../packet/attestation.mjs";
 import {
   capturePacketQuestions,
   classifySelfIdentificationQuestion,
@@ -11,6 +12,7 @@ import {
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { runAbortable, throwIfAborted, withAbortSignal } from "./cancellation.mjs";
 import {
+  ATTESTATION_BLOCKER,
   applicationPlatformForUrl,
   buildFillPlan,
   confirmationCheck,
@@ -18,7 +20,9 @@ import {
   findSubmitButtonRef,
   hostnameToPortal,
   isSsoOrAccountLabel,
+  limitBlockerReason,
   REQUIRED_FIELDS_UNANSWERED,
+  snapshotHasAttestation,
   submitGuard,
 } from "./form-fill.mjs";
 import { employerApplyLink, isLinkedInUrl } from "./linkedin-link.mjs";
@@ -266,16 +270,36 @@ function selectValueFromSnapshot(value, snapshot) {
   return prefixed.length === 1 ? prefixed[0] : String(value);
 }
 
+function stripMarkdownEmphasis(text) {
+  return String(text || "")
+    .replace(/^[\s>#-]+/, "")
+    .replace(/[*_`~]/g, "")
+    .trim();
+}
+
 function answerSections(markdown) {
   const sections = new Map();
-  const pattern = /^##\s+(.+?)\s*\n+([\s\S]*?)(?=\n+##\s+|$)/gm;
-  for (const match of String(markdown || "").matchAll(pattern)) {
-    const label = normalizeLabel(match[1]);
-    const answer = String(match[2] || "").trim();
-    if (!label || !answer || /^NEEDS YOU\b/i.test(answer) || /^Leave blank\b/i.test(answer)) {
-      continue;
+  const lines = String(markdown || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n");
+  const blocks = [];
+  let current = null;
+  for (const line of lines) {
+    const heading = line.match(/^##[ \t]+(\S.*?)[ \t]*$/);
+    if (heading) {
+      current = { heading: heading[1], body: [] };
+      blocks.push(current);
+    } else if (current) {
+      current.body.push(line);
     }
-    if (/^Attach the generated\b/i.test(answer)) continue;
+  }
+  for (const block of blocks) {
+    const label = normalizeLabel(block.heading);
+    const answer = block.body.join("\n").trim();
+    if (!label || !answer) continue;
+    const plain = stripMarkdownEmphasis(answer);
+    if (/^NEEDS\s+YOU\b/i.test(plain) || /^Leave blank\b/i.test(plain)) continue;
+    if (/^Attach the generated\b/i.test(plain)) continue;
     sections.set(label, answer);
   }
   return sections;
@@ -409,6 +433,11 @@ function fillPlan({ fields, config, application, answers }) {
   });
   return planned.map((step, index) => {
     const field = fields[index];
+    // Truthfulness and AI-use attestations are the person's to answer. This runs
+    // before the packet-answer fallback so a stored "Yes" can never tick one.
+    if (isAttestationQuestion(field.label) || step?.reason === "attestation_needs_person") {
+      return { ...field, action: "skip", value: null, reason: "attestation_needs_person" };
+    }
     if (classifySelfIdentificationQuestion(field.label).excluded) {
       if (
         step?.action === "fill" &&
@@ -418,8 +447,17 @@ function fillPlan({ fields, config, application, answers }) {
       }
       return { ...field, action: "exclude", value: null };
     }
-    if (step?.action === "fill") return { ...field, ...step };
     const answer = answers.get(normalizeLabel(field.label));
+    // A reviewed packet answer outranks tool inference: a confirmed tool alone
+    // can't override the person's reviewed answer to a qualification question.
+    if (
+      step?.action === "fill" &&
+      answer &&
+      String(step.source || "").startsWith("honesty.tools.")
+    ) {
+      return { ...field, action: "fill", value: answer, source: "packet.answers" };
+    }
+    if (step?.action === "fill") return { ...field, ...step };
     if (answer) return { ...field, action: "fill", value: answer, source: "packet.answers" };
     return { ...field, action: "skip", value: null };
   });
@@ -444,9 +482,27 @@ function isHumanChallengeBlocker(blocker) {
   return HUMAN_CHALLENGE_BLOCKERS.has(blocker);
 }
 
+// An attestation doesn't stop preparation: the rest of the form still gets filled
+// and the attestation is left for the person. It stops the final guard and Submit.
+function isPreparationBlocker(blocker) {
+  return !isHumanChallengeBlocker(blocker) && blocker !== ATTESTATION_BLOCKER;
+}
+
+// submitGuard plus the live control labels, so an attestation that only shows up
+// as a checkbox or question still stops Submit.
+function snapshotGuard(snapshot) {
+  return submitGuard({
+    pageText: snapshot?.pageText,
+    pageSignals: {
+      attestation: snapshotHasAttestation(snapshot),
+      safetyTextIncomplete: snapshot?.safetyTextIncomplete === true,
+    },
+  });
+}
+
 function browserInterventionBlockers(snapshot) {
   const blockers = submitGuard({ pageText: snapshot?.pageText }).blockers.filter(
-    (blocker) => !isHumanChallengeBlocker(blocker)
+    isPreparationBlocker
   );
   const fields = renderedFieldsFromSnapshot(snapshot);
   if (
@@ -678,9 +734,7 @@ async function fillStep({
   const initialGuard = submitGuard({
     pageText: snapshot.pageText,
   });
-  const preparationBlockers = initialGuard.blockers.filter(
-    (blocker) => !isHumanChallengeBlocker(blocker)
-  );
+  const preparationBlockers = initialGuard.blockers.filter(isPreparationBlocker);
   if (preparationBlockers.length) {
     return {
       blocked: true,
@@ -933,9 +987,7 @@ async function fillStep({
       reason: "This field has no label, so CareerRat can't tell what it asks and didn't guess.",
     });
   }
-  const guard = submitGuard({
-    pageText: finalSnapshot.pageText,
-  });
+  const guard = snapshotGuard(finalSnapshot);
   return {
     blocked: false,
     guard,
@@ -1173,6 +1225,30 @@ export function createApplyDriver({
     packet,
     signal,
   }) {
+    // Every page blocker is checked against the exact snapshot Submit was
+    // resolved from, right before the click, so a notice that appeared after the
+    // fill pass (restriction, limit, captcha) still stops the run with no click.
+    const submitBlockers = snapshotGuard(snapshot).blockers;
+    if (submitBlockers.length) {
+      return {
+        available: true,
+        verified: false,
+        state: "blocked",
+        reason:
+          limitBlockerReason(submitBlockers) ||
+          `The page shows a blocker (${submitBlockers.join(", ")}), so CareerRat didn't press Submit. Nothing was submitted.`,
+        currentUrl: snapshot?.origin,
+        session: {
+          provider: providerLabel,
+          filledCount: counts.filledCount,
+          uploadedCount: counts.uploadedCount,
+          unresolved: counts.unresolved,
+          blockers: submitBlockers,
+          submitMode: "auto",
+          ...stepSession,
+        },
+      };
+    }
     // The caller records a durable "Submit is about to be pressed" marker first.
     // If it can't, nothing is clicked: a click with no marker could repeat
     // after a restart. An abort after the marker but before the click also
@@ -1182,6 +1258,26 @@ export function createApplyDriver({
         await onSubmitAttempt({ applicationId, submitLabel });
       } catch (error) {
         throwIfAborted(signal);
+        if (error?.code === "SUBMIT_ALREADY_CLAIMED") {
+          return {
+            available: true,
+            verified: false,
+            state: "submit-claimed",
+            code: "SUBMIT_ALREADY_CLAIMED",
+            reason:
+              "Another run is already submitting this application. Nothing was clicked here. Check its status before doing anything.",
+            currentUrl: snapshot?.origin,
+            session: {
+              provider: providerLabel,
+              filledCount: counts.filledCount,
+              uploadedCount: counts.uploadedCount,
+              unresolved: counts.unresolved,
+              blockers: [],
+              submitMode: "auto",
+              ...stepSession,
+            },
+          };
+        }
         return {
           available: true,
           verified: false,
@@ -1535,6 +1631,29 @@ export function createApplyDriver({
       };
     }
 
+    // A limit or restriction notice stops the run before any apply control is
+    // considered, including a LinkedIn Apply button sitting on a restriction page.
+    const limitBlockers = submitGuard({ pageText: snapshot?.pageText }).blockers.filter(
+      (blocker) => blocker === "application limit" || blocker === "account restricted"
+    );
+    if (limitBlockers.length) {
+      return {
+        available: true,
+        verified: false,
+        state: "blocked",
+        reason: limitBlockerReason(limitBlockers),
+        currentUrl: snapshot.origin || url,
+        session: {
+          provider: providerLabel,
+          filledCount: 0,
+          uploadedCount: 0,
+          unresolved: [],
+          blockers: limitBlockers,
+          submitMode: "manual",
+        },
+      };
+    }
+
     const entry = applicationEntry(snapshot);
     if (entry) {
       const detailSnapshot = snapshot;
@@ -1669,7 +1788,9 @@ export function createApplyDriver({
         available: true,
         verified: false,
         state: "blocked",
-        reason: `Stopped on ${interventionBlockers.join(", ")}.`,
+        reason:
+          limitBlockerReason(interventionBlockers) ||
+          `Stopped on ${interventionBlockers.join(", ")}.`,
         currentUrl: snapshot.origin || url,
         session: {
           provider: providerLabel,
@@ -1725,7 +1846,7 @@ export function createApplyDriver({
           available: true,
           verified: false,
           state: "blocked",
-          reason: `Stopped on ${stepBlockers.join(", ")}.`,
+          reason: limitBlockerReason(stepBlockers) || `Stopped on ${stepBlockers.join(", ")}.`,
           currentUrl: snapshot.origin || url,
           session: {
             provider: providerLabel,
@@ -1803,7 +1924,10 @@ export function createApplyDriver({
           available: true,
           verified: false,
           state: "blocked",
-          reason: result.reason || `Stopped on ${result.blockers.join(", ")}.`,
+          reason:
+            result.reason ||
+            limitBlockerReason(result.blockers) ||
+            `Stopped on ${result.blockers.join(", ")}.`,
           currentUrl: result.finalSnapshot?.origin || snapshot.origin || url,
           session: {
             provider: providerLabel,
@@ -1828,7 +1952,7 @@ export function createApplyDriver({
           state: "blocked",
           reason: humanChallengeOnly
             ? "CareerRat stopped at the captcha after preparing the live form. Complete the captcha, review it, and submit it yourself."
-            : `Stopped on ${guard.blockers.join(", ")}.`,
+            : limitBlockerReason(guard.blockers) || `Stopped on ${guard.blockers.join(", ")}.`,
           currentUrl: finalSnapshot.origin || snapshot.origin || url,
           session: {
             provider: providerLabel,
