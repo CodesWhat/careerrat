@@ -35,7 +35,8 @@ if (args.includes("--help") || args.includes("-h") || args.length === 0) {
   process.exit(args.length === 0 ? 1 : 0);
 }
 
-exitOnUnknownFlags(args, ["--json", "--write", "--app", "--help", "-h"], "evaluate");
+// 2 is the REVIEW verdict here, so a usage error gets EX_USAGE (64) instead.
+exitOnUnknownFlags(args, ["--json", "--write", "--app", "--help", "-h"], "evaluate", 64);
 
 const appFlagAt = args.indexOf("--app");
 const explicitAppId = appFlagAt >= 0 ? args[appFlagAt + 1] : undefined;
@@ -175,6 +176,6 @@ Usage:
 frontmatter (appId, or company and role), saves nothing if the job has no readable
 text, and prints the job id and gate it saved.
 
-Exit codes: 0 KEEP, 2 REVIEW, 1 CUT (or error).
+Exit codes: 0 KEEP, 2 REVIEW, 1 CUT (or error), 64 unknown option.
 Inputs: candidate/targeting.yml, candidate/profile.yml, candidate/honesty.yml.`);
 }

@@ -174,6 +174,6 @@ test("without --write nothing is written", () => {
 test("a misspelled flag is rejected instead of silently skipping the save", () => {
   const dir = workspace();
   const result = run(dir, ["workspace/jobs/acme.md", "--wrtie"]);
-  assert.equal(result.status, 2);
+  assert.equal(result.status, 64, "must not collide with the review exit code 2");
   assert.match(result.stderr, /unknown option --wrtie/);
 });
