@@ -1559,13 +1559,17 @@ export async function generatePacket({
       env,
       appId: id,
       packetSources: artifacts,
+      freshManifest: manifest,
       formats,
       signal,
     });
     artifacts = { ...artifacts, ...(exported?.artifacts || {}) };
     const registeredManifest = exported?.registered?.packetManifest;
-    if (registeredManifest) Object.assign(manifest, registeredManifest);
-    else {
+    if (registeredManifest) {
+      // The export was handed this manifest as freshManifest, so the
+      // registered gaps/readiness/provenance already carry the fresh values.
+      Object.assign(manifest, registeredManifest);
+    } else {
       manifest.artifacts = artifacts;
       manifest.uploadReady = false;
       manifest.status = "reviewable";
