@@ -294,17 +294,6 @@ export function resolveApplicationId({ db, explicitId, job }) {
   }
 
   const apps = loadRows(db, "applications");
-  if (claimed) {
-    const row = apps.find((r) => r.id === claimed);
-    if (!row) throw new EvaluationWriteError(`No application with id "${claimed}".`);
-    if (!postingMatches(row, facts)) {
-      throw new EvaluationWriteError(
-        `Not saved: the job file says it belongs to ${claimed}, but the job is ${describeJob(facts)} and ${claimed} is ${describe(row)}. Pass --app <id> to choose the application yourself.`
-      );
-    }
-    return claimed;
-  }
-
   const ambiguous = (rows) =>
     new EvaluationWriteError(
       `Not saved: ${describeJob(facts)} matches more than one application (${rows.map((r) => r.id).join(", ")}). Pass --app <id> to choose one.`
@@ -318,9 +307,27 @@ export function resolveApplicationId({ db, explicitId, job }) {
   // application elsewhere must not outvote it, and a sourced-only record at
   // that URL means this job is not an application yet.
   const urlHit = pick(apps.filter((row) => sameSpecificUrl(facts.url, row.link)));
-  if (urlHit) return urlHit;
+  if (urlHit) {
+    if (claimed && claimed !== urlHit) {
+      throw new EvaluationWriteError(
+        `Not saved: the job file says it belongs to ${claimed}, but its posting URL is ${urlHit}'s. Pass --app <id> to choose the application yourself.`
+      );
+    }
+    return urlHit;
+  }
   const urlLead = loadRows(db, "sourced").find((row) => sameSpecificUrl(facts.url, row.link));
   if (urlLead) throw sourcedLeadError(urlLead);
+
+  if (claimed) {
+    const row = apps.find((r) => r.id === claimed);
+    if (!row) throw new EvaluationWriteError(`No application with id "${claimed}".`);
+    if (!postingMatches(row, facts)) {
+      throw new EvaluationWriteError(
+        `Not saved: the job file says it belongs to ${claimed}, but the job is ${describeJob(facts)} and ${claimed} is ${describe(row)}. Pass --app <id> to choose the application yourself.`
+      );
+    }
+    return claimed;
+  }
 
   const sameRole = apps.filter((row) => sameCompany(facts.company, row.company));
   const roleHit =

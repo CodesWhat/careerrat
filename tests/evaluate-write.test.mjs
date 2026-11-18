@@ -300,6 +300,64 @@ test("an exact sourced URL refuses even when a same-title application exists", (
   ]);
 });
 
+test("a stale frontmatter id cannot override an exact sourced URL", () => {
+  for (const key of ["appId", "applicationId"]) {
+    const oldUrl = "https://acme.example/opening/old";
+    const newUrl = "https://acme.example/opening/new";
+    const dir = workspace({
+      apps: [{ ...STAFF, id: "app-old", link: oldUrl }],
+      jd: jd({ extra: `source: ${newUrl}\n${key}: app-old` }),
+    });
+    seedSourced(dir, { id: "src-new", company: "Acme", role: "Staff Engineer", link: newUrl });
+    assertRefused(dir, run(dir, ["workspace/jobs/acme.md", "--write"]), /only a sourced lead/, [
+      "app-old",
+    ]);
+    assert.equal(appRow(dir, "app-old").status, "reviewed-hold");
+  }
+});
+
+test("an exact application URL that disagrees with the frontmatter id is refused naming both", () => {
+  const url = "https://acme.example/opening/new";
+  const dir = workspace({
+    apps: [
+      { ...STAFF, id: "app-old", link: "https://acme.example/opening/old" },
+      { ...STAFF, id: "app-new", link: url },
+    ],
+    jd: jd({ extra: `source: ${url}\nappId: app-old` }),
+  });
+  assertRefused(
+    dir,
+    run(dir, ["workspace/jobs/acme.md", "--write"]),
+    /says it belongs to app-old.*app-new.*--app <id>/s,
+    ["app-old", "app-new"]
+  );
+});
+
+test("a frontmatter id that agrees with the exact posting URL saves", () => {
+  const url = "https://acme.example/opening/new";
+  const dir = workspace({
+    apps: [
+      { ...STAFF, id: "app-old", link: "https://acme.example/opening/old" },
+      { ...STAFF, id: "app-new", link: url },
+    ],
+    jd: jd({ extra: `source: ${url}\nappId: app-new` }),
+  });
+  const result = run(dir, ["workspace/jobs/acme.md", "--write"]);
+  assert.match(result.stdout, /Saved on app-new/);
+  assert.equal(appRow(dir, "app-old").evaluation, undefined);
+});
+
+test("--app still overrides a stale frontmatter id and an exact sourced URL", () => {
+  const newUrl = "https://acme.example/opening/new";
+  const dir = workspace({
+    apps: [{ ...STAFF, id: "app-old", link: "https://acme.example/opening/old" }],
+    jd: jd({ extra: `source: ${newUrl}\nappId: app-gone` }),
+  });
+  seedSourced(dir, { id: "src-new", company: "Acme", role: "Staff Engineer", link: newUrl });
+  const result = run(dir, ["workspace/jobs/acme.md", "--write", "--app", "app-old"]);
+  assert.match(result.stdout, /Saved on app-old/);
+});
+
 test("Engineering Manager does not match the only Marketing Manager application", () => {
   const dir = workspace({
     apps: [{ id: "app-mm", company: "Acme", role: "Marketing Manager" }],
