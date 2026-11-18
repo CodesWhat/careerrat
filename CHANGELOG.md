@@ -6,6 +6,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.24.4] - 2026-11-17
+
 ### Changed
 
 - Titles you save in a secondary role bucket now score the same as your primary titles, so a "Staff UI Engineer" you listed is no longer cut for falling below a "Staff Frontend Engineer" target. Titles that only share a generic word like "engineer" still score lower.
