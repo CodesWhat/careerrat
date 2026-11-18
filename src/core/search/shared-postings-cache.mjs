@@ -174,7 +174,7 @@ function readSharedCacheSettings({ base, env = process.env } = {}) {
 function migrateUrlKeys(db) {
   const rows = db
     .prepare(
-      "SELECT rowid AS id, posting_key, source_key FROM postings WHERE posting_key LIKE 'url:%'"
+      "SELECT rowid AS id, posting_key, source_key, url FROM postings WHERE posting_key LIKE 'url:%'"
     )
     .all();
   const selectRow = db.prepare("SELECT * FROM postings WHERE posting_key = ? AND source_key = ?");
@@ -189,7 +189,9 @@ function migrateUrlKeys(db) {
     WHERE posting_key = ? AND source_key = ?
   `);
   for (const row of rows) {
-    const next = `url:${normalizePostingUrl(row.posting_key.slice(4))}`;
+    // Prefer the URL the row was recorded with; the stored key may already have
+    // lost information (case) under the older normalizer.
+    const next = `url:${normalizePostingUrl(row.url || row.posting_key.slice(4))}`;
     if (next === row.posting_key) continue;
     const existing = selectRow.get(next, row.source_key);
     if (!existing) {

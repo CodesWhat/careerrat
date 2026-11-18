@@ -90,3 +90,7 @@ test("persisted url aliases written under older normalizers still match", () => 
   const keys = identityKeysWithAliases(row);
   assert.ok(keys.includes("url:https://careers.example.com/other?id=1"));
 });
+
+test("an unparseable URL falls back to its trimmed, lowercased form", () => {
+  assert.equal(normalizePostingUrl("  /Jobs/ABC "), "/jobs/abc");
+});

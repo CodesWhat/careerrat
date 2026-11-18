@@ -461,3 +461,19 @@ test("the migration runs once and leaves non-url keys alone", async (t) => {
   );
   assert.deepEqual(keys, [OLD_KEY, keyBefore].sort());
 });
+
+test("migration keys from the stored URL, so an unparseable URL's case cannot split a row", async (t) => {
+  const { raw, store, offer } = await migrationFixture(t);
+  store([offer("/jobs/ABC")]);
+  raw((db) => {
+    db.prepare("UPDATE postings SET posting_key = 'url:/jobs/abc'").run();
+    db.exec("PRAGMA user_version = 1");
+  });
+
+  const added = store([offer("/jobs/ABC")]);
+  assert.equal(added, 0);
+  const rows = raw((db) => db.prepare("SELECT * FROM postings").all());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].posting_key, "url:/jobs/abc");
+  assert.equal(rows[0].closed, 0);
+});

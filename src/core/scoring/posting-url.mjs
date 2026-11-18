@@ -37,6 +37,7 @@ export function normalizePostingUrl(raw) {
     const text = url.toString();
     return url.search ? text : text.replace(/\/$/u, "");
   } catch {
-    return String(raw).trim();
+    // Unparseable strings keep the old identity normalizer's lowercase fold.
+    return String(raw).trim().toLowerCase();
   }
 }
