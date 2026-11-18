@@ -53,7 +53,7 @@ function compensationFrom(comp = {}) {
 
 // Same field names the packet gate writes, so coach-gaps and approve-review
 // read it without caring which path produced it.
-export function buildTypedEvaluation({ result, applicationId, jobPath, now = new Date() }) {
+function buildTypedEvaluation({ result, applicationId, jobPath, now = new Date() }) {
   const gate = String(result.gate || "").toLowerCase();
   if (!["keep", "review", "cut"].includes(gate)) {
     throw new EvaluationWriteError(`Cannot save a verdict with gate "${result.gate}".`);
@@ -277,7 +277,7 @@ function postingMatches(row, facts) {
 // has to agree with the posting before a verdict lands on that row.
 // Automatic matching needs the specific posting URL or company plus role; a
 // company alone, a shared careers URL, or more than one hit is ambiguous.
-export function resolveApplicationId({ db, explicitId, job }) {
+function resolveApplicationId({ db, explicitId, job }) {
   const facts = jobFacts(job);
   const fm = job?.frontmatter || {};
   const explicit = String(explicitId || "").trim();

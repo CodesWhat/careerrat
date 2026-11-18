@@ -1345,7 +1345,7 @@ export const BLOCKER_SIGNALS = [
 // account (LinkedIn and ATS notices). Whole phrases only: a job description that
 // says "no limits on PTO" or "restricted stock units" must not trip them.
 const APOS = "['\u2019]?";
-export const APPLICATION_LIMIT_PATTERNS = [
+const APPLICATION_LIMIT_PATTERNS = [
   /\bthis job has application limits?\b/i,
   new RegExp(
     `\\byou(?:${APOS}ve| have) reached (?:the |your |this )?(?:\\w+ ){0,2}application limit`,
@@ -1374,7 +1374,7 @@ const RESTRICTION_NOTICE_LINES = [
   /^(?:your )?account (?:is |has been |was )?(?:temporarily |currently )?(?:restricted|suspended|blocked|disabled|locked)$/i,
   /^(?:you(?:['\u2019]ve| have) been |you are )?temporarily blocked$/i,
 ];
-export const ACCOUNT_RESTRICTION_PATTERNS = [
+const ACCOUNT_RESTRICTION_PATTERNS = [
   /\byour account (?:has been|is|was) (?:temporarily |currently )?restricted\b/i,
   /\baccount is temporarily restricted\b/i,
   new RegExp(`\\bwe${APOS}ve (?:temporarily )?restricted your account\\b`, "i"),
@@ -1402,7 +1402,7 @@ function noticeLines(text) {
   return out;
 }
 
-export const PAGE_UNREADABLE_BLOCKER = "page-unreadable";
+const PAGE_UNREADABLE_BLOCKER = "page-unreadable";
 
 /**
  * Plain-language stop reason for the limit, restriction and unreadable-page blockers, or null

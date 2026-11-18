@@ -182,4 +182,4 @@ export function checkStoredDraftFacts({ repoRoot, env = process.env, comm }) {
   return checkDraftFacts({ repoRoot, env, comm, subject: draft.subject, body: draft.body });
 }
 
-export const DRAFT_FACTS_CODE = "COMMUNICATION_DRAFT_FACTS";
+const DRAFT_FACTS_CODE = "COMMUNICATION_DRAFT_FACTS";
