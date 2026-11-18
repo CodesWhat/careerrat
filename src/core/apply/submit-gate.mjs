@@ -13,10 +13,16 @@
 import { loadAutomation, loadSubmitMode } from "../automation/consent.mjs";
 import { resolveSession } from "../automation/session.mjs";
 import { dbExists, openDb } from "../db/connection.mjs";
-import { appMarkSubmitAttempt, appSetFields, appSetStatus } from "../db/verbs/app.mjs";
+import {
+  appMarkSubmitAttempt,
+  appSetFields,
+  appSetStatus,
+  statusProvesApplicationWasSubmitted,
+} from "../db/verbs/app.mjs";
 import { getRow } from "../db/verbs/shared.mjs";
 import { openAnswerNeedsFromGaps } from "../packet/answer-needs.mjs";
 import { applicationPacketGatePasses } from "../packet/generate-operation.mjs";
+import { classifyStage, isKnownStatusLabel } from "../tracker/dashboard.mjs";
 import { renderedFieldsFromSnapshot, unrecognizedRequiredUploads } from "./apply-driver.mjs";
 import { throwIfAborted } from "./cancellation.mjs";
 import {
@@ -65,11 +71,15 @@ function postingOrigins(application) {
 // Required controls that are still blank, using the same read the driver makes
 // of the final snapshot: a required field whose live state is known and empty,
 // plus any visible field with no label (it can't be matched, so it can't be
-// called complete).
-function blankRequiredFields(snapshot) {
+// called complete). Required controls whose live state can't be read come back
+// separately as `unverified`: unknown is not the same as confirmed blank, and
+// it is never treated as filled.
+function requiredFieldState(snapshot) {
   const blanks = [];
+  const unverified = [];
   for (const field of renderedFieldsFromSnapshot(snapshot)) {
-    if (!field.required || field.stateKnown !== true || String(field.value || "").trim()) continue;
+    if (!field.required) continue;
+    if (field.stateKnown !== true || String(field.value || "").trim()) continue;
     blanks.push({ label: field.label, reason: "The required field is blank in the live form." });
   }
   let unlabeled = 0;
@@ -83,7 +93,21 @@ function blankRequiredFields(snapshot) {
       reason: "This field has no label, so it can't be checked.",
     });
   }
-  return blanks;
+  return { blanks, unverified };
+}
+
+function isClosedStatus(status) {
+  return isKnownStatusLabel(status) && classifyStage(status).id === "withdrawn";
+}
+
+// An application that is already submitted or closed out must never be handed
+// back to the person as "finish and press Submit".
+function submissionState(application) {
+  if (application?.submitAttemptedAt || statusProvesApplicationWasSubmitted(application?.status)) {
+    return "submitted";
+  }
+  if (isClosedStatus(application?.status)) return "closed";
+  return null;
 }
 
 // Every required file input that is not confirmed attached, recognized kind or not.
@@ -132,11 +156,21 @@ export function evaluateSubmitGate({ snapshot, application, submitMode } = {}) {
       )
     );
   }
-  if (application?.submitAttemptedAt) {
+  const state = submissionState(application);
+  if (state === "submitted") {
     refusals.push(
       refusal(
         "ALREADY_SUBMITTED",
-        "Submit was already pressed once for this application. CareerRat won't press it again; check the site."
+        application?.submitAttemptedAt
+          ? "Submit was already pressed once for this application. CareerRat won't press it again; check the site."
+          : `This application is already past submission (status: ${application.status}). CareerRat won't press Submit again.`
+      )
+    );
+  } else if (state === "closed") {
+    refusals.push(
+      refusal(
+        "APPLICATION_CLOSED",
+        `This application is closed (status: ${application.status}). CareerRat won't submit it.`
       )
     );
   }
@@ -190,7 +224,9 @@ export function evaluateSubmitGate({ snapshot, application, submitMode } = {}) {
       )
     );
   }
-  const blanks = snapshot?.refs ? blankRequiredFields(snapshot) : [];
+  const { blanks, unverified } = snapshot?.refs
+    ? requiredFieldState(snapshot)
+    : { blanks: [], unverified: [] };
   if (blanks.length) {
     refusals.push(
       refusal(
@@ -233,32 +269,43 @@ function handoffText(refusals) {
     .join(" ");
 }
 
-// Hands the job to the person: manual-apply status (unless it already shows
-// submitted) plus a note and next action naming what's missing.
+// Hands the job to the person: manual-apply status plus a note and next action
+// naming what's missing. A row that is already submitted or closed keeps its
+// status, interview fields and next action untouched and is not handed over.
 function handToPerson({ repoRoot, env, id, application, refusals }) {
-  const text = handoffText(refusals);
-  const alreadySubmitted = refusals.some((item) => item.code === "ALREADY_SUBMITTED");
-  const note = `manual-apply: ${text}`.slice(0, 500);
-  if (!alreadySubmitted) {
-    try {
-      appSetStatus({ repoRoot, env, id, to: "manual-apply", note: note.slice(0, 200) });
-    } catch (error) {
-      // A submitted-looking status must not be walked backwards; anything else is real.
-      if (!/applied|submitted/i.test(String(application?.status || ""))) throw error;
+  const state = submissionState(application);
+  if (state) {
+    if (
+      application?.submitAttemptedAt &&
+      !statusProvesApplicationWasSubmitted(application?.status)
+    ) {
+      // Marker only (status still pre-submission): point at the site, leave status alone.
+      appSetFields({
+        repoRoot,
+        env,
+        id,
+        patch: {
+          statusNote: `manual-apply: ${handoffText(refusals)}`.slice(0, 500),
+          nextAction:
+            "Check the application on the site, then record it as Applied if it went through",
+        },
+      });
     }
+    return { status: application?.status || null, handedToPerson: false };
   }
+  const text = handoffText(refusals);
+  const note = `manual-apply: ${text}`.slice(0, 500);
+  appSetStatus({ repoRoot, env, id, to: "manual-apply", note: note.slice(0, 200) });
   appSetFields({
     repoRoot,
     env,
     id,
     patch: {
       statusNote: note,
-      nextAction: alreadySubmitted
-        ? "Check the application on the site, then record it as Applied if it went through"
-        : "Finish the application in the browser and press Submit yourself",
+      nextAction: "Finish the application in the browser and press Submit yourself",
     },
   });
-  return { status: alreadySubmitted ? application?.status || null : "manual-apply" };
+  return { status: "manual-apply", handedToPerson: true };
 }
 
 function defaultOps({ repoRoot, env }) {
@@ -358,7 +405,7 @@ export async function runApplySubmit({
       id,
       reasons: verdict.refusals,
       message: handoffText(verdict.refusals),
-      handedToPerson: true,
+      handedToPerson: handoff.handedToPerson,
       status: handoff.status,
     };
   }
@@ -404,7 +451,7 @@ export async function runApplySubmit({
         ).slice(0, 160)}`
       ),
     ];
-    handToPerson({ repoRoot, env, id, application, refusals: reasons });
+    const handoff = handToPerson({ repoRoot, env, id, application, refusals: reasons });
     return {
       ok: false,
       submitted: false,
@@ -412,8 +459,8 @@ export async function runApplySubmit({
       id,
       reasons,
       message: handoffText(reasons),
-      handedToPerson: true,
-      status: "manual-apply",
+      handedToPerson: handoff.handedToPerson,
+      status: handoff.status,
     };
   }
 

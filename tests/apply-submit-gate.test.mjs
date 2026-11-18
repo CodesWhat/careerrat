@@ -405,6 +405,106 @@ describe("apply submit gate", () => {
     assert.ok(result.reasons.some((reason) => reason.code === "SESSION_UNREACHABLE"));
   });
 
+  const SUBMITTED_STATUSES = [
+    "applied",
+    "screen",
+    "interview",
+    "final",
+    "offer",
+    "accepted",
+    "rejected",
+  ];
+  const CLOSED_STATUSES = ["cut", "withdrawn"];
+
+  for (const status of [...SUBMITTED_STATUSES, ...CLOSED_STATUSES]) {
+    it(`refuses a ${status} row with a KEEP verdict and no attempt marker, untouched`, async () => {
+      const ctx = workspace({
+        status,
+        nextAction: "Prep for the next round",
+        statusNote: "original note",
+      });
+      const { fake, promise } = run(ctx, { before: readyForm() });
+      const result = await promise;
+      const code = CLOSED_STATUSES.includes(status) ? "APPLICATION_CLOSED" : "ALREADY_SUBMITTED";
+      assertRefused(result, fake, code);
+      assert.equal(result.handedToPerson, false);
+      assert.equal(result.status, status);
+      assert.doesNotMatch(result.message, /submit it yourself|press Submit yourself/i);
+      const row = stored(ctx);
+      assert.equal(row.status, status);
+      assert.equal(row.nextAction, "Prep for the next round");
+      assert.equal(row.statusNote, "original note");
+      assert.ok(!row.submitAttemptedAt);
+    });
+  }
+
+  for (const status of ["interview", "offer"]) {
+    for (const reason of ["manual", "unreachable"]) {
+      it(`keeps a ${status} row intact when the refusal is ${reason}`, async () => {
+        const ctx = workspace({
+          status,
+          interviewAt: "2026-12-01T15:00:00.000Z",
+          nextInterviewAt: "2026-12-08T15:00:00.000Z",
+          interviewNote: "Bring portfolio",
+          nextAction: "Prep for the next round",
+        });
+        const { fake, promise } =
+          reason === "manual"
+            ? run(ctx, { before: readyForm() }, { loadSubmitModeImpl: () => "manual" })
+            : run(ctx, { before: null });
+        const result = await promise;
+        assertRefused(
+          result,
+          fake,
+          reason === "manual" ? "MANUAL_SUBMIT_MODE" : "SESSION_UNREACHABLE"
+        );
+        assert.equal(result.handedToPerson, false);
+        assert.equal(result.status, status);
+        const row = stored(ctx);
+        assert.equal(row.status, status);
+        assert.equal(row.interviewAt, "2026-12-01T15:00:00.000Z");
+        assert.equal(row.nextInterviewAt, "2026-12-08T15:00:00.000Z");
+        assert.equal(row.interviewNote, "Bring portfolio");
+        assert.equal(row.nextAction, "Prep for the next round");
+      });
+    }
+  }
+
+  it("keeps interviewAt on an interview row with no booked next round", async () => {
+    const ctx = workspace({
+      status: "interview",
+      interviewAt: "2026-12-01T15:00:00.000Z",
+      interviewNote: "Round one",
+    });
+    const { fake, promise } = run(
+      ctx,
+      { before: readyForm() },
+      { loadSubmitModeImpl: () => "manual" }
+    );
+    const result = await promise;
+    assertRefused(result, fake, "MANUAL_SUBMIT_MODE");
+    const row = stored(ctx);
+    assert.equal(row.status, "interview");
+    assert.equal(row.interviewAt, "2026-12-01T15:00:00.000Z");
+    assert.equal(row.interviewNote, "Round one");
+  });
+
+  it("moves an eligible pre-submission row to manual-apply on a blank-field refusal", async () => {
+    const ctx = workspace({ status: "reviewed-hold" });
+    const form = readyForm({
+      refs: refsOf([
+        ["e1", "textbox", "Full name", true, { stateKnown: true, value: "" }],
+        ["e4", "button", "Submit application"],
+      ]),
+    });
+    const { fake, promise } = run(ctx, { before: form });
+    const result = await promise;
+    assertRefused(result, fake, "REQUIRED_FIELDS_BLANK");
+    assert.equal(result.handedToPerson, true);
+    assert.equal(result.status, "manual-apply");
+    assert.equal(stored(ctx).status, "manual-apply");
+  });
+
   it("evaluateSubmitGate reports every failed check, not just the first", () => {
     const verdict = evaluateSubmitGate({
       snapshot: readyForm({
