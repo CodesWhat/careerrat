@@ -1567,3 +1567,72 @@ describe("confirmationCheck final verified receipt cases", () => {
     );
   });
 });
+
+describe("tool-derived screening answers need a whole-technology plain experience question", () => {
+  const honesty = {
+    tools: {
+      confirmed: ["Go", "Git", "Python", "C / C++", "C++", "C#", ".NET", "Node.js"],
+      do_not_claim: ["Java", "C"],
+    },
+  };
+  const resolve = (question, h = honesty) => resolveScreeningAnswer(question, { honesty: h });
+
+  it("does not answer from substrings of ordinary words", () => {
+    for (const question of [
+      "Do you hold a security clearance from the US government?",
+      "Are you legitimately based in the US?",
+      "Do you have experience with public cloud infrastructure?",
+    ]) {
+      assert.equal(resolve(question).action, "skip", question);
+    }
+  });
+
+  it("leaves years, level and qualified questions to reviewed answers", () => {
+    for (const question of [
+      "Do you have 10+ years of professional Python experience?",
+      "How many years of Python do you have?",
+      "Do you have at least 5 years of Python?",
+      "Do you have expert-level Python experience?",
+      "Have you owned Python in production?",
+      "Do you have no experience with Python?",
+    ]) {
+      assert.equal(resolve(question).action, "skip", question);
+    }
+  });
+
+  it("keeps Java and JavaScript apart", () => {
+    assert.equal(resolve("Do you have JavaScript experience?").action, "skip");
+    const java = resolve("Do you have Java experience?");
+    assert.equal(java.value, "No");
+    assert.equal(java.source, "honesty.tools.do_not_claim");
+  });
+
+  it("still answers a plain confirmed-tool question", () => {
+    for (const question of [
+      "Do you have Python experience?",
+      "Have you used Python?",
+      "Do you have experience with Git?",
+    ]) {
+      const answer = resolve(question);
+      assert.equal(answer.value, "Yes", question);
+      assert.equal(answer.source, "honesty.tools.confirmed");
+    }
+  });
+
+  it("matches punctuation-sensitive names only as themselves", () => {
+    const only = { tools: { confirmed: ["C++"], do_not_claim: [] } };
+    assert.equal(resolve("Do you have experience with C++?", only).value, "Yes");
+    assert.equal(resolve("Do you have experience with C#?", only).action, "skip");
+    assert.equal(resolve("Do you have experience with C?", only).action, "skip");
+    const net = { tools: { confirmed: [".NET"], do_not_claim: [] } };
+    assert.equal(resolve("Do you have experience with .NET?", net).value, "Yes");
+    assert.equal(resolve("Do you have experience with ASP.NET?", net).action, "skip");
+    const node = { tools: { confirmed: ["Node.js"], do_not_claim: [] } };
+    assert.equal(resolve("Do you have experience with Node.js?", node).value, "Yes");
+    assert.equal(resolve("Do you have experience with Node?", node).action, "skip");
+  });
+
+  it("does not answer when one question names a claimable and a forbidden tool", () => {
+    assert.equal(resolve("Do you have experience with Python or Java?").action, "skip");
+  });
+});

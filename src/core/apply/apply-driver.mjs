@@ -419,8 +419,17 @@ function fillPlan({ fields, config, application, answers }) {
       }
       return { ...field, action: "exclude", value: null };
     }
-    if (step?.action === "fill") return { ...field, ...step };
     const answer = answers.get(normalizeLabel(field.label));
+    // A reviewed packet answer outranks tool inference: a confirmed tool alone
+    // can't override the person's reviewed answer to a qualification question.
+    if (
+      step?.action === "fill" &&
+      answer &&
+      String(step.source || "").startsWith("honesty.tools.")
+    ) {
+      return { ...field, action: "fill", value: answer, source: "packet.answers" };
+    }
+    if (step?.action === "fill") return { ...field, ...step };
     if (answer) return { ...field, action: "fill", value: answer, source: "packet.answers" };
     return { ...field, action: "skip", value: null };
   });

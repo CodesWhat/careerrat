@@ -4148,3 +4148,48 @@ test("a job description saying 'too many applications' or 'detected unusual acti
 
   assert.notEqual(result.state, "blocked");
 });
+
+// ---------------------------------------------------------------------------
+// Honesty: reviewed answers outrank tool inference; attestations never fill or submit.
+// ---------------------------------------------------------------------------
+
+const TOOL_CONFIG = {
+  ...CONFIG,
+  honesty: { tools: { confirmed: ["Python"], do_not_claim: [] } },
+};
+const fills = (log) => log.filter((entry) => ["fillField", "toggleField"].includes(entry.op));
+
+test("a reviewed No for 10+ years of Python survives filling and the auto-submit path", async () => {
+  const page = {
+    ...SUBMIT_FORM,
+    refs: refsOf([
+      ["e1", "textbox", "Do you have 10+ years of professional Python experience?", true],
+      ["e3", "textbox", "Do you have experience with Python?", true],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([page, SUBMIT_CONFIRMATION]);
+  const execute = makeDriver({
+    ops,
+    ...fastWaits,
+    candidateConfigGetImpl: () => TOOL_CONFIG,
+    loadAnswerMapImpl: async () =>
+      new Map([
+        ["do you have 10 years of professional python experience", "No"],
+        ["do you have experience with python", "No"],
+      ]),
+  });
+
+  const result = await execute(AUTO_REQUEST);
+
+  const filled = log.filter((entry) => entry.op === "fillField");
+  assert.deepEqual(
+    filled.map((entry) => [entry.ref, entry.value]),
+    [
+      ["e1", "No"],
+      ["e3", "No"],
+    ]
+  );
+  assert.equal(result.state, "submitted");
+  assert.equal(clicks(log).length, 1);
+});

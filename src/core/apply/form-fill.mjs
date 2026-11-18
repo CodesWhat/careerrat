@@ -787,11 +787,62 @@ function listValue(value) {
   return single == null ? [] : [String(single)];
 }
 
-function findNeedle(normalized, values = []) {
-  return values.find((value) => {
-    const needle = normalizeLabel(value);
-    return needle && normalized.includes(needle);
-  });
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Whole-technology match. Boundaries treat + # and letters/digits as part of a
+// name, so "C++" and "C#" only match themselves, "Java" never matches
+// "JavaScript", "Go" never matches "government", ".NET" never matches "ASP.NET".
+// One- and two-letter names ("C", "R", "Go") must also be capitalized as written,
+// since lowercase "go" and "r" are ordinary words.
+function mentionsTool(label, tool) {
+  const name = String(tool || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!name) return false;
+  const body = name.split(" ").map(escapeRegExp).join("\\s+");
+  const short = name.length <= 2;
+  const pattern = new RegExp(
+    `(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#]|\\.[A-Za-z0-9])`,
+    short ? "" : "i"
+  );
+  return pattern.test(label);
+}
+
+function findTool(label, values = []) {
+  return listValue(values).find((value) => mentionsTool(label, value));
+}
+
+// Only an unqualified yes/no experience question is answered from the tool lists.
+// Years, levels, ownership, "at least N" and negations carry a claim the tool
+// lists can't back, so they stay unresolved for the reviewed answer or NEEDS YOU.
+const TOOL_EXPERIENCE_QUESTION =
+  /^\s*(?:(?:do|did) you (?:currently )?(?:have|use)|have you (?:ever )?(?:used|worked|had|built|written)|are you (?:familiar|experienced|comfortable))\b/i;
+const TOOL_EXPERIENCE_WORD =
+  /\b(?:experience|experienced|used|use|worked|familiar|familiarity|comfortable)\b/i;
+const TOOL_QUALIFIED =
+  /\d|\b(?:years?|yrs?|how (?:many|much|long)|at least|at most|minimum|maximum|more than|over|proficien\w*|level|expert\w*|intermediate|advanced|beginner|senior|owner\w*|led|lead|leading|manag\w+|architect\w*|scal\w+|production|professional\w*|commercial\w*|enterprise|hands.on|extensive|deep|strong|significant|substantial|recent\w*|not|never|without|no experience|rate|rating|score)\b|n't/i;
+
+// A multi-word do_not_claim entry ("Kubernetes production ownership") is the claim
+// itself, so a plain yes/no question that names the whole phrase is answerable No.
+const YES_NO_QUESTION_START = /^\s*(?:do|did|have|are|can|could|would) you\b/i;
+const YES_NO_DISQUALIFIER =
+  /\d|\b(?:years?|yrs?|how (?:many|much|long)|at least|not|never|without)\b|n't/i;
+
+function findDisallowedPhrase(label, values) {
+  const text = String(label).replace(/\s+/g, " ").trim();
+  if (!YES_NO_QUESTION_START.test(text) || YES_NO_DISQUALIFIER.test(text)) return undefined;
+  return listValue(values).find((value) => /\s/.test(value.trim()) && mentionsTool(text, value));
+}
+
+function isPlainToolExperienceQuestion(label) {
+  const text = String(label).replace(/\s+/g, " ").trim();
+  return (
+    TOOL_EXPERIENCE_QUESTION.test(text) &&
+    TOOL_EXPERIENCE_WORD.test(text) &&
+    !TOOL_QUALIFIED.test(text)
+  );
 }
 
 function isCurrentCompLabel(normalized) {
@@ -1069,13 +1120,19 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
   }
 
   const tools = honesty?.tools || {};
-  const disallowed = findNeedle(normalized, tools.do_not_claim || []);
-  if (disallowed) {
-    return { action: "fill", value: "No", source: "honesty.tools.do_not_claim" };
-  }
-  const confirmed = findNeedle(normalized, tools.confirmed || []);
-  if (confirmed) {
-    return { action: "fill", value: "Yes", source: "honesty.tools.confirmed" };
+  const plainToolQuestion = isPlainToolExperienceQuestion(label);
+  if (plainToolQuestion || findDisallowedPhrase(label, tools.do_not_claim)) {
+    const disallowed = plainToolQuestion
+      ? findTool(label, tools.do_not_claim)
+      : findDisallowedPhrase(label, tools.do_not_claim);
+    const confirmed = plainToolQuestion ? findTool(label, tools.confirmed) : undefined;
+    // A question naming both a claimable and a forbidden tool has no single honest answer.
+    if (disallowed && !confirmed) {
+      return { action: "fill", value: "No", source: "honesty.tools.do_not_claim" };
+    }
+    if (confirmed && !disallowed) {
+      return { action: "fill", value: "Yes", source: "honesty.tools.confirmed" };
+    }
   }
 
   return { action: "skip", value: null, reason: "unresolved" };
