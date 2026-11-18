@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "brand:icons": "node scripts/generate-brand-icons.mjs",
+    "screenshots:webp": "node scripts/generate-screenshot-webp.mjs",
     "dev": "next dev --port 3002",
     "build:docs-content": "node ../../scripts/build-docs-content.mjs",
     "prebuild": "npm run build:docs-content",

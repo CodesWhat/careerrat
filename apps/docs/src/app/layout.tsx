@@ -46,6 +46,7 @@ const ibmPlexMono = localFont({
   ],
   variable: "--font-mono",
   display: "swap",
+  preload: false,
 });
 
 const archivo = localFont({
@@ -63,6 +64,7 @@ const archivo = localFont({
   ],
   variable: "--font-display",
   display: "swap",
+  preload: false,
 });
 
 export const metadata: Metadata = {
