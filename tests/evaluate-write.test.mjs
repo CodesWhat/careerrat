@@ -36,7 +36,7 @@ function envFor(dir) {
   return { ...process.env, CAREERRAT_HOME: dir, CAREERRAT_NO_UPDATE_CHECK: "1" };
 }
 
-function workspace({ db = true, jd = GOOD_JD } = {}) {
+function workspace({ db = true, jd = GOOD_JD, apps } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "careerrat-eval-write-"));
   homes.push(dir);
   mkdirSync(join(dir, "workspace/jobs"), { recursive: true });
@@ -48,7 +48,7 @@ function workspace({ db = true, jd = GOOD_JD } = {}) {
       join(sourceDir, "tracker.json"),
       JSON.stringify({
         meta: {},
-        applications: [
+        applications: apps || [
           { id: "app-acme", company: "Acme", role: "Staff Engineer", status: "reviewed-hold" },
         ],
         sourced: [{ id: "src-globex", company: "Globex", role: "Analyst" }],
@@ -176,4 +176,107 @@ test("a misspelled flag is rejected instead of silently skipping the save", () =
   const result = run(dir, ["workspace/jobs/acme.md", "--wrtie"]);
   assert.equal(result.status, 64, "must not collide with the review exit code 2");
   assert.match(result.stderr, /unknown option --wrtie/);
+});
+
+function jd({ company = "Acme", role = "Staff Engineer", extra = "" } = {}) {
+  return GOOD_JD.replace("company: Acme", `company: ${company}`).replace(
+    "role: Staff Engineer",
+    `role: ${role}\n${extra}`.trimEnd()
+  );
+}
+
+const CAREERS = "https://acme.example/careers";
+const STAFF = { id: "app-staff", company: "Acme", role: "Staff Engineer", status: "reviewed-hold" };
+const ACCOUNTANT = {
+  id: "app-acct",
+  company: "Acme",
+  role: "Accountant",
+  status: "reviewed-hold",
+};
+
+function assertRefused(dir, result, pattern, ids = ["app-staff", "app-acct"]) {
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  assert.match(result.stderr, pattern);
+  for (const id of ids) assert.equal(appRow(dir, id).evaluation, undefined);
+}
+
+test("a shared careers URL does not land a Staff Engineer verdict on the Accountant", () => {
+  const dir = workspace({
+    apps: [{ ...ACCOUNTANT, link: CAREERS }],
+    jd: jd({ extra: `source: ${CAREERS}` }),
+  });
+  const result = run(dir, ["workspace/jobs/acme.md", "--write"]);
+  assertRefused(dir, result, /only other roles at that company.*app-acct.*--app/s, ["app-acct"]);
+});
+
+test("a frontmatter id pointing at a different role or company is refused", () => {
+  const apps = [STAFF, ACCOUNTANT, { id: "app-glx", company: "Globex", role: "Staff Engineer" }];
+  const role = workspace({ apps, jd: jd({ extra: "appId: app-acct" }) });
+  assertRefused(
+    role,
+    run(role, ["workspace/jobs/acme.md", "--write"]),
+    /says it belongs to app-acct.*--app <id>/s,
+    ["app-acct"]
+  );
+  const company = workspace({ apps, jd: jd({ extra: "applicationId: app-glx" }) });
+  assertRefused(
+    company,
+    run(company, ["workspace/jobs/acme.md", "--write"]),
+    /says it belongs to app-glx/,
+    ["app-glx"]
+  );
+});
+
+test("a frontmatter id that agrees with the posting still saves", () => {
+  const dir = workspace({ apps: [STAFF, ACCOUNTANT], jd: jd({ extra: "appId: app-staff" }) });
+  const result = run(dir, ["workspace/jobs/acme.md", "--write"]);
+  assert.match(result.stdout, /Saved on app-staff/);
+  assert.equal(appRow(dir, "app-acct").evaluation, undefined);
+});
+
+test("two matching applications are refused as ambiguous with both ids listed", () => {
+  const dir = workspace({
+    apps: [STAFF, { ...STAFF, id: "app-staff-2", status: "applied" }],
+  });
+  const result = run(dir, ["workspace/jobs/acme.md", "--write"]);
+  assertRefused(dir, result, /more than one application \(app-staff, app-staff-2\)/, [
+    "app-staff",
+    "app-staff-2",
+  ]);
+});
+
+test("a specific posting URL and a different company+role match conflict as ambiguous", () => {
+  const url = "https://acme.example/careers/accountant-123";
+  const dir = workspace({
+    apps: [STAFF, { ...ACCOUNTANT, link: url }],
+    jd: jd({ extra: `source: ${url}` }),
+  });
+  assertRefused(dir, run(dir, ["workspace/jobs/acme.md", "--write"]), /more than one application/);
+});
+
+test("a specific posting URL writes to the matching application", () => {
+  const url = "https://acme.example/careers/accountant-123?utm_source=x";
+  const dir = workspace({
+    apps: [STAFF, { ...ACCOUNTANT, link: "https://acme.example/careers/accountant-123" }],
+    jd: jd({ role: "Controller", extra: `source: ${url}` }),
+  });
+  const result = run(dir, ["workspace/jobs/acme.md", "--write"]);
+  assert.match(result.stdout, /Saved on app-acct/);
+  assert.equal(appRow(dir, "app-staff").evaluation, undefined);
+});
+
+test("a company+role match writes to the right application", () => {
+  const dir = workspace({ apps: [ACCOUNTANT, STAFF] });
+  const result = run(dir, ["workspace/jobs/acme.md", "--write"]);
+  assert.match(result.stdout, /Saved on app-staff/);
+  assert.equal(appRow(dir, "app-acct").evaluation, undefined);
+});
+
+test("--app with a different company is refused, a different role is allowed", () => {
+  const dir = workspace({ apps: [STAFF, { id: "app-glx", company: "Globex", role: "Analyst" }] });
+  const wrong = run(dir, ["workspace/jobs/acme.md", "--write", "--app", "app-glx"]);
+  assertRefused(dir, wrong, /different company/, ["app-glx"]);
+  const roleOnly = workspace({ apps: [ACCOUNTANT] });
+  const ok = run(roleOnly, ["workspace/jobs/acme.md", "--write", "--app", "app-acct"]);
+  assert.match(ok.stdout, /Saved on app-acct/);
 });

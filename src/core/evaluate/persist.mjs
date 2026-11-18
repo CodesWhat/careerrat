@@ -6,8 +6,9 @@
 // writer the browser path uses, so top-level gate/status/note and the nested
 // verdict can never diverge.
 import { appPersistEvaluation } from "../db/verbs/app.mjs";
-import { matchTrackerRecord } from "../intake/match.mjs";
 import { packetEvaluationProjection } from "../packet/evaluate.mjs";
+import { normalizeUrl } from "../scoring/sourced-delta.mjs";
+import { normalizeTextKey } from "../tracker/tracker-data.mjs";
 
 const MIN_JOB_BODY_CHARS = 40;
 const FIT_RISK_MAX = 80;
@@ -85,29 +86,175 @@ export function buildTypedEvaluation({ result, applicationId, jobPath, now = new
   };
 }
 
-// An explicit id wins, then an id in the job file's frontmatter, then a match on
-// the tracker. Only an application row can hold a typed evaluation.
-export function resolveApplicationId({ db, explicitId, job }) {
+const GENERIC_PATH_WORDS = new Set([
+  "careers",
+  "career",
+  "jobs",
+  "job",
+  "openings",
+  "positions",
+  "join",
+  "join us",
+  "work with us",
+  "about",
+  "company",
+  "search",
+  "en",
+  "us",
+  "apply",
+  "opportunities",
+  "open roles",
+]);
+const JOB_ID_PARAM = /(^|_|-)(id|jid|job|jobid|req|reqid|posting|requisition)$|^gh_jid$/i;
+const COMPANY_SUFFIX = /\b(inc|llc|ltd|corp|corporation|co|company|gmbh|plc)\b/g;
+const SENIORITY = new Set([
+  "senior",
+  "sr",
+  "junior",
+  "jr",
+  "lead",
+  "principal",
+  "staff",
+  "i",
+  "ii",
+  "iii",
+]);
+
+function companyKey(value) {
+  return normalizeTextKey(value).replace(COMPANY_SUFFIX, "").replace(/\s+/g, " ").trim();
+}
+
+function sameCompany(a, b) {
+  const x = companyKey(a);
+  const y = companyKey(b);
+  return Boolean(x) && x === y;
+}
+
+function roleTokens(value) {
+  return normalizeTextKey(value)
+    .split(" ")
+    .filter((t) => t && !SENIORITY.has(t));
+}
+
+function compatibleRole(a, b) {
+  const x = normalizeTextKey(a);
+  const y = normalizeTextKey(b);
+  if (!x || !y) return false;
+  if (x === y || x.includes(y) || y.includes(x)) return true;
+  const tx = roleTokens(a);
+  const ty = roleTokens(b);
+  if (!tx.length || !ty.length) return false;
+  const shared = tx.filter((t) => ty.includes(t)).length;
+  return shared / Math.min(tx.length, ty.length) >= 0.5;
+}
+
+// A posting URL only identifies one job when it points past the careers index:
+// a root, "/careers", "/jobs/search" and the like are shared by every role.
+export function isSpecificPostingUrl(raw) {
+  let url;
+  try {
+    url = new URL(String(raw || "").trim());
+  } catch {
+    return false;
+  }
+  for (const key of url.searchParams.keys()) if (JOB_ID_PARAM.test(key)) return true;
+  const segments = url.pathname
+    .split("/")
+    .map((s) => normalizeTextKey(decodeURIComponent(s)))
+    .filter(Boolean);
+  return segments.some((s) => !GENERIC_PATH_WORDS.has(s));
+}
+
+function sameSpecificUrl(a, b) {
+  if (!a || !b || !isSpecificPostingUrl(a) || !isSpecificPostingUrl(b)) return false;
+  return normalizeUrl(a) === normalizeUrl(b);
+}
+
+function jobFacts(job) {
   const fm = job?.frontmatter || {};
-  const direct = String(explicitId || fm.appId || fm.applicationId || "").trim();
-  if (direct) return direct;
-  const match = matchTrackerRecord({
-    db,
-    url: fm.source || fm.link || fm.url || undefined,
-    company: fm.company || undefined,
-    role: fm.role || undefined,
-  });
-  if (!match.matched) {
+  return {
+    url: String(fm.source || fm.link || fm.url || "").trim(),
+    company: String(fm.company || "").trim(),
+    role: String(fm.role || "").trim(),
+  };
+}
+
+function describe(row) {
+  return `${row.company || "?"}, ${row.role || "?"} (${row.id})`;
+}
+
+function describeJob({ company, role }) {
+  return `${company || "?"}, ${role || "?"}`;
+}
+
+function loadRows(db, table) {
+  const recordType = table === "applications" ? "application" : "sourced";
+  return db
+    .prepare(`SELECT id, data FROM ${table}`)
+    .all()
+    .map((row) => ({ recordType, ...JSON.parse(row.data), id: row.id }));
+}
+
+function postingMatches(row, facts) {
+  if (sameSpecificUrl(facts.url, row.link)) return true;
+  return sameCompany(facts.company, row.company) && compatibleRole(facts.role, row.role);
+}
+
+// An explicit id is the person's choice, so only a clearly different company
+// stops it (a typo guard). A frontmatter id is not a choice, it is a claim, and
+// has to agree with the posting before a verdict lands on that row.
+// Automatic matching needs the specific posting URL or company plus role; a
+// company alone, a shared careers URL, or more than one hit is ambiguous.
+export function resolveApplicationId({ db, explicitId, job }) {
+  const facts = jobFacts(job);
+  const fm = job?.frontmatter || {};
+  const explicit = String(explicitId || "").trim();
+  const claimed = String(fm.appId || fm.applicationId || "").trim();
+
+  if (explicit) {
+    const row = loadRows(db, "applications").find((r) => r.id === explicit);
+    if (row && facts.company && row.company && !sameCompany(facts.company, row.company)) {
+      throw new EvaluationWriteError(
+        `Not saved: this job is ${describeJob(facts)} but ${describe(row)} is a different company. Check the id you passed to --app.`
+      );
+    }
+    return explicit;
+  }
+
+  const apps = loadRows(db, "applications");
+  if (claimed) {
+    const row = apps.find((r) => r.id === claimed);
+    if (!row) throw new EvaluationWriteError(`No application with id "${claimed}".`);
+    if (!postingMatches(row, facts)) {
+      throw new EvaluationWriteError(
+        `Not saved: the job file says it belongs to ${claimed}, but the job is ${describeJob(facts)} and ${claimed} is ${describe(row)}. Pass --app <id> to choose the application yourself.`
+      );
+    }
+    return claimed;
+  }
+
+  const hits = apps.filter((row) => postingMatches(row, facts));
+  if (hits.length === 1) return hits[0].id;
+  if (hits.length > 1) {
     throw new EvaluationWriteError(
-      "Could not find a tracked application for this job. Pass --app <id>, or add the job to the tracker first."
+      `Not saved: ${describeJob(facts)} matches more than one application (${hits.map((r) => r.id).join(", ")}). Pass --app <id> to choose one.`
     );
   }
-  if (match.recordType !== "application") {
+  const sameCo = apps.filter((row) => sameCompany(facts.company, row.company));
+  if (sameCo.length) {
     throw new EvaluationWriteError(
-      `This job is only a sourced lead ("${match.id}"), not an application yet. Pass --app <id> for an application, or promote it first.`
+      `Not saved: no application matches ${describeJob(facts)}, only other roles at that company (${sameCo.map((r) => describe(r)).join("; ")}). Pass --app <id> to choose one.`
     );
   }
-  return match.id;
+  const lead = loadRows(db, "sourced").find((row) => postingMatches(row, facts));
+  if (lead) {
+    throw new EvaluationWriteError(
+      `This job is only a sourced lead ("${lead.id}"), not an application yet. Pass --app <id> for an application, or promote it first.`
+    );
+  }
+  throw new EvaluationWriteError(
+    "Could not find a tracked application for this job. Pass --app <id>, or add the job to the tracker first."
+  );
 }
 
 export function persistEvaluationVerdict({ repoRoot, env, db, explicitId, job, result, jobPath }) {
