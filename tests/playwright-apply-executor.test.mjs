@@ -2723,7 +2723,14 @@ test("a frame that cannot be inspected marks the snapshot incomplete and blocks 
   const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
   const snapshot = await ops.snapshot({ pageId });
   assert.equal(snapshot.safetyTextIncomplete, true);
-  assert.equal(submitGuard({ pageText: snapshot.pageText }).canSubmit, false);
+  assert.doesNotMatch(snapshot.pageText, /security verification/i);
+  assert.deepEqual(
+    submitGuard({
+      pageText: snapshot.pageText,
+      pageSignals: { safetyTextIncomplete: snapshot.safetyTextIncomplete },
+    }).blockers,
+    ["page-unreadable"]
+  );
 
   const { run, actions, cleanup } = honestyDriver({
     controls: SUBMIT_ONLY,
@@ -2733,6 +2740,8 @@ test("a frame that cannot be inspected marks the snapshot incomplete and blocks 
   try {
     const result = await run();
     assert.notEqual(result.state, "submitted");
+    assert.deepEqual(result.session.blockers, ["page-unreadable"]);
+    assert.match(result.reason, /couldn't be read/);
     assert.equal(submitClicks(actions), 0);
   } finally {
     cleanup();

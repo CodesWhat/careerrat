@@ -527,6 +527,21 @@ describe("apply submit gate", () => {
     });
   }
 
+  it("refuses when the snapshot says part of the page could not be read", () => {
+    const verdict = evaluateSubmitGate({
+      snapshot: readyForm({ safetyTextIncomplete: true }),
+      application: { link: GREENHOUSE_URL, evaluation: { gate: "keep" } },
+      submitMode: "auto",
+    });
+    assert.equal(verdict.ok, false);
+    assert.ok(
+      verdict.refusals.some(
+        (item) =>
+          item.code === "HUMAN_CHALLENGE" && item.items?.some((i) => i.label === "page-unreadable")
+      )
+    );
+  });
+
   it("does not call a confirmed attached file input, a disabled or optional field unverified", () => {
     const verdict = evaluateSubmitGate({
       snapshot: readyForm({

@@ -222,7 +222,10 @@ export function evaluateSubmitGate({ snapshot, application, submitMode } = {}) {
 
   const guard = submitGuard({
     pageText: snapshot?.pageText,
-    pageSignals: { attestation: snapshotHasAttestation(snapshot) },
+    pageSignals: {
+      attestation: snapshotHasAttestation(snapshot),
+      safetyTextIncomplete: snapshot?.safetyTextIncomplete === true,
+    },
   });
   if (guard.blockers.length) {
     refusals.push(

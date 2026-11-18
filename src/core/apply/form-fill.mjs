@@ -1402,8 +1402,10 @@ function noticeLines(text) {
   return out;
 }
 
+export const PAGE_UNREADABLE_BLOCKER = "page-unreadable";
+
 /**
- * Plain-language stop reason for the limit and restriction blockers, or null
+ * Plain-language stop reason for the limit, restriction and unreadable-page blockers, or null
  * when none of the blockers is one of them.
  *
  * @param {string[]} blockers
@@ -1415,6 +1417,9 @@ export function limitBlockerReason(blockers = []) {
   }
   if (blockers.includes("application limit")) {
     return "This site says you've hit its application limit. Nothing was submitted.";
+  }
+  if (blockers.includes(PAGE_UNREADABLE_BLOCKER)) {
+    return "Part of this page couldn't be read, so CareerRat didn't submit. Check it and submit it yourself if it's right.";
   }
   return null;
 }
@@ -1505,6 +1510,9 @@ export function submitGuard({ pageText = "", pageSignals = {} } = {}) {
   }
   if (pageSignals.requiredExercise === true) {
     blockers.push("complete the assessment");
+  }
+  if (pageSignals.safetyTextIncomplete === true) {
+    blockers.push(PAGE_UNREADABLE_BLOCKER);
   }
   if (pageSignals.attestation === true || snapshotHasAttestation({ pageText: rawText })) {
     blockers.push(ATTESTATION_BLOCKER);

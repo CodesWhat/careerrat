@@ -13,6 +13,7 @@ import {
   findAdvanceButtonRef,
   findSubmitButtonRef,
   hostnameToPortal,
+  limitBlockerReason,
   mapFormDefaults,
   PORTAL_RECIPES,
   resolveFieldValue,
@@ -405,6 +406,16 @@ describe("submitGuard", () => {
     assert.equal(result.canSubmit, false);
     assert.equal(result.mode, "manual");
     assert.ok(result.blockers.includes("verify you are human"));
+  });
+
+  it("blocks as page-unreadable when part of the page could not be read", () => {
+    const result = submitGuard({
+      pageText: "Application form",
+      pageSignals: { safetyTextIncomplete: true },
+    });
+    assert.equal(result.canSubmit, false);
+    assert.deepEqual(result.blockers, ["page-unreadable"]);
+    assert.match(limitBlockerReason(result.blockers), /couldn't be read/);
   });
 
   it("blocks on pageText containing 'captcha'", () => {

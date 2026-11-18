@@ -28,10 +28,6 @@ const MAX_PAGE_TEXT = 20_000;
 // The submit guard reads text the display limit above would cut off (a notice
 // after a long posting, or inside an iframe). This only bounds memory.
 const MAX_SAFETY_TEXT = 2_000_000;
-// Carries a BLOCKER_SIGNALS phrase so the driver's submitGuard (which reads
-// only pageText) refuses automatic submission when a frame couldn't be read.
-const SAFETY_INCOMPLETE_NOTICE =
-  "[page inspection incomplete: a frame could not be read, security verification needed before submitting]";
 // Bounds every Playwright action selectOption() takes (native-select attempt,
 // then each step of the combobox fallback) so a control that can't actually
 // be driven fails in a few seconds, not Playwright's implicit 30s
@@ -1103,7 +1099,6 @@ export function createPlaywrightOps({
           }
         }
       }
-      if (safetyTextIncomplete) safetyExtras.push(SAFETY_INCOMPLETE_NOTICE);
 
       const treeLines = buildUploadTreeLines(controlsWithRef);
       const displayParts = [bodyText, ...safetyExtras, ...treeLines].filter(

@@ -493,7 +493,10 @@ function isPreparationBlocker(blocker) {
 function snapshotGuard(snapshot) {
   return submitGuard({
     pageText: snapshot?.pageText,
-    pageSignals: { attestation: snapshotHasAttestation(snapshot) },
+    pageSignals: {
+      attestation: snapshotHasAttestation(snapshot),
+      safetyTextIncomplete: snapshot?.safetyTextIncomplete === true,
+    },
   });
 }
 
