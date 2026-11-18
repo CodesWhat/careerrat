@@ -1,7 +1,7 @@
 import { classifyStage, isTerminalStage } from "../tracker/dashboard.mjs";
 
-export const LINK_CHECK_CONCURRENCY = 8;
-export const LINK_CHECK_PER_HOST_CONCURRENCY = 2;
+const LINK_CHECK_CONCURRENCY = 8;
+const LINK_CHECK_PER_HOST_CONCURRENCY = 2;
 
 function hostOf(url) {
   try {
