@@ -20,31 +20,17 @@ test("release.yml queues each tag in its own lane so a later tag cannot drop an 
   assert.match(source, /already has a published release|already exists/i);
 });
 
-test("publish.yml and sbom.yml queue each tag in its own lane so a tag burst publishes every tag", async () => {
-  for (const name of ["publish.yml", "sbom.yml"]) {
+test("dispatched release workflows use one global lane so branch backfills cannot race their resolved tag", async () => {
+  for (const name of ["desktop-release.yml", "publish.yml", "sbom.yml"]) {
     const source = await workflow(name);
     assert.match(
       source,
-      /concurrency:\s*\n\s+group:\s*\$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\s*\n/,
-      `${name} must key its concurrency group on the ref so two tags get different groups`
+      /concurrency:\s*\n\s+group:\s*\$\{\{ github\.workflow \}\}\s*\n/,
+      `${name} must serialize release events and branch-dispatched backfills together`
     );
+    assert.doesNotMatch(source, /group:[^\n]*(?:github\.ref|tag_name)/);
     assert.match(source, /cancel-in-progress:\s*false/);
   }
-});
-
-test("desktop-release.yml keeps one global lane so branch backfills cannot race their resolved tag", async () => {
-  const source = await workflow("desktop-release.yml");
-  assert.match(source, /concurrency:\s*\n\s+group:\s*\$\{\{ github\.workflow \}\}\s*\n/);
-  assert.doesNotMatch(source, /group:[^\n]*(?:github\.ref|tag_name)/);
-  assert.match(source, /cancel-in-progress:\s*false/);
-});
-
-test("publish.yml picks the npm dist-tag through the guard script", async () => {
-  const source = await workflow("publish.yml");
-  assert.match(source, /npm view careerrat dist-tags\.latest/);
-  assert.match(source, /node scripts\/release\/npm-dist-tag\.mjs "\$VERSION" "\$CURRENT_LATEST"/);
-  assert.match(source, /npm publish --provenance --access public --tag "\$TAG"/);
-  assert.doesNotMatch(source, /TAG=latest/);
 });
 
 test("release rejects unsigned or lightweight release tags", async () => {

@@ -42,11 +42,8 @@ on:
     types: [published]
   workflow_dispatch:
 
-# One lane per ref so a tag burst cannot replace a pending run. A branch
-# backfill racing a tag run for the same release is harmless: the upload uses
-# --clobber and both generate the same file.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}
   cancel-in-progress: false
 
 permissions: {}
