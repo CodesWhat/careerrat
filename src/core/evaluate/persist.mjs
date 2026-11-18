@@ -192,11 +192,15 @@ const ATS_MIN_SEGMENTS = [
   [/(^|\.)lever\.co$/i, 2],
   [/(^|\.)ashbyhq\.com$/i, 2],
   [/(^|\.)smartrecruiters\.com$/i, 2],
-  [/(^|\.)workable\.com$/i, 3],
 ];
 
 function atsSpecific(url, segments) {
   const host = url.hostname;
+  // Workable has two shapes: apply.workable.com/<company>/j/<id> and the
+  // <company>.workable.com/j/<id> subdomain form.
+  if (/(^|\.)workable\.com$/i.test(host)) {
+    return segments.length >= (/^apply\./i.test(host) ? 3 : 2);
+  }
   for (const [re, min] of ATS_MIN_SEGMENTS) if (re.test(host)) return segments.length >= min;
   if (/(^|\.)greenhouse\.io$/i.test(host)) {
     const i = segments.indexOf("jobs");

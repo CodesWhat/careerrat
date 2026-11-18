@@ -349,6 +349,8 @@ test("ATS board roots are not specific postings, posting URLs are", async () => 
     "https://jobs.ashbyhq.com/acme",
     "https://apply.workable.com/acme",
     "https://apply.workable.com/acme/",
+    "https://acme.workable.com/",
+    "https://acme.workable.com",
     "https://acme.wd1.myworkdayjobs.com/External",
     "https://acme.wd1.myworkdayjobs.com/en-US/External",
   ]) {
@@ -359,6 +361,7 @@ test("ATS board roots are not specific postings, posting URLs are", async () => 
     "https://boards.greenhouse.io/acme/jobs/4567",
     "https://jobs.ashbyhq.com/acme/5a1b2c3d-0000-4000-8000-123456789abc",
     "https://apply.workable.com/acme/j/ABC123DEF4",
+    "https://acme.workable.com/j/ABC123",
     "https://acme.wd1.myworkdayjobs.com/External/job/Remote/Engineer_R-1",
     "https://acme.example/careers?gh_jid=123",
   ]) {
