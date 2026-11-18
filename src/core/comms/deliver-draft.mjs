@@ -1,6 +1,7 @@
 import { openDb } from "../db/connection.mjs";
 import { commAppendMessage } from "../db/verbs/comm.mjs";
 import { readContact } from "../people/contact.mjs";
+import { checkDraftFacts } from "./draft-facts.mjs";
 import { assertCanNotify, NotifyError, notifyPerson } from "./person-notify.mjs";
 import { buildSendLinks, resolveRecipient } from "./recipient.mjs";
 import { operatorName } from "./roundup.mjs";
@@ -39,6 +40,19 @@ export async function deliverDraftToPerson({
     throw new NotifyError(
       "COMMUNICATION_DRAFT_REQUIRED",
       "Draft a reply and review it before delivering it."
+    );
+  }
+  const draftFacts = checkDraftFacts({
+    repoRoot,
+    env,
+    comm,
+    subject: comm.draft.subject,
+    body: comm.draft.body,
+  });
+  if (!draftFacts.ok) {
+    throw new NotifyError(
+      "COMMUNICATION_DRAFT_FACTS",
+      `This draft names facts that aren't in ${name}'s résumé or evidence, so it was held: ${draftFacts.messages.join("; ")}`
     );
   }
   const contact = readContact(base, name);

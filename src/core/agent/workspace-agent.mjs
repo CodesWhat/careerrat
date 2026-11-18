@@ -25,6 +25,7 @@ import {
 import { PROVIDERS } from "../automation/session.mjs";
 import { statusTransition, toTrackOutcomeStatus } from "../automation/status-map.mjs";
 import { buildCoachingPlan } from "../coaching/plan.mjs";
+import { checkDraftFacts } from "../comms/draft-facts.mjs";
 import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
 import { dbExists, requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
@@ -8670,6 +8671,13 @@ async function executeWorkspaceIntentCore({
         throw actionError(
           "This draft still has unfinished placeholder text. Finish the draft, then try again.",
           "COMMUNICATION_DRAFT_PLACEHOLDER"
+        );
+      }
+      const draftFacts = checkDraftFacts({ repoRoot, env, comm: communication, subject, body });
+      if (!draftFacts.ok) {
+        throw actionError(
+          `This draft names facts that aren't in your résumé or evidence, so I held it. Confirm or remove: ${draftFacts.messages.join("; ")}`,
+          "COMMUNICATION_DRAFT_FACTS"
         );
       }
       const summary = draftSummary(body);

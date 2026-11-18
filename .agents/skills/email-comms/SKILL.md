@@ -357,7 +357,7 @@ Per-type requirements:
 
 Run `careerrat lint-placeholders <draft-path>` if the draft is saved to a file before presenting it to the user.
 
-For outreach and any draft that states candidate facts, also run `careerrat fact-check <draft-path> --company "<Company>"`. Exit 1 means the draft names a number, tool, employer or person absent from the candidate's résumé and evidence: remove it or ask the user before presenting.
+For outreach and any draft that states candidate facts, also run `careerrat fact-check <draft-path> --company "<Company>"`. Exit 1 means the draft names a number, tool, employer or person absent from the candidate's résumé and evidence: remove it or ask the user before presenting. The same check also runs in code: `communication.draft` refuses to store a draft that fails it (`COMMUNICATION_DRAFT_FACTS`), and person draft delivery holds one the same way, so a failing draft never reaches the user as ready.
 
 ---
 
