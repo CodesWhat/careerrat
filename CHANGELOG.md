@@ -18,7 +18,6 @@ All notable changes to CareerRat are documented here. This project follows
 - Strategy findings point at the exact jobs they're based on, with a true count.
 - `careerrat doctor` reports how many searches can actually run and how the last one went, instead of counting run history.
 - A scheduled follow-up checks again that it's still needed right before it runs.
-- Release publishing no longer drops a tag when several are pushed close together, and npm's `latest` only moves forward.
 
 ### Security
 
