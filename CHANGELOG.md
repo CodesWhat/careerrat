@@ -6,6 +6,24 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- `careerrat evaluate <job> --write` saves the verdict in a database workspace, so coaching and review approval work from the terminal. An unknown option on `evaluate` now exits 64 instead of looking like a REVIEW verdict.
+- In auto mode, answering the last open question on a paused application picks it back up and submits it when nothing else is blocking. LinkedIn, attestation answers, unresolved fields and uploads still stop before submit.
+
+### Fixed
+
+- Outreach and reply drafts are fact-checked like every other document, and a draft with an invented number, employer or tool is held instead of sent.
+- Applying stops, with nothing submitted, when a site says you've hit its application limit or your account is restricted.
+- Strategy findings point at the exact jobs they're based on, with a true count.
+- `careerrat doctor` reports how many searches can actually run and how the last one went, instead of counting run history.
+- A scheduled follow-up checks again that it's still needed right before it runs.
+- Release publishing no longer drops a tag when several are pushed close together, and npm's `latest` only moves forward.
+
+### Security
+
+- Patched minimatch in the desktop build tooling (GHSA-g3hv-75wg-m249). CI now fails on high-severity production advisories, and Renovate waits three days before proposing a new release.
+
 ## [0.24.4] - 2026-11-17
 
 ### Changed
