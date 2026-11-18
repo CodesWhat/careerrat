@@ -15,7 +15,9 @@ name: publish
 # Dist-tags: a prerelease version (any version containing "-", e.g. 0.2.0-rc.1) is
 # published to the "rc" dist-tag, so `npm i careerrat` / `npm pack careerrat@latest`
 # stay on the last stable release while testers opt in with `careerrat@rc`. A plain
-# version (0.2.0) publishes to "latest" as usual. Mark the GitHub Release as a
+# version (0.2.0) publishes to "latest" as usual, unless the registry's `latest`
+# is already higher (tags can publish in parallel and finish out of order); then it
+# publishes to "backport" instead (scripts/release/npm-dist-tag.mjs). Mark the GitHub Release as a
 # pre-release when cutting an -rc build for clarity (the trigger fires either way).
 #
 # Provenance: Trusted Publishing generates a signed provenance attestation
@@ -27,8 +29,11 @@ on:
     types: [published]
   workflow_dispatch:
 
+# One lane per tag. GitHub keeps a single pending run per group, so a shared
+# group would silently drop the middle tag of a burst. Publishes can therefore
+# finish out of order; the dist-tag step below keeps `latest` from moving back.
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 permissions: {}
@@ -135,6 +140,7 @@ jobs:
       - name: Publish to npm (unscoped, public, trusted publishing)
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          if [[ "$VERSION" == *-* ]]; then TAG=rc; else TAG=latest; fi
-          echo "Publishing v$VERSION to dist-tag: $TAG"
+          CURRENT_LATEST="$(corepack npm view careerrat dist-tags.latest)"
+          TAG="$(node scripts/release/npm-dist-tag.mjs "$VERSION" "$CURRENT_LATEST")"
+          echo "Publishing v$VERSION to dist-tag: $TAG (registry latest: ${CURRENT_LATEST:-none})"
           corepack npm publish --provenance --access public --tag "$TAG"
