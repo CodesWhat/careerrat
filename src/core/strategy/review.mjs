@@ -52,7 +52,7 @@ import {
   STRATEGY_REVIEW_NEW_SIGNAL,
   strategyReviewSignal,
 } from "../tracker/dashboard-data.js";
-import { buildOutcomeSummary } from "../tracker/outcome-analysis.mjs";
+import { buildOutcomeSummary, classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
 
 const LABELS = Object.freeze({
   skill: "reevaluate-strategy",
@@ -89,6 +89,10 @@ const MAX_RECOMMENDATIONS = 8;
 const MAX_RERANK_ROWS = 5;
 const MAX_LEARNING_ENTRIES_PER_FAMILY = 4;
 const MAX_LEARNING_FAMILIES = 6;
+// Row ids the review input lists for the model to cite, and the most ids one
+// finding or recommendation carries back (its count stays exact past the cap).
+const MAX_EVIDENCE_ROWS = 150;
+const MAX_EVIDENCE_IDS = 25;
 
 function cleanText(value, max = 4000) {
   return String(value ?? "")
@@ -161,6 +165,28 @@ function compactApplicationLimits(applicationLimits) {
     .map((row) => ({ company: row.company, status: row.status, scope: row.scope || "all-roles" }));
 }
 
+// The rows a finding may cite: tracker applications first, then sourced roles,
+// each as id + table + status + role family. Bounded so the prompt stays small;
+// a row past the cap can't be cited, so it can't be counted either.
+function compactEvidenceRows({ applications, sourced, targeting }) {
+  const rows = [];
+  for (const [table, list] of [
+    ["applications", applications],
+    ["sourced", sourced],
+  ]) {
+    for (const row of list) {
+      if (!row?.id) continue;
+      rows.push({
+        id: String(row.id),
+        table,
+        status: row.status || null,
+        family: classifyRoleFamily(row.role, targeting),
+      });
+    }
+  }
+  return rows.slice(0, MAX_EVIDENCE_ROWS);
+}
+
 export function buildStrategyReviewContext({ repoRoot, env = process.env, now = new Date() } = {}) {
   const db = requireDb({ repoRoot, env });
   const trackerData = assembleTrackerObject(db);
@@ -205,6 +231,7 @@ export function buildStrategyReviewContext({ repoRoot, env = process.env, now = 
       target_base: compensation.target_base ?? null,
       minimum_base: compensation.minimum_base ?? null,
     },
+    evidenceRows: compactEvidenceRows({ applications, sourced, targeting }),
     learnings: compactLearnings({ repoRoot, targeting }),
     applicationLimitExclusions: compactApplicationLimits(config["application-limits"]),
   };
@@ -239,12 +266,13 @@ const strategyReviewProposalSchema = {
       maxItems: MAX_RECOMMENDATIONS,
       items: {
         type: "object",
-        required: ["id", "title", "evidence"],
+        required: ["id", "title", "evidence", "evidenceIds"],
         additionalProperties: false,
         properties: {
           id: { type: "string" },
           title: { type: "string", maxLength: 140 },
           evidence: { type: "string", maxLength: 300 },
+          evidenceIds: { type: "array", items: { type: "string" } },
         },
       },
     },
@@ -253,7 +281,7 @@ const strategyReviewProposalSchema = {
       maxItems: MAX_RECOMMENDATIONS,
       items: {
         type: "object",
-        required: ["id", "type", "title", "rationale", "evidenceCount", "proposal"],
+        required: ["id", "type", "title", "rationale", "evidenceCount", "evidenceIds", "proposal"],
         additionalProperties: false,
         properties: {
           id: { type: "string" },
@@ -261,6 +289,7 @@ const strategyReviewProposalSchema = {
           title: { type: "string", maxLength: 140 },
           rationale: { type: "string", maxLength: 300 },
           evidenceCount: { type: "integer", minimum: 0 },
+          evidenceIds: { type: "array", items: { type: "string" } },
           proposal: {
             type: "object",
             required: [
@@ -316,8 +345,8 @@ function promptFor(context) {
     "Rules:",
     "- Ground every finding and recommendation in the provided context only. Never invent a company, number, or outcome not present below.",
     "- Never reference private compensation — the context deliberately omits current_base; use target_base/minimum_base only if you mention comp at all.",
-    "- evidenceCount must honestly reflect how many data points (rows, rejections, entries) actually support the recommendation — do not inflate it.",
-    "- Prefer recommendations with evidenceCount >= 3; a lower count is fine but must be clearly a small-sample, directional call in the rationale.",
+    "- Cite the rows behind every finding and recommendation in evidenceIds, using only ids from context.evidenceRows. CareerRat drops any id it can't find and sets evidenceCount itself from the distinct rows you cite, so cite every row that supports the claim and none that don't.",
+    "- Prefer recommendations backed by >= 3 cited rows; a lower count is fine but must be clearly a small-sample, directional call in the rationale.",
     "- Return at most 8 recommendations, ranked most important first.",
     "- Every proposal includes every schema field. Use null, or [] for ids, when a field does not apply.",
     "- proposal values by type: rerank uses ids/id plus toStatus and/or priority; keep-signal/cut-signal uses signal; comp-target/comp-floor uses amount; exclude-company uses company; fit-bands uses patch; learning uses family/title/body; writing-style/other uses text.",
@@ -386,16 +415,16 @@ function compactStrategyProposal(type, proposal) {
   return value.text ? { text: value.text } : {};
 }
 
-// The review input carries aggregates, not row ids, so a recommendation can't
-// cite rows we could check. The model's evidenceCount is clamped to the data
-// points the review actually saw: tracker rows plus recent learning entries.
-function evidenceCeiling(context) {
-  const counts = context.funnel?.counts || {};
-  const learnings = (context.learnings || []).reduce(
-    (sum, family) => sum + (family.entries?.length || 0),
-    0
-  );
-  return (Number(counts.apps) || 0) + (Number(counts.sourced) || 0) + learnings;
+// A finding or recommendation cites rows by id. Keep only ids the review input
+// actually listed, once each. The count is every distinct real row cited; the
+// ids carried back are the first MAX_EVIDENCE_IDS of them.
+function resolveEvidence(cited, knownIds) {
+  const seen = new Set();
+  for (const raw of Array.isArray(cited) ? cited : []) {
+    const id = typeof raw === "string" ? raw.trim() : "";
+    if (id && knownIds.has(id)) seen.add(id);
+  }
+  return { evidenceCount: seen.size, evidenceIds: [...seen].slice(0, MAX_EVIDENCE_IDS) };
 }
 
 function freshDraftResult({ context, lastReview }) {
@@ -458,7 +487,7 @@ export async function draftStrategyReview({
   }
 
   const data = aiResult.body.data || {};
-  const ceiling = evidenceCeiling(context);
+  const knownIds = new Set((context.evidenceRows || []).map((row) => row.id));
   const recommendations = (Array.isArray(data.recommendations) ? data.recommendations : [])
     .slice(0, MAX_RECOMMENDATIONS)
     .map((rec, index) => {
@@ -468,9 +497,7 @@ export async function draftStrategyReview({
         type,
         title: cleanText(rec.title, 140),
         rationale: cleanText(rec.rationale, 300),
-        evidenceCount: Number.isFinite(rec.evidenceCount)
-          ? Math.min(Math.max(0, rec.evidenceCount), ceiling)
-          : 0,
+        ...resolveEvidence(rec.evidenceIds, knownIds),
         proposal: compactStrategyProposal(type, rec.proposal),
       };
     });
@@ -480,6 +507,7 @@ export async function draftStrategyReview({
       id: cleanText(finding.id, 80) || `finding-${index + 1}`,
       title: cleanText(finding.title, 140),
       evidence: cleanText(finding.evidence, 300),
+      ...resolveEvidence(finding.evidenceIds, knownIds),
     }));
 
   return {
