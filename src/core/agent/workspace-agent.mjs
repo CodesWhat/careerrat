@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, openSync, readSync } from "node:fs";
 import { PLAIN_ENGLISH_AGENT_VOICE } from "../ai/agent-voice.mjs";
+import { loadAIPreferences } from "../ai/ai-preferences.mjs";
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { CHAT_ANSWER_MODE_GUIDANCE, parseChatAnswerMode } from "../ai/chat-answer-mode.mjs";
+import { aiRuntimeIdForRoute, resolveAIExecutionPlan } from "../ai/operation-policy.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { hostnameToPortal, REQUIRED_FIELDS_UNANSWERED } from "../apply/form-fill.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
@@ -49,6 +51,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
 } from "../db/verbs/candidate.mjs";
+import { missionCreate, missionRun } from "../db/verbs/chat-first.mjs";
 import {
   commAppendMessage,
   commCaptureInbound,
@@ -87,6 +90,7 @@ import {
   startManualSearchRun,
 } from "../onboarding/first-search-run.mjs";
 import { openAnswerNeedsFromGaps } from "../packet/answer-needs.mjs";
+import { ATTESTATION_NEEDS_YOU_REASON, isAttestationQuestion } from "../packet/attestation.mjs";
 import { buildPacketContext } from "../packet/context.mjs";
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
@@ -148,6 +152,7 @@ import { readVersion } from "../version.mjs";
 import {
   aiRouteAvailable,
   companyHealthRecheckDays,
+  followUpStillDue,
   noteSkippedFollowUp,
   planAutoFollowUps,
   snapshotApplicationState,
@@ -4487,6 +4492,21 @@ function scheduleAutoFollowUps({ options, before }) {
       delete rest.signal;
       schedule(async () => {
         try {
+          // Cost gate again, right before paid work: the plan that scheduled
+          // this run may be stale by now.
+          if (
+            !followUpStillDue({
+              repoRoot,
+              env,
+              before,
+              followUp,
+              startCompanyHealthImpl: options.startCompanyHealthImpl,
+              now: options.now ? options.now().getTime() : Date.now(),
+            })
+          ) {
+            noteSkippedFollowUp({ repoRoot, env, followUp, reason: "no-longer-due" });
+            return;
+          }
           // The AI-route probe can shell out to a CLI, so it runs here, after
           // the triggering write has already returned.
           if (!aiReady()) {
@@ -4506,13 +4526,170 @@ function scheduleAutoFollowUps({ options, before }) {
   }
 }
 
+// Why an auto-resume re-runs the application but must not press Submit. The
+// live run keeps its own stops (page blockers, unresolved required fields and
+// uploads, fact-check and evaluate-job gates, LinkedIn in apply-driver); these
+// are the ones decided from what the person just answered or from the link.
+function autoResumeSubmitHold({ application, answers }) {
+  if (isLinkedInUrl(safeExternalHttpUrl(application?.link || application?.url) || "")) {
+    return "this application is on LinkedIn, and CareerRat never submits there for you.";
+  }
+  const attested = (answers || []).some((entry) => isAttestationQuestion(entry?.question));
+  if (attested) return ATTESTATION_NEEDS_YOU_REASON;
+  return null;
+}
+
+// NEEDS YOU auto-resume: once the last open answer for a paused application is
+// saved, re-run that one job's apply. In supervised (manual submit) mode the
+// "Resume supervised apply" button stays the only path. Per-job and idempotent:
+// an in-flight resume or an application that already pressed Submit is left alone.
+function scheduleAutoResume({ options, requests }) {
+  try {
+    const { repoRoot, env = process.env } = options;
+    if (loadSubmitMode({ root: repoRoot, env }) !== "auto") return;
+    const schedule = options.scheduleAutoFollowUp || scheduleDetached;
+    for (const request of requests) {
+      const applicationId = request.applicationId;
+      const flightKey = `${repoRoot}\u0000${applicationId}\u0000auto-resume`;
+      if (autoFollowUpsInFlight.has(flightKey)) continue;
+      autoFollowUpsInFlight.add(flightKey);
+      const rest = { ...options, autoFollowUps: false };
+      delete rest.autoResumeSink;
+      delete rest.intentMessageId;
+      delete rest.resultMessageId;
+      delete rest.operationAttempt;
+      delete rest.executionPlan;
+      delete rest.signal;
+      schedule(async () => {
+        try {
+          const application = applicationForIntent({ repoRoot, env, id: applicationId });
+          if (!application) return;
+          if (
+            application.submitAttemptedAt ||
+            statusProvesApplicationWasSubmitted(application.status)
+          ) {
+            return;
+          }
+          const aiReady =
+            options.aiRouteAvailableImpl || (() => aiRouteAvailable({ repoRoot, env }));
+          if (!aiReady()) {
+            workspaceMessageAppend({
+              repoRoot,
+              env,
+              role: "assistant",
+              kind: "status",
+              text: `Your answers are saved, but no AI is set up, so I didn't resume ${applicationLabel(application)}. Connect one in Settings and resume it from this job.`,
+              entity: { type: "application", id: applicationId },
+              metadata: { autoResume: { skipped: "no-ai-route" } },
+            });
+            return;
+          }
+          const hold = autoResumeSubmitHold({ application, answers: request.answers });
+          if (hold) {
+            workspaceMessageAppend({
+              repoRoot,
+              env,
+              role: "assistant",
+              kind: "status",
+              text: `Your answers are saved. I'll re-run ${applicationLabel(application)} but won't press Submit: ${hold}`,
+              entity: { type: "application", id: applicationId },
+              metadata: { autoResume: { held: true } },
+            });
+          }
+          // The apply only runs inside a mission step attempt, so the resume is
+          // a one-job mission with just the prepare and submit steps: the
+          // packet was already built and confirmed, nothing is regenerated.
+          const jobRef = {
+            type: "application",
+            id: applicationId,
+            company: application.company || null,
+            role: application.role || null,
+          };
+          const missionId = `mission-auto-resume-${randomUUID()}`;
+          missionCreate({
+            repoRoot,
+            env,
+            id: missionId,
+            title: `Resume ${applicationLabel(application)}`,
+            mode: "prepare-to-submit",
+            steps: [
+              {
+                id: "job-1-prepare-submit",
+                label: "Resume form",
+                action: "prepare-submit",
+                jobRef,
+              },
+              { id: "job-1-submit", label: "Submit", action: "submit-gate", jobRef },
+            ],
+            metadata: {
+              kind: "job-application",
+              mode: "prepare-to-submit",
+              autoResume: true,
+              jobs: [{ ...jobRef, evaluationGate: "" }],
+            },
+          });
+          await missionRun({
+            repoRoot,
+            env,
+            id: missionId,
+            resolveExecutionPlan:
+              options.resolveMissionExecutionPlanImpl || selectedMissionExecutionPlan,
+            executeIntent: ({ intent }) =>
+              executeWorkspaceIntentCore({
+                ...rest,
+                intent: {
+                  ...intent,
+                  input: { ...(intent.input || {}), ...(hold ? { autoResumeHold: true } : {}) },
+                },
+              }),
+          });
+        } catch {
+          // The handler already wrote the action_error into the job thread.
+        } finally {
+          autoFollowUpsInFlight.delete(flightKey);
+        }
+      });
+    }
+  } catch {
+    // Scheduling the resume never fails the answer save that triggered it.
+  }
+}
+
+function selectedMissionExecutionPlan({ repoRoot, env, operation }) {
+  const route = resolveAIRoute(env, { repoRoot });
+  const runtimeId = aiRuntimeIdForRoute(route);
+  if (!runtimeId) {
+    const error = new Error(route.error || "Select a ready AI CLI before starting this mission.");
+    error.code = "NO_AI_ROUTE";
+    throw error;
+  }
+  return resolveAIExecutionPlan({
+    operation,
+    runtimeId,
+    preferences: loadAIPreferences({ repoRoot, env }),
+    ...(route.type === "installed" ? { installedRuntime: route.runtime } : {}),
+  });
+}
+
+// An answer save is resume-ready when the packet has no open question left.
+function noteAutoResumeCandidate(sink, { applicationId, answers, manifest }) {
+  if (!Array.isArray(sink) || !applicationId) return;
+  if (manifest?.uploadReady !== true) return;
+  if (openAnswerNeedsFromGaps(manifest?.gaps).length > 0) return;
+  sink.push({ applicationId, answers: answers || [] });
+}
+
 export async function executeWorkspaceIntent(options = {}) {
   const auto = options.autoFollowUps === true;
   const before = auto
     ? snapshotApplicationState({ repoRoot: options.repoRoot, env: options.env ?? process.env })
     : null;
-  const result = await executeWorkspaceIntentCore(options);
+  const resumeRequests = auto ? [] : null;
+  const result = await executeWorkspaceIntentCore(
+    auto ? { ...options, autoResumeSink: resumeRequests } : options
+  );
   if (before) scheduleAutoFollowUps({ options, before });
+  if (resumeRequests?.length) scheduleAutoResume({ options, requests: resumeRequests });
   return result;
 }
 
@@ -4569,6 +4746,7 @@ async function executeWorkspaceIntentCore({
   intentMessageId,
   resultMessageId,
   operationAttempt,
+  autoResumeSink,
   now = () => new Date(),
 } = {}) {
   let normalized = normalizeWorkspaceIntent(intent);
@@ -4608,6 +4786,7 @@ async function executeWorkspaceIntentCore({
       const submitAuto =
         loadSubmitMode({ root: repoRoot, env }) === "auto" &&
         normalized.input?.focusSession !== true &&
+        normalized.input?.autoResumeHold !== true &&
         !submitAlreadyAttempted;
       normalized = {
         ...normalized,
@@ -4673,6 +4852,11 @@ async function executeWorkspaceIntentCore({
           saveImpl: saveScreeningAnswerImpl,
           intentMessage,
           applicationId: confirmation.applicationId || operation.applicationId,
+        });
+        noteAutoResumeCandidate(autoResumeSink, {
+          applicationId: confirmation.applicationId || operation.applicationId,
+          answers: confirmation.answers,
+          manifest,
         });
         return appendActionResult({
           repoRoot,
@@ -4840,6 +5024,11 @@ async function executeWorkspaceIntentCore({
         saveImpl: saveScreeningAnswerImpl,
         intentMessage,
         applicationId: operation.applicationId || normalized.entity.id,
+      });
+      noteAutoResumeCandidate(autoResumeSink, {
+        applicationId: operation.applicationId || normalized.entity.id,
+        answers: operation.answers,
+        manifest,
       });
       return appendActionResult({
         repoRoot,

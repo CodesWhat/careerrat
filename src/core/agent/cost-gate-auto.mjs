@@ -119,15 +119,19 @@ function coachingTrigger({ row, before }) {
 // Records that an automatic follow-up was skipped because no AI is set up.
 // Called from inside the detached run, so the AI-route probe (which can run a
 // CLI --version check) never holds up the write that triggered it.
-export function noteSkippedFollowUp({ repoRoot, env, followUp }) {
+export function noteSkippedFollowUp({ repoRoot, env, followUp, reason = "no-ai-route" }) {
+  const why =
+    reason === "no-longer-due"
+      ? "it was no longer due when it came up to run"
+      : "no AI is set up yet. Connect one in Settings and run it from this job";
   workspaceMessageAppend({
     repoRoot,
     env,
     role: "assistant",
     kind: "status",
-    text: `Skipped the automatic ${followUp.label} for ${followUp.company || "this job"}: no AI is set up yet. Connect one in Settings and run it from this job.`,
+    text: `Skipped the automatic ${followUp.label} for ${followUp.company || "this job"}: ${why}.`,
     entity: { type: "application", id: followUp.intent.entity.id },
-    metadata: { autoFollowUp: { key: followUp.key, skipped: "no-ai-route" } },
+    metadata: { autoFollowUp: { key: followUp.key, skipped: reason } },
   });
 }
 
@@ -182,4 +186,23 @@ export function planAutoFollowUps({
     }
   }
   return due;
+}
+
+// The cost gate, asked again right before the detached run does paid work. The
+// plan that scheduled it is a snapshot: by the time the run starts the job may
+// have moved to a terminal stage, been re-evaluated, or already been handled.
+// Re-plans against the current rows with the same `before` and runs only when
+// this exact follow-up (same application, same key) is still due.
+export function followUpStillDue({
+  repoRoot,
+  env,
+  before,
+  followUp,
+  startCompanyHealthImpl,
+  now = Date.now(),
+}) {
+  const due = planAutoFollowUps({ repoRoot, env, before, startCompanyHealthImpl, now });
+  return due.some(
+    (entry) => entry.key === followUp.key && entry.intent.entity?.id === followUp.intent.entity?.id
+  );
 }
