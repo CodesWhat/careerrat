@@ -985,6 +985,76 @@ test("app-nudge stops after max_count sent follow-ups (commMarkSent integration)
   assert.equal(nudges().length, 0, "nudge stops once max_count follow-ups were sent");
 });
 
+function upsertNudgeComm(repoRoot, id, extra = {}) {
+  commUpsert({
+    repoRoot,
+    row: {
+      id,
+      applicationId: "app-with-draft",
+      company: "Hooli",
+      channel: "email",
+      status: "drafted",
+      draft: { body: `body ${id}` },
+      messages: [],
+      ...extra,
+    },
+  });
+}
+
+test("a nudge marker is consumed by its send: a later resume reply on the same thread doesn't count", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  commMarkSent({ repoRoot, id: "comm-with-draft", at: "2026-05-01T00:00:00.000Z" });
+  upsertNudgeComm(repoRoot, "comm-thread", { followUpKind: "app-nudge" });
+  commMarkSent({ repoRoot, id: "comm-thread", at: "2026-06-01T00:00:00.000Z" });
+  assert.equal(
+    JSON.parse(db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-thread").data)
+      .followUpKind,
+    undefined
+  );
+  commSetDraft({ repoRoot, id: "comm-thread", draft: { body: "Attached is my resume." } });
+  commMarkSent({ repoRoot, id: "comm-thread", at: "2026-06-02T00:00:00.000Z" });
+  const app = readAppRow(db, "app-with-draft");
+  assert.equal(app.followUp.sentCount, 2);
+  assert.equal(app.followUp.lastSentAt, "2026-06-01T00:00:00.000Z");
+});
+
+test("a marked nudge replaced by a new unmarked draft doesn't count when sent", () => {
+  for (const replace of ["commSetDraft", "commUpsert"]) {
+    const repoRoot = tempRepo();
+    seedFixture(repoRoot);
+    const db = openDb({ repoRoot });
+    commMarkSent({ repoRoot, id: "comm-with-draft" });
+    upsertNudgeComm(repoRoot, "comm-replace", { followUpKind: "app-nudge" });
+    if (replace === "commSetDraft") {
+      commSetDraft({ repoRoot, id: "comm-replace", draft: { body: "Here is my availability." } });
+    } else {
+      upsertNudgeComm(repoRoot, "comm-replace", {
+        followUpKind: "app-nudge",
+        draft: { body: "Here is my availability." },
+      });
+    }
+    commMarkSent({ repoRoot, id: "comm-replace" });
+    assert.equal(readAppRow(db, "app-with-draft").followUp.sentCount, 1, replace);
+  }
+});
+
+test("two separately marked nudges on one thread count twice", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  commMarkSent({ repoRoot, id: "comm-with-draft" });
+  upsertNudgeComm(repoRoot, "comm-two", { followUpKind: "app-nudge" });
+  commMarkSent({ repoRoot, id: "comm-two" });
+  upsertNudgeComm(repoRoot, "comm-two", {
+    followUpKind: "app-nudge",
+    draft: { body: "nudge again" },
+  });
+  commMarkSent({ repoRoot, id: "comm-two" });
+  assert.equal(readAppRow(db, "app-with-draft").followUp.sentCount, 3);
+});
+
 // ---------------------------------------------------------------------------
 // commMarkSent: verification tiers (email-comms skill's supervised handoff +
 // verified-send paths). "verified" is executor-confirmed delivery evidence,

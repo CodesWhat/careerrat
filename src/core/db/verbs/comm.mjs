@@ -275,7 +275,23 @@ export function commUpsert({ repoRoot, env, row } = {}) {
     }
   }
   return runVerb({ repoRoot, env }, (db) => {
-    const existed = Boolean(getRow(db, "communications", row.id));
+    const existingRow = getRow(db, "communications", row.id);
+    const existed = Boolean(existingRow);
+    // The followUpKind marker belongs to the draft it was set for. A write that
+    // changes the draft while carrying over the old marker unchanged is a new,
+    // unmarked draft; a marker the write itself sets or changes stays.
+    const before = draftParts(existingRow?.draft);
+    const after = draftParts(row.draft);
+    const draftChanged = before.body !== after.body || before.subject !== after.subject;
+    if (
+      existed &&
+      draftChanged &&
+      row.followUpKind &&
+      row.followUpKind === existingRow.followUpKind
+    ) {
+      row = { ...row };
+      delete row.followUpKind;
+    }
     putRow(db, "communications", row.id, row, {
       application_id: resolveApplicationId(db, row),
     });
@@ -395,8 +411,10 @@ export function commSetDraft({ repoRoot, env, id, draft, summary, at, factAllow 
       ...(normalizedDraft.subject ? { subject: normalizedDraft.subject } : {}),
       body: normalizedDraft.body,
     });
+    // A new draft replaces the one the nudge marker was set for.
+    const { followUpKind: _replacedMarker, ...commWithoutMarker } = comm;
     const updated = {
-      ...comm,
+      ...commWithoutMarker,
       status: "drafted",
       draft: normalizedDraft,
       summary: messageSummary,
@@ -485,8 +503,12 @@ export function commMarkSent({
     });
     if (evidence) sentMessage.deliveryEvidence = evidence;
     messages.push(sentMessage);
+    // The marker belongs to the draft being sent: counting it here consumes it,
+    // so the next send on this thread doesn't count again.
+    const countsViaComm = comm.followUpKind === "app-nudge";
+    const { followUpKind: _sentMarker, ...commWithoutMarker } = comm;
     const updated = {
-      ...comm,
+      ...commWithoutMarker,
       status: "waiting",
       draft: null,
       lastOutboundAt: sentAt,
@@ -512,7 +534,7 @@ export function commMarkSent({
       // reply) never counts. Clearing a satisfied draft is separate from counting.
       const appFollowUpKind = app?.followUp?.kind;
       const draftIsNudge = hadAppDraft && (!appFollowUpKind || appFollowUpKind === "app-nudge");
-      const countsAsNudge = comm.followUpKind === "app-nudge" || draftIsNudge;
+      const countsAsNudge = countsViaComm || draftIsNudge;
       if (app && (hadAppDraft || countsAsNudge)) {
         const prevCount = Number(app.followUp?.sentCount);
         putRow(db, "applications", applicationId, {
