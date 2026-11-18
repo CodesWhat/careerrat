@@ -411,6 +411,41 @@ describe("submitGuard", () => {
     assert.equal(result.mode, "manual");
   });
 
+  it("blocks on the Ashby per-employer application limits panel", () => {
+    const result = submitGuard({
+      pageText:
+        "Staff Engineer\nThis job has application limits\nYou can apply 2 times every 90 days.",
+    });
+    assert.equal(result.canSubmit, false);
+    assert.ok(result.blockers.includes("application limit"));
+  });
+
+  it("blocks on reached-limit and account-restriction wording", () => {
+    for (const text of [
+      "You've reached your application limit for this company.",
+      "You've already applied to this employer the maximum number of times.",
+      "Too many applications from this account.",
+    ]) {
+      assert.ok(submitGuard({ pageText: text }).blockers.includes("application limit"), text);
+    }
+    for (const text of [
+      "Your account has been restricted.",
+      "Your account is temporarily restricted",
+      "We\u2019ve restricted your account after unusual activity on your account.",
+    ]) {
+      assert.ok(submitGuard({ pageText: text }).blockers.includes("account restricted"), text);
+    }
+  });
+
+  it("does not trip on job-description prose about limits or restrictions", () => {
+    const result = submitGuard({
+      pageText:
+        "We offer no limits on PTO. Restricted stock units vest over four years. Access to production is restricted to on-call engineers. Our growth has no limits.",
+    });
+    assert.equal(result.canSubmit, true);
+    assert.deepEqual(result.blockers, []);
+  });
+
   it("handles no arguments (empty call)", () => {
     const result = submitGuard();
     assert.equal(result.canSubmit, true);

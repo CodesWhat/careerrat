@@ -18,6 +18,7 @@ import {
   findSubmitButtonRef,
   hostnameToPortal,
   isSsoOrAccountLabel,
+  limitBlockerReason,
   REQUIRED_FIELDS_UNANSWERED,
   submitGuard,
 } from "./form-fill.mjs";
@@ -1535,6 +1536,29 @@ export function createApplyDriver({
       };
     }
 
+    // A limit or restriction notice stops the run before any apply control is
+    // considered, including a LinkedIn Apply button sitting on a restriction page.
+    const limitBlockers = submitGuard({ pageText: snapshot?.pageText }).blockers.filter(
+      (blocker) => blocker === "application limit" || blocker === "account restricted"
+    );
+    if (limitBlockers.length) {
+      return {
+        available: true,
+        verified: false,
+        state: "blocked",
+        reason: limitBlockerReason(limitBlockers),
+        currentUrl: snapshot.origin || url,
+        session: {
+          provider: providerLabel,
+          filledCount: 0,
+          uploadedCount: 0,
+          unresolved: [],
+          blockers: limitBlockers,
+          submitMode: "manual",
+        },
+      };
+    }
+
     const entry = applicationEntry(snapshot);
     if (entry) {
       const detailSnapshot = snapshot;
@@ -1669,7 +1693,9 @@ export function createApplyDriver({
         available: true,
         verified: false,
         state: "blocked",
-        reason: `Stopped on ${interventionBlockers.join(", ")}.`,
+        reason:
+          limitBlockerReason(interventionBlockers) ||
+          `Stopped on ${interventionBlockers.join(", ")}.`,
         currentUrl: snapshot.origin || url,
         session: {
           provider: providerLabel,
@@ -1725,7 +1751,7 @@ export function createApplyDriver({
           available: true,
           verified: false,
           state: "blocked",
-          reason: `Stopped on ${stepBlockers.join(", ")}.`,
+          reason: limitBlockerReason(stepBlockers) || `Stopped on ${stepBlockers.join(", ")}.`,
           currentUrl: snapshot.origin || url,
           session: {
             provider: providerLabel,
@@ -1803,7 +1829,10 @@ export function createApplyDriver({
           available: true,
           verified: false,
           state: "blocked",
-          reason: result.reason || `Stopped on ${result.blockers.join(", ")}.`,
+          reason:
+            result.reason ||
+            limitBlockerReason(result.blockers) ||
+            `Stopped on ${result.blockers.join(", ")}.`,
           currentUrl: result.finalSnapshot?.origin || snapshot.origin || url,
           session: {
             provider: providerLabel,
@@ -1828,7 +1857,7 @@ export function createApplyDriver({
           state: "blocked",
           reason: humanChallengeOnly
             ? "CareerRat stopped at the captcha after preparing the live form. Complete the captcha, review it, and submit it yourself."
-            : `Stopped on ${guard.blockers.join(", ")}.`,
+            : limitBlockerReason(guard.blockers) || `Stopped on ${guard.blockers.join(", ")}.`,
           currentUrl: finalSnapshot.origin || snapshot.origin || url,
           session: {
             provider: providerLabel,

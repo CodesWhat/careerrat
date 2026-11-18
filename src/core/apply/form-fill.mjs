@@ -1242,6 +1242,47 @@ export const BLOCKER_SIGNALS = [
   "security verification",
 ];
 
+// Phrase-level patterns for an employer's application limit (Ashby's per-employer
+// "This job has application limits" panel, a reached cap) and for a restricted
+// account (LinkedIn and ATS notices). Whole phrases only: a job description that
+// says "no limits on PTO" or "restricted stock units" must not trip them.
+const APOS = "['\u2019]?";
+export const APPLICATION_LIMIT_PATTERNS = [
+  /\bthis job has application limits?\b/i,
+  new RegExp(
+    `\\byou(?:${APOS}ve| have) reached (?:the |your |this )?(?:\\w+ ){0,2}application limit`,
+    "i"
+  ),
+  /\bapplication limit (?:has been |was )?reached\b/i,
+  new RegExp(`\\byou${APOS}ve already applied\\b[^.\\n]{0,80}\\bmaximum\\b`, "i"),
+  /\bmaximum (?:number )?of (?:job )?applications\b/i,
+  /\btoo many applications\b/i,
+];
+export const ACCOUNT_RESTRICTION_PATTERNS = [
+  /\byour account (?:has been|is|was) (?:temporarily |currently )?restricted\b/i,
+  /\baccount is temporarily restricted\b/i,
+  new RegExp(`\\bwe${APOS}ve (?:temporarily )?restricted your account\\b`, "i"),
+  /\bunusual activity (?:on|from|in) your account\b/i,
+  /\b(?:detected|noticed) unusual activity\b/i,
+];
+
+/**
+ * Plain-language stop reason for the limit and restriction blockers, or null
+ * when none of the blockers is one of them.
+ *
+ * @param {string[]} blockers
+ * @returns {string|null}
+ */
+export function limitBlockerReason(blockers = []) {
+  if (blockers.includes("account restricted")) {
+    return "This site says your account is restricted. Nothing was submitted.";
+  }
+  if (blockers.includes("application limit")) {
+    return "This site says you've hit its application limit. Nothing was submitted.";
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // submitGuard
 // ---------------------------------------------------------------------------
@@ -1261,6 +1302,17 @@ export function submitGuard({ pageText = "", pageSignals = {} } = {}) {
     if (lower.includes(signal)) {
       blockers.push(signal);
     }
+  }
+
+  const rawText = String(pageText);
+  if (
+    !blockers.includes("application limit") &&
+    APPLICATION_LIMIT_PATTERNS.some((re) => re.test(rawText))
+  ) {
+    blockers.push("application limit");
+  }
+  if (ACCOUNT_RESTRICTION_PATTERNS.some((re) => re.test(rawText))) {
+    blockers.push("account restricted");
   }
 
   // Check explicit pageSignals booleans

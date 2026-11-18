@@ -582,6 +582,81 @@ test("LinkedIn posting with no employer link opens the page, makes no clicks and
   assert.equal(result.session.submitClicked, undefined);
 });
 
+test("an Ashby page with the application limits panel stops with a blocker and no clicks", async () => {
+  const page = {
+    origin: ASHBY_URL,
+    pageText:
+      "Platform Engineer\nThis job has application limits\nYou can apply 2 times every 90 days.\nApply for this Job",
+    refs: refsOf([["e1", "button", "Apply for this Job", false]]),
+  };
+  const { ops, log } = createFakeOps([page]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-ashby-limit",
+    application: { id: "app-ashby-limit", link: ASHBY_URL },
+    postingUrl: ASHBY_URL,
+    questionCapture: { state: "captured" },
+    submitMode: "auto",
+    prepareOnly: false,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /hit its application limit\. Nothing was submitted\./);
+  assert.deepEqual(result.session.blockers, ["application limit"]);
+  assert.equal(
+    log.some(({ op }) => ["clickButton", "fillField", "upload"].includes(op)),
+    false
+  );
+});
+
+test("a LinkedIn restriction page stops with a blocker and no apply click", async () => {
+  const page = {
+    origin: GREENHOUSE_URL,
+    pageText: "Your account has been restricted.\nApply\nEasy Apply",
+    refs: refsOf([["e1", "button", "Easy Apply", false]]),
+  };
+  const { ops, log } = createFakeOps([page]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-linkedin-restricted",
+    application: { id: "app-linkedin-restricted", link: LINKEDIN_URL, applyUrl: GREENHOUSE_URL },
+    postingUrl: LINKEDIN_URL,
+    questionCapture: { state: "captured" },
+    submitMode: "auto",
+    prepareOnly: false,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /account is restricted\. Nothing was submitted\./);
+  assert.deepEqual(result.session.blockers, ["account restricted"]);
+  assert.equal(
+    log.some(({ op }) => op === "clickButton"),
+    false
+  );
+});
+
+test("a job description that mentions limits and restricted stock does not stop the run", async () => {
+  const page = {
+    origin: GREENHOUSE_URL,
+    pageText: "We offer no limits on PTO. Restricted stock units vest over four years.\nApply",
+    refs: refsOf([["e1", "textbox", "First Name", true]]),
+  };
+  const { ops } = createFakeOps([page]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-jd-prose",
+    application: { id: "app-jd-prose", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.notEqual(result.state, "blocked");
+});
+
 test("LinkedIn posting with an employer link applies at that link instead", async () => {
   const opened = [];
   const form = {
