@@ -6,6 +6,7 @@ requirePatchedNode();
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   buildAgentGuidance,
@@ -28,6 +29,7 @@ import {
 } from "../core/ai/runtime-selection.mjs";
 import { automationStatus, loadAutomation } from "../core/automation/consent.mjs";
 import { detectSession } from "../core/automation/session.mjs";
+import { dbExists, dbFilePath } from "../core/db/connection.mjs";
 import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
 import { fetchPublicHttpText } from "../core/net/public-http-fetch.mjs";
@@ -42,7 +44,12 @@ import { loadModes } from "../core/profile/modes.mjs";
 import { targetingAdjacencyGaps } from "../core/profile/targeting-adjacency.mjs";
 import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
 import { parseConfig } from "../core/providers/search-sources.mjs";
-import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
+import {
+  inferProvider,
+  isBoardProviderSupported,
+  loadScannerConfig,
+} from "../core/scoring/sourced-scanner.mjs";
+import { searchRunHealth } from "../core/search/search-health.mjs";
 import { pendingSourceLoginRequests } from "../core/search/source-login-preflight.mjs";
 import { ptyStatus } from "../core/tui/pty-status.mjs";
 import { textualPythonStatus } from "../core/tui/python-runtime.mjs";
@@ -350,7 +357,7 @@ const setup = setupState
       completedDiscoverySteps: discoveryCompleted,
     };
 
-const searchReadiness = loadSearchReadiness();
+const searchReadiness = { ...loadSearchReadiness(), lastRun: loadLastSearchRun() };
 const targetingAdjacency = loadTargetingAdjacency();
 const companyAtsReadiness = loadCompanyAtsReadiness();
 // Checks that look outside the data files. The terminal workspace and the agent
@@ -457,7 +464,12 @@ const result = {
   }),
   plugins: {
     bundled: pluginVerification.plugins.length,
+    // Kept for older consumers. It only means "passed verification": no code
+    // path in CareerRat invokes a bundled plugin on its own, so read `wired`.
     runnable: pluginVerification.plugins.length - invalidPlugins.length,
+    // Plugins something in CareerRat actually calls at runtime. A plugin only
+    // runs when a person asks for it by name with `careerrat plugins`.
+    wired: 0,
     verified: pluginVerification.plugins.length - invalidPlugins.length,
     invalid: invalidPlugins.map((p) => ({ name: p.name, errors: p.errors })),
     error: pluginVerification.error,
@@ -842,6 +854,32 @@ function loadSearchReadiness() {
   }
 }
 
+// The most recent finished search in a database workspace, read without writing
+// anything. Per-source results aren't stored, so this is the only record of
+// whether the last search actually worked. Null means no search has run.
+function loadLastSearchRun() {
+  if (candidateSource !== "db" || !dbExists(pathCtx)) return null;
+  let db;
+  try {
+    db = new DatabaseSync(dbFilePath(pathCtx), { readOnly: true });
+    db.exec("PRAGMA busy_timeout = 5000");
+    const row = db
+      .prepare(
+        "SELECT data FROM sourcing_runs WHERE status IN ('completed', 'failed') ORDER BY updated_at DESC LIMIT 1"
+      )
+      .get();
+    if (!row) return null;
+    const run = JSON.parse(row.data);
+    const health = searchRunHealth(run);
+    if (!health) return null;
+    return { status: health.status, message: health.message };
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
 function summarizeSearchReadiness(config, { exists }) {
   if (config?.searches !== undefined && !Array.isArray(config.searches)) {
     return {
@@ -857,7 +895,17 @@ function summarizeSearchReadiness(config, { exists }) {
   }
   const searches = Array.isArray(config?.searches) ? config.searches : [];
   const enabled = searches.filter((search) => search.enabled !== false);
+  // Same rule the scanner uses: RSS feeds and supported board providers run in
+  // the terminal; everything else needs the browser.
+  const runnable = enabled.filter(
+    (search) =>
+      search.source_type === "rss" ||
+      Boolean(search.rssUrl) ||
+      (["ats", "board"].includes(search.source_type) && isBoardProviderSupported(search.provider))
+  ).length;
   return {
+    runnable,
+    browserOnly: enabled.length - runnable,
     exists,
     valid: true,
     total: searches.length,
@@ -910,13 +958,18 @@ function printSearchReadiness(readiness) {
   const providerText = readiness.providers.length
     ? ` across ${readiness.providers.join(", ")}`
     : "";
-  const runText =
-    readiness.enabled > 0
-      ? `; ${readiness.withLastRun}/${readiness.enabled} have run watermarks`
-      : "";
-  console.log(
-    `- Broad sources: ${readiness.enabled} enabled ${searchWord}${providerText}${runText}.`
-  );
+  console.log(`- Broad sources: ${readiness.enabled} enabled ${searchWord}${providerText}.`);
+  if (readiness.enabled > 0) {
+    const runnable = readiness.runnable ?? 0;
+    const browserOnly = readiness.browserOnly ?? 0;
+    const browserText = browserOnly > 0 ? `, ${browserOnly} need the browser app` : "";
+    console.log(`  ${runnable} can run from the terminal${browserText}.`);
+    if (readiness.lastRun) {
+      console.log(`  Last search: ${readiness.lastRun.message}.`);
+    } else {
+      console.log("  Whether they work is unknown until a search runs.");
+    }
+  }
   if (readiness.pendingLogin > 0) {
     const sourceWord = readiness.pendingLogin === 1 ? "source" : "sources";
     console.log(
