@@ -457,6 +457,31 @@ closeAll();
                 await pilot.press("ctrl+q")
             self.assertEqual(app.errors, [])
 
+    async def test_a_changed_snapshot_during_a_held_message_shows_after_the_hold(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-hold-snapshot-") as folder:
+            (Path(folder) / "workspace").mkdir()
+            app = MODULE.CareerRatApp(
+                env={**os.environ, "CAREERRAT_HOME": folder}, bridge_args=["--no-agent"]
+            )
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot)
+                message = app.query_one("#message", Static)
+                base = app.snapshot
+
+                def snapshot_saying(text):
+                    return {**base, "state": {**base["state"], "message": text}}
+
+                app.update_workspace(snapshot_saying("First status"))
+                app.show_message("Read this first", hold=0.5)
+                app.update_workspace(snapshot_saying("First status"))
+                app.update_workspace(snapshot_saying("Newer status"))
+                self.assertIn("Read this first", str(message.render()))
+                await until(lambda: "Newer status" in str(message.render()), 3)
+                self.assertNotIn("First status", str(message.render()))
+                self.assertGreaterEqual(time.monotonic(), app.held[1] - 0.05)
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
     async def test_saved_jobs_clicks_requests_context_and_cleanup(self):
         with tempfile.TemporaryDirectory(prefix="careerrat-textual-ui-") as folder:
             home = Path(folder)
