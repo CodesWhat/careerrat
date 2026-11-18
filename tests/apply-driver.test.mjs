@@ -4254,3 +4254,62 @@ test("an attestation that appears after the first snapshot still stops Submit", 
   assert.notEqual(result.state, "submitted");
   assert.equal(clicks(log).length, 0);
 });
+
+test("work arrangement question never selects Yes when profile onsite is false", async () => {
+  const log = [];
+  const question = "This role is not remote. Are you able to work onsite in NYC 5 days a week?";
+  const snapshot = () => ({
+    origin: GREENHOUSE_URL,
+    pageText: `${question}\nSubmit application`,
+    refs: {
+      e1: {
+        role: "radio-group",
+        name: question,
+        required: true,
+        options: [
+          { label: "Yes", ref: "e1" },
+          { label: "No", ref: "e2" },
+        ],
+        stateKnown: true,
+        value: "",
+      },
+      e2: { role: "radio", name: "No", required: true, field: false },
+      e3: { role: "button", name: "Submit application", required: false },
+    },
+  });
+  const ops = {
+    async openTab() {
+      return { pageId: "page-arrangement" };
+    },
+    async snapshot() {
+      return snapshot();
+    },
+    async clickButton({ ref }) {
+      log.push(ref);
+      if (ref === "e3") throw new Error("Submit must remain untouched");
+    },
+    async fillField({ ref }) {
+      log.push(ref);
+    },
+    async selectOption({ ref }) {
+      log.push(ref);
+    },
+    async screenshot() {
+      throw new Error("No confirmation screenshot is expected before submit");
+    },
+  };
+  const execute = makeDriver({
+    ops,
+    candidateConfigGetImpl: () => ({
+      ...CONFIG,
+      profile: { ...CONFIG.profile, location: { remote: true, onsite: false } },
+    }),
+  });
+  await execute({
+    applicationId: "app-arrangement",
+    application: { id: "app-arrangement", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+  assert.ok(!log.includes("e1"), `Yes option must not be selected: ${log.join(",")}`);
+});

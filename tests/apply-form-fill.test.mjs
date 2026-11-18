@@ -1669,3 +1669,54 @@ describe("attestation hard stop", () => {
     );
   });
 });
+
+describe("resolveScreeningAnswer work arrangement", () => {
+  const ask = (question, location) => resolveScreeningAnswer(question, { profile: { location } });
+
+  it("answers the asked onsite arrangement, not a negated remote statement", () => {
+    const answer = ask(
+      "This role is not remote. Are you able to work onsite in NYC 5 days a week?",
+      { remote: true, onsite: false }
+    );
+    assert.equal(answer.action, "fill");
+    assert.equal(answer.value, "No");
+    assert.equal(answer.source, "profile.location.onsite");
+  });
+
+  it("handles other negated preambles", () => {
+    const answer = ask("This is not a remote position. Can you work in person in Austin?", {
+      remote: true,
+      onsite: true,
+    });
+    assert.equal(answer.value, "Yes");
+    assert.equal(answer.source, "profile.location.onsite");
+  });
+
+  it("follows reversed preferences", () => {
+    const location = { remote: false, hybrid: false, onsite: true };
+    assert.equal(ask("Are you open to remote work?", location).value, "No");
+    assert.equal(ask("Are you able to work onsite?", location).value, "Yes");
+    assert.equal(
+      ask("This role is not onsite. Are you open to remote work?", location).value,
+      "No"
+    );
+  });
+
+  it("answers hybrid and onsite combinations from the asked arrangement", () => {
+    const location = { remote: true, hybrid: true, onsite: false };
+    assert.equal(ask("The team is not onsite. Are you open to hybrid?", location).value, "Yes");
+    assert.equal(ask("This role is not hybrid. Can you work in office?", location).value, "No");
+  });
+
+  it("leaves ambiguous wording unresolved", () => {
+    const location = { remote: true, hybrid: true, onsite: false };
+    for (const q of [
+      "Are you open to remote or onsite work?",
+      "Are you able to work onsite or hybrid?",
+      "Are you not able to work onsite?",
+      "This role is not remote. Are you comfortable with that?",
+    ]) {
+      assert.equal(ask(q, location).action, "skip", q);
+    }
+  });
+});

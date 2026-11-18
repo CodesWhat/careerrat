@@ -972,6 +972,46 @@ function genericMatch(normalized) {
   return null;
 }
 
+const WORK_ARRANGEMENT_PATTERNS = {
+  remote: /\b(?:remote(?:ly)?|work from home|wfh)\b/g,
+  hybrid: /\bhybrid\b/g,
+  onsite: /\b(?:on[- ]?site|in[- ]?person|in[- ]?office)\b/g,
+};
+const WORK_ARRANGEMENT_ANY = new RegExp(
+  Object.values(WORK_ARRANGEMENT_PATTERNS)
+    .map((re) => re.source)
+    .join("|"),
+  "g"
+);
+const NEGATED_ARRANGEMENT = new RegExp(
+  `\\b(?:not|isn't|is not|non)[- ]\\s*(?:an?\\s+)?(?:fully\\s+|completely\\s+)?(?:${WORK_ARRANGEMENT_ANY.source})(?:\\s+(?:position|role|job|opportunity|work|setup|arrangement))?`,
+  "g"
+);
+
+/**
+ * The single work arrangement a question is actually asking about, or null when
+ * none is asked or the wording is ambiguous (two arrangements, or negated asking).
+ * Arrangements named only in a preceding negated statement ("This role is not
+ * remote.") are ignored.
+ */
+function askedWorkArrangement(rawLabel) {
+  const text = String(rawLabel || "")
+    .toLowerCase()
+    .replace(NEGATED_ARRANGEMENT, " ");
+  const sentences = text.split(/(?<=[.?!])\s+/).filter(Boolean);
+  const isQuestion = (sentence) =>
+    /\?\s*$/.test(sentence) ||
+    /^\s*(?:are|can|could|do|does|will|would|is|have|did|may|should)\b/.test(sentence);
+  const questions = sentences.filter(isQuestion);
+  const asking = (questions.length > 0 ? questions : sentences).join(" ");
+  const found = Object.entries(WORK_ARRANGEMENT_PATTERNS)
+    .filter(([, re]) => new RegExp(re.source).test(asking))
+    .map(([name]) => name);
+  if (found.length !== 1) return null;
+  if (/\b(?:not|unable|cannot|can't|won't|unwilling|never)\b/.test(asking)) return null;
+  return found[0];
+}
+
 // ---------------------------------------------------------------------------
 // resolveScreeningAnswer
 // ---------------------------------------------------------------------------
@@ -1036,17 +1076,22 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
       return { action: "fill", value: notice, source: "profile.authorization.notice_period" };
   }
 
-  if (normalized.includes("remote")) {
+  const arrangement = askedWorkArrangement(label);
+
+  if (arrangement === "remote") {
     const answer = yesNo(location.remote);
     if (answer != null) return { action: "fill", value: answer, source: "profile.location.remote" };
   }
 
-  if (normalized.includes("hybrid")) {
+  if (arrangement === "hybrid") {
     const answer = yesNo(location.hybrid);
     if (answer != null) return { action: "fill", value: answer, source: "profile.location.hybrid" };
   }
 
-  if (normalized.includes("in person") || normalized.includes("inperson")) {
+  if (
+    arrangement === "onsite" &&
+    (normalized.includes("in person") || normalized.includes("inperson"))
+  ) {
     const percentage = String(label).match(/\b(\d{1,3})\s*(?:%|percent\b)/i);
     const posture = percentage && Number(percentage[1]) < 100 ? location.hybrid : location.onsite;
     const answer = yesNo(posture);
@@ -1062,11 +1107,7 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
     }
   }
 
-  if (
-    normalized.includes("onsite") ||
-    normalized.includes("on site") ||
-    normalized.includes("in office")
-  ) {
+  if (arrangement === "onsite") {
     const answer = yesNo(location.onsite);
     if (answer != null) return { action: "fill", value: answer, source: "profile.location.onsite" };
   }
