@@ -1,0 +1,172 @@
+// `careerrat update` must reconcile node_modules when a release changes the runtime
+// dependency set, and must not report success when npm install or doctor fails.
+// Runs the real bin/careerrat.mjs from a copied install layout with a fake `npm` on
+// PATH (view/pack/install), so nothing touches the network or the real node_modules.
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import {
+  RUNTIME_DEPS_INSTALL_ARGS,
+  readRuntimeDeps,
+  runtimeDepsChanged,
+} from "../src/core/update/update-core.mjs";
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+const FAKE_NPM = `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const [cmd, ...rest] = process.argv.slice(2);
+if (cmd === "view") {
+  console.log("9.9.9");
+} else if (cmd === "pack") {
+  const dest = rest[rest.indexOf("--pack-destination") + 1];
+  const r = spawnSync("tar", ["czf", dest + "/careerrat-9.9.9.tgz", "-C", process.env.FAKE_NPM_PKG_ROOT, "package"]);
+  process.exit(r.status ?? 1);
+} else if (cmd === "install") {
+  appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify({ args: [cmd, ...rest], cwd: process.cwd() }) + "\\n");
+  process.exit(Number(process.env.FAKE_NPM_INSTALL_EXIT || 0));
+} else {
+  process.exit(1);
+}
+`;
+
+// Builds an install layout plus a fake "published" package root. `newDeps` is the
+// runtime dependency set the published 9.9.9 package.json declares; `doctorExit` is
+// what the published doctor script exits with.
+function buildFixture({ newDeps, doctorExit = 0 }) {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "careerrat-update-deps-")));
+  const packageDir = join(base, "lib", "node_modules", "careerrat");
+  mkdirSync(packageDir, { recursive: true });
+  for (const entry of ["bin", "src", "config", "templates", "package.json", "AGENTS.md"]) {
+    cpSync(join(REPO_ROOT, entry), join(packageDir, entry), { recursive: true });
+  }
+  symlinkSync(join(REPO_ROOT, "node_modules"), join(packageDir, "node_modules"));
+  const home = join(base, "home");
+  mkdirSync(home, { recursive: true });
+
+  const installed = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+  const published = {
+    ...installed,
+    version: "9.9.9",
+    dependencies: newDeps(installed.dependencies || {}),
+  };
+  const pkgRoot = join(base, "published");
+  mkdirSync(join(pkgRoot, "package", "src", "cli"), { recursive: true });
+  writeFileSync(join(pkgRoot, "package", "package.json"), JSON.stringify(published));
+  writeFileSync(
+    join(pkgRoot, "package", "src", "cli", "doctor.mjs"),
+    `process.exit(${doctorExit});\n`
+  );
+
+  const fakeBin = join(base, "fakebin");
+  mkdirSync(fakeBin);
+  writeFileSync(join(fakeBin, "npm"), FAKE_NPM);
+  chmodSync(join(fakeBin, "npm"), 0o755);
+  const log = join(base, "npm.log");
+  return { base, packageDir, home, pkgRoot, fakeBin, log };
+}
+
+function runUpdate(fx, { installExit = 0 } = {}) {
+  const res = spawnSync(process.execPath, [join(fx.packageDir, "bin/careerrat.mjs"), "update"], {
+    cwd: fx.packageDir,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      HOME: fx.home,
+      PATH: `${fx.fakeBin}${delimiter}${process.env.PATH}`,
+      FAKE_NPM_PKG_ROOT: fx.pkgRoot,
+      FAKE_NPM_LOG: fx.log,
+      FAKE_NPM_INSTALL_EXIT: String(installExit),
+    },
+  });
+  const installs = existsSync(fx.log)
+    ? readFileSync(fx.log, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse)
+    : [];
+  return { res, installs };
+}
+
+test("update runs npm install --omit=dev in the install root when runtime deps change", () => {
+  const fx = buildFixture({ newDeps: (d) => ({ ...d, "brand-new-dep": "^1.0.0" }) });
+  try {
+    const { res, installs } = runUpdate(fx);
+    assert.equal(res.status, 0, res.stderr + res.stdout);
+    assert.equal(installs.length, 1);
+    assert.deepEqual(installs[0].args, RUNTIME_DEPS_INSTALL_ARGS);
+    assert.equal(realpathSync(installs[0].cwd), fx.packageDir);
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+test("update skips npm install when runtime deps are unchanged", () => {
+  const fx = buildFixture({ newDeps: (d) => d });
+  try {
+    const { res, installs } = runUpdate(fx);
+    assert.equal(res.status, 0, res.stderr + res.stdout);
+    assert.equal(installs.length, 0);
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+test("update returns non-zero and names the manual command when npm install fails", () => {
+  const fx = buildFixture({ newDeps: (d) => ({ ...d, "brand-new-dep": "^1.0.0" }) });
+  try {
+    const { res } = runUpdate(fx, { installExit: 3 });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /installing the new dependencies failed \(npm exited 3\)/);
+    assert.ok(
+      res.stderr.includes(`npm ${RUNTIME_DEPS_INSTALL_ARGS.join(" ")}`),
+      `stderr should give the exact npm command: ${res.stderr}`
+    );
+    assert.ok(res.stderr.includes(fx.packageDir));
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+test("update returns non-zero when doctor fails after a successful extract", () => {
+  const fx = buildFixture({ newDeps: (d) => d, doctorExit: 2 });
+  try {
+    const { res } = runUpdate(fx);
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /Updated, but doctor reported problems: run careerrat doctor/);
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+test("runtimeDepsChanged compares dependencies and optionalDependencies, ignores order", () => {
+  const a = { dependencies: { x: "1", y: "2" }, optionalDependencies: {} };
+  assert.equal(
+    runtimeDepsChanged(a, { dependencies: { y: "2", x: "1" }, optionalDependencies: {} }),
+    false
+  );
+  assert.equal(
+    runtimeDepsChanged(a, { dependencies: { x: "1", y: "3" }, optionalDependencies: {} }),
+    true
+  );
+  assert.equal(
+    runtimeDepsChanged(a, { dependencies: a.dependencies, optionalDependencies: { z: "1" } }),
+    true
+  );
+  assert.equal(runtimeDepsChanged(null, a), true);
+  assert.equal(readRuntimeDeps(join(tmpdir(), "no-such-dir-careerrat")), null);
+});

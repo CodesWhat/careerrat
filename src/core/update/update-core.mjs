@@ -149,6 +149,47 @@ export function extractOver(tgz, targetDir) {
   if (x.status !== 0) throw new Error(`extract failed: ${x.stderr}`);
 }
 
+// Runtime dependency reconciliation. extractOver only replaces package files, so a
+// release that adds or bumps a runtime dependency leaves node_modules stale unless
+// update re-runs npm install. Only `dependencies` and `optionalDependencies` matter:
+// devDependencies never ship in a consumer install.
+export const RUNTIME_DEPS_INSTALL_ARGS = ["install", "--omit=dev", "--no-audit", "--no-fund"];
+
+export function readRuntimeDeps(dir) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    return {
+      dependencies: pkg.dependencies || {},
+      optionalDependencies: pkg.optionalDependencies || {},
+    };
+  } catch {
+    return null;
+  }
+}
+
+function sortedEntries(obj) {
+  return JSON.stringify(Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+// True when the runtime dependency set differs, or either side is unreadable (an
+// unreadable package.json can't prove the install is still consistent).
+export function runtimeDepsChanged(before, after) {
+  if (!before || !after) return true;
+  return (
+    sortedEntries(before.dependencies) !== sortedEntries(after.dependencies) ||
+    sortedEntries(before.optionalDependencies) !== sortedEntries(after.optionalDependencies)
+  );
+}
+
+// Runs `npm install --omit=dev` in the install root with default lifecycle-script
+// behaviour, matching a normal global install (node-pty needs its install script).
+// Returns { status, error }.
+export function installRuntimeDeps(dir) {
+  const res = spawnSync("npm", RUNTIME_DEPS_INSTALL_ARGS, { cwd: dir, stdio: "inherit" });
+  if (res.error) return { status: 1, error: res.error.message };
+  return { status: res.status == null ? 1 : res.status, error: null };
+}
+
 // ---------------------------------------------------------------------------
 // update-notifier: a cached, never-blocking "newer version available" check.
 
