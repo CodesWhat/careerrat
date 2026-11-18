@@ -370,7 +370,7 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `applications[]` row.
 4. **Save the typed verdict (DB workspace, roles that are applications).** `coach-gaps` and review approval read the application's typed `evaluation`, and `app set-fields` does not write it. The one way to save it from the terminal is to run the body-read gate with `--write`:
 
-   ```
+   ```bash
    careerrat evaluate workspace/jobs/<file>.md --write
    ```
 
