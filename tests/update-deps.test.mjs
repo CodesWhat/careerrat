@@ -177,8 +177,12 @@ test("update stops with the manual command when a package with an unreviewed ins
     assert.equal(res.status, 1);
     assert.match(res.stderr, /sketchy-pkg@2\.0\.0/);
     assert.match(res.stderr, /allowScripts/);
-    assert.ok(res.stderr.includes(`cd "${fx.packageDir}/" && npm rebuild native-ok`), res.stderr);
-    assert.ok(!res.stderr.includes("npm rebuild sketchy-pkg"), res.stderr);
+    // Recovery covers the approved package AND the one the person still has to approve.
+    assert.ok(
+      res.stderr.includes(`cd "${fx.packageDir}/" && npm rebuild native-ok sketchy-pkg`),
+      res.stderr
+    );
+    assert.match(res.stderr, /plain `careerrat update` won't redo it/);
     assert.equal(installs.filter((i) => i.args[0] === "rebuild").length, 0);
     assert.equal(installs[0].ignoreScriptsEnv, "true");
   } finally {
@@ -208,7 +212,10 @@ test("update stops with nothing rebuilt when a bundled child of an approved pare
     assert.equal(installs.filter((i) => i.args[0] === "rebuild").length, 0);
     assert.match(res.stderr, /evil-child@0\.0\.1 \(bundled\)/);
     assert.match(res.stderr, /allowScripts/);
-    assert.ok(res.stderr.includes(`cd "${fx.packageDir}/" && npm rebuild native-ok`), res.stderr);
+    assert.ok(
+      res.stderr.includes(`cd "${fx.packageDir}/" && npm rebuild native-ok evil-child`),
+      res.stderr
+    );
   } finally {
     rmSync(fx.base, { recursive: true, force: true });
   }

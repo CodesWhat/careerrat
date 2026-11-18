@@ -853,9 +853,16 @@ function runUpdate(extra) {
     console.log("• Runtime dependencies changed. Installing them…");
     const dep = installRuntimeDeps(root);
     if (dep.unreviewed?.length) {
-      const approvedCmd = dep.approved?.length
-        ? `\nThese approved packages were not rebuilt and still need it. After reviewing the above, run:\n    cd "${root}" && npm rebuild ${dep.approved.join(" ")}`
-        : "";
+      // "name@1.2.3 (bundled)" -> "name"; scoped names keep their leading "@".
+      const pkgName = (entry) => {
+        const spec = String(entry).replace(/\s*\(bundled\)$/, "");
+        const at = spec.lastIndexOf("@");
+        return at > 0 ? spec.slice(0, at) : spec;
+      };
+      const toRebuild = [...new Set([...(dep.approved || []), ...dep.unreviewed].map(pkgName))];
+      const approvedCmd =
+        `\nNothing was rebuilt. After you've reviewed and approved the packages above, run this to finish the install` +
+        ` (a plain \`careerrat update\` won't redo it):\n    cd "${root}" && npm rebuild ${toRebuild.join(" ")}`;
       console.error(
         `Updated the files to ${readVersion()}, but stopped before rebuilding anything: ` +
           `${dep.unreviewed.join(", ")} declare an install script that isn't covered by the ` +
