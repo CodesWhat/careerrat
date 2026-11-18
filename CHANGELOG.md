@@ -15,6 +15,13 @@ All notable changes to CareerRat are documented here. This project follows
 
 - Outreach and reply drafts are fact-checked like every other document, and a draft with an invented number, employer or tool is held instead of sent.
 - Applying stops, with nothing submitted, when a site says you've hit its application limit or your account is restricted.
+- Screening answers no longer match a tool name inside another word ("Go" in "government", "Java" in "JavaScript"), only answer plain "have you used X" questions, and never override an answer you reviewed.
+- Attestation and AI-use questions are never filled or submitted for you, even if an answer for them was saved, and the submit check refuses a page that shows one.
+- `careerrat apply submit` refuses jobs already applied, interviewing, withdrawn or cut, and a refusal no longer resets their status or clears interview details.
+- Required fields CareerRat can't read back count as unanswered, so a form with blank required questions isn't submitted.
+- The submit check reads the whole page, including embedded frames, and refuses if part of it can't be read.
+- Work-arrangement questions are answered for the arrangement actually asked about, and saved answers keep every paragraph.
+- `evaluate --write` won't save a verdict onto the wrong application when the job file points somewhere stale.
 - Strategy findings point at the exact jobs they're based on, with a true count.
 - `careerrat doctor` reports how many searches can actually run and how the last one went, instead of counting run history.
 - A scheduled follow-up checks again that it's still needed right before it runs.
