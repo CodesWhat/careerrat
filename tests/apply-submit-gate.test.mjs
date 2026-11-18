@@ -212,6 +212,56 @@ describe("apply submit gate", () => {
     assertRefused(await promise, fake, "NO_SUBMIT_BUTTON");
   });
 
+  it("refuses a page with certification prose", async () => {
+    const ctx = workspace();
+    const { fake, promise } = run(ctx, {
+      before: readyForm({
+        pageText: "I certify that all information provided is true and accurate.",
+      }),
+    });
+    assertRefused(await promise, fake, "HUMAN_CHALLENGE");
+  });
+
+  it("refuses a checked certification control", async () => {
+    const ctx = workspace();
+    const form = readyForm();
+    form.refs.e5 = {
+      role: "checkbox",
+      name: "I certify that the answers above are true and complete.",
+      required: false,
+      stateKnown: true,
+      value: "true",
+    };
+    const { fake, promise } = run(ctx, { before: form });
+    assertRefused(await promise, fake, "HUMAN_CHALLENGE");
+  });
+
+  it("refuses an AI-use disclosure question", async () => {
+    const ctx = workspace();
+    const form = readyForm();
+    form.refs.e5 = {
+      role: "radio",
+      name: "Did you use AI to complete this application?",
+      required: false,
+    };
+    const { fake, promise } = run(ctx, { before: form });
+    assertRefused(await promise, fake, "HUMAN_CHALLENGE");
+  });
+
+  it("does not refuse an ordinary AI experience question", async () => {
+    const verdict = evaluateSubmitGate({
+      snapshot: readyForm({
+        refs: refsOf([
+          ["e1", "textbox", "Do you have experience with AI/ML tools?", false],
+          ["e4", "button", "Submit application"],
+        ]),
+      }),
+      application: { link: GREENHOUSE_URL, evaluation: { gate: "keep" } },
+      submitMode: "auto",
+    });
+    assert.ok(!verdict.refusals.some((reason) => reason.code === "HUMAN_CHALLENGE"));
+  });
+
   it("hands off on a captcha or verification step", async () => {
     const ctx = workspace();
     const { fake, promise } = run(ctx, {

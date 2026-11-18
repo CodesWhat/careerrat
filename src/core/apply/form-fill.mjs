@@ -1382,6 +1382,46 @@ export function limitBlockerReason(blockers = []) {
 // submitGuard
 // ---------------------------------------------------------------------------
 
+export const ATTESTATION_BLOCKER = "attestation";
+const ATTESTATION_FIELD_ROLES = new Set([
+  "textbox",
+  "combobox",
+  "checkbox",
+  "radio",
+  "radiogroup",
+  "spinbutton",
+  "switch",
+  "group",
+  "listbox",
+]);
+// Page prose counts only when it reads as a certification or an AI-use disclosure the
+// person has to act on, so a job description that mentions AI doesn't block anything.
+const ATTESTATION_TEXT_CUE =
+  /\b(?:certify|attest|affirm|declare|swear|true|accurate|truthful|falsif\w*|misrepresent\w*|misleading|disclos\w*|acknowledg\w*|did you|have you|do you|policy)\b|\?\s*$/i;
+
+/**
+ * True when the live form carries a truthfulness certification or an AI-use
+ * disclosure, from the labels of its controls or from certification prose.
+ * Those are the person's to answer, so a page with one never submits.
+ *
+ * @param {{ pageText?: string, refs?: Record<string, object> }} snapshot
+ * @returns {boolean}
+ */
+export function snapshotHasAttestation(snapshot = {}) {
+  const refs = snapshot?.refs && typeof snapshot.refs === "object" ? snapshot.refs : {};
+  for (const entry of Object.values(refs)) {
+    const role = String(entry?.role || "").toLowerCase();
+    if (!ATTESTATION_FIELD_ROLES.has(role)) continue;
+    if (isAttestationQuestion(entry?.name)) return true;
+  }
+  for (const raw of String(snapshot?.pageText || "").split(/\r?\n/)) {
+    const line = raw.replace(/\s*\[[^\]]*\]/g, "").trim();
+    if (line.length < 12 || line.length > 600) continue;
+    if (ATTESTATION_TEXT_CUE.test(line) && isAttestationQuestion(line)) return true;
+  }
+  return false;
+}
+
 /**
  * Safety gate before submit.
  *
@@ -1425,6 +1465,9 @@ export function submitGuard({ pageText = "", pageSignals = {} } = {}) {
   if (pageSignals.requiredExercise === true) {
     blockers.push("complete the assessment");
   }
+  if (pageSignals.attestation === true || snapshotHasAttestation({ pageText: rawText })) {
+    blockers.push(ATTESTATION_BLOCKER);
+  }
 
   const canSubmit = blockers.length === 0;
 
@@ -1450,7 +1493,13 @@ export function buildFillPlan({ fields = [], formDefaults, profile, honesty, por
 
     // Truthfulness and AI-use attestations are the person's to answer, never filled.
     if (isAttestationQuestion(label)) {
-      return { label, canonicalField: null, value: null, action: "skip" };
+      return {
+        label,
+        canonicalField: null,
+        value: null,
+        action: "skip",
+        reason: "attestation_needs_person",
+      };
     }
 
     const voluntary = resolveVoluntarySelfIdentification(field, formDefaults);

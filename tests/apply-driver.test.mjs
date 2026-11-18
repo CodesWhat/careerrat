@@ -4193,3 +4193,64 @@ test("a reviewed No for 10+ years of Python survives filling and the auto-submit
   assert.equal(result.state, "submitted");
   assert.equal(clicks(log).length, 1);
 });
+
+test("a stored packet Yes cannot fill an attestation or cause submission", async () => {
+  const label = "I certify that the information in this application is true and complete.";
+  for (const required of [true, false]) {
+    const page = {
+      ...SUBMIT_FORM,
+      refs: refsOf([
+        ["e1", "textbox", "First Name", true],
+        ["e3", "checkbox", label, required],
+        ["e2", "button", "Submit application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([page, SUBMIT_CONFIRMATION]);
+    const execute = makeDriver({
+      ops,
+      ...fastWaits,
+      loadAnswerMapImpl: async () =>
+        new Map([
+          [label.toLowerCase().replace(/[^a-z0-9 ]/g, ""), "Yes"],
+          ["first name", "Sam"],
+        ]),
+    });
+
+    const result = await execute(AUTO_REQUEST);
+
+    assert.equal(result.state, "blocked", `required=${required}`);
+    assert.equal(clicks(log).length, 0, `required=${required}`);
+    assert.equal(
+      fills(log).some((entry) => entry.ref === "e3"),
+      false,
+      "the attestation control is never touched"
+    );
+  }
+});
+
+test("an attestation that appears after the first snapshot still stops Submit", async () => {
+  const late = {
+    ...SUBMIT_FORM,
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true, { stateKnown: true, value: "Sam" }],
+      ["e3", "checkbox", "I certify that my answers are true and accurate.", false],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+  let calls = 0;
+  ops.snapshot = async () => {
+    calls += 1;
+    return calls <= 1 ? SUBMIT_FORM : late;
+  };
+  const execute = makeDriver({
+    ops,
+    ...fastWaits,
+    loadAnswerMapImpl: async () => new Map([["first name", "Sam"]]),
+  });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.notEqual(result.state, "submitted");
+  assert.equal(clicks(log).length, 0);
+});

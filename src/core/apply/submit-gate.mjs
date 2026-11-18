@@ -23,6 +23,7 @@ import {
   confirmationCheck,
   findSubmitButtonRef,
   hostnameToPortal,
+  snapshotHasAttestation,
   submitGuard,
 } from "./form-fill.mjs";
 import { employerApplyLink, isLinkedInUrl } from "./linkedin-link.mjs";
@@ -176,7 +177,10 @@ export function evaluateSubmitGate({ snapshot, application, submitMode } = {}) {
     );
   }
 
-  const guard = submitGuard({ pageText: snapshot?.pageText });
+  const guard = submitGuard({
+    pageText: snapshot?.pageText,
+    pageSignals: { attestation: snapshotHasAttestation(snapshot) },
+  });
   if (guard.blockers.length) {
     refusals.push(
       refusal(

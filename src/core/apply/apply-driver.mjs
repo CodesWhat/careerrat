@@ -4,6 +4,7 @@ import { basename, isAbsolute, join, normalize, relative, sep } from "node:path"
 import { mayRun } from "../automation/consent.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import { validUploadArtifact } from "../documents/artifact-validation.mjs";
+import { isAttestationQuestion } from "../packet/attestation.mjs";
 import {
   capturePacketQuestions,
   classifySelfIdentificationQuestion,
@@ -11,6 +12,7 @@ import {
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { runAbortable, throwIfAborted, withAbortSignal } from "./cancellation.mjs";
 import {
+  ATTESTATION_BLOCKER,
   applicationPlatformForUrl,
   buildFillPlan,
   confirmationCheck,
@@ -20,6 +22,7 @@ import {
   isSsoOrAccountLabel,
   limitBlockerReason,
   REQUIRED_FIELDS_UNANSWERED,
+  snapshotHasAttestation,
   submitGuard,
 } from "./form-fill.mjs";
 import { employerApplyLink, isLinkedInUrl } from "./linkedin-link.mjs";
@@ -410,6 +413,11 @@ function fillPlan({ fields, config, application, answers }) {
   });
   return planned.map((step, index) => {
     const field = fields[index];
+    // Truthfulness and AI-use attestations are the person's to answer. This runs
+    // before the packet-answer fallback so a stored "Yes" can never tick one.
+    if (isAttestationQuestion(field.label) || step?.reason === "attestation_needs_person") {
+      return { ...field, action: "skip", value: null, reason: "attestation_needs_person" };
+    }
     if (classifySelfIdentificationQuestion(field.label).excluded) {
       if (
         step?.action === "fill" &&
@@ -454,9 +462,24 @@ function isHumanChallengeBlocker(blocker) {
   return HUMAN_CHALLENGE_BLOCKERS.has(blocker);
 }
 
+// An attestation doesn't stop preparation: the rest of the form still gets filled
+// and the attestation is left for the person. It stops the final guard and Submit.
+function isPreparationBlocker(blocker) {
+  return !isHumanChallengeBlocker(blocker) && blocker !== ATTESTATION_BLOCKER;
+}
+
+// submitGuard plus the live control labels, so an attestation that only shows up
+// as a checkbox or question still stops Submit.
+function snapshotGuard(snapshot) {
+  return submitGuard({
+    pageText: snapshot?.pageText,
+    pageSignals: { attestation: snapshotHasAttestation(snapshot) },
+  });
+}
+
 function browserInterventionBlockers(snapshot) {
   const blockers = submitGuard({ pageText: snapshot?.pageText }).blockers.filter(
-    (blocker) => !isHumanChallengeBlocker(blocker)
+    isPreparationBlocker
   );
   const fields = renderedFieldsFromSnapshot(snapshot);
   if (
@@ -688,9 +711,7 @@ async function fillStep({
   const initialGuard = submitGuard({
     pageText: snapshot.pageText,
   });
-  const preparationBlockers = initialGuard.blockers.filter(
-    (blocker) => !isHumanChallengeBlocker(blocker)
-  );
+  const preparationBlockers = initialGuard.blockers.filter(isPreparationBlocker);
   if (preparationBlockers.length) {
     return {
       blocked: true,
@@ -943,9 +964,7 @@ async function fillStep({
       reason: "This field has no label, so CareerRat can't tell what it asks and didn't guess.",
     });
   }
-  const guard = submitGuard({
-    pageText: finalSnapshot.pageText,
-  });
+  const guard = snapshotGuard(finalSnapshot);
   return {
     blocked: false,
     guard,
@@ -1186,7 +1205,7 @@ export function createApplyDriver({
     // Every page blocker is checked against the exact snapshot Submit was
     // resolved from, right before the click, so a notice that appeared after the
     // fill pass (restriction, limit, captcha) still stops the run with no click.
-    const submitBlockers = submitGuard({ pageText: snapshot?.pageText }).blockers;
+    const submitBlockers = snapshotGuard(snapshot).blockers;
     if (submitBlockers.length) {
       return {
         available: true,

@@ -1636,3 +1636,36 @@ describe("tool-derived screening answers need a whole-technology plain experienc
     assert.equal(resolve("Do you have experience with Python or Java?").action, "skip");
   });
 });
+
+describe("attestation hard stop", () => {
+  it("survives planning as a skip with its reason", () => {
+    const [step] = buildFillPlan({
+      fields: [{ label: "I certify that the information above is true and complete." }],
+      formDefaults: {},
+      profile: {},
+    });
+    assert.equal(step.action, "skip");
+    assert.equal(step.reason, "attestation_needs_person");
+  });
+
+  it("leaves ordinary AI/ML experience questions answerable", () => {
+    const answer = resolveScreeningAnswer("Do you have experience with AI/ML tools?", {
+      honesty: { tools: { confirmed: ["AI/ML tools"], do_not_claim: [] } },
+    });
+    assert.equal(answer.action, "fill");
+    assert.equal(answer.value, "Yes");
+  });
+
+  it("submitGuard blocks on the explicit live-label signal and on certification prose", () => {
+    assert.deepEqual(submitGuard({ pageSignals: { attestation: true } }).blockers, ["attestation"]);
+    const prose = submitGuard({
+      pageText: "I certify that all information provided is true and accurate.",
+    });
+    assert.equal(prose.canSubmit, false);
+    assert.ok(prose.blockers.includes("attestation"));
+    assert.equal(
+      submitGuard({ pageText: "We use AI tools in our hiring process. Apply below." }).canSubmit,
+      true
+    );
+  });
+});
