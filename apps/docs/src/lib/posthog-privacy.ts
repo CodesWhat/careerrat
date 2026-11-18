@@ -11,7 +11,7 @@
 const POSTHOG_API_HOST = "https://e.codeswhat.com";
 const POSTHOG_UI_HOST = "https://us.posthog.com";
 const PRODUCTION_ORIGIN = "https://careerrat.com";
-const SITE = "careerrat.com";
+const SITE = "careerrat";
 
 const DOCS_PATH_PREFIX = "/docs";
 const OTHER_PATH = "/_other";
@@ -40,6 +40,19 @@ export function getPostHogConfig(env: PostHogEnvironment) {
     return null;
   }
   return { token, apiHost: POSTHOG_API_HOST, uiHost: POSTHOG_UI_HOST } as const;
+}
+
+// posthog-js 1.449.2 returns true from is_capturing() whenever cookieless_mode
+// is "always", before any consent check, so respect_dnt alone does nothing.
+// Callers check this themselves for Do Not Track and Global Privacy Control.
+type PrivacySignalNavigator = {
+  doNotTrack?: unknown;
+  globalPrivacyControl?: unknown;
+};
+
+export function isTrackingOptedOut(nav: PrivacySignalNavigator | null | undefined): boolean {
+  if (!nav) return false;
+  return nav.doNotTrack === "1" || nav.globalPrivacyControl === true;
 }
 
 // window.location.pathname on the deployed docs bundle is always the real

@@ -2,7 +2,12 @@
 // provider component needed). Wiring copied from CodesWhat/codeswhat.com's
 // frontend/instrumentation-client.ts — the shared house PostHog standard.
 import posthog from "posthog-js";
-import { getPostHogConfig, sanitizeEvent, sanitizeRoute } from "@/lib/posthog-privacy";
+import {
+  getPostHogConfig,
+  isTrackingOptedOut,
+  sanitizeEvent,
+  sanitizeRoute,
+} from "@/lib/posthog-privacy";
 
 const posthogConfig = getPostHogConfig({
   NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN,
@@ -14,7 +19,9 @@ function capturePageview(url: string) {
   posthog.capture("$pageview", { path: sanitizeRoute(url) });
 }
 
-if (typeof window !== "undefined" && posthogConfig) {
+// posthog-js cookieless_mode "always" bypasses respect_dnt, so DNT and Global
+// Privacy Control are checked explicitly here, at init and again at send time.
+if (typeof window !== "undefined" && posthogConfig && !isTrackingOptedOut(window.navigator)) {
   posthog.init(posthogConfig.token, {
     api_host: posthogConfig.apiHost,
     ui_host: posthogConfig.uiHost,
@@ -53,7 +60,8 @@ if (typeof window !== "undefined" && posthogConfig) {
       web_vitals_allowed_metrics: ["CLS", "FCP", "INP", "LCP"],
       web_vitals_attribution: false,
     },
-    before_send: (event) => sanitizeEvent(event) as typeof event | null,
+    before_send: (event) =>
+      isTrackingOptedOut(window.navigator) ? null : (sanitizeEvent(event) as typeof event | null),
   });
 
   capturePageview(window.location.pathname);
@@ -63,5 +71,7 @@ if (typeof window !== "undefined" && posthogConfig) {
 // transition (static export, so all navigation after the first load is
 // client-side).
 export function onRouterTransitionStart(url: string) {
-  if (typeof window !== "undefined" && posthogConfig) capturePageview(url);
+  if (typeof window !== "undefined" && posthogConfig && !isTrackingOptedOut(window.navigator)) {
+    capturePageview(url);
+  }
 }

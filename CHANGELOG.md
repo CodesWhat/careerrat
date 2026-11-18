@@ -10,6 +10,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 - Titles you save in a secondary role bucket now score the same as your primary titles, so a "Staff UI Engineer" you listed is no longer cut for falling below a "Staff Frontend Engineer" target. Titles that only share a generic word like "engineer" still score lower.
 
+### Privacy
+
+- careerrat.com and its docs now send no analytics when your browser has Do Not Track or Global Privacy Control turned on. The analytics library's cookieless mode was skipping that check. Events also report the site as `careerrat`, matching the other CodesWhat sites.
+
 ## [0.24.3] - 2026-11-13
 
 ### Security
