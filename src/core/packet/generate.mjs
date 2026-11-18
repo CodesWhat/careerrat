@@ -834,7 +834,7 @@ function questionLabelById(capture) {
   return new Map((capture.questions || []).map((q) => [String(q.id), q.label || String(q.id)]));
 }
 
-function renderAnswersMarkdown({ answers = [], questionCapture }) {
+export function renderAnswersMarkdown({ answers = [], questionCapture }) {
   const labels = questionLabelById(questionCapture);
   const sections = ["# Application Answers"];
   for (const answer of answers) {

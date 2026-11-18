@@ -270,16 +270,36 @@ function selectValueFromSnapshot(value, snapshot) {
   return prefixed.length === 1 ? prefixed[0] : String(value);
 }
 
+function stripMarkdownEmphasis(text) {
+  return String(text || "")
+    .replace(/^[\s>#-]+/, "")
+    .replace(/[*_`~]/g, "")
+    .trim();
+}
+
 function answerSections(markdown) {
   const sections = new Map();
-  const pattern = /^##\s+(.+?)\s*\n+([\s\S]*?)(?=\n+##\s+|$)/gm;
-  for (const match of String(markdown || "").matchAll(pattern)) {
-    const label = normalizeLabel(match[1]);
-    const answer = String(match[2] || "").trim();
-    if (!label || !answer || /^NEEDS YOU\b/i.test(answer) || /^Leave blank\b/i.test(answer)) {
-      continue;
+  const lines = String(markdown || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n");
+  const blocks = [];
+  let current = null;
+  for (const line of lines) {
+    const heading = line.match(/^##[ \t]+(\S.*?)[ \t]*$/);
+    if (heading) {
+      current = { heading: heading[1], body: [] };
+      blocks.push(current);
+    } else if (current) {
+      current.body.push(line);
     }
-    if (/^Attach the generated\b/i.test(answer)) continue;
+  }
+  for (const block of blocks) {
+    const label = normalizeLabel(block.heading);
+    const answer = block.body.join("\n").trim();
+    if (!label || !answer) continue;
+    const plain = stripMarkdownEmphasis(answer);
+    if (/^NEEDS\s+YOU\b/i.test(plain) || /^Leave blank\b/i.test(plain)) continue;
+    if (/^Attach the generated\b/i.test(plain)) continue;
     sections.set(label, answer);
   }
   return sections;

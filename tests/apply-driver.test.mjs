@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
+import { createApplyDriver, loadAnswerMap } from "../src/core/apply/apply-driver.mjs";
 import { findAdvanceButtonRef } from "../src/core/apply/form-fill.mjs";
+import { renderAnswersMarkdown } from "../src/core/packet/generate.mjs";
 
 const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 const ASHBY_URL = "https://jobs.ashbyhq.com/curri/d616afe4-311f-4c73-8dc9-87c40f8c7ea8";
@@ -4312,4 +4313,97 @@ test("work arrangement question never selects Yes when profile onsite is false",
     questionCapture: { state: "captured" },
   });
   assert.ok(!log.includes("e1"), `Yes option must not be selected: ${log.join(",")}`);
+});
+
+function withAnswersWorkspace(markdown, run) {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-answers-"));
+  try {
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(join(repoRoot, "workspace", "tailored", "app-answers.md"), markdown);
+    return run({
+      repoRoot,
+      env: {},
+      application: { artifacts: { answersSource: "workspace/tailored/app-answers.md" } },
+    });
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+}
+
+test("loadAnswerMap keeps multi-line and multi-paragraph answers whole", () => {
+  const map = withAnswersWorkspace(
+    "# Application Answers\n\n## Why us?\n\nLine one.\nLine two.\n\nSecond paragraph.\n\n## Salary\n\n150k\n",
+    loadAnswerMap
+  );
+  assert.equal(map.get("why us"), "Line one.\nLine two.\n\nSecond paragraph.");
+  assert.equal(map.get("salary"), "150k");
+  assert.equal(map.size, 2);
+});
+
+test("loadAnswerMap handles CRLF and a final section without a trailing newline", () => {
+  const map = withAnswersWorkspace(
+    "# Application Answers\r\n\r\n## First\r\n\r\nA one.\r\nA two.\r\n\r\n## Last\r\n\r\nFinal answer",
+    loadAnswerMap
+  );
+  assert.equal(map.get("first"), "A one.\nA two.");
+  assert.equal(map.get("last"), "Final answer");
+});
+
+test("loadAnswerMap drops NEEDS YOU in any emphasis form, Leave blank, and generated uploads", () => {
+  const map = withAnswersWorkspace(
+    [
+      "## Plain",
+      "NEEDS YOU: provide this.",
+      "## Bold",
+      "**NEEDS YOU**: provide this.",
+      "## Italic",
+      "_NEEDS YOU_",
+      "## Bold inside",
+      "**NEEDS YOU:** provide this.",
+      "## Blank",
+      "Leave blank",
+      "## Upload",
+      "Attach the generated resume.",
+      "## Kept",
+      "Real answer.",
+      "",
+    ].join("\n"),
+    loadAnswerMap
+  );
+  assert.deepEqual([...map.entries()], [["kept", "Real answer."]]);
+});
+
+test("loadAnswerMap returns an empty map for absolute or escaping artifact paths", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-answers-"));
+  try {
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    const inside = join(repoRoot, "workspace", "tailored", "a.md");
+    writeFileSync(inside, "## Q\n\nA\n");
+    for (const stored of [inside, "../workspace/tailored/a.md", "workspace/../../a.md"]) {
+      const map = loadAnswerMap({
+        repoRoot,
+        env: {},
+        application: { artifacts: { answersSource: stored } },
+      });
+      assert.equal(map.size, 0, stored);
+    }
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("loadAnswerMap round-trips the packet writer's answers markdown", () => {
+  const markdown = renderAnswersMarkdown({
+    answers: [
+      { questionId: "q1", question: "Why this role?", answer: "Para one.\n\nPara two." },
+      { questionId: "q2", question: "Pronouns?", answer: "NEEDS YOU: confirm" },
+      { questionId: "q3", question: "Start date?", answer: "Two weeks." },
+    ],
+    questionCapture: { questions: [] },
+  });
+  const map = withAnswersWorkspace(markdown, loadAnswerMap);
+  assert.equal(map.get("why this role"), "Para one.\n\nPara two.");
+  assert.equal(map.get("start date"), "Two weeks.");
+  assert.equal(map.has("pronouns"), false);
+  assert.equal(map.size, 2);
 });
