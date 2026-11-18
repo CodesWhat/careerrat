@@ -11,6 +11,7 @@ import {
   uploadTargetsFromSnapshot,
 } from "../src/core/apply/orca-executor.mjs";
 import { createOrcaOps } from "../src/core/apply/orca-ops.mjs";
+import { evaluateSubmitGate } from "../src/core/apply/submit-gate.mjs";
 import { buildMinimalPdf } from "./fixtures/pdf.mjs";
 
 const allowApply = () => ({ allowed: true, reasons: [] });
