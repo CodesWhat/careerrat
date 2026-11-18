@@ -853,11 +853,16 @@ function runUpdate(extra) {
     console.log("• Runtime dependencies changed. Installing them…");
     const dep = installRuntimeDeps(root);
     if (dep.unreviewed?.length) {
+      const approvedCmd = dep.approved?.length
+        ? `\nThese approved packages were not rebuilt and still need it. After reviewing the above, run:\n    cd "${root}" && npm rebuild ${dep.approved.join(" ")}`
+        : "";
       console.error(
-        `Updated the files to ${readVersion()}, but stopped: ${dep.unreviewed.join(", ")} ` +
-          "declare an install script that isn't in the reviewed allowScripts policy, so it was " +
-          "not run. CareerRat may not start until you review it. If you trust it, run this by hand:\n" +
-          `    cd "${root}" && npm rebuild ${dep.unreviewed.map((p) => p.slice(0, p.lastIndexOf("@"))).join(" ")}`
+        `Updated the files to ${readVersion()}, but stopped before rebuilding anything: ` +
+          `${dep.unreviewed.join(", ")} declare an install script that isn't covered by the ` +
+          "reviewed allowScripts policy in package.json, so no install scripts were run. " +
+          "CareerRat may not start until this is sorted out. To trust a package, add it to " +
+          `allowScripts (true to run, false to deny) in "${join(root, "package.json")}".` +
+          approvedCmd
       );
       return 1;
     }

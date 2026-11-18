@@ -202,15 +202,17 @@ function scriptVerdict(allowScripts, name, version) {
 }
 
 // Installed packages that declare an install script, read from npm's hidden lockfile.
+// Bundled and nested entries are included: `npm rebuild <parent>` also rebuilds the
+// parent's bundled children and runs their install scripts, so they need a verdict too.
 // Returns null when it can't be read, so the caller fails closed.
 function installedScriptPackages(dir) {
   try {
     const lock = JSON.parse(readFileSync(join(dir, "node_modules", ".package-lock.json"), "utf8"));
     const out = [];
     for (const [path, entry] of Object.entries(lock.packages || {})) {
-      if (!entry?.hasInstallScript || entry.link || entry.inBundle) continue;
+      if (!entry?.hasInstallScript || entry.link) continue;
       const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
-      if (name) out.push({ name, version: entry.version });
+      if (name) out.push({ name, version: entry.version, path, bundled: Boolean(entry.inBundle) });
     }
     return out;
   } catch {
@@ -222,8 +224,15 @@ function installedScriptPackages(dir) {
 // postinstall run as the operator: install with --ignore-scripts (flag AND env, so a
 // permissive user npmrc can't turn scripts back on), then `npm rebuild` only the
 // packages the allowScripts policy approves (node-pty needs its install script).
-// Returns { status, error, unreviewed }; `unreviewed` lists packages with an install
-// script the policy doesn't cover, in which case nothing further runs.
+// Returns { status, error, unreviewed, approved }; `unreviewed` lists packages (bundled
+// and nested included) with an install script the policy doesn't cover, in which case
+// nothing is rebuilt and `approved` lists what still needs rebuilding by hand.
+//
+// Rebuild targets are package names, not paths: `npm rebuild <name>` rebuilds every
+// installed copy of that name plus the named package's bundled children. Both are safe
+// only because every script-bearing entry in the tree was checked above. A denied
+// (`false`) copy that rebuild would still reach (same name as an approved package, or
+// nested under one) can't be excluded by name, so that case stops instead of rebuilding.
 export function installRuntimeDeps(dir) {
   const env = { ...process.env, npm_config_ignore_scripts: "true" };
   const res = spawnSync("npm", RUNTIME_DEPS_INSTALL_ARGS, { cwd: dir, stdio: "inherit", env });
@@ -245,16 +254,28 @@ export function installRuntimeDeps(dir) {
     };
   }
   const allowed = [];
+  const allowedPaths = [];
+  const denied = [];
   const unreviewed = [];
-  for (const { name, version } of withScripts) {
-    const verdict = scriptVerdict(allowScripts, name, version);
-    if (verdict === true) allowed.push(name);
-    else if (verdict !== false) unreviewed.push(`${name}@${version}`);
+  const label = (e) => `${e.name}@${e.version}${e.bundled ? " (bundled)" : ""}`;
+  for (const e of withScripts) {
+    const verdict = scriptVerdict(allowScripts, e.name, e.version);
+    if (verdict === true) {
+      allowed.push(e.name);
+      allowedPaths.push(e.path);
+    } else if (verdict === false) denied.push(e);
+    else unreviewed.push(label(e));
   }
-  if (unreviewed.length > 0) return { status: 1, error: null, unreviewed };
-  if (allowed.length === 0) return { status: 0, error: null, unreviewed: [] };
+  const approved = [...new Set(allowed)];
+  for (const e of denied) {
+    const reachable =
+      approved.includes(e.name) || allowedPaths.some((p) => e.path.startsWith(`${p}/`));
+    if (reachable) unreviewed.push(`${label(e)} (denied, but npm rebuild would still reach it)`);
+  }
+  if (unreviewed.length > 0) return { status: 1, error: null, unreviewed, approved };
+  if (approved.length === 0) return { status: 0, error: null, unreviewed: [], approved: [] };
 
-  const rebuild = spawnSync("npm", ["rebuild", ...new Set(allowed)], {
+  const rebuild = spawnSync("npm", ["rebuild", ...approved], {
     cwd: dir,
     stdio: "inherit",
     env: { ...process.env, npm_config_ignore_scripts: "false" },

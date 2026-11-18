@@ -177,9 +177,53 @@ test("update stops with the manual command when a package with an unreviewed ins
     assert.equal(res.status, 1);
     assert.match(res.stderr, /sketchy-pkg@2\.0\.0/);
     assert.match(res.stderr, /allowScripts/);
-    assert.ok(res.stderr.includes("npm rebuild sketchy-pkg"), res.stderr);
+    assert.ok(res.stderr.includes(`cd "${fx.packageDir}/" && npm rebuild native-ok`), res.stderr);
+    assert.ok(!res.stderr.includes("npm rebuild sketchy-pkg"), res.stderr);
     assert.equal(installs.filter((i) => i.args[0] === "rebuild").length, 0);
     assert.equal(installs[0].ignoreScriptsEnv, "true");
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+const bundledLock = {
+  packages: {
+    "node_modules/native-ok": { version: "1.2.3", hasInstallScript: true },
+    "node_modules/native-ok/node_modules/evil-child": {
+      version: "0.0.1",
+      hasInstallScript: true,
+      inBundle: true,
+    },
+  },
+};
+
+test("update stops with nothing rebuilt when a bundled child of an approved parent has an install script", () => {
+  const fx = buildFixture({
+    newDeps: (d) => ({ ...d, "brand-new-dep": "^1.0.0" }),
+    allowScripts: { "native-ok@1.2.3": true },
+  });
+  try {
+    const { res, installs } = runUpdate(fx, { lock: bundledLock });
+    assert.equal(res.status, 1);
+    assert.equal(installs.filter((i) => i.args[0] === "rebuild").length, 0);
+    assert.match(res.stderr, /evil-child@0\.0\.1 \(bundled\)/);
+    assert.match(res.stderr, /allowScripts/);
+    assert.ok(res.stderr.includes(`cd "${fx.packageDir}/" && npm rebuild native-ok`), res.stderr);
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+test("update rebuilds exactly the approved set when bundled children are approved too", () => {
+  const fx = buildFixture({
+    newDeps: (d) => ({ ...d, "brand-new-dep": "^1.0.0" }),
+    allowScripts: { "native-ok@1.2.3": true, "evil-child": true },
+  });
+  try {
+    const { res, installs } = runUpdate(fx, { lock: bundledLock });
+    assert.equal(res.status, 0, res.stderr + res.stdout);
+    assert.deepEqual(installs[1].args, ["rebuild", "native-ok", "evil-child"]);
+    assert.equal(installs.length, 2);
   } finally {
     rmSync(fx.base, { recursive: true, force: true });
   }
