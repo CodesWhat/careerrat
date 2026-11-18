@@ -1545,6 +1545,38 @@ test("submit auto: the executor gets a hook that persists the marker before any 
   assert.equal(markerAtHook, "2026-10-26T20:00:00.000Z");
 });
 
+test("submit auto: the hook refuses the click when another runtime already holds the marker", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+  let hookError = null;
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    now: new Date("2026-10-26T22:00:00.000Z"),
+    applyJobImpl: async (input) => {
+      // A second runtime won the atomic claim after this run's own marker check.
+      appMarkSubmitAttempt({
+        repoRoot,
+        env: {},
+        id: input.applicationId,
+        at: "2026-10-26T21:59:59.000Z",
+      });
+      try {
+        await input.onSubmitAttempt({ applicationId: input.applicationId });
+      } catch (error) {
+        hookError = error;
+      }
+      return { available: true, verified: false, state: "awaiting-submit", session: {} };
+    },
+  });
+
+  assert.ok(hookError, "a lost claim must throw so the driver never clicks");
+  assert.equal(readApplication(repoRoot).submitAttemptedAt, "2026-10-26T21:59:59.000Z");
+});
+
 test("submit auto: a committed marker counts even when the tracker export after it fails", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);

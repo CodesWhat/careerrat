@@ -358,6 +358,46 @@ describe("BLOCKER_SIGNALS", () => {
 // ---------------------------------------------------------------------------
 
 describe("submitGuard", () => {
+  it("blocks restriction and limit headings and short notices", () => {
+    for (const text of [
+      "Account temporarily restricted",
+      '- heading "Account temporarily restricted" [level=2]',
+      "## Account suspended",
+      "Temporarily blocked",
+    ]) {
+      assert.ok(
+        submitGuard({ pageText: `Application form\n${text}\nFirst name` }).blockers.includes(
+          "account restricted"
+        ),
+        text
+      );
+    }
+    for (const text of [
+      "Application limit reached",
+      "You've reached the application limit",
+      "This job has application limits",
+    ]) {
+      assert.ok(
+        submitGuard({ pageText: `Application form\n${text}` }).blockers.includes(
+          "application limit"
+        ),
+        text
+      );
+    }
+  });
+
+  it("does not block on job description prose that only contains the phrases", () => {
+    for (const text of [
+      "We receive too many applications to respond individually.",
+      "You will investigate detected unusual activity and triage alerts.",
+      "Investigate detected unusual activity across our fleet.",
+      "Manage account restricted access policies for customers.",
+      "There is a maximum number of applications we can review per week.",
+    ]) {
+      assert.deepEqual(submitGuard({ pageText: text }).blockers, [], text);
+    }
+  });
+
   it("blocks on pageText containing 'verify you are human'", () => {
     const result = submitGuard({
       pageText: "Please verify you are human to continue.",

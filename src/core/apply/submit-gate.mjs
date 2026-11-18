@@ -361,30 +361,38 @@ export async function runApplySubmit({
 
   // Durable "Submit is about to be pressed" marker first, exactly like the
   // driver: if this can't be recorded the click doesn't happen.
+  // The marker write is an atomic claim: when another run already holds it,
+  // this one must not click.
+  let claim = null;
+  let claimError = null;
   try {
-    appMarkSubmitAttempt({ repoRoot, env, id, at: new Date().toISOString() });
+    claim = appMarkSubmitAttempt({ repoRoot, env, id, at: new Date().toISOString() });
   } catch (error) {
-    if (error?.committed !== true) {
-      const reasons = [
-        refusal(
-          "SESSION_UNREACHABLE",
-          `CareerRat couldn't record the attempt first, so it didn't press Submit: ${String(
-            error?.message || error
-          ).slice(0, 160)}`
-        ),
-      ];
-      handToPerson({ repoRoot, env, id, application, refusals: reasons });
-      return {
-        ok: false,
-        submitted: false,
-        state: "refused",
-        id,
-        reasons,
-        message: handoffText(reasons),
-        handedToPerson: true,
-        status: "manual-apply",
-      };
-    }
+    if (error?.committed === true) claim = error.result || { marked: true };
+    else claimError = error;
+  }
+  if (claimError || claim?.marked !== true) {
+    const reasons = [
+      refusal(
+        "SESSION_UNREACHABLE",
+        claimError
+          ? `CareerRat couldn't record the attempt first, so it didn't press Submit: ${String(
+              claimError?.message || claimError
+            ).slice(0, 160)}`
+          : "CareerRat already pressed Submit for this application, so it didn't press it again."
+      ),
+    ];
+    handToPerson({ repoRoot, env, id, application, refusals: reasons });
+    return {
+      ok: false,
+      submitted: false,
+      state: "refused",
+      id,
+      reasons,
+      message: handoffText(reasons),
+      handedToPerson: true,
+      status: "manual-apply",
+    };
   }
 
   await resolved.ops.clickButton({ pageId, ref: verdict.submitRef, signal });

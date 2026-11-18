@@ -9919,8 +9919,11 @@ async function executeWorkspaceIntentCore({
       submitMode === "auto"
         ? {
             onSubmitAttempt: async () => {
+              // The marker write is an atomic claim (set-once inside an immediate
+              // transaction): only the runtime that wins it may click Submit.
+              let claim;
               try {
-                appMarkSubmitAttempt({
+                claim = appMarkSubmitAttempt({
                   repoRoot,
                   env,
                   id: normalized.entity.id,
@@ -9930,6 +9933,10 @@ async function executeWorkspaceIntentCore({
                 // The marker is in the canonical database even when the tracker
                 // export after it fails; that is enough to block a second submit.
                 if (error?.committed !== true) throw error;
+                claim = error.result || { marked: true };
+              }
+              if (claim?.marked !== true) {
+                throw new Error("another run already pressed Submit for this application");
               }
             },
           }

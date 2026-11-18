@@ -1174,6 +1174,30 @@ export function createApplyDriver({
     packet,
     signal,
   }) {
+    // Every page blocker is checked against the exact snapshot Submit was
+    // resolved from, right before the click, so a notice that appeared after the
+    // fill pass (restriction, limit, captcha) still stops the run with no click.
+    const submitBlockers = submitGuard({ pageText: snapshot?.pageText }).blockers;
+    if (submitBlockers.length) {
+      return {
+        available: true,
+        verified: false,
+        state: "blocked",
+        reason:
+          limitBlockerReason(submitBlockers) ||
+          `The page shows a blocker (${submitBlockers.join(", ")}), so CareerRat didn't press Submit. Nothing was submitted.`,
+        currentUrl: snapshot?.origin,
+        session: {
+          provider: providerLabel,
+          filledCount: counts.filledCount,
+          uploadedCount: counts.uploadedCount,
+          unresolved: counts.unresolved,
+          blockers: submitBlockers,
+          submitMode: "auto",
+          ...stepSession,
+        },
+      };
+    }
     // The caller records a durable "Submit is about to be pressed" marker first.
     // If it can't, nothing is clicked: a click with no marker could repeat
     // after a restart. An abort after the marker but before the click also

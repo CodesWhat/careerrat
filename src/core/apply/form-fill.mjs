@@ -1255,16 +1255,54 @@ export const APPLICATION_LIMIT_PATTERNS = [
   ),
   /\bapplication limit (?:has been |was )?reached\b/i,
   new RegExp(`\\byou${APOS}ve already applied\\b[^.\\n]{0,80}\\bmaximum\\b`, "i"),
-  /\bmaximum (?:number )?of (?:job )?applications\b/i,
-  /\btoo many applications\b/i,
+  new RegExp(
+    `\\byou(?:${APOS}ve| have) (?:reached|exceeded) (?:the |your )?(?:maximum|max) (?:number )?of (?:job )?applications\\b`,
+    "i"
+  ),
+  new RegExp(`\\byou(?:${APOS}ve| have)\\b[^.\\n]{0,60}\\btoo many applications\\b`, "i"),
+  /\btoo many applications (?:from|for) (?:this|your) account\b/i,
+];
+// A notice that stands alone on its own line or heading (including a role
+// heading in the accessibility tree) is addressed to the applicant even when it
+// has no pronoun: "Account temporarily restricted". Whole line only, so a job
+// description sentence that merely contains the words doesn't match.
+const LIMIT_NOTICE_LINES = [
+  /^too many applications$/i,
+  /^application limits? (?:has been |was )?reached$/i,
+  /^you(?:['\u2019]ve| have) reached (?:the |your |this )?(?:\w+ ){0,2}application limits?$/i,
+  /^this job has application limits?$/i,
+];
+const RESTRICTION_NOTICE_LINES = [
+  /^(?:your )?account (?:is |has been |was )?(?:temporarily |currently )?(?:restricted|suspended|blocked|disabled|locked)$/i,
+  /^(?:you(?:['\u2019]ve| have) been |you are )?temporarily blocked$/i,
 ];
 export const ACCOUNT_RESTRICTION_PATTERNS = [
   /\byour account (?:has been|is|was) (?:temporarily |currently )?restricted\b/i,
   /\baccount is temporarily restricted\b/i,
   new RegExp(`\\bwe${APOS}ve (?:temporarily )?restricted your account\\b`, "i"),
   /\bunusual activity (?:on|from|in) your account\b/i,
-  /\b(?:detected|noticed) unusual activity\b/i,
+  new RegExp(`\\bwe${APOS}ve (?:detected|noticed) unusual activity\\b`, "i"),
+  /\bwe (?:have )?(?:detected|noticed) unusual activity\b/i,
 ];
+
+// Lines of the page that read as a standalone heading or short notice. Strips
+// list/markdown markers and the `heading "..." [level=2]` accessibility-tree
+// wrapper, so the notice text itself is what gets matched.
+function noticeLines(text) {
+  const out = [];
+  for (const raw of String(text).split(/\r?\n/)) {
+    let line = raw.trim();
+    if (!line || line.length > 200) continue;
+    line = line
+      .replace(/^[-*#>\s]+/, "")
+      .replace(/^[a-z]+\s+"(.*)"(?:\s*\[[^\]]*\])*:?$/i, "$1")
+      .replace(/\s*\[[^\]]*\]/g, "")
+      .replace(/[\s.!:]+$/, "")
+      .trim();
+    if (line) out.push(line);
+  }
+  return out;
+}
 
 /**
  * Plain-language stop reason for the limit and restriction blockers, or null
@@ -1305,13 +1343,18 @@ export function submitGuard({ pageText = "", pageSignals = {} } = {}) {
   }
 
   const rawText = String(pageText);
+  const lines = noticeLines(rawText);
   if (
     !blockers.includes("application limit") &&
-    APPLICATION_LIMIT_PATTERNS.some((re) => re.test(rawText))
+    (APPLICATION_LIMIT_PATTERNS.some((re) => re.test(rawText)) ||
+      lines.some((line) => LIMIT_NOTICE_LINES.some((re) => re.test(line))))
   ) {
     blockers.push("application limit");
   }
-  if (ACCOUNT_RESTRICTION_PATTERNS.some((re) => re.test(rawText))) {
+  if (
+    ACCOUNT_RESTRICTION_PATTERNS.some((re) => re.test(rawText)) ||
+    lines.some((line) => RESTRICTION_NOTICE_LINES.some((re) => re.test(line)))
+  ) {
     blockers.push("account restricted");
   }
 

@@ -6,6 +6,7 @@ import { after, describe, it } from "node:test";
 
 import { evaluateSubmitGate, runApplySubmit } from "../src/core/apply/submit-gate.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { appMarkSubmitAttempt } from "../src/core/db/verbs/app.mjs";
 import { getRow } from "../src/core/db/verbs/shared.mjs";
 import { appUpsert, candidateSetupInitialize } from "../src/core/db/verbs.mjs";
 
@@ -287,6 +288,34 @@ describe("apply submit gate", () => {
     const result = await promise;
     assertRefused(result, fake, "ALREADY_SUBMITTED");
     assert.equal(stored(ctx).status, "evaluated", "status is not walked to manual-apply");
+  });
+
+  it("does not press Submit when another runtime wins the attempt claim first", async () => {
+    const ctx = workspace();
+    const fake = fakeOps({ before: readyForm() });
+    const baseSnapshot = fake.ops.snapshot;
+    fake.ops.snapshot = async (args) => {
+      // A second runtime claims the attempt between this run's check and its click.
+      appMarkSubmitAttempt({
+        repoRoot: ctx.dir,
+        env: ctx.env,
+        id: "app-1",
+        at: "2026-11-02T00:00:00.000Z",
+      });
+      return baseSnapshot(args);
+    };
+    const result = await runApplySubmit({
+      repoRoot: ctx.dir,
+      env: ctx.env,
+      id: "app-1",
+      pageId: "page-1",
+      opsImpl: fake.ops,
+      loadSubmitModeImpl: () => "auto",
+      sleepImpl: async () => {},
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.submitted, false);
+    assert.equal(fake.clicks().length, 0, "Submit must not be pressed");
   });
 
   it("refuses with SESSION_UNREACHABLE when the page can't be read", async () => {

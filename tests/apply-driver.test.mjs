@@ -4080,3 +4080,71 @@ for (const [label, pageText, refs, expected] of [
     }
   });
 }
+
+function restrictedAfterFill(calls) {
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+  let snapshots = 0;
+  ops.snapshot = async () => {
+    snapshots += 1;
+    log.push({ op: "snapshot" });
+    return snapshots >= calls
+      ? { ...SUBMIT_FORM, pageText: `${SUBMIT_FORM.pageText}\nYour account is restricted` }
+      : SUBMIT_FORM;
+  };
+  return { ops, log };
+}
+
+test("auto submit: a restriction on any snapshot up to the one Submit resolves from stops with no click", async () => {
+  // Snapshot N onward shows the restriction. The last one before the click is
+  // the snapshot Submit is resolved from; it must be guarded too.
+  for (let from = 2; from <= 4; from += 1) {
+    const { ops, log } = restrictedAfterFill(from);
+    let hook = 0;
+    const result = await makeDriver({ ops, ...fastWaits })({
+      ...AUTO_REQUEST,
+      applicationId: "app-restricted-late",
+      onSubmitAttempt: async () => {
+        hook += 1;
+      },
+    });
+    assert.equal(clicks(log).length, 0, `no click (restricted from snapshot ${from})`);
+    assert.equal(hook, 0, `no attempt marker (restricted from snapshot ${from})`);
+    assert.equal(result.state, "blocked", `blocked (restricted from snapshot ${from})`);
+    assert.match(result.reason, /account is restricted\. Nothing was submitted\./);
+  }
+});
+
+test("auto submit: an 'Account temporarily restricted' heading next to the form blocks with no click", async () => {
+  const page = {
+    ...SUBMIT_FORM,
+    pageText: '- heading "Account temporarily restricted" [level=2]\nApplication form',
+  };
+  const { ops, log } = createFakeOps([page, SUBMIT_CONFIRMATION]);
+  const result = await makeDriver({ ops, ...fastWaits })({
+    ...AUTO_REQUEST,
+    applicationId: "app-restricted-heading",
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.deepEqual(result.session.blockers, ["account restricted"]);
+  assert.equal(clicks(log).length, 0);
+});
+
+test("a job description saying 'too many applications' or 'detected unusual activity' does not block", async () => {
+  const page = {
+    origin: GREENHOUSE_URL,
+    pageText:
+      "We receive too many applications to respond individually.\nYou will investigate detected unusual activity.\nApply",
+    refs: refsOf([["e1", "textbox", "First Name", true]]),
+  };
+  const { ops } = createFakeOps([page]);
+  const result = await makeDriver({ ops })({
+    applicationId: "app-jd-prose-2",
+    application: { id: "app-jd-prose-2", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.notEqual(result.state, "blocked");
+});
