@@ -371,15 +371,33 @@ export async function runApplySubmit({
     if (error?.committed === true) claim = error.result || { marked: true };
     else claimError = error;
   }
-  if (claimError || claim?.marked !== true) {
+  if (!claimError && claim?.marked !== true) {
+    // Another runtime holds the claim and may already have clicked. Don't hand
+    // this to the person as manual-apply: that invites a second, manual submit.
+    const reasons = [
+      refusal(
+        "SUBMIT_ALREADY_CLAIMED",
+        "Another run is already submitting this application. Nothing was clicked here. Check its status before doing anything."
+      ),
+    ];
+    return {
+      ok: false,
+      submitted: false,
+      state: "submit-claimed",
+      id,
+      reasons,
+      message: handoffText(reasons),
+      handedToPerson: false,
+      status: application?.status || null,
+    };
+  }
+  if (claimError) {
     const reasons = [
       refusal(
         "SESSION_UNREACHABLE",
-        claimError
-          ? `CareerRat couldn't record the attempt first, so it didn't press Submit: ${String(
-              claimError?.message || claimError
-            ).slice(0, 160)}`
-          : "CareerRat already pressed Submit for this application, so it didn't press it again."
+        `CareerRat couldn't record the attempt first, so it didn't press Submit: ${String(
+          claimError?.message || claimError
+        ).slice(0, 160)}`
       ),
     ];
     handToPerson({ repoRoot, env, id, application, refusals: reasons });

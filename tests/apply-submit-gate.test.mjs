@@ -316,6 +316,12 @@ describe("apply submit gate", () => {
     assert.equal(result.ok, false);
     assert.equal(result.submitted, false);
     assert.equal(fake.clicks().length, 0, "Submit must not be pressed");
+    assert.equal(result.state, "submit-claimed");
+    assert.equal(result.reasons[0].code, "SUBMIT_ALREADY_CLAIMED");
+    assert.equal(result.handedToPerson, false);
+    assert.doesNotMatch(result.message, /press Submit|submit it yourself/i);
+    assert.match(result.message, /Another run is already submitting/);
+    assert.notEqual(result.status, "manual-apply");
   });
 
   it("refuses with SESSION_UNREACHABLE when the page can't be read", async () => {

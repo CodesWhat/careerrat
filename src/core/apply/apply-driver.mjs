@@ -1207,6 +1207,26 @@ export function createApplyDriver({
         await onSubmitAttempt({ applicationId, submitLabel });
       } catch (error) {
         throwIfAborted(signal);
+        if (error?.code === "SUBMIT_ALREADY_CLAIMED") {
+          return {
+            available: true,
+            verified: false,
+            state: "submit-claimed",
+            code: "SUBMIT_ALREADY_CLAIMED",
+            reason:
+              "Another run is already submitting this application. Nothing was clicked here. Check its status before doing anything.",
+            currentUrl: snapshot?.origin,
+            session: {
+              provider: providerLabel,
+              filledCount: counts.filledCount,
+              uploadedCount: counts.uploadedCount,
+              unresolved: counts.unresolved,
+              blockers: [],
+              submitMode: "auto",
+              ...stepSession,
+            },
+          };
+        }
         return {
           available: true,
           verified: false,

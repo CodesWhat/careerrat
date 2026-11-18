@@ -9987,7 +9987,9 @@ async function executeWorkspaceIntentCore({
                 claim = error.result || { marked: true };
               }
               if (claim?.marked !== true) {
-                throw new Error("another run already pressed Submit for this application");
+                const lost = new Error("another run already pressed Submit for this application");
+                lost.code = "SUBMIT_ALREADY_CLAIMED";
+                throw lost;
               }
             },
           }
@@ -10143,6 +10145,33 @@ async function executeWorkspaceIntentCore({
             },
           ],
         },
+        now,
+      });
+    }
+    if (execution?.verified !== true && execution?.state === "submit-claimed") {
+      // Another run holds the atomic submit claim and may already have clicked.
+      // Nothing was clicked here and the status stays put: no manual-apply, no
+      // "press Submit yourself", so nobody double-submits by hand.
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: "Another run is already submitting this application. Nothing was clicked here. Check its status before doing anything. This application was not marked Applied.",
+        metadata: {
+          state: "submit-claimed",
+          code: "SUBMIT_ALREADY_CLAIMED",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          nextActions: [
+            navigationAction("Review application", {
+              surface: "job",
+              entityType: "application",
+              entityId: normalized.entity.id,
+            }),
+          ],
+        },
+        operationResult: execution,
         now,
       });
     }
