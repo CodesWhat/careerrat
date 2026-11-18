@@ -4,6 +4,7 @@ import { candidateConfigGet, sourceConfigGet } from "../db/verbs.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { loadCandidateConfig } from "../profile/config-store.mjs";
 import { loadScannerConfig } from "../scoring/sourced-scanner.mjs";
+import { companyMatchKey } from "./company-identity.mjs";
 
 function trimString(value) {
   if (value === null || value === undefined) return "";
@@ -144,16 +145,6 @@ function readLegacySourceCompanies(pathCtx) {
   }
 }
 
-function normalizeCompanyKey(value) {
-  return trimString(value)
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .replace(/\/.*$/, "")
-    .replace(/[^a-z0-9.]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 export function buildCompanySeedContext({ repoRoot, env = process.env } = {}) {
   const pathCtx = { repoRoot, env };
   const usingDb = dbExists(pathCtx);
@@ -200,7 +191,7 @@ export function buildCompanySeedContext({ repoRoot, env = process.env } = {}) {
     compensationFloors: compensationFloorsFromProfile(profile),
     dedupe: {
       companies: dedupeCompanies,
-      keys: compactStrings(dedupeCompanies.map(normalizeCompanyKey)),
+      keys: compactStrings(dedupeCompanies.map(companyMatchKey)),
     },
   };
 }

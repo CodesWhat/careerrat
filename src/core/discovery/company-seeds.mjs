@@ -3,6 +3,7 @@ import { resolveAIRoute } from "../ai/call-ai.mjs";
 import { validate } from "../profile/schema-validator.mjs";
 import { COMPANY_DISCOVERY_BATCH_MAX, normalizeCompanyKey } from "./company-board-resolver.mjs";
 import { buildCompanySeedContext } from "./company-context.mjs";
+import { companyMatchKey } from "./company-identity.mjs";
 
 const COMPANY_SEED_LABELS = Object.freeze({
   skill: "discover-companies",
@@ -172,7 +173,7 @@ function contextForBroaderDiscovery(context = {}, focusSeeds = []) {
     dedupe: {
       ...(context.dedupe || {}),
       companies: [...(context.dedupe?.companies || []), ...focusNames],
-      keys: [...(context.dedupe?.keys || []), ...focusNames.map(normalizeCompanyKey)],
+      keys: [...(context.dedupe?.keys || []), ...focusNames.map(companyMatchKey)],
     },
   };
 }
