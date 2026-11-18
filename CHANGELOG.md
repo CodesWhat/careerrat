@@ -6,6 +6,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-18
+
 ### Added
 
 - `careerrat evaluate <job> --write` saves the verdict in a database workspace, so coaching and review approval work from the terminal. An unknown option on `evaluate` now exits 64 instead of looking like a REVIEW verdict.
