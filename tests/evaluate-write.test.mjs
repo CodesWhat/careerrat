@@ -245,13 +245,15 @@ test("two matching applications are refused as ambiguous with both ids listed", 
   ]);
 });
 
-test("a specific posting URL and a different company+role match conflict as ambiguous", () => {
+test("a specific posting URL outranks a different company+role match", () => {
   const url = "https://acme.example/careers/accountant-123";
   const dir = workspace({
     apps: [STAFF, { ...ACCOUNTANT, link: url }],
     jd: jd({ extra: `source: ${url}` }),
   });
-  assertRefused(dir, run(dir, ["workspace/jobs/acme.md", "--write"]), /more than one application/);
+  const result = run(dir, ["workspace/jobs/acme.md", "--write"]);
+  assert.match(result.stdout, /Saved on app-acct/);
+  assert.equal(appRow(dir, "app-staff").evaluation, undefined);
 });
 
 test("a specific posting URL writes to the matching application", () => {
@@ -279,4 +281,87 @@ test("--app with a different company is refused, a different role is allowed", (
   const roleOnly = workspace({ apps: [ACCOUNTANT] });
   const ok = run(roleOnly, ["workspace/jobs/acme.md", "--write", "--app", "app-acct"]);
   assert.match(ok.stdout, /Saved on app-acct/);
+});
+
+function seedSourced(dir, row) {
+  const db = openDb({ repoRoot: repo, env: envFor(dir) });
+  db.prepare("INSERT INTO sourced (id, data) VALUES (?, ?)").run(row.id, JSON.stringify(row));
+}
+
+test("an exact sourced URL refuses even when a same-title application exists", () => {
+  const url = "https://acme.example/jobs/222";
+  const dir = workspace({
+    apps: [{ ...STAFF, link: "https://acme.example/jobs/111" }],
+    jd: jd({ extra: `source: ${url}` }),
+  });
+  seedSourced(dir, { id: "src-222", company: "Acme", role: "Staff Engineer", link: url });
+  assertRefused(dir, run(dir, ["workspace/jobs/acme.md", "--write"]), /only a sourced lead/, [
+    "app-staff",
+  ]);
+});
+
+test("Engineering Manager does not match the only Marketing Manager application", () => {
+  const dir = workspace({
+    apps: [{ id: "app-mm", company: "Acme", role: "Marketing Manager" }],
+    jd: jd({ role: "Engineering Manager" }),
+  });
+  assertRefused(dir, run(dir, ["workspace/jobs/acme.md", "--write"]), /only other roles/, [
+    "app-mm",
+  ]);
+});
+
+test("an exact title wins over a longer similar title", () => {
+  const dir = workspace({
+    apps: [
+      { id: "app-se", company: "Acme", role: "Software Engineer" },
+      { id: "app-sem", company: "Acme", role: "Software Engineering Manager" },
+    ],
+    jd: jd({ role: "Software Engineer" }),
+  });
+  const result = run(dir, ["workspace/jobs/acme.md", "--write"]);
+  assert.match(result.stdout, /Saved on app-se\b/);
+  assert.equal(appRow(dir, "app-sem").evaluation, undefined);
+});
+
+test("a seniority prefix still matches the base title", () => {
+  const dir = workspace({
+    apps: [{ id: "app-be", company: "Acme", role: "Backend Engineer" }],
+    jd: jd({ role: "Senior Backend Engineer" }),
+  });
+  assert.match(run(dir, ["workspace/jobs/acme.md", "--write"]).stdout, /Saved on app-be/);
+});
+
+test("Registered Nurse does not fuzzy-match Nurse Manager", () => {
+  const dir = workspace({
+    apps: [{ id: "app-nm", company: "Acme", role: "Nurse Manager" }],
+    jd: jd({ role: "Registered Nurse" }),
+  });
+  assertRefused(dir, run(dir, ["workspace/jobs/acme.md", "--write"]), /only other roles/, [
+    "app-nm",
+  ]);
+});
+
+test("ATS board roots are not specific postings, posting URLs are", async () => {
+  const { isSpecificPostingUrl } = await import("../src/core/evaluate/persist.mjs");
+  for (const root of [
+    "https://jobs.lever.co/acme",
+    "https://boards.greenhouse.io/acme",
+    "https://jobs.ashbyhq.com/acme",
+    "https://apply.workable.com/acme",
+    "https://apply.workable.com/acme/",
+    "https://acme.wd1.myworkdayjobs.com/External",
+    "https://acme.wd1.myworkdayjobs.com/en-US/External",
+  ]) {
+    assert.equal(isSpecificPostingUrl(root), false, root);
+  }
+  for (const posting of [
+    "https://jobs.lever.co/acme/5a1b2c3d-0000-4000-8000-123456789abc",
+    "https://boards.greenhouse.io/acme/jobs/4567",
+    "https://jobs.ashbyhq.com/acme/5a1b2c3d-0000-4000-8000-123456789abc",
+    "https://apply.workable.com/acme/j/ABC123DEF4",
+    "https://acme.wd1.myworkdayjobs.com/External/job/Remote/Engineer_R-1",
+    "https://acme.example/careers?gh_jid=123",
+  ]) {
+    assert.equal(isSpecificPostingUrl(posting), true, posting);
+  }
 });

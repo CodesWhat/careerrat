@@ -130,22 +130,82 @@ function sameCompany(a, b) {
   return Boolean(x) && x === y;
 }
 
+// Tier and role nouns say what kind of job it is, not which one. They never
+// count toward fuzzy overlap, so "Engineering Manager" and "Marketing Manager"
+// share nothing but "manager" and stay apart.
+const ROLE_NOUNS = new Set([
+  "manager",
+  "engineer",
+  "developer",
+  "director",
+  "specialist",
+  "analyst",
+  "associate",
+  "head",
+  "intern",
+  "consultant",
+  "coordinator",
+  "administrator",
+  "officer",
+  "representative",
+  "assistant",
+  "executive",
+  "architect",
+  "supervisor",
+  "technician",
+  "of",
+  "and",
+  "the",
+  "for",
+]);
+
 function roleTokens(value) {
   return normalizeTextKey(value)
     .split(" ")
     .filter((t) => t && !SENIORITY.has(t));
 }
 
-function compatibleRole(a, b) {
-  const x = normalizeTextKey(a);
-  const y = normalizeTextKey(b);
-  if (!x || !y) return false;
-  if (x === y || x.includes(y) || y.includes(x)) return true;
+function exactRole(a, b) {
+  const x = roleTokens(a).join(" ");
+  return Boolean(x) && x === roleTokens(b).join(" ");
+}
+
+// Same distinguishing words (the function) and at least one role noun in
+// common. Different function words, or a different kind of role, never match.
+function fuzzyRole(a, b) {
   const tx = roleTokens(a);
   const ty = roleTokens(b);
-  if (!tx.length || !ty.length) return false;
-  const shared = tx.filter((t) => ty.includes(t)).length;
-  return shared / Math.min(tx.length, ty.length) >= 0.5;
+  const fx = new Set(tx.filter((t) => !ROLE_NOUNS.has(t)));
+  const fy = new Set(ty.filter((t) => !ROLE_NOUNS.has(t)));
+  if (!fx.size || fx.size !== fy.size || ![...fx].every((t) => fy.has(t))) return false;
+  const nx = tx.filter((t) => ROLE_NOUNS.has(t));
+  return nx.some((t) => ty.includes(t));
+}
+
+function compatibleRole(a, b) {
+  return exactRole(a, b) || fuzzyRole(a, b);
+}
+
+// Hosted boards put every opening under one company root. The root is not a
+// posting; the id segment past it is.
+const ATS_MIN_SEGMENTS = [
+  [/(^|\.)lever\.co$/i, 2],
+  [/(^|\.)ashbyhq\.com$/i, 2],
+  [/(^|\.)smartrecruiters\.com$/i, 2],
+  [/(^|\.)workable\.com$/i, 3],
+];
+
+function atsSpecific(url, segments) {
+  const host = url.hostname;
+  for (const [re, min] of ATS_MIN_SEGMENTS) if (re.test(host)) return segments.length >= min;
+  if (/(^|\.)greenhouse\.io$/i.test(host)) {
+    const i = segments.indexOf("jobs");
+    return i >= 0 && i < segments.length - 1;
+  }
+  if (/(^|\.)myworkdayjobs\.com$/i.test(host)) {
+    return segments.includes("job") || segments.includes("details");
+  }
+  return null;
 }
 
 // A posting URL only identifies one job when it points past the careers index:
@@ -162,6 +222,8 @@ export function isSpecificPostingUrl(raw) {
     .split("/")
     .map((s) => normalizeTextKey(decodeURIComponent(s)))
     .filter(Boolean);
+  const ats = atsSpecific(url, segments);
+  if (ats !== null) return ats;
   return segments.some((s) => !GENERIC_PATH_WORDS.has(s));
 }
 
@@ -193,6 +255,12 @@ function loadRows(db, table) {
     .prepare(`SELECT id, data FROM ${table}`)
     .all()
     .map((row) => ({ recordType, ...JSON.parse(row.data), id: row.id }));
+}
+
+function sourcedLeadError(lead) {
+  return new EvaluationWriteError(
+    `This job is only a sourced lead ("${lead.id}"), not an application yet. Pass --app <id> for an application, or promote it first.`
+  );
 }
 
 function postingMatches(row, facts) {
@@ -233,13 +301,28 @@ export function resolveApplicationId({ db, explicitId, job }) {
     return claimed;
   }
 
-  const hits = apps.filter((row) => postingMatches(row, facts));
-  if (hits.length === 1) return hits[0].id;
-  if (hits.length > 1) {
-    throw new EvaluationWriteError(
-      `Not saved: ${describeJob(facts)} matches more than one application (${hits.map((r) => r.id).join(", ")}). Pass --app <id> to choose one.`
+  const ambiguous = (rows) =>
+    new EvaluationWriteError(
+      `Not saved: ${describeJob(facts)} matches more than one application (${rows.map((r) => r.id).join(", ")}). Pass --app <id> to choose one.`
     );
-  }
+  const pick = (rows) => {
+    if (rows.length > 1) throw ambiguous(rows);
+    return rows.length === 1 ? rows[0].id : null;
+  };
+
+  // The exact posting URL decides first: it names one job, so a same-title
+  // application elsewhere must not outvote it, and a sourced-only record at
+  // that URL means this job is not an application yet.
+  const urlHit = pick(apps.filter((row) => sameSpecificUrl(facts.url, row.link)));
+  if (urlHit) return urlHit;
+  const urlLead = loadRows(db, "sourced").find((row) => sameSpecificUrl(facts.url, row.link));
+  if (urlLead) throw sourcedLeadError(urlLead);
+
+  const sameRole = apps.filter((row) => sameCompany(facts.company, row.company));
+  const roleHit =
+    pick(sameRole.filter((row) => exactRole(facts.role, row.role))) ??
+    pick(sameRole.filter((row) => fuzzyRole(facts.role, row.role)));
+  if (roleHit) return roleHit;
   const sameCo = apps.filter((row) => sameCompany(facts.company, row.company));
   if (sameCo.length) {
     throw new EvaluationWriteError(
@@ -248,9 +331,7 @@ export function resolveApplicationId({ db, explicitId, job }) {
   }
   const lead = loadRows(db, "sourced").find((row) => postingMatches(row, facts));
   if (lead) {
-    throw new EvaluationWriteError(
-      `This job is only a sourced lead ("${lead.id}"), not an application yet. Pass --app <id> for an application, or promote it first.`
-    );
+    throw sourcedLeadError(lead);
   }
   throw new EvaluationWriteError(
     "Could not find a tracked application for this job. Pass --app <id>, or add the job to the tracker first."
