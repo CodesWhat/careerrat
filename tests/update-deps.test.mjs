@@ -10,6 +10,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -39,9 +40,12 @@ if (cmd === "view") {
   const dest = rest[rest.indexOf("--pack-destination") + 1];
   const r = spawnSync("tar", ["czf", dest + "/careerrat-9.9.9.tgz", "-C", process.env.FAKE_NPM_PKG_ROOT, "package"]);
   process.exit(r.status ?? 1);
-} else if (cmd === "install") {
-  appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify({ args: [cmd, ...rest], cwd: process.cwd() }) + "\\n");
-  process.exit(Number(process.env.FAKE_NPM_INSTALL_EXIT || 0));
+} else if (cmd === "install" || cmd === "rebuild") {
+  appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify({ args: [cmd, ...rest], cwd: process.cwd(), ignoreScriptsEnv: process.env.npm_config_ignore_scripts }) + "\\n");
+  if (cmd === "install") {
+    require("node:fs").writeFileSync(process.cwd() + "/node_modules/.package-lock.json", process.env.FAKE_NPM_LOCK || "{\\"packages\\":{}}");
+  }
+  process.exit(Number(process.env[cmd === "install" ? "FAKE_NPM_INSTALL_EXIT" : "FAKE_NPM_REBUILD_EXIT"] || 0));
 } else {
   process.exit(1);
 }
@@ -50,14 +54,21 @@ if (cmd === "view") {
 // Builds an install layout plus a fake "published" package root. `newDeps` is the
 // runtime dependency set the published 9.9.9 package.json declares; `doctorExit` is
 // what the published doctor script exits with.
-function buildFixture({ newDeps, doctorExit = 0 }) {
+function buildFixture({ newDeps, doctorExit = 0, allowScripts }) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "careerrat-update-deps-")));
   const packageDir = join(base, "lib", "node_modules", "careerrat");
   mkdirSync(packageDir, { recursive: true });
   for (const entry of ["bin", "src", "config", "templates", "package.json", "AGENTS.md"]) {
     cpSync(join(REPO_ROOT, entry), join(packageDir, entry), { recursive: true });
   }
-  symlinkSync(join(REPO_ROOT, "node_modules"), join(packageDir, "node_modules"));
+  // A real node_modules dir of per-entry symlinks, so the fake npm can write
+  // .package-lock.json without touching the repo's own node_modules.
+  const nm = join(packageDir, "node_modules");
+  mkdirSync(nm);
+  for (const name of readdirSync(join(REPO_ROOT, "node_modules"))) {
+    if (name === ".package-lock.json") continue;
+    symlinkSync(join(REPO_ROOT, "node_modules", name), join(nm, name));
+  }
   const home = join(base, "home");
   mkdirSync(home, { recursive: true });
 
@@ -66,6 +77,7 @@ function buildFixture({ newDeps, doctorExit = 0 }) {
     ...installed,
     version: "9.9.9",
     dependencies: newDeps(installed.dependencies || {}),
+    ...(allowScripts ? { allowScripts } : {}),
   };
   const pkgRoot = join(base, "published");
   mkdirSync(join(pkgRoot, "package", "src", "cli"), { recursive: true });
@@ -83,7 +95,7 @@ function buildFixture({ newDeps, doctorExit = 0 }) {
   return { base, packageDir, home, pkgRoot, fakeBin, log };
 }
 
-function runUpdate(fx, { installExit = 0 } = {}) {
+function runUpdate(fx, { installExit = 0, lock, extraEnv = {} } = {}) {
   const res = spawnSync(process.execPath, [join(fx.packageDir, "bin/careerrat.mjs"), "update"], {
     cwd: fx.packageDir,
     encoding: "utf8",
@@ -94,6 +106,8 @@ function runUpdate(fx, { installExit = 0 } = {}) {
       FAKE_NPM_PKG_ROOT: fx.pkgRoot,
       FAKE_NPM_LOG: fx.log,
       FAKE_NPM_INSTALL_EXIT: String(installExit),
+      ...(lock ? { FAKE_NPM_LOCK: JSON.stringify(lock) } : {}),
+      ...extraEnv,
     },
   });
   const installs = existsSync(fx.log)
@@ -109,7 +123,63 @@ test("update runs npm install --omit=dev in the install root when runtime deps c
     assert.equal(res.status, 0, res.stderr + res.stdout);
     assert.equal(installs.length, 1);
     assert.deepEqual(installs[0].args, RUNTIME_DEPS_INSTALL_ARGS);
+    assert.ok(installs[0].args.includes("--ignore-scripts"));
     assert.equal(realpathSync(installs[0].cwd), fx.packageDir);
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+const lockOf = (pkgs) => ({
+  packages: Object.fromEntries(
+    Object.entries(pkgs).map(([name, version]) => [
+      `node_modules/${name}`,
+      { version, hasInstallScript: true },
+    ])
+  ),
+});
+
+test("update installs with --ignore-scripts (flag and env) and rebuilds only allowlisted packages", () => {
+  const fx = buildFixture({
+    newDeps: (d) => ({ ...d, "brand-new-dep": "^1.0.0" }),
+    allowScripts: { "native-ok@1.2.3": true, "bare-ok": true, "denied-pkg": false },
+  });
+  try {
+    const { res, installs } = runUpdate(fx, {
+      lock: lockOf({ "native-ok": "1.2.3", "bare-ok": "4.0.0", "denied-pkg": "1.0.0" }),
+      // a permissive environment must not re-enable scripts for the main install
+      extraEnv: { npm_config_ignore_scripts: "false" },
+    });
+    assert.equal(res.status, 0, res.stderr + res.stdout);
+    assert.equal(installs.length, 2);
+    assert.equal(installs[0].args[0], "install");
+    assert.ok(installs[0].args.includes("--ignore-scripts"));
+    assert.equal(installs[0].ignoreScriptsEnv, "true");
+    assert.deepEqual(installs[1].args, ["rebuild", "native-ok", "bare-ok"]);
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+});
+
+test("update stops with the manual command when a package with an unreviewed install script appears", () => {
+  const fx = buildFixture({
+    newDeps: (d) => ({ ...d, "brand-new-dep": "^1.0.0" }),
+    allowScripts: { "native-ok@1.2.3": true },
+  });
+  try {
+    const { res, installs } = runUpdate(fx, {
+      lock: lockOf({ "native-ok": "1.2.3", "sketchy-pkg": "2.0.0" }),
+      extraEnv: {
+        npm_config_ignore_scripts: "false",
+        npm_config_dangerously_allow_all_scripts: "true",
+      },
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /sketchy-pkg@2\.0\.0/);
+    assert.match(res.stderr, /allowScripts/);
+    assert.ok(res.stderr.includes("npm rebuild sketchy-pkg"), res.stderr);
+    assert.equal(installs.filter((i) => i.args[0] === "rebuild").length, 0);
+    assert.equal(installs[0].ignoreScriptsEnv, "true");
   } finally {
     rmSync(fx.base, { recursive: true, force: true });
   }

@@ -153,7 +153,13 @@ export function extractOver(tgz, targetDir) {
 // release that adds or bumps a runtime dependency leaves node_modules stale unless
 // update re-runs npm install. Only `dependencies` and `optionalDependencies` matter:
 // devDependencies never ship in a consumer install.
-export const RUNTIME_DEPS_INSTALL_ARGS = ["install", "--omit=dev", "--no-audit", "--no-fund"];
+export const RUNTIME_DEPS_INSTALL_ARGS = [
+  "install",
+  "--omit=dev",
+  "--ignore-scripts",
+  "--no-audit",
+  "--no-fund",
+];
 
 export function readRuntimeDeps(dir) {
   try {
@@ -181,13 +187,80 @@ export function runtimeDepsChanged(before, after) {
   );
 }
 
-// Runs `npm install --omit=dev` in the install root with default lifecycle-script
-// behaviour, matching a normal global install (node-pty needs its install script).
-// Returns { status, error }.
+// Scripts run only for packages the reviewed `allowScripts` policy in package.json
+// approves (the same policy source CI's check-install-scripts.mjs enforces). A key is
+// `name@version` or a bare `name`; `true` approves, `false` denies (never runs, never
+// blocks), absent means unreviewed.
+function scriptVerdict(allowScripts, name, version) {
+  if (!allowScripts || typeof allowScripts !== "object") return undefined;
+  for (const key of [`${name}@${version}`, name]) {
+    if (Object.hasOwn(allowScripts, key) && typeof allowScripts[key] === "boolean") {
+      return allowScripts[key];
+    }
+  }
+  return undefined;
+}
+
+// Installed packages that declare an install script, read from npm's hidden lockfile.
+// Returns null when it can't be read, so the caller fails closed.
+function installedScriptPackages(dir) {
+  try {
+    const lock = JSON.parse(readFileSync(join(dir, "node_modules", ".package-lock.json"), "utf8"));
+    const out = [];
+    for (const [path, entry] of Object.entries(lock.packages || {})) {
+      if (!entry?.hasInstallScript || entry.link || entry.inBundle) continue;
+      const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
+      if (name) out.push({ name, version: entry.version });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+// Reconciles runtime deps without letting a new transitive dependency's unreviewed
+// postinstall run as the operator: install with --ignore-scripts (flag AND env, so a
+// permissive user npmrc can't turn scripts back on), then `npm rebuild` only the
+// packages the allowScripts policy approves (node-pty needs its install script).
+// Returns { status, error, unreviewed }; `unreviewed` lists packages with an install
+// script the policy doesn't cover, in which case nothing further runs.
 export function installRuntimeDeps(dir) {
-  const res = spawnSync("npm", RUNTIME_DEPS_INSTALL_ARGS, { cwd: dir, stdio: "inherit" });
-  if (res.error) return { status: 1, error: res.error.message };
-  return { status: res.status == null ? 1 : res.status, error: null };
+  const env = { ...process.env, npm_config_ignore_scripts: "true" };
+  const res = spawnSync("npm", RUNTIME_DEPS_INSTALL_ARGS, { cwd: dir, stdio: "inherit", env });
+  if (res.error) return { status: 1, error: res.error.message, unreviewed: [] };
+  if (res.status !== 0) return { status: res.status ?? 1, error: null, unreviewed: [] };
+
+  let allowScripts = null;
+  try {
+    allowScripts = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).allowScripts;
+  } catch {
+    /* no readable policy: nothing is approved */
+  }
+  const withScripts = installedScriptPackages(dir);
+  if (withScripts === null) {
+    return {
+      status: 1,
+      error: "couldn't read node_modules/.package-lock.json to check install scripts",
+      unreviewed: [],
+    };
+  }
+  const allowed = [];
+  const unreviewed = [];
+  for (const { name, version } of withScripts) {
+    const verdict = scriptVerdict(allowScripts, name, version);
+    if (verdict === true) allowed.push(name);
+    else if (verdict !== false) unreviewed.push(`${name}@${version}`);
+  }
+  if (unreviewed.length > 0) return { status: 1, error: null, unreviewed };
+  if (allowed.length === 0) return { status: 0, error: null, unreviewed: [] };
+
+  const rebuild = spawnSync("npm", ["rebuild", ...new Set(allowed)], {
+    cwd: dir,
+    stdio: "inherit",
+    env: { ...process.env, npm_config_ignore_scripts: "false" },
+  });
+  if (rebuild.error) return { status: 1, error: rebuild.error.message, unreviewed: [] };
+  return { status: rebuild.status ?? 1, error: null, unreviewed: [] };
 }
 
 // ---------------------------------------------------------------------------

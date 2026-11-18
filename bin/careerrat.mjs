@@ -852,6 +852,15 @@ function runUpdate(extra) {
   if (runtimeDepsChanged(depsBefore, readRuntimeDeps(root))) {
     console.log("• Runtime dependencies changed. Installing them…");
     const dep = installRuntimeDeps(root);
+    if (dep.unreviewed?.length) {
+      console.error(
+        `Updated the files to ${readVersion()}, but stopped: ${dep.unreviewed.join(", ")} ` +
+          "declare an install script that isn't in the reviewed allowScripts policy, so it was " +
+          "not run. CareerRat may not start until you review it. If you trust it, run this by hand:\n" +
+          `    cd "${root}" && npm rebuild ${dep.unreviewed.map((p) => p.slice(0, p.lastIndexOf("@"))).join(" ")}`
+      );
+      return 1;
+    }
     if (dep.status !== 0) {
       console.error(
         `Updated the files to ${readVersion()}, but installing the new dependencies failed` +
