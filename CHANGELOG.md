@@ -13,6 +13,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- `check:jobs` checks links in parallel (8 at a time, 2 per host), skips duplicate links, and leaves out rejected, withdrawn, cut and closed jobs unless you pass `--include-closed`.
 - Outreach and reply drafts are fact-checked like every other document, and a draft with an invented number, employer or tool is held instead of sent.
 - Applying stops, with nothing submitted, when a site says you've hit its application limit or your account is restricted.
 - Screening answers no longer match a tool name inside another word ("Go" in "government", "Java" in "JavaScript"), only answer plain "have you used X" questions, and never override an answer you reviewed.
