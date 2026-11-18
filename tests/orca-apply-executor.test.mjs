@@ -2256,3 +2256,53 @@ test("configured executor never exposes browser CLI commands in user-facing fail
   assert.doesNotMatch(result.reason, /orca click|--page|@e9|Command failed/i);
   assert.equal(orcaCalls, 0);
 });
+
+test("Orca snapshot probes a required textbox that has no snapshot value", async () => {
+  const label = "Why do you want this job?";
+  const evals = [];
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: { e1: { name: label, role: "textbox" } },
+          snapshot: `- textbox "${label}" [required, ref=e1]`,
+        };
+      }
+      if (args[0] === "eval") {
+        evals.push(args);
+        return { result: JSON.stringify([{ label, stateKnown: true, value: "Because." }]) };
+      }
+      return {};
+    },
+  });
+
+  const snapshot = await ops.snapshot({ pageId: "page-1" });
+
+  assert.equal(evals.length > 0, true, "the live state probe must run");
+  assert.equal(snapshot.refs.e1.stateKnown, true);
+  assert.equal(snapshot.refs.e1.value, "Because.");
+});
+
+test("Orca snapshot leaves a required textbox unknown when the probe is unavailable", async () => {
+  const label = "Why do you want this job?";
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: { e1: { name: label, role: "textbox" } },
+          snapshot: `- textbox "${label}" [required, ref=e1]`,
+        };
+      }
+      if (args[0] === "eval") throw new Error("eval unavailable");
+      return {};
+    },
+  });
+
+  const snapshot = await ops.snapshot({ pageId: "page-1" });
+
+  assert.equal(snapshot.refs.e1.required, true);
+  assert.equal(snapshot.refs.e1.stateKnown, undefined);
+  assert.equal(snapshot.refs.e1.value, undefined);
+});

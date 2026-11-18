@@ -253,6 +253,15 @@ function normalizeSnapshot(raw = {}, probe = [], safeAdvanceLabels = []) {
       ...(state?.stateKnown ? { stateKnown: true, value: String(state.value || "") } : {}),
     };
   }
+  // A required answer control the label walk didn't reach (no LabelText wrapper,
+  // aria-label naming) can still be read back by its accessible name.
+  for (const [ref, entry] of Object.entries(refs)) {
+    if (!entry.required || entry.stateKnown === true || entry.field === false) continue;
+    if (!ANSWER_CONTROL_ROLES.has(String(entry.role || "").toLowerCase())) continue;
+    const state = probed.get(normalizeText(entry.name));
+    if (!state?.stateKnown || state.typeahead === true) continue;
+    refs[ref] = { ...entry, stateKnown: true, value: String(state.value || "") };
+  }
   return { origin: raw.origin, pageText: raw.snapshot, refs };
 }
 
@@ -299,11 +308,17 @@ function needsAdvanceSafetyProbe(raw = {}) {
   });
 }
 
+const ANSWER_CONTROL_ROLES = new Set(["textbox", "combobox", "checkbox", "radio"]);
+
 function needsFormStateProbe(raw = {}) {
   return (
     Object.values(raw.refs || {}).some(
       (entry) => String(entry?.role || "").toLowerCase() === "combobox"
-    ) || /LabelText[\s\S]*button "Yes"[\s\S]*button "No"/i.test(String(raw.snapshot || ""))
+    ) ||
+    snapshotNodes(raw.snapshot).some(
+      (node) => node.ref && node.required && !node.stateKnown && ANSWER_CONTROL_ROLES.has(node.role)
+    ) ||
+    /LabelText[\s\S]*button "Yes"[\s\S]*button "No"/i.test(String(raw.snapshot || ""))
   );
 }
 

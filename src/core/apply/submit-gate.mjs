@@ -79,7 +79,16 @@ function requiredFieldState(snapshot) {
   const unverified = [];
   for (const field of renderedFieldsFromSnapshot(snapshot)) {
     if (!field.required) continue;
-    if (field.stateKnown !== true || String(field.value || "").trim()) continue;
+    const entry = snapshot?.refs?.[field.ref] || {};
+    if (entry.fileInput === true || entry.disabled === true || entry.decorative === true) continue;
+    if (field.stateKnown !== true) {
+      unverified.push({
+        label: field.label,
+        reason: "The live answer in this required field couldn't be verified.",
+      });
+      continue;
+    }
+    if (String(field.value || "").trim()) continue;
     blanks.push({ label: field.label, reason: "The required field is blank in the live form." });
   }
   let unlabeled = 0;
@@ -235,6 +244,17 @@ export function evaluateSubmitGate({ snapshot, application, submitMode } = {}) {
           ? "1 required field is still blank."
           : `${blanks.length} required fields are still blank.`,
         blanks
+      )
+    );
+  }
+  if (unverified.length) {
+    refusals.push(
+      refusal(
+        "REQUIRED_FIELDS_UNVERIFIED",
+        unverified.length === 1
+          ? "1 required field's live answer couldn't be verified."
+          : `${unverified.length} required fields' live answers couldn't be verified.`,
+        unverified
       )
     );
   }

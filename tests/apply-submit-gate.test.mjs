@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
+import { createOrcaOps } from "../src/core/apply/orca-ops.mjs";
 import { evaluateSubmitGate, runApplySubmit } from "../src/core/apply/submit-gate.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { appMarkSubmitAttempt } from "../src/core/db/verbs/app.mjs";
@@ -503,6 +504,83 @@ describe("apply submit gate", () => {
     assert.equal(result.handedToPerson, true);
     assert.equal(result.status, "manual-apply");
     assert.equal(stored(ctx).status, "manual-apply");
+  });
+
+  for (const stateKnown of [undefined, false]) {
+    it(`refuses required textbox and choice controls with stateKnown ${stateKnown}`, async () => {
+      const ctx = workspace();
+      const details = stateKnown === undefined ? {} : { stateKnown };
+      const form = readyForm({
+        refs: refsOf([
+          ["e1", "textbox", "Why do you want this job?", true, details],
+          ["e2", "combobox", "Work authorization", true, details],
+          ["e3", "checkbox", "Relocation", true, details],
+          ["e4", "button", "Submit application"],
+        ]),
+      });
+      const { fake, promise } = run(ctx, { before: form });
+      const result = await promise;
+      assertRefused(result, fake, "REQUIRED_FIELDS_UNVERIFIED");
+      const reason = result.reasons.find((item) => item.code === "REQUIRED_FIELDS_UNVERIFIED");
+      assert.equal(reason.items.length, 3);
+      assert.ok(!result.reasons.some((item) => item.code === "REQUIRED_FIELDS_BLANK"));
+    });
+  }
+
+  it("does not call a confirmed attached file input, a disabled or optional field unverified", () => {
+    const verdict = evaluateSubmitGate({
+      snapshot: readyForm({
+        refs: refsOf([
+          ["e1", "textbox", "Full name", true, { stateKnown: true, value: "Sam" }],
+          ["e3", "textbox", "Resume", true, { fileInput: true, fileAttached: true }],
+          ["e5", "textbox", "Hidden", true, { disabled: true }],
+          ["e6", "textbox", "Nickname", false, {}],
+          ["e4", "button", "Submit application"],
+        ]),
+      }),
+      application: { link: GREENHOUSE_URL, evaluation: { gate: "keep" } },
+      submitMode: "auto",
+    });
+    assert.equal(verdict.ok, true, JSON.stringify(verdict.refusals));
+  });
+
+  it("an adapter-produced unknown required textbox reaches runApplySubmit with zero clicks", async () => {
+    const ctx = workspace();
+    const orca = createOrcaOps({
+      runOrcaImpl: async (args) => {
+        if (args[0] === "snapshot") {
+          return {
+            origin: GREENHOUSE_URL,
+            refs: {
+              e1: { name: "Why do you want this job?", role: "textbox" },
+              e4: { name: "Submit application", role: "button" },
+            },
+            snapshot: [
+              '- textbox "Why do you want this job?" [required, ref=e1]',
+              '- button "Submit application" [ref=e4]',
+            ].join("\n"),
+          };
+        }
+        throw new Error("probe unavailable");
+      },
+    });
+    const clicks = [];
+    const ops = {
+      snapshot: (args) => orca.snapshot(args),
+      clickButton: async (args) => clicks.push(args),
+    };
+    const result = await runApplySubmit({
+      repoRoot: ctx.dir,
+      env: ctx.env,
+      id: "app-1",
+      pageId: "page-1",
+      opsImpl: ops,
+      loadSubmitModeImpl: () => "auto",
+      sleepImpl: async () => {},
+    });
+    assert.equal(result.ok, false);
+    assert.ok(result.reasons.some((item) => item.code === "REQUIRED_FIELDS_UNVERIFIED"));
+    assert.equal(clicks.length, 0);
   });
 
   it("evaluateSubmitGate reports every failed check, not just the first", () => {
