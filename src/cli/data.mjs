@@ -72,6 +72,7 @@ import { undoWorkspaceKnowledge } from "../core/agent/knowledge-history.mjs";
 import { mergeRecordedCandidateEvidence } from "../core/agent/recorded-evidence-write.mjs";
 import { workspaceMessageAppend, workspaceThreadRead } from "../core/agent/workspace-thread.mjs";
 import { deliverDraftToPerson } from "../core/comms/deliver-draft.mjs";
+import { checkStoredDraftFacts } from "../core/comms/draft-facts.mjs";
 import { buildSendLinks, resolveRecipient } from "../core/comms/recipient.mjs";
 import { createBackup, listBackups, restoreBackup } from "../core/db/backup.mjs";
 import { dbExists, dbFilePath, NO_DATABASE_MESSAGE, openDb } from "../core/db/connection.mjs";
@@ -578,6 +579,12 @@ async function cmdCommHandoff(id) {
     if (!row) return fail(`no communication "${id}".`);
     const comm = JSON.parse(row.data);
     if (!comm.draft?.body) return fail("draft a reply and review it before handing it off.");
+    const draftFacts = checkStoredDraftFacts({ repoRoot: opts.root, env: opts.env, comm });
+    if (draftFacts && !draftFacts.ok) {
+      return fail(
+        `this draft names facts that aren't in the résumé or evidence, so it was held: ${draftFacts.messages.join("; ")}`
+      );
+    }
     const recipient = resolveRecipient(comm);
     const links =
       recipient.state === "ready"

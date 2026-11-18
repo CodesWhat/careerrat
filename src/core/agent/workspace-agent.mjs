@@ -27,7 +27,7 @@ import {
 import { PROVIDERS } from "../automation/session.mjs";
 import { statusTransition, toTrackOutcomeStatus } from "../automation/status-map.mjs";
 import { buildCoachingPlan } from "../coaching/plan.mjs";
-import { checkDraftFacts } from "../comms/draft-facts.mjs";
+import { checkDraftFacts, checkStoredDraftFacts } from "../comms/draft-facts.mjs";
 import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
 import { dbExists, requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
@@ -8759,6 +8759,42 @@ async function executeWorkspaceIntentCore({
         });
       }
 
+      const schedulingAllow = [
+        scheduling.plan.contactName,
+        scheduling.plan.timezone,
+        profile?.availability?.timezone,
+      ];
+      const schedulingFacts = checkDraftFacts({
+        repoRoot,
+        env,
+        comm: communication,
+        subject: scheduling.plan.subject,
+        body: scheduling.plan.body,
+        // The recruiter's name and the time zone are scheduling logistics, not
+        // claims about the candidate.
+        extraAllow: schedulingAllow,
+      });
+      if (!schedulingFacts.ok) {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `I held the scheduling reply because it names facts that aren't in your résumé or evidence. Confirm or remove: ${schedulingFacts.messages.join("; ")}`,
+          artifacts: [{ ...artifact, status: "held", plan: null, hold: null }],
+          metadata: {
+            state: "manual-fallback",
+            sent: false,
+            booked: false,
+            calendarChecked: scheduling.calendarChecked === true,
+            error: "COMMUNICATION_DRAFT_FACTS",
+            engine: scheduling.ai?.engine || null,
+            elapsedMs: scheduling.ai?.elapsedMs ?? null,
+          },
+          now,
+        });
+      }
+
       const draftedAt = resolvedCommunicationDate(undefined, now);
       const operation = commSetDraft({
         repoRoot,
@@ -8768,6 +8804,7 @@ async function executeWorkspaceIntentCore({
           ...(scheduling.plan.subject ? { subject: scheduling.plan.subject } : {}),
           body: scheduling.plan.body,
         },
+        factAllow: schedulingAllow,
         summary: scheduling.hold
           ? "Scheduling reply and tentative hold prepared for review."
           : "Scheduling reply prepared for review.",
@@ -8925,6 +8962,13 @@ async function executeWorkspaceIntentCore({
         throw actionError(
           "Draft a reply and review it before sending.",
           "COMMUNICATION_DRAFT_REQUIRED"
+        );
+      }
+      const sendFacts = checkStoredDraftFacts({ repoRoot, env, comm: communication });
+      if (sendFacts && !sendFacts.ok) {
+        throw actionError(
+          `This draft names facts that aren't in your résumé or evidence, so I held it. Confirm or remove: ${sendFacts.messages.join("; ")}`,
+          "COMMUNICATION_DRAFT_FACTS"
         );
       }
       if (typeof sendCommunicationImpl !== "function") {
@@ -9109,6 +9153,13 @@ async function executeWorkspaceIntentCore({
         throw actionError(
           "This draft still has unfinished placeholder text. Finish the draft, then try again.",
           "COMMUNICATION_DRAFT_PLACEHOLDER"
+        );
+      }
+      const handoffFacts = checkDraftFacts({ repoRoot, env, comm: communication, subject, body });
+      if (!handoffFacts.ok) {
+        throw actionError(
+          `This draft names facts that aren't in your résumé or evidence, so I held it. Confirm or remove: ${handoffFacts.messages.join("; ")}`,
+          "COMMUNICATION_DRAFT_FACTS"
         );
       }
       const recipient = resolveRecipient(communication);

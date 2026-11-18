@@ -179,6 +179,30 @@ export function extractFacts(text) {
   return { numbers, names };
 }
 
+// Scheduling details (days, dates, clock times, durations, time zones) are
+// logistics, not achievement claims. "Tuesday at 3 works" must not fail because
+// "3" is not on the résumé. Metrics ("40%", "$2M", "10 years") are untouched.
+const DAY_WORDS = MONTHS.join("|");
+const SCHEDULE_PATTERNS = [
+  /\b\d{1,2}:\d{2}(?:\s?(?:am|pm|a\.m\.|p\.m\.))?/gi,
+  /\b\d{1,2}(?:\s?(?:-|–|to|and)\s?\d{1,2})?\s?(?:am|pm|a\.m\.|p\.m\.)(?![a-z])/gi,
+  new RegExp(
+    `\\b(?:${DAY_WORDS}|today|tomorrow|tonight)\\b\\.?(?:\\s+(?:the\\s+)?\\d{1,2}(?:st|nd|rd|th)?\\b(?!\\s?%))?(?:\\s+(?:at|around|by|from|before|after|between)\\s+\\d{1,2}(?::\\d{2})?\\b(?!\\s?%))?(?:\\s*(?:-|–|to|and)\\s*\\d{1,2}(?::\\d{2})?\\b(?!\\s?%))?`,
+    "gi"
+  ),
+  /\b\d{1,2}(?:st|nd|rd|th)\b/gi,
+  /\b\d{4}-\d{2}-\d{2}\b/g,
+  /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g,
+  /\b\d+(?:\.\d+)?\s?(?:-\s?)?(?:minutes?|mins?|hours?|hrs?)\b/gi,
+  /\b(?:[ECMP][SD]T|UTC|GMT|ET|CT|MT|PT)\b/g,
+];
+
+function stripScheduling(text) {
+  let out = String(text || "");
+  for (const pattern of SCHEDULE_PATTERNS) out = out.replace(pattern, " ");
+  return out;
+}
+
 function flattenStrings(value, out = []) {
   if (value === null || value === undefined) return out;
   if (typeof value === "string") out.push(value);
@@ -222,7 +246,13 @@ function allowedText(context = {}, extraAllow = []) {
 // Check one or more texts. Returns { ok, violations: [{ kind, value, message }] }.
 // `texts` may be a string or an array; NEEDS YOU markers are skipped because
 // they are an honest gap, not a claim.
-export function checkArtifactFacts({ texts, context = {}, extraAllow = [], label = "" } = {}) {
+export function checkArtifactFacts({
+  texts,
+  context = {},
+  extraAllow = [],
+  label = "",
+  scheduling = false,
+} = {}) {
   const list = (Array.isArray(texts) ? texts : [texts])
     .map((text) => String(text || ""))
     .filter((text) => text.trim() && !/^\s*NEEDS YOU\b/.test(text));
@@ -233,7 +263,7 @@ export function checkArtifactFacts({ texts, context = {}, extraAllow = [], label
   const seen = new Set();
   const prefix = label ? `${label}: ` : "";
   for (const text of list) {
-    const { numbers, names } = extractFacts(text);
+    const { numbers, names } = extractFacts(scheduling ? stripScheduling(text) : text);
     for (const [value, shown] of numbers) {
       const key = `n:${value}`;
       if (knownNumbers.has(value) || seen.has(key)) continue;

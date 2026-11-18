@@ -7422,6 +7422,48 @@ test("scheduling persists only future offers from the real planner", async () =>
   assert.doesNotMatch(comm.draft.body, /August 9/);
 });
 
+test("scheduling holds a ready plan whose body invents revenue, an employer and a tool", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { status: "interview" });
+  seedCommunication(repoRoot);
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "scheduling.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Accept Wednesday at 2 PM ET and prepare the reply.",
+      },
+    },
+    prepareSchedulingPlanImpl: async () => ({
+      status: "ready",
+      plan: {
+        state: "reply_only",
+        timezone: "America/New_York",
+        subject: "Re: Interview availability",
+        body: "Wednesday at 2 PM ET works. I grew revenue $9M at Globex using Kubernetes.",
+        contactName: "Avery",
+        slots: [],
+        missing: [],
+      },
+      calendarChecked: true,
+      hold: null,
+      ai: { engine: { label: "Codex" }, elapsedMs: 1 },
+    }),
+    now: () => new Date("2030-08-10T12:00:00.000Z"),
+  });
+  const message = result.messages.at(-1);
+  assert.equal(message.metadata.state, "manual-fallback");
+  assert.equal(message.metadata.error, "COMMUNICATION_DRAFT_FACTS");
+  assert.equal(message.artifacts[0].status, "held");
+  assert.match(message.text, /Globex/);
+  const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(comm.draft, undefined);
+  assert.equal(comm.status, "needs-reply");
+});
+
 test("scheduling needs-you results do not create a draft or invent a booked interview", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { status: "interview" });

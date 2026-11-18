@@ -159,6 +159,7 @@ function seedFixture(repoRoot) {
       applicationId: "app-with-draft",
       company: "Hooli",
       channel: "email",
+      subject: "SRE next steps",
       status: "drafted",
       draft: "Hi there, following up on...",
     },
