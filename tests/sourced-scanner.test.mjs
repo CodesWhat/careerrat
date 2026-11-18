@@ -1477,7 +1477,9 @@ test("same Hireology requisition dedupes to the richer Hcareers capture independ
     assert.equal(result.kept[0].bodyText, rich.bodyText);
     assert.equal(result.kept[0].provider, "hcareers");
     assert.equal(result.duplicates.length, 1);
-    assert.equal(result.duplicates[0].duplicateReason, "req_id_batch");
+    // The two URLs differ only by tracking params, which the shared posting
+    // normalizer strips, so the URL key now matches before the req-id key.
+    assert.equal(result.duplicates[0].duplicateReason, "url_batch");
   }
 });
 

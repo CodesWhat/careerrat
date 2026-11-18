@@ -1,8 +1,8 @@
 // match.mjs — the M9 dedup/tracker-match: the mechanical implementation of
 // what evaluate-job SKILL.md STEP 3.25 today only describes in prose ("check
 // the tracker before treating a posting as new"). Reuses extractReqId()
-// verbatim from sourced-scanner.mjs, normalizeUrl() verbatim from
-// sourced-delta.mjs, and normalizeCompanyRoleKey() verbatim from
+// verbatim from sourced-scanner.mjs, normalizePostingUrl() from
+// posting-url.mjs, and normalizeCompanyRoleKey() verbatim from
 // tracker-data.mjs — no second implementation of any of the three.
 //
 // This is the fix for the known dedup gap AT INTAKE TIME ONLY: today
@@ -15,7 +15,7 @@
 // intake's own classify step. search-jobs' sweep-level gap is a different
 // call site with the same underlying bug — NOT fixed here (see the
 // M9 design docs for the natural follow-on).
-import { normalizeUrl } from "../scoring/sourced-delta.mjs";
+import { normalizePostingUrl } from "../scoring/posting-url.mjs";
 import { extractReqId } from "../scoring/sourced-scanner.mjs";
 import { normalizeCompanyRoleKey, normalizeTextKey } from "../tracker/tracker-data.mjs";
 
@@ -57,7 +57,7 @@ export function matchTrackerRecord({ db, url, company, role } = {}) {
   const rows = [...rowsWithParsedData(db, "applications"), ...rowsWithParsedData(db, "sourced")];
 
   const targetReqId = url ? extractReqId(url) : { id: null };
-  const targetUrl = url ? normalizeUrl(url) : "";
+  const targetUrl = url ? normalizePostingUrl(url) : "";
   const targetKey = company && role ? normalizeCompanyRoleKey(company, role) : null;
   const targetCompanyKey = company ? normalizeTextKey(company) : null;
 
@@ -67,7 +67,7 @@ export function matchTrackerRecord({ db, url, company, role } = {}) {
     if (best) best = { row: best, confidence: "exact_req_id" };
   }
   if (!best && targetUrl) {
-    const hit = rows.find((row) => row.link && normalizeUrl(row.link) === targetUrl);
+    const hit = rows.find((row) => row.link && normalizePostingUrl(row.link) === targetUrl);
     if (hit) best = { row: hit, confidence: "exact_url" };
   }
   if (!best && targetKey) {
