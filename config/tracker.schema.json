@@ -58,7 +58,8 @@
               "draft":         { "type": ["string", "null"], "description": "Optional drafted follow-up message body." },
               "generatedAt":   { "type": ["string", "null"], "description": "ISO timestamp the follow-up/draft was generated." },
               "nextActionDue": { "type": ["string", "null"], "description": "ISO date the next action is due (cadence)." },
-              "sentCount":     { "type": ["number", "null"], "description": "How many follow-ups already sent on this thread." }
+              "sentCount":     { "type": ["number", "null"], "description": "How many follow-ups already sent on this thread. Written by commMarkSent; read by the app-nudge max_count cap." },
+              "lastSentAt":    { "type": ["string", "null"], "description": "ISO timestamp of the most recent follow-up sent for this application (set by commMarkSent)." }
             }
           },
           "statusNote": { "type": ["string", "null"], "description": "One-sentence present-tense live state for the jobs card. e.g. 'Awaiting HM debrief — recruiter screen cleared 06-12.' No ATS mechanics, no comp intel." },

@@ -462,6 +462,16 @@ function normalizeCommVerification(value, { hadDraft = false, hasEvidence = fals
   return "user_report";
 }
 
+// Mirrors cadence.mjs APPLIED_STATUSES (plus the empty status it also treats as applied).
+const APPLIED_FOLLOW_UP_STATUSES = new Set([
+  "",
+  "applied",
+  "submitted",
+  "awaiting",
+  "reviewing",
+  "screening",
+]);
+
 // commMarkSent({id, at?, summary?}) — the "sent clears draft" hard invariant
 // (AGENTS.md): status → waiting, comm.draft cleared, and — if the draft was
 // backed by app.followUp.draft — that's cleared too, in the SAME write.
@@ -504,12 +514,24 @@ export function commMarkSent({
     let clearedAppFollowUpDraft = false;
     if (applicationId) {
       const app = getRow(db, "applications", applicationId);
-      if (app?.followUp?.draft != null) {
+      const hadAppDraft = app?.followUp?.draft != null;
+      // A sent message counts toward the app-nudge cap when it was the
+      // app-backed follow-up draft or went out on a row still in the applied
+      // set (cadence reads sentCount; nothing else writes it).
+      const appStatus = String(app?.status || "").toLowerCase();
+      const isAppFollowUp = hadAppDraft || (app && APPLIED_FOLLOW_UP_STATUSES.has(appStatus));
+      if (app && isAppFollowUp) {
+        const prevCount = Number(app.followUp?.sentCount);
         putRow(db, "applications", applicationId, {
           ...app,
-          followUp: { ...app.followUp, draft: null },
+          followUp: {
+            ...(app.followUp || {}),
+            ...(hadAppDraft ? { draft: null } : {}),
+            sentCount: (Number.isFinite(prevCount) ? prevCount : 0) + 1,
+            lastSentAt: sentAt,
+          },
         });
-        clearedAppFollowUpDraft = true;
+        clearedAppFollowUpDraft = hadAppDraft;
       }
     }
 
