@@ -5,23 +5,38 @@ import { fileURLToPath } from "node:url";
 
 import { dbExists } from "../src/core/db/connection.mjs";
 import { jobLinkCheckLast, jobLinkCheckRecord } from "../src/core/db/verbs/search-liveness.mjs";
+import { checkLinks, dedupeUrls, trackerLinks } from "../src/core/liveness/check-links.mjs";
 import { closedSinceLastCheck } from "../src/core/liveness/closed-since.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { displayPath, userPath } from "../src/core/paths/workspace.mjs";
-import { loadTrackerData } from "../src/core/tracker/tracker-data.mjs";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const pathCtx = { repoRoot: root };
 const args = process.argv.slice(2);
 const fileArg = valueAfter("--file");
 const strict = args.includes("--strict");
+const includeClosed = args.includes("--include-closed");
 let urls = [];
+
+if (args.includes("--help") || args.includes("-h")) {
+  console.log(`Usage: check:jobs [--file <links.txt>] [--strict] [--include-closed]
+
+Checks whether saved job links are still open and lists jobs closed since the last check.
+Links are deduplicated and checked in parallel (8 at a time, 2 per host).
+
+  --file <path>     Check every distinct URL in a file (one per line) instead of the tracker.
+  --include-closed  Also check tracker rows that are rejected, withdrawn, cut or closed
+                    (skipped by default).
+  --strict          Exit non-zero when a link could not be checked, not only when it closed.`);
+  process.exit(0);
+}
 
 if (fileArg) {
   urls = readFileSync(fileArg, "utf8")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+  urls = dedupeUrls(urls);
 } else {
   const trackerPath = userPath(pathCtx, "workspace/tracker.json");
   if (!existsSync(trackerPath)) {
@@ -30,18 +45,14 @@ if (fileArg) {
     );
     process.exit(1);
   }
-  const data = loadTrackerData(trackerPath);
-  urls = [...data.apps, ...data.sourced].map((row) => row.link).filter(Boolean);
+  urls = trackerLinks(JSON.parse(readFileSync(trackerPath, "utf8")), { includeClosed });
 }
 
 const keepLedger = dbExists(pathCtx);
 const previous = keepLedger ? jobLinkCheckLast(pathCtx) : new Map();
-const results = [];
-for (const url of urls) {
-  const result = await checkUrlLiveness(url);
-  results.push(result);
-  console.log(`${result.result.padEnd(9)} ${url} - ${result.reason}`);
-}
+const results = await checkLinks(urls, (url) => checkUrlLiveness(url), {
+  onResult: (result, url) => console.log(`${result.result.padEnd(9)} ${url} - ${result.reason}`),
+});
 
 // Codes meaning the check itself never ran (as opposed to a page that was read
 // and could not be judged).

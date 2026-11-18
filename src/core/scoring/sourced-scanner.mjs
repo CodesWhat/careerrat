@@ -2251,7 +2251,9 @@ export function filterAndDedupeOffers(
         });
         continue;
       }
-      rating = scoreSourcedOffer(offer, config);
+      // Non-adjacent titles are dropped before scoring, since scoring is the
+      // expensive step and the result could not change the outcome.
+      if (titleDecision.adjacent) rating = scoreSourcedOffer(offer, config);
       // Adjacent titles are shown but ranked below exact matches (base 70 vs
       // 82), so only a real cut signal or a different job family removes them,
       // never the mode threshold.

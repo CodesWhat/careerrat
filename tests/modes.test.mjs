@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { evaluateGate } from "../src/core/evaluate/gate.mjs";
 import {
   computeAllows,
   DEFAULT_MODES,
+  loadModesSchema,
   normalizeModes,
   USAGE_OPERATIONS,
 } from "../src/core/profile/modes.mjs";
@@ -213,4 +215,23 @@ test("selective application mode holds medium body-read fits for review", () => 
   assert.equal(result.gate, "REVIEW");
   assert.equal(result.action, "manual");
   assert.ok(result.reasons.some((r) => r.includes("application mode selective")));
+});
+
+test("normalizeModes reads the default schema once and honours explicit schemas", () => {
+  const readFile = mock.method(fs, "readFileSync");
+  syncBuiltinESMExports();
+  try {
+    for (let i = 0; i < 5; i += 1) normalizeModes({ usage_mode: "lean" });
+    const schemaReads = readFile.mock.calls.filter((c) =>
+      String(c.arguments[0]).endsWith("modes.schema.json")
+    ).length;
+    assert.ok(schemaReads <= 1, `schema read ${schemaReads} times`);
+  } finally {
+    readFile.mock.restore();
+    syncBuiltinESMExports();
+  }
+  const strict = { type: "object", additionalProperties: false, properties: {} };
+  assert.equal(normalizeModes({ usage_mode: "lean" }, { schema: strict }).valid, false);
+  assert.equal(normalizeModes({ usage_mode: "lean" }).valid, true);
+  assert.notEqual(loadModesSchema(), loadModesSchema());
 });

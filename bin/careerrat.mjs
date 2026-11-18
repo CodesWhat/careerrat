@@ -67,10 +67,14 @@ import {
   extractOver,
   fetchTarball,
   findUserDataLeaks,
+  installRuntimeDeps,
   isNewer,
   latestVersion,
+  RUNTIME_DEPS_INSTALL_ARGS,
+  readRuntimeDeps,
   readUpdateNotice,
   refreshUpdateCacheInBackground,
+  runtimeDepsChanged,
 } from "../src/core/update/update-core.mjs";
 import { readVersion } from "../src/core/version.mjs";
 
@@ -812,6 +816,7 @@ function runUpdate(extra) {
   }
 
   const runningDashboard = activeRecordedDashboard();
+  const depsBefore = readRuntimeDeps(root);
 
   console.log(`• Fetching careerrat@${latest}…`);
   let pkg;
@@ -842,15 +847,55 @@ function runUpdate(extra) {
     pkg.cleanup();
   }
 
+  // extractOver only swaps package files; reconcile node_modules when the release
+  // added or bumped a runtime dependency, or the new code can't import it.
+  if (runtimeDepsChanged(depsBefore, readRuntimeDeps(root))) {
+    console.log("• Runtime dependencies changed. Installing them…");
+    const dep = installRuntimeDeps(root);
+    if (dep.unreviewed?.length) {
+      // "name@1.2.3 (bundled)" -> "name"; scoped names keep their leading "@".
+      const pkgName = (entry) => {
+        const spec = String(entry).replace(/\s*\(bundled\)$/, "");
+        const at = spec.lastIndexOf("@");
+        return at > 0 ? spec.slice(0, at) : spec;
+      };
+      const toRebuild = [...new Set([...(dep.approved || []), ...dep.unreviewed].map(pkgName))];
+      const approvedCmd =
+        `\nNothing was rebuilt. After you've reviewed and approved the packages above, run this to finish the install` +
+        ` (a plain \`careerrat update\` won't redo it):\n    cd "${root}" && npm rebuild ${toRebuild.join(" ")}`;
+      console.error(
+        `Updated the files to ${readVersion()}, but stopped before rebuilding anything: ` +
+          `${dep.unreviewed.join(", ")} declare an install script that isn't covered by the ` +
+          "reviewed allowScripts policy in package.json, so no install scripts were run. " +
+          "CareerRat may not start until this is sorted out. To trust a package, add it to " +
+          `allowScripts (true to run, false to deny) in "${join(root, "package.json")}".` +
+          approvedCmd
+      );
+      return 1;
+    }
+    if (dep.status !== 0) {
+      console.error(
+        `Updated the files to ${readVersion()}, but installing the new dependencies failed` +
+          `${dep.error ? ` (${dep.error})` : ` (npm exited ${dep.status})`}. ` +
+          "CareerRat may not start until they're installed. Run this by hand:\n" +
+          `    cd "${root}" && npm ${RUNTIME_DEPS_INSTALL_ARGS.join(" ")}`
+      );
+      return 1;
+    }
+  }
+
   // Re-shim skills + health-check using the freshly extracted code.
   run(join(root, "scripts/install-skills.mjs"), ["--soft"]);
   console.log(`• Updated ${current} → ${readVersion()}. Running doctor…`);
-  run(join(root, CLIS.doctor), []);
+  const doctorStatus = run(join(root, CLIS.doctor), []);
+  if (doctorStatus !== 0) {
+    console.error("Updated, but doctor reported problems: run careerrat doctor");
+  }
   if (runningDashboard && restartDashboardAfterUpdate(runningDashboard) !== 0) {
     console.error("CareerRat updated, but the running local app could not be refreshed.");
     return 1;
   }
-  return 0;
+  return doctorStatus === 0 ? 0 : 1;
 }
 
 function activeRecordedDashboard() {

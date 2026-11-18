@@ -57,6 +57,7 @@ import {
   sourceWatermarkUpsert,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { computeFollowUps } from "../src/core/tracker/cadence.mjs";
 
 const cleanupRoots = [];
 
@@ -825,6 +826,233 @@ test("commMarkSent clears comm.draft AND the linked app's followUp.draft in the 
   const appRow = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-with-draft");
   const app = JSON.parse(appRow.data);
   assert.equal(app.followUp.draft, null);
+});
+
+function readAppRow(db, id) {
+  return JSON.parse(db.prepare("SELECT data FROM applications WHERE id = ?").get(id).data);
+}
+
+test("commMarkSent increments app.followUp.sentCount and stamps lastSentAt for an app follow-up", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  commMarkSent({ repoRoot, id: "comm-with-draft", at: "2026-06-01T00:00:00.000Z" });
+  let app = readAppRow(db, "app-with-draft");
+  assert.equal(app.followUp.sentCount, 1);
+  assert.equal(app.followUp.lastSentAt, "2026-06-01T00:00:00.000Z");
+  assert.equal(app.followUp.draft, null);
+
+  // Applied-status row with no followUp object at all (undefined followUp).
+  commUpsert({
+    repoRoot,
+    row: {
+      id: "comm-applied-nodraft",
+      applicationId: "app-with-draft",
+      company: "Hooli",
+      channel: "email",
+      status: "drafted",
+      followUpKind: "app-nudge",
+      draft: { body: "second nudge" },
+      messages: [],
+    },
+  });
+  commMarkSent({ repoRoot, id: "comm-applied-nodraft", at: "2026-06-08T00:00:00.000Z" });
+  app = readAppRow(db, "app-with-draft");
+  assert.equal(app.followUp.sentCount, 2);
+  assert.equal(app.followUp.lastSentAt, "2026-06-08T00:00:00.000Z");
+});
+
+test("commMarkSent does not count a resume or availability reply on an applied app", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  commMarkSent({ repoRoot, id: "comm-with-draft", at: "2026-06-01T00:00:00.000Z" });
+  for (const [id, body] of [
+    ["comm-resume", "Attached is my resume."],
+    ["comm-availability", "I'm free Tuesday at 2pm."],
+  ]) {
+    commUpsert({
+      repoRoot,
+      row: {
+        id,
+        applicationId: "app-with-draft",
+        company: "Hooli",
+        channel: "email",
+        status: "drafted",
+        draft: { body },
+        messages: [],
+      },
+    });
+    commMarkSent({ repoRoot, id, at: "2026-06-09T00:00:00.000Z" });
+  }
+  const app = readAppRow(db, "app-with-draft");
+  assert.equal(app.followUp.sentCount, 1);
+  assert.equal(app.followUp.lastSentAt, "2026-06-01T00:00:00.000Z");
+});
+
+test("commMarkSent counts a legacy app followUp draft that has no kind, but not a thank-you draft", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  const base = readAppRow(db, "app-with-draft");
+  assert.equal(base.followUp.kind, undefined);
+  commMarkSent({ repoRoot, id: "comm-with-draft" });
+  assert.equal(readAppRow(db, "app-with-draft").followUp.sentCount, 1);
+
+  const withKind = readAppRow(db, "app-with-draft");
+  db.prepare("UPDATE applications SET data = ? WHERE id = ?").run(
+    JSON.stringify({
+      ...withKind,
+      followUp: { ...withKind.followUp, kind: "thank-you", draft: { body: "Thanks!" } },
+    }),
+    "app-with-draft"
+  );
+  commUpsert({
+    repoRoot,
+    row: {
+      id: "comm-ty",
+      applicationId: "app-with-draft",
+      company: "Hooli",
+      channel: "email",
+      status: "drafted",
+      draft: { body: "Thanks!" },
+      messages: [],
+    },
+  });
+  commMarkSent({ repoRoot, id: "comm-ty" });
+  const app = readAppRow(db, "app-with-draft");
+  assert.equal(app.followUp.sentCount, 1);
+  assert.equal(app.followUp.draft, null);
+});
+
+test("commMarkSent does not count a non-follow-up message (non-applied app, no app draft)", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  commUpsert({
+    repoRoot,
+    row: {
+      id: "comm-non-applied",
+      applicationId: "app-non-interview",
+      company: "Initech",
+      channel: "email",
+      status: "drafted",
+      draft: { body: "Thanks for the call." },
+      messages: [],
+    },
+  });
+  commMarkSent({ repoRoot, id: "comm-non-applied" });
+  const app = readAppRow(db, "app-non-interview");
+  assert.equal(app.followUp?.sentCount, undefined);
+  assert.equal(app.followUp?.lastSentAt, undefined);
+});
+
+test("app-nudge stops after max_count sent follow-ups (commMarkSent integration)", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  const base = readAppRow(db, "app-with-draft");
+  db.prepare("UPDATE applications SET data = ? WHERE id = ?").run(
+    JSON.stringify({ ...base, appliedAt: "2026-01-01", contactEmail: "hr@hooli.example" }),
+    "app-with-draft"
+  );
+  const rules = { appNudge: { enabled: true, afterDays: 7, maxCount: 2 } };
+  const nudges = () =>
+    computeFollowUps(
+      { applications: [readAppRow(db, "app-with-draft")], communications: [] },
+      { now: "2026-03-01T00:00:00.000Z", rules }
+    ).filter((f) => f.kind === "app-nudge");
+
+  assert.equal(nudges().length, 1);
+  commMarkSent({ repoRoot, id: "comm-with-draft" });
+  assert.equal(nudges().length, 1, "one sent follow-up is under the cap of 2");
+  commUpsert({
+    repoRoot,
+    row: {
+      id: "comm-second",
+      applicationId: "app-with-draft",
+      company: "Hooli",
+      channel: "email",
+      status: "drafted",
+      followUpKind: "app-nudge",
+      draft: { body: "second" },
+      messages: [],
+    },
+  });
+  commMarkSent({ repoRoot, id: "comm-second" });
+  assert.equal(nudges().length, 0, "nudge stops once max_count follow-ups were sent");
+});
+
+function upsertNudgeComm(repoRoot, id, extra = {}) {
+  commUpsert({
+    repoRoot,
+    row: {
+      id,
+      applicationId: "app-with-draft",
+      company: "Hooli",
+      channel: "email",
+      status: "drafted",
+      draft: { body: `body ${id}` },
+      messages: [],
+      ...extra,
+    },
+  });
+}
+
+test("a nudge marker is consumed by its send: a later resume reply on the same thread doesn't count", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  commMarkSent({ repoRoot, id: "comm-with-draft", at: "2026-05-01T00:00:00.000Z" });
+  upsertNudgeComm(repoRoot, "comm-thread", { followUpKind: "app-nudge" });
+  commMarkSent({ repoRoot, id: "comm-thread", at: "2026-06-01T00:00:00.000Z" });
+  assert.equal(
+    JSON.parse(db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-thread").data)
+      .followUpKind,
+    undefined
+  );
+  commSetDraft({ repoRoot, id: "comm-thread", draft: { body: "Attached is my resume." } });
+  commMarkSent({ repoRoot, id: "comm-thread", at: "2026-06-02T00:00:00.000Z" });
+  const app = readAppRow(db, "app-with-draft");
+  assert.equal(app.followUp.sentCount, 2);
+  assert.equal(app.followUp.lastSentAt, "2026-06-01T00:00:00.000Z");
+});
+
+test("a marked nudge replaced by a new unmarked draft doesn't count when sent", () => {
+  for (const replace of ["commSetDraft", "commUpsert"]) {
+    const repoRoot = tempRepo();
+    seedFixture(repoRoot);
+    const db = openDb({ repoRoot });
+    commMarkSent({ repoRoot, id: "comm-with-draft" });
+    upsertNudgeComm(repoRoot, "comm-replace", { followUpKind: "app-nudge" });
+    if (replace === "commSetDraft") {
+      commSetDraft({ repoRoot, id: "comm-replace", draft: { body: "Here is my availability." } });
+    } else {
+      upsertNudgeComm(repoRoot, "comm-replace", {
+        followUpKind: "app-nudge",
+        draft: { body: "Here is my availability." },
+      });
+    }
+    commMarkSent({ repoRoot, id: "comm-replace" });
+    assert.equal(readAppRow(db, "app-with-draft").followUp.sentCount, 1, replace);
+  }
+});
+
+test("two separately marked nudges on one thread count twice", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+  commMarkSent({ repoRoot, id: "comm-with-draft" });
+  upsertNudgeComm(repoRoot, "comm-two", { followUpKind: "app-nudge" });
+  commMarkSent({ repoRoot, id: "comm-two" });
+  upsertNudgeComm(repoRoot, "comm-two", {
+    followUpKind: "app-nudge",
+    draft: { body: "nudge again" },
+  });
+  commMarkSent({ repoRoot, id: "comm-two" });
+  assert.equal(readAppRow(db, "app-with-draft").followUp.sentCount, 3);
 });
 
 // ---------------------------------------------------------------------------
