@@ -79,10 +79,22 @@ const CLAIM_PATTERNS = [
   new RegExp(`^\\s*(?:${CLAIM_VERBS})\\b`, "i"),
 ];
 
-// Does this sentence assert something about the candidate's own history? A
-// deliberately simple first-person + experience/achievement-wording heuristic.
+// Fail closed: any clause with the candidate as subject ("I", "I'm", "I've",
+// "my ...") is a claim unless its verb is a discussion/interest one, which
+// asserts nothing about the candidate's background. Keep this list short.
+const FIRST_PERSON = /\bI\b|\bmy\b/i;
+const CLAUSE_SPLIT = /\s*(?:[,;]|\b(?:and|but|though|while|since|because)\b)\s*/i;
+const DISCUSSION_VERBS =
+  /\b(?:discuss(?:ing)?|talk(?:ing)?|chat(?:ting)?|learn(?:ing)?(?:\s+more)?|hear(?:ing)?(?:\s+more)?|ask(?:ing)?|(?:have|had)\s+(?:a\s+few\s+|some\s+|any\s+)?questions?|interested\s+in|would\s+love\s+to|(?:would\s+)?like\s+to\s+(?:discuss|talk|chat|learn|hear|ask|understand)|look(?:ing)?\s+forward|happy\s+to|glad\s+to|curious|want(?:ed)?\s+to\s+understand)\b/i;
+
+// Does this sentence assert something about the candidate's own history?
+// Explicit experience/achievement wording always counts; otherwise any
+// first-person clause counts unless it is a discussion/interest clause.
 export function isCandidateClaim(sentence) {
-  return CLAIM_PATTERNS.some((pattern) => pattern.test(sentence));
+  if (CLAIM_PATTERNS.some((pattern) => pattern.test(sentence))) return true;
+  return String(sentence || "")
+    .split(CLAUSE_SPLIT)
+    .some((clause) => FIRST_PERSON.test(clause) && !DISCUSSION_VERBS.test(clause));
 }
 
 function splitSentences(text) {

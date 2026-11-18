@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { deliverDraftToPerson } from "../src/core/comms/deliver-draft.mjs";
-import { checkDraftFacts } from "../src/core/comms/draft-facts.mjs";
+import { checkDraftFacts, isCandidateClaim } from "../src/core/comms/draft-facts.mjs";
 import { closeAll, openDb, requireDb } from "../src/core/db/connection.mjs";
 import { commSetDraft, commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { putRow } from "../src/core/db/verbs/shared.mjs";
@@ -249,6 +249,10 @@ test("inbound terms are allowed in non-claim sentences, not in candidate-claim o
   for (const body of [
     "I'd like to discuss Kubernetes.",
     "Happy to talk about the Kubernetes migration you mentioned.",
+    "I would like to discuss Kubernetes.",
+    "I'm curious about the Kubernetes setup.",
+    "I look forward to hearing more about Kubernetes.",
+    "Could you tell me more about Kubernetes?",
   ]) {
     const result = check(body);
     assert.equal(result.ok, true, `${body}: ${result.messages.join("; ")}`);
@@ -257,9 +261,21 @@ test("inbound terms are allowed in non-claim sentences, not in candidate-claim o
     "I have 10 years of experience using Kubernetes.",
     "I built Kubernetes clusters.",
     "Thanks Rae. My 10 years with Kubernetes fit well.",
+    "I have been using Kubernetes for 10 years.",
+    "I am experienced in Kubernetes.",
+    "I specialize in Kubernetes.",
+    "I'm proficient with Kubernetes.",
+    "I know Kubernetes well.",
+    "Thanks Rae, Kubernetes is my strongest skill.",
+    "I've worked extensively with Kubernetes.",
+    "I'd love to discuss Kubernetes, and I specialize in it.",
   ]) {
     assert.equal(check(body).ok, false, body);
   }
+});
+
+test("a sentence-initial 'Kubernetes is my strongest skill' is still classed as a claim", () => {
+  assert.equal(isCandidateClaim("Kubernetes is my strongest skill."), true);
 });
 
 test("commUpsert fact-checks a new or changed draft but not unchanged drafts or inbound ingest", (t) => {
