@@ -154,6 +154,9 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
+      # CR102: fail on high or critical advisories in production dependencies.
+      - name: Audit production dependencies (high and above)
+        run: npm audit --omit=dev --audit-level=high
       # Same suite as `npm test`, plus Node's built-in coverage written to
       # coverage/lcov.info for the Codecov upload below.
       - name: Core test suite
