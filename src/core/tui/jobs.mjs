@@ -111,13 +111,25 @@ function unknownPay(comp = {}) {
   };
 }
 
+// Parsing a salary note is the costly part of a refresh and the text rarely
+// changes, so remember the result by its text. Cleared whole at the cap.
+const COMP_BAND_CACHE_LIMIT = 4096;
+const compBandCache = new Map();
+function compBandFor(text) {
+  if (compBandCache.has(text)) return compBandCache.get(text);
+  const band = extractCompBand(text);
+  if (compBandCache.size >= COMP_BAND_CACHE_LIMIT) compBandCache.clear();
+  compBandCache.set(text, band);
+  return band;
+}
+
 // Saved jobs usually carry pay as free text (base, tc), not a structured
 // evaluation. Read a range only where the existing compensation parser finds
 // one; vague text such as "unlisted" stays unknown.
 function notePay(record, currency, basis) {
   const text = basis === "annual-earnings" ? record.tc : record.base;
   if (typeof text !== "string" || !text.trim()) return null;
-  const band = extractCompBand(text);
+  const band = compBandFor(text);
   const min = numeric(band?.min);
   const max = numeric(band?.max);
   if (min === null || max === null) return null;

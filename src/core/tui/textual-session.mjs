@@ -46,32 +46,34 @@ export async function createTextualSession({
   }
   // The selected job travels in full after each snapshot and selection; the
   // snapshot itself carries summary rows only, so its size stays flat.
-  function sendDetail() {
+  function sendDetail(detail) {
+    if (detail) return send({ type: "detail", id: detail.id, job: detail });
     const job = currentView?.jobs.find((item) => item.id === state.selectedId);
     if (job) send({ type: "detail", id: job.id, job: jobDetail(job) });
   }
   // A refresh that finds nothing new sends nothing, so an idle workspace stays
   // quiet and a status message isn't wiped by a snapshot identical to the last.
-  function snapshot({ force = true } = {}) {
-    const view = viewJobs(data, state);
+  // `view` is the viewJobs result the caller already built for this state.
+  // The key covers what goes over the wire (summary rows, state, the selected
+  // job's detail), not every full record; currentView still keeps them all.
+  function snapshot({ force = true, view = viewJobs(data, state) } = {}) {
     currentView = view;
     const capped = capWorkspaceMessages(view.workspaceMessages);
-    const full = {
+    const summary = {
       ...view,
       workspaceMessages: capped.messages,
       workspaceMessagesTotal: capped.total,
+      jobs: summaryJobs(view.jobs),
     };
+    const selected = view.jobs.find((item) => item.id === state.selectedId);
+    const detail = selected ? jobDetail(selected) : null;
     const key = createHash("sha1")
-      .update(JSON.stringify({ view: full, state }))
+      .update(JSON.stringify({ view: summary, state, detail }))
       .digest("hex");
     if (!force && key === lastSnapshot) return;
     lastSnapshot = key;
-    send({
-      type: "workspace",
-      view: { ...full, jobs: summaryJobs(view.jobs) },
-      state,
-    });
-    sendDetail();
+    send({ type: "workspace", view: summary, state });
+    if (detail) sendDetail(detail);
   }
   // Only the rows that changed since the last frame go over the bridge. The
   // first frame, and any frame after a resize, carries every row.
@@ -105,8 +107,9 @@ export async function createTextualSession({
     if (closing) return;
     try {
       data = readJobs(ctx);
-      state = refreshWorkspace(data, state);
-      snapshot({ force });
+      const view = viewJobs(data, state);
+      state = refreshWorkspace(data, state, view);
+      snapshot({ force, view });
     } catch (error) {
       send({
         type: "error",
@@ -177,13 +180,10 @@ export async function createTextualSession({
           throw new TypeError("Unknown job stage");
         if (options.currency !== undefined && !/^[A-Z]{3}$/.test(options.currency))
           throw new TypeError("Currency must be a three-letter code");
-        viewJobs(data, { ...state, ...options });
-        state = refreshWorkspace(data, {
-          ...state,
-          ...options,
-          pendingUndo: null,
-        });
-        snapshot();
+        const next = { ...state, ...options, pendingUndo: null };
+        const view = viewJobs(data, next);
+        state = refreshWorkspace(data, next, view);
+        snapshot({ view });
         break;
       }
       case "refresh":
