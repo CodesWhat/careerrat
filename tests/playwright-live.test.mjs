@@ -521,7 +521,7 @@ test("real Chromium: asterisk labels, custom textboxes and unlabeled fields are 
   }
 });
 
-test("real Chromium: guard text survives a long document and an iframe, and an unreadable frame marks the snapshot incomplete", {
+test("real Chromium: guard text survives a long document and an iframe", {
   skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
 }, async () => {
   const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-profile-"));
