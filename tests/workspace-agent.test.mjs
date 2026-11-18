@@ -60,6 +60,7 @@ import {
   linkedinProposalDecide,
 } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
+import { putRow } from "../src/core/db/verbs/shared.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
 import {
@@ -337,7 +338,15 @@ function seedCommunication(repoRoot, overrides = {}) {
     ],
     ...overrides,
   };
-  commUpsert({ repoRoot, env: {}, row });
+  // Seeded drafts model rows stored before commUpsert fact-checked drafts, so
+  // they go straight to the table; the send-time backstops are what's under test.
+  if (row.draft) {
+    putRow(openDb({ repoRoot, env: {} }), "communications", row.id, row, {
+      application_id: row.applicationId || null,
+    });
+  } else {
+    commUpsert({ repoRoot, env: {}, row });
+  }
   return row;
 }
 

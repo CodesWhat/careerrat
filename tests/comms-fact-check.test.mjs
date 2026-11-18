@@ -8,8 +8,9 @@ import { fileURLToPath } from "node:url";
 import { executeWorkspaceIntent } from "../src/core/agent/workspace-agent.mjs";
 import { deliverDraftToPerson } from "../src/core/comms/deliver-draft.mjs";
 import { checkDraftFacts } from "../src/core/comms/draft-facts.mjs";
-import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { closeAll, openDb, requireDb } from "../src/core/db/connection.mjs";
 import { commSetDraft, commUpsert } from "../src/core/db/verbs/comm.mjs";
+import { putRow } from "../src/core/db/verbs/shared.mjs";
 import { candidateEvidenceMerge, candidateSetupInitialize } from "../src/core/db/verbs.mjs";
 import { createPersonRoot, personEnv } from "../src/core/paths/people.mjs";
 import { optIn, setContact } from "../src/core/people/contact.mjs";
@@ -20,7 +21,9 @@ const NOON = new Date("2026-11-02T17:00:00Z");
 const CLEAN = "Thanks Rae. I cut onboarding time by 30% at Northwind, and Tuesday works for me.";
 const INVENTED = "Thanks Rae. I grew revenue 450% at Globex using Kubernetes, and Tuesday works.";
 
-function fixture(t, body, extra = {}) {
+// `legacy` writes the row straight to the table, the way a draft stored before the
+// check existed (or by a path that skipped it) looks.
+function fixture(t, body, extra = {}, { legacy = false } = {}) {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "careerrat-commfacts-")));
   t.after(() => {
     closeAll();
@@ -53,7 +56,8 @@ function fixture(t, body, extra = {}) {
     messages: [],
     ...extra,
   };
-  commUpsert({ repoRoot: REPO_ROOT, env, row: comm });
+  if (legacy) putRow(requireDb({ repoRoot: REPO_ROOT, env }), "communications", comm.id, comm, {});
+  else commUpsert({ repoRoot: REPO_ROOT, env, row: comm });
   return { base, env, comm };
 }
 
@@ -64,7 +68,7 @@ test("a clean draft passes the fact check", (t) => {
 });
 
 test("a draft with an invented metric, employer and tool is held with findings", (t) => {
-  const { env, comm } = fixture(t, INVENTED);
+  const { env, comm } = fixture(t, INVENTED, {}, { legacy: true });
   const result = checkDraftFacts({ repoRoot: REPO_ROOT, env, comm, body: INVENTED });
   assert.equal(result.ok, false);
   const text = result.messages.join("\n");
@@ -74,7 +78,7 @@ test("a draft with an invented metric, employer and tool is held with findings",
 });
 
 test("delivery holds an invented-fact draft and sends a clean one unchanged", async (t) => {
-  const bad = fixture(t, INVENTED);
+  const bad = fixture(t, INVENTED, {}, { legacy: true });
   const sent = [];
   const transportOverride = {
     transport: {
@@ -124,7 +128,7 @@ const KUBE_INBOUND = {
 const KUBE_DRAFT = "Thanks Rae. I have 10 years of experience using Kubernetes.";
 
 test("inbound recruiter text is not evidence for the candidate's own claims", (t) => {
-  const { env, comm } = fixture(t, KUBE_DRAFT, { messages: [KUBE_INBOUND] });
+  const { env, comm } = fixture(t, KUBE_DRAFT, { messages: [KUBE_INBOUND] }, { legacy: true });
   const result = checkDraftFacts({ repoRoot: REPO_ROOT, env, comm, body: KUBE_DRAFT });
   assert.equal(result.ok, false);
   assert.match(result.messages.join("\n"), /Kubernetes/);
@@ -139,7 +143,7 @@ test("a span quoted back from the inbound message and the thread company are all
 });
 
 test("inbound-supported claims are held at delivery", async (t) => {
-  const { env, base } = fixture(t, KUBE_DRAFT, { messages: [KUBE_INBOUND] });
+  const { env, base } = fixture(t, KUBE_DRAFT, { messages: [KUBE_INBOUND] }, { legacy: true });
   await assert.rejects(
     deliverDraftToPerson({
       repoRoot: REPO_ROOT,
@@ -166,7 +170,7 @@ test("commSetDraft refuses an invented-fact draft at the storage point", (t) => 
 });
 
 test("compose-link handoff and send refuse a draft stored before the check existed", async (t) => {
-  const { env } = fixture(t, INVENTED);
+  const { env } = fixture(t, INVENTED, {}, { legacy: true });
   for (const type of ["communication.handoff", "communication.send"]) {
     await assert.rejects(
       executeWorkspaceIntent({
@@ -201,4 +205,78 @@ test("availability replies with days, times, dates and durations pass; metrics s
   ]) {
     assert.equal(check(body).ok, false, body);
   }
+});
+
+test("achievement metrics are not scheduling: hours saved and ordinal finishes still fail", (t) => {
+  const { env, comm } = fixture(t, CLEAN);
+  const check = (body) => checkDraftFacts({ repoRoot: REPO_ROOT, env, comm, body });
+  for (const body of [
+    "I saved 900 hours annually.",
+    "I finished 17th in the competition.",
+    "I worked 40 hours per week on it.",
+  ]) {
+    assert.equal(check(body).ok, false, body);
+  }
+  for (const body of [
+    "Tuesday at 3 works for me.",
+    "Free Nov 21st 2-4pm ET.",
+    "A 30 minute call works.",
+    "How about the 3rd of December, or 12/3 at 15:00?",
+    "I can do a 45-minute chat for 1 hour if needed.",
+  ]) {
+    const result = check(body);
+    assert.equal(result.ok, true, `${body}: ${result.messages.join("; ")}`);
+  }
+});
+
+test("a quoted inbound span is exempt only inside the quotes", (t) => {
+  const inbound = {
+    ...KUBE_INBOUND,
+    summary: "Kubernetes and 10 years",
+    body: "Kubernetes and 10 years",
+  };
+  const body = 'On "Kubernetes and 10 years" I have 10 years of experience with Kubernetes.';
+  const { env, comm } = fixture(t, CLEAN, { messages: [inbound] });
+  const result = checkDraftFacts({ repoRoot: REPO_ROOT, env, comm, body });
+  assert.equal(result.ok, false);
+  assert.match(result.messages.join("\n"), /Kubernetes/);
+  assert.match(result.messages.join("\n"), /10/);
+});
+
+test("inbound terms are allowed in non-claim sentences, not in candidate-claim ones", (t) => {
+  const { env, comm } = fixture(t, CLEAN, { messages: [KUBE_INBOUND] });
+  const check = (body) => checkDraftFacts({ repoRoot: REPO_ROOT, env, comm, body });
+  for (const body of [
+    "I'd like to discuss Kubernetes.",
+    "Happy to talk about the Kubernetes migration you mentioned.",
+  ]) {
+    const result = check(body);
+    assert.equal(result.ok, true, `${body}: ${result.messages.join("; ")}`);
+  }
+  for (const body of [
+    "I have 10 years of experience using Kubernetes.",
+    "I built Kubernetes clusters.",
+    "Thanks Rae. My 10 years with Kubernetes fit well.",
+  ]) {
+    assert.equal(check(body).ok, false, body);
+  }
+});
+
+test("commUpsert fact-checks a new or changed draft but not unchanged drafts or inbound ingest", (t) => {
+  const { env, comm } = fixture(t, CLEAN);
+  const upsert = (row) => commUpsert({ repoRoot: REPO_ROOT, env, row });
+  assert.throws(
+    () => upsert({ ...comm, draft: { body: INVENTED } }),
+    (error) => error.code === "COMMUNICATION_DRAFT_FACTS" && /Globex/.test(error.message)
+  );
+  assert.throws(
+    () => upsert({ ...comm, id: "comm-new", draft: INVENTED }),
+    (error) => error.code === "COMMUNICATION_DRAFT_FACTS"
+  );
+  // unchanged draft, and a row without a draft, still write
+  assert.doesNotThrow(() => upsert({ ...comm, summary: "touched" }));
+  const { draft: _draft, ...noDraft } = comm;
+  assert.doesNotThrow(() => upsert({ ...noDraft, id: "comm-none" }));
+  // inbound text carrying facts the candidate lacks is not treated as a draft
+  assert.doesNotThrow(() => upsert({ ...comm, summary: "inbound", messages: [KUBE_INBOUND] }));
 });
