@@ -2306,3 +2306,43 @@ test("Orca snapshot leaves a required textbox unknown when the probe is unavaila
   assert.equal(snapshot.refs.e1.stateKnown, undefined);
   assert.equal(snapshot.refs.e1.value, undefined);
 });
+
+test("Orca snapshot keeps duplicate-labelled required textboxes unknown and the gate refuses", async () => {
+  const label = "Reference name";
+  const ops = createOrcaOps({
+    runOrcaImpl: async (args) => {
+      if (args[0] === "snapshot") {
+        return {
+          origin: "https://job-boards.greenhouse.io/example/jobs/123",
+          refs: { e1: { name: label, role: "textbox" }, e2: { name: label, role: "textbox" } },
+          snapshot: [
+            `- textbox "${label}" [required, ref=e1]`,
+            `- textbox "${label}" [required, ref=e2]`,
+            '- button "Submit application" [ref=e3]',
+          ].join("\n"),
+        };
+      }
+      if (args[0] === "eval") {
+        return { result: JSON.stringify([{ label, stateKnown: true, value: "Pat" }]) };
+      }
+      return {};
+    },
+  });
+
+  const snapshot = await ops.snapshot({ pageId: "page-1" });
+
+  for (const ref of ["e1", "e2"]) {
+    assert.equal(snapshot.refs[ref].stateKnown, undefined);
+    assert.equal(snapshot.refs[ref].value, undefined);
+  }
+  const verdict = evaluateSubmitGate({
+    snapshot,
+    application: {
+      link: "https://job-boards.greenhouse.io/example/jobs/123",
+      evaluation: { gate: "keep" },
+    },
+    submitMode: "auto",
+  });
+  assert.ok(verdict.refusals.some((item) => item.code === "REQUIRED_FIELDS_UNVERIFIED"));
+  assert.equal(verdict.ok, false);
+});

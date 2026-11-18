@@ -255,9 +255,22 @@ function normalizeSnapshot(raw = {}, probe = [], safeAdvanceLabels = []) {
   }
   // A required answer control the label walk didn't reach (no LabelText wrapper,
   // aria-label naming) can still be read back by its accessible name.
+  // Only a name that is unique among required answer controls is trusted: the
+  // probe is keyed by label, so a shared label could hand one field's answer to
+  // another. Duplicates stay unknown.
+  const isRequiredAnswer = (entry) =>
+    entry.required &&
+    entry.field !== false &&
+    ANSWER_CONTROL_ROLES.has(String(entry.role || "").toLowerCase());
+  const nameCounts = new Map();
+  for (const entry of Object.values(refs)) {
+    if (!isRequiredAnswer(entry)) continue;
+    const key = normalizeText(entry.name);
+    nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+  }
   for (const [ref, entry] of Object.entries(refs)) {
-    if (!entry.required || entry.stateKnown === true || entry.field === false) continue;
-    if (!ANSWER_CONTROL_ROLES.has(String(entry.role || "").toLowerCase())) continue;
+    if (!isRequiredAnswer(entry) || entry.stateKnown === true) continue;
+    if (nameCounts.get(normalizeText(entry.name)) !== 1) continue;
     const state = probed.get(normalizeText(entry.name));
     if (!state?.stateKnown || state.typeahead === true) continue;
     refs[ref] = { ...entry, stateKnown: true, value: String(state.value || "") };
