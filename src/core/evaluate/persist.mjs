@@ -7,7 +7,7 @@
 // verdict can never diverge.
 import { appPersistEvaluation } from "../db/verbs/app.mjs";
 import { packetEvaluationProjection } from "../packet/evaluate.mjs";
-import { normalizeUrl } from "../scoring/sourced-delta.mjs";
+import { normalizePostingUrl } from "../scoring/posting-url.mjs";
 import { normalizeTextKey } from "../tracker/tracker-data.mjs";
 
 const MIN_JOB_BODY_CHARS = 40;
@@ -233,7 +233,7 @@ export function isSpecificPostingUrl(raw) {
 
 function sameSpecificUrl(a, b) {
   if (!a || !b || !isSpecificPostingUrl(a) || !isSpecificPostingUrl(b)) return false;
-  return normalizeUrl(a) === normalizeUrl(b);
+  return normalizePostingUrl(a) === normalizePostingUrl(b);
 }
 
 function jobFacts(job) {

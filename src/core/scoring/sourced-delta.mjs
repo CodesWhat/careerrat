@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { userPath } from "../paths/workspace.mjs";
+import { normalizePostingUrl } from "./posting-url.mjs";
 import { postingIdentityKeys } from "./sourced-identity.mjs";
 import { extractReqId } from "./sourced-scanner.mjs";
 
@@ -65,7 +66,7 @@ export function offerIdentity(offer) {
   if (offer?.reqId) return String(offer.reqId).toLowerCase();
   const req = extractReqId(offer?.url || offer?.hiringCafeUrl || "");
   if (req.id) return req.id.toLowerCase();
-  const url = normalizeUrl(offer?.url || offer?.hiringCafeUrl || "");
+  const url = normalizePostingUrl(offer?.url || offer?.hiringCafeUrl || "");
   if (url) return `url:${url}`;
   const company = normalizeText(offer?.company);
   const title = normalizeText(offer?.title || offer?.role);
@@ -93,7 +94,7 @@ export function offerIdentityKeys(offer) {
   for (const key of postingIdentityKeys(withUrlFallback)) {
     if (key.startsWith("req:")) keys.add(key.slice(4));
   }
-  const url = normalizeUrl(offer?.url || offer?.hiringCafeUrl || "");
+  const url = normalizePostingUrl(offer?.url || offer?.hiringCafeUrl || "");
   if (url) keys.add(`url:${url}`);
   if (keys.size) return [...keys];
   const company = normalizeText(offer?.company);
@@ -252,23 +253,6 @@ export function renderDeltaMarkdown({ currentPath, previousPath, delta, summary 
 
   lines.push("");
   return `${lines.join("\n")}\n`;
-}
-
-// Exported for reuse by src/core/intake/match.mjs (M9's tracker-match dedup
-// logic reuses the exact same tracking-param-stripping/hash-trim rule this
-// module already applies, rather than a second copy).
-export function normalizeUrl(raw) {
-  if (!raw) return "";
-  try {
-    const url = new URL(raw);
-    for (const key of [...url.searchParams.keys()]) {
-      if (/^(utm_|trk|ref|gh_src|source)/i.test(key)) url.searchParams.delete(key);
-    }
-    url.hash = "";
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return String(raw).trim();
-  }
 }
 
 function normalizeText(value) {

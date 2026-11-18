@@ -3,6 +3,7 @@ import {
   extractCompensationBands,
   resolveCompensationEvidence,
 } from "../scoring/sourced-scanner.mjs";
+import { companyMatchesAny } from "./company-identity.mjs";
 
 const COMP_REVIEW_FLAGS = new Set([
   "comp-unposted",
@@ -39,62 +40,6 @@ function unique(values) {
     if (text && !output.includes(text)) output.push(text);
   }
   return output;
-}
-
-// Trailing legal-entity words stripped from a company NAME key so "Acme" and
-// "Acme, Inc." / "Acme LLC" / "Acme Corporation" collide on the same key.
-// Domains never reach this: a bare domain has no "-"-separated tokens, so the
-// pop loop below (which requires more than one token) never fires for them.
-// Without this, an excluded_companies entry entered as a short form ("Acme")
-// would never match a discovered listing's full legal name — the exclusion
-// list and the comparison side would use inconsistent normalization, letting
-// an excluded company slip through as a "new" proposal.
-const COMPANY_LEGAL_SUFFIXES = new Set([
-  "inc",
-  "incorporated",
-  "llc",
-  "ltd",
-  "limited",
-  "corp",
-  "corporation",
-  "co",
-  "company",
-  "plc",
-  "gmbh",
-  "llp",
-  "lp",
-  "pllc",
-  "pbc",
-  "ag",
-  "sa",
-  "bv",
-  "nv",
-  "kk",
-  "oy",
-  "ab",
-]);
-
-function companyKey(value) {
-  const slug = trimString(value)
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .replace(/\/.*$/, "")
-    .replace(/[^a-z0-9.]+/g, "-")
-    .replace(/^-|-$/g, "")
-    // A trailing "." (e.g. from "Acme Inc.") must not make the key differ from
-    // the period-less form ("Acme Inc") — both must slug to the same key.
-    .replace(/\.+$/, "");
-  const parts = slug.split("-");
-  while (parts.length > 1 && COMPANY_LEGAL_SUFFIXES.has(parts[parts.length - 1])) {
-    parts.pop();
-  }
-  return parts.join("-");
-}
-
-function companyMatches(values, company) {
-  const keys = new Set([companyKey(company.name), companyKey(company.domain)].filter(Boolean));
-  return list(values).some((value) => keys.has(companyKey(value)));
 }
 
 function ruleFlags(offer) {
@@ -309,7 +254,7 @@ export function buildCompanyProposal({
   const floors = compensationFloors(context);
   const offers = list(scanResult?.offers).filter(hasRequiredOfferFields);
 
-  if (companyMatches(context?.trackedCompanies, company)) {
+  if (companyMatchesAny(context?.trackedCompanies, company)) {
     return rejectedResult({
       seed,
       resolution,
@@ -320,7 +265,7 @@ export function buildCompanyProposal({
       rejectReasons: ["already-tracked"],
     });
   }
-  if (companyMatches(context?.excludedCompanies, company)) {
+  if (companyMatchesAny(context?.excludedCompanies, company)) {
     return rejectedResult({
       seed,
       resolution,
@@ -332,8 +277,8 @@ export function buildCompanyProposal({
     });
   }
   if (
-    companyMatches(context?.applications, company) ||
-    companyMatches(context?.sourcedCompanies, company)
+    companyMatchesAny(context?.applications, company) ||
+    companyMatchesAny(context?.sourcedCompanies, company)
   ) {
     return rejectedResult({
       seed,

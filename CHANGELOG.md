@@ -13,6 +13,9 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Two different postings on the same site no longer count as the same job just because their links differ only in an id parameter like `referenceId`. Links that differ only in tracking parameters still match. One rule now decides this everywhere, and existing saved links and the shared job cache are migrated to it.
+- "A & B" and "A and B" (and legal suffixes like Inc.) are recognized as the same company when checking what you already track or excluded.
+- The terminal workspace refreshes much faster on large job lists.
 - `check:jobs` checks links in parallel (8 at a time, 2 per host), skips duplicate links, and leaves out rejected, withdrawn, cut and closed jobs unless you pass `--include-closed`.
 - Regenerating an application packet keeps the new open questions it finds, so a packet can't stay marked ready to upload after a required question appears.
 - The "no response after applying" follow-up stops after the configured number of nudges. Other messages on the thread don't count toward it.
