@@ -15,7 +15,7 @@ import {
   sourceConfigPut,
 } from "../src/core/db/verbs.mjs";
 import { personEnv, personRoot } from "../src/core/paths/people.mjs";
-import { sharedCachePath } from "../src/core/search/shared-postings-cache.mjs";
+import { openRunCache, sharedCachePath } from "../src/core/search/shared-postings-cache.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const HOST = async () => [{ address: "93.184.216.34", family: 4 }];
@@ -327,4 +327,137 @@ test("without any people the cache stays out of the way", async (t) => {
   const summary = await scan(env, counter);
   assert.equal(summary.sharedCache, undefined);
   assert.equal(existsSync(sharedCachePath(base)), false);
+});
+
+// Cache rows written before the shared posting-identity normalizer keep their old
+// url: keys until the cache migrates them. Seeds one by storing through the real
+// cache, then rewriting the key and schema version the way an older build left it.
+async function migrationFixture(t) {
+  const base = tempBase(t);
+  mkdirSync(personRoot(base, "alice"), { recursive: true });
+  const env = { CAREERRAT_HOME: base };
+  const { DatabaseSync } = await import("node:sqlite");
+  const result = (offers) => ({ offers, errors: [], warnings: [] });
+  const offer = (url, extra = {}) => ({
+    company: "Acme",
+    title: "Staff Engineer",
+    url,
+    bodyText: "body",
+    ...extra,
+  });
+  const open = () => {
+    const run = openRunCache({ repoRoot: REPO_ROOT, env });
+    assert.ok(run);
+    return run;
+  };
+  const raw = (fn) => {
+    const db = new DatabaseSync(sharedCachePath(base));
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  };
+  const store = (offers) => {
+    const run = open();
+    run.store("lever", { slug: "acme" }, "Acme", result(offers));
+    const added = run.newPostings.length;
+    run.close();
+    return added;
+  };
+  return { open, raw, store, offer };
+}
+
+const OLD_KEY = "url:https://careers.example.com/jobs/view?z=2&id=1&utm_source=feed";
+const NEW_KEY = "url:https://careers.example.com/jobs/view?id=1&z=2";
+
+test("an old-format url key migrates, and a re-scan neither re-adds nor closes it", async (t) => {
+  const { raw, store, offer } = await migrationFixture(t);
+  store([offer("https://careers.example.com/jobs/view?id=1&z=2")]);
+  raw((db) => {
+    db.prepare(
+      "UPDATE postings SET posting_key = ?, first_seen_at = '2026-01-01T00:00:00.000Z'"
+    ).run(OLD_KEY);
+    db.exec("PRAGMA user_version = 1");
+  });
+
+  const added = store([offer("https://careers.example.com/jobs/view?z=2&id=1&utm_source=feed")]);
+  assert.equal(added, 0);
+  const rows = raw((db) => db.prepare("SELECT * FROM postings").all());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].posting_key, NEW_KEY);
+  assert.equal(rows[0].closed, 0);
+  assert.equal(rows[0].first_seen_at, "2026-01-01T00:00:00.000Z");
+});
+
+test("old rows that collide after normalization merge into one", async (t) => {
+  const { open, raw, store, offer } = await migrationFixture(t);
+  store([offer("https://careers.example.com/jobs/view?id=1&z=2")]);
+  raw((db) => {
+    const row = db.prepare("SELECT * FROM postings").get();
+    db.prepare(
+      "UPDATE postings SET posting_key = ?, first_seen_at = ?, closed = 1, body = ?, offer_json = ?, fetched_at = ?"
+    ).run(
+      "url:https://careers.example.com/jobs/view?id=1&z=2&utm_source=feed",
+      "2026-01-01T00:00:00.000Z",
+      "older body",
+      row.offer_json,
+      "2026-01-02T00:00:00.000Z"
+    );
+    db.prepare(
+      `INSERT INTO postings (posting_key, source_key, company, title, location, comp_text, url, body,
+        posted_at, offer_json, first_seen_at, fetched_at, last_seen_at, closed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+    ).run(
+      "url:https://careers.example.com/jobs/view?z=2&id=1",
+      row.source_key,
+      row.company,
+      row.title,
+      row.location,
+      row.comp_text,
+      row.url,
+      "newer body",
+      row.posted_at,
+      row.offer_json,
+      "2026-02-01T00:00:00.000Z",
+      "2026-02-01T00:00:00.000Z",
+      "2026-02-01T00:00:00.000Z"
+    );
+    db.exec("PRAGMA user_version = 1");
+  });
+
+  open().close();
+  const rows = raw((db) => db.prepare("SELECT * FROM postings").all());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].posting_key, NEW_KEY);
+  assert.equal(rows[0].first_seen_at, "2026-01-01T00:00:00.000Z");
+  assert.equal(rows[0].closed, 0);
+  assert.equal(rows[0].body, "newer body");
+});
+
+test("the migration runs once and leaves non-url keys alone", async (t) => {
+  const { open, raw, store, offer } = await migrationFixture(t);
+  store([offer("https://careers.example.com/jobs/view?id=1", { reqId: "REQ-9" })]);
+  assert.equal(
+    raw((db) => db.prepare("PRAGMA user_version").get().user_version),
+    2
+  );
+  const keyBefore = raw((db) => db.prepare("SELECT posting_key FROM postings").get().posting_key);
+  assert.match(keyBefore, /^req:/);
+
+  // A url: row planted after the version bump is not touched by a later open.
+  raw((db) => {
+    db.prepare(
+      `INSERT INTO postings (posting_key, source_key, company, title, offer_json, first_seen_at, fetched_at, last_seen_at)
+       VALUES (?, 'x', 'A', 'T', '{}', 'a', 'a', 'a')`
+    ).run(OLD_KEY);
+  });
+  open().close();
+  const keys = raw((db) =>
+    db
+      .prepare("SELECT posting_key FROM postings ORDER BY posting_key")
+      .all()
+      .map((row) => row.posting_key)
+  );
+  assert.deepEqual(keys, [OLD_KEY, keyBefore].sort());
 });
