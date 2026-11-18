@@ -159,3 +159,9 @@ h6,
   letter-spacing: 0.025em;
   color: hsl(var(--muted-foreground));
 }
+
+/* Code comments: the github-dark comment grey (#6a737d) is 2.5:1 on the code
+   block background. Lift it to pass WCAG AA in dark mode. */
+.dark .shiki span[style*="--shiki-dark:#6A737D"] {
+  color: #9aa4b0 !important;
+}
