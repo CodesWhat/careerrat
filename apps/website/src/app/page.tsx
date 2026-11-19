@@ -132,14 +132,21 @@ export default function Home() {
             </div>
           </div>
           <figure className="terminal-shot">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/screenshots/tui-main.png"
-              alt="The CareerRat terminal workspace: a table of saved jobs with fit and pay on the left, details for the selected job below it, and the agent chat on the right."
-              width={1600}
-              height={1031}
-              decoding="async"
-            />
+            <picture>
+              <source
+                type="image/webp"
+                srcSet="/screenshots/tui-main-800.webp 800w, /screenshots/tui-main-1600.webp 1600w"
+                sizes="(min-width: 1200px) 1100px, 100vw"
+              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/screenshots/tui-main.png"
+                alt="The CareerRat terminal workspace: a table of saved jobs with fit and pay on the left, details for the selected job below it, and the agent chat on the right."
+                width={1600}
+                height={1031}
+                decoding="async"
+              />
+            </picture>
             <figcaption className="terminal-shot__caption">
               The terminal workspace, shown with demo jobs. Run careerrat start to open yours.
             </figcaption>
@@ -181,30 +188,44 @@ export default function Home() {
 
           <div className="terminal-shots">
             <figure className="terminal-shot terminal-shot--small">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/screenshots/tui-fit.png"
-                alt="The Fit report tab listing each requirement from a posting with the evidence from your record and a strong, partial, or gap match."
-                width={1600}
-                height={1031}
-                loading="lazy"
-                decoding="async"
-              />
+              <picture>
+                <source
+                  type="image/webp"
+                  srcSet="/screenshots/tui-fit-800.webp 800w, /screenshots/tui-fit-1600.webp 1600w"
+                  sizes="(min-width: 900px) 50vw, 100vw"
+                />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/screenshots/tui-fit.png"
+                  alt="The Fit report tab listing each requirement from a posting with the evidence from your record and a strong, partial, or gap match."
+                  width={1600}
+                  height={1031}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </picture>
               <figcaption className="terminal-shot__caption">
                 The Fit report checks the posting against your must-haves, one requirement at a
                 time.
               </figcaption>
             </figure>
             <figure className="terminal-shot terminal-shot--small">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/screenshots/tui-activity.png"
-                alt="The Activity tab showing a search running in the background with sources checked and jobs found so far, above a finished search with a Review new matches button."
-                width={1600}
-                height={1031}
-                loading="lazy"
-                decoding="async"
-              />
+              <picture>
+                <source
+                  type="image/webp"
+                  srcSet="/screenshots/tui-activity-800.webp 800w, /screenshots/tui-activity-1600.webp 1600w"
+                  sizes="(min-width: 900px) 50vw, 100vw"
+                />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/screenshots/tui-activity.png"
+                  alt="The Activity tab showing a search running in the background with sources checked and jobs found so far, above a finished search with a Review new matches button."
+                  width={1600}
+                  height={1031}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </picture>
               <figcaption className="terminal-shot__caption">
                 Search jobs runs in the background. Keep working while Activity shows its progress.
               </figcaption>

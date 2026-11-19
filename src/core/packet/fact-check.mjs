@@ -179,6 +179,54 @@ export function extractFacts(text) {
   return { numbers, names };
 }
 
+// Scheduling details are logistics, not achievement claims: "Tuesday at 3
+// works" must not fail because "3" is not on the résumé. Only numbers sitting
+// inside a scheduling expression are stripped: clock times, weekday/month + day,
+// ordinals inside a date, ISO/slash dates and meeting-length durations. A bare
+// ordinal ("1st in the competition") or a rate ("900 hours annually") is a
+// metric and stays checked, as do "40%", "$2M" and "10 years".
+const DAY_WORDS = MONTHS.join("|");
+const CLOCK = "\\d{1,2}(?::\\d{2})?";
+const RANGE_SEP = "(?:-|–|to|and)";
+const MEETING_NOUN =
+  "(?:call|chat|meeting|conversation|intro|sync|session|interview|slot|window|screen|catch-up)";
+const SCHEDULE_PATTERNS = [
+  /\b\d{1,2}:\d{2}(?:\s?(?:am|pm|a\.m\.|p\.m\.))?/gi,
+  /\b\d{1,2}(?:\s?(?:-|–|to|and)\s?\d{1,2})?\s?(?:am|pm|a\.m\.|p\.m\.)(?![a-z])/gi,
+  // "3rd of December", "21st of Nov"
+  new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)\\s+of\\s+(?:${DAY_WORDS})\\b`, "gi"),
+  // weekday/month/today + optional day + optional "at 3" / "between 10 and 11"
+  new RegExp(
+    `\\b(?:${DAY_WORDS}|today|tomorrow|tonight)\\b\\.?(?:\\s+(?:the\\s+)?\\d{1,2}(?:st|nd|rd|th)?(?![\\d%:]|\\s?%))?(?:,?\\s+(?:19|20)\\d{2}\\b)?(?:\\s+(?:at|around|by|from|before|after|between)\\s+${CLOCK}(?!\\s?%)(?:\\s*${RANGE_SEP}\\s*${CLOCK}(?!\\s?%))?)?`,
+    "gi"
+  ),
+  // "at 3 works", "at 3, or", "at 4 ET": a bare hour only next to scheduling cues
+  new RegExp(
+    `\\b(?:at|around|between)\\s+${CLOCK}(?:\\s*${RANGE_SEP}\\s*${CLOCK})?(?=\\s*(?:[,.;!?]|$|works|is\\s+(?:good|fine|free|ok|okay)|sounds|or\\b|and\\b|[ECMP][SD]T\\b|ET\\b|CT\\b|MT\\b|PT\\b|UTC\\b|GMT\\b))`,
+    "gi"
+  ),
+  new RegExp(
+    `\\b${CLOCK}(?=\\s+(?:works|would\\s+work|is\\s+(?:good|fine|free|open)|sounds\\s+good)\\b)`,
+    "gi"
+  ),
+  /\b\d{4}-\d{2}-\d{2}\b/g,
+  /\b(?:0?[1-9]|1[0-2])\/(?:0?[1-9]|[12]\d|3[01])(?:\/\d{2,4})?\b/g,
+  // meeting length only: "a 45-minute call", "30 minutes is fine", "for 20 minutes"
+  /\b\d+(?:\.\d+)?-(?:minute|min|hour|hr)\b/gi,
+  new RegExp(
+    `\\b\\d+(?:\\.\\d+)?\\s?(?:minutes?|mins?|hours?|hrs?)(?=\\s+${MEETING_NOUN}\\b|\\s+(?:is|works|would|should|will|sounds|suffices|ok|okay|fine|good)\\b)`,
+    "gi"
+  ),
+  /\b(?:for|about|around)\s+(?:a\s+)?\d+(?:\.\d+)?\s?(?:minutes?|mins?|hours?|hrs?)\b(?!\s+(?:annually|per|a\s+(?:year|week|month)|each|every|weekly|monthly|yearly|of\b|saved))/gi,
+  /\b(?:[ECMP][SD]T|UTC|GMT|ET|CT|MT|PT)\b/g,
+];
+
+function stripScheduling(text) {
+  let out = String(text || "");
+  for (const pattern of SCHEDULE_PATTERNS) out = out.replace(pattern, " ");
+  return out;
+}
+
 function flattenStrings(value, out = []) {
   if (value === null || value === undefined) return out;
   if (typeof value === "string") out.push(value);
@@ -222,7 +270,13 @@ function allowedText(context = {}, extraAllow = []) {
 // Check one or more texts. Returns { ok, violations: [{ kind, value, message }] }.
 // `texts` may be a string or an array; NEEDS YOU markers are skipped because
 // they are an honest gap, not a claim.
-export function checkArtifactFacts({ texts, context = {}, extraAllow = [], label = "" } = {}) {
+export function checkArtifactFacts({
+  texts,
+  context = {},
+  extraAllow = [],
+  label = "",
+  scheduling = false,
+} = {}) {
   const list = (Array.isArray(texts) ? texts : [texts])
     .map((text) => String(text || ""))
     .filter((text) => text.trim() && !/^\s*NEEDS YOU\b/.test(text));
@@ -233,7 +287,7 @@ export function checkArtifactFacts({ texts, context = {}, extraAllow = [], label
   const seen = new Set();
   const prefix = label ? `${label}: ` : "";
   for (const text of list) {
-    const { numbers, names } = extractFacts(text);
+    const { numbers, names } = extractFacts(scheduling ? stripScheduling(text) : text);
     for (const [value, shown] of numbers) {
       const key = `n:${value}`;
       if (knownNumbers.has(value) || seen.has(key)) continue;

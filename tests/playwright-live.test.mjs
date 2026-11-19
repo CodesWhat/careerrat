@@ -19,6 +19,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
+import { submitGuard } from "../src/core/apply/form-fill.mjs";
 import { createPlaywrightOps } from "../src/core/apply/playwright-ops.mjs";
 import { resolveLocalFixtureTarget, startFixtureServer } from "./helpers/fixture-server.mjs";
 
@@ -512,6 +513,47 @@ test("real Chromium: asterisk labels, custom textboxes and unlabeled fields are 
       entries.some((entry) => entry.role === "textbox" && entry.name === ""),
       "the unlabeled input is collected with an empty name"
     );
+  } finally {
+    await ops.close();
+    await closeServer();
+    rmSync(profileDir, { recursive: true, force: true });
+    rmSync(pageDir, { recursive: true, force: true });
+  }
+});
+
+test("real Chromium: guard text survives a long document and an iframe", {
+  skip: !LIVE && "set CAREERRAT_LIVE_BROWSER=1 to run this against a real Chromium instance",
+}, async () => {
+  const profileDir = mkdtempSync(join(tmpdir(), "careerrat-live-profile-"));
+  const pageDir = mkdtempSync(join(tmpdir(), "careerrat-live-safety-"));
+  const notice = "Your account has been restricted from applying to jobs.";
+  writeFileSync(
+    join(pageDir, "long.html"),
+    `<!doctype html><body><p>${"Job description prose. ".repeat(1_100)}</p><p>${notice}</p><button type="button">Submit application</button></body>`
+  );
+  writeFileSync(join(pageDir, "frame.html"), `<!doctype html><body><p>${notice}</p></body>`);
+  writeFileSync(
+    join(pageDir, "framed.html"),
+    `<!doctype html><body><p>Apply for this role</p><iframe src="/frame.html"></iframe><button type="button">Submit application</button></body>`
+  );
+  const { url: baseUrl, close: closeServer } = await startFixtureServer(pageDir);
+  const ops = createPlaywrightOps({
+    profileDir,
+    headless: true,
+    resolvePublicTargetImpl: resolveLocalFixtureTarget,
+  });
+  try {
+    const long = await ops.openTab({ url: `${baseUrl}/long.html` });
+    const longSnapshot = await ops.snapshot({ pageId: long.pageId });
+    assert.ok(longSnapshot.pageText.indexOf(notice) > 20_000, "notice sits past the display limit");
+    assert.match(longSnapshot.pageText, /restricted from applying/);
+    assert.equal(submitGuard({ pageText: longSnapshot.pageText }).canSubmit, false);
+
+    const framed = await ops.openTab({ url: `${baseUrl}/framed.html` });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const framedSnapshot = await ops.snapshot({ pageId: framed.pageId });
+    assert.match(framedSnapshot.pageText, /restricted from applying/);
+    assert.equal(submitGuard({ pageText: framedSnapshot.pageText }).canSubmit, false);
   } finally {
     await ops.close();
     await closeServer();

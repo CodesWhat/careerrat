@@ -191,3 +191,22 @@ test("outreach drafts: the fact-check CLI exits 1 on an added fact and 0 on a cl
   assert.match(badRun.stdout, /Globex/);
   assert.equal(run(good).status, 0);
 });
+
+test("scheduling mode strips only scheduling expressions, not metrics or bare ordinals", () => {
+  const check = (text) => checkArtifactFacts({ texts: text, scheduling: true });
+  for (const text of [
+    "I saved 900 hours annually.",
+    "I finished 1st in the competition.",
+    "I worked 40 hours per week.",
+  ]) {
+    assert.equal(check(text).ok, false, text);
+  }
+  for (const text of [
+    "Tuesday at 3 works for me.",
+    "Free Nov 21st 2-4pm ET.",
+    "A 30 minute call works.",
+    "The 3rd of December at 15:00.",
+  ]) {
+    assert.equal(check(text).ok, true, text);
+  }
+});

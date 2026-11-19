@@ -1136,3 +1136,46 @@ test("forced answer regeneration preserves three prior application answers and g
   assert.equal(result.body.data.uploadReady, false);
   assert.equal(result.body.data.manual.required, true);
 });
+
+test("tool presence alone cannot produce an upload-ready years, clearance or location answer", async () => {
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const seen = [];
+  const questions = [
+    { id: "years", label: "Do you have 10+ years of professional Python experience?" },
+    { id: "clearance", label: "Do you hold a security clearance from the US government?" },
+    { id: "location", label: "Are you legitimately based in the US?" },
+  ].map((question) => ({ ...question, type: "text", required: true }));
+
+  const result = await draftPacketAnswers({
+    context: {
+      ...PACKET_CONTEXT,
+      honesty: { tools: { confirmed: ["Python", "Go", "Git"], do_not_claim: ["Java"] } },
+    },
+    questions: { answerable: questions, excluded: [] },
+    runAI: async ({ messages }) => {
+      const prompt = messages.at(-1).content;
+      const sent = JSON.parse(prompt.split("Questions:\n")[1].split("\n\nContext:")[0]);
+      seen.push(...sent.map((question) => question.id));
+      return {
+        body: {
+          ok: true,
+          ai: { used: true },
+          data: {
+            answers: sent.map((question) => ({
+              questionId: question.id,
+              answer: "NEEDS YOU: confirm this yourself.",
+              evidenceIds: [],
+              gap: "unsupported claim",
+            })),
+          },
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(seen.sort(), ["clearance", "location", "years"]);
+  for (const answer of result.answers) {
+    assert.match(answer.answer, /^NEEDS YOU\b/, answer.questionId);
+    assert.equal(answer.uploadReady, false, answer.questionId);
+  }
+});

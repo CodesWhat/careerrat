@@ -1,22 +1,9 @@
 import { workdayDedupKey } from "../providers/career-ops/vendor/workday.mjs";
 import { normalizeCompanyRoleKey, normalizeTextKey } from "../tracker/tracker-data.mjs";
+import { normalizePostingUrl } from "./posting-url.mjs";
 
 function postingUrl(row = {}) {
   return String(row.url || row.link || "").trim();
-}
-
-function normalizePostingUrl(rawUrl = "") {
-  try {
-    const url = new URL(rawUrl);
-    url.hash = "";
-    url.hostname = url.hostname.toLowerCase();
-    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
-    return url.href;
-  } catch {
-    return String(rawUrl || "")
-      .trim()
-      .toLowerCase();
-  }
 }
 
 // Mirrors workdayDedupKey's "last path segment, split at its first
@@ -173,7 +160,11 @@ export function postingIdentityIsSeen(row, seenKeys) {
 // still resolves back to the same row instead of inserting a duplicate.
 export function rowAliasKeys(row = {}) {
   return Array.isArray(row.aliasKeys)
-    ? row.aliasKeys.filter((key) => typeof key === "string" && key)
+    ? row.aliasKeys
+        .filter((key) => typeof key === "string" && key)
+        // Stored url: aliases were written under older URL normalizers;
+        // re-normalize on read so they still match current keys.
+        .map((key) => (key.startsWith("url:") ? `url:${normalizePostingUrl(key.slice(4))}` : key))
     : [];
 }
 

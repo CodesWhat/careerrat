@@ -787,11 +787,62 @@ function listValue(value) {
   return single == null ? [] : [String(single)];
 }
 
-function findNeedle(normalized, values = []) {
-  return values.find((value) => {
-    const needle = normalizeLabel(value);
-    return needle && normalized.includes(needle);
-  });
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Whole-technology match. Boundaries treat + # and letters/digits as part of a
+// name, so "C++" and "C#" only match themselves, "Java" never matches
+// "JavaScript", "Go" never matches "government", ".NET" never matches "ASP.NET".
+// One- and two-letter names ("C", "R", "Go") must also be capitalized as written,
+// since lowercase "go" and "r" are ordinary words.
+function mentionsTool(label, tool) {
+  const name = String(tool || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!name) return false;
+  const body = name.split(" ").map(escapeRegExp).join("\\s+");
+  const short = name.length <= 2;
+  const pattern = new RegExp(
+    `(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#]|\\.[A-Za-z0-9])`,
+    short ? "" : "i"
+  );
+  return pattern.test(label);
+}
+
+function findTool(label, values = []) {
+  return listValue(values).find((value) => mentionsTool(label, value));
+}
+
+// Only an unqualified yes/no experience question is answered from the tool lists.
+// Years, levels, ownership, "at least N" and negations carry a claim the tool
+// lists can't back, so they stay unresolved for the reviewed answer or NEEDS YOU.
+const TOOL_EXPERIENCE_QUESTION =
+  /^\s*(?:(?:do|did) you (?:currently )?(?:have|use)|have you (?:ever )?(?:used|worked|had|built|written)|are you (?:familiar|experienced|comfortable))\b/i;
+const TOOL_EXPERIENCE_WORD =
+  /\b(?:experience|experienced|used|use|worked|familiar|familiarity|comfortable)\b/i;
+const TOOL_QUALIFIED =
+  /\d|\b(?:years?|yrs?|how (?:many|much|long)|at least|at most|minimum|maximum|more than|over|proficien\w*|level|expert\w*|intermediate|advanced|beginner|senior|owner\w*|led|lead|leading|manag\w+|architect\w*|scal\w+|production|professional\w*|commercial\w*|enterprise|hands.on|extensive|deep|strong|significant|substantial|recent\w*|not|never|without|no experience|rate|rating|score)\b|n't/i;
+
+// A multi-word do_not_claim entry ("Kubernetes production ownership") is the claim
+// itself, so a plain yes/no question that names the whole phrase is answerable No.
+const YES_NO_QUESTION_START = /^\s*(?:do|did|have|are|can|could|would) you\b/i;
+const YES_NO_DISQUALIFIER =
+  /\d|\b(?:years?|yrs?|how (?:many|much|long)|at least|not|never|without)\b|n't/i;
+
+function findDisallowedPhrase(label, values) {
+  const text = String(label).replace(/\s+/g, " ").trim();
+  if (!YES_NO_QUESTION_START.test(text) || YES_NO_DISQUALIFIER.test(text)) return undefined;
+  return listValue(values).find((value) => /\s/.test(value.trim()) && mentionsTool(text, value));
+}
+
+function isPlainToolExperienceQuestion(label) {
+  const text = String(label).replace(/\s+/g, " ").trim();
+  return (
+    TOOL_EXPERIENCE_QUESTION.test(text) &&
+    TOOL_EXPERIENCE_WORD.test(text) &&
+    !TOOL_QUALIFIED.test(text)
+  );
 }
 
 function isCurrentCompLabel(normalized) {
@@ -921,6 +972,46 @@ function genericMatch(normalized) {
   return null;
 }
 
+const WORK_ARRANGEMENT_PATTERNS = {
+  remote: /\b(?:remote(?:ly)?|work from home|wfh)\b/g,
+  hybrid: /\bhybrid\b/g,
+  onsite: /\b(?:on[- ]?site|in[- ]?person|in[- ]?office)\b/g,
+};
+const WORK_ARRANGEMENT_ANY = new RegExp(
+  Object.values(WORK_ARRANGEMENT_PATTERNS)
+    .map((re) => re.source)
+    .join("|"),
+  "g"
+);
+const NEGATED_ARRANGEMENT = new RegExp(
+  `\\b(?:not|isn't|is not|non)[- ]\\s*(?:an?\\s+)?(?:fully\\s+|completely\\s+)?(?:${WORK_ARRANGEMENT_ANY.source})(?:\\s+(?:position|role|job|opportunity|work|setup|arrangement))?`,
+  "g"
+);
+
+/**
+ * The single work arrangement a question is actually asking about, or null when
+ * none is asked or the wording is ambiguous (two arrangements, or negated asking).
+ * Arrangements named only in a preceding negated statement ("This role is not
+ * remote.") are ignored.
+ */
+function askedWorkArrangement(rawLabel) {
+  const text = String(rawLabel || "")
+    .toLowerCase()
+    .replace(NEGATED_ARRANGEMENT, " ");
+  const sentences = text.split(/(?<=[.?!])\s+/).filter(Boolean);
+  const isQuestion = (sentence) =>
+    /\?\s*$/.test(sentence) ||
+    /^\s*(?:are|can|could|do|does|will|would|is|have|did|may|should)\b/.test(sentence);
+  const questions = sentences.filter(isQuestion);
+  const asking = (questions.length > 0 ? questions : sentences).join(" ");
+  const found = Object.entries(WORK_ARRANGEMENT_PATTERNS)
+    .filter(([, re]) => new RegExp(re.source).test(asking))
+    .map(([name]) => name);
+  if (found.length !== 1) return null;
+  if (/\b(?:not|unable|cannot|can't|won't|unwilling|never)\b/.test(asking)) return null;
+  return found[0];
+}
+
 // ---------------------------------------------------------------------------
 // resolveScreeningAnswer
 // ---------------------------------------------------------------------------
@@ -985,17 +1076,22 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
       return { action: "fill", value: notice, source: "profile.authorization.notice_period" };
   }
 
-  if (normalized.includes("remote")) {
+  const arrangement = askedWorkArrangement(label);
+
+  if (arrangement === "remote") {
     const answer = yesNo(location.remote);
     if (answer != null) return { action: "fill", value: answer, source: "profile.location.remote" };
   }
 
-  if (normalized.includes("hybrid")) {
+  if (arrangement === "hybrid") {
     const answer = yesNo(location.hybrid);
     if (answer != null) return { action: "fill", value: answer, source: "profile.location.hybrid" };
   }
 
-  if (normalized.includes("in person") || normalized.includes("inperson")) {
+  if (
+    arrangement === "onsite" &&
+    (normalized.includes("in person") || normalized.includes("inperson"))
+  ) {
     const percentage = String(label).match(/\b(\d{1,3})\s*(?:%|percent\b)/i);
     const posture = percentage && Number(percentage[1]) < 100 ? location.hybrid : location.onsite;
     const answer = yesNo(posture);
@@ -1011,11 +1107,7 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
     }
   }
 
-  if (
-    normalized.includes("onsite") ||
-    normalized.includes("on site") ||
-    normalized.includes("in office")
-  ) {
+  if (arrangement === "onsite") {
     const answer = yesNo(location.onsite);
     if (answer != null) return { action: "fill", value: answer, source: "profile.location.onsite" };
   }
@@ -1069,13 +1161,19 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
   }
 
   const tools = honesty?.tools || {};
-  const disallowed = findNeedle(normalized, tools.do_not_claim || []);
-  if (disallowed) {
-    return { action: "fill", value: "No", source: "honesty.tools.do_not_claim" };
-  }
-  const confirmed = findNeedle(normalized, tools.confirmed || []);
-  if (confirmed) {
-    return { action: "fill", value: "Yes", source: "honesty.tools.confirmed" };
+  const plainToolQuestion = isPlainToolExperienceQuestion(label);
+  if (plainToolQuestion || findDisallowedPhrase(label, tools.do_not_claim)) {
+    const disallowed = plainToolQuestion
+      ? findTool(label, tools.do_not_claim)
+      : findDisallowedPhrase(label, tools.do_not_claim);
+    const confirmed = plainToolQuestion ? findTool(label, tools.confirmed) : undefined;
+    // A question naming both a claimable and a forbidden tool has no single honest answer.
+    if (disallowed && !confirmed) {
+      return { action: "fill", value: "No", source: "honesty.tools.do_not_claim" };
+    }
+    if (confirmed && !disallowed) {
+      return { action: "fill", value: "Yes", source: "honesty.tools.confirmed" };
+    }
   }
 
   return { action: "skip", value: null, reason: "unresolved" };
@@ -1242,9 +1340,133 @@ export const BLOCKER_SIGNALS = [
   "security verification",
 ];
 
+// Phrase-level patterns for an employer's application limit (Ashby's per-employer
+// "This job has application limits" panel, a reached cap) and for a restricted
+// account (LinkedIn and ATS notices). Whole phrases only: a job description that
+// says "no limits on PTO" or "restricted stock units" must not trip them.
+const APOS = "['\u2019]?";
+const APPLICATION_LIMIT_PATTERNS = [
+  /\bthis job has application limits?\b/i,
+  new RegExp(
+    `\\byou(?:${APOS}ve| have) reached (?:the |your |this )?(?:\\w+ ){0,2}application limit`,
+    "i"
+  ),
+  /\bapplication limit (?:has been |was )?reached\b/i,
+  new RegExp(`\\byou${APOS}ve already applied\\b[^.\\n]{0,80}\\bmaximum\\b`, "i"),
+  new RegExp(
+    `\\byou(?:${APOS}ve| have) (?:reached|exceeded) (?:the |your )?(?:maximum|max) (?:number )?of (?:job )?applications\\b`,
+    "i"
+  ),
+  new RegExp(`\\byou(?:${APOS}ve| have)\\b[^.\\n]{0,60}\\btoo many applications\\b`, "i"),
+  /\btoo many applications (?:from|for) (?:this|your) account\b/i,
+];
+// A notice that stands alone on its own line or heading (including a role
+// heading in the accessibility tree) is addressed to the applicant even when it
+// has no pronoun: "Account temporarily restricted". Whole line only, so a job
+// description sentence that merely contains the words doesn't match.
+const LIMIT_NOTICE_LINES = [
+  /^too many applications$/i,
+  /^application limits? (?:has been |was )?reached$/i,
+  /^you(?:['\u2019]ve| have) reached (?:the |your |this )?(?:\w+ ){0,2}application limits?$/i,
+  /^this job has application limits?$/i,
+];
+const RESTRICTION_NOTICE_LINES = [
+  /^(?:your )?account (?:is |has been |was )?(?:temporarily |currently )?(?:restricted|suspended|blocked|disabled|locked)$/i,
+  /^(?:you(?:['\u2019]ve| have) been |you are )?temporarily blocked$/i,
+];
+const ACCOUNT_RESTRICTION_PATTERNS = [
+  /\byour account (?:has been|is|was) (?:temporarily |currently )?restricted\b/i,
+  /\baccount is temporarily restricted\b/i,
+  new RegExp(`\\bwe${APOS}ve (?:temporarily )?restricted your account\\b`, "i"),
+  /\bunusual activity (?:on|from|in) your account\b/i,
+  new RegExp(`\\bwe${APOS}ve (?:detected|noticed) unusual activity\\b`, "i"),
+  /\bwe (?:have )?(?:detected|noticed) unusual activity\b/i,
+];
+
+// Lines of the page that read as a standalone heading or short notice. Strips
+// list/markdown markers and the `heading "..." [level=2]` accessibility-tree
+// wrapper, so the notice text itself is what gets matched.
+function noticeLines(text) {
+  const out = [];
+  for (const raw of String(text).split(/\r?\n/)) {
+    let line = raw.trim();
+    if (!line || line.length > 200) continue;
+    line = line
+      .replace(/^[-*#>\s]+/, "")
+      .replace(/^[a-z]+\s+"(.*)"(?:\s*\[[^\]]*\])*:?$/i, "$1")
+      .replace(/\s*\[[^\]]*\]/g, "")
+      .replace(/[\s.!:]+$/, "")
+      .trim();
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+const PAGE_UNREADABLE_BLOCKER = "page-unreadable";
+
+/**
+ * Plain-language stop reason for the limit, restriction and unreadable-page blockers, or null
+ * when none of the blockers is one of them.
+ *
+ * @param {string[]} blockers
+ * @returns {string|null}
+ */
+export function limitBlockerReason(blockers = []) {
+  if (blockers.includes("account restricted")) {
+    return "This site says your account is restricted. Nothing was submitted.";
+  }
+  if (blockers.includes("application limit")) {
+    return "This site says you've hit its application limit. Nothing was submitted.";
+  }
+  if (blockers.includes(PAGE_UNREADABLE_BLOCKER)) {
+    return "Part of this page couldn't be read, so CareerRat didn't submit. Check it and submit it yourself if it's right.";
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // submitGuard
 // ---------------------------------------------------------------------------
+
+export const ATTESTATION_BLOCKER = "attestation";
+const ATTESTATION_FIELD_ROLES = new Set([
+  "textbox",
+  "combobox",
+  "checkbox",
+  "radio",
+  "radiogroup",
+  "spinbutton",
+  "switch",
+  "group",
+  "listbox",
+]);
+// Page prose counts only when it reads as a certification or an AI-use disclosure the
+// person has to act on, so a job description that mentions AI doesn't block anything.
+const ATTESTATION_TEXT_CUE =
+  /\b(?:certify|attest|affirm|declare|swear|true|accurate|truthful|falsif\w*|misrepresent\w*|misleading|disclos\w*|acknowledg\w*|did you|have you|do you|policy)\b|\?\s*$/i;
+
+/**
+ * True when the live form carries a truthfulness certification or an AI-use
+ * disclosure, from the labels of its controls or from certification prose.
+ * Those are the person's to answer, so a page with one never submits.
+ *
+ * @param {{ pageText?: string, refs?: Record<string, object> }} snapshot
+ * @returns {boolean}
+ */
+export function snapshotHasAttestation(snapshot = {}) {
+  const refs = snapshot?.refs && typeof snapshot.refs === "object" ? snapshot.refs : {};
+  for (const entry of Object.values(refs)) {
+    const role = String(entry?.role || "").toLowerCase();
+    if (!ATTESTATION_FIELD_ROLES.has(role)) continue;
+    if (isAttestationQuestion(entry?.name)) return true;
+  }
+  for (const raw of String(snapshot?.pageText || "").split(/\r?\n/)) {
+    const line = raw.replace(/\s*\[[^\]]*\]/g, "").trim();
+    if (line.length < 12 || line.length > 600) continue;
+    if (ATTESTATION_TEXT_CUE.test(line) && isAttestationQuestion(line)) return true;
+  }
+  return false;
+}
 
 /**
  * Safety gate before submit.
@@ -1263,6 +1485,22 @@ export function submitGuard({ pageText = "", pageSignals = {} } = {}) {
     }
   }
 
+  const rawText = String(pageText);
+  const lines = noticeLines(rawText);
+  if (
+    !blockers.includes("application limit") &&
+    (APPLICATION_LIMIT_PATTERNS.some((re) => re.test(rawText)) ||
+      lines.some((line) => LIMIT_NOTICE_LINES.some((re) => re.test(line))))
+  ) {
+    blockers.push("application limit");
+  }
+  if (
+    ACCOUNT_RESTRICTION_PATTERNS.some((re) => re.test(rawText)) ||
+    lines.some((line) => RESTRICTION_NOTICE_LINES.some((re) => re.test(line)))
+  ) {
+    blockers.push("account restricted");
+  }
+
   // Check explicit pageSignals booleans
   if (pageSignals.captcha === true && !blockers.includes("captcha")) {
     blockers.push("captcha");
@@ -1272,6 +1510,12 @@ export function submitGuard({ pageText = "", pageSignals = {} } = {}) {
   }
   if (pageSignals.requiredExercise === true) {
     blockers.push("complete the assessment");
+  }
+  if (pageSignals.safetyTextIncomplete === true) {
+    blockers.push(PAGE_UNREADABLE_BLOCKER);
+  }
+  if (pageSignals.attestation === true || snapshotHasAttestation({ pageText: rawText })) {
+    blockers.push(ATTESTATION_BLOCKER);
   }
 
   const canSubmit = blockers.length === 0;
@@ -1298,7 +1542,13 @@ export function buildFillPlan({ fields = [], formDefaults, profile, honesty, por
 
     // Truthfulness and AI-use attestations are the person's to answer, never filled.
     if (isAttestationQuestion(label)) {
-      return { label, canonicalField: null, value: null, action: "skip" };
+      return {
+        label,
+        canonicalField: null,
+        value: null,
+        action: "skip",
+        reason: "attestation_needs_person",
+      };
     }
 
     const voluntary = resolveVoluntarySelfIdentification(field, formDefaults);

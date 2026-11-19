@@ -60,6 +60,7 @@ import {
   linkedinProposalDecide,
 } from "../src/core/db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
+import { putRow } from "../src/core/db/verbs/shared.mjs";
 import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
 import {
@@ -337,7 +338,15 @@ function seedCommunication(repoRoot, overrides = {}) {
     ],
     ...overrides,
   };
-  commUpsert({ repoRoot, env: {}, row });
+  // Seeded drafts model rows stored before commUpsert fact-checked drafts, so
+  // they go straight to the table; the send-time backstops are what's under test.
+  if (row.draft) {
+    putRow(openDb({ repoRoot, env: {} }), "communications", row.id, row, {
+      application_id: row.applicationId || null,
+    });
+  } else {
+    commUpsert({ repoRoot, env: {}, row });
+  }
   return row;
 }
 
@@ -7420,6 +7429,48 @@ test("scheduling persists only future offers from the real planner", async () =>
   assert.equal(comm.status, "drafted");
   assert.match(comm.draft.body, /August 13 at 3 PM ET/);
   assert.doesNotMatch(comm.draft.body, /August 9/);
+});
+
+test("scheduling holds a ready plan whose body invents revenue, an employer and a tool", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { status: "interview" });
+  seedCommunication(repoRoot);
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "scheduling.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Accept Wednesday at 2 PM ET and prepare the reply.",
+      },
+    },
+    prepareSchedulingPlanImpl: async () => ({
+      status: "ready",
+      plan: {
+        state: "reply_only",
+        timezone: "America/New_York",
+        subject: "Re: Interview availability",
+        body: "Wednesday at 2 PM ET works. I grew revenue $9M at Globex using Kubernetes.",
+        contactName: "Avery",
+        slots: [],
+        missing: [],
+      },
+      calendarChecked: true,
+      hold: null,
+      ai: { engine: { label: "Codex" }, elapsedMs: 1 },
+    }),
+    now: () => new Date("2030-08-10T12:00:00.000Z"),
+  });
+  const message = result.messages.at(-1);
+  assert.equal(message.metadata.state, "manual-fallback");
+  assert.equal(message.metadata.error, "COMMUNICATION_DRAFT_FACTS");
+  assert.equal(message.artifacts[0].status, "held");
+  assert.match(message.text, /Globex/);
+  const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(comm.draft, undefined);
+  assert.equal(comm.status, "needs-reply");
 });
 
 test("scheduling needs-you results do not create a draft or invent a booked interview", async () => {

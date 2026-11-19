@@ -6,6 +6,7 @@ import { after, test } from "node:test";
 
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
+import { putRow } from "../src/core/db/verbs/shared.mjs";
 import {
   appScheduleInterview,
   appSetStatus,
@@ -1305,28 +1306,29 @@ test("job-thread AI context includes redacted recent inbound and draft communica
     id: "app-recent-comms",
     company: "Recent Comms Corp",
   });
-  commUpsert({
-    repoRoot,
-    row: {
-      id: "comm-recent-comms",
-      applicationId: "app-recent-comms",
-      company: "Recent Comms Corp",
-      role: "Staff Engineer",
-      channel: "email",
-      status: "drafted",
-      summary: "Interview scheduling is in progress.",
-      draft: {
-        subject: "Re: interview",
-        body: "Tuesday works for me. api_key=do-not-leak and I currently make $230k.",
-      },
-      messages: [
-        {
-          direction: "inbound",
-          at: "2026-08-23T14:00:00.000Z",
-          body: "The panel is Tuesday. Reply to recruiter@example.test or call 212-555-0188.",
-        },
-      ],
+  // Raw write: this row models a draft stored before commUpsert fact-checked drafts.
+  const staleRow = {
+    id: "comm-recent-comms",
+    applicationId: "app-recent-comms",
+    company: "Recent Comms Corp",
+    role: "Staff Engineer",
+    channel: "email",
+    status: "drafted",
+    summary: "Interview scheduling is in progress.",
+    draft: {
+      subject: "Re: interview",
+      body: "Tuesday works for me. api_key=do-not-leak and I currently make $230k.",
     },
+    messages: [
+      {
+        direction: "inbound",
+        at: "2026-08-23T14:00:00.000Z",
+        body: "The panel is Tuesday. Reply to recruiter@example.test or call 212-555-0188.",
+      },
+    ],
+  };
+  putRow(openDb({ repoRoot }), "communications", staleRow.id, staleRow, {
+    application_id: staleRow.applicationId,
   });
 
   let request;

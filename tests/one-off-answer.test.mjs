@@ -922,3 +922,19 @@ test("confirming an answer cannot clear a packet gap without a tracked answers a
   assert.equal(stored.packetManifest.uploadReady, false);
   assert.equal(stored.artifacts?.answers, undefined);
 });
+
+test("confirmation refuses to store an answer for an attestation question", async () => {
+  const { confirmOneOffScreeningAnswer } = await import("../src/core/packet/one-off-answer.mjs");
+  await assert.rejects(
+    confirmOneOffScreeningAnswer({
+      repoRoot: tempRepo(),
+      env: {},
+      applicationId: "app-attest",
+      question: "I certify that the information in this application is true and complete.",
+      answer: "Yes",
+    }),
+    (error) =>
+      error?.code === "ATTESTATION_NEEDS_PERSON" &&
+      /answer it yourself on the form/i.test(error.message)
+  );
+});

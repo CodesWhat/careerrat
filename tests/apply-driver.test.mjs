@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { createApplyDriver } from "../src/core/apply/apply-driver.mjs";
+import { createApplyDriver, loadAnswerMap } from "../src/core/apply/apply-driver.mjs";
 import { findAdvanceButtonRef } from "../src/core/apply/form-fill.mjs";
+import { renderAnswersMarkdown } from "../src/core/packet/generate.mjs";
 
 const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 const ASHBY_URL = "https://jobs.ashbyhq.com/curri/d616afe4-311f-4c73-8dc9-87c40f8c7ea8";
@@ -580,6 +581,81 @@ test("LinkedIn posting with no employer link opens the page, makes no clicks and
   assert.deepEqual(log, [{ op: "openTab" }], "only the page open; no snapshot, fill or click");
   assert.equal(consulted, 0);
   assert.equal(result.session.submitClicked, undefined);
+});
+
+test("an Ashby page with the application limits panel stops with a blocker and no clicks", async () => {
+  const page = {
+    origin: ASHBY_URL,
+    pageText:
+      "Platform Engineer\nThis job has application limits\nYou can apply 2 times every 90 days.\nApply for this Job",
+    refs: refsOf([["e1", "button", "Apply for this Job", false]]),
+  };
+  const { ops, log } = createFakeOps([page]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-ashby-limit",
+    application: { id: "app-ashby-limit", link: ASHBY_URL },
+    postingUrl: ASHBY_URL,
+    questionCapture: { state: "captured" },
+    submitMode: "auto",
+    prepareOnly: false,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /hit its application limit\. Nothing was submitted\./);
+  assert.deepEqual(result.session.blockers, ["application limit"]);
+  assert.equal(
+    log.some(({ op }) => ["clickButton", "fillField", "upload"].includes(op)),
+    false
+  );
+});
+
+test("a LinkedIn restriction page stops with a blocker and no apply click", async () => {
+  const page = {
+    origin: GREENHOUSE_URL,
+    pageText: "Your account has been restricted.\nApply\nEasy Apply",
+    refs: refsOf([["e1", "button", "Easy Apply", false]]),
+  };
+  const { ops, log } = createFakeOps([page]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-linkedin-restricted",
+    application: { id: "app-linkedin-restricted", link: LINKEDIN_URL, applyUrl: GREENHOUSE_URL },
+    postingUrl: LINKEDIN_URL,
+    questionCapture: { state: "captured" },
+    submitMode: "auto",
+    prepareOnly: false,
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /account is restricted\. Nothing was submitted\./);
+  assert.deepEqual(result.session.blockers, ["account restricted"]);
+  assert.equal(
+    log.some(({ op }) => op === "clickButton"),
+    false
+  );
+});
+
+test("a job description that mentions limits and restricted stock does not stop the run", async () => {
+  const page = {
+    origin: GREENHOUSE_URL,
+    pageText: "We offer no limits on PTO. Restricted stock units vest over four years.\nApply",
+    refs: refsOf([["e1", "textbox", "First Name", true]]),
+  };
+  const { ops } = createFakeOps([page]);
+  const execute = makeDriver({ ops });
+
+  const result = await execute({
+    applicationId: "app-jd-prose",
+    application: { id: "app-jd-prose", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.notEqual(result.state, "blocked");
 });
 
 test("LinkedIn posting with an employer link applies at that link instead", async () => {
@@ -4005,3 +4081,329 @@ for (const [label, pageText, refs, expected] of [
     }
   });
 }
+
+function restrictedAfterFill(calls) {
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+  let snapshots = 0;
+  ops.snapshot = async () => {
+    snapshots += 1;
+    log.push({ op: "snapshot" });
+    return snapshots >= calls
+      ? { ...SUBMIT_FORM, pageText: `${SUBMIT_FORM.pageText}\nYour account is restricted` }
+      : SUBMIT_FORM;
+  };
+  return { ops, log };
+}
+
+test("auto submit: a restriction on any snapshot up to the one Submit resolves from stops with no click", async () => {
+  // Snapshot N onward shows the restriction. The last one before the click is
+  // the snapshot Submit is resolved from; it must be guarded too.
+  for (let from = 2; from <= 4; from += 1) {
+    const { ops, log } = restrictedAfterFill(from);
+    let hook = 0;
+    const result = await makeDriver({ ops, ...fastWaits })({
+      ...AUTO_REQUEST,
+      applicationId: "app-restricted-late",
+      onSubmitAttempt: async () => {
+        hook += 1;
+      },
+    });
+    assert.equal(clicks(log).length, 0, `no click (restricted from snapshot ${from})`);
+    assert.equal(hook, 0, `no attempt marker (restricted from snapshot ${from})`);
+    assert.equal(result.state, "blocked", `blocked (restricted from snapshot ${from})`);
+    assert.match(result.reason, /account is restricted\. Nothing was submitted\./);
+  }
+});
+
+test("auto submit: an 'Account temporarily restricted' heading next to the form blocks with no click", async () => {
+  const page = {
+    ...SUBMIT_FORM,
+    pageText: '- heading "Account temporarily restricted" [level=2]\nApplication form',
+  };
+  const { ops, log } = createFakeOps([page, SUBMIT_CONFIRMATION]);
+  const result = await makeDriver({ ops, ...fastWaits })({
+    ...AUTO_REQUEST,
+    applicationId: "app-restricted-heading",
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.deepEqual(result.session.blockers, ["account restricted"]);
+  assert.equal(clicks(log).length, 0);
+});
+
+test("a job description saying 'too many applications' or 'detected unusual activity' does not block", async () => {
+  const page = {
+    origin: GREENHOUSE_URL,
+    pageText:
+      "We receive too many applications to respond individually.\nYou will investigate detected unusual activity.\nApply",
+    refs: refsOf([["e1", "textbox", "First Name", true]]),
+  };
+  const { ops } = createFakeOps([page]);
+  const result = await makeDriver({ ops })({
+    applicationId: "app-jd-prose-2",
+    application: { id: "app-jd-prose-2", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+    prepareOnly: true,
+  });
+
+  assert.notEqual(result.state, "blocked");
+});
+
+// ---------------------------------------------------------------------------
+// Honesty: reviewed answers outrank tool inference; attestations never fill or submit.
+// ---------------------------------------------------------------------------
+
+const TOOL_CONFIG = {
+  ...CONFIG,
+  honesty: { tools: { confirmed: ["Python"], do_not_claim: [] } },
+};
+const fills = (log) => log.filter((entry) => ["fillField", "toggleField"].includes(entry.op));
+
+test("a reviewed No for 10+ years of Python survives filling and the auto-submit path", async () => {
+  const page = {
+    ...SUBMIT_FORM,
+    refs: refsOf([
+      ["e1", "textbox", "Do you have 10+ years of professional Python experience?", true],
+      ["e3", "textbox", "Do you have experience with Python?", true],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([page, SUBMIT_CONFIRMATION]);
+  const execute = makeDriver({
+    ops,
+    ...fastWaits,
+    candidateConfigGetImpl: () => TOOL_CONFIG,
+    loadAnswerMapImpl: async () =>
+      new Map([
+        ["do you have 10 years of professional python experience", "No"],
+        ["do you have experience with python", "No"],
+      ]),
+  });
+
+  const result = await execute(AUTO_REQUEST);
+
+  const filled = log.filter((entry) => entry.op === "fillField");
+  assert.deepEqual(
+    filled.map((entry) => [entry.ref, entry.value]),
+    [
+      ["e1", "No"],
+      ["e3", "No"],
+    ]
+  );
+  assert.equal(result.state, "submitted");
+  assert.equal(clicks(log).length, 1);
+});
+
+test("a stored packet Yes cannot fill an attestation or cause submission", async () => {
+  const label = "I certify that the information in this application is true and complete.";
+  for (const required of [true, false]) {
+    const page = {
+      ...SUBMIT_FORM,
+      refs: refsOf([
+        ["e1", "textbox", "First Name", true],
+        ["e3", "checkbox", label, required],
+        ["e2", "button", "Submit application", false],
+      ]),
+    };
+    const { ops, log } = createFakeOps([page, SUBMIT_CONFIRMATION]);
+    const execute = makeDriver({
+      ops,
+      ...fastWaits,
+      loadAnswerMapImpl: async () =>
+        new Map([
+          [label.toLowerCase().replace(/[^a-z0-9 ]/g, ""), "Yes"],
+          ["first name", "Sam"],
+        ]),
+    });
+
+    const result = await execute(AUTO_REQUEST);
+
+    assert.equal(result.state, "blocked", `required=${required}`);
+    assert.equal(clicks(log).length, 0, `required=${required}`);
+    assert.equal(
+      fills(log).some((entry) => entry.ref === "e3"),
+      false,
+      "the attestation control is never touched"
+    );
+  }
+});
+
+test("an attestation that appears after the first snapshot still stops Submit", async () => {
+  const late = {
+    ...SUBMIT_FORM,
+    refs: refsOf([
+      ["e1", "textbox", "First Name", true, { stateKnown: true, value: "Sam" }],
+      ["e3", "checkbox", "I certify that my answers are true and accurate.", false],
+      ["e2", "button", "Submit application", false],
+    ]),
+  };
+  const { ops, log } = createFakeOps([SUBMIT_FORM, SUBMIT_CONFIRMATION]);
+  let calls = 0;
+  ops.snapshot = async () => {
+    calls += 1;
+    return calls <= 1 ? SUBMIT_FORM : late;
+  };
+  const execute = makeDriver({
+    ops,
+    ...fastWaits,
+    loadAnswerMapImpl: async () => new Map([["first name", "Sam"]]),
+  });
+
+  const result = await execute(AUTO_REQUEST);
+
+  assert.notEqual(result.state, "submitted");
+  assert.equal(clicks(log).length, 0);
+});
+
+test("work arrangement question never selects Yes when profile onsite is false", async () => {
+  const log = [];
+  const question = "This role is not remote. Are you able to work onsite in NYC 5 days a week?";
+  const snapshot = () => ({
+    origin: GREENHOUSE_URL,
+    pageText: `${question}\nSubmit application`,
+    refs: {
+      e1: {
+        role: "radio-group",
+        name: question,
+        required: true,
+        options: [
+          { label: "Yes", ref: "e1" },
+          { label: "No", ref: "e2" },
+        ],
+        stateKnown: true,
+        value: "",
+      },
+      e2: { role: "radio", name: "No", required: true, field: false },
+      e3: { role: "button", name: "Submit application", required: false },
+    },
+  });
+  const ops = {
+    async openTab() {
+      return { pageId: "page-arrangement" };
+    },
+    async snapshot() {
+      return snapshot();
+    },
+    async clickButton({ ref }) {
+      log.push(ref);
+      if (ref === "e3") throw new Error("Submit must remain untouched");
+    },
+    async fillField({ ref }) {
+      log.push(ref);
+    },
+    async selectOption({ ref }) {
+      log.push(ref);
+    },
+    async screenshot() {
+      throw new Error("No confirmation screenshot is expected before submit");
+    },
+  };
+  const execute = makeDriver({
+    ops,
+    candidateConfigGetImpl: () => ({
+      ...CONFIG,
+      profile: { ...CONFIG.profile, location: { remote: true, onsite: false } },
+    }),
+  });
+  await execute({
+    applicationId: "app-arrangement",
+    application: { id: "app-arrangement", link: GREENHOUSE_URL },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  });
+  assert.ok(!log.includes("e1"), `Yes option must not be selected: ${log.join(",")}`);
+});
+
+function withAnswersWorkspace(markdown, run) {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-answers-"));
+  try {
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeFileSync(join(repoRoot, "workspace", "tailored", "app-answers.md"), markdown);
+    return run({
+      repoRoot,
+      env: {},
+      application: { artifacts: { answersSource: "workspace/tailored/app-answers.md" } },
+    });
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+}
+
+test("loadAnswerMap keeps multi-line and multi-paragraph answers whole", () => {
+  const map = withAnswersWorkspace(
+    "# Application Answers\n\n## Why us?\n\nLine one.\nLine two.\n\nSecond paragraph.\n\n## Salary\n\n150k\n",
+    loadAnswerMap
+  );
+  assert.equal(map.get("why us"), "Line one.\nLine two.\n\nSecond paragraph.");
+  assert.equal(map.get("salary"), "150k");
+  assert.equal(map.size, 2);
+});
+
+test("loadAnswerMap handles CRLF and a final section without a trailing newline", () => {
+  const map = withAnswersWorkspace(
+    "# Application Answers\r\n\r\n## First\r\n\r\nA one.\r\nA two.\r\n\r\n## Last\r\n\r\nFinal answer",
+    loadAnswerMap
+  );
+  assert.equal(map.get("first"), "A one.\nA two.");
+  assert.equal(map.get("last"), "Final answer");
+});
+
+test("loadAnswerMap drops NEEDS YOU in any emphasis form, Leave blank, and generated uploads", () => {
+  const map = withAnswersWorkspace(
+    [
+      "## Plain",
+      "NEEDS YOU: provide this.",
+      "## Bold",
+      "**NEEDS YOU**: provide this.",
+      "## Italic",
+      "_NEEDS YOU_",
+      "## Bold inside",
+      "**NEEDS YOU:** provide this.",
+      "## Blank",
+      "Leave blank",
+      "## Upload",
+      "Attach the generated resume.",
+      "## Kept",
+      "Real answer.",
+      "",
+    ].join("\n"),
+    loadAnswerMap
+  );
+  assert.deepEqual([...map.entries()], [["kept", "Real answer."]]);
+});
+
+test("loadAnswerMap returns an empty map for absolute or escaping artifact paths", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-answers-"));
+  try {
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    const inside = join(repoRoot, "workspace", "tailored", "a.md");
+    writeFileSync(inside, "## Q\n\nA\n");
+    for (const stored of [inside, "../workspace/tailored/a.md", "workspace/../../a.md"]) {
+      const map = loadAnswerMap({
+        repoRoot,
+        env: {},
+        application: { artifacts: { answersSource: stored } },
+      });
+      assert.equal(map.size, 0, stored);
+    }
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("loadAnswerMap round-trips the packet writer's answers markdown", () => {
+  const markdown = renderAnswersMarkdown({
+    answers: [
+      { questionId: "q1", question: "Why this role?", answer: "Para one.\n\nPara two." },
+      { questionId: "q2", question: "Pronouns?", answer: "NEEDS YOU: confirm" },
+      { questionId: "q3", question: "Start date?", answer: "Two weeks." },
+    ],
+    questionCapture: { questions: [] },
+  });
+  const map = withAnswersWorkspace(markdown, loadAnswerMap);
+  assert.equal(map.get("why this role"), "Para one.\n\nPara two.");
+  assert.equal(map.get("start date"), "Two weeks.");
+  assert.equal(map.has("pronouns"), false);
+  assert.equal(map.size, 2);
+});

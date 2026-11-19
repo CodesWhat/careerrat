@@ -1545,6 +1545,40 @@ test("submit auto: the executor gets a hook that persists the marker before any 
   assert.equal(markerAtHook, "2026-10-26T20:00:00.000Z");
 });
 
+test("submit auto: the hook refuses the click when another runtime already holds the marker", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+  let hookError = null;
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    now: new Date("2026-10-26T22:00:00.000Z"),
+    applyJobImpl: async (input) => {
+      // A second runtime won the atomic claim after this run's own marker check.
+      appMarkSubmitAttempt({
+        repoRoot,
+        env: {},
+        id: input.applicationId,
+        at: "2026-10-26T21:59:59.000Z",
+      });
+      try {
+        await input.onSubmitAttempt({ applicationId: input.applicationId });
+      } catch (error) {
+        hookError = error;
+      }
+      return { available: true, verified: false, state: "awaiting-submit", session: {} };
+    },
+  });
+
+  assert.ok(hookError, "a lost claim must throw so the driver never clicks");
+  assert.equal(hookError.code, "SUBMIT_ALREADY_CLAIMED");
+  assert.notEqual(readApplication(repoRoot).status, "manual-apply");
+  assert.equal(readApplication(repoRoot).submitAttemptedAt, "2026-10-26T21:59:59.000Z");
+});
+
 test("submit auto: a committed marker counts even when the tracker export after it fails", async () => {
   const repoRoot = tempRepo();
   seedPreparedApplication(repoRoot);
@@ -1785,4 +1819,30 @@ test("prepare-submit on an Easy Apply only LinkedIn job opens the page, records 
   assert.equal(last.metadata.state, "waiting-on-person");
   assert.equal(last.metadata.submissionVerified, false);
   assert.equal(last.artifacts[0].url, LINKEDIN_JOB);
+});
+
+test("submit auto: a lost claim reports submit-claimed with no press-Submit instruction", async () => {
+  const repoRoot = tempRepo();
+  seedPreparedApplication(repoRoot);
+  setSubmitMode(repoRoot, "auto");
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: prepareIntent(null, repoRoot),
+    now: new Date("2026-10-26T22:00:00.000Z"),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "submit-claimed",
+      session: {},
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "submit-claimed");
+  assert.equal(last.metadata.code, "SUBMIT_ALREADY_CLAIMED");
+  assert.match(last.text, /Another run is already submitting/);
+  assert.doesNotMatch(last.text, /press submit yourself|submit it yourself/i);
+  assert.notEqual(readApplication(repoRoot).status, "manual-apply");
 });

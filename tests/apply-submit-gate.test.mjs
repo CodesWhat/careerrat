@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
+import { createOrcaOps } from "../src/core/apply/orca-ops.mjs";
 import { evaluateSubmitGate, runApplySubmit } from "../src/core/apply/submit-gate.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { appMarkSubmitAttempt } from "../src/core/db/verbs/app.mjs";
 import { getRow } from "../src/core/db/verbs/shared.mjs";
 import { appUpsert, candidateSetupInitialize } from "../src/core/db/verbs.mjs";
 
@@ -211,6 +213,56 @@ describe("apply submit gate", () => {
     assertRefused(await promise, fake, "NO_SUBMIT_BUTTON");
   });
 
+  it("refuses a page with certification prose", async () => {
+    const ctx = workspace();
+    const { fake, promise } = run(ctx, {
+      before: readyForm({
+        pageText: "I certify that all information provided is true and accurate.",
+      }),
+    });
+    assertRefused(await promise, fake, "HUMAN_CHALLENGE");
+  });
+
+  it("refuses a checked certification control", async () => {
+    const ctx = workspace();
+    const form = readyForm();
+    form.refs.e5 = {
+      role: "checkbox",
+      name: "I certify that the answers above are true and complete.",
+      required: false,
+      stateKnown: true,
+      value: "true",
+    };
+    const { fake, promise } = run(ctx, { before: form });
+    assertRefused(await promise, fake, "HUMAN_CHALLENGE");
+  });
+
+  it("refuses an AI-use disclosure question", async () => {
+    const ctx = workspace();
+    const form = readyForm();
+    form.refs.e5 = {
+      role: "radio",
+      name: "Did you use AI to complete this application?",
+      required: false,
+    };
+    const { fake, promise } = run(ctx, { before: form });
+    assertRefused(await promise, fake, "HUMAN_CHALLENGE");
+  });
+
+  it("does not refuse an ordinary AI experience question", async () => {
+    const verdict = evaluateSubmitGate({
+      snapshot: readyForm({
+        refs: refsOf([
+          ["e1", "textbox", "Do you have experience with AI/ML tools?", false],
+          ["e4", "button", "Submit application"],
+        ]),
+      }),
+      application: { link: GREENHOUSE_URL, evaluation: { gate: "keep" } },
+      submitMode: "auto",
+    });
+    assert.ok(!verdict.refusals.some((reason) => reason.code === "HUMAN_CHALLENGE"));
+  });
+
   it("hands off on a captcha or verification step", async () => {
     const ctx = workspace();
     const { fake, promise } = run(ctx, {
@@ -289,6 +341,40 @@ describe("apply submit gate", () => {
     assert.equal(stored(ctx).status, "evaluated", "status is not walked to manual-apply");
   });
 
+  it("does not press Submit when another runtime wins the attempt claim first", async () => {
+    const ctx = workspace();
+    const fake = fakeOps({ before: readyForm() });
+    const baseSnapshot = fake.ops.snapshot;
+    fake.ops.snapshot = async (args) => {
+      // A second runtime claims the attempt between this run's check and its click.
+      appMarkSubmitAttempt({
+        repoRoot: ctx.dir,
+        env: ctx.env,
+        id: "app-1",
+        at: "2026-11-02T00:00:00.000Z",
+      });
+      return baseSnapshot(args);
+    };
+    const result = await runApplySubmit({
+      repoRoot: ctx.dir,
+      env: ctx.env,
+      id: "app-1",
+      pageId: "page-1",
+      opsImpl: fake.ops,
+      loadSubmitModeImpl: () => "auto",
+      sleepImpl: async () => {},
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.submitted, false);
+    assert.equal(fake.clicks().length, 0, "Submit must not be pressed");
+    assert.equal(result.state, "submit-claimed");
+    assert.equal(result.reasons[0].code, "SUBMIT_ALREADY_CLAIMED");
+    assert.equal(result.handedToPerson, false);
+    assert.doesNotMatch(result.message, /press Submit|submit it yourself/i);
+    assert.match(result.message, /Another run is already submitting/);
+    assert.notEqual(result.status, "manual-apply");
+  });
+
   it("refuses with SESSION_UNREACHABLE when the page can't be read", async () => {
     const ctx = workspace();
     const fake = fakeOps({ before: readyForm() });
@@ -318,6 +404,198 @@ describe("apply submit gate", () => {
     });
     assert.equal(result.ok, false);
     assert.ok(result.reasons.some((reason) => reason.code === "SESSION_UNREACHABLE"));
+  });
+
+  const SUBMITTED_STATUSES = [
+    "applied",
+    "screen",
+    "interview",
+    "final",
+    "offer",
+    "accepted",
+    "rejected",
+  ];
+  const CLOSED_STATUSES = ["cut", "withdrawn"];
+
+  for (const status of [...SUBMITTED_STATUSES, ...CLOSED_STATUSES]) {
+    it(`refuses a ${status} row with a KEEP verdict and no attempt marker, untouched`, async () => {
+      const ctx = workspace({
+        status,
+        nextAction: "Prep for the next round",
+        statusNote: "original note",
+      });
+      const { fake, promise } = run(ctx, { before: readyForm() });
+      const result = await promise;
+      const code = CLOSED_STATUSES.includes(status) ? "APPLICATION_CLOSED" : "ALREADY_SUBMITTED";
+      assertRefused(result, fake, code);
+      assert.equal(result.handedToPerson, false);
+      assert.equal(result.status, status);
+      assert.doesNotMatch(result.message, /submit it yourself|press Submit yourself/i);
+      const row = stored(ctx);
+      assert.equal(row.status, status);
+      assert.equal(row.nextAction, "Prep for the next round");
+      assert.equal(row.statusNote, "original note");
+      assert.ok(!row.submitAttemptedAt);
+    });
+  }
+
+  for (const status of ["interview", "offer"]) {
+    for (const reason of ["manual", "unreachable"]) {
+      it(`keeps a ${status} row intact when the refusal is ${reason}`, async () => {
+        const ctx = workspace({
+          status,
+          interviewAt: "2026-12-01T15:00:00.000Z",
+          nextInterviewAt: "2026-12-08T15:00:00.000Z",
+          interviewNote: "Bring portfolio",
+          nextAction: "Prep for the next round",
+        });
+        const { fake, promise } =
+          reason === "manual"
+            ? run(ctx, { before: readyForm() }, { loadSubmitModeImpl: () => "manual" })
+            : run(ctx, { before: null });
+        const result = await promise;
+        assertRefused(
+          result,
+          fake,
+          reason === "manual" ? "MANUAL_SUBMIT_MODE" : "SESSION_UNREACHABLE"
+        );
+        assert.equal(result.handedToPerson, false);
+        assert.equal(result.status, status);
+        const row = stored(ctx);
+        assert.equal(row.status, status);
+        assert.equal(row.interviewAt, "2026-12-01T15:00:00.000Z");
+        assert.equal(row.nextInterviewAt, "2026-12-08T15:00:00.000Z");
+        assert.equal(row.interviewNote, "Bring portfolio");
+        assert.equal(row.nextAction, "Prep for the next round");
+      });
+    }
+  }
+
+  it("keeps interviewAt on an interview row with no booked next round", async () => {
+    const ctx = workspace({
+      status: "interview",
+      interviewAt: "2026-12-01T15:00:00.000Z",
+      interviewNote: "Round one",
+    });
+    const { fake, promise } = run(
+      ctx,
+      { before: readyForm() },
+      { loadSubmitModeImpl: () => "manual" }
+    );
+    const result = await promise;
+    assertRefused(result, fake, "MANUAL_SUBMIT_MODE");
+    const row = stored(ctx);
+    assert.equal(row.status, "interview");
+    assert.equal(row.interviewAt, "2026-12-01T15:00:00.000Z");
+    assert.equal(row.interviewNote, "Round one");
+  });
+
+  it("moves an eligible pre-submission row to manual-apply on a blank-field refusal", async () => {
+    const ctx = workspace({ status: "reviewed-hold" });
+    const form = readyForm({
+      refs: refsOf([
+        ["e1", "textbox", "Full name", true, { stateKnown: true, value: "" }],
+        ["e4", "button", "Submit application"],
+      ]),
+    });
+    const { fake, promise } = run(ctx, { before: form });
+    const result = await promise;
+    assertRefused(result, fake, "REQUIRED_FIELDS_BLANK");
+    assert.equal(result.handedToPerson, true);
+    assert.equal(result.status, "manual-apply");
+    assert.equal(stored(ctx).status, "manual-apply");
+  });
+
+  for (const stateKnown of [undefined, false]) {
+    it(`refuses required textbox and choice controls with stateKnown ${stateKnown}`, async () => {
+      const ctx = workspace();
+      const details = stateKnown === undefined ? {} : { stateKnown };
+      const form = readyForm({
+        refs: refsOf([
+          ["e1", "textbox", "Why do you want this job?", true, details],
+          ["e2", "combobox", "Work authorization", true, details],
+          ["e3", "checkbox", "Relocation", true, details],
+          ["e4", "button", "Submit application"],
+        ]),
+      });
+      const { fake, promise } = run(ctx, { before: form });
+      const result = await promise;
+      assertRefused(result, fake, "REQUIRED_FIELDS_UNVERIFIED");
+      const reason = result.reasons.find((item) => item.code === "REQUIRED_FIELDS_UNVERIFIED");
+      assert.equal(reason.items.length, 3);
+      assert.ok(!result.reasons.some((item) => item.code === "REQUIRED_FIELDS_BLANK"));
+    });
+  }
+
+  it("refuses when the snapshot says part of the page could not be read", () => {
+    const verdict = evaluateSubmitGate({
+      snapshot: readyForm({ safetyTextIncomplete: true }),
+      application: { link: GREENHOUSE_URL, evaluation: { gate: "keep" } },
+      submitMode: "auto",
+    });
+    assert.equal(verdict.ok, false);
+    assert.ok(
+      verdict.refusals.some(
+        (item) =>
+          item.code === "HUMAN_CHALLENGE" && item.items?.some((i) => i.label === "page-unreadable")
+      )
+    );
+  });
+
+  it("does not call a confirmed attached file input, a disabled or optional field unverified", () => {
+    const verdict = evaluateSubmitGate({
+      snapshot: readyForm({
+        refs: refsOf([
+          ["e1", "textbox", "Full name", true, { stateKnown: true, value: "Sam" }],
+          ["e3", "textbox", "Resume", true, { fileInput: true, fileAttached: true }],
+          ["e5", "textbox", "Hidden", true, { disabled: true }],
+          ["e6", "textbox", "Nickname", false, {}],
+          ["e4", "button", "Submit application"],
+        ]),
+      }),
+      application: { link: GREENHOUSE_URL, evaluation: { gate: "keep" } },
+      submitMode: "auto",
+    });
+    assert.equal(verdict.ok, true, JSON.stringify(verdict.refusals));
+  });
+
+  it("an adapter-produced unknown required textbox reaches runApplySubmit with zero clicks", async () => {
+    const ctx = workspace();
+    const orca = createOrcaOps({
+      runOrcaImpl: async (args) => {
+        if (args[0] === "snapshot") {
+          return {
+            origin: GREENHOUSE_URL,
+            refs: {
+              e1: { name: "Why do you want this job?", role: "textbox" },
+              e4: { name: "Submit application", role: "button" },
+            },
+            snapshot: [
+              '- textbox "Why do you want this job?" [required, ref=e1]',
+              '- button "Submit application" [ref=e4]',
+            ].join("\n"),
+          };
+        }
+        throw new Error("probe unavailable");
+      },
+    });
+    const clicks = [];
+    const ops = {
+      snapshot: (args) => orca.snapshot(args),
+      clickButton: async (args) => clicks.push(args),
+    };
+    const result = await runApplySubmit({
+      repoRoot: ctx.dir,
+      env: ctx.env,
+      id: "app-1",
+      pageId: "page-1",
+      opsImpl: ops,
+      loadSubmitModeImpl: () => "auto",
+      sleepImpl: async () => {},
+    });
+    assert.equal(result.ok, false);
+    assert.ok(result.reasons.some((item) => item.code === "REQUIRED_FIELDS_UNVERIFIED"));
+    assert.equal(clicks.length, 0);
   });
 
   it("evaluateSubmitGate reports every failed check, not just the first", () => {

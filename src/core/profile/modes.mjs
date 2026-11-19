@@ -78,6 +78,13 @@ export function loadModesSchema({ root = DEFAULT_ROOT } = {}) {
   return JSON.parse(readFileSync(join(root, MODES_SCHEMA_PATH), "utf8"));
 }
 
+let defaultModesSchema = null;
+
+function defaultSchema() {
+  defaultModesSchema ??= loadModesSchema();
+  return defaultModesSchema;
+}
+
 export function normalizeModes(input, { schema } = {}) {
   if (input == null) return { valid: true, errors: [], data: { ...DEFAULT_MODES } };
   if (typeof input !== "object" || Array.isArray(input)) {
@@ -88,7 +95,7 @@ export function normalizeModes(input, { schema } = {}) {
     };
   }
 
-  const s = schema || loadModesSchema();
+  const s = schema || defaultSchema();
   const validation = validate(input, s);
   const data = {
     ...DEFAULT_MODES,

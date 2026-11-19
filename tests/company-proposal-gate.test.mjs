@@ -233,3 +233,15 @@ test("buildCompanyProposal reports a failed scan as scan-failed, not as no match
   );
   assert.equal(empty.rejected.reason, "no-current-role-signal");
 });
+
+test("buildCompanyProposal treats '&' and 'and' as the same excluded company", () => {
+  for (const [seedName, excluded] of [
+    ["Barnes and Noble", "Barnes & Noble"],
+    ["Barnes & Noble, Inc.", "Barnes and Noble"],
+  ]) {
+    const result = buildCompanyProposal(
+      proposalArgs({ seed: { name: seedName }, context: { excludedCompanies: [excluded] } })
+    );
+    assert.equal(result.rejected?.reason, "excluded-company", `${seedName} vs ${excluded}`);
+  }
+});

@@ -195,10 +195,10 @@ Either way, never treat an executor's claim of submission as permission to mark
 the application Applied. Only a seen confirmation page or the user's report does that.
 
 **Immediately halt** if the page shows a captcha or Cloudflare human-check, an
-application-limit blocker, a required manual exercise (assessment, coding exercise,
+application-limit blocker (a notice that you've hit the site's limit, or Ashby's "This job has application limits" panel; Ashby limits are set by each employer, so there is no platform number to check ahead of time, and CareerRat detects the notice instead of counting), an account-restriction notice ("your account has been restricted", "unusual activity on your account"), a required manual exercise (assessment, coding exercise,
 Ashby/Workday exercise, etc.), a required account creation or password reset, an ATS
 spam-rejection, or any auth prompt that is not a supported emailed verification-code
-flow. When halting on one of these blockers:
+flow. For a limit or restriction notice `submitGuard` reports the blocker `application limit` or `account restricted` and the driver stops with no fill, apply or submit click, telling the person "This site says you've hit its application limit. Nothing was submitted." (or that the account is restricted). Prose in a job description such as "no limits on PTO" or "restricted stock units" does not count; only the notice wording does. When halting on one of these blockers:
 
 - **DB workspace:**
   1. Write the blocked state immediately:
@@ -303,6 +303,8 @@ Do this and stop:
 
    (Legacy workspace with no DB: set `status: "manual-apply"` with the same note and next action on the tracker row.) Keep any existing status that is already `applied` or later.
 3. Tell the person: the page is open, you can't apply for them on LinkedIn, and you're waiting for them to say they applied.
+
+If the page you land on (the employer link, or a LinkedIn page the driver reads) shows an account-restriction or application-limit notice, stop and record it as a blocker (`manual-apply` with the blocker type in the note) instead of waiting on the person. Make no Apply click.
 
 Nothing is recorded as applied until the person says so. When they do, record it with the normal outcome path (`application.record-external`, or `careerrat data app set-status <id> applied`) and continue into **STEP 9** with `channel: "LinkedIn"`.
 

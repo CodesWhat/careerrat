@@ -368,7 +368,14 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - In that object set `fitScore: <N>`, `fitBucket: "<high|med|stretch>"`, `fitBasis: "evaluated"`.
    - **DB workspace:** `careerrat data app set-fields <id> --data '{"fitScore":<N>,"fitBucket":"<high|med|stretch>","fitBasis":"evaluated"}'`. Not outcome-changing (no analytics refresh) — this is a fit-score annotation on an existing row, not a status transition.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `applications[]` row.
-4. Validate and snapshot:
+4. **Save the typed verdict (DB workspace, roles that are applications).** `coach-gaps` and review approval read the application's typed `evaluation`, and `app set-fields` does not write it. The one way to save it from the terminal is to run the body-read gate with `--write`:
+
+   ```bash
+   careerrat evaluate workspace/jobs/<file>.md --write
+   ```
+
+   It saves the verdict that same run produced (gate, fit, comp, named `fitRisks`) through the validated writer, finds the application from the file's frontmatter (`appId`, or company and role; add `--app <id>` to name it), and prints the job id and gate it saved. It saves nothing and exits non-zero when the job has no readable text, when the job is only a `sourced[]` lead, or in a legacy workspace (no DB). Say so plainly and never claim a verdict was saved when it refused. Run it as the final gate run for the posting; a bare `careerrat evaluate` without `--write` saves nothing. Exit codes: 0 KEEP, 2 REVIEW, 1 CUT or error, 64 for an unknown option (a typo, nothing ran). Do not hand-edit an `evaluation` object into the row.
+5. Validate and snapshot:
    - **DB workspace:** sub-step 2's `sourced upsert-batch` call (or sub-step 3's `app set-fields` call) already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write Contract, AGENTS.md). Run:
 
      ```

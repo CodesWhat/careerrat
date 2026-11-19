@@ -27,13 +27,15 @@ import { dbExists } from "../db/connection.mjs";
 import { currentPerson, listPersonNames, peopleBase, personEnv } from "../paths/people.mjs";
 import { listPeople } from "../people/roster.mjs";
 import { loadCandidateConfig } from "../profile/config-store.mjs";
+import { normalizePostingUrl } from "../scoring/posting-url.mjs";
 import { postingIdentityKeys } from "../scoring/sourced-identity.mjs";
 
 const SHARED_CACHE_DB = "postings-cache.db";
 const SHARED_CACHE_SETTINGS = "shared-cache.json";
 const SHARED_CACHE_PROVENANCE = "shared-cache";
 const DEFAULT_FRESHNESS_HOURS = 6;
-const SCHEMA_VERSION = 1;
+// v2: url: posting keys were re-derived through the shared posting-identity normalizer.
+const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources (
@@ -165,6 +167,77 @@ function readSharedCacheSettings({ base, env = process.env } = {}) {
   return { enabled, freshnessHours, freshnessMs: freshnessHours * 3600000 };
 }
 
+// Rekeys url: postings stored under an older URL normalizer so a re-scan finds
+// them instead of inserting a second row and closing the original. A rekey that
+// lands on an existing row merges: earliest first_seen_at, open if either is
+// open, and the most recently fetched body/offer.
+function migrateUrlKeys(db) {
+  const rows = db
+    .prepare(
+      "SELECT rowid AS id, posting_key, source_key, url FROM postings WHERE posting_key LIKE 'url:%'"
+    )
+    .all();
+  const selectRow = db.prepare("SELECT * FROM postings WHERE posting_key = ? AND source_key = ?");
+  const deleteRow = db.prepare("DELETE FROM postings WHERE posting_key = ? AND source_key = ?");
+  const rekey = db.prepare(
+    "UPDATE postings SET posting_key = ? WHERE posting_key = ? AND source_key = ?"
+  );
+  const mergeInto = db.prepare(`
+    UPDATE postings SET company = ?, title = ?, location = ?, comp_text = ?, url = ?, body = ?,
+      posted_at = ?, offer_json = ?, fetched_at = ?, last_seen_at = ?,
+      first_seen_at = ?, closed = ?
+    WHERE posting_key = ? AND source_key = ?
+  `);
+  for (const row of rows) {
+    // Prefer the URL the row was recorded with; the stored key may already have
+    // lost information (case) under the older normalizer.
+    const next = `url:${normalizePostingUrl(row.url || row.posting_key.slice(4))}`;
+    if (next === row.posting_key) continue;
+    const existing = selectRow.get(next, row.source_key);
+    if (!existing) {
+      rekey.run(next, row.posting_key, row.source_key);
+      continue;
+    }
+    const old = selectRow.get(row.posting_key, row.source_key);
+    const newer = String(old.fetched_at) > String(existing.fetched_at) ? old : existing;
+    mergeInto.run(
+      newer.company,
+      newer.title,
+      newer.location,
+      newer.comp_text,
+      newer.url,
+      newer.body,
+      newer.posted_at,
+      newer.offer_json,
+      newer.fetched_at,
+      newer.last_seen_at,
+      String(old.first_seen_at) < String(existing.first_seen_at)
+        ? old.first_seen_at
+        : existing.first_seen_at,
+      old.closed === 0 || existing.closed === 0 ? 0 : 1,
+      next,
+      row.source_key
+    );
+    deleteRow.run(row.posting_key, row.source_key);
+  }
+}
+
+function migrateSchema(db) {
+  const { user_version: version } = db.prepare("PRAGMA user_version").get();
+  if (version >= SCHEMA_VERSION) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    // Another process may have migrated while this one waited for the lock.
+    const { user_version: current } = db.prepare("PRAGMA user_version").get();
+    if (current < 2) migrateUrlKeys(db);
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function openSharedCacheDb(base) {
   mkdirSync(base, { recursive: true, mode: 0o700 });
   const path = sharedCachePath(base);
@@ -174,7 +247,7 @@ function openSharedCacheDb(base) {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL");
   db.exec(SCHEMA);
-  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  migrateSchema(db);
   if (created) {
     try {
       chmodSync(path, 0o600);

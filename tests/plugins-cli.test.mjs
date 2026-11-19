@@ -170,6 +170,8 @@ test("doctor --json includes a plugins block reporting the bundled example-echo 
     assert.ok(parsed.plugins, "expected a plugins block in doctor --json output");
     assert.ok(parsed.plugins.bundled >= 1);
     assert.equal(parsed.plugins.runnable, parsed.plugins.bundled);
+    // Nothing in CareerRat calls a bundled plugin by itself, so none are wired.
+    assert.equal(parsed.plugins.wired, 0);
     assert.deepEqual(parsed.plugins.invalid, []);
     assert.equal(parsed.plugins.error, null);
   } finally {

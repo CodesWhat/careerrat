@@ -149,6 +149,141 @@ export function extractOver(tgz, targetDir) {
   if (x.status !== 0) throw new Error(`extract failed: ${x.stderr}`);
 }
 
+// Runtime dependency reconciliation. extractOver only replaces package files, so a
+// release that adds or bumps a runtime dependency leaves node_modules stale unless
+// update re-runs npm install. Only `dependencies` and `optionalDependencies` matter:
+// devDependencies never ship in a consumer install.
+export const RUNTIME_DEPS_INSTALL_ARGS = [
+  "install",
+  "--omit=dev",
+  "--ignore-scripts",
+  "--no-audit",
+  "--no-fund",
+];
+
+export function readRuntimeDeps(dir) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    return {
+      dependencies: pkg.dependencies || {},
+      optionalDependencies: pkg.optionalDependencies || {},
+    };
+  } catch {
+    return null;
+  }
+}
+
+function sortedEntries(obj) {
+  return JSON.stringify(Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+// True when the runtime dependency set differs, or either side is unreadable (an
+// unreadable package.json can't prove the install is still consistent).
+export function runtimeDepsChanged(before, after) {
+  if (!before || !after) return true;
+  return (
+    sortedEntries(before.dependencies) !== sortedEntries(after.dependencies) ||
+    sortedEntries(before.optionalDependencies) !== sortedEntries(after.optionalDependencies)
+  );
+}
+
+// Scripts run only for packages the reviewed `allowScripts` policy in package.json
+// approves (the same policy source CI's check-install-scripts.mjs enforces). A key is
+// `name@version` or a bare `name`; `true` approves, `false` denies (never runs, never
+// blocks), absent means unreviewed.
+function scriptVerdict(allowScripts, name, version) {
+  if (!allowScripts || typeof allowScripts !== "object") return undefined;
+  for (const key of [`${name}@${version}`, name]) {
+    if (Object.hasOwn(allowScripts, key) && typeof allowScripts[key] === "boolean") {
+      return allowScripts[key];
+    }
+  }
+  return undefined;
+}
+
+// Installed packages that declare an install script, read from npm's hidden lockfile.
+// Bundled and nested entries are included: `npm rebuild <parent>` also rebuilds the
+// parent's bundled children and runs their install scripts, so they need a verdict too.
+// Returns null when it can't be read, so the caller fails closed.
+function installedScriptPackages(dir) {
+  try {
+    const lock = JSON.parse(readFileSync(join(dir, "node_modules", ".package-lock.json"), "utf8"));
+    const out = [];
+    for (const [path, entry] of Object.entries(lock.packages || {})) {
+      if (!entry?.hasInstallScript || entry.link) continue;
+      const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
+      if (name) out.push({ name, version: entry.version, path, bundled: Boolean(entry.inBundle) });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+// Reconciles runtime deps without letting a new transitive dependency's unreviewed
+// postinstall run as the operator: install with --ignore-scripts (flag AND env, so a
+// permissive user npmrc can't turn scripts back on), then `npm rebuild` only the
+// packages the allowScripts policy approves (node-pty needs its install script).
+// Returns { status, error, unreviewed, approved }; `unreviewed` lists packages (bundled
+// and nested included) with an install script the policy doesn't cover, in which case
+// nothing is rebuilt and `approved` lists what still needs rebuilding by hand.
+//
+// Rebuild targets are package names, not paths: `npm rebuild <name>` rebuilds every
+// installed copy of that name plus the named package's bundled children. Both are safe
+// only because every script-bearing entry in the tree was checked above. A denied
+// (`false`) copy that rebuild would still reach (same name as an approved package, or
+// nested under one) can't be excluded by name, so that case stops instead of rebuilding.
+export function installRuntimeDeps(dir) {
+  const env = { ...process.env, npm_config_ignore_scripts: "true" };
+  const res = spawnSync("npm", RUNTIME_DEPS_INSTALL_ARGS, { cwd: dir, stdio: "inherit", env });
+  if (res.error) return { status: 1, error: res.error.message, unreviewed: [] };
+  if (res.status !== 0) return { status: res.status ?? 1, error: null, unreviewed: [] };
+
+  let allowScripts = null;
+  try {
+    allowScripts = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).allowScripts;
+  } catch {
+    /* no readable policy: nothing is approved */
+  }
+  const withScripts = installedScriptPackages(dir);
+  if (withScripts === null) {
+    return {
+      status: 1,
+      error: "couldn't read node_modules/.package-lock.json to check install scripts",
+      unreviewed: [],
+    };
+  }
+  const allowed = [];
+  const allowedPaths = [];
+  const denied = [];
+  const unreviewed = [];
+  const label = (e) => `${e.name}@${e.version}${e.bundled ? " (bundled)" : ""}`;
+  for (const e of withScripts) {
+    const verdict = scriptVerdict(allowScripts, e.name, e.version);
+    if (verdict === true) {
+      allowed.push(e.name);
+      allowedPaths.push(e.path);
+    } else if (verdict === false) denied.push(e);
+    else unreviewed.push(label(e));
+  }
+  const approved = [...new Set(allowed)];
+  for (const e of denied) {
+    const reachable =
+      approved.includes(e.name) || allowedPaths.some((p) => e.path.startsWith(`${p}/`));
+    if (reachable) unreviewed.push(`${label(e)} (denied, but npm rebuild would still reach it)`);
+  }
+  if (unreviewed.length > 0) return { status: 1, error: null, unreviewed, approved };
+  if (approved.length === 0) return { status: 0, error: null, unreviewed: [], approved: [] };
+
+  const rebuild = spawnSync("npm", ["rebuild", ...approved], {
+    cwd: dir,
+    stdio: "inherit",
+    env: { ...process.env, npm_config_ignore_scripts: "false" },
+  });
+  if (rebuild.error) return { status: 1, error: rebuild.error.message, unreviewed: [] };
+  return { status: rebuild.status ?? 1, error: null, unreviewed: [] };
+}
+
 // ---------------------------------------------------------------------------
 // update-notifier: a cached, never-blocking "newer version available" check.
 

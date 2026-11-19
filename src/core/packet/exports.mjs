@@ -339,6 +339,54 @@ export async function appRegisterPacketArtifacts({
   });
 }
 
+// RESUME_UPLOAD_ARTIFACT_MISSING behaves like ARTIFACT_EXPORT_FAILED
+// for readiness recovery: both describe a transient export-time
+// shortfall, not an unresolved content decision, so a later
+// successful export that restores the missing artifact must be able
+// to clear it automatically rather than requiring a human to dismiss
+// a stuck content gap.
+const RECOVERABLE_GAP_CODES = new Set(["ARTIFACT_EXPORT_FAILED", "RESUME_UPLOAD_ARTIFACT_MISSING"]);
+
+// Gap codes packet generation recomputes on every run. A prior gap with one of
+// these codes that generation no longer reports has been resolved, so it must
+// not be resurrected from the stored manifest.
+const GENERATION_OWNED_GAP_CODES = new Set([
+  "COVER_LETTER_CONFIRMATION",
+  "ANSWER_CONFIRMATION_REQUIRED",
+  "GENERATED_CONTENT_REVIEW_REQUIRED",
+  "QUESTION_CAPTURE_DEFERRED",
+  "PACKET_PROVENANCE_REQUIRED",
+]);
+
+// Freshly generated validation wins over the stored DB manifest. DB-only state
+// generation doesn't produce (the captured-questions summary, answers
+// confirmed later, gaps raised outside generation) is kept, and any such
+// still-open gap blocks uploadReady.
+function overlayFreshManifest(dbManifest, freshManifest) {
+  if (!freshManifest || typeof freshManifest !== "object") return dbManifest;
+  const merged = { ...dbManifest, ...freshManifest };
+  const dbHasArtifacts = dbManifest.artifacts && Object.keys(dbManifest.artifacts).length > 0;
+  if (dbHasArtifacts) merged.artifacts = dbManifest.artifacts;
+  if (dbManifest.questions && !Array.isArray(dbManifest.questions)) {
+    merged.questions = dbManifest.questions;
+    delete merged.excludedQuestions;
+    delete merged.questionCaptureSource;
+  }
+  if (Array.isArray(dbManifest.confirmedAnswers) && dbManifest.confirmedAnswers.length) {
+    merged.confirmedAnswers = dbManifest.confirmedAnswers;
+  }
+  const freshGaps = Array.isArray(freshManifest.gaps) ? freshManifest.gaps : [];
+  const dbOnlyGaps = (Array.isArray(dbManifest.gaps) ? dbManifest.gaps : []).filter(
+    (gap) =>
+      !RECOVERABLE_GAP_CODES.has(gap?.code) &&
+      !GENERATION_OWNED_GAP_CODES.has(gap?.code) &&
+      !freshGaps.some((fresh) => fresh?.code === gap?.code && fresh?.questionId === gap?.questionId)
+  );
+  merged.gaps = [...freshGaps, ...dbOnlyGaps];
+  merged.uploadReady = freshManifest.uploadReady === true && dbOnlyGaps.length === 0;
+  return merged;
+}
+
 export async function exportPacketArtifacts({
   repoRoot,
   env = process.env,
@@ -357,6 +405,10 @@ export async function exportPacketArtifacts({
   // reliably provoked to fail on demand.
   writeManifestFile = (path, content) => writeFileSync(path, content, "utf8"),
   now = () => new Date(),
+  // The manifest generation just computed in memory (fresh gaps, readiness,
+  // provenance). It wins over the stored DB manifest for everything
+  // generation produces; DB-only state is merged in by overlayFreshManifest.
+  freshManifest,
 } = {}) {
   signal?.throwIfAborted();
   const id = cleanText(applicationId || appId);
@@ -379,10 +431,11 @@ export async function exportPacketArtifacts({
   // is what actually confines a promotion.
   const realWorkspaceRoot = safeRealpath(workspaceDir);
   const storedManifest = readStoredManifest(workspaceDir, sources.packetManifest);
-  const priorManifest =
+  const dbManifest =
     app.packetManifest && Object.keys(app.packetManifest).length
       ? app.packetManifest
       : storedManifest || {};
+  const priorManifest = overlayFreshManifest(dbManifest, freshManifest);
   const priorManifestForDb = { ...priorManifest };
   if (Array.isArray(priorManifestForDb.questions)) {
     if (priorManifestForDb.questionCaptureSource) {
@@ -811,16 +864,6 @@ export async function exportPacketArtifacts({
         renameSync(stagedPath, finalPath);
       }
 
-      // RESUME_UPLOAD_ARTIFACT_MISSING behaves like ARTIFACT_EXPORT_FAILED
-      // for readiness recovery: both describe a transient export-time
-      // shortfall, not an unresolved content decision, so a later
-      // successful export that restores the missing artifact must be able
-      // to clear it automatically rather than requiring a human to dismiss
-      // a stuck content gap.
-      const RECOVERABLE_GAP_CODES = new Set([
-        "ARTIFACT_EXPORT_FAILED",
-        "RESUME_UPLOAD_ARTIFACT_MISSING",
-      ]);
       const priorGaps = Array.isArray(priorManifestForDb.gaps) ? priorManifestForDb.gaps : [];
       const priorRecoverable = priorGaps.some((gap) => RECOVERABLE_GAP_CODES.has(gap?.code));
       const contentGaps = priorGaps.filter((gap) => !RECOVERABLE_GAP_CODES.has(gap?.code));

@@ -16,12 +16,12 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 import { dbExists } from "../src/core/db/connection.mjs";
 import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { normalizePostingUrl } from "../src/core/scoring/posting-url.mjs";
 import {
   buildOfferIdentitySet,
   diffSnapshotOffers,
   latestSnapshotPair,
   loadSnapshot,
-  normalizeUrl,
   renderDeltaMarkdown,
   summarizeDelta,
 } from "../src/core/scoring/sourced-delta.mjs";
@@ -46,8 +46,8 @@ export function buildRepoSeenIds({ repoRoot = ROOT } = {}) {
   ]) {
     if (!id) continue;
     // Preserve path and query casing for URL identities (CR-29 round 6):
-    // offerIdentityKeys' own "url:" keys are only normalizeUrl-normalized
-    // (strips tracking params/hash/trailing slash, see normalizeUrl below),
+    // offerIdentityKeys' own "url:" keys are only normalizePostingUrl-normalized
+    // (strips tracking params/hash/trailing slash, see normalizePostingUrl below),
     // never lowercased — lowercasing them here made a case-sensitive path
     // (e.g. "/Jobs/Foo") never match an identical mixed-case snapshot URL,
     // reporting an already-persisted posting as repo-new. Requisition
@@ -66,7 +66,7 @@ export function buildRepoSeenIds({ repoRoot = ROOT } = {}) {
       // sourced-identity.mjs's normalizePostingUrl (lowercases hostname,
       // strips hash, strips a trailing pathname slash) — NOT the same
       // normalization diffSnapshotOffers' own offerIdentityKeys applies via
-      // sourced-delta's normalizeUrl (also strips utm_/trk/ref/gh_src/source
+      // sourced-delta's normalizePostingUrl (also strips utm_/trk/ref/gh_src/source
       // tracking params, and the trailing slash of the WHOLE string).
       // Without re-normalizing here, a persisted URL-only alias (e.g. a
       // HiringCafe republish this run's canonical dedupe folded onto a
@@ -76,7 +76,7 @@ export function buildRepoSeenIds({ repoRoot = ROOT } = {}) {
       // would be reported as repo-new (CR-29 round 5).
       //
       // Do NOT lowercase the result (CR-29 round 6, unlike the req: branch
-      // above): normalizeUrl only strips tracking params/hash/trailing
+      // above): normalizePostingUrl only strips tracking params/hash/trailing
       // slash, it never touches casing, so offerIdentityKeys' own `url:`
       // keys for the CURRENT snapshot keep whatever path/query casing the
       // posting URL actually has. Lowercasing only THIS side made a
@@ -84,7 +84,7 @@ export function buildRepoSeenIds({ repoRoot = ROOT } = {}) {
       // mixed-case snapshot URL, reporting an already-persisted posting as
       // repo-new.
       if (key.startsWith("url:")) {
-        const normalized = normalizeUrl(key.slice(4));
+        const normalized = normalizePostingUrl(key.slice(4));
         if (normalized) ids.add(`url:${normalized}`);
       }
     }

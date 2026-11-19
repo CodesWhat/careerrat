@@ -2,7 +2,9 @@
 // outcome-changing, so none of these refresh the analytics block (AGENTS.md's
 // Tracker Write Contract explicitly carves out "pure comms/scheduling writes").
 import { randomUUID } from "node:crypto";
+import { checkDraftFacts } from "../../comms/draft-facts.mjs";
 import { slugifyThreadId } from "../../comms/threads.mjs";
+import { requireDb } from "../connection.mjs";
 import { ensureJobThreadInDb } from "./chat-first.mjs";
 import {
   appIdExists,
@@ -237,11 +239,59 @@ function assertMessagesValid(messages) {
   });
 }
 
+function draftParts(draft) {
+  const source = typeof draft === "string" ? { body: draft } : draft;
+  return { subject: clean(source?.subject), body: clean(source?.body) };
+}
+
+function draftFactsError(draftFacts) {
+  const error = new Error(
+    `This draft names facts that aren't in your résumé or evidence, so it was held: ${draftFacts.messages.join("; ")}`
+  );
+  error.code = "COMMUNICATION_DRAFT_FACTS";
+  error.details = { messages: draftFacts.messages };
+  return error;
+}
+
 export function commUpsert({ repoRoot, env, row } = {}) {
   if (!row?.id) throw new Error("commUpsert: row.id is required");
   assertMessagesValid(row.messages);
+  // A full-row write must not become a side door around commSetDraft: a new or
+  // changed draft body gets the same fact check. Only the draft is checked, never
+  // the inbound messages the row carries.
+  const incoming = draftParts(row.draft);
+  if (incoming.body) {
+    const existing = getRow(requireDb({ repoRoot, env }), "communications", row.id);
+    const previous = draftParts(existing?.draft);
+    if (previous.body !== incoming.body || previous.subject !== incoming.subject) {
+      const draftFacts = checkDraftFacts({
+        repoRoot,
+        env,
+        comm: row,
+        subject: incoming.subject,
+        body: incoming.body,
+      });
+      if (!draftFacts.ok) throw draftFactsError(draftFacts);
+    }
+  }
   return runVerb({ repoRoot, env }, (db) => {
-    const existed = Boolean(getRow(db, "communications", row.id));
+    const existingRow = getRow(db, "communications", row.id);
+    const existed = Boolean(existingRow);
+    // The followUpKind marker belongs to the draft it was set for. A write that
+    // changes the draft while carrying over the old marker unchanged is a new,
+    // unmarked draft; a marker the write itself sets or changes stays.
+    const before = draftParts(existingRow?.draft);
+    const after = draftParts(row.draft);
+    const draftChanged = before.body !== after.body || before.subject !== after.subject;
+    if (
+      existed &&
+      draftChanged &&
+      row.followUpKind &&
+      row.followUpKind === existingRow.followUpKind
+    ) {
+      row = { ...row };
+      delete row.followUpKind;
+    }
     putRow(db, "communications", row.id, row, {
       application_id: resolveApplicationId(db, row),
     });
@@ -330,9 +380,21 @@ function normalizeDraft(draft) {
 // Persist a generated reply as a reviewable draft and append its durable
 // history in the same transaction. Drafting never claims delivery;
 // commMarkSent remains the only send writer.
-export function commSetDraft({ repoRoot, env, id, draft, summary, at } = {}) {
+export function commSetDraft({ repoRoot, env, id, draft, summary, at, factAllow = [] } = {}) {
   const normalizedDraft = normalizeDraft(draft);
   const messageSummary = String(summary || "Reply drafted for review.").trim();
+  // Canonical storage point (CR103): no caller can persist a draft that names
+  // facts outside the candidate's own material, whatever path produced it.
+  const existing = requireRow(requireDb({ repoRoot, env }), "communications", id, "communication");
+  const draftFacts = checkDraftFacts({
+    repoRoot,
+    env,
+    comm: existing,
+    subject: normalizedDraft.subject,
+    body: normalizedDraft.body,
+    extraAllow: factAllow,
+  });
+  if (!draftFacts.ok) throw draftFactsError(draftFacts);
   return runVerb({ repoRoot, env }, (db) => {
     const comm = requireRow(db, "communications", id, "communication");
     if (comm.status === "closed" || comm.status === "blocked") {
@@ -349,8 +411,10 @@ export function commSetDraft({ repoRoot, env, id, draft, summary, at } = {}) {
       ...(normalizedDraft.subject ? { subject: normalizedDraft.subject } : {}),
       body: normalizedDraft.body,
     });
+    // A new draft replaces the one the nudge marker was set for.
+    const { followUpKind: _replacedMarker, ...commWithoutMarker } = comm;
     const updated = {
-      ...comm,
+      ...commWithoutMarker,
       status: "drafted",
       draft: normalizedDraft,
       summary: messageSummary,
@@ -439,8 +503,12 @@ export function commMarkSent({
     });
     if (evidence) sentMessage.deliveryEvidence = evidence;
     messages.push(sentMessage);
+    // The marker belongs to the draft being sent: counting it here consumes it,
+    // so the next send on this thread doesn't count again.
+    const countsViaComm = comm.followUpKind === "app-nudge";
+    const { followUpKind: _sentMarker, ...commWithoutMarker } = comm;
     const updated = {
-      ...comm,
+      ...commWithoutMarker,
       status: "waiting",
       draft: null,
       lastOutboundAt: sentAt,
@@ -458,12 +526,31 @@ export function commMarkSent({
     let clearedAppFollowUpDraft = false;
     if (applicationId) {
       const app = getRow(db, "applications", applicationId);
-      if (app?.followUp?.draft != null) {
+      const hadAppDraft = app?.followUp?.draft != null;
+      // Only an app-nudge send counts toward the cap (cadence reads sentCount;
+      // nothing else writes it): a comm marked followUpKind "app-nudge", or the
+      // app's own followUp.draft when that draft is a nudge (no kind = legacy
+      // nudge draft). Other outbound mail (a requested resume, an availability
+      // reply) never counts. Clearing a satisfied draft is separate from counting.
+      const appFollowUpKind = app?.followUp?.kind;
+      const draftIsNudge = hadAppDraft && (!appFollowUpKind || appFollowUpKind === "app-nudge");
+      const countsAsNudge = countsViaComm || draftIsNudge;
+      if (app && (hadAppDraft || countsAsNudge)) {
+        const prevCount = Number(app.followUp?.sentCount);
         putRow(db, "applications", applicationId, {
           ...app,
-          followUp: { ...app.followUp, draft: null },
+          followUp: {
+            ...(app.followUp || {}),
+            ...(hadAppDraft ? { draft: null } : {}),
+            ...(countsAsNudge
+              ? {
+                  sentCount: (Number.isFinite(prevCount) ? prevCount : 0) + 1,
+                  lastSentAt: sentAt,
+                }
+              : {}),
+          },
         });
-        clearedAppFollowUpDraft = true;
+        clearedAppFollowUpDraft = hadAppDraft;
       }
     }
 

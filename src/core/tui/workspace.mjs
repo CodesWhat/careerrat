@@ -35,8 +35,9 @@ export function createWorkspaceState(data, options = {}) {
   });
 }
 
-export function refreshWorkspace(data, state) {
-  const view = viewJobs(data, state);
+// `view` lets a caller that already built viewJobs(data, state) skip a second
+// parse and sort of every job.
+export function refreshWorkspace(data, state, view = viewJobs(data, state)) {
   const selected = view.jobs.find((job) => job.id === view.selectedId);
   const change = selectedChange(data, state);
   const pending = state.pendingUndo;

@@ -23,6 +23,7 @@ import { classifyLiveness } from "../liveness/liveness-core.mjs";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { fetchCareerOpsPostingDetail } from "../providers/career-ops-registry.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
+import { normalizePostingUrl } from "../scoring/posting-url.mjs";
 import { extractReqId, fetchProvider, inferProvider } from "../scoring/sourced-scanner.mjs";
 import { extractJobPageIdentity, extractStructuredJobPostings } from "./job-posting-extract.mjs";
 
@@ -612,7 +613,7 @@ async function resolveViaProviderBoard({
   }
   const match = (jobs || []).find((job) => {
     if (!job.url) return false;
-    if (normalizedProviderPostingUrl(job.url) === normalizedProviderPostingUrl(url)) return true;
+    if (normalizePostingUrl(job.url) === normalizePostingUrl(url)) return true;
     if (!targetReqId.id) return false;
     const jobReqId = extractReqId(job.url);
     return jobReqId.id === targetReqId.id;
@@ -667,25 +668,6 @@ async function resolveViaProviderBoard({
         ? "The job description exceeded the provider capture safety limit."
         : null,
   };
-}
-
-const TRACKING_QUERY_KEYS = new Set(["ref", "referrer", "source", "sourceid", "trackingid"]);
-
-function normalizedProviderPostingUrl(value) {
-  try {
-    const url = new URL(value);
-    url.hash = "";
-    for (const key of [...url.searchParams.keys()]) {
-      if (key.toLowerCase().startsWith("utm_") || TRACKING_QUERY_KEYS.has(key.toLowerCase())) {
-        url.searchParams.delete(key);
-      }
-    }
-    url.searchParams.sort();
-    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/u, "");
-    return url.toString();
-  } catch {
-    return String(value || "").trim();
-  }
 }
 
 function fallbackCompanyFromUrl(url) {

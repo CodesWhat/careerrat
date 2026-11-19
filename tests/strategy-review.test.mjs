@@ -428,6 +428,7 @@ test("draftStrategyReview passes through a schema-shaped AI recommendation set a
       title: "Re-rank the Acme role",
       rationale: "It has gone quiet longer than comparable roles.",
       evidenceCount: 3,
+      evidenceIds: ["app-1", "app-2", "app-3"],
       proposal: { id: "app-1", toStatus: "reviewed-hold" },
     },
     {
@@ -542,7 +543,12 @@ test("draftStrategyReview passes through a schema-shaped AI recommendation set a
           data: {
             headline: "Ten candidate recommendations, capped at eight.",
             findings: [
-              { id: "f1", title: "Remote-first roles convert best", evidence: "4 of 5 advanced." },
+              {
+                id: "f1",
+                title: "Remote-first roles convert best",
+                evidence: "4 of 5 advanced.",
+                evidenceIds: ["app-1", "app-4"],
+              },
             ],
             recommendations,
           },
@@ -577,6 +583,9 @@ test("draftStrategyReview passes through a schema-shaped AI recommendation set a
 
   assert.equal(draft.findings.length, 1);
   assert.equal(draft.findings[0].title, "Remote-first roles convert best");
+  assert.equal(draft.findings[0].evidenceCount, 2);
+  assert.deepEqual(draft.findings[0].evidenceIds, ["app-1", "app-4"]);
+  assert.deepEqual(rerank.evidenceIds, ["app-1", "app-2", "app-3"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -1084,12 +1093,8 @@ test("buildStrategyReviewContext reads learning headings written with either sep
   assert.equal(entry.entries[3].title, "Onsite: bring a written question list");
 });
 
-test("draftStrategyReview clamps a model-claimed evidenceCount to the rows the review saw", async () => {
-  const repoRoot = tempRepo();
-  seedApplication(repoRoot, { id: "app-1", status: "applied" });
-  seedApplication(repoRoot, { id: "app-2", status: "applied" });
-
-  const draft = await draftStrategyReview({
+function draftWithCitations({ repoRoot, findings, recommendations }) {
+  return draftStrategyReview({
     repoRoot,
     env: {},
     force: true,
@@ -1098,25 +1103,80 @@ test("draftStrategyReview clamps a model-claimed evidenceCount to the rows the r
       body: {
         ok: true,
         ai: { engine: { id: "claude", label: "Claude Code" } },
-        data: {
-          headline: "Inflated count.",
-          findings: [],
-          recommendations: [
-            {
-              id: "rec-1",
-              type: "exclude-company",
-              title: "Exclude Acme",
-              rationale: "Claimed lots of evidence.",
-              evidenceCount: 40,
-              proposal: { company: "Acme" },
-            },
-          ],
-        },
+        data: { headline: "Cited.", findings, recommendations },
       },
     }),
   });
+}
 
-  assert.equal(draft.recommendations[0].evidenceCount, 2);
+test("buildStrategyReviewContext lists application and sourced row ids for the model to cite", () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-1", status: "applied" });
+  seedSourced(repoRoot, { id: "sourced-1" });
+
+  const context = buildStrategyReviewContext({ repoRoot, env: {} });
+  assert.deepEqual(
+    context.evidenceRows.map((row) => [row.id, row.table]),
+    [
+      ["app-1", "applications"],
+      ["sourced-1", "sourced"],
+    ]
+  );
+});
+
+test("draftStrategyReview findings and recommendations carry exactly the rows they cite, with an exact count", async () => {
+  const repoRoot = tempRepo();
+  const ids = Array.from({ length: 30 }, (_, i) => `app-${String(i + 1).padStart(2, "0")}`);
+  for (const id of ids) seedApplication(repoRoot, { id, status: "rejected" });
+
+  const draft = await draftWithCitations({
+    repoRoot,
+    findings: [
+      {
+        id: "f-small",
+        title: "Two rejections",
+        evidence: "Two rows.",
+        // a duplicate and an id that isn't a row are both dropped
+        evidenceIds: ["app-02", "app-05", "app-02", "app-999"],
+      },
+      { id: "f-none", title: "No rows", evidence: "Nothing cited.", evidenceIds: [] },
+    ],
+    recommendations: [
+      {
+        id: "rec-big",
+        type: "exclude-company",
+        title: "Exclude Acme",
+        rationale: "All thirty rows.",
+        // the model's own number is ignored; the count comes from the cited rows
+        evidenceCount: 2,
+        evidenceIds: ids,
+        proposal: { company: "Acme" },
+      },
+      {
+        id: "rec-inflated",
+        type: "exclude-company",
+        title: "Exclude Beta",
+        rationale: "Claims 40, cites 2.",
+        evidenceCount: 40,
+        evidenceIds: ["app-01", "app-03"],
+        proposal: { company: "Beta" },
+      },
+    ],
+  });
+
+  const [small, none] = draft.findings;
+  assert.deepEqual(small.evidenceIds, ["app-02", "app-05"]);
+  assert.equal(small.evidenceCount, 2);
+  assert.deepEqual(none.evidenceIds, []);
+  assert.equal(none.evidenceCount, 0);
+
+  const [big, inflated] = draft.recommendations;
+  // 30 is past the 25-id cap and past what the old clamp would have let a
+  // model claim of 2; the count is exact and the ids are the first 25 cited.
+  assert.equal(big.evidenceCount, 30);
+  assert.deepEqual(big.evidenceIds, ids.slice(0, 25));
+  assert.equal(inflated.evidenceCount, 2);
+  assert.deepEqual(inflated.evidenceIds, ["app-01", "app-03"]);
 });
 
 test("restoreRerankRows deletes priority for a row that had none instead of writing null", async () => {

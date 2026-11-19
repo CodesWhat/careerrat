@@ -277,3 +277,18 @@ test("background search progress is read from the same canonical snapshot", asyn
   assert.equal(data.searchRuns[0].progress.foundCount, 3);
   assert.deepEqual(readFileSync(join(ctx.env.CAREERRAT_HOME, "db/careerrat.db")), before);
 });
+
+test("a changed salary note re-parses instead of reusing a cached band", (t) => {
+  const ctx = fixture(t, {
+    applications: [],
+    sourced: [row("a", null, { base: "$150k-$200k" })],
+  });
+  const first = viewJobs(readJobs(ctx)).jobs[0].pay;
+  assert.deepEqual([first.min, first.max], [150000, 200000]);
+  writeFileSync(
+    join(ctx.workspace, "tracker.json"),
+    JSON.stringify({ applications: [], sourced: [row("a", null, { base: "$160k-$210k" })] })
+  );
+  const second = viewJobs(readJobs(ctx)).jobs[0].pay;
+  assert.deepEqual([second.min, second.max], [160000, 210000]);
+});

@@ -357,7 +357,7 @@ Per-type requirements:
 
 Run `careerrat lint-placeholders <draft-path>` if the draft is saved to a file before presenting it to the user.
 
-For outreach and any draft that states candidate facts, also run `careerrat fact-check <draft-path> --company "<Company>"`. Exit 1 means the draft names a number, tool, employer or person absent from the candidate's résumé and evidence: remove it or ask the user before presenting.
+For outreach and any draft that states candidate facts, also run `careerrat fact-check <draft-path> --company "<Company>"`. Exit 1 means the draft names a number, tool, employer or person absent from the candidate's résumé and evidence: remove it or ask the user before presenting. The same check also runs in code: `communication.draft` refuses to store a draft that fails it (`COMMUNICATION_DRAFT_FACTS`), and person draft delivery holds one the same way, so a failing draft never reaches the user as ready.
 
 ---
 
@@ -478,6 +478,7 @@ When the user asks to work follow-ups (or `careerrat tracker --followups` surfac
 5. **Persist a baked draft** for the dashboard notification panel. After drafting, write `draft: { subject, body }` onto the relevant record in `workspace/tracker.json`:
    - For comm-based kinds (`needs-reply`, `comm-due`, `waiting-stale`): set `comm.draft = { subject, body }` on the communications record.
    - For application-based kinds (`app-nudge`, `post-interview-nudge`, `thank-you`): set `app.followUp = { kind, dueAt, draft: { subject, body }, generatedAt }` on the application record.
+     Sending that draft (`comm mark-sent`) counts toward `follow_up.app_nudge.max_count` only for `app-nudge`. If you send a nudge as its own communication instead of the app's follow-up draft, set `followUpKind: "app-nudge"` on that communication so it counts. Other messages on the thread never count.
    The dashboard notification bell reads these fields directly; a baked draft appears as "ready to send." A baked draft is only valid for the DRAFT/awaiting-send state; once the message is sent, it must be nulled per the sent-clears-draft invariant (STEP 6b) so the "Ready to send" panel clears.
    - **DB workspace:** comm-based kinds — there is no single-field patch verb for `communications[]`, so read the current row, set `draft`, and persist: `careerrat data comm upsert --data '<patched full comm row JSON>'`. Application-based kinds — `app.followUp` merges one level under `app set-fields`: `careerrat data app set-fields <id> --data '{"followUp":{"kind":"<kind>","dueAt":"<iso>","draft":{"subject":"<s>","body":"<b>"},"generatedAt":"<iso>"}}'`. Neither is outcome-changing.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly.

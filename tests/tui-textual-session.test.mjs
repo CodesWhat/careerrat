@@ -460,6 +460,51 @@ test("snapshots carry summary rows and the selected job arrives as one detail ev
   assert.equal(events.filter((event) => event.type === "detail").at(-1).id, "harbor");
 });
 
+test("a salary change on a saved job re-renders the summary rows", async (t) => {
+  const { events, session, path, tracker } = await fixture(t);
+  const before = events.filter((event) => event.type === "workspace").length;
+  tracker.applications[1].base = "$100k-$120k";
+  writeFileSync(path, JSON.stringify(tracker));
+  session.refresh();
+  await until(() => events.filter((event) => event.type === "workspace").length > before);
+  const harbor = snapshot(events).view.jobs.find((job) => job.id === "harbor");
+  assert.deepEqual([harbor.pay.min, harbor.pay.max], [100000, 120000]);
+  tracker.applications[1].base = "$130k-$150k";
+  writeFileSync(path, JSON.stringify(tracker));
+  session.refresh();
+  await until(() => {
+    const row = snapshot(events).view.jobs.find((job) => job.id === "harbor");
+    return row.pay.min === 130000;
+  });
+});
+
+test("selecting a job that changed while unselected sends its fresh detail", async (t) => {
+  const { events, session, path, tracker } = await fixture(t);
+  tracker.applications[1].evaluation = {
+    requirements: [{ requirement: "Fresh requirement", evidence: "now" }],
+  };
+  writeFileSync(path, JSON.stringify(tracker));
+  session.refresh();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await session.dispatch({ op: "select", id: "harbor" });
+  const detail = events.filter((event) => event.type === "detail").at(-1);
+  assert.equal(detail.id, "harbor");
+  assert.equal(detail.job.record.evaluation.requirements[0].requirement, "Fresh requirement");
+});
+
+test("a change visible only in the selected job's detail still emits", async (t) => {
+  const { events, session, path, tracker } = await fixture(t);
+  const workspaces = () => events.filter((event) => event.type === "workspace").length;
+  const before = workspaces();
+  tracker.applications[0].evaluation.requirements = [{ requirement: "Only in detail" }];
+  writeFileSync(path, JSON.stringify(tracker));
+  session.refresh();
+  await until(() => workspaces() > before);
+  const detail = events.filter((event) => event.type === "detail").at(-1);
+  assert.equal(detail.id, "northstar");
+  assert.equal(detail.job.record.evaluation.requirements[0].requirement, "Only in detail");
+});
+
 test("Search jobs starts the background worker and never writes to the agent PTY", {
   timeout: 9000,
 }, async (t) => {

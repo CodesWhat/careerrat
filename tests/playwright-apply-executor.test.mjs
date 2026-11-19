@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { createApplyDriver, uploadTargetsFromSnapshot } from "../src/core/apply/apply-driver.mjs";
 import { createConfiguredApplyExecutor } from "../src/core/apply/apply-executor-factory.mjs";
+import { submitGuard } from "../src/core/apply/form-fill.mjs";
 import { createPlaywrightApplyExecutor } from "../src/core/apply/playwright-executor.mjs";
 import {
   collectControls,
@@ -29,7 +30,7 @@ const GREENHOUSE_URL = "https://job-boards.greenhouse.io/example/jobs/123";
 // no-live-browser suite. A click on a non-file-input control resolves any
 // pending waitForEvent("filechooser") listener with a fake chooser, mirroring
 // how a real styled "Attach" button opens the native file picker on click.
-function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
+function createFakeBrowser({ controls, bodyText = "", frames, onAction } = {}) {
   const actions = [];
   let pageOpens = 0;
   let currentUrl = "";
@@ -87,6 +88,7 @@ function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
     };
   }
 
+  const mainFrame = { name: "main" };
   const page = {
     async goto(url) {
       currentUrl = url;
@@ -134,6 +136,12 @@ function createFakeBrowser({ controls, bodyText = "", onAction } = {}) {
     async bringToFront() {
       actions.push({ op: "bringToFront" });
     },
+    ...(frames
+      ? {
+          mainFrame: () => mainFrame,
+          frames: () => [mainFrame, ...frames],
+        }
+      : {}),
   };
 
   const context = {
@@ -2423,14 +2431,14 @@ const HONESTY_CONFIG = {
   "form-defaults": {},
 };
 
-function honestyDriver({ controls, bodyText = "", saveScreenshotImpl, onAction }) {
+function honestyDriver({ controls, bodyText = "", frames, saveScreenshotImpl, onAction }) {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-honesty-"));
   mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
   writeFileSync(
     join(repoRoot, "workspace", "tailored", "resume.pdf"),
     buildMinimalPdf(["Resume"]).bytes
   );
-  const { launchImpl, actions } = createFakeBrowser({ controls, bodyText, onAction });
+  const { launchImpl, actions } = createFakeBrowser({ controls, bodyText, frames, onAction });
   const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
   const execute = createApplyDriver({
     ops,
@@ -2635,6 +2643,136 @@ test("receipt wording on a page we just opened is not a confirmed submission", a
     const result = await run();
     assert.notEqual(result.state, "submitted");
     assert.notEqual(result.verified, true);
+  } finally {
+    cleanup();
+  }
+});
+
+const frameWith = (text) => ({
+  isDetached: () => false,
+  locator: () => ({ innerText: async () => text }),
+});
+const unreadableFrame = () => ({
+  isDetached: () => false,
+  locator: () => ({
+    innerText: async () => {
+      throw new Error("Frame was detached or cross-origin");
+    },
+  }),
+});
+const submitClicks = (actions) => actions.filter((a) => a.op === "click" && a.index === 0).length;
+const SUBMIT_ONLY = [SUBMIT];
+const RESTRICTION_NOTICE = "Your account has been restricted from applying to jobs.";
+
+test("snapshot keeps a restriction notice past the 20,000 char display limit and Submit is not pressed", async () => {
+  const bodyText = `${"Job description prose. ".repeat(1_000)}\n${RESTRICTION_NOTICE}`;
+  assert.ok(bodyText.indexOf(RESTRICTION_NOTICE) > 20_000);
+  const { launchImpl } = createFakeBrowser({ controls: SUBMIT_ONLY, bodyText });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  const snapshot = await ops.snapshot({ pageId });
+  assert.match(snapshot.pageText, /restricted from applying/);
+
+  const { run, actions, cleanup } = honestyDriver({ controls: SUBMIT_ONLY, bodyText });
+  try {
+    const result = await run();
+    assert.notEqual(result.state, "submitted");
+    assert.equal(submitClicks(actions), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a restriction notice inside a child frame prevents a top-document Submit", async () => {
+  const { run, actions, cleanup } = honestyDriver({
+    controls: SUBMIT_ONLY,
+    bodyText: "Apply for this role",
+    frames: [frameWith(RESTRICTION_NOTICE)],
+  });
+  try {
+    const result = await run();
+    assert.notEqual(result.state, "submitted");
+    assert.equal(submitClicks(actions), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a challenge inside a child frame prevents a top-document Submit", async () => {
+  const { run, actions, cleanup } = honestyDriver({
+    controls: SUBMIT_ONLY,
+    bodyText: "Apply for this role",
+    frames: [frameWith("Please verify you are human to continue.")],
+  });
+  try {
+    const result = await run();
+    assert.notEqual(result.state, "submitted");
+    assert.equal(submitClicks(actions), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a frame that cannot be inspected marks the snapshot incomplete and blocks automatic Submit", async () => {
+  const { launchImpl } = createFakeBrowser({
+    controls: SUBMIT_ONLY,
+    bodyText: "Apply for this role",
+    frames: [unreadableFrame()],
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  const snapshot = await ops.snapshot({ pageId });
+  assert.equal(snapshot.safetyTextIncomplete, true);
+  assert.doesNotMatch(snapshot.pageText, /security verification/i);
+  assert.deepEqual(
+    submitGuard({
+      pageText: snapshot.pageText,
+      pageSignals: { safetyTextIncomplete: snapshot.safetyTextIncomplete },
+    }).blockers,
+    ["page-unreadable"]
+  );
+
+  const { run, actions, cleanup } = honestyDriver({
+    controls: SUBMIT_ONLY,
+    bodyText: "Apply for this role",
+    frames: [unreadableFrame()],
+  });
+  try {
+    const result = await run();
+    assert.notEqual(result.state, "submitted");
+    assert.deepEqual(result.session.blockers, ["page-unreadable"]);
+    assert.match(result.reason, /couldn't be read/);
+    assert.equal(submitClicks(actions), 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a detached frame is skipped and ordinary limit prose in a long document still submits", async () => {
+  const bodyText = `${"We offer no limits on PTO and restricted stock units. ".repeat(600)}`;
+  assert.ok(bodyText.length > 20_000);
+  const detached = { isDetached: () => true, locator: unreadableFrame().locator };
+  const { launchImpl } = createFakeBrowser({
+    controls: SUBMIT_ONLY,
+    bodyText,
+    frames: [detached, frameWith("Embedded benefits overview")],
+  });
+  const ops = createPlaywrightOps({ launchImpl, profileDir: "/tmp/profile" });
+  const { pageId } = await ops.openTab({ url: GREENHOUSE_URL });
+  const snapshot = await ops.snapshot({ pageId });
+  assert.equal(snapshot.safetyTextIncomplete, undefined);
+  assert.equal(submitGuard({ pageText: snapshot.pageText }).canSubmit, true);
+});
+
+test("control: a clean long page with a clean child frame does press Submit", async () => {
+  const { run, actions, cleanup } = honestyDriver({
+    controls: SUBMIT_ONLY,
+    bodyText: `${"We offer no limits on PTO. ".repeat(900)}`,
+    frames: [frameWith("Embedded benefits overview")],
+  });
+  try {
+    await run();
+    assert.equal(submitClicks(actions), 1);
   } finally {
     cleanup();
   }

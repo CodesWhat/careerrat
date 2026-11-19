@@ -1477,7 +1477,9 @@ test("same Hireology requisition dedupes to the richer Hcareers capture independ
     assert.equal(result.kept[0].bodyText, rich.bodyText);
     assert.equal(result.kept[0].provider, "hcareers");
     assert.equal(result.duplicates.length, 1);
-    assert.equal(result.duplicates[0].duplicateReason, "req_id_batch");
+    // The two URLs differ only by tracking params, which the shared posting
+    // normalizer strips, so the URL key now matches before the req-id key.
+    assert.equal(result.duplicates[0].duplicateReason, "url_batch");
   }
 });
 
@@ -4167,4 +4169,104 @@ test("an unlabeled comp field is still not treated as a base band", () => {
   });
   assert.equal(evidence.baseComp, "");
   assert.equal(evidence.unclassifiedComp, "$95k-$120k");
+});
+
+test("unrelated titles are rejected before scoring and output matches score-first behaviour", () => {
+  const targeting = {
+    role_buckets: [
+      { name: "Frontend", priority: "primary", titles: ["Staff Frontend Engineer"] },
+      {
+        name: "Design systems",
+        priority: "secondary",
+        titles: ["Staff UI Engineer", "Staff Software Engineer, Design Systems"],
+      },
+    ],
+    keep_signals: ["accessibility systems"],
+  };
+  const titleFilter = buildTitleFilter(
+    { positive: ["Staff Frontend Engineer"], negative: ["Security", "Sales"] },
+    targeting
+  );
+  const makeOffer = (id, title) => ({
+    company: "Acme",
+    title,
+    url: `https://jobs.example.test/${id}`,
+    location: "Remote - United States",
+    bodyText: "Build and maintain a mature product platform with a friendly team. ".repeat(12),
+  });
+  const titles = [
+    "Staff Frontend Engineer",
+    "Staff UI Engineer",
+    "Staff Software Engineer, Design Systems",
+    "Staff Security Engineer",
+    "Product Marketing Manager",
+    "Regional Sales Director",
+    "Warehouse Associate",
+    "Registered Nurse",
+  ];
+  const offers = titles.map((title, i) => makeOffer(i, title));
+  const baseConfig = {
+    targeting,
+    modes: { application_mode: "balanced" },
+    profile: { location: { home: "New York, NY", remote: true } },
+  };
+  const run = (offerList, config) =>
+    filterAndDedupeOffers(offerList, {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter,
+      locationFilter: () => true,
+      config,
+    });
+
+  // Reference: the old order scored every unmatched, unblocked title first.
+  const expectedFilteredTitle = [];
+  for (const offer of offers) {
+    const decision = titleFilter.classify(offer.title);
+    if (decision.matched) continue;
+    if (decision.blocked) {
+      expectedFilteredTitle.push({
+        ...offer,
+        qualificationKind: "blocker",
+        qualificationReason: "title-negative-blocker",
+      });
+      continue;
+    }
+    const rating = scoreSourcedOffer(offer, baseConfig);
+    if (
+      !decision.adjacent ||
+      rating.gate === "likely-cut" ||
+      rating.ruleFlags?.includes("title-target-mismatch")
+    ) {
+      expectedFilteredTitle.push({
+        ...offer,
+        qualificationKind: "relevance",
+        qualificationReason: "title-relevance-low",
+      });
+    }
+  }
+  const result = run(offers, baseConfig);
+  assert.deepEqual(result.filteredTitle, expectedFilteredTitle);
+  assert.ok(result.filteredTitle.some((o) => o.qualificationKind === "blocker"));
+  assert.ok(result.filteredTitle.some((o) => o.qualificationKind === "relevance"));
+  assert.ok(result.kept.some((o) => o.titleRelevance === "adjacent-signal"));
+  assert.ok(result.kept.some((o) => o.title === "Staff Frontend Engineer"));
+
+  // Unrelated-only input never reaches scoring, so config is never read.
+  let reads = 0;
+  const countingConfig = new Proxy(baseConfig, {
+    get(target, prop, receiver) {
+      reads += 1;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  const unrelated = run(
+    ["Product Marketing Manager", "Warehouse Associate", "Registered Nurse"].map((t, i) =>
+      makeOffer(`u${i}`, t)
+    ),
+    countingConfig
+  );
+  assert.equal(unrelated.filteredTitle.length, 3);
+  assert.equal(reads, 0);
 });

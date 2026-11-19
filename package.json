@@ -1,6 +1,6 @@
 {
   "name": "careerrat",
-  "version": "0.24.4",
+  "version": "0.25.0",
   "private": false,
   "packageManager": "npm@12.0.2",
   "publishConfig": {
@@ -192,7 +192,19 @@
   "overrides": {
     "vite": "8.3.8",
     "postcss": "^8.5.10",
-    "sharp": "$sharp"
+    "sharp": "$sharp",
+    "@electron/universal": {
+      "minimatch": "11.0.1",
+      "dir-compare": {
+        "minimatch": "^3.0.5"
+      },
+      "@electron/asar": {
+        "minimatch": "^3.0.4",
+        "glob": {
+          "minimatch": "^3.1.1"
+        }
+      }
+    }
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
