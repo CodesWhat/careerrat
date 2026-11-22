@@ -6,6 +6,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-11-21
+
 ### Changed
 
 - CI retries the Playwright browser and OS dependency install up to three times instead of failing on a stalled package mirror.
