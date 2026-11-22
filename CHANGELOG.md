@@ -6,6 +6,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Disposing an agent pane right after it starts now also stops the child when its process group hasn't formed yet, so the test run can't hang on a surviving child.
+
 ## [0.25.1] - 2026-11-21
 
 ### Changed
