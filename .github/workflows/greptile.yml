@@ -8,14 +8,15 @@ name: Greptile second opinion
 # "@greptileai" comment reviews remain available. See CodesWhat/.github
 # REPOSITORY_ONBOARDING.md.
 #
-# pull_request_target (not pull_request) so labeled fork PRs get a
-# write-scoped token for the summon comment; the job is label-gated (a
-# maintainer applying "second-opinion" is the consent step), and the frozen
-# reusable workflow only validates the head SHA and posts a comment - it
-# never checks out or executes PR code.
+# pull_request (not pull_request_target): GitHub blocks pull_request_target by
+# default on public repos from 2026-12-02. Same-repo PRs still get the
+# write-scoped token the summon comment needs. A labeled fork PR gets a
+# read-only token, so the summon comment can't post; use a manual
+# "@greptileai" comment there. The job stays label-gated, and the frozen
+# reusable workflow only validates the head SHA and posts a comment.
 
 on:
-  pull_request_target: # zizmor: ignore[dangerous-triggers] label-gated, no PR code checkout
+  pull_request:
     types: [labeled]
 
 permissions: {}

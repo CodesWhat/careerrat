@@ -6,6 +6,13 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-11-21
+
+### Changed
+
+- CI retries the Playwright browser and OS dependency install up to three times instead of failing on a stalled package mirror.
+- The Greptile second-opinion caller runs on `pull_request` instead of `pull_request_target`, ahead of GitHub blocking that trigger on public repos from 2026-12-02.
+
 ## [0.25.0] - 2026-11-18
 
 ### Added
