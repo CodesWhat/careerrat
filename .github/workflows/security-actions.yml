@@ -11,8 +11,9 @@ name: security-actions
 on:
   pull_request:
     branches: [main, "dev/**"]
+  # No push run for dev/**: the pull_request run covers it.
   push:
-    branches: [main, "dev/**"]
+    branches: [main]
   schedule:
     - cron: "15 3 * * 4" # weekly, Thursday 03:15 UTC (off-peak, distinct from codeql's Monday 04:30 UTC)
 

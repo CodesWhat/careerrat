@@ -256,7 +256,7 @@ test("native agent pane routes input, terminal queries, resize and bracketed pas
 
 test("disposing a pane terminates its live child and releases the emulator", {
   timeout: 10000,
-}, async () => {
+}, async (t) => {
   const create = requireFunction(api, "createAgentPane");
   requireFunction(prepare, "preparePtyHelpers")();
   const pane = create({
@@ -268,6 +268,14 @@ test("disposing a pane terminates its live child and releases the emulator", {
     rows: 5,
   });
   const pid = pane.pid;
+  t.after(() => {
+    // A failed dispose must never leave a live child that keeps the runner alive.
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  });
   await pane.dispose();
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   await pane.dispose();

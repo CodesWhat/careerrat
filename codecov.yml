@@ -1,9 +1,11 @@
-# Coverage is reported, never enforced here. The required checks stay the
-# test jobs; both Codecov statuses are informational so they can't block a merge.
+# Coverage is enforced at 80% lines (and functions) by the test runner inside
+# the required tests job (npm run test:coverage). The Codecov statuses stay
+# informational so they can't block a merge on their own.
 coverage:
   status:
     project:
       default:
+        target: 80%
         informational: true
     patch:
       default:
