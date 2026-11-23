@@ -247,11 +247,32 @@ export function createAgentPane({
       if (process.platform === "win32") {
         killProcessTreeByPid(child.pid, { env });
         child.kill();
-      } else process.kill(-groupPid, name);
+        return;
+      }
+      // The group may not exist yet if setsid hasn't run in the fork, so also signal the leader.
+      signalTarget(-groupPid, name);
+      if (!exited) signalTarget(groupPid, name);
     } catch (error) {
       if (error.code !== "ESRCH" && !(process.platform !== "win32" && error.code === "EPERM"))
         throw error;
     }
+  }
+  function signalTarget(target, name) {
+    try {
+      process.kill(target, name);
+    } catch (error) {
+      if (error.code !== "ESRCH" && error.code !== "EPERM") throw error;
+    }
+  }
+  function probeGone(target) {
+    try {
+      process.kill(target, 0);
+    } catch (error) {
+      if (error.code === "ESRCH") return true;
+      // Darwin can briefly report EPERM for a group containing only zombies.
+      if (error.code !== "EPERM") throw error;
+    }
+    return false;
   }
   function waitForExit(ms) {
     if (exited) return Promise.resolve(true);
@@ -266,13 +287,8 @@ export function createAgentPane({
   async function waitForGroupExit(ms) {
     const deadline = Date.now() + ms;
     while (true) {
-      try {
-        process.kill(-groupPid, 0);
-      } catch (error) {
-        if (error.code === "ESRCH") return true;
-        // Darwin can briefly report EPERM for a group containing only zombies.
-        if (error.code !== "EPERM") throw error;
-      }
+      // A reaped leader (pty onExit fired) can't be probed by pid, since the pid may be reused.
+      if (probeGone(-groupPid) && (exited || probeGone(groupPid))) return true;
       const remaining = deadline - Date.now();
       if (remaining <= 0) return false;
       await new Promise((resolve) => setTimeout(resolve, Math.min(25, remaining)));

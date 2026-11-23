@@ -6,6 +6,20 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Changed
+
+- CI no longer repeats a pull request's checks when it merges into a dev branch, and pull request runs cancel when a newer commit lands but main runs don't.
+- CI skips the main-only web, website and browser jobs on dev pull requests unless the files they build changed. The promotion pull request into main still runs all of them, and the Windows package smoke runs only there.
+- The browser CI jobs run inside Playwright's own container image, pinned to the Playwright version in the lockfile, instead of installing browser system packages with apt on every run.
+- The required `tests` CI job now fails if line or function coverage drops below 80%. Codecov's statuses stay informational.
+- The README Codecov badge tracks the default branch instead of a pinned dev branch.
+- The README shows the Qlty maintainability badge.
+- The LICENSE copyright holder is now CodesWhat.
+
+### Fixed
+
+- Disposing an agent pane right after it starts now also stops the child when its process group hasn't formed yet, so the test run can't hang on a surviving child.
+
 ## [0.25.1] - 2026-11-21
 
 ### Changed
