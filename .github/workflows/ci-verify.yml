@@ -239,16 +239,16 @@ jobs:
           # website-build, website-browser-checks: the marketing site, the
           # docs it embeds, and the shared inputs.
           site=false
-          if printf '%s\n' "$files" | grep -Eq "$shared|^apps/(website|docs)/"; then site=true; fi
+          if grep -Eq "$shared|^apps/(website|docs)/" <<<"$files"; then site=true; fi
           # web-build, browser-application-prep: the SPA plus the product code
           # and fixtures its imports and Playwright tests reach. Other apps,
           # docs, markdown, other workflows and unit tests outside the
           # Playwright set cannot reach them.
           ignorable='^(apps/(website|docs|desktop)|docs|examples|\.github)/|\.md$|^LICENSE$|^tests/'
           web=false
-          if printf '%s\n' "$files" | grep -Eq "$shared"; then web=true
-          elif printf '%s\n' "$files" | grep -Evq "$ignorable"; then web=true
-          elif printf '%s\n' "$files" | grep -Eq '^tests/(playwright-|helpers/|fixtures/)'; then web=true
+          if grep -Eq "$shared" <<<"$files"; then web=true
+          elif grep -Evq "$ignorable" <<<"$files"; then web=true
+          elif grep -Eq '^tests/(playwright-|helpers/|fixtures/)' <<<"$files"; then web=true
           fi
           emit "$web" "$site"
           echo "web=$web site=$site"
@@ -436,6 +436,10 @@ jobs:
   # output renders. Source: apps/website/browser-checks/smoke.mjs (CR117).
   website-browser-checks:
     name: website-browser-checks
+    # Container steps default to sh (dash on Noble); the steps here need bash.
+    defaults:
+      run:
+        shell: bash
     needs: changes
     # Required on main only. On a dev PR, run when the website or docs changed,
     # or when the changes job did not succeed (fail closed).
@@ -630,6 +634,10 @@ jobs:
   # cover the multi-step application and native dropdown/radio controls.
   browser-application-prep:
     name: browser-application-prep
+    # Container steps default to sh (dash on Noble); the steps here need bash.
+    defaults:
+      run:
+        shell: bash
     needs: changes
     # Required on main only. On a dev PR, run when the web app or the code it imports changed,
     # or when the changes job did not succeed (fail closed).
