@@ -13,6 +13,7 @@ All notable changes to CareerRat are documented here. This project follows
 - The browser CI jobs run inside Playwright's own container image, pinned to the Playwright version in the lockfile, instead of installing browser system packages with apt on every run.
 - The required `tests` CI job now fails if line or function coverage drops below 80%. Codecov's statuses stay informational.
 - The README Codecov badge tracks the default branch instead of a pinned dev branch.
+- The README shows the Qlty maintainability badge.
 - The LICENSE copyright holder is now CodesWhat.
 
 ### Fixed
