@@ -195,7 +195,6 @@ jobs:
       - name: Web UI test suite
         run: npm --workspace apps/web test
 
-  # M7 — builds the apps/web SPA shell as its own required product gate.
   # Decides which path-sensitive jobs a dev PR needs. Plain git diff against the
   # PR base, no third-party action. Any error (or any non-PR event) reports
   # both outputs true, and a failed job leaves the outputs empty and a
@@ -254,6 +253,7 @@ jobs:
           emit "$web" "$site"
           echo "web=$web site=$site"
 
+  # M7 — builds the apps/web SPA shell as its own required product gate.
   web-build:
     name: web-build
     needs: changes
@@ -448,7 +448,9 @@ jobs:
     # no-ops here (the job was audit-only before).
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e # mcr.microsoft.com/playwright:v1.62.1-noble
-      options: --ipc=host --init
+      # Playwright's documented CI form runs as the runner's uid (1001), so the
+      # checkout stays writable and Chromium and Firefox don't run as root.
+      options: --user 1001 --ipc=host --init
     timeout-minutes: 20
     steps:
       - name: Harden the runner (audit browser and system dependency downloads)
@@ -640,7 +642,9 @@ jobs:
     # no-ops here (the job was audit-only before).
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e # mcr.microsoft.com/playwright:v1.62.1-noble
-      options: --ipc=host --init
+      # Playwright's documented CI form runs as the runner's uid (1001), so the
+      # checkout stays writable and Chromium and Firefox don't run as root.
+      options: --user 1001 --ipc=host --init
     timeout-minutes: 15
     env:
       CAREERRAT_LIVE_BROWSER: "1"
