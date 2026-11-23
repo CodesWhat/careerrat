@@ -6,6 +6,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.25.2] - 2026-11-23
+
 ### Changed
 
 - CI no longer repeats a pull request's checks when it merges into a dev branch, and pull request runs cancel when a newer commit lands but main runs don't.
