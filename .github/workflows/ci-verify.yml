@@ -172,7 +172,8 @@ jobs:
       - name: Audit production dependencies (high and above)
         run: npm audit --omit=dev --audit-level=high
       # Same suite as `npm test`, plus Node's built-in coverage written to
-      # coverage/lcov.info for the Codecov upload below.
+      # coverage/lcov.info for the Codecov upload below. The run fails if line
+      # or function coverage drops under the 80% floor set in package.json.
       - name: Core test suite
         run: npm run test:coverage
       # Reporting only. Codecov's statuses are informational (codecov.yml) and

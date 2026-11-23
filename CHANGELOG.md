@@ -11,6 +11,9 @@ All notable changes to CareerRat are documented here. This project follows
 - CI no longer repeats a pull request's checks when it merges into a dev branch, and pull request runs cancel when a newer commit lands but main runs don't.
 - CI skips the main-only web, website and browser jobs on dev pull requests unless the files they build changed. The promotion pull request into main still runs all of them, and the Windows package smoke runs only there.
 - The browser CI jobs run inside Playwright's own container image, pinned to the Playwright version in the lockfile, instead of installing browser system packages with apt on every run.
+- The required `tests` CI job now fails if line or function coverage drops below 80%. Codecov's statuses stay informational.
+- The README Codecov badge tracks the default branch instead of a pinned dev branch.
+- The LICENSE copyright holder is now CodesWhat.
 
 ### Fixed
 
