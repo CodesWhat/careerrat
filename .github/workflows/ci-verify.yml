@@ -19,6 +19,16 @@ name: ci
 # scripts/protect-main.sh's DESIRED block and in the live ruleset, and that
 # script's drift guard now holds the two in sync.
 #
+# Run scope: a PR into a dev branch runs the always-on jobs (structure-guards,
+# tests, qlty, knip). The jobs that are required only on main (web-build,
+# website-build, website-browser-checks, browser-application-prep,
+# windows-package-smoke) run on a promotion PR into main and on pushes to main.
+# On a dev PR, the four path-sensitive ones also run when the `changes` job
+# says their paths changed (or when `changes` itself failed, so it fails
+# closed). windows-package-smoke has no path trigger. A skipped job via a
+# job-level `if:` still satisfies a required context; a workflow-level `paths:`
+# filter would not, so never add one here.
+#
 # qlty and knip remain required as well. The desired list is source-controlled;
 # scripts/protect-main.sh's drift check proves whether GitHub's live ruleset has
 # caught up without mutating it from CI.
@@ -26,12 +36,15 @@ name: ci
 on:
   pull_request:
     branches: [main, "dev/**"]
+  # No push trigger for dev/**: every change reaches a dev branch through a
+  # pull_request run of this same workflow, so a push run would repeat it.
   push:
-    branches: [main, "dev/**"]
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A newer push to a PR supersedes the older run. Runs on main always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -182,8 +195,70 @@ jobs:
         run: npm --workspace apps/web test
 
   # M7 — builds the apps/web SPA shell as its own required product gate.
+  # Decides which path-sensitive jobs a dev PR needs. Plain git diff against the
+  # PR base, no third-party action. Any error (or any non-PR event) reports
+  # both outputs true, and a failed job leaves the outputs empty and a
+  # non-success result, which the consumers treat as "run".
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      web: ${{ steps.diff.outputs.web }}
+      site: ${{ steps.diff.outputs.site }}
+    steps:
+      - name: Harden the runner (block all outbound calls except the allowlist)
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Work out which path-sensitive jobs this PR needs
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          emit() { echo "web=$1" >> "$GITHUB_OUTPUT"; echo "site=$2" >> "$GITHUB_OUTPUT"; }
+          if [ "$EVENT_NAME" != "pull_request" ]; then emit true true; exit 0; fi
+          if ! files="$(git diff --name-only "$BASE_SHA...HEAD")"; then
+            echo "::warning::git diff failed; running every path-sensitive job"
+            emit true true
+            exit 0
+          fi
+          echo "Changed files:"; printf '%s\n' "$files"
+          # Inputs every build shares: dependency files, shared scripts, and
+          # this workflow.
+          shared='^(package\.json|package-lock\.json|\.npmrc|turbo\.json|\.github/workflows/ci-verify\.yml)$|^scripts/'
+          # website-build, website-browser-checks: the marketing site, the
+          # docs it embeds, and the shared inputs.
+          site=false
+          if printf '%s\n' "$files" | grep -Eq "$shared|^apps/(website|docs)/"; then site=true; fi
+          # web-build, browser-application-prep: the SPA plus the product code
+          # and fixtures its imports and Playwright tests reach. Other apps,
+          # docs, markdown, other workflows and unit tests outside the
+          # Playwright set cannot reach them.
+          ignorable='^(apps/(website|docs|desktop)|docs|examples|\.github)/|\.md$|^LICENSE$|^tests/'
+          web=false
+          if printf '%s\n' "$files" | grep -Eq "$shared"; then web=true
+          elif printf '%s\n' "$files" | grep -Evq "$ignorable"; then web=true
+          elif printf '%s\n' "$files" | grep -Eq '^tests/(playwright-|helpers/|fixtures/)'; then web=true
+          fi
+          emit "$web" "$site"
+          echo "web=$web site=$site"
+
   web-build:
     name: web-build
+    needs: changes
+    # Required on main only. On a dev PR, run when the web app or the code it imports changed,
+    # or when the changes job did not succeed (fail closed).
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main' || needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
@@ -271,6 +346,10 @@ jobs:
   # required product gate instead.
   website-build:
     name: website-build
+    needs: changes
+    # Required on main only. On a dev PR, run when the website or docs changed,
+    # or when the changes job did not succeed (fail closed).
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main' || needs.changes.result != 'success' || needs.changes.outputs.site == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
@@ -356,7 +435,19 @@ jobs:
   # output renders. Source: apps/website/browser-checks/smoke.mjs (CR117).
   website-browser-checks:
     name: website-browser-checks
+    needs: changes
+    # Required on main only. On a dev PR, run when the website or docs changed,
+    # or when the changes job did not succeed (fail closed).
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main' || needs.changes.result != 'success' || needs.changes.outputs.site == 'true') }}
     runs-on: ubuntu-latest
+    # Playwright's own image carries the OS libraries and all three browsers
+    # at the version resolved in package-lock.json (tests/release-gating-ci
+    # checks they match). Tag kept for humans, digest for the pull.
+    # harden-runner installs no agent inside a container job, so it only
+    # no-ops here (the job was audit-only before).
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e # mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --ipc=host --init
     timeout-minutes: 20
     steps:
       - name: Harden the runner (audit browser and system dependency downloads)
@@ -423,52 +514,19 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
-      # Browser binaries are cached per runner OS and resolved Playwright
-      # version, so a stalled download (CR74, 2026-11-17) can only hit a cold
-      # cache, and the install has its own short timeout to fail fast. OS
-      # packages live outside the cache, so a hit still runs install-deps.
-      - name: Resolve the Playwright version from package-lock.json
-        id: playwright-version
-        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium-webkit-firefox
-      - name: Install the real Chromium, WebKit and Firefox test browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 14
-        # apt mirrors stall now and then (CR74). Bounded retry, about 4 minutes per attempt.
-        run: |
-          for attempt in 1 2 3; do
-            if timeout 240 npx playwright install --with-deps chromium webkit firefox; then exit 0; fi
-            echo "::warning::Playwright install attempt $attempt failed or stalled; retrying"
-            sleep 10
-          done
-          exit 1
-      - name: Install Playwright OS dependencies (browsers restored from cache)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 14
-        # apt mirrors stall now and then (CR74). Bounded retry, about 4 minutes per attempt.
-        run: |
-          for attempt in 1 2 3; do
-            if timeout 240 npx playwright install-deps chromium webkit firefox; then exit 0; fi
-            echo "::warning::Playwright install attempt $attempt failed or stalled; retrying"
-            sleep 10
-          done
-          exit 1
       - name: Build the marketing site and docs (apps/website, apps/docs)
         run: npm run build --workspace apps/website
       - name: Render the built site in all three browsers at desktop and phone widths
         run: npm run test:website-browser
 
-  # Builds the real Windows installer on every PR/push and drives it through
+  # Builds the real Windows installer on promotion PRs and main pushes and drives it through
   # silent install, packaged Electron mount, PDF export, bundled Playwright
   # Chromium launch, and uninstall. It is intentionally unsigned here and
   # retained only as a short-lived Actions QA artifact.
   windows-package-smoke:
     name: windows-package-smoke
+    # Release gate: promotion PRs into main and pushes to main only, no path trigger.
+    if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
     runs-on: windows-latest
     steps:
       - name: Harden the runner (audit Electron and Chromium downloads)
@@ -569,7 +627,19 @@ jobs:
   # cover the multi-step application and native dropdown/radio controls.
   browser-application-prep:
     name: browser-application-prep
+    needs: changes
+    # Required on main only. On a dev PR, run when the web app or the code it imports changed,
+    # or when the changes job did not succeed (fail closed).
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main' || needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
+    # Playwright's own image carries the OS libraries and all three browsers
+    # at the version resolved in package-lock.json (tests/release-gating-ci
+    # checks they match). Tag kept for humans, digest for the pull.
+    # harden-runner installs no agent inside a container job, so it only
+    # no-ops here (the job was audit-only before).
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e # mcr.microsoft.com/playwright:v1.62.1-noble
+      options: --ipc=host --init
     timeout-minutes: 15
     env:
       CAREERRAT_LIVE_BROWSER: "1"
@@ -639,41 +709,6 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
-      # Browser binaries are cached per runner OS and resolved Playwright
-      # version, so a stalled download (CR74, 2026-11-17) can only hit a cold
-      # cache, and the install has its own short timeout to fail fast. OS
-      # packages live outside the cache, so a hit still runs install-deps.
-      - name: Resolve the Playwright version from package-lock.json
-        id: playwright-version
-        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium
-      - name: Install the real Chromium test browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 14
-        # apt mirrors stall now and then (CR74). Bounded retry, about 4 minutes per attempt.
-        run: |
-          for attempt in 1 2 3; do
-            if timeout 240 npx playwright install --with-deps chromium; then exit 0; fi
-            echo "::warning::Playwright install attempt $attempt failed or stalled; retrying"
-            sleep 10
-          done
-          exit 1
-      - name: Install Playwright OS dependencies (browsers restored from cache)
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 14
-        # apt mirrors stall now and then (CR74). Bounded retry, about 4 minutes per attempt.
-        run: |
-          for attempt in 1 2 3; do
-            if timeout 240 npx playwright install-deps chromium; then exit 0; fi
-            echo "::warning::Playwright install attempt $attempt failed or stalled; retrying"
-            sleep 10
-          done
-          exit 1
       - name: Build the app used by the visual contract
         run: npm run build --workspace apps/web
       - name: Verify application preparation and rendered workspace geometry

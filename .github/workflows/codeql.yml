@@ -9,8 +9,9 @@ name: codeql
 # is clean, a `code_scanning` rule can be added to the Main branch protection ruleset.
 
 on:
+  # No push run for dev/**: the pull_request run covers it.
   push:
-    branches: [main, "dev/**"]
+    branches: [main]
   pull_request:
     branches: [main, "dev/**"]
   schedule:

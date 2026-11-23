@@ -1211,7 +1211,11 @@ test("real Chromium application preparation and rendered UI geometry are an expl
 
   assert.match(job, /name:\s*browser-application-prep/);
   assert.match(job, /CAREERRAT_LIVE_BROWSER:\s*["']?1/);
-  assert.match(job, /playwright install --with-deps chromium/);
+  assert.match(
+    job,
+    /container:\s*\n\s+image: mcr\.microsoft\.com\/playwright:v[\d.]+-noble@sha256:[0-9a-f]{64}/
+  );
+  assert.doesNotMatch(job, /playwright install/);
   assert.match(job, /npm run build --workspace apps\/web/);
   assert.match(job, /tests\/playwright-live\.test\.mjs/);
   assert.match(job, /tests\/playwright-live-dropdowns\.test\.mjs/);
@@ -1252,7 +1256,11 @@ test("website-browser-checks renders the built site in all three engines", async
     workflow.indexOf("  windows-package-smoke:")
   );
   assert.match(job, /name:\s*website-browser-checks/);
-  assert.match(job, /playwright install --with-deps chromium webkit firefox/);
+  assert.match(
+    job,
+    /container:\s*\n\s+image: mcr\.microsoft\.com\/playwright:v[\d.]+-noble@sha256:[0-9a-f]{64}/
+  );
+  assert.doesNotMatch(job, /playwright install/);
   assert.match(job, /npm run build --workspace apps\/website/);
   assert.match(job, /npm run test:website-browser/);
   const pkg = JSON.parse(await source("package.json"));
@@ -1260,6 +1268,53 @@ test("website-browser-checks renders the built site in all three engines", async
   const smoke = await source("apps/website/browser-checks/smoke.mjs");
   for (const engine of ["chromium", "webkit", "firefox"]) assert.match(smoke, new RegExp(engine));
   assert.match(smoke, /phone:\s*\{/);
+});
+
+test("Playwright container images match the Playwright version locked in package-lock.json", async () => {
+  const lock = JSON.parse(await source("package-lock.json"));
+  const locked = lock.packages["node_modules/playwright"].version;
+  const workflow = await loadWorkflow();
+  for (const jobId of ["website-browser-checks", "browser-application-prep"]) {
+    const image = workflow.jobs[jobId].container?.image;
+    assert.ok(image, `${jobId} must run in the Playwright container image`);
+    assert.equal(
+      image.split("@")[0],
+      `mcr.microsoft.com/playwright:v${locked}-noble`,
+      `${jobId}: container image tag must match the locked playwright ${locked}`
+    );
+  }
+});
+
+test("main-only jobs skip on dev pull requests unless their paths changed, and fail closed", async () => {
+  const workflow = await loadWorkflow();
+  const main = "github.event_name != 'pull_request' || github.base_ref == 'main'";
+  assert.deepEqual(workflow.on.push.branches, ["main"]);
+  assert.equal(
+    workflow.on.pull_request.paths,
+    undefined,
+    "a workflow-level paths filter would block required contexts"
+  );
+  assert.equal(workflow.jobs["windows-package-smoke"].if.includes(main), true);
+  assert.ok(
+    !/changes/.test(workflow.jobs["windows-package-smoke"].if),
+    "windows smoke has no path trigger"
+  );
+  for (const [jobId, output] of [
+    ["web-build", "web"],
+    ["browser-application-prep", "web"],
+    ["website-build", "site"],
+    ["website-browser-checks", "site"],
+  ]) {
+    const job = workflow.jobs[jobId];
+    assert.equal(job.needs, "changes", `${jobId} must need the changes job`);
+    assert.match(job.if, /!cancelled\(\)/, `${jobId} must not be skipped by a failed changes job`);
+    assert.ok(job.if.includes(main), `${jobId} must run on main`);
+    assert.ok(job.if.includes("needs.changes.result != 'success'"), `${jobId} must fail closed`);
+    assert.ok(
+      job.if.includes(`needs.changes.outputs.${output} == 'true'`),
+      `${jobId} must read the ${output} output`
+    );
+  }
 });
 
 test("windows-package-smoke filters to win32-gated cases before building the installer", async () => {
