@@ -394,3 +394,32 @@ test("a migration another process applied after our version read is skipped, not
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a version above what this build supports, seen only under the lock, is rejected", () => {
+  const db = new DatabaseSync(":memory:");
+  const list = Array.from({ length: 21 }, (_, index) => ({
+    id: index + 1,
+    name: `m${index + 1}`,
+    up: () => {},
+  }));
+  // First read (before the lock) says 20, the recheck under BEGIN IMMEDIATE says 22.
+  const reads = [20, 22];
+  const racing = new Proxy(db, {
+    get(target, prop) {
+      if (prop === "prepare") {
+        return (sql) => {
+          if (sql === "PRAGMA user_version" && reads.length > 0) {
+            const value = reads.shift();
+            return { get: () => ({ user_version: value }) };
+          }
+          return target.prepare(sql);
+        };
+      }
+      const value = target[prop];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  assert.throws(() => runMigrations(racing, list), /newer CareerRat \(schema 22/);
+  assert.throws(() => db.exec("COMMIT"), /no transaction/i, "the lock transaction was rolled back");
+  db.close();
+});
