@@ -380,3 +380,26 @@ test("the scan summary lists dead sources with their URL and next action", async
   );
   assert.match(out, /Errors:\n- Gone Co: HTTP 404/);
 });
+
+test("a blocked Adzuna request does not put the app id or key in the error", async () => {
+  await assert.rejects(
+    fetchAdzuna(
+      { country: "us", query: "bartender" },
+      {
+        env: ADZUNA_ENV,
+        fetchImpl: async () => json({ results: [] }),
+        // A host that resolves to a private address makes the guard refuse the request.
+        resolveHost: async () => [{ address: "10.0.0.5", family: 4 }],
+        dispatcherFactory: () => ({ close: async () => {} }),
+      }
+    ),
+    (error) => {
+      assert.match(error.message, /blocked/);
+      for (const text of [error.message, error.url, error.blockedUrl]) {
+        assert.doesNotMatch(text, /app-1|key-1/);
+      }
+      assert.match(error.message, /app_key=REDACTED/);
+      return true;
+    }
+  );
+});

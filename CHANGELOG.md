@@ -6,6 +6,12 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A blocked Adzuna search request no longer prints your app id and key in the error message.
+- The operator roundup's "Status changes" section counts only real status changes, not field edits, evaluations or approvals.
+- Removing a person with `--purge` now refuses while CareerRat has their workspace open, and backs their database up as a consistent copy instead of copying the live WAL files.
+
 ## [0.25.2] - 2026-11-23
 
 ### Changed

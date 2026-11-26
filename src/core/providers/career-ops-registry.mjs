@@ -226,6 +226,26 @@ function timeoutFor(value) {
 // request the guard blocks throws a specific error naming the URL and the
 // reason — never a silent empty result — so a provider (or its caller) sees
 // exactly why a scan came back short instead of just quietly missing rows.
+// Keyed providers (Adzuna) put their credentials in the query string, and a blocked
+// request's error is printed and returned to the caller, so those values never go in it.
+const CREDENTIAL_PARAM = /^(app_?id|app_?key|api_?key|key|secret|password|auth|access_token)$/i;
+
+function redactCredentialParams(url) {
+  try {
+    const parsed = new URL(url);
+    let changed = false;
+    for (const name of [...parsed.searchParams.keys()]) {
+      if (CREDENTIAL_PARAM.test(name)) {
+        parsed.searchParams.set(name, "REDACTED");
+        changed = true;
+      }
+    }
+    return changed ? parsed.toString() : url;
+  } catch {
+    return url;
+  }
+}
+
 async function request(
   fetchImpl,
   url,
@@ -254,19 +274,23 @@ async function request(
       // blocked target, not just the URL the provider originally asked for,
       // so the error is specific enough to act on.
       const blockedUrl = guarded.finalUrl && guarded.finalUrl !== url ? guarded.finalUrl : url;
+      const shownUrl = redactCredentialParams(url);
+      const shownBlocked = redactCredentialParams(blockedUrl);
       const error = new Error(
-        `Career Ops request blocked for ${blockedUrl}: ${guarded.reason}` +
-          (blockedUrl !== url ? ` (requested ${url})` : "")
+        `Career Ops request blocked for ${shownBlocked}: ${guarded.reason}` +
+          (blockedUrl !== url ? ` (requested ${shownUrl})` : "")
       );
       error.code = guarded.code;
-      error.url = url;
-      error.blockedUrl = blockedUrl;
+      error.url = shownUrl;
+      error.blockedUrl = shownBlocked;
       throw error;
     }
     close = guarded.close;
     const response = guarded.response;
     if (!response || typeof response.text !== "function") {
-      throw new Error(`Career Ops provider request returned an invalid response for ${url}`);
+      throw new Error(
+        `Career Ops provider request returned an invalid response for ${redactCredentialParams(url)}`
+      );
     }
     if (!response.ok) {
       const responseText = await response.text().catch(() => "");
