@@ -23,6 +23,7 @@ All notable changes to CareerRat are documented here. This project follows
 - Removing a person with `--purge` now refuses while CareerRat has their workspace open, and backs their database up as a consistent copy instead of copying the live WAL files.
 - Restoring a backup stages the copy beside the live database first, so a failed copy leaves the live database untouched.
 - Two processes opening the same workspace can no longer apply the same database migration twice.
+- Undoing an evidence, deep-intake or re-rank change from the thread now re-checks the value inside the same write as the undo, and a re-rank undo restores every row in one transaction, so a change that lands in between is reported as changed again instead of being overwritten.
 
 ## [0.25.2] - 2026-11-23
 

@@ -11,7 +11,7 @@ import { userPath } from "../../paths/workspace.mjs";
 import { activityRetentionLimit, computeAppend } from "../../tracker/activity-log.mjs";
 import { requireDb } from "../connection.mjs";
 import { exportToTracker } from "../export-to-tracker.mjs";
-import { withTransaction } from "../transaction.mjs";
+import { inTransaction, withTransaction } from "../transaction.mjs";
 
 export class NotFoundError extends Error {
   constructor(message) {
@@ -234,6 +234,9 @@ function pruneActivityEvents(db, max) {
 export function runVerb({ repoRoot, env }, fn, { requireExistingTracker = false } = {}) {
   const pathCtx = { repoRoot, env };
   const db = requireDb(pathCtx);
+  // Run from inside another verb's transaction: join it (as a savepoint) and
+  // leave the retention prune and export to the outermost verb.
+  if (inTransaction(db)) return { ok: true, ...withTransaction(db, () => fn(db, pathCtx)) };
   const transaction = withTransaction(db, () => {
     const trackerBefore = trackerExportRevision(db);
     const activityBefore = activityExportRevision(db);
