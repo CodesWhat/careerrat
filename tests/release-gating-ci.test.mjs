@@ -1197,12 +1197,11 @@ function assertBashSyntaxStepsUseBashShell(job, jobId) {
   }
 }
 
-test("real Chromium application preparation and rendered UI geometry are an explicit required CI context", async () => {
-  const [workflow, protection, liveApply, liveVisual] = await Promise.all([
+test("real Chromium application preparation is an explicit required CI context", async () => {
+  const [workflow, protection, liveApply] = await Promise.all([
     source(".github/workflows/ci-verify.yml"),
     source("scripts/protect-main.sh"),
     source("tests/playwright-live.test.mjs"),
-    source("tests/playwright-app-visual.test.mjs"),
   ]);
   const job = workflow.slice(
     workflow.indexOf("  browser-application-prep:"),
@@ -1216,18 +1215,26 @@ test("real Chromium application preparation and rendered UI geometry are an expl
     /container:\s*\n\s+image: mcr\.microsoft\.com\/playwright:v[\d.]+-noble@sha256:[0-9a-f]{64}/
   );
   assert.doesNotMatch(job, /playwright install/);
-  assert.match(job, /npm run build --workspace apps\/web/);
+  assert.doesNotMatch(job, /--workspace apps\/web/);
+  assert.doesNotMatch(job, /playwright-app-visual/);
   assert.match(job, /tests\/playwright-live\.test\.mjs/);
   assert.match(job, /tests\/playwright-live-dropdowns\.test\.mjs/);
-  assert.match(job, /tests\/playwright-app-visual\.test\.mjs/);
-  assert.match(job, /output\/playwright/);
   assert.doesNotMatch(job, /ANTHROPIC|OPENAI|CLAUDE|CODEX/);
   assert.match(protection, /"context": "browser-application-prep"/);
   assert.match(liveApply, /assert\.notEqual\(result\.state, "applied"\)/);
   assert.match(liveApply, /clicked\.includes\("Submit application"\), false/);
-  assert.match(liveVisual, /getComputedStyle/);
-  assert.match(liveVisual, /boundingBox/);
-  assert.match(liveVisual, /page\.screenshot/);
+});
+
+test("web-build runs the packed npm install smoke, not the apps/web build", async () => {
+  const workflow = await source(".github/workflows/ci-verify.yml");
+  const job = workflow.slice(
+    workflow.indexOf("  web-build:"),
+    workflow.indexOf("  website-build:")
+  );
+  assert.match(job, /name:\s*web-build/);
+  assert.match(job, /node scripts\/smoke-packed-install\.mjs/);
+  assert.doesNotMatch(job, /--workspace apps\/web\b/);
+  assert.doesNotMatch(job, /apps\/desktop/);
 });
 
 test("all deterministic product builds are declared as protected contexts", async () => {
@@ -1317,7 +1324,7 @@ test("main-only jobs skip on dev pull requests unless their paths changed, and f
   }
 });
 
-test("windows-package-smoke filters to win32-gated cases before building the installer", async () => {
+test("windows-package-smoke runs the win32 filter, then the packed npm smoke, and nothing references apps/desktop", async () => {
   const workflow = await source(".github/workflows/ci-verify.yml");
   const job = workflow.slice(
     workflow.indexOf("  windows-package-smoke:"),
@@ -1326,13 +1333,13 @@ test("windows-package-smoke filters to win32-gated cases before building the ins
   const testStepIndex = job.search(
     /node --test --test-name-pattern "\\\[win32\\\]" tests\/installed-runtime\.test\.mjs tests\/doctor-installed-runtimes\.test\.mjs/
   );
-  const distWindowsIndex = job.indexOf("npm run dist:windows --workspace apps/desktop");
+  const smokeIndex = job.indexOf("node scripts/smoke-packed-install.mjs");
   assert.notEqual(testStepIndex, -1, "the win32 test-name-pattern filter must be present");
-  assert.notEqual(distWindowsIndex, -1, "the dist:windows step must be present");
-  assert.ok(
-    testStepIndex < distWindowsIndex,
-    "the filtered installed-runtime identity tests must run before dist:windows"
-  );
+  assert.notEqual(smokeIndex, -1, "the packed npm smoke step must be present");
+  assert.ok(testStepIndex < smokeIndex, "the win32 filter must run before the packed smoke");
+  assert.doesNotMatch(job, /apps\/desktop|dist:windows|verify:windows|Electron/);
+  const smokeStep = job.slice(job.lastIndexOf("      - name:", smokeIndex), smokeIndex);
+  assert.match(smokeStep, /shell:\s*bash/);
 });
 
 test("every dependency-installing job activates the pinned npm, resolves a trusted node path, stages installs with scripts and bin-links disabled, checks allowScripts through that trusted node directly, then reinstalls strictly, in order", async () => {

@@ -15,6 +15,7 @@ All notable changes to CareerRat are documented here. This project follows
 - The sitemap no longer lists the old dashboard stub, and the stub is marked noindex.
 - CI: every ci-verify and security-actions job now has a timeout, so a job that hangs in a harden-runner or post-step fails in minutes instead of running to the 6-hour default.
 - The npm publish workflow now installs the packed tarball with `--omit=dev` and runs the installed `careerrat` before publishing, so a runtime import of a dev dependency fails the release instead of shipping.
+- CI: the main-only `web-build`, `windows-package-smoke` and `browser-application-prep` jobs no longer build the web app, the Windows installer or the visual-contract app. `web-build` runs the packed npm install smoke, `windows-package-smoke` runs the `[win32]` tests plus that smoke on Windows, and `browser-application-prep` runs only the live application-preparation tests. The job names stay because the main ruleset requires them.
 
 ### Fixed
 
