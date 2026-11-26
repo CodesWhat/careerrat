@@ -87,8 +87,35 @@ export async function generateMetadata(props: { params: Promise<{ slug?: string[
   const page = getDocsPage(params.slug);
   if (!page) notFound();
 
+  const title = page.data.title;
+  const description = page.data.description;
+  // Absolute URLs: Next doesn't add the /docs basePath to metadata URLs, so
+  // relative values would resolve against the bare origin.
+  const url = pageUrl(params.slug);
+  const image = {
+    url: `${ORIGIN}/opengraph-image.png`,
+    width: 1200,
+    height: 630,
+    alt: "CareerRat: Your AI CLI, working your job search.",
+  };
+
   return {
-    title: params.slug?.length ? page.data.title : { absolute: page.data.title },
-    description: page.data.description,
+    title: params.slug?.length ? title : { absolute: title },
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      title,
+      description,
+      url,
+      siteName: "CareerRat Docs",
+      type: "article",
+      images: [image],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [image],
+    },
   };
 }
