@@ -2508,3 +2508,18 @@ test("paid native AI certification is separate from deterministic release gates"
   assert.doesNotMatch(macReleaseJob, /ANTHROPIC|OPENAI|CLAUDE|CODEX/);
   assert.match(macReleaseJob, /fetch-depth:\s*0/);
 });
+
+// CR74: a job stuck in a harden-runner or post-step (cache save, checkout
+// cleanup) sits until GitHub's 6-hour default. Every always-on CI and security
+// job carries its own cap so a hang fails fast and the rerun is cheap.
+for (const file of ["ci-verify.yml", "security-actions.yml"]) {
+  test(`every ${file} job sets a bounded timeout-minutes`, async () => {
+    const workflow = YAML.parse(await source(`.github/workflows/${file}`));
+    for (const [jobId, job] of Object.entries(workflow.jobs)) {
+      assert.ok(
+        Number.isInteger(job["timeout-minutes"]) && job["timeout-minutes"] <= 30,
+        `${file} job "${jobId}" needs timeout-minutes (<= 30) so a hung post-step fails fast`
+      );
+    }
+  });
+}

@@ -53,6 +53,7 @@ jobs:
   structure-guards:
     name: structure-guards
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -261,6 +262,7 @@ jobs:
     # or when the changes job did not succeed (fail closed).
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main' || needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -352,6 +354,7 @@ jobs:
     # or when the changes job did not succeed (fail closed).
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main' || needs.changes.result != 'success' || needs.changes.outputs.site == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -535,6 +538,7 @@ jobs:
     # Release gate: promotion PRs into main and pushes to main only, no path trigger.
     if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Harden the runner (audit Electron and Chromium downloads)
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -759,6 +763,7 @@ jobs:
   qlty:
     name: qlty
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -819,6 +824,7 @@ jobs:
   knip:
     name: knip
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Harden the runner (block all outbound calls except the allowlist)
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
