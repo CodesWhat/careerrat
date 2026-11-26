@@ -783,6 +783,7 @@ export function candidateConfigPatch({
   unset,
   recordActivity = true,
   onWrite,
+  guard,
 } = {}) {
   if (!SINGLETON_TABLES[name]) {
     const err = new Error(`unknown candidate config "${name}"`);
@@ -796,11 +797,20 @@ export function candidateConfigPatch({
   }
   if (onWrite !== undefined && typeof onWrite !== "function")
     throw new TypeError("onWrite must be a synchronous function");
+  if (guard !== undefined && typeof guard !== "function")
+    throw new TypeError("guard must be a synchronous function");
   const unsetList = normalizeUnsetList(unset);
 
   return runVerb(
     { repoRoot, env },
     (db) => {
+      // Checked inside the write transaction so a change that landed after the
+      // caller's own read can't be silently overwritten.
+      if (guard && !guard(readCandidateConfigFromDb(db)[name])) {
+        const err = new Error(`candidate config "${name}" changed since it was read`);
+        err.code = "CONFLICT";
+        throw err;
+      }
       const before = onWrite
         ? name === "targeting"
           ? readTargeting(db)

@@ -286,7 +286,19 @@ function revertConfig({ repoRoot, env, entry }) {
     byName.set(item.name, group);
   }
   for (const [name, { patch, unset }] of byName) {
-    candidateConfigPatch({ repoRoot, env, name, patch, unset });
+    // Re-checked inside the write transaction: the read above is not atomic with it.
+    const guard = (doc) =>
+      items
+        .filter((item) => item.name === name)
+        .every((item) =>
+          sameValue(readConfigPath(configView(name, doc), item.path), entryValue(item, "after"))
+        );
+    try {
+      candidateConfigPatch({ repoRoot, env, name, patch, unset, guard });
+    } catch (error) {
+      if (error?.code === "CONFLICT") return refuse(STALE_NOTE, "stale");
+      throw error;
+    }
     // A patch that touches location mode fields makes the profile normalizer
     // stamp mode_preferences_confirmed back on, so an absent prior is unset again.
     const now = candidateConfigGet({ repoRoot, env })[name];
