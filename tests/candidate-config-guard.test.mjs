@@ -74,3 +74,49 @@ test("undo refuses as stale when the value moved after the entry", () => {
   assert.equal(outcome.reason, "stale");
   assert.equal(headline(ctx), "Later");
 });
+
+function twoDocEntry(ctx, { flipSecond = false } = {}) {
+  candidateConfigPatch({ ...ctx, name: "profile", patch: { candidate: { headline: "After" } } });
+  candidateConfigPatch({ ...ctx, name: "honesty", patch: { note: "After" } });
+  const companion = {
+    name: "honesty",
+    path: "note",
+    before: "Before",
+    after: "After",
+  };
+  return {
+    kind: "knowledge_write",
+    target: "candidate_config:profile",
+    op: "set",
+    path: "candidate.headline",
+    before: "Before",
+    after: "After",
+    get companions() {
+      // Read after the undo took its snapshot and before it writes, so this
+      // lands in the gap between the two, like a concurrent edit would.
+      if (flipSecond)
+        candidateConfigPatch({ ...ctx, name: "honesty", patch: { note: "Moved on" } });
+      return [companion];
+    },
+    revertible: true,
+  };
+}
+
+test("a two-document undo reverts both documents when nothing moved", () => {
+  const ctx = tempRepo();
+  const entry = twoDocEntry(ctx);
+  const outcome = revertKnowledgeWrite({ ...ctx, entry, messageId: "m1", index: 0 });
+  assert.equal(outcome.ok, true);
+  assert.equal(headline(ctx), "Before");
+  assert.equal(candidateConfigGet(ctx).honesty.note, "Before");
+});
+
+test("a two-document undo writes nothing when the second document changed mid-flight", () => {
+  const ctx = tempRepo();
+  const entry = twoDocEntry(ctx, { flipSecond: true });
+  const outcome = revertKnowledgeWrite({ ...ctx, entry, messageId: "m1", index: 0 });
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.reason, "stale");
+  assert.equal(headline(ctx), "After");
+  assert.equal(candidateConfigGet(ctx).honesty.note, "Moved on");
+});
