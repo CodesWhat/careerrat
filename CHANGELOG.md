@@ -6,6 +6,14 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- The website adds JSON-LD (SoftwareApplication and Organization on the homepage, TechArticle and BreadcrumbList on docs pages), canonical, Open Graph and Twitter metadata on docs pages, lastmod dates in the sitemap, and a generated `llms-full.txt`. `llms.txt` now lists every docs page.
+
+### Changed
+
+- The sitemap no longer lists the old dashboard stub, and the stub is marked noindex.
+
 ## [0.25.2] - 2026-11-23
 
 ### Changed
