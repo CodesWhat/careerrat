@@ -8,6 +8,8 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Changed
 
+- CI: every ci-verify and security-actions job now has a timeout, so a job that hangs in a harden-runner or post-step fails in minutes instead of running to the 6-hour default.
+
 - The npm publish workflow now installs the packed tarball with `--omit=dev` and runs the installed `careerrat` before publishing, so a runtime import of a dev dependency fails the release instead of shipping.
 
 ### Fixed
