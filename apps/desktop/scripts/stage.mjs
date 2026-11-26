@@ -38,7 +38,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { npmInvocation } from "./npm-invocation.mjs";
+import { npmInvocation } from "../../../scripts/lib/npm-invocation.mjs";
 import { compileSingleStarGlob } from "../../../src/core/fs/single-star-glob.mjs";
 
 const desktopDir = join(fileURLToPath(new URL(".", import.meta.url)), "..");

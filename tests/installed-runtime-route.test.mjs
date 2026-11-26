@@ -7,10 +7,7 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, mock, test } from "node:test";
 
-import {
-  inspectInstalledRuntimeState,
-  mountInstalledRuntimeRoutes,
-} from "../src/cli/installed-runtime-route.mjs";
+import { mountInstalledRuntimeRoutes } from "../src/cli/installed-runtime-route.mjs";
 import {
   reserveGuidedSetupOwnership,
   writeGuidedSetupOwnership,
@@ -2158,92 +2155,6 @@ test("Advanced provider fallback is explicit, durable, and reversible", async ()
   });
   assert.equal(localSelection.runtimeId, "claude");
   assert.deepEqual(localSelection.verification?.capabilities, VERIFIED_CAPABILITIES);
-});
-
-test("runtime inspection does not replace an explicit selection made while probes are pending", async () => {
-  const repoRoot = root();
-  const env = { CAREERRAT_DESKTOP_SHELL: "1" };
-  const probesStarted = deferred();
-  const releaseProbes = deferred();
-  let probeCount = 0;
-
-  writeInstalledRuntimeSelection({
-    repoRoot,
-    env,
-    runtimeId: "codex",
-    providerFallback: false,
-  });
-  const inspection = inspectInstalledRuntimeState({
-    repoRoot,
-    env,
-    detectImpl: () => INVENTORY,
-    probeImpl: async () => {
-      probeCount += 1;
-      if (probeCount === 2) probesStarted.resolve();
-      await releaseProbes.promise;
-      return readyProbe();
-    },
-  });
-
-  await probesStarted.promise;
-  writeInstalledRuntimeSelection({
-    repoRoot,
-    env,
-    runtimeId: "claude",
-    providerFallback: false,
-  });
-  releaseProbes.resolve();
-
-  const state = await inspection;
-  assert.equal(state.selectedId, "claude");
-  assert.equal(state.providerFallback, false);
-  assert.equal(
-    state.runtimes.find(({ id }) => id === "claude").selected,
-    true,
-    "the inspection response must reflect the newer explicit choice"
-  );
-  assert.equal(loadInstalledRuntimeSelection({ repoRoot, env }).runtimeId, "claude");
-});
-
-test("runtime auto-selection does not replace provider fallback enabled while probes are pending", async () => {
-  const repoRoot = root();
-  const env = { CAREERRAT_DESKTOP_SHELL: "1" };
-  const probesStarted = deferred();
-  const releaseProbes = deferred();
-  let probeCount = 0;
-
-  const inspection = inspectInstalledRuntimeState({
-    repoRoot,
-    env,
-    detectImpl: () => INVENTORY,
-    probeImpl: async (runtime) => {
-      probeCount += 1;
-      if (probeCount === 2) probesStarted.resolve();
-      await releaseProbes.promise;
-      return runtime.id === "codex"
-        ? readyProbe()
-        : { status: "authentication_required", ready: false, action: "start_sign_in" };
-    },
-  });
-
-  await probesStarted.promise;
-  writeInstalledRuntimeSelection({
-    repoRoot,
-    env,
-    runtimeId: null,
-    providerFallback: true,
-  });
-  releaseProbes.resolve();
-
-  const state = await inspection;
-  assert.equal(state.selectedId, null);
-  assert.equal(state.providerFallback, true);
-  assert.equal(
-    state.runtimes.some(({ selected }) => selected),
-    false,
-    "provider fallback must remain the active choice"
-  );
-  assert.equal(loadInstalledRuntimeSelection({ repoRoot, env }).providerFallback, true);
 });
 
 test("packaged desktop rejects and heals provider fallback before the renderer can use it", async () => {

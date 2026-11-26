@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="apps/desktop/build/icon.png" alt="CareerRat" width="112">
+<img src="assets/icon.png" alt="CareerRat" width="112">
 
 <h1>CareerRat</h1>
 

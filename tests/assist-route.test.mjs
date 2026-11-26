@@ -16,7 +16,8 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { suggestAssist } from "../apps/web/src/lib/api.js";
-import { buildAssistPrompt, mountAssistRoutes, runBareOneshot } from "../src/cli/assist-route.mjs";
+import { buildAssistPrompt, mountAssistRoutes } from "../src/cli/assist-route.mjs";
+import { runBareOneshot } from "../src/core/ai/bare-oneshot.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));

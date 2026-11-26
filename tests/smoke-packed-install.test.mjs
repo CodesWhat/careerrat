@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { npmCommand } from "../scripts/lib/npm-invocation.mjs";
 import { checkInstalledOutput, packedFilename } from "../scripts/smoke-packed-install.mjs";
 
 test("packedFilename reads both npm 11 (array) and npm 12 (object) pack output", () => {
@@ -21,6 +22,35 @@ test("checkInstalledOutput flags a wrong version or a missing usage banner", () 
   assert.deepEqual(checkInstalledOutput(ok), []);
   assert.equal(checkInstalledOutput({ ...ok, version: "0.9.0" }).length, 1);
   assert.equal(checkInstalledOutput({ ...ok, help: "boom" }).length, 1);
+});
+
+test("npmCommand starts npm through a shell on Windows, since npm.cmd cannot be exec'd directly", () => {
+  assert.deepEqual(npmCommand(["pack"], { env: {}, platform: "win32" }), {
+    file: "npm.cmd",
+    args: ["pack"],
+    shell: true,
+  });
+});
+
+test("npmCommand runs plain npm without a shell elsewhere", () => {
+  assert.deepEqual(npmCommand(["pack"], { env: {}, platform: "linux" }), {
+    file: "npm",
+    args: ["pack"],
+    shell: false,
+  });
+});
+
+test("npmCommand prefers the Node-driven npm CLI when npm_execpath is set", () => {
+  const command = npmCommand(["ci"], {
+    env: { npm_execpath: "/usr/lib/npm-cli.js" },
+    execPath: "/usr/bin/node",
+    platform: "win32",
+  });
+  assert.deepEqual(command, {
+    file: "/usr/bin/node",
+    args: ["/usr/lib/npm-cli.js", "ci"],
+    shell: false,
+  });
 });
 
 test("publish.yml smokes the packed install after the build and before npm publish", async () => {
