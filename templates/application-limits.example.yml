@@ -32,7 +32,7 @@
 companies:
   - company: Aperture Science
     scope: all-roles            # cap spans every Aperture posting, not per-req
-    cap: { max: 4, window_days: 180 }
+    cap: {max: 4, window_days: 180}
     status: caution             # not hit — known from the careers FAQ
     reapply_rule: "Up to 4 applications in any rolling 180-day window."
     bypass: "recruiter referral resets the counter"
@@ -41,7 +41,7 @@ companies:
 
   - company: Tyrell Corporation
     scope: "department:Engineering"
-    cap: { max: 2, window_days: 60 }
+    cap: {max: 2, window_days: 60}
     status: blocked
     hit_on: 2026-05-30
     hit_via: "Applied AI Engineer"
