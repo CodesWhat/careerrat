@@ -103,6 +103,9 @@ export async function generateMetadata(props: { params: Promise<{ slug?: string[
     title: params.slug?.length ? title : { absolute: title },
     description,
     alternates: { canonical: url },
+    ...(params.slug?.join("/") === "getting-started/dashboard"
+      ? { robots: { index: false, follow: true } }
+      : {}),
     openGraph: {
       title,
       description,
