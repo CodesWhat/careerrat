@@ -95,6 +95,11 @@ export function runMigrations(db, migrations = ALL_MIGRATIONS) {
   for (const migration of pending) {
     db.exec("BEGIN IMMEDIATE");
     try {
+      // Another process may have applied this one between our read and the lock.
+      if (readUserVersion(db) >= migration.id) {
+        db.exec("ROLLBACK");
+        continue;
+      }
       migration.up(db);
       // user_version is a plain integer under our control (migration.id), not
       // caller-supplied — safe to interpolate; PRAGMA doesn't accept bound params.
