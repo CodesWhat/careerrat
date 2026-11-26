@@ -711,7 +711,8 @@ test("scripts reachable from a skill or published npm-run alias are shipped", as
   // Everything an agent can reach at runtime MUST ship. npm pack ships exactly
   // the "files" allowlist, so an unshipped-but-referenced script breaks every
   // installed/live copy (the missing-verify-tracker.mjs class of bug).
-  const DEV_ONLY = new Set();
+  // Release-time only: publish.yml runs it from the checkout, never an installed copy.
+  const DEV_ONLY = new Set(["scripts/smoke-packed-install.mjs"]);
 
   const referenced = new Set();
   // Every script a published npm-run alias points at.
