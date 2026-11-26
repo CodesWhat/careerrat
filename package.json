@@ -194,6 +194,8 @@
     "vite": "8.3.8",
     "postcss": "^8.5.10",
     "sharp": "$sharp",
+    "minimatch@^10": "11.0.1",
+    "glob@^13": "14.0.2",
     "@electron/universal": {
       "minimatch": "11.0.1",
       "dir-compare": {
