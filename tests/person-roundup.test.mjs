@@ -17,7 +17,7 @@ import {
   smtpTransport,
 } from "../src/core/comms/transports.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { appRecordOutcome, appUpsert } from "../src/core/db/verbs.mjs";
+import { appRecordOutcome, appSetFields, appUpsert } from "../src/core/db/verbs.mjs";
 import { createPersonRoot, personEnv } from "../src/core/paths/people.mjs";
 import { optIn, setContact } from "../src/core/people/contact.mjs";
 
@@ -142,6 +142,23 @@ test("dry run lists the verified submissions in the window, status changes and n
   assert.match(result.text, /1\. Initech, Engineer: Are you authorized to work in the US\?/);
   assert.match(result.text, /CareerRat, run by /);
   assert.match(result.text, /Reply STOP to pause these\./);
+});
+
+test("field edits are not counted as status changes", async (t) => {
+  const { base, env } = fixture(t);
+  appSetFields({
+    repoRoot: REPO_ROOT,
+    env,
+    id: "a2",
+    patch: { note: "Spoke with the recruiter" },
+  });
+  // Put the edit inside the window so only the filter keeps it out.
+  openDb({ repoRoot: REPO_ROOT, env })
+    .prepare("UPDATE activity_events SET at = ? WHERE data LIKE ?")
+    .run("2026-11-01T12:00:00Z", "%details-update%");
+  const { text } = await runRoundup({ ...common(base, env), now: NOON });
+  assert.match(text, /Status changes \(1\)/);
+  assert.doesNotMatch(text, /Application details updated/);
 });
 
 test("the roundup never carries pay, SSN, date of birth or background-check links", async (t) => {
