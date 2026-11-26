@@ -110,11 +110,11 @@ export function describeDbHolders(holders) {
 }
 
 export class DatabaseInUseError extends Error {
-  constructor(holders) {
+  constructor(holders, action = "restore") {
     super(
-      `can't restore while CareerRat is running: ${describeDbHolders(holders).join(", ")} ` +
+      `can't ${action} while CareerRat is running: ${describeDbHolders(holders).join(", ")} ` +
         "has the database open and would keep writing to the old one. Quit it (or stop that " +
-        "process), then run the restore again. If that process is already gone, delete " +
+        `process), then run the ${action} again. If that process is already gone, delete ` +
         `${holders.map((holder) => holder.file).join(", ")}`
     );
     this.name = "DatabaseInUseError";
@@ -123,7 +123,7 @@ export class DatabaseInUseError extends Error {
   }
 }
 
-export function assertNoDbHolders(ctx = {}, options) {
+export function assertNoDbHolders(ctx = {}, { action, ...options } = {}) {
   const holders = activeDbHolders(ctx, options);
-  if (holders.length) throw new DatabaseInUseError(holders);
+  if (holders.length) throw new DatabaseInUseError(holders, action);
 }

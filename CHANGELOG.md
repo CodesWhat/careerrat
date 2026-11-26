@@ -6,6 +6,10 @@ All notable changes to CareerRat are documented here. This project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Removing a person with `--purge` now refuses while CareerRat has their workspace open, and backs their database up as a consistent copy instead of copying the live WAL files.
+
 ## [0.25.2] - 2026-11-23
 
 ### Changed
