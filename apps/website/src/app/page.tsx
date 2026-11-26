@@ -1,8 +1,43 @@
 import { ArrowRight, ClipboardList, Lock, Radar, Target } from "lucide-react";
 import { Footer } from "@/components/Footer";
+import { JsonLd } from "@/components/JsonLd";
 import { TrackedCtaLink } from "@/components/TrackedCtaLink";
 
 const INSTALL_URL = "/docs/getting-started/install";
+const ORIGIN = "https://careerrat.com";
+const GITHUB_URL = "https://github.com/CodesWhat/careerrat";
+
+// Facts only: name, description and license come from package.json and the
+// site copy. No ratings or review counts.
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://codeswhat.com/#organization",
+      name: "CodesWhat",
+      url: "https://codeswhat.com",
+      logo: `${ORIGIN}/codeswhat-logo.png`,
+      sameAs: ["https://github.com/CodesWhat"],
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${ORIGIN}/#software`,
+      name: "CareerRat",
+      description:
+        "Agentic job-search workspace for finding, vetting, tailoring, tracking, and preparing for roles.",
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "macOS, Linux, Windows",
+      url: `${ORIGIN}/`,
+      downloadUrl: "https://www.npmjs.com/package/careerrat",
+      license: "https://opensource.org/license/mit",
+      codeRepository: GITHUB_URL,
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      publisher: { "@id": "https://codeswhat.com/#organization" },
+    },
+  ],
+};
+
 const STAR_HISTORY_URL =
   "https://www.star-history.com/?repos=codeswhat%2Fcareerrat&type=date&legend=top-left";
 const STAR_HISTORY_CHART =
@@ -52,6 +87,7 @@ const features = [
 export default function Home() {
   return (
     <div className="site-shell">
+      <JsonLd data={structuredData} />
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
