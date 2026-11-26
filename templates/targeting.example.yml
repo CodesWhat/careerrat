@@ -81,7 +81,7 @@ fit_bands:                # single source for FIT thresholds; omit to use defaul
   high_min: 85
   med_min: 65
   # fit_floor: 80         # optional: auto-drop (hard CUT) roles scoring below this,
-                          # so low-fit roles never reach manual triage. Omit to disable.
+  # so low-fit roles never reach manual triage. Omit to disable.
 
 search_preferences:
   # ai_rerank:           # OPTIONAL, off by default. Adds an AI fit note to the top results.
@@ -130,8 +130,8 @@ reevaluation:             # thresholds that trigger reevaluate-strategy
   rejection_per_family: 3 # default 3; trigger when one family/fit-band hits this
 
 legitimacy:               # OPTIONAL — posting-legitimacy gate (ghost/evergreen/stale).
-                          # All fields optional; sensible field-agnostic defaults in code.
-                          # A "suspect" verdict flags the posting for REVIEW, never an auto-cut.
+  # All fields optional; sensible field-agnostic defaults in code.
+  # A "suspect" verdict flags the posting for REVIEW, never an auto-cut.
   enabled: true           # set false to skip the legitimacy check entirely
   max_posting_age_days: 60 # older than this → "stale" (a mild signal)
   min_body_chars: 500     # JD shorter than this → "thin JD" (a mild signal)
@@ -142,8 +142,8 @@ legitimacy:               # OPTIONAL — posting-legitimacy gate (ghost/evergree
   recruiter_farm_phrases: []
 
 follow_up:                # OPTIONAL — per-kind reminder engine config.
-                          # Code defaults (all enabled, conventional timings) apply
-                          # when this block is omitted entirely.
+  # Code defaults (all enabled, conventional timings) apply
+  # when this block is omitted entirely.
   app_nudge:
     enabled: true         # set false to never chase cold applications with no response
     after_days: 7         # nudge when an applied/submitted application gets no reply after this many days
