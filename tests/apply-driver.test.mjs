@@ -4407,3 +4407,72 @@ test("loadAnswerMap round-trips the packet writer's answers markdown", () => {
   assert.equal(map.has("pronouns"), false);
   assert.equal(map.size, 2);
 });
+
+test("auto submit: a throwing Submit click is never retried and the page decides the result", async () => {
+  const stillForm = { ...SUBMIT_FORM, pageText: "Application form (processing)" };
+  const { ops, log } = createFakeOps([SUBMIT_FORM, stillForm]);
+  ops.clickButton = async (args) => {
+    log.push({ op: "clickButton", ...args });
+    throw new Error("target closed");
+  };
+  const execute = makeDriver({ ops, ...fastWaits });
+
+  const result = await execute({ ...AUTO_REQUEST, applicationId: "app-click-throws" });
+
+  assert.equal(clicks(log).length, 1);
+  assert.equal(result.verified, false);
+  assert.equal(result.state, "submitted-unverified");
+
+  const second = await execute({ ...AUTO_REQUEST, applicationId: "app-click-throws" });
+  assert.equal(clicks(log).length, 1, "a later run never presses Submit again");
+  assert.equal(second.verified, false);
+});
+
+test("a page that leaves the trusted origin before the resume upload never receives the file", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apply-driver-"));
+  try {
+    mkdirSync(join(repoRoot, "workspace", "tailored"), { recursive: true });
+    writeTestPdf(join(repoRoot, "workspace", "tailored", "resume.pdf"));
+    const form = {
+      origin: GREENHOUSE_URL,
+      pageText: 'Application form\n- button "Resume" [required, ref=e1]\nSubmit application',
+      refs: refsOf([
+        ["e1", "button", "Resume", true],
+        ["e2", "button", "Submit Application", false],
+      ]),
+    };
+    const offSite = {
+      origin: "https://unrelated.example.test/apply",
+      pageText: "Application form",
+      refs: form.refs,
+    };
+    const { ops, log } = createFakeOps([form]);
+    ops.snapshot = async () => {
+      log.push({ op: "snapshot" });
+      // The first snapshot reads the form; the fresh one taken right before
+      // the upload finds the page on another site.
+      return log.filter((entry) => entry.op === "snapshot").length >= 2 ? offSite : form;
+    };
+    const execute = makeDriver({ ops, repoRoot });
+
+    const result = await execute({
+      applicationId: "app-leave-before-upload",
+      application: {
+        id: "app-leave-before-upload",
+        link: GREENHOUSE_URL,
+        artifacts: { resumePdf: "workspace/tailored/resume.pdf" },
+      },
+      postingUrl: GREENHOUSE_URL,
+      questionCapture: { state: "captured" },
+      prepareOnly: true,
+    });
+
+    assert.equal(
+      log.some((entry) => entry.op === "upload"),
+      false
+    );
+    assert.equal(result.state, "blocked");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
