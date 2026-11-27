@@ -910,7 +910,7 @@ class PersonPicker(ModalScreen):
 
     def on_option_list_option_selected(self, event):
         event.stop()
-        self.dismiss(event.option.id or None)
+        self.dismiss(event.option.id or "")
 
     def on_button_pressed(self, event):
         event.stop()
@@ -1035,6 +1035,10 @@ class CareerRatApp(App):
         self.status_timer = None
         self.env = dict(os.environ if env is None else env)
         self.bridge_args = list(sys.argv[1:] if bridge_args is None else bridge_args)
+        # Which workspace the bridge has open. Every request carries it, so a
+        # request queued for one person is never run against another.
+        self.generation = 0
+        self.switching = False
         self.proc = None
         self.reader = None
         self.stderr_reader = None
@@ -1265,6 +1269,12 @@ class CareerRatApp(App):
         self.push_screen(ContextCapture(prefill=event.text))
 
     async def send(self, message):
+        # While a switch is open, nothing but the switch itself (and the pane
+        # resize and quit) goes out: the old workspace is closing and the new
+        # one isn't ready.
+        if self.switching and message.get("op") not in ("switch-person", "resize", "quit"):
+            return
+        message = {**message, "generation": self.generation}
         if self.proc and self.proc.returncode is None:
             try:
                 self.proc.stdin.write((json.dumps(message) + "\n").encode())
@@ -1399,7 +1409,11 @@ class CareerRatApp(App):
                 lambda choice: self.pick_person(value.get("current"), choice),
             )
         elif kind == "person":
+            self.generation = value.get("generation", self.generation)
+            self.switching = False
             self.open_person(value.get("person"))
+        elif kind == "switch-end":
+            self.switching = False
         elif kind == "selection":
             self.apply_selection(value)
         elif kind == "detail":
@@ -1968,6 +1982,8 @@ class CareerRatApp(App):
         # Single letters belong to the agent and to text boxes; they only act
         # from the jobs side, and never under a dialog.
         if action in ("request", "add_context", "refresh_jobs", "filter", "switch_person"):
+            if self.switching:
+                return False
             if len(self.screen_stack) > 1 or self.query_one(NativePane).has_focus:
                 return False
             if action == "filter" and not self.query_one(f"#{parameters[0]}").display:
@@ -1997,11 +2013,14 @@ class CareerRatApp(App):
         self.push_screen(ContextCapture())
 
     def pick_person(self, current, choice):
-        if choice is None and current is None:
+        # None is Escape or Cancel. The owner's own workspace is "".
+        if choice is None:
             return
-        if choice == current:
+        person = choice or None
+        if person == current:
             return
-        asyncio.create_task(self.send({"op": "switch-person", "person": choice}))
+        self.switching = True
+        asyncio.create_task(self.send({"op": "switch-person", "person": person}))
 
     async def action_switch_person(self):
         await self.send({"op": "people"})

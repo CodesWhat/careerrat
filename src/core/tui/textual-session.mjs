@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { closeDb } from "../db/connection.mjs";
 import { registerDbHolder } from "../db/holders.mjs";
 import { readSavedJobDescription } from "../jobs/job-description.mjs";
 import { currentPerson, peopleBase, resolvePersonSelection } from "../paths/people.mjs";
@@ -17,6 +18,10 @@ import { capWorkspaceMessages, readJobs, viewJobs } from "./jobs.mjs";
 import { jobDetail, summaryJobs } from "./snapshot.mjs";
 import { createWorkspaceState, refreshWorkspace, workspaceKey } from "./workspace.mjs";
 
+const PERSON_ENV_KEYS = ["CAREERRAT_HOME", "CAREERRAT_PERSON", "CAREERRAT_PEOPLE_BASE"];
+// Ops that only touch the agent pane. A stale one is dropped without a notice.
+const PANE_OPS = new Set(["resize", "input", "paste", "scroll", "wheel"]);
+
 // agentIssue says why there is no agent when one was asked for or expected:
 // the TUI shows it in its own banner and names it when a request has nowhere to go.
 export async function createTextualSession({
@@ -28,6 +33,11 @@ export async function createTextualSession({
   search = { start: startTerminalSearch, cancel: cancelTerminalSearch },
 }) {
   let ctx = { repoRoot, env };
+  // The owner's own values for the person-selecting variables, unset ones
+  // included, so returning to the owner restores exactly what the start had.
+  const ownerOverrides = currentPerson(env)
+    ? null
+    : Object.fromEntries(PERSON_ENV_KEYS.map((key) => [key, env[key]]));
   const sessionId = randomUUID();
   let data = readJobs(ctx);
   let state = createWorkspaceState(data);
@@ -41,6 +51,7 @@ export async function createTextualSession({
   let watcher;
   // Bumped on every person switch so a stopped pane's late events are dropped.
   let generation = 0;
+  let switching = false;
   let releaseHolder = registerDbHolder(ctx, "tui");
   let lastSnapshot = "";
   let framed = null;
@@ -136,6 +147,14 @@ export async function createTextualSession({
   // The env a fresh `careerrat --for <name>` start would run with, or the owner's
   // own workspace for null. Throws, touching nothing, for an unknown or removed person.
   function personContext(name) {
+    if (name === null && ownerOverrides) {
+      const next = { ...env };
+      for (const [key, value] of Object.entries(ownerOverrides)) {
+        if (value === undefined) delete next[key];
+        else next[key] = value;
+      }
+      return next;
+    }
     if (name === null) {
       const base = peopleBase({ repoRoot, env });
       const next = { ...env, CAREERRAT_HOME: base };
@@ -147,7 +166,7 @@ export async function createTextualSession({
     return { ...env, ...resolvePersonSelection({ repoRoot, env, forName: name }) };
   }
   function personEvent() {
-    return { type: "person", person: currentPerson(env) };
+    return { type: "person", person: currentPerson(env), generation };
   }
   function startWatcher() {
     watcher = createDataWatch({
@@ -160,11 +179,13 @@ export async function createTextualSession({
         }),
     });
   }
-  // Stops the agent pane, searches and watcher on the old root, then reopens all
-  // of it on the new one. Nothing from the old person is kept: jobs, selection,
-  // filters and pending Undo all start from the new workspace.
+  // Reads the destination first, then stops the agent pane, searches and watcher
+  // on the old root and reopens all of it on the new one. A destination that
+  // can't be read leaves the old session exactly as it was. Nothing from the old
+  // person is kept: jobs, selection, filters and pending Undo all start over.
   async function switchPerson(name) {
     if (name === currentPerson(env)) {
+      send({ type: "switch-end" });
       send({
         type: "notice",
         message: name ? `Already in ${name}'s workspace.` : "Already in your own workspace.",
@@ -172,33 +193,54 @@ export async function createTextualSession({
       return;
     }
     let nextEnv;
+    let nextCtx;
+    let nextData;
     try {
       nextEnv = personContext(name);
+      nextCtx = { repoRoot, env: nextEnv };
+      nextData = readJobs(nextCtx);
     } catch (error) {
+      send({ type: "switch-end" });
       send({ type: "notice", message: `Can't switch: ${error.message}` });
       return;
     }
+    const nextState = createWorkspaceState(nextData);
+    const nextHolder = registerDbHolder(nextCtx, "tui");
+    switching = true;
     generation += 1;
     clearTimeout(drawing);
     drawing = null;
     watcher?.close();
-    releaseHolder();
     const oldPane = pane;
     const oldCtx = ctx;
+    const oldHolder = releaseHolder;
     pane = undefined;
     exited = false;
     framed = null;
+    let teardownError = null;
     try {
-      await oldPane?.dispose();
+      try {
+        await oldPane?.dispose();
+      } finally {
+        await stopTerminalSessionSearches({ ...oldCtx, sessionId });
+      }
+    } catch (error) {
+      teardownError = error;
     } finally {
-      await stopTerminalSessionSearches({ ...oldCtx, sessionId });
+      // Held until cleanup is done, then the cached connection goes with it.
+      closeDb(oldCtx);
+      oldHolder();
+      switching = false;
     }
-    if (closing) return;
+    if (closing) {
+      nextHolder();
+      return;
+    }
     env = nextEnv;
-    ctx = { repoRoot, env };
-    releaseHolder = registerDbHolder(ctx, "tui");
-    data = readJobs(ctx);
-    state = createWorkspaceState(data);
+    ctx = nextCtx;
+    releaseHolder = nextHolder;
+    data = nextData;
+    state = nextState;
     lastSnapshot = "";
     send(personEvent());
     snapshot();
@@ -207,6 +249,19 @@ export async function createTextualSession({
       type: "notice",
       message: name ? `Switched to ${name}'s workspace.` : "Switched to your own workspace.",
     });
+    if (teardownError)
+      send({
+        type: "error",
+        message: `The previous workspace did not stop cleanly: ${teardownError.message}`,
+      });
+  }
+  // The agent's launch arguments for the workspace now open: the opening message
+  // depends on that person's setup, so it is decided on every start.
+  function agentArgs() {
+    const args = [...(agent.args || [])];
+    const opening = agent.opening?.(env);
+    if (typeof opening === "string" && opening) args.push(opening);
+    return args;
   }
   function paneEnv() {
     let base = env;
@@ -226,6 +281,20 @@ export async function createTextualSession({
   }
   async function dispatch(message) {
     if (closing) throw new Error("Textual session is closed");
+    // An action issued before the open workspace changed, or while it is
+    // changing, was meant for a different person's data. It never runs.
+    if (
+      message.op !== "quit" &&
+      ((message.generation !== undefined && message.generation !== generation) ||
+        (switching && message.op !== "switch-person"))
+    ) {
+      if (!PANE_OPS.has(message.op))
+        send({
+          type: "notice",
+          message: "That action was for the previous workspace, so it was not run.",
+        });
+      return;
+    }
     switch (message.op) {
       case "select": {
         // Only the selection changed: the list Python holds is still right, so
@@ -405,7 +474,7 @@ export async function createTextualSession({
           const born = generation;
           pane = native.createAgentPane({
             command: agent.command,
-            args: agent.args || [],
+            args: agentArgs(),
             cwd: repoRoot,
             env: paneEnv(),
             cols,
@@ -456,12 +525,15 @@ export async function createTextualSession({
     closing = true;
     clearTimeout(drawing);
     watcher?.close();
-    releaseHolder();
     closePromise = (async () => {
       try {
         await pane?.dispose();
       } finally {
-        await stopTerminalSessionSearches({ ...ctx, sessionId });
+        try {
+          await stopTerminalSessionSearches({ ...ctx, sessionId });
+        } finally {
+          releaseHolder();
+        }
       }
     })();
     return closePromise;

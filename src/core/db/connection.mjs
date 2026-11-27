@@ -89,6 +89,20 @@ export function closeAll() {
   _connections.clear();
 }
 
+// Close and forget the cached connection for one data root, so nothing keeps the
+// file open once its workspace is no longer in use.
+export function closeDb({ repoRoot, env } = {}) {
+  const key = privateDataRoot({ repoRoot, env });
+  const db = _connections.get(key);
+  if (!db) return;
+  _connections.delete(key);
+  try {
+    db.close();
+  } catch {
+    /* already closed / file removed out from under us */
+  }
+}
+
 export const NO_DATABASE_MESSAGE =
   "no database yet. Run 'careerrat data import' to migrate this workspace, or 'careerrat data init' to start fresh";
 
