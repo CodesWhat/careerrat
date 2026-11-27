@@ -54,6 +54,8 @@ CR70 slice 2 (2026-11-27) re-vendored verbatim from `13786939`: bamboohr, beesit
 
 CR70 slice 3 (2026-11-27) re-vendored verbatim from `13786939`: feishu-jobs, garena, gem, getro, glints, hecklerkoch, higheredjobs, himalayas, ibm, icims. hackernews was in this slice's list but is NOT re-vendored here: the new upstream file imports `../ats-vendor.mjs`, a repo-root upstream module CareerRat does not vendor, so it moves to the re-port slices (9 to 11) and keeps its pre-roll copy. The icims fixture reads its HTML sample from `tests/fixtures/career-ops/icims-search-page.html`. Message strings we emit are re-punctuated; comments stay verbatim.
 
+CR70 slice 4 (2026-11-27) re-vendored verbatim from `13786939`: itviec, jibeapply, jobbankca, jobicy, jobspresso, jobstreet, jobvite, join. The jobbankca fixture is regenerated from upstream's suite minus the `config/profile.yml` fallback case (CareerRat's `_profile-keywords` has no ambient filesystem fallback); the join fixture drops the `scan.mjs` dedup cases (`isOfferSeen`, `markOfferSeen`, `listingIdentityToken`). Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the
