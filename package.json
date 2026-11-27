@@ -174,13 +174,11 @@
   "allowScripts": {
     "@homebridge/node-pty-prebuilt-multiarch@0.15.0": true,
     "fsevents@2.3.2": true,
-    "fsevents@2.3.3": true,
     "esbuild@0.28.2": true,
     "lefthook@2.1.12": true,
     "core-js": false
   },
   "overrides": {
-    "vite": "8.3.8",
     "postcss": "^8.5.10",
     "sharp": "$sharp",
     "minimatch@^10": "11.0.1",

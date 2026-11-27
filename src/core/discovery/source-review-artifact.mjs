@@ -127,12 +127,6 @@ function sourceReviewSummary(review) {
   return `I found ${count} useful source${count === 1 ? "" : "s"}. Nothing has been added yet.`;
 }
 
-export function hasPersistedSourceReviewTable(value) {
-  return String(value || "")
-    .split(/\r?\n/)
-    .some((line) => line.trim() === PERSISTED_TABLE_HEADER);
-}
-
 function parsePersistedStatus(value) {
   if (value === "NEW") return { status: "proposed", confidence: "high" };
   const borderline = /^NEW \(borderline: ([^)]+)\)$/.exec(value);

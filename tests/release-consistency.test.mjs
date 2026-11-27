@@ -10,15 +10,10 @@ import test from "node:test";
 const SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
-// Packages that are deliberately NOT synced to the root version: apps/web
-// (SPA shell, still 0.1.0), apps/website (marketing site, still 0.0.0), and
-// apps/docs (docs site, still 0.0.0). Do not add a version-sync assertion for
+// Packages that are deliberately NOT synced to the root version: apps/website
+// (marketing site, still 0.0.0) and apps/docs (docs site, still 0.0.0). Do not add a version-sync assertion for
 // these — they ship independently of the CLI.
-const UNVERSIONED_APP_PACKAGE_JSON_PATHS = [
-  "apps/web/package.json",
-  "apps/website/package.json",
-  "apps/docs/package.json",
-];
+const UNVERSIONED_APP_PACKAGE_JSON_PATHS = ["apps/website/package.json", "apps/docs/package.json"];
 
 // Round-trip rather than a NaN check. JS silently normalizes an out-of-range
 // day instead of rejecting it, so `2026-02-30` parses fine and comes back as
@@ -146,7 +141,7 @@ test("the date check rejects dates that only look valid", () => {
 });
 
 // Guard against someone "helpfully" mass-bumping every package.json in the
-// monorepo to match the root version. apps/web, apps/website, and
+// monorepo to match the root version. apps/website and
 // apps/docs are intentionally on their own version tracks.
 test("intentionally unversioned apps do not track the root version", async () => {
   const rootPackageJson = JSON.parse(await readFile("package.json", "utf8"));

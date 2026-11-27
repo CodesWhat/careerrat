@@ -7,8 +7,8 @@ name: sbom
 #
 # Tool choice: `npm sbom --sbom-format spdx` was the first choice (no extra
 # action, no third-party trust). It was tested locally against this repo's
-# real lockfile and fails with ESBOMPROBLEMS: apps/web pins vite@6.4.3 while
-# apps/docs's fumadocs-mdx@15.2.3 requires vite 7.x||8.x. `npm ci` installs
+# real lockfile and fails with ESBOMPROBLEMS: a workspace pinned vite@6.4.3
+# while apps/docs's fumadocs-mdx@15.2.3 required vite 7.x||8.x. `npm ci` installs
 # that tree fine (it's a benign cross-workspace peer mismatch, not a broken
 # install), but `npm sbom` runs a stricter validate pass that refuses to
 # describe a tree it considers invalid, and neither `--omit` nor

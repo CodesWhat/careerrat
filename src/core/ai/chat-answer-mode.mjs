@@ -16,7 +16,7 @@ export const CHAT_ANSWER_MODE_GUIDANCE =
   "multiple-choice, rhetorical, or multi-part questions, and never use it for a confirm/save " +
   "action that already has its own controls. Do not mention or explain the marker in prose.";
 
-export function stripChatConfirmationBlocks(value) {
+function stripChatConfirmationBlocks(value) {
   return String(value || "")
     .replace(/```(?:careerrat:confirm|confirm)[ \t]*\r?\n[\s\S]*?\r?\n```/gi, "")
     .replace(/\n(?:\s*\n)+/g, "\n")

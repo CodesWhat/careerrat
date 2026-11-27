@@ -18,9 +18,8 @@ metadata:
 ## Boundary — when this runs
 
 This skill is **never** invoked conversationally and has no Intent Routing entry — a
-user never asks for it by name. It exists solely as the backend of two onboarding
-wizard résumé-drop steps in `src/cli/onboard-route.mjs`, each running it exactly once
-per upload, headlessly, over the embedded one-shot runtime
+user never asks for it by name. It exists solely as the backend of the onboarding
+résumé-drop steps, each running it exactly once per upload, headlessly, over the embedded one-shot runtime
 (`src/core/ai/skill-runtime.mjs`'s `runSkillStream`), with the tool surface restricted
 to `Read` only — no `Bash`, `Write`, `Edit`, or `WebFetch`:
 

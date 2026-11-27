@@ -1,6 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
-import { parseChatAnswerMode, stripChatConfirmationBlocks } from "../ai/chat-answer-mode.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { withTransaction } from "../db/transaction.mjs";
 import { collapseUnansweredOnboardingPrompts } from "../onboarding/transcript-cleanup.mjs";
@@ -18,7 +17,6 @@ const KIND_VALUES = new Set([
   "agent_error",
   "status",
 ]);
-const ONBOARDING_TRANSCRIPT_CHAR_LIMIT = 16_000;
 
 export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "interview.prepare": ["application"],
@@ -184,161 +182,11 @@ export function workspaceMessagesForDisplay(messages) {
   );
 }
 
-export function workspaceThreadOpen({ repoRoot, env = process.env, now } = {}) {
-  const db = requireDb({ repoRoot, env });
-  const at = dateIso(now);
-  const thread = withTransaction(db, () => ensureThread(db, at));
-  return { ok: true, thread, messages: workspaceMessagesForDisplay(readMessages(db)) };
-}
-
 export function workspaceThreadRead({ repoRoot, env = process.env } = {}) {
   const db = requireDb({ repoRoot, env });
   const thread = readThreadRow(db);
   if (!thread) return { ok: true, thread: null, messages: [] };
   return { ok: true, thread, messages: workspaceMessagesForDisplay(readMessages(db)) };
-}
-
-function normalizeOnboardingMessages(transcript) {
-  const candidates = collapseUnansweredOnboardingPrompts(transcript).flatMap((message) => {
-    const role = String(message?.role || "").trim();
-    const rawText = String(message?.text || "").trim();
-    if ((role !== "user" && role !== "assistant") || !rawText) return [];
-    if (role === "user") return [{ role, text: rawText }];
-    const parsed = parseChatAnswerMode(stripChatConfirmationBlocks(rawText));
-    const answerMode =
-      parsed.answerMode ||
-      (message?.answerMode === "yes-no" || message?.metadata?.answerMode === "yes-no"
-        ? "yes-no"
-        : null);
-    return parsed.text
-      ? [
-          {
-            role,
-            text: parsed.text,
-            ...(answerMode ? { metadata: { answerMode } } : {}),
-          },
-        ]
-      : [];
-  });
-  const bounded = [];
-  let remaining = ONBOARDING_TRANSCRIPT_CHAR_LIMIT;
-  for (let index = candidates.length - 1; index >= 0 && remaining > 0; index--) {
-    const message = candidates[index];
-    const text = message.text.length > remaining ? message.text.slice(-remaining) : message.text;
-    bounded.push({ ...message, text });
-    remaining -= text.length;
-  }
-  return bounded.reverse();
-}
-
-export function workspaceOnboardingHandoff({
-  repoRoot,
-  env = process.env,
-  transcript,
-  handoffText,
-  finishedAt,
-  now,
-} = {}) {
-  const messages = normalizeOnboardingMessages(transcript);
-  const finalText = cleanText(handoffText, { required: true });
-  const at = dateIso(now);
-  const completedAt = dateIso(finishedAt || at);
-  const transcriptHash = createHash("sha256")
-    .update(JSON.stringify({ messages, handoffText: finalText }))
-    .digest("hex");
-  const db = requireDb({ repoRoot, env });
-
-  return withTransaction(db, () => {
-    const thread = ensureThread(db, at);
-    const currentMessages = readMessages(db);
-    const allOnboardingMessages = currentMessages.filter(
-      (message) => message.metadata?.source === "onboarding"
-    );
-    const existingImported = currentMessages.filter(
-      (message) =>
-        message.metadata?.source === "onboarding" &&
-        message.metadata?.handoffHash === transcriptHash
-    );
-    const expectedCount = messages.length + 1;
-    if (
-      thread.onboardingHandoff?.transcriptHash === transcriptHash &&
-      allOnboardingMessages.length === expectedCount &&
-      existingImported.length === expectedCount
-    ) {
-      return {
-        ok: true,
-        reused: true,
-        repaired: false,
-        thread,
-        messages: existingImported,
-        finishedAt: thread.onboardingHandoff.finishedAt,
-      };
-    }
-
-    const repaired = Boolean(thread.onboardingHandoff);
-    const preserved = currentMessages.filter(
-      (message) => message.metadata?.source !== "onboarding"
-    );
-    const imported = [...messages, { role: "assistant", text: finalText }].map((message, index) => {
-      const id = `onboarding-${transcriptHash.slice(0, 20)}-${index + 1}`;
-      const metadata = choiceMetadataForMessage({
-        metadata: {
-          ...(message.metadata || {}),
-          source: "onboarding",
-          handoffHash: transcriptHash,
-        },
-        role: message.role,
-        threadId: WORKSPACE_THREAD_ID,
-        messageId: id,
-        text: message.text,
-      });
-      return {
-        id,
-        threadId: WORKSPACE_THREAD_ID,
-        sequence: index + 1,
-        role: message.role,
-        kind: "text",
-        text: message.text,
-        createdAt: completedAt,
-        metadata,
-      };
-    });
-    const ordered = [...imported, ...preserved].map((message, index) => ({
-      ...message,
-      sequence: index + 1,
-    }));
-
-    db.prepare("DELETE FROM workspace_messages WHERE thread_id = ?").run(WORKSPACE_THREAD_ID);
-    const insert = db.prepare(
-      "INSERT INTO workspace_messages (id, thread_id, sequence, data) VALUES (?, ?, ?, ?)"
-    );
-    for (const message of ordered) {
-      insert.run(message.id, WORKSPACE_THREAD_ID, message.sequence, JSON.stringify(message));
-    }
-
-    const updatedThread = {
-      ...thread,
-      updatedAt: at,
-      onboardingHandoff: {
-        transcriptHash,
-        messageCount: imported.length,
-        finishedAt: completedAt,
-        importedAt: at,
-      },
-    };
-    db.prepare("UPDATE workspace_threads SET data = ? WHERE id = ?").run(
-      JSON.stringify(updatedThread),
-      WORKSPACE_THREAD_ID
-    );
-    return {
-      ok: true,
-      reused: false,
-      repaired,
-      thread: updatedThread,
-      messages: imported,
-      finishedAt: completedAt,
-    };
-  });
 }
 
 export function workspaceMessageAppend(options = {}) {

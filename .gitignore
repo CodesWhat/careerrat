@@ -2,7 +2,7 @@ node_modules/
 .env
 .env.local
 
-# Local throwaway demo workspace seeded by scripts/demo-serve.sh
+# Local throwaway demo workspace seeded by scripts/seed-demo.mjs
 # (CAREERRAT_HOME=./.demo-home) — never real data, never checked in.
 .demo-home/
 
@@ -12,11 +12,6 @@ node_modules/
 # qlty config (track qlty.toml, ignore the CLI's local cache/output symlinks)
 .qlty/*
 !.qlty/qlty.toml
-
-# apps/web build artifacts (M7 SPA shell) — built fresh, shipped via
-# package.json#files["apps/web/dist"], same "gitignored generated release
-# artifact" pattern as the Next app outputs above.
-apps/web/dist/
 
 # build:demo static bundle (rebuilt per deploy so dates stay evergreen)
 dist/

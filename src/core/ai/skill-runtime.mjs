@@ -139,11 +139,6 @@ export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
   });
 }
 
-export function resolveDirectSkillRunSkills({ repoRoot, env = process.env } = {}) {
-  const allowed = new Set(resolveAllowedSkills({ repoRoot, env }));
-  return DIRECT_SKILL_RUN_SKILLS.filter((skill) => allowed.has(skill));
-}
-
 // ---------------------------------------------------------------------------
 // AI routing mirrors call-ai.mjs exactly through resolveAIRoute(). Installed
 // CLIs are invoked directly below. For BYOK/managed provider fallback, the

@@ -1,8 +1,8 @@
 // structured-oneshot.mjs — the shared "buffer model text → extract one fenced
 // JSON block → validate against a schema → one corrective retry" loop used by
 // every small, bounded, structured-output-only AI route this milestone adds:
-// POST /api/onboard/resume-ai (src/cli/onboard-route.mjs, via the
-// resume-extract skill) and POST /api/assist/suggest (src/cli/assist-route.mjs,
+// POST /api/onboard/resume-ai (the retired onboard route, via the
+// resume-extract skill) and POST /api/assist/suggest (the retired assist route,
 // a bare no-tool one-shot). Both are a materially different shape from
 // POST /api/skill/run: that route is a raw SSE passthrough by design
 // (evaluate-job/tailor-application need live tool-call visibility for a human

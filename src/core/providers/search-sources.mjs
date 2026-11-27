@@ -120,7 +120,7 @@ export function resolveBrowserSourceIdentity(source = {}, value = source.url || 
   };
 }
 
-export function requireBrowserSourceIdentity(source = {}, value = source.url || source.target) {
+function requireBrowserSourceIdentity(source = {}, value = source.url || source.target) {
   const identity = resolveBrowserSourceIdentity(source, value);
   if (identity.ok) return identity;
   const error = new Error(identity.reason);

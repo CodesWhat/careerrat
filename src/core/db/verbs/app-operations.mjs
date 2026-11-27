@@ -341,46 +341,6 @@ export function appOperationRetryStart({
   });
 }
 
-export function appOperationCompletedReplacementStart({
-  repoRoot,
-  env,
-  id,
-  ownerId,
-  leaseMs = 90_000,
-  now,
-} = {}) {
-  const operationId = required(id, "id");
-  const owner = required(ownerId, "ownerId");
-  const db = requireDb({ repoRoot, env });
-  return withTransaction(db, () => {
-    const previous = operationById(db, operationId);
-    if (!previous) throw makeError(`app operation not found: ${operationId}`, "NOT_FOUND");
-    const existingReplacement = retryByParent(db, operationId);
-    if (existingReplacement) {
-      return { ok: true, reused: true, operation: existingReplacement };
-    }
-    if (previous.status !== "completed") {
-      throw makeError(
-        "only completed app operations can have their result replaced",
-        "APP_OPERATION_RESULT_NOT_COMPLETED"
-      );
-    }
-    const replacement = queuedOperation({
-      kind: previous.kind,
-      requestDigest: previous.requestDigest,
-      request: previous.request,
-      executionPlan: previous.executionPlan,
-      ownerId: owner,
-      fence: previous.fence + 1,
-      retryOf: previous.id,
-      attempt: previous.attempt + 1,
-      leaseMs,
-      now: timestampAfter(now, previous.updatedAt),
-    });
-    return { ok: true, reused: false, operation: insertOperation(db, replacement) };
-  });
-}
-
 export function appOperationGet({ repoRoot, env, id } = {}) {
   const operationId = required(id, "id");
   const operation = operationById(requireDb({ repoRoot, env }), operationId);

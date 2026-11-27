@@ -273,7 +273,6 @@ test("public docs explain durable background work without claiming interrupted w
     readme: "README.md",
     website: "apps/website/src/app/page.tsx",
     workspace: "apps/docs/content/docs/getting-started/terminal-workspace.mdx",
-    runtime: "docs/CHAT_FIRST_RUNTIME.md",
   };
   const copy = Object.fromEntries(
     await Promise.all(
@@ -422,7 +421,6 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
   const paths = {
     readme: "README.md",
     website: "apps/website/src/app/page.tsx",
-    runtime: "docs/CHAT_FIRST_RUNTIME.md",
     windows: "docs/WINDOWS.md",
     architecture: "docs/ARCHITECTURE.md",
   };
@@ -433,7 +431,7 @@ test("public surfaces keep the provider-neutral installed-runtime contract align
   );
   const combined = Object.values(copy).join("\n");
 
-  for (const name of ["readme", "runtime", "windows", "architecture"]) {
+  for (const name of ["readme", "windows", "architecture"]) {
     assert.match(
       copy[name],
       /CareerRat[\s\S]{0,180}(?:owns|keeps)[\s\S]{0,120}(?:workflows?|threads?)[\s\S]{0,120}provider-neutral/i,
@@ -709,7 +707,6 @@ test("docs website source uses the public careerrat CLI convention", async () =>
 
   assert.match(combined, /npm install -g careerrat/);
   assert.match(combined, /careerrat start claude/);
-  assert.match(combined, /careerrat tracker-dev/);
   assert.match(combined, /careerrat automation status/);
   assert.match(combined, /careerrat update/);
   assert.match(combined, /site:dev/);

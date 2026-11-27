@@ -1,15 +1,13 @@
 import { createHash } from "node:crypto";
 import { htmlToPlainText } from "../text/html-text.mjs";
 
-export const DEEP_INGEST_JSON_BODY_MAX_BYTES = 1024 * 1024;
-export const DEEP_INGEST_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 const DEEP_INGEST_SOURCE_TEXT_MAX_CHARS = 12000;
 export const DEEP_INGEST_REPO_FILE_LIMIT = 12;
 export const DEEP_INGEST_REPO_MAX_BYTES = 128 * 1024;
 export const DEEP_INGEST_FETCH_TIMEOUT_MS = 12000;
 export const DEEP_INGEST_FETCH_MAX_BYTES = 512 * 1024;
 
-export const DEEP_INGEST_TARGET_SHAPES = Object.freeze([
+const DEEP_INGEST_TARGET_SHAPES = Object.freeze([
   "auto",
   "evidence",
   "story",

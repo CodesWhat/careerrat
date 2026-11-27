@@ -298,7 +298,7 @@ operations, and agent-led handoffs all stay inside it. The React product at `/ap
 is the legacy browser surface, reachable only through `careerrat start --browser`.
 
 The runtime persists threads and missions independently of any one AI
-vendor. See [CHAT_FIRST_RUNTIME.md](CHAT_FIRST_RUNTIME.md).
+vendor.
 
 ### Skill Contract Layer
 

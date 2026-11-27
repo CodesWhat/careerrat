@@ -18,9 +18,8 @@ metadata:
 ## Boundary — when this runs
 
 This skill is **never** invoked conversationally and has no Intent Routing entry — a
-user never asks for it by name. It exists solely as the backend of one Universal
-Intake upload branch, `src/cli/intake-route.mjs`'s `POST /api/intake/upload` handler,
-running it exactly once per PDF/image upload, headlessly, over the embedded one-shot
+user never asks for it by name. It exists solely as the backend of the Universal
+Intake PDF/image upload branch, running it exactly once per upload, headlessly, over the embedded one-shot
 runtime (`src/core/ai/skill-runtime.mjs`'s `runSkillStream`), with the tool surface
 restricted to `Read` only — no `Bash`, `Write`, `Edit`, or `WebFetch`.
 

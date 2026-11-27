@@ -60,7 +60,7 @@ function buildActivityLines(db) {
 // applications/sources/communications/sourced/meta/analytics/kv straight off
 // the db and reassembles the exact legacy tracker.json shape, WITHOUT writing
 // anything to disk. Extracted (M10) so a request-time consumer — the new
-// GET /api/data/dashboard route (src/cli/dashboard-route.mjs) — can build the
+// GET /api/data/dashboard route (the retired dashboard route) — can build the
 // same trackerData object exportToTracker() writes to disk, in-process, with
 // no round-trip through the filesystem. exportToTracker() below is now just
 // this function + the atomic file write; no behavior change.
@@ -84,16 +84,6 @@ export function assembleTrackerObject(db) {
   for (const row of kvRows) output[row.key] = JSON.parse(row.data);
 
   return output;
-}
-
-// assembleActivityEvents — the activity.jsonl feed as parsed objects (not raw
-// JSONL lines) for an in-process consumer. Reuses the same table read
-// exportToTracker's own buildActivityLines() draws from; order doesn't matter
-// to callers (dashboard-data.js's buildActivityPulse/buildJobActivityTimeline
-// both sort internally), so this is just the plain rowid-ordered read
-// rowsAsObjects() already gives every other table.
-export function assembleActivityEvents(db) {
-  return rowsAsObjects(db, "activity_events");
 }
 
 export function exportToTracker({ repoRoot, env } = {}, { tracker = true, activity = true } = {}) {
