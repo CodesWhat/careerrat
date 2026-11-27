@@ -30,12 +30,14 @@ from textual.widgets import (
     Input,
     Label,
     MarkdownViewer,
+    OptionList,
     Select,
     Static,
     TabbedContent,
     TabPane,
     TextArea,
 )
+from textual.widgets.option_list import Option
 
 HOLD_SECONDS = 12
 LOG_LIMIT_BYTES = 512 * 1024
@@ -611,6 +613,13 @@ class NativePane(Widget):
                 ]
             )
 
+    def clear_frame(self):
+        """Forget the last agent's screen, so the next one never shows the old person's."""
+        self.frame = None
+        self.lines = ()
+        self.strips.clear()
+        self.refresh()
+
     def render_line(self, y):
         if not self.frame:
             return super().render_line(y)
@@ -864,6 +873,50 @@ class JobDocument(ModalScreen):
         self.dismiss()
 
 
+class PersonPicker(ModalScreen):
+    """Pick whose workspace to open: your own, or one of the people you run it for."""
+
+    BINDINGS = [Binding("escape", "close", "Cancel")]
+    CSS = """
+    PersonPicker { align: center middle; background: $background 70%; }
+    #person-dialog { width: 60; height: auto; max-height: 80%; padding: 1 2; border: round $accent; background: $surface; }
+    #person-list { height: auto; max-height: 20; margin: 1 0; }
+    """
+
+    def __init__(self, people, current):
+        super().__init__()
+        self.people = people
+        self.current = current
+
+    def compose(self) -> ComposeResult:
+        options = [Option("Your own workspace" + (" (open)" if not self.current else ""), id="")]
+        for person in self.people:
+            name = person["name"]
+            label = name + (" (open)" if name == self.current else "")
+            if not person.get("ready"):
+                label += " · setup not finished"
+            options.append(Option(label, id=name))
+        with Vertical(id="person-dialog", classes="dialog"):
+            yield Static("Switch person\nThe agent and watchers restart on their workspace.", markup=False)
+            yield OptionList(*options, id="person-list")
+            with Horizontal():
+                yield Button("Cancel", id="cancel-person", compact=True)
+
+    def on_mount(self):
+        self.query_one("#person-list", OptionList).focus()
+
+    def action_close(self):
+        self.dismiss()
+
+    def on_option_list_option_selected(self, event):
+        event.stop()
+        self.dismiss(event.option.id or None)
+
+    def on_button_pressed(self, event):
+        event.stop()
+        self.dismiss()
+
+
 class RequestText(ModalScreen):
     """A request that has no agent to receive it: readable, selectable, copyable."""
 
@@ -921,6 +974,7 @@ class CareerRatApp(App):
         Binding("a", "request('apply')", "Apply selected"),
         Binding("c", "add_context", "Add context"),
         Binding("f5", "refresh_jobs", "Refresh"),
+        Binding("p", "switch_person", "Switch person"),
         Binding("t", "filter('status')", "Status", show=False),
         Binding("y", "filter('currency')", "Currency", show=False),
         Binding("b", "filter('basis')", "Pay basis", show=False),
@@ -1098,10 +1152,7 @@ class CareerRatApp(App):
         yield Footer()
 
     async def on_mount(self):
-        person = (self.env.get("CAREERRAT_PERSON") or "").strip()
-        if person:
-            self.title = f"CareerRat · {person}"
-            self.sub_title = f"Workspace for {person}"
+        self.show_person((self.env.get("CAREERRAT_PERSON") or "").strip() or None)
         loop = asyncio.get_running_loop()
         if sys.platform != "win32":
             for name in (signal.SIGTERM, signal.SIGHUP):
@@ -1342,6 +1393,13 @@ class CareerRatApp(App):
         kind = value["type"]
         if kind == "workspace":
             self.update_workspace(value)
+        elif kind == "people":
+            self.push_screen(
+                PersonPicker(value["people"], value.get("current")),
+                lambda choice: self.pick_person(value.get("current"), choice),
+            )
+        elif kind == "person":
+            self.open_person(value.get("person"))
         elif kind == "selection":
             self.apply_selection(value)
         elif kind == "detail":
@@ -1432,6 +1490,30 @@ class CareerRatApp(App):
             self.errors.append(value["message"])
             self.write_log(f"error: {value['message']}")
             self.show_message(value["message"], hold=HOLD_SECONDS)
+
+    def show_person(self, person):
+        """The header says whose workspace is open."""
+        self.title = f"CareerRat · {person}" if person else "CareerRat · Workspace"
+        self.sub_title = f"Workspace for {person}" if person else "Your own workspace"
+
+    def open_person(self, person):
+        """The bridge moved to another workspace: drop everything shown from the last one."""
+        if person:
+            self.env["CAREERRAT_PERSON"] = person
+        else:
+            self.env.pop("CAREERRAT_PERSON", None)
+        self.snapshot = None
+        self.detail = None
+        self.selected_id = None
+        self.table_signature = None
+        self.run_status = {}
+        self.job_ids = []
+        self.job_cells = []
+        self.query_one("#request", Input).value = ""
+        self.show_person(person)
+        self.write_terminal(f"\x1b]2;CareerRat{' · ' + person if person else ''}\x07")
+        self.query_one(NativePane).clear_frame()
+        self.call_after_refresh(self.resize_agent)
 
     def ring_bell(self):
         """The agent rang the bell: pass it to the outer terminal, at most once a second."""
@@ -1885,7 +1967,7 @@ class CareerRatApp(App):
     def check_action(self, action, parameters):
         # Single letters belong to the agent and to text boxes; they only act
         # from the jobs side, and never under a dialog.
-        if action in ("request", "add_context", "refresh_jobs", "filter"):
+        if action in ("request", "add_context", "refresh_jobs", "filter", "switch_person"):
             if len(self.screen_stack) > 1 or self.query_one(NativePane).has_focus:
                 return False
             if action == "filter" and not self.query_one(f"#{parameters[0]}").display:
@@ -1900,6 +1982,7 @@ class CareerRatApp(App):
             ("Apply selected", "Ask the agent to apply to the selected job", lambda: self.action_request("apply")),
             ("Add context", "Paste a JD, transcript or file path", self.action_add_context),
             ("Refresh", "Read the saved workspace again", self.action_refresh_jobs),
+            ("Switch person", "Open another person's workspace, or your own", self.action_switch_person),
             ("Jobs / agent", "Move focus between the jobs table and the agent", self.action_switch_focus),
         ):
             yield SystemCommand(label, help_text, callback)
@@ -1912,6 +1995,16 @@ class CareerRatApp(App):
 
     def action_add_context(self):
         self.push_screen(ContextCapture())
+
+    def pick_person(self, current, choice):
+        if choice is None and current is None:
+            return
+        if choice == current:
+            return
+        asyncio.create_task(self.send({"op": "switch-person", "person": choice}))
+
+    async def action_switch_person(self):
+        await self.send({"op": "people"})
 
     async def action_refresh_jobs(self):
         await self.send({"op": "refresh"})

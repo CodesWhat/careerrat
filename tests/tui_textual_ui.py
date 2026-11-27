@@ -105,6 +105,50 @@ closeAll();
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             self.assertEqual(result.stdout.strip(), b"60")
 
+    async def test_switch_person_picker_swaps_the_workspace_and_header(self):
+        with tempfile.TemporaryDirectory(prefix="careerrat-textual-people-") as folder:
+            base = Path(folder)
+            for home, job in (
+                (base, "OwnerCo"),
+                (base / "people/ada", "AdaCo"),
+            ):
+                (home / "workspace").mkdir(parents=True)
+                (home / "workspace/tracker.json").write_text(
+                    json.dumps(
+                        {
+                            "applications": [
+                                {
+                                    "id": job.lower(),
+                                    "company": job,
+                                    "role": "Lead",
+                                    "status": "applied",
+                                }
+                            ]
+                        }
+                    )
+                )
+            env = {**os.environ, "CAREERRAT_HOME": folder}
+            env.pop("CAREERRAT_PERSON", None)
+            env.pop("CAREERRAT_PEOPLE_BASE", None)
+            app = MODULE.CareerRatApp(env=env, bridge_args=["--no-agent"])
+            async with app.run_test(size=(160, 50)) as pilot:
+                await until(lambda: app.snapshot and app.job_ids == ["ownerco"])
+                self.assertEqual(app.sub_title, "Your own workspace")
+                await pilot.press("p")
+                await until(lambda: isinstance(app.screen, MODULE.PersonPicker))
+                picker = app.screen.query_one("#person-list")
+                self.assertEqual(
+                    [option.id for option in picker.options], ["", "ada"]
+                )
+                picker.highlighted = 1
+                await pilot.press("enter")
+                await until(lambda: app.job_ids == ["adaco"])
+                self.assertEqual(app.title, "CareerRat · ada")
+                self.assertEqual(app.sub_title, "Workspace for ada")
+                self.assertEqual(app.env["CAREERRAT_PERSON"], "ada")
+                await pilot.press("ctrl+q")
+            self.assertEqual(app.errors, [])
+
     @unittest.skipIf(
         sys.platform == "win32", "Unix outer-PTY proof; Windows acceptance is separate"
     )

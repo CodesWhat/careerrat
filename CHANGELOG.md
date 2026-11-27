@@ -8,6 +8,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- The terminal workspace can switch person without restarting `careerrat`. Press `p` or pick Switch person from the F1 palette to choose someone from `careerrat people list`, or your own workspace. The agent and the data watcher restart on that person's root, the header shows whose workspace is open, and a person who doesn't exist is refused with a message.
 - The website adds JSON-LD (SoftwareApplication and Organization on the homepage, TechArticle and BreadcrumbList on docs pages), canonical, Open Graph and Twitter metadata on docs pages, lastmod dates in the sitemap, and a generated `llms-full.txt`. `llms.txt` now lists every docs page.
 - New job sources: Gupy, PeopleSoft, TalentLink, SuccessFactors classic, TurboHire, Taleez, Viterbit and WP Job Manager sites. The existing SuccessFactors source is updated to the latest upstream and leaves classic career-site URLs to the new source. Gupy needs search keywords on the entry.
 - New job sources: ADP MyJobs, ADP WorkforceNow, ApplicantPro, CareerPuck, ClearCompany, Darwinbox, Eploy, InRecruiting, PageUp, Taleo, UltiPro and Zoho Recruit. These are multi-tenant hiring systems, so each company is read from its own careers page.

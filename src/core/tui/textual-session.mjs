@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { registerDbHolder } from "../db/holders.mjs";
 import { readSavedJobDescription } from "../jobs/job-description.mjs";
+import { currentPerson, peopleBase, resolvePersonSelection } from "../paths/people.mjs";
 import { borrowedAiWarning } from "../people/ai-route.mjs";
+import { listPeople } from "../people/roster.mjs";
 import {
   cancelTerminalSearch,
   startTerminalSearch,
@@ -25,7 +27,7 @@ export async function createTextualSession({
   emit,
   search = { start: startTerminalSearch, cancel: cancelTerminalSearch },
 }) {
-  const ctx = { repoRoot, env };
+  let ctx = { repoRoot, env };
   const sessionId = randomUUID();
   let data = readJobs(ctx);
   let state = createWorkspaceState(data);
@@ -37,7 +39,9 @@ export async function createTextualSession({
   let closePromise;
   let drawing;
   let watcher;
-  const releaseHolder = registerDbHolder(ctx, "tui");
+  // Bumped on every person switch so a stopped pane's late events are dropped.
+  let generation = 0;
+  let releaseHolder = registerDbHolder(ctx, "tui");
   let lastSnapshot = "";
   let framed = null;
 
@@ -129,6 +133,81 @@ export async function createTextualSession({
           : agentIssue || "No agent is running.";
     send({ type: "request", text, inserted, notice: notice ?? null, reason });
   }
+  // The env a fresh `careerrat --for <name>` start would run with, or the owner's
+  // own workspace for null. Throws, touching nothing, for an unknown or removed person.
+  function personContext(name) {
+    if (name === null) {
+      const base = peopleBase({ repoRoot, env });
+      const next = { ...env, CAREERRAT_HOME: base };
+      delete next.CAREERRAT_PERSON;
+      delete next.CAREERRAT_PEOPLE_BASE;
+      return next;
+    }
+    if (typeof name !== "string") throw new TypeError("Person must be a name or null");
+    return { ...env, ...resolvePersonSelection({ repoRoot, env, forName: name }) };
+  }
+  function personEvent() {
+    return { type: "person", person: currentPerson(env) };
+  }
+  function startWatcher() {
+    watcher = createDataWatch({
+      ctx,
+      onChange: () => refresh({ force: false }),
+      onError: (error) =>
+        send({
+          type: "error",
+          message: `Saved data could not be watched: ${error.message}`,
+        }),
+    });
+  }
+  // Stops the agent pane, searches and watcher on the old root, then reopens all
+  // of it on the new one. Nothing from the old person is kept: jobs, selection,
+  // filters and pending Undo all start from the new workspace.
+  async function switchPerson(name) {
+    if (name === currentPerson(env)) {
+      send({
+        type: "notice",
+        message: name ? `Already in ${name}'s workspace.` : "Already in your own workspace.",
+      });
+      return;
+    }
+    let nextEnv;
+    try {
+      nextEnv = personContext(name);
+    } catch (error) {
+      send({ type: "notice", message: `Can't switch: ${error.message}` });
+      return;
+    }
+    generation += 1;
+    clearTimeout(drawing);
+    drawing = null;
+    watcher?.close();
+    releaseHolder();
+    const oldPane = pane;
+    const oldCtx = ctx;
+    pane = undefined;
+    exited = false;
+    framed = null;
+    try {
+      await oldPane?.dispose();
+    } finally {
+      await stopTerminalSessionSearches({ ...oldCtx, sessionId });
+    }
+    if (closing) return;
+    env = nextEnv;
+    ctx = { repoRoot, env };
+    releaseHolder = registerDbHolder(ctx, "tui");
+    data = readJobs(ctx);
+    state = createWorkspaceState(data);
+    lastSnapshot = "";
+    send(personEvent());
+    snapshot();
+    startWatcher();
+    send({
+      type: "notice",
+      message: name ? `Switched to ${name}'s workspace.` : "Switched to your own workspace.",
+    });
+  }
   function paneEnv() {
     let base = env;
     try {
@@ -189,6 +268,23 @@ export async function createTextualSession({
       case "refresh":
         refresh();
         break;
+      case "people": {
+        let people;
+        try {
+          people = listPeople({ repoRoot, env });
+        } catch (error) {
+          send({ type: "notice", message: `People could not be listed: ${error.message}` });
+          break;
+        }
+        send({ type: "people", people, current: currentPerson(env) });
+        break;
+      }
+      case "switch-person": {
+        if (message.person !== null && typeof message.person !== "string")
+          throw new TypeError("Person must be a name or null");
+        await switchPerson(message.person);
+        break;
+      }
       case "document": {
         const job = data.jobs.find((item) => item.id === message.id);
         if (!job) throw new Error("Saved job was not found");
@@ -306,6 +402,7 @@ export async function createTextualSession({
         if (agent && !pane && !exited) {
           native = await import("./agent-pane.mjs");
           if (closing) return;
+          const born = generation;
           pane = native.createAgentPane({
             command: agent.command,
             args: agent.args || [],
@@ -313,11 +410,14 @@ export async function createTextualSession({
             env: paneEnv(),
             cols,
             rows,
-            onChange: scheduleFrame,
-            onBell: () => send({ type: "bell" }),
-            onTitle: (title) => send({ type: "title", title }),
-            onClipboard: (text) => send({ type: "clipboard", text }),
+            onChange: () => {
+              if (born === generation) scheduleFrame();
+            },
+            onBell: () => born === generation && send({ type: "bell" }),
+            onTitle: (title) => born === generation && send({ type: "title", title }),
+            onClipboard: (text) => born === generation && send({ type: "clipboard", text }),
             onExit: ({ exitCode }) => {
+              if (born !== generation) return;
               exited = true;
               send({ type: "agent-exited", exitCode });
               refresh({ force: false });
@@ -367,15 +467,7 @@ export async function createTextualSession({
     return closePromise;
   }
   snapshot();
-  watcher = createDataWatch({
-    ctx,
-    onChange: () => refresh({ force: false }),
-    onError: (error) =>
-      send({
-        type: "error",
-        message: `Saved data could not be watched: ${error.message}`,
-      }),
-  });
+  startWatcher();
   if (agentIssue) send({ type: "agent-status", message: agentIssue });
   return { dispatch, refresh, close };
 }
