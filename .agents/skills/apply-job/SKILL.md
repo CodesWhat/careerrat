@@ -176,7 +176,7 @@ Run it once the form is filled and every upload is attached. Read the JSON:
   that is yours to fix (a blank required field you can truthfully answer, an upload not yet
   attached) and run the command again, once.
 
-The checks the command runs (the same ones the browser app's apply driver enforces): the submit
+The checks the command runs (the same ones the apply driver enforces): the submit
 mode is `auto` (`careerrat automation status`; `submit: manual` is set with
 `careerrat automation submit manual --write` and always refuses, so the person presses Submit),
 the posting is not on LinkedIn (never auto-submitted), Submit was not already pressed once, the
@@ -208,7 +208,7 @@ flow. For a limit or restriction notice `submitGuard` reports the blocker `appli
      careerrat data app set-fields <id> --data '{"note":"manual-apply: <blocker type> — <url>"}'
      ```
 
-     (e.g. `"manual-apply: Cloudflare human-check — <url>"`, `"manual-apply: Ashby take-home exercise required — <url>"`, `"manual-apply: Workday account creation required — <url>"`, `"manual-apply: ATS spam-flag — contact recruiter directly — <url>"`). `manual-apply` means the human must finish applying; it is ACTIVE and stays visible on the dashboard, never archived. Run both calls back-to-back, never deferring the second.
+     (e.g. `"manual-apply: Cloudflare human-check — <url>"`, `"manual-apply: Ashby take-home exercise required — <url>"`, `"manual-apply: Workday account creation required — <url>"`, `"manual-apply: ATS spam-flag — contact recruiter directly — <url>"`). `manual-apply` means the human must finish applying; it is ACTIVE and stays visible on the terminal workspace, never archived. Run both calls back-to-back, never deferring the second.
   2. **Comm-thread write-back (blocker case):** check whether a backing comm thread exists — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting. If one exists, compose two calls (there is no single partial-patch verb, so this is "same turn," never deferred):
      1. Patch the comm row locally (read the current shape, do NOT change `status` — the human still needs to act — rewrite `nextAction` to describe the manual step and advance `nextActionDue` forward by one day so it doesn't show overdue while the human clears the blocker), then persist:
 
@@ -225,7 +225,7 @@ flow. For a limit or restriction notice `submitGuard` reports the blocker `appli
   3. Report what was found and ask the user how to proceed.
   4. **Re-entry point:** when the user clears the blocker and returns, resume at STEP 7 (Fill) — the tail of the form is the re-entry point, not the beginning of the workflow. Re-read the current page state via the session browser before continuing.
 - **Legacy workspace (no DB):**
-  1. Write the blocked state to the application's tracker row immediately — set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type, any visible context text, and the apply URL so the human can finish (e.g. `"manual-apply: Cloudflare human-check — <url>"`, `"manual-apply: Ashby take-home exercise required — <url>"`, `"manual-apply: Workday account creation required — <url>"`, `"manual-apply: ATS spam-flag — contact recruiter directly — <url>"`). `manual-apply` means the human must finish applying; it is ACTIVE and stays visible on the dashboard, never archived.
+  1. Write the blocked state to the application's tracker row immediately — set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type, any visible context text, and the apply URL so the human can finish (e.g. `"manual-apply: Cloudflare human-check — <url>"`, `"manual-apply: Ashby take-home exercise required — <url>"`, `"manual-apply: Workday account creation required — <url>"`, `"manual-apply: ATS spam-flag — contact recruiter directly — <url>"`). `manual-apply` means the human must finish applying; it is ACTIVE and stays visible on the terminal workspace, never archived.
   2. **Comm-thread write-back (blocker case):** in the same `tracker.json` write as step 1, check whether a backing comm thread exists — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting. If one exists: do NOT flip `comm.status` to `waiting` (the human still needs to act), but append a `note`-direction entry to `comm.messages[]` recording the block reason and the manual-apply URL (e.g. `{ direction: "note", at: "<ISO>", body: "Application preparation blocked: Cloudflare — manual apply required at <url>" }`), rewrite `comm.nextAction` to describe the manual step (e.g. `"Complete application manually — Cloudflare block at <url>"`), and update `comm.nextActionDue` forward by one day so the due date does not show as overdue while the human clears the blocker. Write app row + comm update atomically — no partial writes.
   3. Report what was found and ask the user how to proceed.
   4. **Re-entry point:** when the user clears the blocker and returns, resume at STEP 7 (Fill) — the tail of the form is the re-entry point, not the beginning of the workflow. Re-read the current page state via the session browser before continuing.
@@ -356,7 +356,7 @@ Locate the application row in `workspace/tracker.json`:
   - **DB workspace:** create it with `careerrat data app upsert --data '{"id":"<slug>","company":"<Company>","role":"<Role>"}'` (it refuses an id that already exists, so an existing row is never wiped; for an existing row use `app set-fields`), then continue with the field writes below against that same `<id>`.
   - **Legacy workspace (no DB):** create the entry directly in the `tracker.json` edit below.
 
-**`app.note` validation (run before writing the row):** `note` is the INTERNAL submission one-liner — ≤60 chars, one topic, ATS/system + "submitted" only (e.g. `"Greenhouse — submitted, confirmation received."`). It must NOT contain application-form answer text, work-arrangement Q&A (onsite/hybrid/remote phrases), interview-loop descriptions, or language copied from the JD or form fields. Anything that fails this check routes to `statusNote` (live state text), `compNote` (comp intel), or is dropped entirely. A polluted `note` produces phantom interview Focus cards on the dashboard — prevent it here.
+**`app.note` validation (run before writing the row):** `note` is the INTERNAL submission one-liner — ≤60 chars, one topic, ATS/system + "submitted" only (e.g. `"Greenhouse — submitted, confirmation received."`). It must NOT contain application-form answer text, work-arrangement Q&A (onsite/hybrid/remote phrases), interview-loop descriptions, or language copied from the JD or form fields. Anything that fails this check routes to `statusNote` (live state text), `compNote` (comp intel), or is dropped entirely. A polluted `note` produces phantom interview Focus cards on the terminal workspace — prevent it here.
 
 The matched (or newly created) row must end up with:
 
@@ -388,7 +388,7 @@ Apply the write per mode:
      A shallow-merge patch (one level) carrying every field `set-status` doesn't cover (`set-status` already stamps `appliedAt` when the row moves to an applied status): `channel`, `note` (the internal one-liner — **not** the same as `set-status`'s `--note`, which writes `statusNote`), `link`, `compNote` / `roleFit.why[]` / `roleFit.risks[]` (Content Register routing), and `artifacts: {jd, coverLetter, resume, resumeNote}` (merges one level into the existing `artifacts` object). Use `--data-file` rather than an inline `--data` string given the JD-body and cover-letter text length. Not outcome-changing — the preceding `set-status` call already refreshed analytics.
 
      `app register-artifact <id> --kind resume --path "<resume filename>" --note "<tailoring approach>"` is the more purpose-built verb for a single artifact (it stamps `artifacts.resume` + `artifacts.resumeGeneratedAt` + `artifacts.resumeNote` in one call) and is a reasonable substitute for the `resume`/`resumeNote` piece of the patch above — it fits well because a résumé filename is a short, path-like value. It's a poorer fit for `artifacts.jd` / `artifacts.coverLetter`, which hold full body **text** (not a path) that's awkward to pass through a single `--path` argv token, so those two stay in the `set-fields` patch. Don't run both against the same `artifacts` key in the same turn — pick one path per field.
-- **Legacy workspace (no DB):** edit the matched (or newly created) row directly with the fields above, in one `tracker.json` write. Also set `appliedAt` to the current ISO datetime (keep an existing one), since no `set-status` call stamps it here and the dashboard would otherwise fall back to `createdAt`.
+- **Legacy workspace (no DB):** edit the matched (or newly created) row directly with the fields above, in one `tracker.json` write. Also set `appliedAt` to the current ISO datetime (keep an existing one), since no `set-status` call stamps it here and the terminal workspace would otherwise fall back to `createdAt`.
 
 **Comm-thread write-back (submission case):** after setting the fields above, before closing the write, check whether this submission fulfills an open comm thread — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting (the D.E. Shaw / Avature supplemental-form case: a recruiter-requested data-completion tracked in comm must flip to waiting in the same write that records the submission). If such a thread exists:
 
@@ -459,7 +459,7 @@ If `tailor-application` already exported these files to the job folder this turn
 
 ### 9d — Log and commit (only after 9b passes)
 
-Then log the submission to the Activity Pulse feed (the dashboard's live timeline — see
+Then log the submission to the Activity Pulse feed (the terminal workspace's activity log — see
 **Activity Pulse** in AGENTS.md). One event per submission; the id is content-derived, so
 a re-run never double-logs:
 

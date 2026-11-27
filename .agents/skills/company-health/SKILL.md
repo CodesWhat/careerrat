@@ -162,15 +162,15 @@ candidate values them:
   intersecting need). Record which needs in `crossCut[]`. Never a hard kill on its own — it
   pairs with `fit_floor` + the cold-family down-weight; a severe cross-cut can drag fit below
   floor *via the need it hits*, but health alone never gates.
-- No intersection → `fitDelta: 0`, `crossCut: []`. The rating still shows as its own badge.
+- No intersection → `fitDelta: 0`, `crossCut: []`. The rating still shows on its own.
 
 ---
 
 ## STEP 5 — Persist to the tracker (Tracker Write Contract)
 
-`dashboard-data.js` runs in the **browser** (no server imports / file reads — see the
-dashboard data-pipeline constraint in AGENTS.md). So the rating must be DERIVED here and
-PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
+`dashboard-data.js` is a pure derivation module (no server imports / file reads — see the
+data-pipeline constraint in AGENTS.md). So the rating must be DERIVED here and
+PERSISTED onto `workspace/tracker.json`; the terminal workspace only reads it. Mirror the
 `compEstimate` provenance pattern.
 
 1. On the company's `applications[]` row (or `sourced[]` row), set:
@@ -206,7 +206,7 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
 2. Bump `meta.lastUpdatedAt` (the freshness stamp every writing skill bumps).
    - **DB workspace:** `careerrat health record --write` already bumped `meta.lastUpdatedAt` (and `meta.version`) in the same transaction — no separate action needed.
    - **Legacy workspace (no DB):** stamp it by hand in the same write as step 1.
-3. Verify + snapshot (the dashboard handoff):
+3. Verify + snapshot (the terminal workspace handoff):
    - **DB workspace:** step 1's call already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl`. Run:
 
      ```
@@ -277,8 +277,8 @@ Tell the user, in the configured voice register:
 - The one signal that drove it (e.g. "Eng RIF 3 weeks ago — your exact org").
 - Whether it touched the fit score, and which need it cross-cut (or "standalone — didn't move
   fit").
-- Consumers: `evaluate-job` reads `companyHealth.fitDelta` into scoring; the dashboard shows
-  the badge on the card + the health section in the drawer; `research-company` embeds the
+- Consumers: `evaluate-job` reads `companyHealth.fitDelta` into scoring; the terminal workspace shows
+  the rating with the job and in its health section; `research-company` embeds the
   section in a dossier when one is built.
 
 ---

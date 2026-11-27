@@ -319,13 +319,13 @@ the app write across steps leaves the app row at its old status with a ghost CTA
 must land in one `tracker.json` write.
 
 **(c-iii) Write the structured interview datetime fields** on the `applications[]` row — in the
-SAME write as (c-i) and (c-ii). These fields drive the Focus card on the dashboard; without
+SAME write as (c-i) and (c-ii). These fields drive the Focus card on the terminal workspace; without
 them the booked interview never surfaces there.
 
 - **First round being booked** → set `interviewAt` to the ISO 8601 datetime string (e.g.
   `"2026-06-23T12:00:00-04:00"`). Do not use the deprecated `interviewDate`.
 - **Subsequent / follow-on round** → set `nextInterviewAt` instead (it supersedes `interviewAt`
-  on the dashboard). Do not use the deprecated `nextInterviewDate`.
+  on the terminal workspace). Do not use the deprecated `nextInterviewDate`.
 - **Both cases** → also set `interviewNote` to a ≤60-char logistics string:
   `"<Round> — <Weekday> <DD-MM> <HH:MM> <TZ> with <First Name>"`
   Example: `"Onsite loop — Tue 03-10 14:00 PT with Alex Rivera"`
@@ -414,7 +414,7 @@ draft awaiting send → log it as needing the user:
 | Condition | Action | DB-mode command |
 |---|---|---|
 | Meeting booked / confirmed | `applications[].status` + `conversations[]` entry are already written in STEP 7(c). Hand off to `interview-prep` for prep materials using that conversations[] entry as the anchor. No additional write needed here. | Already covered by STEP 7(c)'s DB composition — no additional call. |
-| Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + snapshot. Without updating the datetime fields the dashboard Focus card still shows the old time. | `careerrat data app schedule-interview <id> --at <new-iso> --round "<kind>" --note "<updated interviewNote>"` re-books onto the same field (`interviewAt`/`nextInterviewAt`, auto-detected) and appends a fresh `conversations[]` entry rather than editing the old one in place — follow with `careerrat data app set-fields <id> --data '{"conversations":[...]}'` to patch the existing entry's `date`/`notes` in place instead, if that's the desired shape (wholesale array replace). Then `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"Meeting rescheduled to <new ISO datetime>"}'`, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `nextActionDue`. Then STEP 7(d)'s DB verify. |
+| Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + snapshot. Without updating the datetime fields the terminal workspace Focus card still shows the old time. | `careerrat data app schedule-interview <id> --at <new-iso> --round "<kind>" --note "<updated interviewNote>"` re-books onto the same field (`interviewAt`/`nextInterviewAt`, auto-detected) and appends a fresh `conversations[]` entry rather than editing the old one in place — follow with `careerrat data app set-fields <id> --data '{"conversations":[...]}'` to patch the existing entry's `date`/`notes` in place instead, if that's the desired shape (wholesale array replace). Then `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"Meeting rescheduled to <new ISO datetime>"}'`, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `nextActionDue`. Then STEP 7(d)'s DB verify. |
 | They go quiet after your proposal | Leave `status: waiting`; STEP 7b's `nextActionDue` surfaces it as a follow-up (handled by `email-comms` / the follow-up timer). | No write here — this is a read/no-op branch. |
 | Thread turns to comp / general reply | Hand off to `email-comms` (general comms / negotiation surface). | No write here — hand-off only. |
 | User states a new availability rule mid-thread ("no Fridays", "never before 10") | Confirm-first, then persist to candidate profile config `availability` (STEP 3 write-back). | DB mode: `careerrat data candidate patch profile --data ...`; legacy mode: guarded candidate-config write path. Never hand-edit YAML in DB mode. |

@@ -56,7 +56,7 @@ history:
 
 Append the **full JD body** below the frontmatter — the complete role text, not a summary, excerpt, or link. This is mandatory for every posting; the saved body is the only copy that survives the page closing or the login expiring. If STEP 0 could only recover a partial body (login-gated, user-pasted), save what you have and set `partial: true` in the frontmatter so it's visibly incomplete rather than silently lossy. Add a `<!-- gate: KEEP|CUT|REVIEW - reason -->` comment at the end after the verdict is reached.
 
-Mirror the same body onto the tracker row so it travels with the application: when this posting has (or gets) an `applications[]` row, set `artifacts.jd` to the full body text (the saved `workspace/jobs/` file stays the source of truth; `artifacts.jd` is the embedded durable copy the dashboard can render without the live page).
+Mirror the same body onto the tracker row so it travels with the application: when this posting has (or gets) an `applications[]` row, set `artifacts.jd` to the full body text (the saved `workspace/jobs/` file stays the source of truth; `artifacts.jd` is the embedded durable copy the terminal workspace can render without the live page).
 
 - **DB workspace:** `careerrat data app set-fields <id> --data-file <patch.json>` with `{"artifacts": {"jd": "<full body text>"}}` (shallow merge one level — merges into the existing `artifacts` object without disturbing `artifacts.resume`/`artifacts.coverLetter`). Use `--data-file` given the body length. Not outcome-changing.
 - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set `artifacts.jd` on the matching `applications[]` row.
@@ -245,7 +245,7 @@ Extract the comp band from the JD (may be missing; note "unlisted" if so).
    - **Estimate from tracker comparables first.** The gate runs `estimateCompFromComparables()` automatically — it finds roles in `workspace/tracker.json` (both `sourced[]` and `applications[]`, including rejected rows) in the same role family (`classifyRoleFamily`) and same arrangement/metro area, and computes a low/mid/high range from those with a real posted band. If enough comparables exist, `comp.verdict` will be `"estimated"` or `"estimated-below-floor"` and `comp.estimate` will carry `{lowK, midpointK, highK, sampleSize, tier, confidence, basis, compensationBasis}`:
      - **`estimated`** (estimate midpoint clears the arrangement floor) → `COMP: review - estimated $<low>K–$<high>K (mid $<mid>K) from <N> comparables; confirm live before anchoring`. This is ADVISORY; action stays `manual`, never a hard cut.
      - **`estimated-below-floor`** (estimate midpoint falls under the arrangement floor) → `COMP: review - estimated $<low>K–$<high>K (mid $<mid>K) likely below floor; confirm live before deciding`. ADVISORY; action is `hold`, never a hard cut. An estimate is a guess, not a posted band — never trigger `cut` on an estimate. For an annual-cash floor, never suggest equity or benefits can make up the difference.
-     - **Persist the estimate** onto the tracker `sourced[]` row as `compEstimate` so the terminal workspace shows it with provenance ("Built from data"). Shape: `{source:"comparables", lowK, midpointK, highK, floorK, askK, sampleSize, tier, confidence, basis, compensationBasis, asOf}`. Stamp `asOf` with today's date (`YYYY-MM-DD`) so staleness is detectable — the dashboard surfaces it as "as of <date>".
+     - **Persist the estimate** onto the tracker `sourced[]` row as `compEstimate` so the terminal workspace shows it with provenance ("Built from data"). Shape: `{source:"comparables", lowK, midpointK, highK, floorK, askK, sampleSize, tier, confidence, basis, compensationBasis, asOf}`. Stamp `asOf` with today's date (`YYYY-MM-DD`) so staleness is detectable — the terminal workspace surfaces it as "as of <date>".
        - **DB workspace:** there is no single-field patch verb for `sourced[]` — read the current row from `workspace/tracker.json#sourced[]`, set `compEstimate` on it (carrying every other field over unchanged), then persist the whole row: `careerrat data sourced upsert-batch --data '[<patched full sourced row JSON>]'` (a one-element batch).
        - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set `compEstimate` on the matching `sourced[]` row.
      - **Freshness / decay (mirror `company_health`).** A comp estimate drifts as the tracker accumulates comparables. If the row already carries a `compEstimate` whose `asOf` is newer than `modes.comp_estimate.recheck_days` ago (default 30), reuse it as-is — don't recompute. Older than that, or the row just crossed into a deeper stage (screen/interview/offer), re-run the estimate and bump `asOf`. Never leave an estimate un-dated.
@@ -295,7 +295,7 @@ FIT: high|med|stretch <score> - <why> | caveats: <...> | priority: apply-now|hol
 
 Update the saved JD file frontmatter: set `fitScore: <N>` and `fitBucket: <high|med|stretch>`.
 
-**Requirements table (app-automated evaluate).** When this evaluation runs through the local app's automated packet gate (a chat "evaluate this job" turn, not this skill's own manual body-read), the same completion that produces the verdict also builds `evaluation.requirements`: an evidence-tiered table of the JD's actual requirements (max 20 rows), each row scored `importance` (critical, high, meaningful, preferred, low_signal), `evidence` (stated, structural, inferred), and `match` (strong, partial, missing, na) against the candidate context, with the justifying `jdSignal` phrase and a plain-English `note`. `fitRisks` is derived from that table, not written separately — every `fitRisks` entry names a row whose `match` is missing or partial and whose `importance` is critical or high (`src/core/packet/requirements.mjs#deriveFitRisks`). A body-read run of this skill has no such table; caveats above remain the manual equivalent.
+**Requirements table (app-automated evaluate).** When this evaluation runs through the automated packet gate (a chat "evaluate this job" turn, not this skill's own manual body-read), the same completion that produces the verdict also builds `evaluation.requirements`: an evidence-tiered table of the JD's actual requirements (max 20 rows), each row scored `importance` (critical, high, meaningful, preferred, low_signal), `evidence` (stated, structural, inferred), and `match` (strong, partial, missing, na) against the candidate context, with the justifying `jdSignal` phrase and a plain-English `note`. `fitRisks` is derived from that table, not written separately — every `fitRisks` entry names a row whose `match` is missing or partial and whose `importance` is critical or high (`src/core/packet/requirements.mjs#deriveFitRisks`). A body-read run of this skill has no such table; caveats above remain the manual equivalent.
 
 ---
 
@@ -352,7 +352,7 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
 
 1. Open `workspace/tracker.json`.
 2. **For sourced roles (in `sourced[]`):** locate the row in the `sourced[]` array where `company` and `role` match the JD.
-   - **GATE: CUT** → set `status: "cut"`. The role is now archived (drops off the active board but stays in `sourced[]`, recoverable). Do not create an `applications[]` row — but still complete the validate + snapshot (sub-step 4 below) and log the Activity event; a cut is a tracker-visible change and the dashboard must reflect it.
+   - **GATE: CUT** → set `status: "cut"`. The role is now archived (drops off the active board but stays in `sourced[]`, recoverable). Do not create an `applications[]` row — but still complete the validate + snapshot (sub-step 4 below) and log the Activity event; a cut is a tracker-visible change and the terminal workspace must reflect it.
    - **GATE: KEEP or REVIEW** → set `status: "reviewed-hold"`. The role has passed the gate and sits on the active board as ready-to-apply.
    - Also set `fitScore`, `fitBucket`, and `fitBasis: "evaluated"` on the sourced row.
    - Also write company-history cautions from STEP 3.25 into `warn`/`note`, and set `action: "manual"` when same-company active/recent history forced manual review.
@@ -395,7 +395,7 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
 
 This promotes the row from a coarse scanner estimate to an authoritative body-read fit.
 
-Then log the verdict to the Activity Pulse feed (the dashboard's live timeline — see
+Then log the verdict to the Activity Pulse feed (the terminal workspace's activity log — see
 **Activity Pulse** in AGENTS.md). One event per evaluation:
 
 - **DB workspace:** sub-step 2/3's call already auto-logged its own generic event

@@ -39,14 +39,14 @@ When the user pastes or types a prompt of the form:
 
 > Draft the follow-up email for {Company} — {Role}
 
-this is the one-click Draft button on the dashboard's Needs Attention panel. It copies exactly that text to the clipboard and the user pastes it here.
+this is the Draft action in the terminal workspace's Needs Attention list. It hands exactly that text to the agent.
 
 Treat this as an `outbound-follow-up` (or `thank-you` if the notification kind is `thank-you`). Start at STEP 1 to match the communications or application record for `{Company}` + `{Role}` in `workspace/tracker.json`. Then run the full flow (STEP 2 → 5 → 6 → STEP 8) to:
 
 1. Draft the due follow-up (STEP 5 — complete, no placeholders).
 2. Capture the outbound draft message (STEP 6a/b).
 3. Advance the record status and reset `nextActionDue` (STEP 6b / STEP 8 timer reset).
-4. Persist the baked draft onto the record (STEP 8 — `comm.draft` or `app.followUp.draft`) so the notification bell can show it ready to send.
+4. Persist the baked draft onto the record (STEP 8 — `comm.draft` or `app.followUp.draft`) so the terminal workspace can show it ready to send.
 5. Validate and snapshot — the mode branch from STEP 6(d)/(e) and STEP 8 items 6–7 (DB workspace: `careerrat data verify` + `careerrat tracker --verify`; legacy: `careerrat tracker --verify` then `careerrat tracker`) — this clears the timer from the Needs Attention panel for that item.
 
 ---
@@ -354,7 +354,7 @@ Confirm it exits clean before proceeding. If it fails, fix the JSON (legacy) or 
 - **DB workspace:** already exported by the calls above, and an open terminal workspace picks the change up on its own. Run `careerrat tracker` only for a recovery checkpoint.
 - **Legacy workspace (no DB):** run `careerrat tracker`.
 
-Then log it to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). If the message is a draft awaiting the user to send, log it as needing the user; if it was already sent, log it sent:
+Then log it to the Activity Pulse feed (the terminal workspace's activity log — see **Activity Pulse** in AGENTS.md). If the message is a draft awaiting the user to send, log it as needing the user; if it was already sent, log it sent:
 
 - **DB workspace:** the (a)/(b) calls above already auto-logged their own generic events (`message` type) in their own transactions. For the richer, outcome-specific type below, log an additional event (this verb only logs, it never bumps the stamp):
 
@@ -413,11 +413,11 @@ When the user asks to work follow-ups (or `careerrat tracker --followups` surfac
 2. Apply STEP 3 style gate.
 3. Draft the follow-up (STEP 5).
 4. Capture (STEP 6): append outbound message, advance `status` from `waiting` to appropriate state, reset `nextActionDue`.
-5. **Persist a baked draft** for the dashboard notification panel. After drafting, write `draft: { subject, body }` onto the relevant record in `workspace/tracker.json`:
+5. **Persist a baked draft** for the terminal workspace's notifications. After drafting, write `draft: { subject, body }` onto the relevant record in `workspace/tracker.json`:
    - For comm-based kinds (`needs-reply`, `comm-due`, `waiting-stale`): set `comm.draft = { subject, body }` on the communications record.
    - For application-based kinds (`app-nudge`, `post-interview-nudge`, `thank-you`): set `app.followUp = { kind, dueAt, draft: { subject, body }, generatedAt }` on the application record.
      Sending that draft (`comm mark-sent`) counts toward `follow_up.app_nudge.max_count` only for `app-nudge`. If you send a nudge as its own communication instead of the app's follow-up draft, set `followUpKind: "app-nudge"` on that communication so it counts. Other messages on the thread never count.
-   The dashboard notification bell reads these fields directly; a baked draft appears as "ready to send." A baked draft is only valid for the DRAFT/awaiting-send state; once the message is sent, it must be nulled per the sent-clears-draft invariant (STEP 6b) so the "Ready to send" panel clears.
+   The terminal workspace reads these fields directly; a baked draft appears as "ready to send." A baked draft is only valid for the DRAFT/awaiting-send state; once the message is sent, it must be nulled per the sent-clears-draft invariant (STEP 6b) so the "Ready to send" panel clears.
    - **DB workspace:** comm-based kinds — there is no single-field patch verb for `communications[]`, so read the current row, set `draft`, and persist: `careerrat data comm upsert --data '<patched full comm row JSON>'`. Application-based kinds — `app.followUp` merges one level under `app set-fields`: `careerrat data app set-fields <id> --data '{"followUp":{"kind":"<kind>","dueAt":"<iso>","draft":{"subject":"<s>","body":"<b>"},"generatedAt":"<iso>"}}'`. Neither is outcome-changing.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly.
    **Also write a convenience copy** to the job's Documents folder — `~/Documents/careerrat/<Company>/job-<application-id>/<Company> - <what> Email.txt` (e.g. `Aperture Science - Follow-up Email.txt`), per the Artifact Contract (organized by company, job, then round). Use the real company name for the folder and file (never a bracket placeholder; if the company is somehow unknown, use `unknown`). File content: subject line on the first line, a blank line, then the body. `workspace/` stays the source of truth; Documents is for the user's convenience. Body must NEVER contain `current_base` or any private comp field (per the Privacy Invariant). (This Documents copy is a local file write outside `tracker.json` — unaffected by DB vs legacy mode.)
@@ -426,19 +426,19 @@ When the user asks to work follow-ups (or `careerrat tracker --followups` surfac
    - **Legacy workspace (no DB):** `careerrat tracker --verify` (also: `npm run verify:tracker`). Confirm clean exit before proceeding.
 7. Snapshot:
    - **DB workspace:** already exported; run `careerrat tracker` only for a recovery checkpoint.
-   - **Legacy workspace (no DB):** `careerrat tracker` (so the timer clears from the dashboard).
+   - **Legacy workspace (no DB):** `careerrat tracker` (so the timer clears in the terminal workspace).
 
 ---
 
 ## STEP 8a — Prepare follow-up drafts
 
-When surfacing currently-due follow-ups (the same set `computeFollowUps` returns), proactively generate a baked draft for each due item so the bell panel shows them ready to send — not just as bare reminders.
+When surfacing currently-due follow-ups (the same set `computeFollowUps` returns), proactively generate a baked draft for each due item so the terminal workspace shows them ready to send — not just as bare reminders.
 
 For each item returned by `computeFollowUps`:
 
 1. **Check the candidate `follow_up:` config** in `candidate/targeting.yml`. Do NOT generate a draft for any kind that is `enabled: false` — those reminders are suppressed entirely. Use the configured `after_days` / `after_hours` thresholds (mapped via `rulesFromConfig` in `src/core/tracker/cadence.mjs`) rather than hardcoded defaults.
 2. **Draft per kind** (apply STEP 5 requirements — complete, no placeholders, honest):
-   - `app-nudge`: short, professional follow-up on the outstanding application; reference the role name and applied date. **Contact-path precondition (hard):** an app-nudge only makes sense when there's an actual person to nudge — a linked recruiter/email thread (`communications[]` for the row), a logged conversation with a named `who`, or an explicit contact on the application. A black-hole portal or cold application with none of these has nobody to follow up with, so `computeFollowUps` no longer emits an `app-nudge` for it (see `appHasContactPath` in `cadence.mjs`). Do **not** hand-draft a follow-up "to nobody" for such a row — the real move is `relationship-sourcing` (find a contact first) or a plain wait/archive decision. The dashboard mirrors this: a contactless quiet application shows no action.
+   - `app-nudge`: short, professional follow-up on the outstanding application; reference the role name and applied date. **Contact-path precondition (hard):** an app-nudge only makes sense when there's an actual person to nudge — a linked recruiter/email thread (`communications[]` for the row), a logged conversation with a named `who`, or an explicit contact on the application. A black-hole portal or cold application with none of these has nobody to follow up with, so `computeFollowUps` no longer emits an `app-nudge` for it (see `appHasContactPath` in `cadence.mjs`). Do **not** hand-draft a follow-up "to nobody" for such a row — the real move is `relationship-sourcing` (find a contact first) or a plain wait/archive decision. The terminal workspace mirrors this: a contactless quiet application shows no action.
    - `post-interview-nudge`: 4–6 lines referencing the interview stage, reiterating interest, and asking about next steps.
    - `thank-you`: warm, specific thank-you referencing one detail from `applications[].conversations[]`; keep to 3–5 lines.
    - `needs-reply` / `comm-due` / `waiting-stale`: advance the existing thread per STEP 5's follow-up guidance.

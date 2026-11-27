@@ -108,13 +108,13 @@ of the nine out of real work, on the settings route and CareerRat's normal
 AI routing, is the same `supported: false` flag from the registry. Qwen
 Code, Antigravity, Amp, Goose, and Droid have no protocol adapter at all.
 Asking CareerRat to run work through any unsupported runtime on those two
-paths is rejected before an invocation is ever built. The settings route
+paths is rejected before an invocation is ever built. The settings check
 checks availability before support: an unsupported runtime that isn't even
 installed returns `RUNTIME_NOT_AVAILABLE`; `RUNTIME_NOT_SUPPORTED` only comes
 back once the runtime is detected and available. Normal AI routing returns a generic
 route-failure result that `callAI` throws as a plain, uncoded error;
 workflow callers that catch it, such as the skill runtime, chat runtime,
-intake route, and workspace-agent route, may then label it `NO_AI_ROUTE`
+and intake path, may then label it `NO_AI_ROUTE`
 themselves. `RUNTIME_COMPLETION_UNSUPPORTED` is a different, lower-level check: it comes
 from a runner's own capability assertion when something asks it to spawn a
 runtime directly, bypassing normal routing. That guarantee covers those two

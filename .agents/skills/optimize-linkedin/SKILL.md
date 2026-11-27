@@ -276,7 +276,7 @@ in its response. Each subsequent `mark-applied` call must use the `version` from
 PREVIOUS call's output, never the original batch's version — re-read the current version
 via `careerrat data linkedin-proposals latest --status any` if you lost track of it.
 
-Then log one event to the Activity Pulse feed (the dashboard's live timeline — see
+Then log one event to the Activity Pulse feed (the terminal workspace's activity log — see
 **Activity Pulse** in AGENTS.md), actor `agent`:
 
 ```

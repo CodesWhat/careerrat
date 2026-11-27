@@ -62,8 +62,8 @@ posting and say "evaluate this", or try the bundled sample under
 It needs a real terminal and exits with an error otherwise. It never opens a browser.
 
 Flags: `--no-agent` (workspace only, no chat), `--agent <name>` (alias for the
-positional), `--browser` (legacy: serve the browser workspace, with `--no-open` and
-`--port <n>`), `--no-dashboard` (legacy: terminal agent session without the workspace).
+positional), `--no-dashboard` (terminal agent session without the workspace).
+`--browser` is retired and prints a message (see below).
 
 ## Exported Files
 
@@ -84,10 +84,8 @@ careerrat update     # fetches the latest published code; your data is untouched
 ```
 
 The update command pulls the latest release from npm and overwrites only the
-code. Your `.careerrat/workspace/` and `.careerrat/candidate/` data are not touched. If the local app
-is running, the updated launcher verifies its version and safely replaces only
-that recorded CareerRat process. An unrelated process on the preferred port is
-left alone and CareerRat uses another loopback port.
+code. Your `.careerrat/workspace/` and `.careerrat/candidate/` data are not touched. If a CareerRat
+process is running, close it first so the next launch picks up the new code.
 
 ## Manual Wiring
 

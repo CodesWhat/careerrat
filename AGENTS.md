@@ -177,25 +177,24 @@ task, and `workspace/tracker.json`, then recommend and run the owning skill.
 After every skill finishes, surface the next handoff in one line. If an optional
 discovery step is intentionally skipped, record it with `careerrat next --skip <step> --write`
 where `<step>` is `research-boards` or `discover-companies`, so doctor,
-`careerrat next`, and the dashboard stop recommending it.
+`careerrat next`, and the terminal workspace stop recommending it.
 
 ## Runtime Routing for Company Discovery
 
-The app default for company discovery is the local company proposal path:
-create/read proposal batches with `/api/discovery/company-proposals` and decide
-them with `/api/discovery/company-proposal-decisions`. Bounded AI may supply
+The default for company discovery is the local company proposal path, owned by
+`careerrat companies` and the code under `src/core/discovery/`: proposal batches
+are created, read and decided there. Bounded AI may supply
 company seed judgment only; seed output is advisory until deterministic
 validation, resolver/scanner/gate checks, and confirm-first source config writes
 through `careerrat companies` or the DB/source-config owners approve it.
 
-Local proposal errors do not silently start chat, `/api/chat/*`, the full skill
-runtime, or `POST /api/skill/run`; they surface locally with manual input, retry,
-or no-AI fallback paths. `/api/discovery/quick-start` and
-`/api/discovery/next` are explicit user-selected chat handoffs that start or
-reuse visible `/api/chat/*` sessions. `POST /api/skill/run` remains the retained
-allowlisted full skill runtime for tool-heavy, long-running, or human-watched
-workflows, not the default app path for proposal creation, proposal decisions,
-deterministic validation, dedupe, or confirmed writes.
+Local proposal errors do not silently start chat or the full skill runtime; they
+surface locally with manual input, retry, or no-AI fallback paths. Visible agent
+sessions in the terminal workspace are explicit user-selected handoffs. The
+allowlisted full skill runtime (`src/core/ai/skill-runtime.mjs`) remains for
+tool-heavy, long-running, or human-watched workflows, not the default path for
+proposal creation, proposal decisions, deterministic validation, dedupe, or
+confirmed writes.
 
 ## Keeping Current
 
@@ -208,9 +207,9 @@ tarball extract so your `candidate/` and `workspace/` data are never touched.
 
 The onboarding key step writes BYOK credentials through `src/core/ai/ai-env.mjs`
 to `.internal/ai.env` (see Path Resolution above for how that resolves). The
-value is chmod `0600`, loaded at server boot, and never echoed back by the API.
+value is chmod `0600`, loaded at startup, and never echoed back.
 
-## Dashboard Dev Server Contract
+## Terminal Workspace Contract
 
 **Terminal workspace exception.** When `CAREERRAT_SURFACE=tui`, the persistent
 terminal workspace owns the live view. Do not start `tracker-dev`, open a
@@ -1088,9 +1087,9 @@ under `workspace/research/`: company intel (`<slug>.md`), market comp benchmarks
 - **Privacy.** Research artifacts are treated as outbound; `current_base` never
   appears in any of them. Comp benchmarks are market data only.
 
-## Activity Pulse (the dashboard feed)
+## Activity Pulse (the activity feed)
 
-The Command Center's marquee panel is the **Activity Pulse** — a reverse-chronological
+The terminal workspace's Activity tab shows the **Activity Pulse** — a reverse-chronological
 "what the agent did + what happened" timeline. It renders from an append-only feed at
 `workspace/activity.jsonl` (gitignored runtime data), so it must reflect real work, not
 the demo data it shipped with. **Every skill that makes a tracker-visible change logs one
@@ -1100,7 +1099,7 @@ portal advances and logs the matching event in that transaction.
 
 - **Mechanism — use the `activity` helper, don't hand-write JSONL.** Skills call
   `careerrat activity append --type <type> --title "…"` rather than editing the feed in
-  prose — the dashboard/CLI only RENDER it. The append is a **dry run** by default
+  prose — the terminal workspace and CLI only RENDER it. The append is a **dry run** by default
   (canonicalizes, schema-validates, lint/leak-checks, prints the line it would write);
   add `--write` to commit. It is **idempotent** on a content-derived id, so re-logging the
   same event never double-writes. Options: `--summary "…"`, `--actor agent|world`,
@@ -1159,7 +1158,7 @@ portal advances and logs the matching event in that transaction.
   action cell stays blank (`appHasContactPath` in `cadence.mjs`, `hasContactPath` in
   `dashboard-data.js`). For such a row the real move is `relationship-sourcing` (find a
   contact first) or a plain wait/archive call — never a follow-up drafted to no one.
-- **Honesty + privacy (hard).** The feed renders on the dashboard, so it is **outbound**:
+- **Honesty + privacy (hard).** The feed renders in the terminal workspace, so it is **outbound**:
   every event is schema-validated against `config/activity-event.schema.json`, refused if
   its prose carries placeholder residue, and refused if it names the private `current_base`
   field. Log only what actually happened — the feed is an audit trail, not a highlight reel.
@@ -1300,7 +1299,7 @@ loops so prep compounds instead of restarting each round.
   thin spots — bank it now, never gate on a missing detail. Record each gap (a metric
   to confirm, a concrete before/after, a detail that conflicts with committed code) as
   an `open_questions[]` string on the story. `add --write` auto-mirrors `open_questions`
-  into `tracker.storyEnrichment`, which the local app renders as a
+  into `tracker.storyEnrichment`, which the terminal workspace renders as a
   self-clearing **"give me more context"** card in the Next Steps queue (one per thin
   story). The story's `open_questions` is the source of truth; `tracker.storyEnrichment`
   is the derived browser-side mirror. Clearing a story's `open_questions` and re-`add
