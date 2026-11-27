@@ -25,6 +25,7 @@ import provider, {
   parseQueryResponse,
   resolveConfig,
   resolveMaxPages,
+  resolveMaxResponseBytes,
   resolveSiteHost,
   SITES,
 } from "../../../../src/core/providers/career-ops/vendor/aldi-nord.mjs";
@@ -205,6 +206,34 @@ test("resolveMaxPages: default, override, ceiling", () => {
   assert.equal(resolveMaxPages({ max_pages: 99999 }), 1000);
   assert.equal(resolveMaxPages({ max_pages: 0 }), 500);
   assert.equal(resolveMaxPages({ max_pages: "7" }), 500);
+});
+
+test("resolveMaxResponseBytes: absent is the shared default, a number is MB, junk throws", () => {
+  assert.equal(resolveMaxResponseBytes({}), undefined);
+  assert.equal(resolveMaxResponseBytes({ max_response_mb: 20 }), 20 * 1024 * 1024);
+  assert.equal(resolveMaxResponseBytes({ max_response_mb: 0.5 }), 512 * 1024);
+  for (const bad of [0, -1, "20", NaN, Infinity, 100000, true]) {
+    assert.throws(() => resolveMaxResponseBytes({ max_response_mb: bad }), /max_response_mb/);
+  }
+});
+
+test("max_response_mb reaches every list request as maxBytes; absent sends none", async () => {
+  const { ctx, calls } = makeCtx(source(35));
+  await provider.fetch(entry({ max_response_mb: 20 }), ctx);
+  assert.equal(calls.length, 2);
+  for (const c of calls) assert.equal(c.opts.maxBytes, 20 * 1024 * 1024);
+  const plain = makeCtx(source(35));
+  await provider.fetch(entry(), plain.ctx);
+  for (const c of plain.calls) assert.equal("maxBytes" in c.opts, false);
+});
+
+test("a bad max_response_mb fails before any request", async () => {
+  const { ctx, calls } = makeCtx(source(35));
+  await assert.rejects(
+    () => provider.fetch(entry({ max_response_mb: "lots" }), ctx),
+    /max_response_mb/
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("buildQueryBody is the shape the site sends", () => {

@@ -1524,7 +1524,9 @@ try {
       });
       if (
         fallthrough.seqs.join(",") === "1,2" &&
-        fallthrough.jobs[0]?.description === "Seq two body text."
+        fallthrough.jobs[0]?.description === "Seq two body text." &&
+        fallthrough.jobs[0]?.url.includes("PostingSeq=2") &&
+        !fallthrough.jobs[0]?.url.includes("PostingSeq=1")
       )
         pass(`fetch() tries PostingSeq=2 after PostingSeq=1 answers HTTP ${status}`);
       else

@@ -392,6 +392,66 @@ test("createContext() rejects on a declared content-length over maxBytes without
   assert.equal(counter.cancelled, true);
 });
 
+test("an oversized error body keeps its first 64 KiB of text and cancels the rest", async () => {
+  const counter = { pulls: 0, cancelled: false };
+  const marker = "Service is down for maintenance";
+  const head = new TextEncoder().encode(marker);
+  const chunk = new Uint8Array(1024 * 1024).fill(97);
+  const ctx = createContext(
+    async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            counter.pulls += 1;
+            controller.enqueue(counter.pulls === 1 ? head : chunk);
+          },
+          cancel() {
+            counter.cancelled = true;
+          },
+        }),
+        { status: 503 }
+      ),
+    SIZE_SEAMS
+  );
+  const error = await ctx.fetchText("https://public.example.test/down").catch((e) => e);
+  assert.equal(error.status, 503);
+  assert.ok(error.body.startsWith(marker), "diagnostic text was discarded");
+  assert.equal(Buffer.byteLength(error.body, "utf8"), 64 * 1024);
+  assert.equal(counter.cancelled, true);
+  assert.ok(counter.pulls < 8);
+});
+
+test("a content-encoded response is judged on its decoded size, not Content-Length", async () => {
+  const ctx = createContext(
+    async () =>
+      new Response("abcdefgh", {
+        status: 200,
+        headers: { "content-length": "999999", "content-encoding": "gzip" },
+      }),
+    SIZE_SEAMS
+  );
+  assert.equal(await ctx.fetchText("https://public.example.test/z", { maxBytes: 64 }), "abcdefgh");
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/z", { maxBytes: 4 }),
+    (error) => error.code === "response_too_large"
+  );
+});
+
+test("an identity-encoded Content-Length over maxBytes still short-circuits", async () => {
+  const ctx = createContext(
+    async () =>
+      new Response("abc", {
+        status: 200,
+        headers: { "content-length": "999999", "content-encoding": "identity" },
+      }),
+    SIZE_SEAMS
+  );
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/z", { maxBytes: 64 }),
+    (error) => error.code === "response_too_large"
+  );
+});
+
 test("an Ashby body over its cap falls back to the embed listing instead of being parsed whole", async () => {
   const embedHtml = `<script>window.__appData = ${JSON.stringify({
     jobBoard: {

@@ -112,6 +112,21 @@ export function resolveMaxPages(entry) {
   return DEFAULT_MAX_PAGES;
 }
 
+// An entry's max_response_mb raises the shared 10 MB body cap for a board whose
+// cumulative list outgrows it. Absent means the shared default; anything else
+// must be a positive number (capped, so a typo cannot lift the guard entirely).
+const MAX_RESPONSE_MB_CAP = 256;
+
+/** @param {any} entry @returns {number | undefined} bytes, or undefined for the shared default */
+export function resolveMaxResponseBytes(entry) {
+  const v = entry?.max_response_mb;
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > MAX_RESPONSE_MB_CAP) {
+    throw new Error(`aldi-nord: max_response_mb must be a number from 0 to ${MAX_RESPONSE_MB_CAP}, got ${JSON.stringify(v)}`);
+  }
+  return Math.floor(v * 1024 * 1024);
+}
+
 /**
  * Reads the `aldi_nord:` block. A wrong value throws: a typo would otherwise
  * read as an empty board (unknown locale) or a 502 (non-numeric id).
@@ -256,6 +271,7 @@ export default {
     const apiUrl = `https://${host}/api/job/hr/query`;
 
     const maxPages = resolveMaxPages(entry);
+    const maxBytes = resolveMaxResponseBytes(entry);
     const ctxMaxPages = Number(ctx?.maxPages);
     const probing = Number.isInteger(ctxMaxPages) && ctxMaxPages > 0;
     const pageBudget = probing ? Math.min(maxPages, ctxMaxPages) : maxPages;
@@ -265,6 +281,7 @@ export default {
       method: 'POST',
       redirect: 'error',
       timeoutMs: LIST_TIMEOUT_MS,
+      ...(maxBytes !== undefined ? { maxBytes } : {}),
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: buildQueryBody(locale, categories, page),
     });

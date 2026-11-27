@@ -726,6 +726,7 @@ export function parseJobDetail(html, expectedJobId) {
  * PostingSeq=2 (empirically necessary — see module header) before giving up.
  * Detail enrichment is best-effort: returns null (never throws) when neither
  * PostingSeq works, so the caller keeps the listing row without a description.
+ * A hit carries the `seq` that answered, so the offer can link the live posting.
  * @param {{origin: string, site: string}} config
  * @param {{ctx: any, jar: Map<string, string>}} session
  * @param {string} jobId
@@ -745,7 +746,7 @@ async function fetchJobDetail(config, session, jobId) {
       throw err;
     }
     const detail = parseJobDetail(html, jobId);
-    if (detail.valid) return detail;
+    if (detail.valid) return { ...detail, seq };
     // Invalid page or id mismatch — try the next PostingSeq before giving up.
   }
   return null;
@@ -898,8 +899,8 @@ export default {
     for (const row of byId.values()) {
       const job = {
         title: row.title,
-        // PostingSeq=1 is the canonical public posting URL; a candidate
-        // clicking through gets redirected to the working seq regardless.
+        // PostingSeq=1 is the default link; detail enrichment replaces it with
+        // the sequence that actually answered when seq 1 is dead.
         url: buildDetailUrl(config, row.jobId, 1),
         company: entry.name,
         location: row.location,
@@ -935,6 +936,8 @@ export default {
         await sleep(INTER_REQUEST_DELAY_MS, ctx);
         try {
           const detail = await fetchJobDetail(config, session, job._jobId);
+          // Link the sequence that answered: seq 1 may be dead for this posting.
+          if (detail) job.url = buildDetailUrl(config, job._jobId, detail.seq);
           if (detail?.descriptionText) {
             job.description = detail.descriptionText;
             if (detail.descriptionPartial) job.descriptionPartial = true;
