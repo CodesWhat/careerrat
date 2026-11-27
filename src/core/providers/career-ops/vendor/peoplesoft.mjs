@@ -104,7 +104,7 @@
 // same convention as adp-workforcenow.mjs/vdab.mjs.
 
 import { decodeEntities } from './_html-entities.mjs';
-import { htmlToText, DESCRIPTION_CAP } from './_html-to-text.mjs';
+import { htmlToTextCapture, capDescriptionText } from './_html-to-text.mjs';
 import { fetchResponseWithRetry, sleep, BROWSER_LIKE_USER_AGENT } from './_http.mjs';
 import { intInRange } from './_config-utils.mjs';
 
@@ -685,6 +685,7 @@ export function parseJobDetail(html, expectedJobId) {
   // alerts on the hand-rolled tag filter that built it. Removed rather than
   // kept unused.
   const sections = [];
+  let sectionTruncated = false;
   for (const idx of sectionIndices) {
     // Same `$N` grid-instance convention as the search-page rows (see
     // parseSearchPage) — verified live against the same real tenant's detail
@@ -692,17 +693,21 @@ export function parseJobDetail(html, expectedJobId) {
     const labelRaw = extractById(str, `HRS_SCH_WRK_DESCR100$${idx}lbl`);
     const bodyRaw = extractById(str, `HRS_SCH_PSTDSC_DESCRLONG$${idx}`);
     if (labelRaw === null && bodyRaw === null) continue; // neither half present — nothing to concatenate
-    sections.push({
-      label: labelRaw !== null ? htmlToText(labelRaw) : '',
-      text: htmlToText(bodyRaw || ''),
-    });
+    // CareerRat-local: the byte-capped capture helpers replace upstream's
+    // 4000-char slice, so a long posting keeps its body and a trimmed one says so.
+    const label = htmlToTextCapture(labelRaw ?? '');
+    const body = htmlToTextCapture(bodyRaw || '');
+    if (label.truncated || body.truncated) sectionTruncated = true;
+    sections.push({ label: label.text, text: body.text });
   }
 
-  const descriptionText = sections
-    .map((s) => (s.label ? `${s.label}\n` : '') + s.text)
-    .join('\n\n')
-    .trim()
-    .slice(0, DESCRIPTION_CAP);
+  const { text: descriptionText, truncated: capped } = capDescriptionText(
+    sections
+      .map((s) => (s.label ? `${s.label}\n` : '') + s.text)
+      .join('\n\n')
+      .trim()
+  );
+  const descriptionPartial = sectionTruncated || capped;
 
   return {
     valid: true,
@@ -712,6 +717,7 @@ export function parseJobDetail(html, expectedJobId) {
     location,
     sections,
     descriptionText,
+    descriptionPartial,
   };
 }
 
@@ -727,7 +733,17 @@ export function parseJobDetail(html, expectedJobId) {
 async function fetchJobDetail(config, session, jobId) {
   for (const seq of [1, 2]) {
     const url = assertPeopleSoftUrl(buildDetailUrl(config, jobId, seq), config);
-    const html = await getWithSession(session.ctx, session.jar, config, url);
+    let html;
+    try {
+      html = await getWithSession(session.ctx, session.jar, config, url);
+    } catch (err) {
+      // CareerRat-local: a dead PostingSeq answers 404/410 on some tenants
+      // rather than redirecting. That is this sequence's answer, not the
+      // posting's, so try the next one. Anything else is a real failure.
+      const status = /** @type {any} */ (err)?.status;
+      if (status === 404 || status === 410) continue;
+      throw err;
+    }
     const detail = parseJobDetail(html, jobId);
     if (detail.valid) return detail;
     // Invalid page or id mismatch — try the next PostingSeq before giving up.
@@ -919,7 +935,10 @@ export default {
         await sleep(INTER_REQUEST_DELAY_MS, ctx);
         try {
           const detail = await fetchJobDetail(config, session, job._jobId);
-          if (detail?.descriptionText) job.description = detail.descriptionText;
+          if (detail?.descriptionText) {
+            job.description = detail.descriptionText;
+            if (detail.descriptionPartial) job.descriptionPartial = true;
+          }
         } catch {
           // Detail fetch is enrichment only — keep the listing result
           // (same fail-open contract as adp-workforcenow.mjs/smartrecruiters.mjs).

@@ -664,11 +664,95 @@ try {
     }
   );
 
-  if (inlineRequested.length === 1 && !inlineRequested.some((u) => u.endsWith("/offices")))
+  // CareerRat-local (Codex pass 1): job 999 is work-model-only with no inline
+  // offices, so /offices is consulted for it even though content=true worked.
+  if (
+    inlineRequested.length === 2 &&
+    inlineRequested.filter((u) => u.endsWith("/offices")).length === 1
+  )
     pass(
-      "greenhouse.fetch() enriches inline offices and makes zero /offices calls when bodiesInline"
+      "greenhouse.fetch() enriches inline offices and asks /offices once for a work-model-only job with no inline offices"
     );
   else fail(`greenhouse.fetch() requested ${JSON.stringify(inlineRequested)}`);
+
+  const allInlineRequested = [];
+  await greenhouse.fetch(
+    { name: "Cloudflare", careers_url: "https://job-boards.greenhouse.io/cloudflare" },
+    {
+      fetchJson: async (url) => {
+        allInlineRequested.push(url);
+        return {
+          jobs: [
+            {
+              id: 201,
+              title: "Systems Engineer",
+              absolute_url: "https://job-boards.greenhouse.io/cloudflare/jobs/201",
+              location: { name: "In-Office" },
+              offices: [{ id: 1, name: "Austin, TX" }],
+            },
+            {
+              id: 203,
+              title: "Berlin Engineer",
+              absolute_url: "https://job-boards.greenhouse.io/cloudflare/jobs/203",
+              location: { name: "Berlin, Germany" },
+              offices: [],
+            },
+          ],
+        };
+      },
+    }
+  );
+  if (allInlineRequested.length === 1 && !allInlineRequested.some((u) => u.endsWith("/offices")))
+    pass(
+      "greenhouse.fetch() makes zero /offices calls when every work-model-only job has inline offices"
+    );
+  else fail(`greenhouse.fetch() all-inline requested ${JSON.stringify(allInlineRequested)}`);
+
+  // A 'Hybrid' posting with no inline office keeps the city /offices reports
+  // even though content=true succeeded.
+  const hybridOffices = {
+    offices: [{ name: "Austin, TX", departments: [{ jobs: [{ id: 301 }] }] }],
+  };
+  const hybridRequested = [];
+  const hybridJobs = await greenhouse.fetch(
+    { name: "Cloudflare", careers_url: "https://job-boards.greenhouse.io/cloudflare" },
+    {
+      fetchJson: async (url) => {
+        hybridRequested.push(url);
+        if (url.endsWith("/offices")) return hybridOffices;
+        return {
+          jobs: [
+            {
+              id: 301,
+              title: "Hybrid Engineer",
+              absolute_url: "https://job-boards.greenhouse.io/cloudflare/jobs/301",
+              location: { name: "Hybrid" },
+            },
+            {
+              id: 302,
+              title: "Inline Engineer",
+              absolute_url: "https://job-boards.greenhouse.io/cloudflare/jobs/302",
+              location: { name: "Hybrid" },
+              offices: [{ id: 2, name: "Seattle, WA" }],
+            },
+          ],
+        };
+      },
+    }
+  );
+  if (
+    hybridJobs[0]?.location === "Hybrid · Austin, TX" &&
+    JSON.stringify(hybridJobs[0]?.locations) === JSON.stringify(["Austin, TX"]) &&
+    hybridJobs[1]?.location === "Hybrid · Seattle, WA" &&
+    hybridRequested.filter((u) => u.endsWith("/offices")).length === 1
+  )
+    pass(
+      "greenhouse.fetch() reads /offices for a work-model-only job with no inline offices, and keeps inline offices where present"
+    );
+  else
+    fail(
+      `greenhouse.fetch() hybrid fallback = ${JSON.stringify(hybridJobs.map((j) => [j.location, j.locations]))} via ${JSON.stringify(hybridRequested)}`
+    );
 
   if (inlineEnriched[0]?.location === "In-Office · Austin, TX")
     pass("greenhouse.fetch() folds the inline office city into a work-model-only location");

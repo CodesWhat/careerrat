@@ -548,7 +548,7 @@ function locationFromPath(externalPath) {
  * Lowercase a raw requisition token and drop Workday's cross-site repost
  * disambiguator, a trailing `-N`. The suffix is a disambiguator only when two
  * things hold (credit: ronanime-arch, PR #3446):
- *   - N is one or two digits. This is what keeps Walmart's "R-2593225" whole:
+ *   - N is one digit (CareerRat-local; upstream allows two). This is what keeps Walmart's "R-2593225" whole:
  *     a seven-digit tail never splits, so the base check never runs.
  *   - What precedes it is requisition-ID-shaped on its own: a digit, then 2+
  *     trailing digits, underscores allowed. This is what keeps a short "R-25"
@@ -582,7 +582,10 @@ export function stripWorkdayRepostSuffix(raw) {
 // which keeps the ATS's own casing ("R-2593225"). Only the
 // dedup key is lowercased.
 function stripRepostSuffixKeepCase(token) {
-  const m = token.match(/^(.*?)-(\d{1,2})$/);
+  // CareerRat-local: a one-digit suffix only. A two-digit tail is part of the id
+  // ("JR2024-12" and "JR2024-13" are different requisitions), the rule this
+  // file had before the re-port onto 13786939.
+  const m = token.match(/^(.*?)-(\d)$/);
   if (!m) return token;
   const base = m[1];
   // Case-insensitive: the captured requisitionId keeps the ATS's casing

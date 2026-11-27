@@ -207,3 +207,32 @@ user-configured local commands and is not a public source adapter.
 `_http.mjs` and `_profile-keywords.mjs` are CareerRat compatibility shims. They
 keep requests inside CareerRat's injected, timeout-bound transport and keep
 candidate lookup inside CareerRat's workspace model.
+
+## Local deviations (Codex pass 1 fixes, 2026-11-27)
+
+These files differ from upstream on purpose. Re-vendoring must keep them.
+
+- Response-size limits live in `career-ops-registry.mjs`, not in a vendor file:
+  `fetchJson`, `fetchText` and `fetchResponse` read the decoded body with a
+  byte count, cancel it at the limit and throw `response_too_large`. The limit
+  is the request's `maxBytes`, or 10 MiB when a provider sets none.
+- `workday.mjs`: `stripRepostSuffixKeepCase` strips a one-digit `-N` suffix only
+  (upstream allows two). `JR2024-12` and `JR2024-13` are different requisitions
+  and must keep distinct identities.
+- `career-ops-registry.mjs` copies a stored `--query` into `gupy`, `jobscz`,
+  `platsbanken` and `pracecz` keyword config (as it already did for
+  `arbeitsagentur`, `vdab`, `jobbankca` and `mycareersfuture`) when the entry's
+  own block sets no keywords. An explicit `keywords` list, or gupy's `q`, wins.
+- `greenhouse.mjs`: `/offices` is fetched whenever a work-model-only posting
+  ("Hybrid") has no usable inline office name, including after a successful
+  `content=true` read. Upstream only fetches it on the oversized-board fallback.
+  Inline office names still win where a posting has them. The greenhouse fixture
+  changed to match.
+- `peoplesoft.mjs`: detail descriptions go through `htmlToTextCapture` and
+  `capDescriptionText` (64 KiB byte cap) instead of upstream's 4000-char slice,
+  and `descriptionPartial` is propagated to the job when the cap trims one.
+- `peoplesoft.mjs`: a 404 or 410 on one `PostingSeq` moves on to the next
+  sequence instead of ending the detail loop.
+- `teamtailor.mjs`: `isWholeChannel` checks for a self-closing or closed
+  `<channel>` in one forward pass. Upstream's per-opener regex rescans the page
+  from every unterminated `<channel` and goes quadratic.
