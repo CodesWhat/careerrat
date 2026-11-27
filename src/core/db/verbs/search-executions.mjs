@@ -69,8 +69,8 @@ function normalizedError(error) {
         url: offer?.url ? String(offer.url).slice(0, 500) : null,
       }))
     : undefined;
-  // Plain-count/marker pass-through (CR-29 round 14): workspace-agent.mjs's
-  // compactSearchExecutionLaneError stopped duplicating failedIds/
+  // Plain-count/marker pass-through (CR-29 round 14): the lane error compactor
+  // (compactSearchExecutionLaneError) stopped duplicating failedIds/
   // failedOffers/conflictOffers onto the error object (they now live on the
   // lane's `summary` only, which this verb clones unfiltered) and instead
   // hands this a bare `failed` count plus `truncated: true` whenever

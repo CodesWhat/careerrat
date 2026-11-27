@@ -1,7 +1,7 @@
 // gate-apply.mjs — the DB-native gate-write primitive shared by every Ask-bar
 // surface that writes a single gate value: strategy.apply's per-recommendation
 // dispatch (src/core/strategy/review.mjs) and settings.apply's gate-kind
-// change (src/core/agent/workspace-agent.mjs). Reused rather than re-derived
+// change. Reused rather than re-derived
 // so a "keep-signal" or "comp-floor" write means the same thing everywhere it
 // is triggered from.
 //

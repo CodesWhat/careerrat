@@ -43,6 +43,7 @@ All notable changes to CareerRat are documented here. This project follows
 - The browser product is deleted: the `apps/web` app, `src/cli/tracker-dev.mjs`, the 25 HTTP route modules, the dev server and the web-only runtime glue, along with the tests that only exercised them. `careerrat tracker-dev` and `careerrat start --browser` still print the retired message and exit 1. Nothing the terminal workspace or the CLI runs depends on the removed code.
 - The Electron desktop app (`apps/desktop`), its release workflow (`desktop-release.yml`), the Homebrew cask generator, the `desktop`, `desktop:fresh`, `desktop:dist` and `desktop:release` npm scripts, and the Electron PDF renderer hook in document export. PDFs render with Playwright Chromium only. The Mac app ended at v0.19.2; npm is the only way to install CareerRat.
 - `docs/WINDOWS.md` is now a short "Windows: install from npm" page, and `docs/RELEASE.md` drops the retired Mac build and Homebrew cask sections.
+- The in-app agent engine (`workspace-agent.mjs`, its write logs and auto-apply helpers, the issue-report builder) is deleted along with the tests that only drove it. The `configure`, `report-issue`, `email-comms` and `calendar-sync` skills drop their "Ask workspace" sections, and `coach-gaps` no longer describes a workspace-intent path.
 
 ### Fixed
 

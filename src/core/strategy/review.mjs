@@ -1,6 +1,6 @@
 // strategy/review.mjs — the server-side compute for the native strategy-review
-// Ask workflow (`strategy.review` / `strategy.apply` / `strategy.stamp` intents
-// in workspace-agent.mjs). This is the HTTP-reachable sibling of the
+// Ask workflow (`strategy.review` / `strategy.apply` / `strategy.stamp` intents).
+// This is the HTTP-reachable sibling of the
 // reevaluate-strategy SKILL.md flow: the skill's file-driven, multi-turn
 // analysis (STEPS 0-9, subagent-fanned-out) is what a terminal session runs;
 // this module is what the embedded chat workspace runs instead, in one
@@ -714,7 +714,7 @@ function applyRerank({ repoRoot, env, proposal }) {
 }
 
 // Thin wrapper over gate-apply.mjs's shared applyGateWrite primitive (also
-// used by settings.apply in workspace-agent.mjs) — translates its plain,
+// used by the settings gate writes) — translates its plain,
 // code-less errors into this module's own STRATEGY_APPLY_INVALID /
 // VALIDATION_FAILED vocabulary so callers and existing tests see identical
 // behavior to when this logic lived here directly.

@@ -212,7 +212,7 @@ function failRun(db, current, error, { preserveUpdatedAt = false, summary } = {}
     // caller already had the child's bounded result in hand (e.g. an AI-web
     // search worker that reported conflicts/failedOffers before settling as
     // failed). Restart recovery reconstructs a terminal run's in-memory
-    // outcome as `{ run, value: run.summary }` (workspace-agent.mjs's
+    // outcome as `{ run, value: run.summary }` (the old
     // reconcileOrphanedSourcingRuns), so a null summary meant that detail
     // was unrecoverable across a restart even though it was available at
     // fail time (CR-29 round 10). Callers that don't have one still pass
