@@ -72,6 +72,8 @@ CR70 slice 14 (2026-11-27) newly adopted from `13786939`: bizneo, computrabajo, 
 
 CR70 slice 15 (2026-11-27) newly adopted from `13786939`: pracecz, platsbanken, jobscz, kalibrr, techinasia, kariyer, kula, rexx, tes, velorahr, trakstar, keka, homerun. The pracecz, platsbanken and jobscz fixtures drop their `config/profile.yml` fallback case (CareerRat's `_profile-keywords` has no ambient filesystem fallback) but keep the no-keywords error case; the rexx and velorahr fixtures drop their `scan.mjs` cases. Message strings we emit are re-punctuated; comments stay verbatim.
 
+CR70 slice 16 (2026-11-27) newly adopted from `13786939`: adp-myjobs, adp-workforcenow, applicantpro, careerpuck, clearcompany, darwinbox, eploy, inrecruiting, pageup, taleo, ultipro, zoho-recruit. The applicantpro, eploy and zoho-recruit fixtures read their sample pages from `tests/fixtures/career-ops/` (copied from upstream, MIT). Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the

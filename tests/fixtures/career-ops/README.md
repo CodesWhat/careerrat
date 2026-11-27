@@ -38,6 +38,8 @@ CR70 slice 14: new fixtures for bizneo, computrabajo, goldman, google, hirehive,
 
 CR70 slice 15: new fixtures for pracecz, platsbanken, jobscz, kalibrr, techinasia, kariyer, kula, rexx, tes, velorahr, trakstar, keka, homerun, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
 
+CR70 slice 16: new fixtures for adp-myjobs, adp-workforcenow, applicantpro, careerpuck, clearcompany, darwinbox, eploy, inrecruiting, pageup, taleo, ultipro, zoho-recruit, adapted from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`). Cases that import upstream's `scan.mjs` or read `config/profile.yml` are dropped, and node:test suites run through a small in-file queue so the runner still counts them.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two
 commits were re-adapted from upstream's suites: `icims` gained a "Location

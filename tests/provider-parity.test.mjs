@@ -19,11 +19,14 @@ import {
 const EXPECTED_PROVIDER_IDS = [
   "4dayweek",
   "a16z-speedrun-talent",
+  "adp-myjobs",
+  "adp-workforcenow",
   "agentic-jobs",
   "aldi-nord",
   "alibaba",
   "amazon",
   "apple",
+  "applicantpro",
   "applitrack",
   "arbeitnow",
   "arbeitsagentur",
@@ -38,19 +41,23 @@ const EXPECTED_PROVIDER_IDS = [
   "builtin",
   "bulldogjob",
   "bwi",
+  "careerpuck",
   "careerviet",
+  "clearcompany",
   "collage",
   "comeet",
   "computrabajo",
   "consider",
   "cryptocurrencyjobs",
   "csod",
+  "darwinbox",
   "dassault",
   "deel",
   "deutschebahn",
   "dover",
   "echojobs",
   "eightfold",
+  "eploy",
   "factorial",
   "feishu-jobs",
   "flowxtra",
@@ -75,6 +82,7 @@ const EXPECTED_PROVIDER_IDS = [
   "ibm",
   "icims",
   "inhire",
+  "inrecruiting",
   "itjobs",
   "itviec",
   "jazzhr",
@@ -107,6 +115,7 @@ const EXPECTED_PROVIDER_IDS = [
   "notion",
   "occ",
   "oraclecloud",
+  "pageup",
   "paycom",
   "paylocity",
   "personio",
@@ -134,6 +143,7 @@ const EXPECTED_PROVIDER_IDS = [
   "solidjobs",
   "startup-jobs",
   "successfactors",
+  "taleo",
   "teamtailor",
   "techinasia",
   "tencent",
@@ -143,6 +153,7 @@ const EXPECTED_PROVIDER_IDS = [
   "tkms",
   "torre",
   "trakstar",
+  "ultipro",
   "vdab",
   "velorahr",
   "weworkremotely",
@@ -151,6 +162,7 @@ const EXPECTED_PROVIDER_IDS = [
   "workingnomads",
   "wttj",
   "yourator",
+  "zoho-recruit",
 ];
 
 test("Career Ops provider parity is pinned to the audited upstream snapshot", () => {
@@ -160,8 +172,8 @@ test("Career Ops provider parity is pinned to the audited upstream snapshot", ()
     providerCount: 157,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
-  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 134);
-  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 134);
+  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 146);
+  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 146);
 });
 
 test("every provider in the pinned upstream inventory has an explicit disposition", () => {

@@ -9,6 +9,7 @@ All notable changes to CareerRat are documented here. This project follows
 ### Added
 
 - The website adds JSON-LD (SoftwareApplication and Organization on the homepage, TechArticle and BreadcrumbList on docs pages), canonical, Open Graph and Twitter metadata on docs pages, lastmod dates in the sitemap, and a generated `llms-full.txt`. `llms.txt` now lists every docs page.
+- New job sources: ADP MyJobs, ADP WorkforceNow, ApplicantPro, CareerPuck, ClearCompany, Darwinbox, Eploy, InRecruiting, PageUp, Taleo, UltiPro and Zoho Recruit. These are multi-tenant hiring systems, so each company is read from its own careers page.
 - New job sources: prace.cz, Platsbanken, jobs.cz, Kalibrr, Tech in Asia, Kariyer.net, Kula, rexx, Tes, VeloraHR, Trakstar, Keka and Homerun. The Czech and Swedish boards need search keywords on the entry, since CareerRat has no profile fallback.
 - New job sources: Bizneo, Computrabajo, Goldman Sachs, Google (first results page), HireHive, ITjobs, Magneto365, NEOGOV, OCC, Paycom and SchoolSpring. A board that is cut short is reported as partial.
 - New job sources: Aldi Nord, Apple, BWI, Bulldogjob, Deel, Bolt, Dover, Paylocity, Polymer, RedRover, Notion careers pages and JazzHR. Each reads a public careers board.
