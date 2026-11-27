@@ -207,3 +207,12 @@ user-configured local commands and is not a public source adapter.
 `_http.mjs` and `_profile-keywords.mjs` are CareerRat compatibility shims. They
 keep requests inside CareerRat's injected, timeout-bound transport and keep
 candidate lookup inside CareerRat's workspace model.
+
+## Local deviations (Codex pass 1 fixes, 2026-11-27)
+
+These files differ from upstream on purpose. Re-vendoring must keep them.
+
+- Response-size limits live in `career-ops-registry.mjs`, not in a vendor file:
+  `fetchJson`, `fetchText` and `fetchResponse` read the decoded body with a
+  byte count, cancel it at the limit and throw `response_too_large`. The limit
+  is the request's `maxBytes`, or 10 MiB when a provider sets none.
