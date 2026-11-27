@@ -42,7 +42,7 @@
 
 <h2 align="center" id="current-status">Current Status</h2>
 
-**As of November 27, 2026:** v0.26.0 is the next release. CareerRat installs
+**As of November 27, 2026:** v0.26.0 is the latest release. CareerRat installs
 from npm and runs on your machine, in your terminal, with the AI CLI you already
 use. v0.19.2 was the last release with a Mac app.
 
