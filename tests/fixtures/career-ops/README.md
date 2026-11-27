@@ -26,6 +26,8 @@ CR70 slice 5: the fixtures for justjoin, landingjobs, larajobs, lever, manfred, 
 
 CR70 slice 6: the fixtures for phenom, pinpoint, radancy, remoteok, remotive, remotli, rheinmetall, rippling, senjob, softgarden were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
 
+CR70 slice 7: the fixtures for tencent, thehub, themuse, tkms, torre were regenerated from upstream's `13786939` suites with the same adaptation (path rewrites, then `biome check --write`); where a test matched an em-dash message it matches the re-punctuated one.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two
 commits were re-adapted from upstream's suites: `icims` gained a "Location

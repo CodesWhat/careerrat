@@ -60,6 +60,8 @@ CR70 slice 5 (2026-11-27) re-vendored verbatim from `13786939`: justjoin, landin
 
 CR70 slice 6 (2026-11-27) re-vendored verbatim from `13786939`: phenom, pinpoint, radancy, remoteok, remotive, remotli, rheinmetall, rippling, senjob, softgarden. successfactors was in this slice's list but is NOT re-vendored here: the new upstream file imports `./successfactors-classic.mjs`, a new provider that lands in slice 17, so successfactors moves to that slice and keeps its pre-roll copy. The rippling fixture drops the `scan.mjs` dedup cases. Message strings we emit are re-punctuated; comments stay verbatim.
 
+CR70 slice 7 (2026-11-27) re-vendored verbatim from `13786939`: tencent, thehub, themuse, tkms, torre. teamtailor was in this slice's list but is NOT re-vendored here: the new upstream file imports `resolveDefaultTimeoutMs` from `_http.mjs`, a transport export the shim does not carry, so it moves to the re-port slices and keeps its pre-roll copy. The themuse fixture drops the `verify-portals.mjs` `classifyFetchError` assertions. Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the
