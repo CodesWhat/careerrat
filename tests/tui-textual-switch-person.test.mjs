@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { createTextualSession } from "../src/core/tui/textual-session.mjs";
 
 const root = join(import.meta.dirname, "..");
@@ -18,7 +19,7 @@ function app(id, company) {
   return { id, company, role: "Engineer", status: "applied" };
 }
 // Two synthetic people next to the owner's own workspace, all under one base.
-async function fixture(t, agent = null) {
+async function fixture(t, agent = null, search = undefined) {
   const base = mkdtempSync(join(tmpdir(), "careerrat-switch-"));
   writeTracker(base, [app("owner-job", "OwnerCo")]);
   writeTracker(join(base, "people/ada"), [app("ada-job", "AdaCo")]);
@@ -31,6 +32,7 @@ async function fixture(t, agent = null) {
     env,
     agent,
     emit: (e) => events.push(e),
+    ...(search ? { search } : {}),
   });
   t.after(async () => {
     await session.close();
@@ -154,4 +156,110 @@ test("switching to the workspace that is already open says so and restarts nothi
   await session.dispatch({ op: "switch-person", person: null });
   assert.match(events.at(-1).message, /Already in your own workspace/);
   assert.equal(events.filter((e) => e.type === "workspace").length, before);
+});
+
+// --- Codex pass-1 findings ---
+
+test("a destination that can't be read is refused before anything is torn down", async (t) => {
+  const started = [];
+  const { base, events, session } = await fixture(t, null, {
+    start: async (ctx) => {
+      started.push(ctx.env.CAREERRAT_HOME);
+      return { reused: false, run: { id: "r1" } };
+    },
+    cancel: () => {},
+  });
+  writeFileSync(join(base, "people/ada/workspace/tracker.json"), "{ not json");
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  assert.match(events.filter((e) => e.type === "notice").at(-1).message, /Can't switch/);
+  assert.equal(
+    events.some((e) => e.type === "person"),
+    false
+  );
+  assert.deepEqual(ids(events), ["owner-job"]);
+  await session.dispatch({ op: "search-start" });
+  assert.deepEqual(started, [base], "search still runs against the workspace on screen");
+});
+
+test("actions issued for the previous workspace are rejected after a switch", async (t) => {
+  const started = [];
+  const { events, session } = await fixture(t, null, {
+    start: async (ctx) => {
+      started.push(ctx.env.CAREERRAT_HOME);
+      return { reused: false, run: { id: "r1" } };
+    },
+    cancel: () => {},
+  });
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  const person = events.filter((e) => e.type === "person").at(-1);
+  assert.equal(typeof person.generation, "number");
+  await session.dispatch({ op: "search-start", generation: person.generation - 1 });
+  assert.deepEqual(started, [], "a stale search never reaches the new workspace");
+  assert.match(events.at(-1).message, /previous workspace/);
+  await session.dispatch({ op: "search-start", generation: person.generation });
+  assert.equal(started.length, 1);
+});
+
+test("actions sent while a switch is in flight are not run", async (t) => {
+  const started = [];
+  const { events, session } = await fixture(t, null, {
+    start: async (ctx) => {
+      started.push(ctx.env.CAREERRAT_HOME);
+      return { reused: false, run: { id: "r1" } };
+    },
+    cancel: () => {},
+  });
+  const switching = session.dispatch({ op: "switch-person", person: "ada" });
+  await session.dispatch({ op: "search-start" });
+  await switching;
+  assert.deepEqual(started, []);
+});
+
+test("switching closes and evicts the old workspace's cached database connection", async (t) => {
+  const { base, session } = await fixture(t);
+  t.after(() => closeAll());
+  const db = openDb({ repoRoot: root, env: { ...process.env, CAREERRAT_HOME: base } });
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  assert.throws(() => db.prepare("SELECT 1").get(), /not open|closed/i);
+  const again = openDb({ repoRoot: root, env: { ...process.env, CAREERRAT_HOME: base } });
+  assert.notEqual(again, db, "the next open makes a fresh connection");
+});
+
+test("returning to the owner restores the original environment, unset keys included", async (t) => {
+  const repo = mkdtempSync(join(tmpdir(), "careerrat-legacy-"));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeTracker(repo, [app("legacy-owner", "LegacyCo")]);
+  writeTracker(join(repo, ".careerrat/people/ada"), [app("ada-job", "AdaCo")]);
+  const env = { ...process.env, HOME: repo };
+  for (const key of ["CAREERRAT_HOME", "CAREERRAT_PERSON", "CAREERRAT_PEOPLE_BASE"])
+    delete env[key];
+  const events = [];
+  const session = await createTextualSession({
+    repoRoot: repo,
+    env,
+    emit: (e) => events.push(e),
+  });
+  t.after(() => session.close());
+  assert.deepEqual(ids(events), ["legacy-owner"]);
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  assert.deepEqual(ids(events), ["ada-job"]);
+  await session.dispatch({ op: "switch-person", person: null });
+  assert.deepEqual(ids(events), ["legacy-owner"]);
+});
+
+test("the agent's launch arguments are worked out for each person on every start", {
+  timeout: 30_000,
+}, async (t) => {
+  const childCode =
+    "process.stdin.setRawMode(true);process.stdin.resume();process.stdout.write('ARGS['+process.argv.slice(1).join('|')+']');setInterval(()=>{},1000);";
+  const { events, session } = await fixture(t, {
+    command: process.execPath,
+    args: ["-e", childCode, "base"],
+    opening: (env) => (env.CAREERRAT_PERSON ? null : "ONBOARD"),
+  });
+  await session.dispatch({ op: "resize", cols: 200, rows: 10 });
+  await until(() => screen(events).includes("ARGS[base|ONBOARD]"));
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  await session.dispatch({ op: "resize", cols: 200, rows: 10 });
+  await until(() => screen(events).includes("ARGS[base]"));
 });
