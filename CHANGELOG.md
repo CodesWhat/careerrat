@@ -8,6 +8,7 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Added
 
+- The website now tells the story. careerrat.com opens with what CareerRat does, a short section on how Scott found a job with it and what it learns from results, a cost and privacy list, and two ways in: read the code on GitHub or install with npm. The page title, description, structured data, docs description and llms.txt all use the same one-line pitch.
 - The website adds JSON-LD (SoftwareApplication and Organization on the homepage, TechArticle and BreadcrumbList on docs pages), canonical, Open Graph and Twitter metadata on docs pages, lastmod dates in the sitemap, and a generated `llms-full.txt`. `llms.txt` now lists every docs page.
 - New job sources: Gupy, PeopleSoft, TalentLink, SuccessFactors classic, TurboHire, Taleez, Viterbit and WP Job Manager sites. The existing SuccessFactors source is updated to the latest upstream and leaves classic career-site URLs to the new source. Gupy needs search keywords on the entry.
 - New job sources: ADP MyJobs, ADP WorkforceNow, ApplicantPro, CareerPuck, ClearCompany, Darwinbox, Eploy, InRecruiting, PageUp, Taleo, UltiPro and Zoho Recruit. These are multi-tenant hiring systems, so each company is read from its own careers page.

@@ -600,7 +600,7 @@ test("website analytics uses the cookieless house PostHog posture, not Vercel An
 test("website metadata is CareerRat-branded", async () => {
   const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
 
-  assert.match(layout, /CareerRat: Rate\. Apply\. Track\./);
+  assert.match(layout, /CareerRat: AI job search in your terminal/);
   assert.doesNotMatch(layout, new RegExp(LEGACY_BRAND, "i"));
   // Product copy carries no em dashes, and page/OG/Twitter titles and
   // descriptions are product copy: they are the first thing anyone sees in a
@@ -608,7 +608,7 @@ test("website metadata is CareerRat-branded", async () => {
   // code comment (which no user reads) does not fail the suite.
   const metadataCopy = [
     ...layout.matchAll(/^\s*(?:title|description):\s*"([^"]*)"/gm),
-    ...layout.matchAll(/^\s*"(CareerRat is [^"]*)"/gm),
+    ...layout.matchAll(/^\s*"(CareerRat turns [^"]*)"/gm),
   ].map((match) => match[1]);
   // Three titles (page, OG, Twitter) plus the shared siteDescription.
   assert.equal(metadataCopy.length, 4);
