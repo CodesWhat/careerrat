@@ -52,3 +52,22 @@ test("persisted url aliases written under older normalizers still match", () => 
 test("an unparseable URL falls back to its trimmed, lowercased form", () => {
   assert.equal(normalizePostingUrl("  /Jobs/ABC "), "/jobs/abc");
 });
+
+const PS = (seq, extra = "") =>
+  `https://hr.example.edu/psc/hrprd/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_JBPST_FL&Action=U&JobOpeningId=JR00012345&PostingSeq=${seq}&SiteId=1${extra}`;
+
+test("PeopleSoft posting identity is tenant plus JobOpeningId, whatever PostingSeq answered", () => {
+  assert.equal(normalizePostingUrl(PS(1)), normalizePostingUrl(PS(2)));
+  assert.equal(normalizePostingUrl(PS(1)), normalizePostingUrl(PS(2, "&trk=x")));
+  const other = PS(1).replace("JR00012345", "JR00099999");
+  assert.notEqual(normalizePostingUrl(PS(1)), normalizePostingUrl(other));
+  const otherTenant = PS(1).replace("hr.example.edu", "jobs.other.edu");
+  assert.notEqual(normalizePostingUrl(PS(1)), normalizePostingUrl(otherTenant));
+
+  const tracked = [{ company: "Uni", title: "Analyst", url: PS(1) }];
+  const scanned = [{ company: "Uni", title: "Analyst", url: PS(2) }];
+  const delta = diffSnapshotOffers({ previous: tracked, current: scanned });
+  assert.equal(delta.newOffers.length, 0, "the seq 2 URL is the same opening, not a new row");
+  const seen = new Set(postingIdentityKeys({ url: PS(1) }));
+  assert.ok(postingIdentityKeys({ url: PS(2) }).some((key) => seen.has(key)));
+});
