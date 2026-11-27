@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import JSZip from "jszip";
 import mammoth from "mammoth";
-import { plainTextFromHtml } from "../src/core/deep-ingest/source-normalize.mjs";
-import { extractPublicCareersPage } from "../src/core/discovery/public-page-extractor.mjs";
 import { extractDocxResumeMarkdown } from "../src/core/onboarding/resume-docx.mjs";
 import { trimEdgeCharacter } from "../src/core/text/slug.mjs";
 
@@ -13,32 +11,6 @@ async function smallDocx() {
   zip.file("word/document.xml", "<w:document/>");
   return zip.generateAsync({ type: "nodebuffer" });
 }
-
-const publicResolver = async () => [{ address: "93.184.216.34", family: 4 }];
-
-test("HTML-to-text conversion drops script and style bodies with spaced closing tags", () => {
-  const text = plainTextFromHtml(
-    "Before<script >private script text</script >After<style >private CSS</style >Done"
-  );
-
-  assert.equal(text, "Before After Done");
-});
-
-test("public careers extraction never treats script text as a login gate", async () => {
-  const result = await extractPublicCareersPage({
-    url: "https://example.test/careers",
-    fetchImpl: async () =>
-      new Response(
-        "<html><body><h1>Careers</h1><script >Please sign in</script >" +
-          '<a href="/careers/engineering">Engineering roles</a>' +
-          '<a href="/careers/design">Design roles</a></body></html>',
-        { status: 200, headers: { "content-type": "text/html" } }
-      ),
-    resolveHost: publicResolver,
-  });
-
-  assert.equal(result.extractionStatus, "ambiguous_public_page");
-});
 
 test("DOCX HTML fallback decodes entities once and omits active-content bodies", async () => {
   const convertToMarkdown = mammoth.convertToMarkdown;

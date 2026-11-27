@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { validatePublicHttpUrl } from "../deep-ingest/source-fetch.mjs";
+import { validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { isWithinRuntimePath } from "./runtime-path-policy.mjs";
 

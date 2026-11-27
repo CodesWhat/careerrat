@@ -44,6 +44,7 @@ All notable changes to CareerRat are documented here. This project follows
 - The Electron desktop app (`apps/desktop`), its release workflow (`desktop-release.yml`), the Homebrew cask generator, the `desktop`, `desktop:fresh`, `desktop:dist` and `desktop:release` npm scripts, and the Electron PDF renderer hook in document export. PDFs render with Playwright Chromium only. The Mac app ended at v0.19.2; npm is the only way to install CareerRat.
 - `docs/WINDOWS.md` is now a short "Windows: install from npm" page, and `docs/RELEASE.md` drops the retired Mac build and Homebrew cask sections.
 - The in-app agent engine (`workspace-agent.mjs`, its write logs and auto-apply helpers, the issue-report builder) is deleted along with the tests that only drove it. The `configure`, `report-issue`, `email-comms` and `calendar-sync` skills drop their "Ask workspace" sections, and `coach-gaps` no longer describes a workspace-intent path.
+- Discovery and deep-ingest code that only the browser product reached is deleted: the company proposal flow and public careers scanner, the deep-ingest repo and source scanners and proposal builders, the sourcing worker manager, the browser source capture, the adjacent-role coach and the paste-intake classifier, dispatcher and matcher. `config/paste-intake-routes.json` stays, since AGENTS.md parity still checks it.
 
 ### Fixed
 
