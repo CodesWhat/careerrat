@@ -64,6 +64,8 @@ CR70 slice 7 (2026-11-27) re-vendored verbatim from `13786939`: tencent, thehub,
 
 CR70 slice 8 (2026-11-27) re-vendored verbatim from `13786939`: vdab, weworkremotely, workingnomads, wttj, yourator. workable was in this slice's list but is NOT re-vendored here: the new upstream file imports `fetchTextStream` from `_http.mjs`, a transport export the shim does not carry, so it moves to the re-port slices and keeps its pre-roll copy. The vdab fixture drops the `config/profile.yml` fallback case. Across slices 1 to 8, four listed providers stayed on their pre-roll copy for a dependency outside `providers/`: hackernews (`ats-vendor.mjs`), successfactors (`successfactors-classic`, a new provider), teamtailor (`resolveDefaultTimeoutMs`) and workable (`fetchTextStream`). Message strings we emit are re-punctuated; comments stay verbatim.
 
+CR70 slice 12 (2026-11-27) newly adopted from `13786939`: atlassian, factorial, hiringroom, generalist-world, germantechjobs, startup-jobs, pythonorg, prevueaps, hibob, inhire, remote-com, applitrack. The hibob fixture is a node:test suite; the remote-com, inhire and startup-jobs fixtures drop their `scan.mjs` cases. Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the
