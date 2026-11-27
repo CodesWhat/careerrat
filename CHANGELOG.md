@@ -16,6 +16,13 @@ All notable changes to CareerRat are documented here. This project follows
 
 ### Fixed
 
+- Employer job sitemap source: a posting the site's robots.txt disallows is no longer opened later in the scan, either to fill in its description or to check it's still live, and those later fetches no longer follow redirects. Those postings stay as partial rows.
+- Employer job sitemap source: a sitemap with a very large number of unclosed entries, or a robots.txt with expensive wildcard rules, can no longer stall a scan. A stalled DNS lookup for robots.txt now times out and respects Stop, a partial (HTTP 206) robots.txt counts as unreadable, and an escaped `%2A` or `%24` in a rule is matched as a literal character instead of a wildcard or end anchor.
+
+## [0.26.1] - 2026-11-27
+
+### Fixed
+
 - Switching person in the terminal workspace no longer leaves the screen locked when the new person's workspace is too large to show. The switch now ends on its own signal, and a notice says the workspace was skipped.
 - Switching person in the terminal workspace now clears the previous person's jobs and details right away and keeps the screen locked until the switch finishes, so a click on a stale row can no longer act on the new person's workspace.
 - The public-fetch safety check now also refuses the local-use NAT64 range (`64:ff9b:1::/48`) and the other non-public IPv6 ranges: discard-only, documentation, SRv6, deprecated site-local, multicast and the IETF protocol-assignment block.
@@ -24,9 +31,6 @@ All notable changes to CareerRat are documented here. This project follows
 - `localhost.` and `*.localhost.` with a trailing dot are now refused as local hosts by the public-fetch check and the WebFetch gate.
 - A failure while the terminal workspace closes the previous person's session no longer leaves the screen locked. Every switch now ends on one signal, with an error notice if cleanup failed, and the screen also unlocks if the request can't be sent or the connection closes mid-switch.
 - Switching person in the terminal workspace now resets the status, currency, pay basis and sort controls, then fills all four from the new person's workspace, so the previous person's filters no longer linger.
-
-- Employer job sitemap source: a posting the site's robots.txt disallows is no longer opened later in the scan, either to fill in its description or to check it's still live, and those later fetches no longer follow redirects. Those postings stay as partial rows.
-- Employer job sitemap source: a sitemap with a very large number of unclosed entries, or a robots.txt with expensive wildcard rules, can no longer stall a scan. A stalled DNS lookup for robots.txt now times out and respects Stop, a partial (HTTP 206) robots.txt counts as unreadable, and an escaped `%2A` or `%24` in a rule is matched as a literal character instead of a wildcard or end anchor.
 
 ## [0.26.0] - 2026-11-27
 
