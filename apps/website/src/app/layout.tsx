@@ -42,17 +42,16 @@ const mono = localFont({
 });
 
 const siteDescription =
-  "CareerRat is a personal recruiter built on your AI CLI. Rate jobs before you apply, use your real experience, and track every outcome.";
+  "CareerRat turns the AI CLI you already have into a personal recruiter. It rates jobs, applies with your real experience, and tracks outcomes. Free, MIT.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://careerrat.com"),
-  title: "CareerRat: Rate. Apply. Track.",
+  title: "CareerRat: AI job search in your terminal",
   description: siteDescription,
   applicationName: "CareerRat",
   alternates: { canonical: "/" },
-  keywords: ["job search", "local-first", "agentic", "resume", "career", "privacy"],
   openGraph: {
-    title: "CareerRat: Rate. Apply. Track.",
+    title: "CareerRat: AI job search in your terminal",
     description: siteDescription,
     url: "/",
     siteName: "CareerRat",
@@ -68,7 +67,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "CareerRat: Rate. Apply. Track.",
+    title: "CareerRat: AI job search in your terminal",
     description: siteDescription,
     images: [
       {
