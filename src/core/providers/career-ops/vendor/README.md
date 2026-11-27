@@ -223,3 +223,8 @@ These files differ from upstream on purpose. Re-vendoring must keep them.
   `platsbanken` and `pracecz` keyword config (as it already did for
   `arbeitsagentur`, `vdab`, `jobbankca` and `mycareersfuture`) when the entry's
   own block sets no keywords. An explicit `keywords` list, or gupy's `q`, wins.
+- `greenhouse.mjs`: `/offices` is fetched whenever a work-model-only posting
+  ("Hybrid") has no usable inline office name, including after a successful
+  `content=true` read. Upstream only fetches it on the oversized-board fallback.
+  Inline office names still win where a posting has them. The greenhouse fixture
+  changed to match.

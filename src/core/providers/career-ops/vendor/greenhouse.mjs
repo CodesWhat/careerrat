@@ -349,12 +349,18 @@ export default {
       }
     }
 
-    // /offices is only needed when bodiesInline is false (oversized-board
-    // fallback without content=true), because the content=true payload already
-    // embeds offices[] per job (#6911). Even then, only pay for /offices when
-    // this board actually hides its cities there.
+    // /offices is needed for a work-model-only posting ("Hybrid") that has no
+    // usable inline office name. content=true embeds offices[] per job (#6911),
+    // but not every posting carries one, and the oversized-board fallback has
+    // none at all. Only pay for /offices when this board actually hides a city
+    // there.
+    // CareerRat-local: upstream skips /offices whenever content=true succeeded,
+    // which leaves a "Hybrid" posting with no inline office on the bare string.
+    const lacksInlineOffices = /** @param {any} j */ j =>
+      isWorkModelOnly(j.location?.name)
+      && (!bodiesInline || extractSortedOfficeNames(j.offices).length === 0);
     let officeMap = null;
-    if (!bodiesInline && usable.some(/** @param {any} j */ j => isWorkModelOnly(j.location?.name))) {
+    if (usable.some(lacksInlineOffices)) {
       const officesUrl = officesUrlFor(apiUrl);
       if (officesUrl) {
         try {
@@ -383,8 +389,10 @@ export default {
       // Sorted, not in /offices traversal order or payload order. The set
       // deduplicates and sorts so re-ordered offices cannot rewrite the
       // location string or the dedupe key (scan.mjs `normalizeLocationForDedup`).
-      const offices = bodiesInline ? j.offices : officeMap?.get(j.id);
-      const officeList = extractSortedOfficeNames(offices);
+      const inlineOffices = bodiesInline ? extractSortedOfficeNames(j.offices) : [];
+      const officeList = inlineOffices.length > 0
+        ? inlineOffices
+        : extractSortedOfficeNames(officeMap?.get(j.id));
       if (workModel && officeList.length > 0) {
         location = [location, ...officeList].join(' · ');
       }
