@@ -414,7 +414,7 @@ test("docs tour the terminal workspace instead of the browser app", async () => 
   assert.match(tour, /\| v \| Review matches/);
   assert.match(tour, /\| a \| Apply/);
   assert.match(tour, /\| c \| Add context/);
-  assert.match(tour, /legacy and is being retired/);
+  assert.match(tour, /retired\s+in\s+v0\.26/);
   assert.doesNotMatch(tour, /\u2014/);
 });
 

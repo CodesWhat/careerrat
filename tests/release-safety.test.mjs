@@ -212,16 +212,14 @@ test("the published package runs no consumer lifecycle setup and start installs 
   assert.match(launcher, /run\(join\(root, "scripts\/install-skills\.mjs"\), \["--soft"\]\)/);
 });
 
-test("start and update reconcile stale local app runtimes without killing foreign listeners", async () => {
+test("update only reports a leftover browser workspace and never launches or kills one", async () => {
   const launcher = await readText("bin/careerrat.mjs");
   const healthRoute = await readText("src/cli/tracker-dev.mjs");
 
-  assert.match(launcher, /classifyLocalAppRuntime/);
-  assert.match(launcher, /findAvailableLoopbackPort/);
-  assert.match(launcher, /runtime\.state === "stale-owned"/);
-  assert.match(launcher, /runtime\.state === "foreign"/);
-  assert.match(launcher, /activeRecordedDashboard/);
-  assert.match(launcher, /restartDashboardAfterUpdate/);
+  assert.match(launcher, /noticeRetiredBrowserWorkspace/);
+  assert.match(launcher, /kill \$\{pid\}/);
+  assert.doesNotMatch(launcher, /process\.kill\([^)]*SIG/);
+  assert.doesNotMatch(launcher, /restartDashboardAfterUpdate|startDashboard|local-app-runtime/);
   assert.match(healthRoute, /product:\s*"careerrat"/);
   assert.match(healthRoute, /pid:\s*process\.pid/);
 });

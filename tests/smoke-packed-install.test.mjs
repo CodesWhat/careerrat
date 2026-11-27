@@ -53,14 +53,15 @@ test("npmCommand prefers the Node-driven npm CLI when npm_execpath is set", () =
   });
 });
 
-test("publish.yml smokes the packed install after the build and before npm publish", async () => {
+test("publish.yml smokes the packed install after the install and before npm publish", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/publish.yml", import.meta.url),
     "utf8"
   );
-  const buildAt = workflow.indexOf("corepack npm run app:build");
+  const installAt = workflow.indexOf("run: corepack npm ci");
   const smokeAt = workflow.indexOf("node scripts/smoke-packed-install.mjs");
   const publishAt = workflow.indexOf("corepack npm publish --provenance");
-  assert.ok(buildAt !== -1 && buildAt < smokeAt, "the smoke must run after the web build");
+  assert.equal(workflow.includes("app:build"), false, "the web build is retired");
+  assert.ok(installAt !== -1 && installAt < smokeAt, "the smoke must run after npm ci");
   assert.ok(smokeAt < publishAt, "the smoke must run before npm publish");
 });

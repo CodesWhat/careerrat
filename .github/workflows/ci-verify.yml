@@ -344,8 +344,10 @@ jobs:
       # re-run a script, reviewed or not.
       - name: Materialize dependency bin links (scripts already ran; this only links)
         run: npm rebuild --ignore-scripts
-      - name: List the files the npm package would publish
-        run: npm pack --dry-run --json --ignore-scripts > /dev/null
+      - name: Assert the npm package ships no apps/web paths
+        run: |
+          npm pack --dry-run --json --ignore-scripts > "$RUNNER_TEMP/pack.json"
+          node -e 'const fs = require("node:fs"); const [pkg] = Object.values(JSON.parse(fs.readFileSync(process.argv[1], "utf8"))); const hits = pkg.files.map((f) => f.path).filter((p) => p.startsWith("apps/web")); if (hits.length) { console.error("apps/web paths in the npm package:\n" + hits.join("\n")); process.exit(1); }' "$RUNNER_TEMP/pack.json"
       - name: Packed npm install smoke (pack, install --omit=dev, run the bin)
         run: node scripts/smoke-packed-install.mjs
 

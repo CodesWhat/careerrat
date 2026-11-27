@@ -1233,6 +1233,8 @@ test("web-build runs the packed npm install smoke, not the apps/web build", asyn
   );
   assert.match(job, /name:\s*web-build/);
   assert.match(job, /node scripts\/smoke-packed-install\.mjs/);
+  assert.match(job, /npm pack --dry-run --json --ignore-scripts > "\$RUNNER_TEMP\/pack\.json"/);
+  assert.match(job, /startsWith\("apps\/web"\)/);
   assert.doesNotMatch(job, /--workspace apps\/web\b/);
   assert.doesNotMatch(job, /apps\/desktop/);
 });
