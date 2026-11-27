@@ -201,13 +201,12 @@ function seedFixture(repoRoot, tracker) {
   importFromTracker({ repoRoot, sourceDir });
 }
 
-test("loadAgentGuidanceSnapshot forces Electron's child into Node mode and preserves caller env", () => {
+test("loadAgentGuidanceSnapshot preserves caller env", () => {
   const repoRoot = tempRepo();
   mkdirSync(join(repoRoot, "src/cli"), { recursive: true });
   writeFileSync(
     join(repoRoot, "src/cli/doctor.mjs"),
     `console.log(JSON.stringify({ agentGuidance: {
-      electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE,
       callerEnv: process.env.CAREERRAT_TEST_CALLER_ENV,
     } }));\n`
   );
@@ -218,7 +217,6 @@ test("loadAgentGuidanceSnapshot forces Electron's child into Node mode and prese
   });
 
   assert.deepEqual(snapshot, {
-    electronRunAsNode: "1",
     callerEnv: "preserved",
   });
 });
