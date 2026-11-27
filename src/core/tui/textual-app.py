@@ -1394,6 +1394,9 @@ class CareerRatApp(App):
                         self.show_message(str(error), hold=HOLD_SECONDS)
             await self.bridge_closed()
         except (ValueError, OSError) as error:
+            # A switch the bridge can no longer finish must not stay locked.
+            self.switching = False
+            self.awaiting_snapshot = False
             self.errors.append(str(error))
             self.write_log(f"bridge read error: {error}")
             if not self.stopping:

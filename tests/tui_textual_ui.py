@@ -391,6 +391,31 @@ closeAll();
         self.assertFalse(app.switching)
         self.assertFalse(app.awaiting_snapshot)
 
+    async def test_a_bridge_read_error_mid_switch_clears_the_switch_lock(self):
+        class BrokenStdout:
+            async def readline(self):
+                raise ConnectionResetError("reset")
+
+            async def read(self, n=-1):
+                raise ConnectionResetError("reset")
+
+            async def readuntil(self, separator=b"\n"):
+                raise ConnectionResetError("reset")
+
+        shim = SimpleNamespace(
+            proc=SimpleNamespace(stdout=BrokenStdout()),
+            stopping=False,
+            errors=[],
+            switching=True,
+            awaiting_snapshot=True,
+            show_message=lambda *a, **k: None,
+            write_log=lambda *a, **k: None,
+        )
+        await MODULE.CareerRatApp.read_events(shim)
+        self.assertFalse(shim.switching)
+        self.assertFalse(shim.awaiting_snapshot)
+        self.assertEqual(len(shim.errors), 1)
+
     async def test_switch_complete_unlocks_when_the_snapshot_was_skipped(self):
         app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
         messages = []
