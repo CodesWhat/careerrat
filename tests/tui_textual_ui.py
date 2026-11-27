@@ -247,6 +247,37 @@ closeAll();
         self.assertFalse(app.switching)
         self.assertEqual([c[0] for c in calls], ["person", "workspace"])
 
+    async def test_switch_complete_unlocks_when_the_snapshot_was_skipped(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        messages = []
+        app.query = lambda *a, **k: [object()]
+        app.open_person = lambda person: None
+        app.update_workspace = lambda value: None
+        app.show_message = lambda text, hold=None: messages.append(text)
+        app.switching = True
+        await app.handle_event({"type": "person", "person": "ada", "generation": 1})
+        self.assertTrue(app.switching)
+        # The oversized snapshot never arrives; the bridge still ends the switch.
+        await app.handle_event({"type": "switch-complete"})
+        self.assertFalse(app.switching)
+        self.assertFalse(app.awaiting_snapshot)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("too large", messages[0])
+
+    async def test_switch_complete_after_a_delivered_snapshot_adds_no_notice(self):
+        app = MODULE.CareerRatApp(env={**os.environ}, bridge_args=["--no-agent"])
+        messages = []
+        app.query = lambda *a, **k: [object()]
+        app.open_person = lambda person: None
+        app.update_workspace = lambda value: None
+        app.show_message = lambda text, hold=None: messages.append(text)
+        app.switching = True
+        await app.handle_event({"type": "person", "person": "ada", "generation": 1})
+        await app.handle_event({"type": "workspace", "view": {}, "state": {}})
+        await app.handle_event({"type": "switch-complete"})
+        self.assertFalse(app.switching)
+        self.assertEqual(messages, [])
+
     @unittest.skipIf(
         sys.platform == "win32", "Unix outer-PTY proof; Windows acceptance is separate"
     )

@@ -4,6 +4,12 @@ All notable changes to CareerRat are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Switching person in the terminal workspace no longer leaves the screen locked when the new person's workspace is too large to show. The switch now ends on its own signal, and a notice says the workspace was skipped.
+
 ## [0.26.0] - 2026-11-27
 
 ### Added

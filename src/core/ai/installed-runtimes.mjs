@@ -12,7 +12,6 @@ import {
   copyFileSync,
   existsSync,
   fstatSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -21,27 +20,15 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import {
-  basename,
-  delimiter,
-  dirname,
-  extname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { fetchPublicHttpText, validatePublicHttpUrl } from "../net/public-http-fetch.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { probeAcpRuntime, runAcpRuntime } from "./acp-runtime.mjs";
-import { isWithinRuntimePath } from "./runtime-path-policy.mjs";
 import { CLEANUP_DEADLINE_MS, KILL_TIMEOUT_MS } from "./runtime-probe-constants.mjs";
 import {
   killProcessTreeByPid,
@@ -69,10 +56,7 @@ const SCOPED_TOOLS_SERVER_NAME = "careerrat_scoped_tools";
 const PUBLIC_WEB_FETCH_TOOL = `mcp__${SCOPED_TOOLS_SERVER_NAME}__fetch`;
 const SCOPED_TOOLS_SERVER_ARG = "--careerrat-scoped-tools";
 const SCOPED_PUBLIC_WEB_ARG = "--allow-public-web";
-const SCOPED_READ_FILE_ARG = "--approved-read-file";
-const MAX_SCOPED_READ_BYTES = 20 * 1024 * 1024;
 const INSTALLED_RUNTIME_MODULE_PATH = fileURLToPath(import.meta.url);
-const EXACT_READ_ROOTS = Object.freeze({});
 
 const FULL_WORKFLOW_ACCEPTED_CAPABILITIES = Object.freeze({
   completion: true,
@@ -1322,7 +1306,6 @@ export async function probeInstalledRuntimeCompletion({
         tools: [],
         skill: null,
         repoRoot: null,
-        approvedReadPaths: [],
         env,
         timeoutMs: Math.min(COMPLETION_SMOKE_TIMEOUT_MS, Math.max(1, timeoutMs)),
       });
@@ -1870,132 +1853,31 @@ function existingCanonicalPath(path) {
 
 const RUNTIME_READ_BOUNDARY_INVALID = "RUNTIME_READ_BOUNDARY_INVALID";
 
-function exactApprovedReadPaths({ repoRoot, env, skill, approvedReadPaths, runtimeId } = {}) {
-  const rootSegments = EXACT_READ_ROOTS[skill];
-  if (
-    !repoRoot ||
-    !rootSegments ||
-    !Array.isArray(approvedReadPaths) ||
-    approvedReadPaths.length !== 1
-  ) {
-    throw runtimeError(
-      `Skill "${skill || "unknown"}" requires one explicit saved-upload read path.`,
-      RUNTIME_READ_BOUNDARY_INVALID,
-      { runtimeId: runtimeId || null, skill: skill || null }
-    );
-  }
-
-  const lexicalAllowedRoot = resolve(userPath({ repoRoot, env }, join(...rootSegments)));
-  const canonicalAllowedRoot = existingCanonicalPath(lexicalAllowedRoot);
-  if (!canonicalAllowedRoot) {
-    throw runtimeError(
-      `Skill "${skill}" cannot resolve its saved-upload boundary.`,
-      RUNTIME_READ_BOUNDARY_INVALID,
-      { runtimeId: runtimeId || null, skill }
-    );
-  }
-
-  const approved = approvedReadPaths.map((candidate) => {
-    const lexical = resolve(String(candidate || ""));
-    const canonical = existingCanonicalPath(lexical);
-    const expectedCanonical = resolve(canonicalAllowedRoot, relative(lexicalAllowedRoot, lexical));
-    const isFile = canonical ? statSync(canonical).isFile() : false;
-    if (
-      !canonical ||
-      !isFile ||
-      !isWithinRuntimePath(lexicalAllowedRoot, lexical) ||
-      !isWithinRuntimePath(canonicalAllowedRoot, canonical) ||
-      canonical !== expectedCanonical
-    ) {
-      throw runtimeError(
-        `Skill "${skill}" received a read path outside its exact saved-upload boundary.`,
-        RUNTIME_READ_BOUNDARY_INVALID,
-        { runtimeId: runtimeId || null, skill }
-      );
-    }
-    return canonical;
-  });
-  return [...new Set(approved)];
+// No skill reads a saved upload any more (resume-extract and intake-extract are
+// retired), so an exact-read request always fails closed.
+function rejectExactRead({ skill, runtimeId } = {}) {
+  throw runtimeError(
+    `Skill "${skill || "unknown"}" requires one explicit saved-upload read path.`,
+    RUNTIME_READ_BOUNDARY_INVALID,
+    { runtimeId: runtimeId || null, skill: skill || null }
+  );
 }
 
-function stageApprovedReadInput({
-  repoRoot,
-  env,
-  skill,
-  approvedReadPaths,
-  isolatedCwd,
-  runtimeId,
-}) {
-  const [source] = exactApprovedReadPaths({
-    repoRoot,
-    env,
-    skill,
-    approvedReadPaths,
-    runtimeId,
-  });
-  const inputDir = join(isolatedCwd, "input");
-  mkdirSync(inputDir, { recursive: true });
-  const stagedPath = join(inputDir, basename(source));
-  copyFileSync(source, stagedPath);
-  return stagedPath;
-}
-
-function approvedInstalledRuntimeReadPaths({
-  repoRoot,
-  env,
-  skill,
-  isolatedCwd,
-  approvedReadPaths,
-} = {}) {
-  return [
-    ...exactApprovedReadPaths({
-      repoRoot,
-      env,
-      skill,
-      approvedReadPaths,
-      runtimeId: "claude",
-    }),
-    existingCanonicalPath(isolatedCwd),
-  ].filter(Boolean);
-}
-
-function permissionAbsolutePath(path) {
-  const normalized = resolve(path).split(sep).join("/");
-  if (/^[A-Za-z]:\//.test(normalized)) {
-    return `//${normalized[0].toLowerCase()}${normalized.slice(2)}`;
-  }
-  return `//${normalized.replace(/^\/+/, "")}`;
-}
-
-function scopedReadRule(path) {
-  const absolute = permissionAbsolutePath(path);
-  try {
-    return statSync(path).isDirectory() ? `Read(${absolute}/**)` : `Read(${absolute})`;
-  } catch {
-    return `Read(${absolute})`;
-  }
-}
-
-function scopedToolsServerArgs({ allowPublicWeb = false, stagedReadPath = null } = {}) {
+function scopedToolsServerArgs({ allowPublicWeb = false } = {}) {
   return [
     INSTALLED_RUNTIME_MODULE_PATH,
     SCOPED_TOOLS_SERVER_ARG,
     ...(allowPublicWeb ? [SCOPED_PUBLIC_WEB_ARG] : []),
-    ...(stagedReadPath ? [SCOPED_READ_FILE_ARG, stagedReadPath] : []),
   ];
 }
 
-function scopedToolsMcpConfig({
-  runtimeHostPath = process.execPath,
-  allowPublicWeb = false,
-  stagedReadPath = null,
-} = {}) {
-  if (!allowPublicWeb && !stagedReadPath) return emptyMcpConfig();
+function scopedToolsMcpConfig({ runtimeHostPath = process.execPath, allowPublicWeb = false } = {}) {
+  if (!allowPublicWeb) return emptyMcpConfig();
   return {
     mcpServers: {
       [SCOPED_TOOLS_SERVER_NAME]: {
         command: runtimeHostPath,
-        args: scopedToolsServerArgs({ allowPublicWeb, stagedReadPath }),
+        args: scopedToolsServerArgs({ allowPublicWeb }),
         env: {},
       },
     },
@@ -2009,18 +1891,14 @@ function emptyMcpConfig() {
 function codexScopedToolsConfigArgs({
   runtimeHostPath = process.execPath,
   allowPublicWeb = false,
-  stagedReadPath = null,
 } = {}) {
-  if (!allowPublicWeb && !stagedReadPath) return [];
+  if (!allowPublicWeb) return [];
   const prefix = `mcp_servers.${SCOPED_TOOLS_SERVER_NAME}`;
-  const enabledTools = [
-    ...(allowPublicWeb ? ["fetch"] : []),
-    ...(stagedReadPath ? ["read_staged_input"] : []),
-  ];
+  const enabledTools = ["fetch"];
   const overrides = [
-    ...(allowPublicWeb ? ['web_search="live"'] : []),
+    'web_search="live"',
     `${prefix}.command=${JSON.stringify(runtimeHostPath)}`,
-    `${prefix}.args=${JSON.stringify(scopedToolsServerArgs({ allowPublicWeb, stagedReadPath }))}`,
+    `${prefix}.args=${JSON.stringify(scopedToolsServerArgs({ allowPublicWeb }))}`,
     `${prefix}.enabled_tools=${JSON.stringify(enabledTools)}`,
     `${prefix}.required=true`,
     `${prefix}.default_tools_approval_mode="approve"`,
@@ -2031,28 +1909,19 @@ function codexScopedToolsConfigArgs({
 function acpScopedToolsServers({
   runtimeHostPath = process.execPath,
   allowPublicWeb = false,
-  stagedReadPath = null,
 } = {}) {
-  if (!allowPublicWeb && !stagedReadPath) return [];
+  if (!allowPublicWeb) return [];
   return [
     {
       name: SCOPED_TOOLS_SERVER_NAME,
       command: runtimeHostPath,
-      args: scopedToolsServerArgs({ allowPublicWeb, stagedReadPath }),
+      args: scopedToolsServerArgs({ allowPublicWeb }),
       env: [],
     },
   ];
 }
 
-function claudeRuntimeBoundary({
-  repoRoot,
-  env,
-  skill,
-  tools,
-  isolatedCwd,
-  approvedReadPaths,
-  runtimeHostPath,
-} = {}) {
+function claudeRuntimeBoundary({ skill, tools, isolatedCwd, runtimeHostPath } = {}) {
   const requested = new Set(Array.isArray(tools) ? tools.filter(Boolean) : []);
   const usesFiles = ["Read", "Glob", "Grep"].some((tool) => requested.has(tool));
   if (requested.has("Glob") || requested.has("Grep")) {
@@ -2062,20 +1931,11 @@ function claudeRuntimeBoundary({
       { runtimeId: "claude" }
     );
   }
-  const readPaths = usesFiles
-    ? approvedInstalledRuntimeReadPaths({
-        repoRoot,
-        env,
-        skill,
-        isolatedCwd,
-        approvedReadPaths,
-      })
-    : [existingCanonicalPath(isolatedCwd)].filter(Boolean);
+  if (usesFiles) rejectExactRead({ skill, runtimeId: "claude" });
 
   const usesPublicWeb = requested.has("WebSearch") || requested.has("WebFetch");
   const visibleTools = [...requested].filter((tool) => tool !== "WebFetch");
   const allowedTools = [];
-  if (usesFiles) allowedTools.push(...readPaths.map(scopedReadRule));
   if (requested.has("Skill") && skill) allowedTools.push(`Skill(${skill})`);
   if (requested.has("WebSearch")) allowedTools.push("WebSearch");
   if (usesPublicWeb) allowedTools.push(PUBLIC_WEB_FETCH_TOOL);
@@ -2092,7 +1952,7 @@ function claudeRuntimeBoundary({
         allowUnsandboxedCommands: false,
         filesystem: {
           denyRead: ["//**"],
-          allowRead: usesFiles ? readPaths : isolatedCwd ? [isolatedCwd] : [],
+          allowRead: isolatedCwd ? [isolatedCwd] : [],
         },
         network: {
           allowLocalBinding: false,
@@ -2119,11 +1979,7 @@ export function buildInstalledRuntimeInvocation({
   // is only safe when the spawn's cwd is guaranteed to contain nothing but
   // that one skill.
   skill,
-  repoRoot,
-  env = process.env,
   isolatedCwd,
-  approvedReadPaths,
-  stagedReadPath,
   runtimeHostPath,
   // Claude uses stream-json for live protocol messages. Codex always emits its
   // structural JSONL events through `exec --json`; the flag has no effect there.
@@ -2136,15 +1992,7 @@ export function buildInstalledRuntimeInvocation({
     options: { shell: false, windowsHide: true },
   };
   if (definition?.protocol === "claude-json") {
-    const boundary = claudeRuntimeBoundary({
-      repoRoot,
-      env,
-      skill,
-      tools,
-      isolatedCwd,
-      approvedReadPaths,
-      runtimeHostPath,
-    });
+    const boundary = claudeRuntimeBoundary({ skill, tools, isolatedCwd, runtimeHostPath });
     const args = [
       "-p",
       "--setting-sources",
@@ -2182,7 +2030,7 @@ export function buildInstalledRuntimeInvocation({
         { runtimeId: "codex" }
       );
     }
-    if (usesLocalRead && !stagedReadPath) {
+    if (usesLocalRead) {
       throw runtimeError(
         "Codex exact-read work requires one staged CareerRat input.",
         RUNTIME_READ_BOUNDARY_INVALID,
@@ -2219,7 +2067,6 @@ export function buildInstalledRuntimeInvocation({
       ...codexScopedToolsConfigArgs({
         runtimeHostPath,
         allowPublicWeb: usesPublicWeb,
-        stagedReadPath: usesLocalRead ? stagedReadPath : null,
       }),
       "--ephemeral",
       "--skip-git-repo-check",
@@ -2987,11 +2834,9 @@ export async function runInstalledRuntime({
   platform = process.platform,
   onEvent,
   // A named skill always runs in materializeIsolatedSkillCwd()'s single-skill
-  // project. Exact-read tool runs must also supply one canonical saved upload
-  // through approvedReadPaths; broad repo reads fail closed.
+  // project. File reads fail closed: no skill takes a saved upload any more.
   skill = null,
   repoRoot = null,
-  approvedReadPaths = [],
 } = {}) {
   if (!runtime?.id || !runtime?.path) {
     throw runtimeError("No installed AI runtime is selected.", "RUNTIME_NOT_SELECTED");
@@ -3040,7 +2885,6 @@ export async function runInstalledRuntime({
   let tempDir = null;
   let skillCwd = null;
   let taskCwd = null;
-  let stagedReadPath = null;
   try {
     let schemaPath = null;
     if (definition?.protocol === "codex-jsonl" && outputSchema) {
@@ -3060,22 +2904,7 @@ export async function runInstalledRuntime({
           { runtimeId: runtime.id }
         );
       }
-      if (providerTools.includes("Read")) {
-        stagedReadPath = stageApprovedReadInput({
-          repoRoot,
-          env,
-          skill,
-          approvedReadPaths,
-          isolatedCwd: skillCwd,
-          runtimeId: runtime.id,
-        });
-        installedPrompt = [
-          installedPrompt,
-          definition?.protocol === "claude-json"
-            ? `CareerRat staged the one user-approved input at ${stagedReadPath}. Use that copy as the input for this task.`
-            : "Use CareerRat's read_staged_input tool to read the one user-approved input. No other filesystem read is available for this task.",
-        ].join("\n\n");
-      }
+      if (providerTools.includes("Read")) rejectExactRead({ skill, runtimeId: runtime.id });
     } else if (!toolBearing) {
       taskCwd = mkdtempSync(join(tmpdir(), "careerrat-task-cwd-"));
       chmodSync(taskCwd, 0o700);
@@ -3083,7 +2912,6 @@ export async function runInstalledRuntime({
     if (definition?.protocol === "acp") {
       const mcpServers = acpScopedToolsServers({
         allowPublicWeb: providerTools.includes("WebSearch") || providerTools.includes("WebFetch"),
-        stagedReadPath,
       });
       return await runAcpRuntimeImpl({
         runtime: { ...runtime, name: definition.name, acpArgs: definition.acpArgs },
@@ -3112,11 +2940,7 @@ export async function runInstalledRuntime({
       // repoRoot cwd, which would reintroduce the full checkout context and
       // defeat the per-call filesystem boundary.
       skill: definition?.protocol === "claude-json" && skillCwd ? skill : undefined,
-      repoRoot,
-      env,
       isolatedCwd: skillCwd,
-      approvedReadPaths,
-      stagedReadPath,
     });
 
     const processInvocation = runtimeProcessInvocation(invocation.command, invocation.args, {
@@ -3384,7 +3208,6 @@ export async function runInstalledRuntimeStream({
   // materializeIsolatedSkillCwd and buildInstalledRuntimeInvocation above).
   skill = null,
   repoRoot = null,
-  approvedReadPaths = [],
   // Called once per raw NDJSON message, in stream order, as soon as it's
   // fully parsed — including the terminal "result" message. A throwing
   // callback must never break the pump; caught and dropped.
@@ -3447,7 +3270,6 @@ export async function runInstalledRuntimeStream({
   let tempDir = null;
   let skillCwd = null;
   let taskCwd = null;
-  let stagedReadPath = null;
   try {
     let schemaPath = null;
     if (definition?.protocol === "codex-jsonl" && outputSchema) {
@@ -3469,22 +3291,7 @@ export async function runInstalledRuntimeStream({
         );
       }
       installedPrompt = promptWithInstalledSkill({ prompt: installedPrompt, repoRoot, skill });
-      if (providerTools.includes("Read")) {
-        stagedReadPath = stageApprovedReadInput({
-          repoRoot,
-          env,
-          skill,
-          approvedReadPaths,
-          isolatedCwd: skillCwd,
-          runtimeId: runtime.id,
-        });
-        installedPrompt = [
-          installedPrompt,
-          definition?.protocol === "claude-json"
-            ? `CareerRat staged the one user-approved input at ${stagedReadPath}. Use that copy as the input for this task.`
-            : "Use CareerRat's read_staged_input tool to read the one user-approved input. No other filesystem read is available for this task.",
-        ].join("\n\n");
-      }
+      if (providerTools.includes("Read")) rejectExactRead({ skill, runtimeId: runtime.id });
     } else if (definition?.protocol === "acp") {
       taskCwd = mkdtempSync(join(tmpdir(), "careerrat-task-cwd-"));
       chmodSync(taskCwd, 0o700);
@@ -3495,7 +3302,6 @@ export async function runInstalledRuntimeStream({
     if (definition?.protocol === "acp") {
       const mcpServers = acpScopedToolsServers({
         allowPublicWeb: providerTools.includes("WebSearch") || providerTools.includes("WebFetch"),
-        stagedReadPath,
       });
       return await runAcpRuntimeImpl({
         runtime: { ...runtime, name: definition.name, acpArgs: definition.acpArgs },
@@ -3521,11 +3327,7 @@ export async function runInstalledRuntimeStream({
       effort,
       tools,
       skill: skillCwd ? skill : undefined,
-      repoRoot,
-      env,
       isolatedCwd: skillCwd,
-      approvedReadPaths,
-      stagedReadPath,
       streaming: true,
     });
 
@@ -3815,81 +3617,11 @@ export async function fetchInstalledRuntimePublicUrl(
   };
 }
 
-function scopedReadError(message) {
-  return {
-    isError: true,
-    content: [{ type: "text", text: `Scoped read rejected: ${message}` }],
-  };
-}
-
-export function readInstalledRuntimeScopedFile(
-  stagedPath,
-  { input = {}, maxBytes = MAX_SCOPED_READ_BYTES } = {}
-) {
-  if (
-    input &&
-    (typeof input !== "object" || Array.isArray(input) || Object.keys(input).length > 0)
-  ) {
-    return scopedReadError("the staged-input tool does not accept a caller-selected path.");
-  }
-  const candidate = String(stagedPath || "").trim();
-  if (!candidate || !isAbsolute(candidate)) {
-    return scopedReadError("no absolute staged input was configured.");
-  }
-  try {
-    const lexical = resolve(candidate);
-    const details = lstatSync(lexical);
-    if (details.isSymbolicLink() || !details.isFile()) {
-      return scopedReadError("the staged input is not a regular file.");
-    }
-    if (details.size > maxBytes) {
-      return scopedReadError("the staged input exceeds the bounded read size.");
-    }
-    const extension = extname(lexical).toLowerCase();
-    const mimeTypes = {
-      ".jpeg": "image/jpeg",
-      ".jpg": "image/jpeg",
-      ".md": "text/markdown",
-      ".pdf": "application/pdf",
-      ".png": "image/png",
-      ".txt": "text/plain",
-      ".webp": "image/webp",
-    };
-    const mimeType = mimeTypes[extension];
-    if (!mimeType) return scopedReadError("the staged input type is unsupported.");
-    const canonical = realpathSync(lexical);
-    const data = readFileSync(canonical);
-    if (mimeType.startsWith("text/")) {
-      return { content: [{ type: "text", text: data.toString("utf8") }] };
-    }
-    if (mimeType.startsWith("image/")) {
-      return { content: [{ type: "image", data: data.toString("base64"), mimeType }] };
-    }
-    return {
-      content: [
-        {
-          type: "resource",
-          resource: {
-            uri: pathToFileURL(canonical).href,
-            mimeType,
-            blob: data.toString("base64"),
-          },
-        },
-      ],
-    };
-  } catch {
-    return scopedReadError("the staged input is missing or unreadable.");
-  }
-}
-
 function writeMcpMessage(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
-async function handleScopedToolsMcpRequest(
-  message,
-  { allowPublicWeb = false, stagedReadPath = null } = {}
-) {
+async function handleScopedToolsMcpRequest(message, { allowPublicWeb = false } = {}) {
   if (!message || message.id === undefined) return;
   const base = { jsonrpc: "2.0", id: message.id };
   if (message.method === "initialize") {
@@ -3927,20 +3659,6 @@ async function handleScopedToolsMcpRequest(
                 },
               ]
             : []),
-          ...(stagedReadPath
-            ? [
-                {
-                  name: "read_staged_input",
-                  description:
-                    "Read the single file CareerRat staged for this request. This tool accepts no path.",
-                  inputSchema: {
-                    type: "object",
-                    properties: {},
-                    additionalProperties: false,
-                  },
-                },
-              ]
-            : []),
         ],
       },
     });
@@ -3953,19 +3671,6 @@ async function handleScopedToolsMcpRequest(
     });
     return;
   }
-  if (
-    stagedReadPath &&
-    message.method === "tools/call" &&
-    message.params?.name === "read_staged_input"
-  ) {
-    writeMcpMessage({
-      ...base,
-      result: readInstalledRuntimeScopedFile(stagedReadPath, {
-        input: message.params?.arguments,
-      }),
-    });
-    return;
-  }
   writeMcpMessage({
     ...base,
     error: { code: -32601, message: "Method not found" },
@@ -3973,11 +3678,7 @@ async function handleScopedToolsMcpRequest(
 }
 
 function scopedToolsServerOptions(args = process.argv) {
-  const readIndex = args.indexOf(SCOPED_READ_FILE_ARG);
-  return {
-    allowPublicWeb: args.includes(SCOPED_PUBLIC_WEB_ARG),
-    stagedReadPath: readIndex >= 0 ? String(args[readIndex + 1] || "").trim() || null : null,
-  };
+  return { allowPublicWeb: args.includes(SCOPED_PUBLIC_WEB_ARG) };
 }
 
 function startScopedToolsMcpServer() {

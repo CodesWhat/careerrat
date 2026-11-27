@@ -268,6 +268,9 @@ export async function createTextualSession({
       type: "notice",
       message: name ? `Switched to ${name}'s workspace.` : "Switched to your own workspace.",
     });
+    // The pane unlocks on this, not on the snapshot: a snapshot over the
+    // bridge's line cap is skipped, and the lock must not wait for it.
+    send({ type: "switch-complete" });
     if (teardownError)
       send({
         type: "error",

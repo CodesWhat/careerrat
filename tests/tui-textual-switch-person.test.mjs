@@ -86,6 +86,17 @@ test("switching shows only the chosen person's jobs, then back to the owner's", 
   }
 });
 
+test("a switch ends with a switch-complete signal after the snapshot", async (t) => {
+  const { events, session } = await fixture(t);
+  await session.dispatch({ op: "switch-person", person: "ada" });
+  const types = events.map((e) => e.type);
+  const person = types.lastIndexOf("person");
+  const snap = types.lastIndexOf("workspace");
+  const done = types.lastIndexOf("switch-complete");
+  assert.ok(person >= 0 && snap > person, "snapshot follows the person event");
+  assert.ok(done > snap, "switch-complete follows the snapshot");
+});
+
 test("after a switch the watcher follows the new root only", async (t) => {
   const { base, events, session } = await fixture(t);
   await session.dispatch({ op: "switch-person", person: "ada" });
