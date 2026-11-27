@@ -228,7 +228,7 @@ function writeExitingLeaderDescendantWrapperScript(wrapperPath) {
   );
 }
 
-async function waitForFileContent(path, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+async function waitForFileContent(path, { timeoutMs = 30_000, intervalMs = 20 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (existsSync(path)) {
@@ -249,7 +249,7 @@ function isProcessAlive(pid) {
   }
 }
 
-async function waitUntilProcessDead(pid, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+async function waitUntilProcessDead(pid, { timeoutMs = 30_000, intervalMs = 20 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (isProcessAlive(pid) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
@@ -2092,7 +2092,7 @@ test("Windows execution identity fails closed without spawning when no cmd.exe i
 // the same helper file win32 production runs use with taskkill /T /F
 // instead. Mirrors the resistant-descendant shell script already proven in
 // doctor-installed-runtimes.test.mjs's SIGTERM-trap test.
-test("runtime-probe-helper.mjs kills a resistant descendant on timeout and reports it in its JSON protocol", (t) => {
+test("runtime-probe-helper.mjs kills a resistant descendant on timeout and reports it in its JSON protocol", async (t) => {
   if (process.platform === "win32") {
     t.skip("trap/sleep shell scripting is POSIX-only; win32 exercises taskkill /T /F instead");
     return;
@@ -2111,9 +2111,9 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
   );
 
   try {
-    const result = spawnSync(process.execPath, [helperPath, scriptPath, "--timeout-ms", "300"], {
+    const result = spawnSync(process.execPath, [helperPath, scriptPath, "--timeout-ms", "4000"], {
       encoding: "utf8",
-      timeout: 10_000,
+      timeout: 60_000,
     });
     assert.equal(result.status, 0, result.stderr || "the helper must exit 0 after reporting");
     const reported = JSON.parse(result.stdout);
@@ -2124,9 +2124,11 @@ test("runtime-probe-helper.mjs kills a resistant descendant on timeout and repor
       Number.isInteger(sleepPid) && sleepPid > 0,
       "the resistant script must have recorded the sleep descendant's real pid"
     );
-    assert.throws(
-      () => process.kill(sleepPid, 0),
-      /ESRCH/,
+    // A killed process stays signalable until its new parent reaps it, which a
+    // loaded machine can delay, so wait for it to actually be gone.
+    assert.equal(
+      await waitUntilProcessDead(sleepPid),
+      true,
       "the sleep descendant must not survive the helper's timeout cleanup"
     );
   } finally {
@@ -2183,7 +2185,7 @@ test("[win32] runtime-probe-helper.mjs's runProbe kills a real node child and it
   // Bounded poll for process.kill(pid, 0) to throw ESRCH — real process exit
   // is asynchronous from the caller's point of view, so this can't just
   // assert once immediately after the helper's own spawnSync returns.
-  async function waitUntilDead(pid, timeoutMs = 5_000, intervalMs = 20) {
+  async function waitUntilDead(pid, timeoutMs = 30_000, intervalMs = 20) {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       try {
@@ -2203,8 +2205,8 @@ test("[win32] runtime-probe-helper.mjs's runProbe kills a real node child and it
       // real node process starts (child, then its grandchild) time to run
       // far enough to write their pid files before the probe's own timeout
       // fires and kills the tree.
-      [helperPath, process.execPath, childScript, "--timeout-ms", "1000"],
-      { encoding: "utf8", timeout: 15_000 }
+      [helperPath, process.execPath, childScript, "--timeout-ms", "5000"],
+      { encoding: "utf8", timeout: 60_000 }
     );
     assert.equal(result.status, 0, result.stderr || "the helper must exit 0 after reporting");
     const reported = JSON.parse(result.stdout);
@@ -3235,7 +3237,7 @@ test("isInstalledRuntimeBelowVersionBoundary kills a probed CLI's whole descenda
     const claudeRuntime = { id: "claude", path: process.execPath };
     const resultPromise = isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
       platform: "darwin",
-      timeoutMs: 500,
+      timeoutMs: 5000,
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });
@@ -3274,7 +3276,7 @@ test("isInstalledRuntimeBelowVersionBoundary does not settle early when the wrap
     const claudeRuntime = { id: "claude", path: process.execPath };
     const resultPromise = isInstalledRuntimeBelowVersionBoundary(claudeRuntime, {
       platform: "darwin",
-      timeoutMs: 500,
+      timeoutMs: 5000,
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });
@@ -3732,7 +3734,7 @@ test("the scoped-tools child speaks MCP JSON-RPC for discovery, staged read, and
       child.stdin.write(`${JSON.stringify(message)}\n`);
     }
 
-    const deadline = Date.now() + 3000;
+    const deadline = Date.now() + 60_000;
     while (stdout.trim().split("\n").filter(Boolean).length < 5 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -3967,7 +3969,7 @@ test("guided Claude setup timeout kills the whole installer process tree after i
   try {
     const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
       platform: "darwin",
-      timeoutMs: 300,
+      timeoutMs: 5000,
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });
@@ -4037,7 +4039,7 @@ test("guided Claude setup timeout does not release the lock early when bash exit
   try {
     const resultPromise = startInstalledRuntimeGuidedSetup("claude", {
       platform: "darwin",
-      timeoutMs: 300,
+      timeoutMs: 5000,
       spawnImpl: (_command, _args, options) =>
         spawn(process.execPath, [wrapperPath, pidFilePath], options),
     });

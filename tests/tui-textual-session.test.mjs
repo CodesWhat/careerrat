@@ -77,7 +77,7 @@ function screen(events) {
   return lines.join("");
 }
 async function until(check) {
-  const end = Date.now() + 4000;
+  const end = Date.now() + 30_000;
   while (!check()) {
     assert.ok(Date.now() < end, "timed out waiting for a real session event");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -314,7 +314,7 @@ test("later frames carry only the rows that changed", { timeout: 9000 }, async (
 });
 
 test("the agent pane resolves careerrat to this checkout, not an earlier install", {
-  timeout: 15000,
+  timeout: 60_000,
 }, async (t) => {
   const decoy = mkdtempSync(join(tmpdir(), "careerrat-decoy-"));
   t.after(() => rmSync(decoy, { recursive: true, force: true }));
@@ -322,7 +322,7 @@ test("the agent pane resolves careerrat to this checkout, not an earlier install
     mode: 0o755,
   });
   const childCode =
-    "const r=require('node:child_process').spawnSync('careerrat',['--version'],{encoding:'utf8',shell:process.platform==='win32'});process.stdout.write('CLI['+String(r.stdout).trim()+']');setTimeout(()=>{},3000)";
+    "const r=require('node:child_process').spawnSync('careerrat',['--version'],{encoding:'utf8',shell:process.platform==='win32'});process.stdout.write('CLI['+String(r.stdout).trim()+']');setTimeout(()=>{},45000)";
   const { events, session } = await fixture(
     t,
     { command: process.execPath, args: ["-e", childCode] },

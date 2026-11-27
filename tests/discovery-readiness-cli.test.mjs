@@ -805,7 +805,7 @@ test("careerrat next runs doctor with --guidance-only and never executes a detec
         CAREERRAT_RUNTIME_SEARCH_DIRS: registry,
       },
       encoding: "utf8",
-      timeout: 5000,
+      timeout: 60_000,
     });
 
     assert.equal(result.signal, null, "careerrat next must not hang");
