@@ -56,8 +56,8 @@ try {
       description: "<p>Own the <b>numbers</b>.</p><li>FP&amp;A</li>",
       applyUrl: "https://job-boards.greenhouse.io/acme/jobs/4012345",
       publishedAt: "2026-08-01T10:00:00.000Z",
-      salaryMin: 180000,
-      salaryMax: 220000,
+      salaryMin: 150000,
+      salaryMax: 190000,
       salaryCurrency: "chf",
     })
   );
@@ -118,8 +118,8 @@ try {
   if (
     full &&
     full.salary &&
-    full.salary.min === 180000 &&
-    full.salary.max === 220000 &&
+    full.salary.min === 150000 &&
+    full.salary.max === 190000 &&
     full.salary.currency === "CHF"
   ) {
     pass(
