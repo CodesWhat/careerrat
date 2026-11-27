@@ -661,6 +661,7 @@ try {
   if (
     deniedCalls.length === 1 &&
     deniedJobs.length === 10 &&
+    deniedJobs.filter((j) => j.bodyPartial === true).length === 2 &&
     deniedWarn.some((l) => /robots\.txt disallows 2 detail page/.test(l))
   ) {
     pass("robots-denied detail pages are not fetched; rows keep their sitemap title");

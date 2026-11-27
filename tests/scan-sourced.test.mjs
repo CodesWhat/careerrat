@@ -3342,3 +3342,94 @@ test("the rerank hook annotates results without removing any and reports its sta
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
+
+// Sitemap job pages: robots.txt must hold on the later fetch paths too.
+function sitemapOffer(path = "1234/staff-engineer") {
+  return {
+    title: "Staff Engineer",
+    url: `https://careers.example.test/jobs/${path}`,
+    company: "ExampleCo",
+    location: "Remote - US",
+    comp: "",
+    bodyText: "",
+    bodyPartial: true,
+    provider: "sitemap",
+  };
+}
+
+test("a robots-denied sitemap posting is neither hydrated nor liveness-probed", async () => {
+  const repoRoot = tempRepo();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot, { tracked_companies: [] });
+    const fetched = [];
+    const hydrated = [];
+    const gated = [];
+    const summary = await runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      verify: true,
+      hostThrottle: false,
+      prefetchedOffers: [sitemapOffer()],
+      crossMatch: false,
+      fetchImpl: async (url) => {
+        fetched.push(String(url));
+        return new Response("live", { status: 200 });
+      },
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      hydrateOfferImpl: async (offer) => {
+        hydrated.push(offer.url);
+        return { ...offer, bodyText: "x".repeat(400), bodyPartial: false };
+      },
+      robotsGateImpl: async (url) => {
+        gated.push(url);
+        return { allowed: false, code: "robots_disallowed", reason: "disallows /jobs" };
+      },
+    });
+    assert.deepEqual(hydrated, []);
+    assert.deepEqual(fetched, []);
+    assert.ok(gated.length >= 1);
+    assert.equal(summary.offers.length, 1);
+    assert.equal(summary.offers[0].bodyPartial, true);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("a permitted sitemap posting is fetched without following redirects", async () => {
+  const repoRoot = tempRepo();
+  try {
+    const configPath = writeSourcedScanConfig(repoRoot, { tracked_companies: [] });
+    const outcomes = [];
+    await runSourcedScan({
+      repoRoot,
+      configPath,
+      write: false,
+      verify: true,
+      hostThrottle: false,
+      prefetchedOffers: [sitemapOffer()],
+      crossMatch: false,
+      fetchImpl: async () =>
+        new Response("", {
+          status: 302,
+          headers: { location: "https://elsewhere.example.test/x" },
+        }),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      hydrateOfferImpl: async (offer, { fetchImpl }) => {
+        try {
+          const res = await fetchImpl(offer.url, { redirect: "manual" });
+          outcomes.push(`hydrate:${res.status}`);
+        } catch (err) {
+          outcomes.push(`hydrate:refused:${err.code}`);
+        }
+        return offer;
+      },
+      robotsGateImpl: async () => ({ allowed: true, code: "robots_allowed", reason: "permits" }),
+    });
+    assert.deepEqual(outcomes, ["hydrate:refused:redirect_refused"]);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});

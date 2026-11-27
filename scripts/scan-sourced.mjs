@@ -46,6 +46,7 @@ import {
   loadCandidateConfig as loadStoredCandidateConfig,
 } from "../src/core/profile/config-store.mjs";
 import { adjacencyNote } from "../src/core/profile/targeting-adjacency.mjs";
+import { robotsAllows } from "../src/core/providers/career-ops/robots-check.mjs";
 import { buildSourceUrl } from "../src/core/providers/source-url.mjs";
 import {
   captureAndPersistOffersIfDb,
@@ -482,6 +483,25 @@ async function hydratePartialOffer(offer, { fetchImpl, resolveHost } = {}) {
   return hydrateJobOffer(offer, { fetchImpl, resolveHost });
 }
 
+// Sitemap postings come from an employer's own site, which publishes robots.txt.
+// The sitemap provider honoured it for the sitemap and detail fetches; the scan's
+// later fetches (description hydration, liveness) must honour it too, and must
+// not follow a redirect to a destination nobody checked.
+const isSitemapOffer = (offer) => offer?.provider === "sitemap";
+
+function refuseRedirects(fetchImpl) {
+  return async (url, init = {}) => {
+    const res = await fetchImpl(url, init);
+    if (res?.status >= 300 && res?.status < 400) {
+      await res.body?.cancel?.().catch(() => {});
+      throw Object.assign(new Error("redirect refused for a sitemap posting"), {
+        code: "redirect_refused",
+      });
+    }
+    return res;
+  };
+}
+
 const PARTIAL_HYDRATION_CONCURRENCY = 4;
 const SOURCE_SCAN_CONCURRENCY = 4;
 const LIVENESS_VERIFICATION_CONCURRENCY = 6;
@@ -559,6 +579,7 @@ async function runSourcedScanCore(
     assertActive,
     writeGuard,
     hydrateOfferImpl = hydratePartialOffer,
+    robotsGateImpl = robotsAllows,
     captureBrowserSourceImpl,
     recheckDead = false,
     hostThrottle,
@@ -992,9 +1013,22 @@ async function runSourcedScanCore(
         filtered.kept,
         (offer) => {
           ensureActive();
-          return offer?.bodyPartial === true && offer?.bodyCapture !== "session-browser"
-            ? hydrateOfferImpl(offer, { fetchImpl: fetchForRun, resolveHost })
-            : offer;
+          if (offer?.bodyPartial !== true || offer?.bodyCapture === "session-browser") return offer;
+          if (!isSitemapOffer(offer))
+            return hydrateOfferImpl(offer, { fetchImpl: fetchForRun, resolveHost });
+          return robotsGateImpl(offer.url, { signal }).then((gate) =>
+            gate.allowed
+              ? hydrateOfferImpl(offer, {
+                  fetchImpl: refuseRedirects(fetchForRun),
+                  resolveHost,
+                })
+              : {
+                  ...offer,
+                  bodyPartial: true,
+                  bodyFetchStatus: "unavailable",
+                  bodyFetchReason: `robots.txt ${gate.reason}`,
+                }
+          );
         },
         PARTIAL_HYDRATION_CONCURRENCY
       ),
@@ -1033,9 +1067,20 @@ async function runSourcedScanCore(
       filtered.kept,
       async (offer) => {
         ensureActive();
-        const live = await checkUrlLiveness(offer.url, {
-          fetchImpl: fetchForRun,
-        });
+        let live;
+        if (isSitemapOffer(offer)) {
+          const gate = await robotsGateImpl(offer.url, { signal });
+          live = gate.allowed
+            ? await checkUrlLiveness(offer.url, { fetchImpl: refuseRedirects(fetchForRun) })
+            : {
+                result: "uncertain",
+                code: gate.code,
+                reason: `robots.txt ${gate.reason}`,
+                url: offer.url,
+              };
+        } else {
+          live = await checkUrlLiveness(offer.url, { fetchImpl: fetchForRun });
+        }
         ensureActive();
         return { offer, live };
       },

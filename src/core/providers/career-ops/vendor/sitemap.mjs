@@ -237,11 +237,65 @@ function isSameSiteUrl(url, sitemapUrl) {
     && url.hostname.toLowerCase().replace(/\.$/, '') === sitemapUrl.hostname.toLowerCase();
 }
 
-/** @param {string} block */
-function locOf(block) {
-  const raw = block.match(/<loc\b[^>]*>([\s\S]*?)<\/loc\s*>/i)?.[1];
-  if (!raw) return '';
+/** @param {string} raw */
+function cleanLoc(raw) {
   return decodeEntities(raw.replace(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/, '$1').trim());
+}
+
+/**
+ * One forward pass over the document's tags. Every tag match is bounded by the
+ * next `<`, so the total work is linear in the body size however many entries
+ * are left unclosed (a per-entry regex rescans the rest of the document from
+ * each unclosed start, which is quadratic on a body the site controls).
+ *
+ * An entry runs from its first open tag to the first close tag after it; its
+ * `<loc>` is the first one inside, from its open tag to its first close.
+ *
+ * @param {string} xml
+ */
+function scanSitemapTags(xml) {
+  const roots = {
+    sitemapindex: { open: false, selfClosed: false, closed: false },
+    urlset: { open: false, selfClosed: false, closed: false },
+  };
+  /** @type {{ url: string[], sitemap: string[] }} */
+  const locs = { url: [], sitemap: [] };
+  /** @type {'url' | 'sitemap' | null} */
+  let entry = null;
+  let entryLoc = '';
+  let locStart = -1;
+  const tagRe = /<(\/?)([A-Za-z][\w:.-]*)[^<>]*>/g;
+  for (let m = tagRe.exec(xml); m; m = tagRe.exec(xml)) {
+    const closing = m[1] === '/';
+    const name = m[2].toLowerCase();
+    const end = m.index + m[0].length;
+    if (name === 'sitemapindex' || name === 'urlset') {
+      const root = roots[name];
+      if (closing) root.closed = root.closed || root.open;
+      else {
+        root.open = true;
+        if (m[0].endsWith('/>')) root.selfClosed = true;
+      }
+    } else if (name === 'url' || name === 'sitemap') {
+      if (!closing && entry === null) {
+        entry = name;
+        entryLoc = '';
+        locStart = -1;
+      } else if (closing && entry === name) {
+        if (entryLoc) locs[name].push(entryLoc);
+        entry = null;
+        locStart = -1;
+      }
+    } else if (name === 'loc' && entry !== null && !entryLoc) {
+      if (!closing) {
+        if (locStart === -1) locStart = end;
+      } else if (locStart !== -1) {
+        entryLoc = cleanLoc(xml.slice(locStart, m.index));
+        locStart = -1;
+      }
+    }
+  }
+  return { roots, locs };
 }
 
 /**
@@ -283,27 +337,18 @@ export function parseSitemapDocument(raw) {
   // A root that opens but never closes is a truncated body, not a short
   // board (sitemaps.org requires the closing tag; join.mjs applies the same
   // rule to its company sitemap). A self-closing empty root is complete.
-  /** @param {string} tag */
-  const complete = (tag) => new RegExp(`<${tag}\\b[^>]*\\/>|<${tag}\\b[^>]*>[\\s\\S]*<\\/${tag}\\s*>`, 'i').test(xml);
+  const { roots, locs } = scanSitemapTags(xml);
+  /** @param {'sitemapindex' | 'urlset'} tag */
+  const complete = (tag) => roots[tag].selfClosed || roots[tag].closed;
   /** @param {string} tag */
   const incomplete = (tag) => new Error(`sitemap: truncated response (<${tag}> without a closing </${tag}>)`);
-  if (/<sitemapindex\b[^>]*>/i.test(xml)) {
+  if (roots.sitemapindex.open) {
     if (!complete('sitemapindex')) throw incomplete('sitemapindex');
-    const locs = [];
-    for (const m of xml.matchAll(/<sitemap\b[^>]*>([\s\S]*?)<\/sitemap\s*>/gi)) {
-      const loc = locOf(m[1]);
-      if (loc) locs.push(loc);
-    }
-    return { kind: 'index', locs };
+    return { kind: 'index', locs: locs.sitemap };
   }
-  if (/<urlset\b[^>]*>/i.test(xml)) {
+  if (roots.urlset.open) {
     if (!complete('urlset')) throw incomplete('urlset');
-    const locs = [];
-    for (const m of xml.matchAll(/<url\b[^>]*>([\s\S]*?)<\/url\s*>/gi)) {
-      const loc = locOf(m[1]);
-      if (loc) locs.push(loc);
-    }
-    return { kind: 'urlset', locs };
+    return { kind: 'urlset', locs: locs.url };
   }
   throw new Error('sitemap: unexpected response (expected an XML <urlset> or <sitemapindex>)');
 }
@@ -548,6 +593,9 @@ export function createSitemapProvider({ robotsGate = robotsAllows } = {}) {
             const verdict = await robotsGate(detailUrl.href, robotsOpts);
             if (!verdict.allowed) {
               denied++;
+              // The page was never read, so the row has no description. Say so
+              // explicitly: the scan must not hydrate or probe it either.
+              job.bodyPartial = true;
             } else {
               const html = await fetchTextWithRetry(paced, detailUrl.href, { redirect: 'error', timeoutMs: DETAIL_TIMEOUT_MS }, detailRetry);
               const detail = parseJobPostingJsonLd(html);
