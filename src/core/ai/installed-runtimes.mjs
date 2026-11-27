@@ -1,4 +1,4 @@
-// Installed AI CLI registry shared by in-app sign-in and Electron.
+// Installed AI CLI registry shared by in-app sign-in.
 // Discovery never executes a candidate binary. Readiness probes and requests
 // spawn the resolved executable directly with fixed argv and shell:false.
 
@@ -1029,16 +1029,7 @@ export function installedRuntimeExecutionIdentity(
               : []),
           ],
           {
-            // In the packaged desktop, process.execPath (used as the
-            // command above) is CareerRat.exe, not a Node binary — without
-            // ELECTRON_RUN_AS_NODE, this launches another Electron GUI
-            // instead of running runtime-probe-helper.mjs as a script. Scoped
-            // to this one child, same pattern as buildChildEnv's
-            // electronGuard (skill-runtime.mjs) and update-core.mjs's
-            // installer relaunch. The helper strips this back out of the
-            // env it hands to the runtime it spawns (runtime-probe-helper.mjs),
-            // so the runtime itself never inherits it.
-            env: { ...childEnv, ELECTRON_RUN_AS_NODE: "1" },
+            env: childEnv,
             encoding: "utf8",
             maxBuffer: MAX_RUNTIME_PROBE_BYTES,
             // Backstop only, derived above from the helper's full worst-case
@@ -1374,7 +1365,7 @@ export async function probeInstalledRuntimeCompletion({
 // scheduleRuntimeProcessKill) already branches on win32 vs POSIX signal
 // delivery, so this same implementation is safe for any caller that cannot
 // tolerate a synchronous spawn blocking its process (for example a probe run
-// from Electron's main/local-server process).
+// from the local server process).
 function runInstalledRuntimeProbeAsync(
   invocation,
   options,
@@ -1609,7 +1600,7 @@ async function assertInstalledRuntimeBoundaryVersion(
 // cancellation, or unparseable/ambiguous output) must both refuse. The probe
 // itself always runs through the async, abort-aware, SIGTERM-then-SIGKILL
 // path (runInstalledRuntimeProbeAsync) regardless of platform, because this
-// function is called from Electron's main/local-server process and a
+// function is called from the local server process and a
 // synchronous spawn there can block the whole app if the child ignores
 // SIGTERM.
 export async function isInstalledRuntimeBelowVersionBoundary(
@@ -2008,7 +1999,7 @@ function scopedToolsMcpConfig({
       [SCOPED_TOOLS_SERVER_NAME]: {
         command: runtimeHostPath,
         args: scopedToolsServerArgs({ allowPublicWeb, stagedReadPath }),
-        env: { ELECTRON_RUN_AS_NODE: "1" },
+        env: {},
       },
     },
   };
@@ -2036,7 +2027,6 @@ function codexScopedToolsConfigArgs({
     `${prefix}.enabled_tools=${JSON.stringify(enabledTools)}`,
     `${prefix}.required=true`,
     `${prefix}.default_tools_approval_mode="approve"`,
-    `${prefix}.env.ELECTRON_RUN_AS_NODE="1"`,
   ];
   return overrides.flatMap((override) => ["-c", override]);
 }
@@ -2052,7 +2042,7 @@ function acpScopedToolsServers({
       name: SCOPED_TOOLS_SERVER_NAME,
       command: runtimeHostPath,
       args: scopedToolsServerArgs({ allowPublicWeb, stagedReadPath }),
-      env: [{ name: "ELECTRON_RUN_AS_NODE", value: "1" }],
+      env: [],
     },
   ];
 }

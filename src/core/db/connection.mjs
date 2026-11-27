@@ -2,7 +2,7 @@
 //
 // The db file lives at `<dataRoot>/db/careerrat.db` — resolved through the same
 // path helpers the rest of the engine uses (workspace.mjs's dataPath/
-// privateDataRoot) so CAREERRAT_HOME (the Electron packaged app's override)
+// privateDataRoot) so CAREERRAT_HOME
 // keeps working, and so the db always lands inside the already-gitignored
 // `.careerrat/` root, never a hardcoded path (M6 decision 2).
 //
