@@ -56,6 +56,8 @@ CR70 slice 3 (2026-11-27) re-vendored verbatim from `13786939`: feishu-jobs, gar
 
 CR70 slice 4 (2026-11-27) re-vendored verbatim from `13786939`: itviec, jibeapply, jobbankca, jobicy, jobspresso, jobstreet, jobvite, join. The jobbankca fixture is regenerated from upstream's suite minus the `config/profile.yml` fallback case (CareerRat's `_profile-keywords` has no ambient filesystem fallback); the join fixture drops the `scan.mjs` dedup cases (`isOfferSeen`, `markOfferSeen`, `listingIdentityToken`). Message strings we emit are re-punctuated; comments stay verbatim.
 
+CR70 slice 5 (2026-11-27) re-vendored verbatim from `13786939`: justjoin, landingjobs, larajobs, lever, manfred, mokahr, mycareersfuture, nodesk, oraclecloud, personio. Upstream's lever and oraclecloud import `isWorkModelOnly` from `greenhouse.mjs`, which still resolves against the pre-roll copy until slice 9. The mokahr, oraclecloud and mycareersfuture fixtures drop the cases that import upstream's `scan.mjs`/`url-key.mjs` or read `config/profile.yml`. Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the
