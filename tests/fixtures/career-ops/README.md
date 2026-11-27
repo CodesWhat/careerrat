@@ -34,6 +34,8 @@ CR70 slice 9: the fixtures for greenhouse and workday were regenerated from upst
 
 CR70 slice 10: the fixtures for ashby, consider and recruitee were regenerated from upstream's `13786939` suites. ashby drops the `liveness-api.mjs` and `verify-portals.mjs` cases (not vendored) and keeps the local `summaryComponents` and permanent-versus-transient retry cases; consider drops the `_ip-guard` case and keeps the local `createContext` private-address case; recruitee keeps a local `descriptionPartial` case.
 
+CR70 slice 11: the fixtures for smartrecruiters, meituan and alibaba were regenerated from upstream's `13786939` suites. smartrecruiters drops the `scan.mjs` age-filter and dedup cases; all three keep a local case that a description past the byte cap sets `descriptionPartial`.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`. The
 fixtures for the providers upstream actually changed between those two
 commits were re-adapted from upstream's suites: `icims` gained a "Location
