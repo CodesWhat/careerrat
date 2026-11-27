@@ -606,7 +606,7 @@ export function normalizedHostname(value) {
     .toLowerCase();
 }
 
-function isNonPublicIp(value) {
+export function isNonPublicIp(value) {
   const host = normalizedHostname(value);
   const version = isIP(host);
   if (!version) return false;

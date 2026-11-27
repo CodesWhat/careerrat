@@ -140,6 +140,7 @@ const EXPECTED_PROVIDER_IDS = [
   "rippling",
   "schoolspring",
   "senjob",
+  "sitemap",
   "smartrecruiters",
   "softgarden",
   "solidjobs",
@@ -180,8 +181,8 @@ test("Career Ops provider parity is pinned to the audited upstream snapshot", ()
     providerCount: 157,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
-  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 154);
-  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 154);
+  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 155);
+  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 155);
 });
 
 test("every provider in the pinned upstream inventory has an explicit disposition", () => {
@@ -220,19 +221,22 @@ test("every provider in the pinned upstream inventory has an explicit dispositio
   assert.equal(CAREER_OPS_UPSTREAM.providerCount, CAREER_OPS_UPSTREAM_PROVIDER_IDS.length);
 });
 
-test("upstream providers not yet adopted are deferred with a CR70 slice marker", () => {
-  // Slice 0 of CR70 rolled the pin forward without adopting the 70 new
-  // providers. Each later slice moves its ids out of the deferred map, so a
-  // deferred id without a "CR70 slice N pending" reason (other than the
-  // long-standing telegram-channel deferral) means a slice lost track of it.
-  const adopted = new Set(CAREER_OPS_PROVIDER_IDS);
-  const pending = Object.entries(CAREER_OPS_DEFERRED_PROVIDER_IDS).filter(
-    ([id]) => id !== "telegram-channel"
-  );
-  assert.equal(pending.length, CAREER_OPS_UPSTREAM_PROVIDER_IDS.length - adopted.size - 1);
-  for (const [id, reason] of pending) {
-    assert.match(reason, /^CR70 slice \d+ pending$/, id);
+test("providers upstream ships but we do not adopt carry a stated reason, never a CR70 marker", () => {
+  // CR70 is done: every upstream id is adopted or deliberately not. The two
+  // that are not are decisions with a reason, not slices still to come.
+  assert.deepEqual(Object.keys(CAREER_OPS_DEFERRED_PROVIDER_IDS).sort(), [
+    "telegram-channel",
+    "wellfound",
+  ]);
+  for (const [id, reason] of Object.entries(CAREER_OPS_DEFERRED_PROVIDER_IDS)) {
+    assert.doesNotMatch(reason, /pending|CR70 slice/i, id);
+    assert.ok(reason.length > 40, `${id} needs a real reason`);
   }
+  assert.match(CAREER_OPS_DEFERRED_PROVIDER_IDS.wellfound, /robots\.txt/);
+  assert.match(CAREER_OPS_DEFERRED_PROVIDER_IDS["telegram-channel"], /heuristic/);
+  assert.ok(!CAREER_OPS_PROVIDER_IDS.includes("wellfound"));
+  assert.ok(!CAREER_OPS_PROVIDER_IDS.includes("telegram-channel"));
+  assert.ok(CAREER_OPS_PROVIDER_IDS.includes("sitemap"));
 });
 
 test("every upstream provider has an explicit runtime disposition", () => {
