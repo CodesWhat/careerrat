@@ -71,6 +71,7 @@ const EXPECTED_PROVIDER_IDS = [
   "goldman",
   "google",
   "greenhouse",
+  "gupy",
   "hackernews",
   "hecklerkoch",
   "hibob",
@@ -118,6 +119,7 @@ const EXPECTED_PROVIDER_IDS = [
   "pageup",
   "paycom",
   "paylocity",
+  "peoplesoft",
   "personio",
   "phenom",
   "pinpoint",
@@ -143,6 +145,9 @@ const EXPECTED_PROVIDER_IDS = [
   "solidjobs",
   "startup-jobs",
   "successfactors",
+  "successfactors-classic",
+  "taleez",
+  "talentlink",
   "taleo",
   "teamtailor",
   "techinasia",
@@ -153,13 +158,16 @@ const EXPECTED_PROVIDER_IDS = [
   "tkms",
   "torre",
   "trakstar",
+  "turbohire",
   "ultipro",
   "vdab",
   "velorahr",
+  "viterbit",
   "weworkremotely",
   "workable",
   "workday",
   "workingnomads",
+  "wp-job-manager",
   "wttj",
   "yourator",
   "zoho-recruit",
@@ -172,8 +180,8 @@ test("Career Ops provider parity is pinned to the audited upstream snapshot", ()
     providerCount: 157,
   });
   assert.deepEqual(CAREER_OPS_PROVIDER_IDS, EXPECTED_PROVIDER_IDS);
-  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 146);
-  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 146);
+  assert.equal(new Set(CAREER_OPS_PROVIDER_IDS).size, 154);
+  assert.equal(CAREER_OPS_PROVIDER_PARITY.length, 154);
 });
 
 test("every provider in the pinned upstream inventory has an explicit disposition", () => {

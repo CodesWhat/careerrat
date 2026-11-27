@@ -243,6 +243,30 @@ test("createContext().fetchJson honors an explicit redirect:'error' request with
   assert.equal(receivedInit.redirect, "error");
 });
 
+test("createContext().fetchResponse hands a manual 3xx back to the provider, while fetchText still throws on it", async () => {
+  const seen = [];
+  const ctx = createContext(
+    async (_url, init) => {
+      seen.push(init.redirect);
+      return new Response(null, { status: 302, headers: { location: "/next" } });
+    },
+    { resolveHost: async () => [PUBLIC_ADDRESS], dispatcherFactory: noopDispatcherFactory }
+  );
+  const res = await ctx.fetchResponse("https://public.example.test/start", { redirect: "manual" });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get("location"), "/next");
+  await assert.rejects(
+    () => ctx.fetchText("https://public.example.test/start", { redirect: "manual" }),
+    (error) => error.status === 302 && error.location === "/next"
+  );
+  // Without redirect: "manual" a failed status still throws from fetchResponse.
+  await assert.rejects(
+    () => ctx.fetchResponse("https://public.example.test/start", { redirect: "error" }),
+    (error) => error.status === 302
+  );
+  assert.deepEqual(seen, ["manual", "manual", "error"]);
+});
+
 // fetchCareerOpsProvider's normalizeOffer maps `job.comp` (a plain string)
 // into the returned offer's comp field. Some vendored providers (ashby among
 // them) instead surface a structured `job.salary: {min, max, currency}`. The

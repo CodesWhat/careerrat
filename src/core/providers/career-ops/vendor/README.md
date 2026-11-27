@@ -74,6 +74,8 @@ CR70 slice 15 (2026-11-27) newly adopted from `13786939`: pracecz, platsbanken, 
 
 CR70 slice 16 (2026-11-27) newly adopted from `13786939`: adp-myjobs, adp-workforcenow, applicantpro, careerpuck, clearcompany, darwinbox, eploy, inrecruiting, pageup, taleo, ultipro, zoho-recruit. The applicantpro, eploy and zoho-recruit fixtures read their sample pages from `tests/fixtures/career-ops/` (copied from upstream, MIT). Message strings we emit are re-punctuated; comments stay verbatim.
 
+CR70 slice 17 (2026-11-27) newly adopted from `13786939`: gupy, peoplesoft, talentlink, successfactors-classic, turbohire, taleez, viterbit, wp-job-manager. successfactors was re-vendored verbatim here (it was held back in slice 6 because the new upstream file imports successfactors-classic) and its fixture regenerated. The peoplesoft fixture reads its sample pages from `tests/fixtures/career-ops/` and drives the real `createContext()` transport instead of upstream's `makeHttpCtx()`; for that, `fetchResponse` in `career-ops-registry.mjs` now hands a raw 3xx back when a provider asks for `redirect: 'manual'` (guardedFetch already declined to follow it), which peoplesoft's same-origin redirect walk needs. The gupy fixture drops its `config/profile.yml` fallback case, the successfactors, successfactors-classic and taleez fixtures drop their `scan.mjs` cases, and the talentlink fixture is a node:test suite. Message strings we emit are re-punctuated; comments stay verbatim.
+
 Rolled forward 2026-09-07 from `ffb49be1f394041840c31c23a5d3a3347854340e`
 (September 2, 2026). `icims.mjs` was re-vendored verbatim: upstream's
 `pickLocation` now walks every `jobLocation` entry instead of trusting only the
