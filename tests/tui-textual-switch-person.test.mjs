@@ -202,7 +202,7 @@ test("actions issued for the previous workspace are rejected after a switch", as
 
 test("actions sent while a switch is in flight are not run", async (t) => {
   const started = [];
-  const { events, session } = await fixture(t, null, {
+  const { session } = await fixture(t, null, {
     start: async (ctx) => {
       started.push(ctx.env.CAREERRAT_HOME);
       return { reused: false, run: { id: "r1" } };
